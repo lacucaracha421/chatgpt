@@ -52,6 +52,11 @@ import type {
   MetadataBackup,
   MetadataImportPlan,
   PurgeSummary,
+  PrivateVaultAssetPage,
+  PrivateVaultQuery,
+  PrivateVaultScanReport,
+  PrivateVaultStatus,
+  PrivateVaultThumbnailCandidate,
   SimilarityIndexProgress,
   SimilarityReviewPage,
   TrashPage,
@@ -365,6 +370,24 @@ export const libraryGateway: LibraryGateway = {
     invoke<string[]>("get_asset_collections", { assetId }),
   patchAssetCollections: (patch: AssetCollectionPatch) =>
     invoke<void>("patch_asset_collections", { patch }),
+  getPrivateVaultStatus: () => invoke<PrivateVaultStatus>("get_private_vault_status"),
+  registerPrivateVault: (root) => invoke<PrivateVaultStatus>("register_private_vault", { root }),
+  unregisterPrivateVault: () => invoke<void>("unregister_private_vault"),
+  scanPrivateVault: () => invoke<PrivateVaultScanReport>("scan_private_vault"),
+  listPrivateVaultAssets: (query: PrivateVaultQuery) =>
+    invoke<PrivateVaultAssetPage>("list_private_vault_assets", { query }),
+  playPrivateVaultVideo: (assetId) =>
+    invoke<void>("play_private_vault_video", { assetId }),
+  setPrivateVaultTitle: (assetId, title) =>
+    invoke<void>("set_private_vault_title", { assetId, title }),
+  listPrivateVaultThumbnailCandidates: (assetId) =>
+    invoke<PrivateVaultThumbnailCandidate[]>("list_private_vault_thumbnail_candidates", { assetId }),
+  setPrivateVaultThumbnailFromFile: (assetId, sourcePath) =>
+    invoke<void>("set_private_vault_thumbnail_from_file", { assetId, sourcePath }),
+  setPrivateVaultThumbnailFromFrame: (assetId, timestampMs) =>
+    invoke<void>("set_private_vault_thumbnail_from_frame", { assetId, timestampMs }),
+  resetPrivateVaultThumbnail: (assetId) =>
+    invoke<void>("reset_private_vault_thumbnail", { assetId }),
   getMangaRoot: () => invoke<string | null>("get_manga_root"),
   setMangaRoot: (path) => invoke("set_manga_root", { path }),
   scanManga: () => invoke<number>("scan_manga"),

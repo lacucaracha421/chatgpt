@@ -13,6 +13,10 @@ import {
 } from "./mediaUrl";
 
 describe("media URLs", () => {
+  it("puts thumbnail cache revisions in the path", () => {
+    expect(thumbnailUrl("asset-1", 7)).toBe("http://lakomics.localhost/thumbnail/asset-1/v7");
+  });
+
   it("uses the Windows custom-protocol origin and ID-only paths", () => {
     const id = "00000000-0000-4000-8000-000000000001";
 

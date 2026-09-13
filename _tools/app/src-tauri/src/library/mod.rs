@@ -59,6 +59,7 @@ pub(crate) use drag_out::PreparedAssetDrag;
 pub mod collection_tracking;
 pub mod error;
 mod external_binding;
+pub(crate) mod external_vault;
 mod favorite;
 mod folder_appearance;
 pub(crate) mod igdb;
@@ -550,8 +551,18 @@ impl Library {
                 unreachable!()
             }
         };
-        let relative_path = relative_path.ok_or(LibraryError::AssetNotFound)?;
-        self.open_library_media(&relative_path)
+        if let Some(relative_path) = relative_path {
+            return self.open_library_media(&relative_path);
+        }
+        let external_variant = match variant {
+            MediaVariant::Asset => external_vault::PrivateVaultMediaVariant::Asset,
+            MediaVariant::Thumbnail => external_vault::PrivateVaultMediaVariant::Thumbnail,
+            MediaVariant::Playback => external_vault::PrivateVaultMediaVariant::Playback,
+            _ => return Err(LibraryError::AssetNotFound),
+        };
+        let status = self.private_vault_status()?;
+        let vault_id = status.vault_id.ok_or(LibraryError::AssetNotFound)?;
+        self.resolve_private_vault_media(&vault_id, asset_id, external_variant)
     }
 
     pub(crate) fn open_library_media(

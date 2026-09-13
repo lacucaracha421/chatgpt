@@ -57,8 +57,8 @@ export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAsse
         <Button size="icon" variant="ghost" aria-label="다음 자산" aria-description="다음 자산" disabled={!next} onClick={() => move(next)}><ChevronRightIcon aria-hidden="true" /></Button>
       </div>
       <div className="asset-viewer__controls">
-        <Button className="asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "즐겨찾기 끄기" : "즐겨찾기 켜기"} aria-pressed={asset.favorite} onClick={() => onToggleFavorite?.(asset)}><StarIcon aria-hidden="true" /></Button>
-        <Button size="icon" variant="danger" aria-label="휴지통으로 이동" onClick={() => onTrash?.(asset)}><TrashIcon aria-hidden="true" /></Button>
+        {onToggleFavorite && <Button className="asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "즐겨찾기 끄기" : "즐겨찾기 켜기"} aria-pressed={asset.favorite} onClick={() => onToggleFavorite(asset)}><StarIcon aria-hidden="true" /></Button>}
+        {onTrash && <Button size="icon" variant="danger" aria-label="휴지통으로 이동" onClick={() => onTrash(asset)}><TrashIcon aria-hidden="true" /></Button>}
         <Button size="icon" variant="ghost" aria-label="감상 화면 닫기" aria-description="감상 화면 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </div>
       {privacyMode

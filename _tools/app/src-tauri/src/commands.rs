@@ -35,7 +35,8 @@ use crate::{
             MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
             MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexApplyRequest,
             MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
-            MangaDexWorkPreview, MangaSeries, MetadataBackup, PurgeSummary, ReleaseWatchEvent,
+            MangaDexWorkPreview, MangaSeries, MetadataBackup, PrivateVaultAssetPage,
+            PrivateVaultQuery, PrivateVaultScanReport, PrivateVaultStatus, PrivateVaultThumbnailCandidate, PurgeSummary, ReleaseWatchEvent,
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus,
             RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
             SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
@@ -324,6 +325,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::UnsupportedVideo => "unsupported_video",
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
             LibraryError::VideoToolUnavailable => "video_tool_unavailable",
+            LibraryError::MediaPlayerUnavailable => "media_player_unavailable",
+            LibraryError::MediaPlayerLaunchFailed => "media_player_launch_failed",
+            LibraryError::InvalidPrivateVaultTitle => "invalid_private_vault_title",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
             LibraryError::CollectionSourceRootNotSet => "collection_source_root_not_set",
@@ -2552,6 +2556,142 @@ pub async fn execute_legacy_package_migration(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_private_vault_status(
+    state: State<'_, AppState>,
+) -> Result<PrivateVaultStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.private_vault_status())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn register_private_vault(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<PrivateVaultStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.register_private_vault(std::path::Path::new(&root))?;
+        library.scan_private_vault()?;
+        library.private_vault_status()
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn unregister_private_vault(state: State<'_, AppState>) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.unregister_private_vault())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn scan_private_vault(
+    state: State<'_, AppState>,
+) -> Result<PrivateVaultScanReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.scan_private_vault())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_private_vault_assets(
+    query: PrivateVaultQuery,
+    state: State<'_, AppState>,
+) -> Result<PrivateVaultAssetPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_private_vault_assets(query))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn play_private_vault_video(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .play_private_vault_video(&asset_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_private_vault_title(
+    asset_id: String,
+    title: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_private_vault_title(&asset_id, title.as_deref()))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_private_vault_thumbnail_candidates(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<PrivateVaultThumbnailCandidate>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.private_vault_thumbnail_candidates(&asset_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_private_vault_thumbnail_from_file(
+    asset_id: String,
+    source_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.set_private_vault_thumbnail_from_file(&asset_id, std::path::Path::new(&source_path))
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_private_vault_thumbnail_from_frame(
+    asset_id: String,
+    timestamp_ms: u64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.set_private_vault_thumbnail_from_frame(&asset_id, timestamp_ms)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn reset_private_vault_thumbnail(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.reset_private_vault_thumbnail(&asset_id))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { catalogStreamStatus } from "../library/catalogStreams";
-import type { CatalogLanguage, CatalogStatus, CatalogStreamStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, ExtensionPairingLink, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
+import type { CatalogLanguage, CatalogStatus, CatalogStreamStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, ExtensionPairingLink, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup, PrivateVaultStatus } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
 import { notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
@@ -32,6 +32,7 @@ type SettingsViewProps = {
   onCollectionsChanged?: () => void;
   onCloudCaptureSynced?: (result: CloudCaptureSyncResult) => void;
   onRestoreCloudMetadata?: () => Promise<CloudLibraryRestoreReport>;
+  onPrivateVaultChanged?: () => void | Promise<void>;
   initialSection?: SettingsSection;
   privacyMode?: boolean;
   onPrivacyModeChange?: (privacyMode: boolean) => void;
@@ -49,7 +50,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, onPrivateVaultChanged, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
   const workspace = useWorkspaceChrome();
   const { collections: collectionPublication, characters: characterPublication } = usePublicationJobs();
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
@@ -68,6 +69,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [collectionSourceRoot, setCollectionSourceRootState] = useState<string | null>(null);
   const [collectionSourceError, setCollectionSourceError] = useState<string | null>(null);
   const [collectionSourceMessage, setCollectionSourceMessage] = useState<string | null>(null);
+  const [privateVaultStatus, setPrivateVaultStatus] = useState<PrivateVaultStatus | null>(null);
+  const [privateVaultBusy, setPrivateVaultBusy] = useState(false);
+  const [privateVaultError, setPrivateVaultError] = useState<string | null>(null);
   useAutoDismiss(collectionSourceMessage, setCollectionSourceMessage);
   const [extensionConnection, setExtensionConnection] = useState<ExtensionConnection | null>(null);
   const [extensionError, setExtensionError] = useState<string | null>(null);
@@ -123,7 +127,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [extensionPairingQr, setExtensionPairingQr] = useState<ExtensionPairingLink | null>(null);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
   useAutoDismiss(cloudMessage, setCloudMessage);
-  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary || characterAutomationBusy;
+  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary || characterAutomationBusy || privateVaultBusy;
 
   useEffect(() => {
     let active = true;
@@ -133,6 +137,18 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     if (section === "data") void gateway.getCollectionSourceRoot()
       .then((root) => { if (active) setCollectionSourceRootState(root); })
       .catch((error) => { if (active) setCollectionSourceError(commandErrorMessage(error, "구버전 소스 폴더를 확인하지 못했습니다.")); });
+    return () => { active = false; };
+  }, [gateway, section]);
+
+  useEffect(() => {
+    if (section !== "data" || !gateway.getPrivateVaultStatus) return;
+    let active = true;
+    setPrivateVaultError(null);
+    void gateway.getPrivateVaultStatus().then((status) => {
+      if (active) setPrivateVaultStatus(status);
+    }).catch((loadError: unknown) => {
+      if (active) setPrivateVaultError(commandErrorMessage(loadError, "비밀 보관함 상태를 확인하지 못했습니다."));
+    });
     return () => { active = false; };
   }, [gateway, section]);
 
@@ -258,6 +274,40 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       setSaved("망가 폴더를 저장했습니다");
     } catch (error) {
       setMangaRootError(commandErrorMessage(error, "망가 폴더를 설정하지 못했습니다."));
+    }
+  }
+
+  async function choosePrivateVaultFolder() {
+    if (privateVaultBusy || !gateway.registerPrivateVault) return;
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    setPrivateVaultBusy(true);
+    setPrivateVaultError(null);
+    try {
+      const status = await gateway.registerPrivateVault(selected);
+      setPrivateVaultStatus(status);
+      setSaved("비밀 보관함을 등록했습니다");
+      await onPrivateVaultChanged?.();
+    } catch (vaultError) {
+      setPrivateVaultError(commandErrorMessage(vaultError, "비밀 보관함을 등록하지 못했습니다."));
+    } finally {
+      setPrivateVaultBusy(false);
+    }
+  }
+
+  async function unregisterPrivateVault() {
+    if (privateVaultBusy || !gateway.unregisterPrivateVault) return;
+    setPrivateVaultBusy(true);
+    setPrivateVaultError(null);
+    try {
+      await gateway.unregisterPrivateVault();
+      setPrivateVaultStatus({ registered: false, available: false, vaultId: null, root: null, assetCount: 0, readOnly: false });
+      setSaved("비밀 보관함 등록을 해제했습니다");
+      await onPrivateVaultChanged?.();
+    } catch (vaultError) {
+      setPrivateVaultError(commandErrorMessage(vaultError, "비밀 보관함 등록을 해제하지 못했습니다."));
+    } finally {
+      setPrivateVaultBusy(false);
     }
   }
 
@@ -1051,6 +1101,26 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     {section === "data" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>데이터 관리</h2></header>
+        <h3 className="settings-view__group-title">비밀 보관함</h3>
+        <dl className="settings-view__property">
+          <dt>상태</dt>
+          <dd className="settings-view__path">{privateVaultStatus?.root ?? (privateVaultStatus?.registered ? "등록됨 · 연결되지 않음" : "등록되지 않음")}</dd>
+          <dd className="settings-view__row-note">
+            {privateVaultStatus?.available
+              ? `사용 가능 · ${privateVaultStatus.assetCount.toLocaleString()}개${privateVaultStatus.readOnly ? " · 읽기 전용" : ""}`
+              : "VeraCrypt나 다른 도구에서 먼저 잠금을 해제한 폴더를 등록합니다."}
+          </dd>
+          <dd className="settings-view__actions">
+            <Button size="sm" aria-label={privateVaultStatus?.registered ? "비밀 보관함 다시 연결" : "비밀 보관함 등록"}
+              disabled={privateVaultBusy || !gateway.registerPrivateVault} onClick={() => void choosePrivateVaultFolder()}>
+              {privateVaultBusy ? "처리 중…" : privateVaultStatus?.registered ? "다시 연결" : "등록"}
+            </Button>
+            {privateVaultStatus?.registered && <Button size="sm" variant="danger" aria-label="비밀 보관함 등록 해제"
+              disabled={privateVaultBusy || !gateway.unregisterPrivateVault} onClick={() => void unregisterPrivateVault()}>등록 해제</Button>}
+          </dd>
+          <dd className="settings-view__row-note">등록 해제는 Lakomics의 연결 정보만 지우며, 외부 보관함의 원본과 .lakomics 데이터는 삭제하지 않습니다.</dd>
+          {privateVaultError && <dd className="settings-view__row-message" role="alert">{privateVaultError}</dd>}
+        </dl>
         <h3 className="settings-view__group-title">컬렉션 가져오기</h3>
         <dl className="settings-view__property">
           <dt>book 폴더</dt>

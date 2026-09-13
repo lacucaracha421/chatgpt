@@ -61,6 +61,13 @@ it("toggles favorite and moves to trash from the keyboard and buttons", () => {
   expect(onTrash).toHaveBeenCalledTimes(2);
 });
 
+it("hides library management actions when handlers are absent", () => {
+  render(<AssetViewer items={[asset("a", "a.gif")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+
+  expect(screen.queryByRole("button", { name: "즐겨찾기 켜기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
+});
+
 it("renders a video player and cleans up its source when navigating", () => {
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);

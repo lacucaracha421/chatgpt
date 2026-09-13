@@ -221,6 +221,33 @@ it("groups data import and backup restore under 데이터 관리", async () => {
   }
 });
 
+it("registers and unregisters the secret vault from data settings", async () => {
+  const gateway = createGateway();
+  const unregistered = { registered: false, available: false, vaultId: null, root: null, assetCount: 0, readOnly: false };
+  const registered = { registered: true, available: true, vaultId: "vault-1", root: "/media/private", assetCount: 12, readOnly: false };
+  gateway.getPrivateVaultStatus = vi.fn().mockResolvedValue(unregistered);
+  gateway.registerPrivateVault = vi.fn().mockResolvedValue(registered);
+  gateway.unregisterPrivateVault = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(open).mockResolvedValue("/media/private" as never);
+  const onPrivateVaultChanged = vi.fn();
+
+  render(<LibraryProvider gateway={gateway}>
+    <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="data" onPrivateVaultChanged={onPrivateVaultChanged} />
+  </LibraryProvider>);
+
+  expect(await screen.findByRole("heading", { name: "비밀 보관함", level: 3 })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "비밀 보관함 등록" }));
+  expect(open).toHaveBeenCalledWith({ directory: true, multiple: false });
+  await waitFor(() => expect(gateway.registerPrivateVault).toHaveBeenCalledWith("/media/private"));
+  expect(await screen.findByText("/media/private")).toBeVisible();
+  expect(screen.getByText(/12개/)).toBeVisible();
+  expect(onPrivateVaultChanged).toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole("button", { name: "비밀 보관함 등록 해제" }));
+  await waitFor(() => expect(gateway.unregisterPrivateVault).toHaveBeenCalled());
+  expect(onPrivateVaultChanged).toHaveBeenCalledTimes(2);
+});
+
 it("groups extension diagnostics and shortcuts under 정보", async () => {
   const gateway = createGateway();
   vi.mocked(gateway.getExtensionConnection).mockResolvedValue({ baseUrl: "http://127.0.0.1:32145", token: "token", status: "ready" });

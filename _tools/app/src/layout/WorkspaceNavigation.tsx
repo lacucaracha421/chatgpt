@@ -1,4 +1,4 @@
-import { BookOpenIcon, CalendarIcon, InboxIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { BookOpenIcon, BookmarkIcon, CalendarIcon, InboxIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
@@ -7,8 +7,9 @@ import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
 
-export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "notes" | "manage" {
+export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "notes" | "private_vault" | "manage" {
   if (view.kind === "notes") return "notes";
+  if (view.kind === "private_vault") return "private_vault";
   if (view.kind === "collections" || view.kind === "collection") return "collections";
   if (view.kind === "manga") return "manga";
   if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
@@ -24,11 +25,12 @@ type Props = {
   reviewCount: number;
   trashCount: number;
   cloudProblemCount?: number;
+  privateVaultAvailable?: boolean;
   onImportFiles?: () => void;
   renderManagement?: (items: MenuItem[]) => ReactNode;
 };
 
-export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, onImportFiles, renderManagement }: Props) {
+export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, privateVaultAvailable = false, onImportFiles, renderManagement }: Props) {
   const chrome = useWorkspaceChrome();
   const area = workspaceArea(view);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
@@ -37,7 +39,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const quickAssetView = view.kind === "revisit" || view.kind === "creator" || view.kind === "unsorted";
   if (!quickAssetView) history.current[area] = view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
-  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", manage: "라이브러리 관리" }[area];
+  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", private_vault: "비밀", manage: "라이브러리 관리" }[area];
   const enterArea = (next: "assets" | "collections" | "manga") => {
     if (next === "collections" && view.kind === "collection") {
       onNavigate(collectionList.current ?? { kind: "collections", typeFilter: collectionType, showcase: false });
@@ -63,6 +65,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       })}
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "revisit" || view.kind === "creator" ? "page" : undefined} onClick={() => onNavigate({ kind: "revisit" })}><CalendarIcon aria-hidden="true" /><span>다시보기</span></button>
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "notes" ? "page" : undefined} onClick={() => onNavigate({kind:"notes"})}><NoteIcon aria-hidden="true"/><span>메모</span></button>
+      {privateVaultAvailable && <button type="button" className="workspace-rail__item" aria-current={view.kind === "private_vault" ? "page" : undefined} onClick={() => onNavigate({ kind: "private_vault" })}><BookmarkIcon aria-hidden="true" /><span>비밀</span></button>}
       <div className="workspace-rail__tail">
         {cloudProblemCount > 0 && <button type="button" className="workspace-rail__item" onClick={() => onNavigate({ kind: "settings", section: "cloud" })} aria-label={`동기화 문제 ${cloudProblemCount}개`}><span aria-hidden="true">!</span><span>동기화 문제 {cloudProblemCount}</span></button>}
         {renderManagement ? renderManagement(management) : <Menu label="라이브러리 관리" trigger={<><EllipsisHorizontalIcon aria-hidden="true" /><span>관리</span>{reviewCount > 0 && <span className="workspace-rail__review-alert" role="img" aria-label={`유사 검토 ${reviewCount}개 대기`} aria-description={`유사 검토 ${reviewCount}개 대기`}>!</span>}</>} items={management} />}

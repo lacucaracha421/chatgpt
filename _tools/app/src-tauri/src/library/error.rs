@@ -400,6 +400,12 @@ pub enum LibraryError {
     VideoPreparationFailed,
     #[error("영상 처리 도구를 실행할 수 없습니다")]
     VideoToolUnavailable,
+    #[error("비밀 영상 재생을 위해 mpv를 설치해 주세요")]
+    MediaPlayerUnavailable,
+    #[error("비밀 영상 플레이어를 실행하지 못했습니다")]
+    MediaPlayerLaunchFailed,
+    #[error("비밀 영상 제목은 200자 이하여야 합니다")]
+    InvalidPrivateVaultTitle,
     #[error("라이브러리 파일을 쓸 수 없습니다: {path}")]
     WriteAsset {
         path: PathBuf,

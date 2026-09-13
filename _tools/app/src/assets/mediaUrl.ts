@@ -13,8 +13,9 @@ export function nativeMediaUrl(url: string): string {
   return url.startsWith(`${origin}/`) ? `${mediaOrigin()}${url.slice(origin.length)}` : url;
 }
 
-export function thumbnailUrl(assetId: string): string {
-  return `${mediaOrigin()}/thumbnail/${encodeURIComponent(assetId)}`;
+export function thumbnailUrl(assetId: string, revision?: string | number): string {
+  const base = `${mediaOrigin()}/thumbnail/${encodeURIComponent(assetId)}`;
+  return revision === undefined ? base : `${base}/v${encodeURIComponent(String(revision))}`;
 }
 
 export function trashThumbnailUrl(assetId: string): string {

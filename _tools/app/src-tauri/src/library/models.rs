@@ -1240,6 +1240,64 @@ pub struct LibrarySummary {
     pub root: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateVaultStatus {
+    pub registered: bool,
+    pub available: bool,
+    pub vault_id: Option<String>,
+    pub root: Option<String>,
+    pub asset_count: u64,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateVaultQuery {
+    pub media_kind: Option<MediaKindFilter>,
+    pub offset: u64,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateVaultAssetSummary {
+    pub id: String,
+    pub title: Option<String>,
+    pub original_name: String,
+    pub byte_size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub modified_at: String,
+    pub media: MediaSummary,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateVaultThumbnailCandidate {
+    pub timestamp_ms: u64,
+    pub image_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateVaultAssetPage {
+    pub items: Vec<PrivateVaultAssetSummary>,
+    pub total_count: u64,
+    pub next_offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateVaultScanReport {
+    pub scanned: u64,
+    pub added: u64,
+    pub updated: u64,
+    pub unchanged: u64,
+    pub removed: u64,
+    pub failed: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MangaSeries {

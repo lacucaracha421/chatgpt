@@ -38,7 +38,7 @@ export function AssetToolbar({
   onSortChange, onMediaFilterChange, onAspectFilterChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle,
 }: AssetToolbarProps) {
   const registration = useContext(FolderRegistrationContext);
-  const view = rawView.kind === "notes" || rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "statistics" || rawView.kind === "manga" || rawView.kind === "calendar" || rawView.kind === "creators" || rawView.kind === "revisited-bundle"
+  const view = rawView.kind === "notes" || rawView.kind === "private_vault" || rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "statistics" || rawView.kind === "manga" || rawView.kind === "calendar" || rawView.kind === "creators" || rawView.kind === "revisited-bundle"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const recent = view.kind === "revisit";

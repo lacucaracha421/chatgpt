@@ -30,6 +30,20 @@ it("places Notes immediately below Revisit and navigates to the notes area", asy
   expect(notes).toHaveAttribute("aria-current","page");
   await userEvent.click(notes);expect(onNavigate).toHaveBeenCalledWith({kind:"notes"});
 });
+it("shows Secret directly below Notes only while the external vault is available", async () => {
+  const onNavigate = vi.fn();
+  const props = { view: { kind: "classification" as const, classificationId: null }, collectionType: "manga" as const,
+    width: 208, onWidthChange: vi.fn(), onNavigate, assetNavigation: null, reviewCount: 0, trashCount: 0 };
+  const { rerender } = render(<WorkspaceNavigation {...props} />);
+  expect(screen.queryByRole("button", { name: "비밀" })).not.toBeInTheDocument();
+
+  rerender(<WorkspaceNavigation {...props} privateVaultAvailable />);
+  const secret = screen.getByRole("button", { name: "비밀" });
+  expect(screen.getByRole("button", { name: "메모" }).nextElementSibling).toBe(secret);
+  await userEvent.click(secret);
+  expect(onNavigate).toHaveBeenCalledWith({ kind: "private_vault" });
+});
+
 it("shows cloud problems only when actionable and opens cloud settings", async () => {
   const onNavigate = vi.fn();
   const props = { view: { kind: "statistics" as const }, collectionType: "manga" as const, width: 208,

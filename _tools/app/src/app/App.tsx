@@ -57,6 +57,7 @@ import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
 import { useCloudProblems } from "./useCloudProblems";
 import { useCollectionOpen } from "../statistics/useCollectionOpen";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
+import { useExternalVaultAvailability } from "../external-vault/useExternalVaultAvailability";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
 
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
@@ -69,6 +70,7 @@ const TrashBrowser = lazy(() => import("../safety/TrashBrowser").then((module) =
 const SimilarityReviewBrowser = lazy(() => import("../similarity/SimilarityReviewBrowser").then((module) => ({ default: module.SimilarityReviewBrowser })));
 const MangaBrowser = lazy(() => import("../manga/MangaBrowser").then((module) => ({ default: module.MangaBrowser })));
 const MangaViewer = lazy(() => import("../manga/MangaViewer").then((module) => ({ default: module.MangaViewer })));
+const ExternalVaultBrowser = lazy(() => import("../external-vault/ExternalVaultBrowser").then((module) => ({ default: module.ExternalVaultBrowser })));
 
 export type ExtensionIngestListener = (handler: (outcome: IngestOutcome) => void) => Promise<() => void>;
 
@@ -159,6 +161,17 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }, [entries]);
   const [sidebarWidth, setSidebarWidth] = useState(preferences.sidebarWidth);
   const [message, setMessage] = useState<string | null>(null);
+  const handlePrivateVaultDisconnect = useCallback(() => {
+    setView((current) => current.kind === "private_vault"
+      ? { kind: "classification", classificationId: null }
+      : current);
+    setMessage("비밀 보관함의 연결이 끊겼습니다.");
+  }, []);
+  const { status: privateVaultStatus, refresh: refreshPrivateVaultStatus } = useExternalVaultAvailability({
+    gateway,
+    view,
+    onDisconnect: handlePrivateVaultDisconnect,
+  });
   const [assetRefresh, setAssetRefresh] = useState(0);
   const characterHub = useCharacterHub(assetRefresh);
   const [clearAssetSelectionRequest, setClearAssetSelectionRequest] = useState(0);
@@ -271,7 +284,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     retry: gateway.retryVideoPreparation,
     onChanged: () => setAssetRefresh((current) => current + 1),
   });
-  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes";
+  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes" && view.kind !== "private_vault";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   function handleNativeDragEvent(event: NativeFileDropEvent, disposition: NativeFileDragDisposition) {
     const assetIds = activeNativeDragAssetIdsRef.current;
@@ -682,6 +695,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               cloudProblemCount={cloudProblems}
+              privateVaultAvailable={Boolean(privateVaultStatus?.available && gateway.listPrivateVaultAssets && gateway.scanPrivateVault)}
               renderManagement={(items) => <WorkStatusCenter managementItems={items} reviewCount={reviewCount} characterAutomation={characterAutomation} progress={dropState.progress}
                 similarityIndex={similarityIndex} browserStatus={browserStatus} dropEnabled={dropEnabled} />}
               assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets} characterGroups={characterHub.groups}
@@ -723,7 +737,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
                 <Suspense fallback={<DeferredViewFallback />}>
-                {view.kind === "notes" ? <NotesView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
+                {view.kind === "private_vault" ? (
+                  privateVaultStatus?.available && gateway.listPrivateVaultAssets && gateway.scanPrivateVault
+                    ? <ExternalVaultBrowser gateway={gateway} privacyMode={preferences.privacyMode} />
+                    : <DeferredViewFallback />
+                ) : view.kind === "notes" ? <NotesView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}
@@ -733,6 +751,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onCollectionsChanged={refreshCollections}
                     onCloudCaptureSynced={handleCloudCaptureSync}
                     onRestoreCloudMetadata={restoreCloudMetadataBackup}
+                    onPrivateVaultChanged={async () => { await refreshPrivateVaultStatus(); }}
                     initialSection={view.section}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}

@@ -5,7 +5,7 @@ use std::{
 };
 
 use tauri::http::{
-    header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
+    header::{ACCEPT_RANGES, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
     Method, Response, StatusCode,
 };
 
@@ -221,12 +221,14 @@ pub(crate) fn media_response_with_range(
             if media.file.read_to_end(&mut bytes).is_err() {
                 return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
             }
-            Response::builder()
+            let mut response = Response::builder()
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, media.mime)
-                .header(CONTENT_LENGTH, media.length.to_string())
-                .body(bytes)
-                .expect("static media response is valid")
+                .header(CONTENT_LENGTH, media.length.to_string());
+            if matches!(variant, MediaVariant::Thumbnail) {
+                response = response.header(CACHE_CONTROL, "no-store");
+            }
+            response.body(bytes).expect("static media response is valid")
         }
         Err(
             LibraryError::AssetNotFound
@@ -494,7 +496,15 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
     let (variant, file_name) = match route {
         "asset" if segments.next().is_none() => (MediaVariant::Asset, None),
         "trash-thumbnail" if segments.next().is_none() => (MediaVariant::TrashThumbnail, None),
-        "thumbnail" if segments.next().is_none() => (MediaVariant::Thumbnail, None),
+        "thumbnail" => {
+            if let Some(revision) = segments.next() {
+                let Some(number) = revision.strip_prefix('v') else { return None; };
+                if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) || segments.next().is_some() {
+                    return None;
+                }
+            }
+            (MediaVariant::Thumbnail, None)
+        },
         "playback" if segments.next().is_none() => (MediaVariant::Playback, None),
         "manga-cover" if segments.next().is_none() => (MediaVariant::MangaCover, None),
         "manga-page" => {
@@ -621,6 +631,7 @@ mod tests {
     const SERIES_ID: &str = "00000000-0000-4000-8000-000000000005";
     const COLLECTION_ID: &str = "00000000-0000-4000-8000-000000000006";
     const ARTWORK_ID: &str = "00000000-0000-4000-8000-000000000007";
+    const VAULT_VIDEO_ID: &str = "00000000-0000-4000-8000-000000000008";
 
     #[test]
     fn remote_manga_routes_accept_only_closed_numeric_paths() {
@@ -869,6 +880,25 @@ mod tests {
         assert!(matches!(variant, MediaVariant::TmdbImagePreviewBackdrop));
         assert_eq!(path.as_deref(), Some("/abcd1234.webp"));
         assert!(parse_media_path("/tmdb-image-preview/backdrop/..%2Fsecret.jpg").is_err());
+    }
+
+    #[test]
+    fn thumbnail_revision_path_bypasses_cached_thumbnail_response() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_asset(&library, ASSET_ID, "assets/image.png", "thumbnails/image.webp");
+        std::fs::write(library.root().join("assets/image.png"), b"asset bytes").unwrap();
+        std::fs::write(library.root().join("thumbnails/image.webp"), b"fresh thumbnail").unwrap();
+
+        let response = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/thumbnail/{ASSET_ID}/v7"),
+        );
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.body(), b"fresh thumbnail");
+        assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
     }
 
     #[test]
@@ -1122,6 +1152,52 @@ mod tests {
     }
 
     #[test]
+    fn external_vault_media_falls_back_through_standard_media_routes() {
+        let (_temp, library, _vault_id) = private_vault_media_library();
+
+        let image = media_response(Some(&library), &Method::GET, &format!("/asset/{ASSET_ID}"));
+        assert_eq!(image.status(), StatusCode::OK);
+        assert_eq!(image.headers()[CONTENT_TYPE], "image/png");
+        assert_eq!(image.body(), b"vault-image");
+
+        let thumbnail = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!("/thumbnail/{ASSET_ID}"),
+        );
+        assert_eq!(thumbnail.status(), StatusCode::OK);
+        assert_eq!(thumbnail.headers()[CONTENT_TYPE], "image/webp");
+        assert_eq!(thumbnail.body(), b"vault-thumbnail");
+
+        let playback = media_response_with_range(
+            Some(&library),
+            &Method::GET,
+            &format!("/playback/{VAULT_VIDEO_ID}"),
+            Some("bytes=10-19"),
+        );
+        assert_eq!(playback.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(playback.headers()[CONTENT_RANGE], "bytes 10-19/36");
+        assert_eq!(playback.body(), b"abcdefghij");
+    }
+
+    #[test]
+    fn external_vault_fallback_rejects_unsafe_index_paths() {
+        let (temp, library, _vault_id) = private_vault_media_library();
+        std::fs::write(temp.path().join("outside.png"), b"outside").unwrap();
+        let db = rusqlite::Connection::open(temp.path().join("vault/.lakomics/index.sqlite")).unwrap();
+        db.execute(
+            "UPDATE vault_assets SET relative_path='../outside.png' WHERE id=?1",
+            [ASSET_ID],
+        )
+        .unwrap();
+
+        assert_eq!(
+            media_response(Some(&library), &Method::GET, &format!("/asset/{ASSET_ID}")).status(),
+            StatusCode::NOT_FOUND,
+        );
+    }
+
+    #[test]
     fn manga_page_route_rejects_out_of_range_page() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path().join("library")).unwrap();
@@ -1206,6 +1282,33 @@ mod tests {
     fn manga_routes_are_hidden_when_no_library_is_open() {
         let response = media_response(None, &Method::GET, &format!("/manga-cover/{SERIES_ID}"));
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn private_vault_media_library() -> (tempfile::TempDir, Library, String) {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let vault = temp.path().join("vault");
+        std::fs::create_dir(&vault).unwrap();
+        let status = library.register_private_vault(&vault).unwrap();
+        let vault_id = status.vault_id.unwrap();
+        std::fs::create_dir_all(vault.join("media")).unwrap();
+        std::fs::create_dir_all(vault.join(".lakomics/thumbnails")).unwrap();
+        std::fs::create_dir_all(vault.join(format!(".lakomics/media/{VAULT_VIDEO_ID}/scrub"))).unwrap();
+        std::fs::write(vault.join("media/image.png"), b"vault-image").unwrap();
+        std::fs::write(vault.join(".lakomics/thumbnails/image.webp"), b"vault-thumbnail").unwrap();
+        std::fs::write(vault.join("media/clip.mp4"), b"0123456789abcdefghijklmnopqrstuvwxyz").unwrap();
+        std::fs::write(vault.join(format!(".lakomics/media/{VAULT_VIDEO_ID}/poster.webp")), b"vault-poster").unwrap();
+        std::fs::write(vault.join(format!(".lakomics/media/{VAULT_VIDEO_ID}/scrub/000.webp")), b"vault-scrub").unwrap();
+        let db = rusqlite::Connection::open(vault.join(".lakomics/index.sqlite")).unwrap();
+        db.execute(
+            "INSERT INTO vault_assets(id,relative_path,media_kind,original_name,byte_size,modified_ns,modified_at,width,height,thumbnail_relative_path,scrub_frame_count) VALUES(?1,'media/image.png','image','image.png',11,1,'2026-09-13T00:00:00Z',8,6,'thumbnails/image.webp',0)",
+            [ASSET_ID],
+        ).unwrap();
+        db.execute(
+            "INSERT INTO vault_assets(id,relative_path,media_kind,original_name,byte_size,modified_ns,modified_at,width,height,duration_ms,container,video_codec,audio_codec,thumbnail_relative_path,playback_relative_path,scrub_relative_dir,scrub_frame_count) VALUES(?1,'media/clip.mp4','video','clip.mp4',36,2,'2026-09-13T00:00:01Z',1280,720,5000,'mp4','h264','aac',?2,NULL,?3,1)",
+            rusqlite::params![VAULT_VIDEO_ID, format!("media/{VAULT_VIDEO_ID}/poster.webp"), format!("media/{VAULT_VIDEO_ID}/scrub")],
+        ).unwrap();
+        (temp, library, vault_id)
     }
 
     fn write_test_png(path: &std::path::Path) {

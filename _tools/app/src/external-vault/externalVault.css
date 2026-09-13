@@ -1,0 +1,19 @@
+.external-vault-browser { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.external-vault-browser__toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--color-border); }
+.external-vault-browser__filters { display: flex; align-items: center; gap: 4px; }
+.external-vault-browser__error { margin: 0; padding: 10px 16px; color: var(--color-danger); font-size: var(--text-sm); }
+.external-vault-browser > .asset-gallery { flex: 1; min-height: 0; }
+.external-vault-browser__actions { display: flex; align-items: center; gap: 4px; }
+.external-vault-browser .asset-gallery__asset--caption .asset-gallery__metadata { color: var(--color-text); }
+.external-vault-browser .asset-gallery__asset--caption .asset-gallery__metadata time { display: none; }
+.external-vault-browser .asset-gallery__asset--caption .asset-gallery__metadata > span { width: 100%; }
+.external-vault-editor__hint, .external-vault-editor__error { margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--color-muted); }
+.external-vault-editor__error { color: var(--color-danger); }
+.external-vault-thumbnail-editor { display: grid; gap: var(--space-3); }
+.external-vault-thumbnail-editor__current { display: grid; place-items: center; min-height: 12rem; overflow: hidden; background: var(--color-bg); border-radius: var(--radius-sm); }
+.external-vault-thumbnail-editor__current img { display: block; width: 100%; max-height: 18rem; object-fit: contain; }
+.external-vault-thumbnail-editor__choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.external-vault-thumbnail-editor__frames { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.external-vault-thumbnail-editor__frames button { display: grid; gap: var(--space-1); padding: 0; color: var(--color-muted); text-align: left; }
+.external-vault-thumbnail-editor__frames img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius-sm); }
+.external-vault-thumbnail-editor__frames button:hover img, .external-vault-thumbnail-editor__frames button:focus-visible img { outline: var(--border-width) solid var(--color-accent); outline-offset: 1px; }

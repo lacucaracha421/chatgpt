@@ -37,6 +37,16 @@ it("uses prepared frames on hover and delays full playback until timeline intera
   expect(release).toHaveBeenCalledOnce();
 });
 
+it("updates the still image immediately when its thumbnail source revision changes", () => {
+  const props = { active: false, onRequestActive: vi.fn(), onReleaseActive: vi.fn(), onRetry: vi.fn() };
+  const { rerender } = render(<VideoTileMedia asset={video()} {...props} thumbnailSrc="http://lakomics.localhost/thumbnail/video-1?v=1" />);
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-1?v=1");
+
+  rerender(<VideoTileMedia asset={video()} {...props} thumbnailSrc="http://lakomics.localhost/thumbnail/video-1?v=2" />);
+
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-1?v=2");
+});
+
 it("decodes the still thumbnail asynchronously", () => {
   render(<VideoTileMedia asset={video()} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("decoding", "async");

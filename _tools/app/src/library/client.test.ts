@@ -303,6 +303,36 @@ describe("libraryGateway revisit contract", () => {
 });
 
 
+describe("libraryGateway external vault contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("uses stable commands and payloads for the portable vault", async () => {
+    await libraryGateway.getPrivateVaultStatus!();
+    expect(invoke).toHaveBeenCalledWith("get_private_vault_status");
+    await libraryGateway.registerPrivateVault!("/media/private");
+    expect(invoke).toHaveBeenCalledWith("register_private_vault", { root: "/media/private" });
+    await libraryGateway.scanPrivateVault!();
+    expect(invoke).toHaveBeenCalledWith("scan_private_vault");
+    const query = { mediaKind: null, offset: 0, limit: 80 } as const;
+    await libraryGateway.listPrivateVaultAssets!(query);
+    expect(invoke).toHaveBeenCalledWith("list_private_vault_assets", { query });
+    await libraryGateway.playPrivateVaultVideo!("vault-video-1");
+    expect(invoke).toHaveBeenCalledWith("play_private_vault_video", { assetId: "vault-video-1" });
+    await libraryGateway.setPrivateVaultTitle!("vault-video-1", "제목");
+    expect(invoke).toHaveBeenCalledWith("set_private_vault_title", { assetId: "vault-video-1", title: "제목" });
+    await libraryGateway.listPrivateVaultThumbnailCandidates!("vault-video-1");
+    expect(invoke).toHaveBeenCalledWith("list_private_vault_thumbnail_candidates", { assetId: "vault-video-1" });
+    await libraryGateway.setPrivateVaultThumbnailFromFile!("vault-video-1", "/tmp/cover.png");
+    expect(invoke).toHaveBeenCalledWith("set_private_vault_thumbnail_from_file", { assetId: "vault-video-1", sourcePath: "/tmp/cover.png" });
+    await libraryGateway.setPrivateVaultThumbnailFromFrame!("vault-video-1", 1200);
+    expect(invoke).toHaveBeenCalledWith("set_private_vault_thumbnail_from_frame", { assetId: "vault-video-1", timestampMs: 1200 });
+    await libraryGateway.resetPrivateVaultThumbnail!("vault-video-1");
+    expect(invoke).toHaveBeenCalledWith("reset_private_vault_thumbnail", { assetId: "vault-video-1" });
+    await libraryGateway.unregisterPrivateVault!();
+    expect(invoke).toHaveBeenCalledWith("unregister_private_vault");
+  });
+});
+
 it("streams grouped count through Channel and sends edition requests", async () => {
   const query = { provider: "kHentai" as const, text: "love", sort: "latest" as const, scope: "all" as const, page: 0, pageSize: 48 };
   const onEvent = vi.fn();

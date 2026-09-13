@@ -277,6 +277,7 @@ export type AssetView =
   | { kind: "trash" }
   | { kind: "statistics" }
   | { kind: "notes" }
+  | { kind: "private_vault" }
   | { kind: "settings"; section?: "general" | "cloud" | "catalog" | "external_services" | "data" | "about" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider }
@@ -660,6 +661,52 @@ export type MediaSummary =
       preparationState: VideoPreparationState;
       scrubFrameCount: number;
     };
+
+export type PrivateVaultStatus = {
+  registered: boolean;
+  available: boolean;
+  vaultId: string | null;
+  root: string | null;
+  assetCount: number;
+  readOnly: boolean;
+};
+
+export type PrivateVaultQuery = {
+  mediaKind: "images" | "videos" | null;
+  offset: number;
+  limit: number;
+};
+
+export type PrivateVaultAssetSummary = {
+  id: string;
+  title: string | null;
+  originalName: string;
+  byteSize: number;
+  width: number;
+  height: number;
+  modifiedAt: string;
+  media: MediaSummary;
+};
+
+export type PrivateVaultThumbnailCandidate = {
+  timestampMs: number;
+  imageBytes: number[];
+};
+
+export type PrivateVaultAssetPage = {
+  items: PrivateVaultAssetSummary[];
+  totalCount: number;
+  nextOffset: number | null;
+};
+
+export type PrivateVaultScanReport = {
+  scanned: number;
+  added: number;
+  updated: number;
+  unchanged: number;
+  removed: number;
+  failed: number;
+};
 
 export type ImportSource =
   | "direct"
@@ -1141,6 +1188,17 @@ export interface LibraryGateway {
   setCollectionShowcase(collectionId: string, showcase: boolean): Promise<CollectionSummary>;
   getAssetCollections(assetId: string): Promise<string[]>;
   patchAssetCollections(patch: AssetCollectionPatch): Promise<void>;
+  getPrivateVaultStatus?(): Promise<PrivateVaultStatus>;
+  registerPrivateVault?(root: string): Promise<PrivateVaultStatus>;
+  unregisterPrivateVault?(): Promise<void>;
+  scanPrivateVault?(): Promise<PrivateVaultScanReport>;
+  listPrivateVaultAssets?(query: PrivateVaultQuery): Promise<PrivateVaultAssetPage>;
+  playPrivateVaultVideo?(assetId: string): Promise<void>;
+  setPrivateVaultTitle?(assetId: string, title: string | null): Promise<void>;
+  listPrivateVaultThumbnailCandidates?(assetId: string): Promise<PrivateVaultThumbnailCandidate[]>;
+  setPrivateVaultThumbnailFromFile?(assetId: string, sourcePath: string): Promise<void>;
+  setPrivateVaultThumbnailFromFrame?(assetId: string, timestampMs: number): Promise<void>;
+  resetPrivateVaultThumbnail?(assetId: string): Promise<void>;
   getMangaRoot(): Promise<string | null>;
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;

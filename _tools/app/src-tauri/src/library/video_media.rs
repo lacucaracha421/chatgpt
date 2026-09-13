@@ -77,6 +77,42 @@ pub(crate) fn probe_video(source: &Path, extension: &str) -> Result<VideoProbe, 
     ProcessVideoTool.probe(source, extension)
 }
 
+pub(crate) fn create_video_poster(
+    source: &Path,
+    seek_ms: u64,
+    destination: &Path,
+) -> Result<(), LibraryError> {
+    ProcessVideoTool.create_poster(source, seek_ms, destination)
+}
+
+fn ffmpeg_seek_seconds(seek_ms: u64) -> String {
+    format!("{}.{:03}", seek_ms / 1_000, seek_ms % 1_000)
+}
+
+pub(crate) fn render_video_frame_webp(source: &Path, seek_ms: u64) -> Result<Vec<u8>, LibraryError> {
+    let seek = ffmpeg_seek_seconds(seek_ms);
+    run_tool(
+        "ffmpeg",
+        [
+            "-v".into(),
+            "error".into(),
+            "-ss".into(),
+            seek.into(),
+            "-i".into(),
+            source.as_os_str().to_owned(),
+            "-frames:v".into(),
+            "1".into(),
+            "-vf".into(),
+            "scale=640:640:force_original_aspect_ratio=decrease".into(),
+            "-c:v".into(),
+            "libwebp".into(),
+            "-f".into(),
+            "image2pipe".into(),
+            "-".into(),
+        ],
+    )
+}
+
 impl VideoTool for ProcessVideoTool {
     fn probe(&self, source: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
         let output = run_tool(
@@ -101,7 +137,7 @@ impl VideoTool for ProcessVideoTool {
         seek_ms: u64,
         destination: &Path,
     ) -> Result<(), LibraryError> {
-        let seek_seconds = format!("0.{seek_ms:03}");
+        let seek_seconds = ffmpeg_seek_seconds(seek_ms);
         run_tool(
             "ffmpeg",
             [
@@ -489,6 +525,54 @@ fn install_prepared_directory(pending: &Path, final_directory: &Path) -> Result<
     Err(LibraryError::VideoPreparationFailed)
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ExternalVideoPreparation {
+    pub(crate) probe: VideoProbe,
+    pub(crate) uses_proxy: bool,
+    pub(crate) scrub_frame_count: u32,
+}
+
+pub(crate) fn prepare_external_video(
+    source: &Path,
+    extension: &str,
+    destination: &Path,
+) -> Result<ExternalVideoPreparation, LibraryError> {
+    prepare_external_video_with(&ProcessVideoTool, source, extension, destination)
+}
+
+fn prepare_external_video_with<T: VideoTool>(
+    tool: &T,
+    source: &Path,
+    extension: &str,
+    destination: &Path,
+) -> Result<ExternalVideoPreparation, LibraryError> {
+    let probe = tool.probe(source, extension)?;
+    let parent = destination
+        .parent()
+        .ok_or(LibraryError::VideoPreparationFailed)?;
+    fs::create_dir_all(parent).map_err(|_| LibraryError::VideoPreparationFailed)?;
+    let pending = parent.join(format!(".pending-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&pending).map_err(|_| LibraryError::VideoPreparationFailed)?;
+    let result = (|| {
+        let poster = pending.join("poster.webp");
+        tool.create_poster(source, poster_seek_ms(probe.duration_ms), &poster)?;
+        require_non_empty_file(&poster)
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_dir_all(&pending);
+        return Err(error);
+    }
+    if destination.exists() {
+        fs::remove_dir_all(destination).map_err(|_| LibraryError::VideoPreparationFailed)?;
+    }
+    install_prepared_directory(&pending, destination)?;
+    Ok(ExternalVideoPreparation {
+        probe,
+        uses_proxy: false,
+        scrub_frame_count: 0,
+    })
+}
+
 fn safe_asset_id(asset_id: &str) -> bool {
     !asset_id.is_empty()
         && asset_id
@@ -770,23 +854,20 @@ fn scrub_timestamps_ms(duration_ms: u64) -> Vec<u64> {
 pub(crate) fn parse_probe(json: &str, extension: &str) -> Result<VideoProbe, LibraryError> {
     let output: ProbeOutput =
         serde_json::from_str(json).map_err(|_| LibraryError::UnsupportedVideo)?;
-    let container = extension.to_ascii_lowercase();
-    let format_matches = match container.as_str() {
-        "mp4" | "mov" => output
-            .format
-            .format_name
-            .split(',')
-            .any(|name| name == "mov"),
-        "webm" => output
-            .format
-            .format_name
-            .split(',')
-            .any(|name| name == "webm"),
-        _ => false,
-    };
-    if !format_matches {
+    let extension = extension.to_ascii_lowercase();
+    let formats = output.format.format_name.split(',').collect::<Vec<_>>();
+    let container = if formats.contains(&"mov") {
+        if extension == "mov" {
+            "mov"
+        } else {
+            "mp4"
+        }
+    } else if formats.contains(&"webm") {
+        "webm"
+    } else {
         return Err(LibraryError::UnsupportedVideo);
     }
+    .to_owned();
     let video = output
         .streams
         .iter()
@@ -859,8 +940,8 @@ mod tests {
     use rusqlite::params;
 
     use super::{
-        direct_playback, install_prepared_directory, parse_probe, poster_seek_ms,
-        scrub_timestamps_ms, VideoProbe, VideoTool,
+        direct_playback, ffmpeg_seek_seconds, install_prepared_directory, parse_probe, poster_seek_ms,
+        prepare_external_video_with, scrub_timestamps_ms, VideoProbe, VideoTool,
     };
     use crate::library::{error::LibraryError, models::MediaSummary, Library};
 
@@ -873,8 +954,15 @@ mod tests {
     struct FailingVideoTool;
 
     impl VideoTool for FakeVideoTool {
-        fn probe(&self, _source: &Path, _extension: &str) -> Result<VideoProbe, LibraryError> {
-            unreachable!("preparation uses persisted probe metadata")
+        fn probe(&self, _source: &Path, extension: &str) -> Result<VideoProbe, LibraryError> {
+            Ok(VideoProbe {
+                container: extension.to_owned(),
+                video_codec: "h264".into(),
+                audio_codec: Some("aac".into()),
+                duration_ms: 2_000,
+                width: 1920,
+                height: 1080,
+            })
         }
 
         fn create_poster(
@@ -982,6 +1070,24 @@ mod tests {
         assert_eq!(probe.audio_codec.as_deref(), Some("opus"));
         assert_eq!(probe.duration_ms, 65_432);
         assert_eq!((probe.width, probe.height), (1920, 1080));
+    }
+
+    #[test]
+    fn ffprobe_json_uses_detected_container_when_extension_is_misleading() {
+        let json = r#"{
+            "streams": [
+                {"codec_type":"video","codec_name":"av1","width":1920,"height":1080},
+                {"codec_type":"audio","codec_name":"aac"}
+            ],
+            "format": {"format_name":"matroska,webm","duration":"1952.517"}
+        }"#;
+
+        let probe = parse_probe(json, "mp4").unwrap();
+
+        assert_eq!(probe.container, "webm");
+        assert_eq!(probe.video_codec, "av1");
+        assert_eq!(probe.audio_codec.as_deref(), Some("aac"));
+        assert_eq!(probe.duration_ms, 1_952_517);
     }
 
     #[test]
@@ -1226,6 +1332,14 @@ mod tests {
     }
 
     #[test]
+    fn ffmpeg_seek_seconds_preserves_whole_seconds_and_milliseconds() {
+        assert_eq!(ffmpeg_seek_seconds(250), "0.250");
+        assert_eq!(ffmpeg_seek_seconds(10_000), "10.000");
+        assert_eq!(ffmpeg_seek_seconds(174_195), "174.195");
+        assert_eq!(ffmpeg_seek_seconds(1_952_517), "1952.517");
+    }
+
+    #[test]
     fn poster_seek_stays_at_half_second_for_normal_videos() {
         assert_eq!(poster_seek_ms(1_000), 500);
         assert_eq!(poster_seek_ms(65_432), 500);
@@ -1276,6 +1390,25 @@ mod tests {
 
         assert_eq!(progress.failed, 0);
         assert_eq!(tool.poster_seeks_ms.borrow().as_slice(), &[500]);
+    }
+
+    #[test]
+    fn external_video_preparation_writes_only_a_poster() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.mp4");
+        fs::write(&source, b"source").unwrap();
+        let destination = temp.path().join("derived");
+        let tool = FakeVideoTool::default();
+
+        let prepared = prepare_external_video_with(&tool, &source, "mp4", &destination).unwrap();
+
+        assert_eq!(prepared.probe.duration_ms, 2_000);
+        assert_eq!(prepared.scrub_frame_count, 0);
+        assert!(!prepared.uses_proxy);
+        assert_eq!(tool.proxy_calls.load(Ordering::SeqCst), 0);
+        assert!(destination.join("poster.webp").is_file());
+        assert!(!destination.join("scrub").exists());
+        assert!(!destination.join("playback.mp4").exists());
     }
 
     fn insert_pending_video(
@@ -1342,4 +1475,8 @@ fn linux_system_video_tools_create_and_probe_proxy() {
     let poster = temp.path().join("poster.webp");
     ProcessVideoTool.create_poster(&proxy, 0, &poster).unwrap();
     assert!(poster.metadata().unwrap().len() > 0);
+    let frame = render_video_frame_webp(&proxy, 250).unwrap();
+    let decoded = image::load_from_memory_with_format(&frame, image::ImageFormat::WebP).unwrap();
+    assert!(decoded.width() > 0 && decoded.width() <= 640);
+    assert!(decoded.height() > 0 && decoded.height() <= 640);
 }

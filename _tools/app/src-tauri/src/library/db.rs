@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 76;
+pub(crate) const SCHEMA_VERSION: i64 = 77;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -393,6 +393,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 75 {
             transaction.execute_batch(include_str!("../../migrations/0076_cloud_metadata_publication.sql"))?;
+        }
+        if version <= 76 {
+            transaction.execute_batch(include_str!("../../migrations/0077_private_vault.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
@@ -3066,6 +3069,29 @@ mod tests {
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
             SCHEMA_VERSION,
+        );
+    }
+
+    #[test]
+    fn private_vault_registration_columns_default_to_null() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 76);
+
+        migrate_to_latest(&mut connection, 76).unwrap();
+
+        let registration: (Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT private_vault_id, private_vault_last_root FROM library_settings WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(registration, (None, None));
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
         );
     }
 
