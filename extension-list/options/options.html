@@ -35,7 +35,8 @@
   </section>
   <section id="translation-section">
     <div class="section-head"><span>AI 번역</span><output id="translation-status" aria-live="polite"></output></div>
-    <p class="hint">OpenRouter · Gemini 3.1 Flash Lite · 한국어</p>
+    <p class="hint">OpenRouter · 한국어 번역</p>
+    <label for="translation-model">모델 <select id="translation-model" aria-label="번역 모델"></select></label>
     <label><input id="translation-enabled" type="checkbox"> 자동 번역</label>
     <form id="translation-key-form"><input id="translation-key" type="password" aria-label="OpenRouter API 키" autocomplete="off" placeholder="OpenRouter API 키"><button>키 저장</button></form>
     <button id="translation-clear" type="button">캐시 비우기</button>

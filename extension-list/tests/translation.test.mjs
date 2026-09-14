@@ -5,6 +5,35 @@ import {readFile} from 'node:fs/promises';
 import {JSDOM} from '../../_tools/app/node_modules/jsdom/lib/api.js';
 const service = await readFile(new URL('../src/translate-service.js', import.meta.url), 'utf8');
 const content = await readFile(new URL('../src/x-translate.js', import.meta.url), 'utf8');
+function fakeTimers(w) {
+  let now = 0, nextId = 0;
+  const timers = new Map();
+  w.setTimeout = (callback, delay = 0, ...args) => {
+    const id = ++nextId;
+    timers.set(id, { at: now + Math.max(0, Number(delay) || 0), callback, args });
+    return id;
+  };
+  w.clearTimeout = id => timers.delete(id);
+  const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+  async function advance(ms) {
+    const end = now + ms;
+    for (;;) {
+      await flush();
+      const next = [...timers.entries()].filter(([, timer]) => timer.at <= end)
+        .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+      if (!next) break;
+      now = next[1].at; timers.delete(next[0]); next[1].callback(...next[1].args);
+    }
+    now = end; await flush();
+    for (;;) {
+      const next = [...timers.entries()].filter(([, timer]) => timer.at <= end)
+        .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+      if (!next) break;
+      timers.delete(next[0]); next[1].callback(...next[1].args); await flush();
+    }
+  }
+  return { advance };
+}
 function fixture(initial={}, fetcher) {
   const memory = structuredClone(initial), calls = [];
   const context = vm.createContext({ AbortController, setTimeout, clearTimeout,
@@ -30,6 +59,25 @@ test('requests use only Flash Lite, cache repeats and clear cached results',asyn
   assert.equal(JSON.parse(f.calls[0].init.body).model,'google/gemini-3.1-flash-lite');
   await f.handle({type:'translation:clear'}); await f.handle(request); assert.equal(f.calls.length,2);
   await f.handle({type:'translation:update',enabled:false}); assert.equal((await f.handle(request)).code,'disabled'); assert.equal(f.calls.length,2);
+});
+
+test('selected translation model persists, clears incompatible cache and is used for later requests',async()=>{
+  const f=fixture(legacy); const request={type:'translation:request',text:'Hello [[LINK_0]]'};
+  assert.equal((await f.handle(request)).ok,true);
+  const changed=await f.handle({type:'translation:update',model:'google/gemma-4-26b-a4b-it'});
+  assert.equal(changed.model,'google/gemma-4-26b-a4b-it'); assert.equal(changed.modelLabel,'Gemma 4 26B A4B');
+  assert.equal(f.memory['lakomics:translation:v1'].model,'google/gemma-4-26b-a4b-it');
+  assert.deepEqual(f.memory['lakomics:translation-cache:v2']||[],[]);
+  assert.equal((await f.handle(request)).ok,true); assert.equal(f.calls.length,2);
+  assert.equal(JSON.parse(f.calls[1].init.body).model,'google/gemma-4-26b-a4b-it');
+});
+
+test('unsupported translation model is rejected without changing the current model',async()=>{
+  const f=fixture(legacy);
+  const before=await f.handle({type:'translation:settings'});
+  const result=await f.handle({type:'translation:update',model:'vendor/not-a-model'});
+  assert.equal(result.ok,false); assert.equal(result.code,'invalid_model');
+  const after=await f.handle({type:'translation:settings'}); assert.equal(after.model,before.model);
 });
 
 test('off or cache clear rejects in-flight results without repopulating the cache',async()=>{
@@ -60,7 +108,7 @@ test('source snapshots preserve emoji, line breaks and safe clickable links with
 
 test('mounted translator handles initial scan, recycled tweet text, off and on without stale results', async () => {
   const dom = new JSDOM('<div data-testid="tweetText" lang="en">Hello world</div>', {url:'https://x.com', runScripts:'outside-only'});
-  const w = dom.window, element = w.document.querySelector('div');
+  const w = dom.window, element = w.document.querySelector('div'), clock = fakeTimers(dom.window);
   let enabled = true, changed, requests = 0;
   element.getBoundingClientRect = () => ({width:300,height:60,top:10,bottom:70});
   w.IntersectionObserver = class { observe() {} unobserve() {} };
@@ -70,13 +118,12 @@ test('mounted translator handles initial scan, recycled tweet text, off and on w
     if (message.type === 'translation:request-batch') { requests++; callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:item.text.includes('Changed')?'변경된 글':'안녕하세요'}))}); }
   }}, storage:{onChanged:{addListener(fn) { changed=fn; }}}};
   w.eval(content);
-  const wait = ms => new Promise(resolve=>setTimeout(resolve,ms));
-  await wait(400); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'안녕하세요');
-  element.textContent='Changed post'; await wait(500);
+  await clock.advance(400); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'안녕하세요');
+  element.textContent='Changed post'; await clock.advance(500);
   assert.equal(w.document.querySelector('.lakomics-translation').textContent,'변경된 글');
-  enabled=false; changed({'lakomics:translation:v1':{newValue:{enabled:false}}},'local'); await wait(400);
+  enabled=false; changed({'lakomics:translation:v1':{newValue:{enabled:false}}},'local'); await clock.advance(400);
   assert.equal(w.document.querySelector('.lakomics-translation'),null); assert.equal(requests,2);
-  enabled=true; changed({'lakomics:translation:v1':{newValue:{enabled:true}}},'local'); await wait(400);
+  enabled=true; changed({'lakomics:translation:v1':{newValue:{enabled:true}}},'local'); await clock.advance(400);
   assert.equal(w.document.querySelector('.lakomics-translation').textContent,'변경된 글'); assert.equal(requests,3); w.close();
 });
 
@@ -134,7 +181,7 @@ test('language detection trusts explicit tags but skips tiny foreign snippets',(
 
 test('visible tweets use one fast lane request and keep the remainder in a four-item batch',async()=>{
   const html=Array.from({length:5},(_,i)=>`<div data-testid="tweetText" lang="en">Post number ${i} text</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window;
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
   const batches=[]; let singles=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:10+i*50,bottom:50+i*50});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -143,13 +190,13 @@ test('visible tweets use one fast lane request and keep the remainder in a four-
     else if(message.type==='translation:request'){singles+=1; callback({ok:true,text:'빠른 번역'});}
     else if(message.type==='translation:request-batch'){batches.push(message.items.length); callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`번역 ${item.id}`}))});}
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await new Promise(resolve=>setTimeout(resolve,120));
+  w.eval(content); await clock.advance(120);
   assert.equal(singles,1); assert.deepEqual(batches,[4]); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
 });
 
 test('transient content failure is retried when the tweet re-enters the viewport',async()=>{
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">Retry this post</div>',{url:'https://x.com',runScripts:'outside-only'});
-  const w=dom.window, element=w.document.querySelector('div'); let observer, requests=0;
+  const w=dom.window, element=w.document.querySelector('div'), clock=fakeTimers(dom.window); let observer, requests=0;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
   w.IntersectionObserver=class{constructor(cb){this.cb=cb;observer=this;} observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
@@ -157,23 +204,24 @@ test('transient content failure is retried when the tweet re-enters the viewport
     else if(message.type==='translation:request'){requests+=1; callback(requests===1?{ok:false,code:'network_error'}:{ok:true,text:'재시도 성공'});}
     else if(message.type==='translation:request-batch'){requests+=1; callback(requests===1?{ok:false,code:'network_error'}:{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'재시도 성공'}))});}
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await new Promise(resolve=>setTimeout(resolve,450));
-  observer.cb([{isIntersecting:true,target:element}]); await new Promise(resolve=>setTimeout(resolve,450));
+  w.eval(content); await clock.advance(450);
+  observer.cb([{isIntersecting:true,target:element}]); await clock.advance(450);
   assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'재시도 성공'); w.close();
 });
 
 test('translator uses a compact floating icon popover and themed translation card',async()=>{
   const dom=new JSDOM('<body style="background:rgb(0,0,0)"><div data-testid="tweetText" lang="en">Hello <a href="https://x.com/hashtag/test">#test</a></div></body>',{url:'https://x.com',runScripts:'outside-only'});
-  const w=dom.window, element=w.document.querySelector('[data-testid="tweetText"]');
+  const w=dom.window, element=w.document.querySelector('[data-testid="tweetText"]'), clock=fakeTimers(dom.window);
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70}); w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
-    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true,model:'google/gemini-3.1-flash-lite'});
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true,model:'google/gemma-4-26b-a4b-it',modelLabel:'Gemma 4 26B A4B'});
     else if(message.type==='translation:request') callback({ok:true,text:'안녕 [[LINK_0]]'});
     else if(message.type==='translation:request-batch') callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'안녕 [[LINK_0]]'}))});
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await new Promise(resolve=>setTimeout(resolve,450));
+  w.eval(content); await clock.advance(450);
   const host=w.document.getElementById('lakomics-translation-controls'), shadow=host.shadowRoot;
   assert.ok(shadow.getElementById('translator-button')); assert.equal(shadow.getElementById('translator-popover').hidden,true);
+  assert.equal(shadow.querySelector('.model').textContent,'Gemma 4 26B A4B');
   shadow.getElementById('translator-button').click(); assert.equal(shadow.getElementById('translator-popover').hidden,false);
   const card=w.document.querySelector('.lakomics-translation'); assert.equal(card.dataset.theme,'lights-out');
   assert.equal(card.querySelector('a').textContent,'#test'); assert.match(w.document.head.textContent,/29,\s*155,\s*240/); w.close();
@@ -191,7 +239,7 @@ test('rate limit honors Retry-After and retries without invalidating the key',as
 
 test('invalid item in the non-fast-lane batch falls back alone without discarding valid translations',async()=>{
   const html='<div data-testid="tweetText" lang="en">Fast post</div><div data-testid="tweetText" lang="en">First post</div><div data-testid="tweetText" lang="en">Second post</div>';
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window; let batchCalls=0,singleCalls=0;
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window); let batchCalls=0,singleCalls=0;
   const positions=[[350,390],[10,50],[60,100]];
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:positions[i][0],bottom:positions[i][1]});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -200,23 +248,23 @@ test('invalid item in the non-fast-lane batch falls back alone without discardin
     else if(message.type==='translation:request'){singleCalls+=1; callback({ok:true,text:message.text==='Fast post'?'빠른 번역':'두 번째 번역'});}
     else if(message.type==='translation:request-batch'){batchCalls+=1; const first=message.items.find(item=>item.text==='First post'), second=message.items.find(item=>item.text==='Second post'); callback({ok:true,items:[{id:first.id,ok:true,text:'첫 번째 번역'},{id:second.id,ok:false,code:'invalid_translation'}]});}
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await new Promise(resolve=>setTimeout(resolve,150));
+  w.eval(content); await clock.advance(150);
   assert.equal(batchCalls,1); assert.equal(singleCalls,2); assert.deepEqual([...w.document.querySelectorAll('.lakomics-translation')].map(n=>n.textContent),['빠른 번역','첫 번째 번역','두 번째 번역']); w.close();
 });
 
 test('one X tab keeps the fast lane and first batch in flight together',async()=>{
   const html=Array.from({length:8},(_,i)=>`<div data-testid="tweetText" lang="en">Concurrent post ${i}</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window;
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
   let active=0,maxActive=0,batchCalls=0,singleCalls=0;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
-  const finish=(callback,result)=>{active+=1; maxActive=Math.max(maxActive,active); setTimeout(()=>{active-=1; callback(result);},120);};
+  const finish=(callback,result)=>{active+=1; maxActive=Math.max(maxActive,active); w.setTimeout(()=>{active-=1; callback(result);},120);};
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type==='translation:request'){singleCalls+=1; finish(callback,{ok:true,text:'빠른 번역'});}
     else if(message.type==='translation:request-batch'){batchCalls+=1; finish(callback,{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`번역 ${item.id}`}))});}
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await new Promise(resolve=>setTimeout(resolve,380));
+  w.eval(content); await clock.advance(380);
   assert.equal(singleCalls,1); assert.equal(batchCalls,2); assert.equal(maxActive,2); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,8); w.close();
 });
 
@@ -231,18 +279,18 @@ test('runtime mounts as soon as body exists without waiting for DOMContentLoaded
 
 test('initial visible tweet scan starts a translation without the 120 ms debounce',async()=>{
   const dom=new JSDOM('<div data-testid="tweetText" lang="en">Immediate translation text</div>',{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window; let requests=0;
-  const element=w.document.querySelector('[data-testid="tweetText"]'); element.getBoundingClientRect=()=>({width:300,height:50,top:10,bottom:60});
+  const element=w.document.querySelector('[data-testid="tweetText"]'), clock=fakeTimers(dom.window); element.getBoundingClientRect=()=>({width:300,height:50,top:10,bottom:60});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
     else if(message.type.startsWith('translation:request')){requests+=1; callback(message.type.endsWith('batch')?{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'즉시 번역'}))}:{ok:true,text:'즉시 번역'});}
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await new Promise(resolve=>setTimeout(resolve,40));
+  w.eval(content); await clock.advance(40);
   assert.equal(requests,1); w.close();
 });
 test('first visible tweet uses a single fast lane while the next batch starts concurrently',async()=>{
   const html=Array.from({length:5},(_,i)=>`<div data-testid="tweetText" lang="en">Fast lane post ${i}</div>`).join('');
-  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window;
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
   let singleCalls=0,batchCalls=0,releaseBatch;
   for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:40,top:280+i*45,bottom:320+i*45});
   w.IntersectionObserver=class{observe(){} unobserve(){}};
@@ -251,7 +299,7 @@ test('first visible tweet uses a single fast lane while the next batch starts co
     else if(message.type==='translation:request'){singleCalls+=1; callback({ok:true,text:'가장 먼저 번역'});}
     else if(message.type==='translation:request-batch'){batchCalls+=1; releaseBatch=()=>callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`배치 ${item.id}`}))});}
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await new Promise(resolve=>setTimeout(resolve,40));
+  w.eval(content); await clock.advance(40);
   assert.equal(singleCalls,1); assert.equal(batchCalls,1); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,1);
-  releaseBatch(); await new Promise(resolve=>setTimeout(resolve,30)); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
+  releaseBatch(); await clock.advance(30); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
 });

@@ -4,6 +4,27 @@ import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 
 const dom = new JSDOM('<!doctype html><body><button id="opener">image</button></body>', { url: 'https://example.test/' });
 globalThis.window = dom.window; globalThis.document = dom.window.document;
+
+const realNow = globalThis.performance.now.bind(globalThis.performance);
+let virtualOffset = 0, frameId = 0;
+const frameQueue = new Map();
+Object.defineProperty(globalThis.performance, 'now', { configurable: true, value: () => realNow() + virtualOffset });
+dom.window.requestAnimationFrame = callback => { const id = ++frameId; frameQueue.set(id, callback); return id; };
+dom.window.cancelAnimationFrame = id => frameQueue.delete(id);
+async function advanceTime(ms) {
+  const target = globalThis.performance.now() + ms;
+  while (frameQueue.size && globalThis.performance.now() < target) {
+    const step = Math.min(16, target - globalThis.performance.now());
+    virtualOffset += step;
+    const callbacks = [...frameQueue.values()]; frameQueue.clear();
+    for (const callback of callbacks) callback(globalThis.performance.now());
+    await Promise.resolve();
+  }
+  const remainder = target - globalThis.performance.now();
+  if (remainder > 0) virtualOffset += remainder;
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+}
+
 await import('../src/classification-tree.js');
 await import('../src/arc-collector.js');
 const entries = [
@@ -20,47 +41,168 @@ function mount(options = {}) {
   return { ...view, $: selector => view.host.shadowRoot.querySelector(selector), $$: selector => [...view.host.shadowRoot.querySelectorAll(selector)] };
 }
 const row = (view, id) => view.$(`[data-classification-id="${id}"]`);
-const currentIds = view => view.$$('.sector[data-classification-id]').map(button => button.dataset.classificationId);
+const currentIds = view => view.$$('.sector:not(:disabled)[data-classification-id]').map(button => button.dataset.classificationId);
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const settleDial = () => advanceTime(760);
+const visibleIds = view => view.$$('.sector:not(:disabled)[data-classification-id]').map(button => button.dataset.classificationId);
+function wheel(view, deltaY = 120, target = null) {
+  const event = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY });
+  (target || view.$('.arc')).dispatchEvent(event);
+  return event;
+}
 const tap = (view, id) => row(view, id).dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, detail: 1 }));
 const enter = (view, id) => { tap(view, id); tap(view, id); };
 
 
-test('root keeps six folder slots and exposes every overflow folder', () => {
+test('branch folders use a clean curved rim flush with the outer edge', () => {
   const view = mount();
-  assert.deepEqual(currentIds(view), ['games', 'root0', 'root1', 'root2', 'root3', 'root4']);
-  assert.equal(view.$$('.sector').length, 6);
-  assert.equal(view.$('.save-current').disabled, true);
-  assert.equal(view.$('.back').disabled, true);
-  view.$('.root-next').click();
-  assert.deepEqual(currentIds(view), ['root5']);
-  assert.equal(view.$$('.sector.empty').length, 5);
-  view.$('.root-next').click();
-  assert.equal(row(view, 'games').dataset.slot, '0');
+  const style = view.host.shadowRoot.querySelector('style').textContent;
+  assert.match(style, /\.sector\.branch:before\{[^}]*clip-path:var\(--branch-ring\)/);
+  assert.match(style, /\.sector\.branch:after\{[^}]*clip-path:var\(--branch-highlight\)/);
+  assert.doesNotMatch(style, /--branch-x|--branch-y/);
+  const radius = parseFloat(view.$('.panel').style.getPropertyValue('--radius'));
+  const ring = row(view, 'games').style.getPropertyValue('--branch-ring');
+  const points = [...ring.matchAll(/(-?\d+(?:\.\d+)?)px (-?\d+(?:\.\d+)?)px/g)]
+    .map(match => [Number(match[1]), Number(match[2])]);
+  const outer = Math.max(...points.map(([x, y]) => Math.hypot(x - radius, y - radius)));
+  assert.ok(Math.abs(outer - radius) < 0.02, `expected branch rim at outer edge ${radius}, got ${outer}`);
 });
 
-test('children keep five folder slots and the bottom navigation slot through page wrap', () => {
+test('resting runtime labels snap to device pixels for crisp text', () => {
+  const previousDpr = dom.window.devicePixelRatio;
+  Object.defineProperty(dom.window, 'devicePixelRatio', { configurable: true, value: 2.25 });
+  try {
+    const view = mount();
+    const label = view.$('.dial-label[data-classification-id="root0"]');
+    const left = parseFloat(label.style.left) * dom.window.devicePixelRatio;
+    const top = parseFloat(label.style.top) * dom.window.devicePixelRatio;
+    assert.ok(Math.abs(left - Math.round(left)) < 1e-6, `expected device-pixel left, got ${left}`);
+    assert.ok(Math.abs(top - Math.round(top)) < 1e-6, `expected device-pixel top, got ${top}`);
+  } finally {
+    Object.defineProperty(dom.window, 'devicePixelRatio', { configurable: true, value: previousDpr });
+  }
+});
+
+test('runtime dial labels are outside clipped sector buttons', () => {
+  const view = mount();
+  const label = view.$('.dial-label[data-classification-id="root1"]');
+  assert.ok(label);
+  assert.equal(label.closest('.sector'), null);
+});
+
+test('runtime labels travel in the same direction as the rotating sectors', async () => {
+  const view = mount();
+  const label = view.$('.dial-label[data-classification-id="root1"]');
+  const before = parseFloat(label.style.top);
+  wheel(view, 53);
+  await advanceTime(120);
+  const after = parseFloat(label.style.top);
+  assert.doesNotMatch(view.$('.arc').style.getPropertyValue('--dial-angle'), /^-/);
+  assert.ok(after < before, `expected label and sector to travel upward together, got ${before} -> ${after}`);
+});
+
+test('long child lists mount every label once instead of recycling the sector pool', () => {
+  const longEntries = [
+    { id: 'long-parent', name: '리버스', parentId: null },
+    ...Array.from({ length: 24 }, (_, i) => ({ id: `long${i}`, name: `긴 하위 ${i}`, parentId: 'long-parent' })),
+  ];
+  const view = mount({ entries: longEntries }); enter(view, 'long-parent');
+  assert.equal(view.$$('.dial-label[data-classification-id]').length, 24);
+  assert.ok(view.$('.dial-label[data-classification-id="long23"]'));
+});
+
+test('an incoming label fades through the arc edge instead of switching on at a slot boundary', () => {
   const view = mount(); enter(view, 'games');
-  assert.deepEqual(currentIds(view), ['game0', 'game1', 'game2', 'game3', 'game4']);
-  assert.equal(view.$('.next').dataset.slot, '5');
-  const target = view.$('.save-current').getAttribute('aria-label');
-  view.$('.next').click(); view.$('.next').click();
-  assert.deepEqual(currentIds(view), ['game10', 'game11']);
-  assert.equal(view.$$('.sector.empty').length, 3);
-  assert.match(view.$('.next').textContent, /처음으로3\/3/);
-  assert.equal(view.$('.save-current').getAttribute('aria-label'), target);
-  view.$('.next').click();
-  assert.equal(row(view, 'game0').dataset.slot, '0');
+  const arc = view.$('.arc');
+  arc.getBoundingClientRect = () => ({ left: 700, right: 924, top: 100, bottom: 548, width: 224, height: 448 });
+  const point = degrees => {
+    const radians = degrees * Math.PI / 180, r = 180;
+    return { x: 924 - r * Math.cos(radians), y: 324 + r * Math.sin(radians) };
+  };
+  for (const [type, degrees] of [['pointerdown', 32], ['pointermove', 2]]) {
+    const { x, y } = point(degrees), event = new dom.window.MouseEvent(type, { bubbles: true, clientX: x, clientY: y });
+    Object.defineProperty(event, 'pointerId', { value: 31 }); arc.dispatchEvent(event);
+  }
+  const opacity = Number(view.$('.dial-label[data-classification-id="game6"]').style.opacity);
+  assert.ok(opacity > 0 && opacity < 1, `expected edge fade opacity, got ${opacity}`);
 });
 
-test('back follows visited screens, restores parent pages, and skips page changes', () => {
-  const view = mount(); enter(view, 'games'); view.$('.next').click(); enter(view, 'game7');
-  view.$('.next').click(); view.$('.next').click();
+test('resting runtime dial points a sector center at the screen center axis', () => {
+  const view = mount();
+  const centered = row(view, 'root1');
+  assert.equal(centered.dataset.slot, '2');
+  const radius = parseFloat(view.$('.panel').style.getPropertyValue('--radius'));
+  const labelTop = parseFloat(centered.querySelector('.sector-label').style.top);
+  assert.ok(Math.abs(labelTop - radius) < 0.01, `expected label center ${labelTop} to align with radius ${radius}`);
+});
+
+test('sixth visible runtime wedge stays fully inside the semicircle while a middle wedge faces center', () => {
+  const view = mount();
+  const radius = parseFloat(view.$('.panel').style.getPropertyValue('--radius'));
+  const centered = row(view, 'root1');
+  const last = row(view, 'root4');
+  const centerTop = parseFloat(centered.querySelector('.sector-label').style.top);
+  const lastTop = parseFloat(last.querySelector('.sector-label').style.top);
+  assert.ok(Math.abs(centerTop - radius) < 0.01, `expected middle wedge to face center, got ${centerTop}`);
+  assert.ok(lastTop < radius * 1.74, `expected sixth wedge center inside the lower edge, got ${lastTop} for radius ${radius}`);
+});
+
+test('runtime root keeps six visible folders and mouse wheel reveals overflow through the dial', async () => {
+  const view = mount();
+  assert.deepEqual(visibleIds(view), ['games', 'root0', 'root1', 'root2', 'root3', 'root4']);
+  assert.equal(view.$('.root-next').hidden, true);
+  const event = wheel(view);
+  assert.equal(event.defaultPrevented, true);
+  await settleDial();
+  assert.deepEqual(visibleIds(view), ['root0', 'root1', 'root2', 'root3', 'root4', 'root5']);
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+});
+
+test('runtime child dial uses all six wedges and scrolls without a paging sector', async () => {
+  const view = mount(); enter(view, 'games');
+  assert.deepEqual(visibleIds(view), ['game0', 'game1', 'game2', 'game3', 'game4', 'game5']);
+  assert.equal(view.$('.next'), null);
+  wheel(view); await settleDial();
+  assert.deepEqual(visibleIds(view), ['game1', 'game2', 'game3', 'game4', 'game5', 'game6']);
+});
+
+test('six-item short dial centers the whole group inside the semicircle', () => {
+  const shortEntries = [
+    { id: 'parent', name: '엔필', parentId: null },
+    ...Array.from({ length: 6 }, (_, i) => ({ id: `short${i}`, name: `하위 ${i}`, parentId: 'parent' })),
+  ];
+  const view = mount({ entries: shortEntries }); enter(view, 'parent');
+  const radius = parseFloat(view.$('.panel').style.getPropertyValue('--radius'));
+  const first = parseFloat(view.$('.dial-label[data-classification-id="short0"]').style.top);
+  const last = parseFloat(view.$('.dial-label[data-classification-id="short5"]').style.top);
+  assert.ok(Math.abs(first + last - radius * 2) < 1, `expected symmetric short-list labels, got ${first} + ${last}`);
+  assert.ok(last < radius * 1.74, `expected last label fully inside the arc, got ${last} for radius ${radius}`);
+});
+
+test('runtime dial compacts preserved null holes instead of showing blank wedges', () => {
+  const holeEntries = [
+    { id: 'parent', name: '리버스', parentId: null },
+    ...Array.from({ length: 10 }, (_, i) => ({ id: `c${i}`, name: `캐릭터 ${i}`, parentId: 'parent' })),
+  ];
+  const arcLayout = LakomicsClassificationTree.reconcileArcLayout(holeEntries, {});
+  arcLayout.parent.slots = ['c0', 'c1', null, 'c2', 'c3', null, 'c4', 'c5', 'c6', 'c7', 'c8', 'c9'];
+  const view = mount({ entries: holeEntries, arcLayout });
+  enter(view, 'parent');
+  assert.deepEqual(currentIds(view), ['c0', 'c1', 'c2', 'c3', 'c4', 'c5']);
+});
+
+
+test('back restores the parent dial position instead of resetting the ring', async () => {
+  const view = mount(); enter(view, 'games');
+  wheel(view, 53); await settleDial();
+  wheel(view, 53); await settleDial();
+  assert.equal(view.$('.panel').dataset.dialIndex, '2');
+  enter(view, 'game7');
   assert.equal(view.$('.panel').dataset.depth, '2');
   view.$('.back').click();
-  assert.equal(view.$('.panel').dataset.page, '2');
+  assert.equal(view.$('.panel').dataset.depth, '1');
+  assert.equal(view.$('.panel').dataset.dialIndex, '2');
   assert.ok(row(view, 'game7'));
-  assert.equal(view.$('.destination').textContent, '게임 7');
   view.$('.back').click();
   assert.equal(view.$('.panel').dataset.depth, '0');
 });
@@ -86,14 +228,14 @@ test('leaf taps only select and central save sends exactly that destination', as
 test('branch destinations remain saveable and failures retain selection and prevent duplicate requests', async () => {
   let complete, calls = 0;
   const view = mount({ onSave: () => { calls++; return new Promise(resolve => { complete = resolve; }); } });
-  enter(view, 'games'); view.$('.next').click();
+  enter(view, 'games'); wheel(view); await settleDial();
   view.$('.save-current').click(); view.$('.save-current').click();
   assert.equal(calls, 1); assert.equal(view.$('.back').disabled, true);
   view.host.shadowRoot.querySelector('.backdrop').click();
   assert.equal(view.host.isConnected, true);
   complete({ ok: false, message: 'offline' }); await tick();
   assert.equal(view.host.isConnected, true); assert.equal(view.$('.notice').textContent, 'offline');
-  assert.equal(view.$('.panel').dataset.page, '2'); assert.equal(view.$('.destination').textContent, '게임');
+  assert.equal(view.$('.panel').dataset.dialIndex, '1'); assert.equal(view.$('.destination').textContent, '게임');
   view.$('.save-current').click(); assert.equal(calls, 2);
   complete({ ok: true }); await tick(); assert.equal(view.host.isConnected, false);
 });
@@ -112,12 +254,25 @@ test('central temporary save stays root-only and blocks back double taps before 
   assert.equal(view.$('footer .temporary'), null);
   assert.ok(view.$('.center .temporary'));
   enter(view, 'games'); assert.equal(view.$('.temporary'), null);
-  view.$('.back').click(); view.$('.back').click();
-  assert.equal(temporary, 0);
-  assert.equal(view.$('.temporary').disabled, true);
-  await new Promise(resolve => setTimeout(resolve, 420));
-  view.$('.temporary').click();
-  assert.equal(temporary, 1); assert.equal(permanent, 0); assert.equal(view.host.isConnected, true);
+  const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+  let queuedTemporaryTimer = null;
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay !== 400) return realSetTimeout(callback, delay, ...args);
+    queuedTemporaryTimer = () => callback(...args);
+    return queuedTemporaryTimer;
+  };
+  globalThis.clearTimeout = id => { if (id === queuedTemporaryTimer) queuedTemporaryTimer = null; else realClearTimeout(id); };
+  try {
+    view.$('.back').click(); view.$('.back').click();
+    assert.equal(temporary, 0);
+    assert.equal(view.$('.temporary').disabled, true);
+    await advanceTime(420);
+    const runTemporaryTimer = queuedTemporaryTimer; queuedTemporaryTimer = null; runTemporaryTimer?.();
+    view.$('.temporary').click();
+    assert.equal(temporary, 1); assert.equal(permanent, 0); assert.equal(view.host.isConnected, true);
+  } finally {
+    globalThis.setTimeout = realSetTimeout; globalThis.clearTimeout = realClearTimeout;
+  }
 });
 
 test('the opening press chooses the nearest screen edge without direction or close buttons', () => {
@@ -143,10 +298,123 @@ test('drag or cancelled touch never selects or saves a sector', () => {
   assert.equal(view.$('.panel').dataset.depth, '0');
 });
 
-test('Escape restores focus and a single-page child retains its disabled navigation slot', () => {
+test('a simple sector press does not capture the pointer away from its button click target', () => {
+  const view = mount(), arc = view.$('.arc'), button = row(view, 'games');
+  let captures = 0; arc.setPointerCapture = () => { captures += 1; };
+  const event = new dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: 740, clientY: 200 });
+  Object.defineProperty(event, 'pointerId', { value: 21 });
+  button.dispatchEvent(event);
+  assert.equal(captures, 0);
+});
+
+test('arc drag rotates the runtime dial and settles on the next visible group', async () => {
+  const view = mount(), arc = view.$('.arc');
+  arc.getBoundingClientRect = () => ({ left: 700, right: 924, top: 100, bottom: 548, width: 224, height: 448 });
+  const point = degrees => {
+    const radians = degrees * Math.PI / 180, r = 180;
+    return { x: 924 - r * Math.cos(radians), y: 324 + r * Math.sin(radians) };
+  };
+  function pointer(type, degrees) {
+    const { x, y } = point(degrees);
+    const event = new dom.window.MouseEvent(type, { bubbles: true, clientX: x, clientY: y });
+    Object.defineProperty(event, 'pointerId', { value: 7 }); arc.dispatchEvent(event);
+  }
+  pointer('pointerdown', 32); pointer('pointermove', -12); pointer('pointerup', -12);
+  await settleDial();
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+  assert.deepEqual(visibleIds(view), ['root0', 'root1', 'root2', 'root3', 'root4', 'root5']);
+  assert.equal(view.$('.save-current').disabled, true);
+});
+
+test('a Chromium-sized mouse wheel notch advances one dial slot', async () => {
+  const view = mount();
+  const event = wheel(view, 53);
+  assert.equal(event.defaultPrevented, true);
+  await settleDial();
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+  assert.deepEqual(visibleIds(view), ['root0', 'root1', 'root2', 'root3', 'root4', 'root5']);
+});
+
+test('one fast wheel burst advances only one child slot instead of racing through several', async () => {
+  const view = mount(); enter(view, 'games');
+  wheel(view, 53); wheel(view, 53); wheel(view, 53);
+  await advanceTime(760);
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+  assert.deepEqual(visibleIds(view), ['game1', 'game2', 'game3', 'game4', 'game5', 'game6']);
+});
+
+test('a wheel step keeps the original label set readable for the first 120 ms', async () => {
+  const view = mount(); enter(view, 'games');
+  wheel(view, 53);
+  await advanceTime(120);
+  assert.equal(view.$('.panel').dataset.dialIndex, '0');
+  assert.equal(row(view, 'game0').disabled, false);
+  await advanceTime(640);
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+});
+
+test('wheel animation keeps the same label nodes connected until the step settles', async () => {
+  const view = mount(); enter(view, 'games');
+  const game2 = row(view, 'game2'), game3 = row(view, 'game3');
+  wheel(view, 53);
+  await advanceTime(320);
+  assert.equal(game2.isConnected, true);
+  assert.equal(game3.isConnected, true);
+  assert.equal(row(view, 'game2'), game2);
+  assert.equal(row(view, 'game3'), game3);
+});
+
+test('a visible label keeps one physical dial slot while crossing the half-step boundary', async () => {
+  const view = mount(); enter(view, 'games');
+  const game2 = row(view, 'game2'), slot = game2.dataset.slot;
+  wheel(view, 53);
+  await advanceTime(300);
+  assert.ok(Number(view.$('.panel').dataset.dialPosition) > 0.5);
+  assert.equal(row(view, 'game2'), game2);
+  assert.equal(game2.dataset.slot, slot);
+});
+
+test('settling into a detent keeps visible folder nodes instead of swapping the ring', async () => {
+  const view = mount(); enter(view, 'games');
+  const game2 = row(view, 'game2'), game3 = row(view, 'game3');
+  wheel(view, 53);
+  await settleDial();
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+  assert.equal(game2.isConnected, true);
+  assert.equal(game3.isConnected, true);
+  assert.equal(row(view, 'game2'), game2);
+  assert.equal(row(view, 'game3'), game3);
+});
+
+test('wheel over the fixed center does not rotate or swallow page scrolling', async () => {
+  const view = mount();
+  const event = wheel(view, 120, view.$('.center'));
+  assert.equal(event.defaultPrevented, false);
+  await advanceTime(100);
+  assert.equal(view.$('.panel').dataset.dialIndex, '0');
+  assert.deepEqual(visibleIds(view), ['games', 'root0', 'root1', 'root2', 'root3', 'root4']);
+});
+
+test('left-edge arc drag keeps the same logical next-folder direction', async () => {
+  const view = mount({ origin: { x: 100, y: 300 } }), arc = view.$('.arc');
+  arc.getBoundingClientRect = () => ({ left: 0, right: 224, top: 100, bottom: 548, width: 224, height: 448 });
+  const point = degrees => {
+    const radians = degrees * Math.PI / 180, r = 180;
+    return { x: r * Math.cos(radians), y: 324 + r * Math.sin(radians) };
+  };
+  for (const [type, degrees] of [['pointerdown', 32], ['pointermove', -12], ['pointerup', -12]]) {
+    const { x, y } = point(degrees), event = new dom.window.MouseEvent(type, { bubbles: true, clientX: x, clientY: y });
+    Object.defineProperty(event, 'pointerId', { value: 9 }); arc.dispatchEvent(event);
+  }
+  await settleDial();
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+  assert.deepEqual(visibleIds(view), ['root0', 'root1', 'root2', 'root3', 'root4', 'root5']);
+});
+
+test('Escape restores focus and a single-page child has no paging sector', () => {
   document.getElementById('opener').focus();
   const view = mount({ entries: entries.slice(0, 9) }); enter(view, 'games');
-  assert.equal(view.$('.next').disabled, true); assert.equal(view.$('.next').dataset.slot, '5');
+  assert.equal(view.$('.next'), null); assert.deepEqual(currentIds(view), ['game0', 'game1']);
   view.$('.panel').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   assert.equal(view.host.isConnected, false); assert.equal(document.activeElement.id, 'opener');
 });
@@ -255,7 +523,7 @@ test('single tap selects any branch for saving and only a double tap enters its 
 
 test('slow repeated taps keep selecting and keyboard users open branches with ArrowRight', async () => {
   const view = mount(); tap(view, 'games');
-  await new Promise(resolve => setTimeout(resolve, 370));
+  await advanceTime(370);
   tap(view, 'games');
   assert.equal(view.$('.panel').dataset.depth, '0');
   row(view, 'games').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
@@ -263,17 +531,17 @@ test('slow repeated taps keep selecting and keyboard users open branches with Ar
 });
 
 
-test('pinned shortcuts disappear from child pages and return to their canonical position when unpinned', () => {
+test('pinned shortcuts disappear from the child dial and return to canonical order when unpinned', async () => {
   const profile = { pinnedClassificationIds: ['game1', 'game7'] };
   const arcLayout = LakomicsClassificationTree.reconcileArcLayout(entries, profile);
   const view = mount({ profile, arcLayout });
   assert.ok(row(view, 'game1')); assert.ok(row(view, 'game7'));
   enter(view, 'games');
-  assert.deepEqual(currentIds(view), ['game0', 'game2', 'game3', 'game4', 'game5']);
-  view.$('.next').click();
-  assert.deepEqual(currentIds(view), ['game6', 'game8', 'game9', 'game10', 'game11']);
+  assert.deepEqual(currentIds(view), ['game0', 'game2', 'game3', 'game4', 'game5', 'game6']);
+  wheel(view); await settleDial();
+  assert.deepEqual(currentIds(view), ['game2', 'game3', 'game4', 'game5', 'game6', 'game8']);
   view.update({ profile: { pinnedClassificationIds: [] } });
-  view.$('.next').click(); view.$('.next').click();
+  wheel(view, -120); await settleDial();
   assert.equal(row(view, 'game1').dataset.slot, '1');
   assert.equal(view.tree.path('game7')[0].id, 'games');
 });

@@ -108,8 +108,15 @@
     const result = await send({ type: "translation:settings" });
     if (!result?.ok) return;
     $("translation-enabled").checked = result.enabled;
+    $("translation-model").replaceChildren(...(result.models || []).map(model => new Option(model.label, model.id)));
+    $("translation-model").value = result.model || "";
     $("translation-key").placeholder = result.hasApiKey ? "API 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
   }
+  $("translation-model").onchange = async () => {
+    const result = await send({ type: "translation:update", model: $("translation-model").value });
+    $("translation-status").textContent = result?.ok ? "모델 변경됨 · 캐시 초기화" : "모델 변경 실패";
+    await translationSettings();
+  };
   $("translation-enabled").onchange = async () => {
     const result = await send({ type: "translation:update", enabled: $("translation-enabled").checked });
     $("translation-status").textContent = result?.ok ? "저장됨" : "설정 저장 실패";

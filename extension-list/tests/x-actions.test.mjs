@@ -4,6 +4,29 @@ import { readFile } from 'node:fs/promises';
 import { JSDOM } from '../../_tools/app/node_modules/jsdom/lib/api.js';
 const source = await readFile(new URL('../src/x-source.js', import.meta.url), 'utf8');
 const content = await readFile(new URL('../src/content.js', import.meta.url), 'utf8');
+function fakeTimers(w) {
+  let now = 0, nextId = 0;
+  const timers = new Map();
+  w.setTimeout = (callback, delay = 0, ...args) => {
+    const id = ++nextId;
+    timers.set(id, { at: now + Math.max(0, Number(delay) || 0), callback, args });
+    return id;
+  };
+  w.clearTimeout = id => timers.delete(id);
+  const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+  async function advance(ms) {
+    const end = now + ms;
+    for (;;) {
+      await flush();
+      const next = [...timers.entries()].filter(([, timer]) => timer.at <= end)
+        .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+      if (!next) break;
+      now = next[1].at; timers.delete(next[0]); next[1].callback(...next[1].args);
+    }
+    now = end; await flush();
+  }
+  return { advance };
+}
 function fixture(body) {
   const dom = new JSDOM(body, {url:'https://x.com/home',runScripts:'outside-only'});
   dom.window.__LAKOMICS_TEST__ = true;
@@ -51,7 +74,7 @@ test('already-liked posts never toggle unlike or send a fallback request', async
 
 test('quote poster long press suppresses native context and successful save reaches the exact auto-like target', async () => {
   const dom = new JSDOM(`<article data-testid="tweet"><a href="/outer/status/111"><time></time></a>${quote}<button data-testid="like"></button></article><article data-testid="tweet"><a href="/inner/status/222"><time></time></a><button id="inner-like" data-testid="like"></button></article>`, {url:'https://x.com/home',runScripts:'outside-only'});
-  const w=dom.window, requests=[]; let mounted, clicks=0, saveOk=false;
+  const w=dom.window, requests=[], clock=fakeTimers(dom.window); let mounted, clicks=0, saveOk=false;
   w.chrome={runtime:{sendMessage(message,callback){requests.push(message); callback(message.type==='collector:save'?{ok:saveOk,status:'captured'}:{ok:true,state:{classifications:{entries:[{id:'games',name:'게임'}]},profile:{preferences:{}}}});}}};
   w.LakomicsClassificationTree={createModel:()=>({path:()=>[{name:'게임'}]})};
   w.LakomicsArcCollector={mount(options){mounted=options; return {host:w.document.createElement('div'),unlockInput(){}};}};
@@ -61,9 +84,9 @@ test('quote poster long press suppresses native context and successful save reac
   const pointer=type=>{const event=new w.MouseEvent(type,{bubbles:true,cancelable:true,clientX:30,clientY:40});Object.defineProperties(event,{pointerType:{value:'touch'},pointerId:{value:1}});poster.dispatchEvent(event);return event;};
   pointer('pointerdown');
   const context=new w.MouseEvent('contextmenu',{bubbles:true,cancelable:true});poster.dispatchEvent(context);assert.equal(context.defaultPrevented,true);
-  await new Promise(resolve=>setTimeout(resolve,550)); assert.ok(mounted); pointer('pointerup');
+  await clock.advance(550); assert.ok(mounted); pointer('pointerup');
   assert.equal((await mounted.onSave('games')).ok,false); assert.equal(clicks,0);
-  saveOk=true; const result=await mounted.onSave('games');
+  saveOk=true; const pendingSave=mounted.onSave('games'); await clock.advance(420); const result=await pendingSave;
   assert.equal(result.ok,true); assert.match(result.message,/좋아요 완료/); assert.equal(clicks,1);
   assert.equal(requests.find(message=>message.type==='collector:save').payload.candidate.postId,'222');
   assert.equal(w.document.querySelector('article button').dataset.testid,'like'); w.close();

@@ -3,7 +3,12 @@
   const SETTINGS = "lakomics:translation:v1";
   const CACHE = "lakomics:translation-cache:v2";
   const RETIRED_CACHE = "lakomics:translation-cache:v1";
-  const MODEL = "google/gemini-3.1-flash-lite";
+  const MODELS = Object.freeze([
+    { id: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
+    { id: "google/gemma-4-26b-a4b-it", label: "Gemma 4 26B A4B" },
+  ]);
+  const MODEL_BY_ID = new Map(MODELS.map(model => [model.id, model]));
+  const DEFAULT_MODEL = MODELS[0].id;
   const MAX_CONCURRENT = 2;
   const MAX_BATCH_ITEMS = 4;
   const MAX_BATCH_CHARS = 6000;
@@ -17,9 +22,11 @@
     return initialized ??= (async () => {
       const stored = await chrome.storage.local.get(null);
       const legacy = stored["xtranslate:gm:oit.settings.v2"] || {};
-      settings = stored[SETTINGS] || {
-        apiKey: String(legacy.openrouterApiKey || "").trim(),
-        enabled: stored.xTranslateEnabled !== false && legacy.autoTranslate === true,
+      const current = stored[SETTINGS] || {};
+      settings = {
+        apiKey: typeof current.apiKey === "string" ? current.apiKey.trim() : String(legacy.openrouterApiKey || "").trim(),
+        enabled: typeof current.enabled === "boolean" ? current.enabled : stored.xTranslateEnabled !== false && legacy.autoTranslate === true,
+        model: MODEL_BY_ID.has(current.model) ? current.model : DEFAULT_MODEL,
       };
       cache = new Map(Array.isArray(stored[CACHE]) ? stored[CACHE].slice(-400) : []);
       await chrome.storage.local.set({ [SETTINGS]: settings });
@@ -28,7 +35,8 @@
     })();
   }
   function publicSettings() {
-    return { enabled: settings.enabled === true, hasApiKey: Boolean(settings.apiKey), model: MODEL };
+    const model = MODEL_BY_ID.get(settings.model) || MODEL_BY_ID.get(DEFAULT_MODEL);
+    return { enabled: settings.enabled === true, hasApiKey: Boolean(settings.apiKey), model: model.id, modelLabel: model.label, models: MODELS.map(item => ({ ...item })) };
   }
   function invalidate() {
     generation += 1;
@@ -115,7 +123,7 @@
     await chrome.storage.local.set({ [CACHE]: [...cache] });
   }
   function baseBody(messages) {
-    return { model: MODEL, temperature: 0.2, max_tokens: 4096, messages };
+    return { model: settings.model, temperature: 0.2, max_tokens: 4096, messages };
   }
   async function translateSingle(text, epoch) {
     if (epoch !== generation || !settings.enabled) return { ok: false, code: "disabled" };
@@ -202,12 +210,19 @@
     await init();
     if (message.type === "translation:settings") return { ok: true, ...publicSettings() };
     if (message.type === "translation:update") {
+      if (Object.hasOwn(message, "model") && !MODEL_BY_ID.has(message.model)) return { ok: false, code: "invalid_model" };
+      const nextModel = typeof message.model === "string" ? message.model : settings.model;
+      const modelChanged = nextModel !== settings.model;
       invalidate();
       settings = {
         apiKey: typeof message.apiKey === "string" ? message.apiKey.trim() : settings.apiKey,
         enabled: typeof message.enabled === "boolean" ? message.enabled : settings.enabled,
+        model: nextModel,
       };
-      await chrome.storage.local.set({ [SETTINGS]: settings });
+      if (modelChanged) {
+        cache.clear();
+        await chrome.storage.local.set({ [SETTINGS]: settings, [CACHE]: [] });
+      } else await chrome.storage.local.set({ [SETTINGS]: settings });
       return { ok: true, ...publicSettings() };
     }
     if (message.type === "translation:clear") {

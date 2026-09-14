@@ -7,35 +7,55 @@ retained.
 
 ## Edge menu
 
-Version 3.0.0.13 uses a semicircle attached to the selected screen edge. Image
+Version 3.0.0.29 uses a semicircle attached to the selected screen edge. Image
 dragging on desktop requires a held press of at least 250 ms and movement of
 12 px. Touch requires a stationary 500 ms long press. Releasing early, scrolling,
 losing window focus, or cancelling the pointer cancels the pending opening. Releasing the opening finger never selects a folder or saves an image.
-The menu uses a warm paper palette and thin divisions inspired by NieR. The inner
-semicircle is split horizontally into equal upper-action and Save surfaces.
+The menu uses a neutral warm-gray matte palette with restrained highlights, fine
+divisions, and layered shadows. The inner semicircle is split horizontally into
+equal upper-action and Save surfaces.
 The upper action is Temporary save on the first screen and Back inside folders.
 Temporary save stays disabled when unsupported and in the settings preview.
 Returning to the first screen disables it for 400 ms to guard repeated Back taps.
-Folder labels contain only their names. A thick dark band on a sector's outer
-curve marks folders with children; pagination keeps its page count.
+Folder labels contain only their names. Folders with children use a slim charcoal outer rim that sits flush on the
+sector edge, with a subtle inner highlight for a machined finish. The live collector uses the outer ring as a
+bounded rotary dial: six folders stay visible while overflow folders rotate in.
+Desktop mouse-wheel/trackpad input drives the ring while the pointer is over the
+outer arc; touch and pointer drags follow the semicircle directly. Wheel input adds
+bounded momentum to one continuous dial position instead of choosing a target slot
+up front. The ring coasts under friction, then captures the nearest slot only after
+velocity falls below the detent threshold, producing a late mechanical stop rather
+than a page-like snap. Visible folder nodes remain mounted while their geometry is
+rebased continuously. Runtime labels are not recycled with the fixed physical
+wedge pool: every child label is mounted once when its folder opens, then follows
+the continuous dial position directly. Labels use a separate overlay outside each
+wedge clip-path and fade smoothly near the arc edge. At rest, runtime labels snap
+to device-pixel coordinates for crisper tablet text without quantizing motion. The central Temporary/Back and Save
+surfaces never rotate and do not capture wheel scrolling.
 
-- The first screen shows six fixed slots, using the order edited in settings. Initially, pinned shortcuts precede
-  root classifications. If there are more than six, the page button below the
-  semicircle makes the remaining roots and shortcuts accessible.
+- The first screen shows six visible slots, using the order edited in settings. Initially, pinned shortcuts precede
+  root classifications. If there are more than six, rotate the outer ring to
+  reveal the remaining roots and shortcuts.
 - Pinned shortcuts appear only on the first screen, not again among their
   canonical siblings. Unpinning restores them to the original child order.
   This affects menu presentation only; the classification hierarchy is retained.
-- Inside a folder, five slots show children and the bottom sixth slot changes
-  pages. The last page returns to the first; a single-page folder keeps that slot
-  disabled. Empty slots keep their positions.
+- Inside a folder, all six wedges can show children. Runtime wedge spacing uses a
+  fourteen-position circular geometry so one middle wedge can face the screen center
+  while the sixth visible wedge remains fully inside the semicircle. Lists of six or
+  fewer are centered as a group. Preserved empty layout slots are compacted out of
+  the live dial so scrolling never exposes a blank wedge between real folders.
+- On coarse-pointer portrait devices such as a tablet, the live dial radius is
+  capped at 208 px to preserve touch targets while reducing visual bulk. Fine-pointer
+  desktop use caps at 200 px. Initial wheel and release momentum is deliberately
+  restrained; the existing late detent stop remains unchanged.
 - Tap any folder once to select it, including a branch or pinned shortcut.
   Double-tap the same folder within 350 ms to enter its children. Selection is
   immediate; neither tap submits media. The central Save button saves to the
   selected folder, so roots and branches are directly saveable.
-- Back, above Save, follows visited screens and restores the previous page and
-  selection. Entering a pinned shortcut and going back returns to the first
-  screen, rather than inserting that shortcut's canonical ancestors. Paging does
-  not add history entries.
+- Back, above Save, follows visited screens and restores the previous dial
+  position and selection. Entering a pinned shortcut and going back returns to
+  the first screen, rather than inserting that shortcut's canonical ancestors.
+  Dial movement does not add history entries.
 - The opening press determines the edge: the left half of the visible screen
   opens the left menu, and the right half opens the right menu. There are no
   direction or close buttons. Tap outside the curved menu, including its
@@ -52,9 +72,10 @@ curve marks folders with children; pagination keeps its page count.
 
 The server's classification tree and portable pins/order remain authoritative.
 Local slot positions are retained across snapshot refreshes: deleting a folder
-leaves its slot empty, and new folders fill empty slots before appending. Explicit
-pin or sibling-order edits rebuild the affected slot layout. Local slot history
-is not sent as a server profile field.
+leaves its stored/editor slot empty, and new folders fill empty slots before
+appending. The live collector compacts those preserved holes for presentation
+only. Explicit pin or sibling-order edits rebuild the affected slot layout. Local
+slot history is not sent as a server profile field.
 
 Settings embed the same semicircle. Tap a folder to select it, then use Previous
 slot / Next slot to move it, including across pages. Root shortcuts and ordinary
@@ -69,8 +90,9 @@ Visible folders close the hidden gaps; restoration recovers their underlying
 positions. Disconnect clears these connection-specific local preferences.
 
 Keyboard users can navigate with Tab, arrow keys, Enter/Space, Backspace,
-PageUp/PageDown, ArrowRight to open children, Ctrl+Enter to save, and Escape to
-dismiss. The settings editor allows normal Tab navigation out to other settings.
+PageUp/PageDown (one dial step in the live collector), ArrowRight to open children,
+Ctrl+Enter to save, and Escape to dismiss. The settings editor keeps its existing
+page controls and allows normal Tab navigation out to other settings.
 
 ## Connect a PC browser
 
@@ -91,10 +113,13 @@ existing X session sends a bounded FavoriteTweet request for that exact post ID.
 Like failure is reported separately from successful media capture. X can change
 this private web endpoint; a fixture success does not establish live acceptance.
 
-AI translation uses only OpenRouter `google/gemini-3.1-flash-lite`, into Korean.
-Options retain an API key, one automatic on/off switch and Clear cache. On X, a
+AI translation uses OpenRouter into Korean, with `google/gemini-3.1-flash-lite`
+as the default and `google/gemma-4-26b-a4b-it` as an optional model. Options
+retain an API key, model selection, one automatic on/off switch and Clear cache.
+Changing models clears the shared translation cache so results from different
+models are not mixed. On X, a
 compact floating translation icon opens the same controls in a small popover.
-Other providers, model selection/fallback, manual translate, diagnostics and
+Other providers, automatic model fallback, manual translate, diagnostics and
 tuning remain removed. Existing OpenRouter keys and automatic preferences migrate
 locally; retired provider settings and pre-3.1 translation caches are removed.
 Keys stay in extension storage and the worker: they are never returned to X
@@ -121,6 +146,6 @@ browser setting; Android keeps the native temporary-album path.
 
 Run `npm test` from this directory. DOM tests use the existing jsdom installation
 in `../_tools/app/node_modules`; no separate dependency installation is needed.
-They cover navigation, paging, stable slots, input-release protection, explicit
-save, retries, and existing collector behavior. Browser fixture checks do not
+They cover navigation, runtime dial motion, settings paging, stable slots,
+input-release protection, explicit save, retries, and existing collector behavior. Browser fixture checks do not
 establish Android/Titanium native touch or live-server capture acceptance.

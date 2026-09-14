@@ -303,6 +303,7 @@
     hasApiKey = settings.hasApiKey;
     blocked = false;
     ui.toggle.checked = enabled;
+    if (settings.modelLabel) ui.model.textContent = settings.modelLabel;
     setNotice(hasApiKey ? "" : "설정에서 OpenRouter API 키를 입력하세요", hasApiKey ? "" : "error");
     if (enabled && hasApiKey) scan(true);
     else updateControlState();
@@ -330,13 +331,14 @@
       :host([data-theme="light"]){color:#0f1419;--panel:#fff;--border:#cfd9de;--muted:#536471;--button:#f7f9f9}
       *{box-sizing:border-box}[hidden]{display:none!important}.wrap{position:relative}.launcher{position:relative;width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--muted);box-shadow:0 4px 16px rgba(0,0,0,.22);display:grid;place-items:center;cursor:pointer;padding:0}.launcher:hover{filter:brightness(1.08)}.launcher:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.launcher svg{width:23px;height:23px}.launcher[data-state="on"],.launcher[data-state="busy"]{color:var(--accent)}.launcher[data-state="busy"] svg{animation:pulse 1.1s ease-in-out infinite}.dot{position:absolute;right:1px;top:1px;width:8px;height:8px;border-radius:50%;background:transparent;border:1px solid transparent}.launcher[data-state="error"] .dot{background:#f4212e;border-color:var(--panel)}.launcher[data-state="warning"] .dot{background:#ffd400;border-color:var(--panel)}@keyframes pulse{50%{opacity:.45;transform:scale(.94)}}
       .panel{position:absolute;right:0;bottom:48px;width:min(270px,calc(100vw - 24px));padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.28)}.head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}.head strong{font-size:13px}.model{font-size:11px;color:var(--muted);white-space:nowrap}.toggle{display:flex;align-items:center;gap:8px;margin:8px 0 12px}.toggle input{accent-color:var(--accent)}.actions{display:flex;gap:6px}.actions button{font:inherit;color:inherit;background:var(--button);border:1px solid var(--border);border-radius:7px;padding:6px 9px;cursor:pointer}.status{font-size:11px;color:var(--muted);margin:9px 0 0}.status:empty{display:none}
-    </style><div class="wrap"><button id="translator-button" class="launcher" type="button" aria-label="AI 번역" aria-controls="translator-popover" aria-expanded="false" title="AI 번역"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h7M7.5 3v2.5m-2.2 3.2c1.5 2.1 3.5 3.8 6 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10.7 8.5c-.9 2.1-2.5 4-4.8 5.6M13.5 18.5l3.1-8 3.1 8m-5-2.7h3.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="dot"></span></button><div id="translator-popover" class="panel" role="dialog" aria-label="AI 번역 설정" hidden><div class="head"><strong>AI 번역</strong><span class="model">Gemini 3.1 Flash Lite</span></div><label class="toggle"><input id="auto" type="checkbox"> 자동 번역</label><div class="actions"><button id="clear" type="button">캐시 비우기</button><button id="settings" type="button">설정</button></div><p id="status" class="status" role="status"></p></div></div>`;
+    </style><div class="wrap"><button id="translator-button" class="launcher" type="button" aria-label="AI 번역" aria-controls="translator-popover" aria-expanded="false" title="AI 번역"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h7M7.5 3v2.5m-2.2 3.2c1.5 2.1 3.5 3.8 6 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10.7 8.5c-.9 2.1-2.5 4-4.8 5.6M13.5 18.5l3.1-8 3.1 8m-5-2.7h3.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="dot"></span></button><div id="translator-popover" class="panel" role="dialog" aria-label="AI 번역 설정" hidden><div class="head"><strong>AI 번역</strong><span class="model" id="model-name">Gemini 3.1 Flash Lite</span></div><label class="toggle"><input id="auto" type="checkbox"> 자동 번역</label><div class="actions"><button id="clear" type="button">캐시 비우기</button><button id="settings" type="button">설정</button></div><p id="status" class="status" role="status"></p></div></div>`;
     document.body.append(host);
     ui = {
       host,
       button: shadow.getElementById("translator-button"),
       popover: shadow.getElementById("translator-popover"),
       toggle: shadow.getElementById("auto"),
+      model: shadow.getElementById("model-name"),
       status: shadow.getElementById("status"),
       notice: "",
     };

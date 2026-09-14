@@ -66,3 +66,28 @@ test('PC pasted link pairs through the existing API, then arc edits and local hi
   assert.equal(requests.filter(request => request.init.method === 'PATCH').length, patchCount);
   second.dom.window.close();
 });
+
+
+test('translation options expose both supported models and persist a model change', async () => {
+  const dom = new JSDOM(html, { url: 'https://extension.test/options.html', runScripts: 'outside-only' });
+  const w = dom.window;
+  let selected = 'google/gemini-3.1-flash-lite';
+  const models = [
+    { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
+    { id: 'google/gemma-4-26b-a4b-it', label: 'Gemma 4 26B A4B' },
+  ];
+  w.chrome = { runtime: { async sendMessage(message) {
+    if (message.type === 'settings:get') return { paired: false, state: null };
+    if (message.type === 'translation:settings') return { ok: true, enabled: true, hasApiKey: true, model: selected, models };
+    if (message.type === 'translation:update') { selected = message.model ?? selected; return { ok: true, enabled: true, hasApiKey: true, model: selected, models }; }
+    throw new Error(`Unexpected message type: ${message.type}`);
+  } } };
+  for (const source of sources) w.eval(source);
+  w.eval(optionsSource); await tick(); await tick();
+  const select = w.document.querySelector('#translation-model');
+  assert.equal(select.options.length, 2); assert.equal(select.value, 'google/gemini-3.1-flash-lite');
+  select.value = 'google/gemma-4-26b-a4b-it';
+  select.dispatchEvent(new w.Event('change', { bubbles: true })); await tick();
+  assert.equal(selected, 'google/gemma-4-26b-a4b-it');
+  dom.window.close();
+});
