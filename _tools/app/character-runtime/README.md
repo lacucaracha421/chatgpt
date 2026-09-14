@@ -192,3 +192,10 @@ Instrumentation leaves the frozen inference implementation, CPU settings, featur
 cache identity and source-integrity checks intact. Cold/warm synthetic measurements
 validate the instrumentation and cache reuse; they do not establish real-library
 throughput or justify a CPU/GPU configuration change.
+
+
+## Frozen offline evaluation
+
+See [HOLDOUT.md](HOLDOUT.md) for the standard-library-only exporter and evaluator.
+It freezes explicit manual labels and pre-feedback evidence, screens duplicate and
+reference leakage, and reports automatic/recommendation metrics without inference.

@@ -1,3 +1,4 @@
+import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { libraryContextItems } from "./libraryContextItems";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ASSET_PAGE_SIZE } from "../library/constants";
@@ -43,6 +44,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const [firstLoading, setFirstLoading] = useState(true);
   const [nextLoading, setNextLoading] = useState(false);
   const [prevLoading, setPrevLoading] = useState(false);
+  const galleryRefreshVersion = useCoalescedRefreshVersion(refreshVersion, firstLoading || nextLoading || prevLoading);
   const [firstError, setFirstError] = useState<QueryError | null>(null);
   const [nextError, setNextError] = useState<QueryError | null>(null);
   const [prevError, setPrevError] = useState<QueryError | null>(null);
@@ -138,7 +140,8 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
       setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
-  }, [gateway, queryBase, queryKey, refreshVersion, retryVersion, revisitDate, view.kind, viewKey]);
+    return () => { ++generationRef.current; };
+  }, [gateway, queryKey, galleryRefreshVersion, retryVersion, revisitDate, view.kind, viewKey]);
   const needsDateBuckets = view.kind !== "revisit";
   useEffect(() => {
     if (!needsDateBuckets) return;

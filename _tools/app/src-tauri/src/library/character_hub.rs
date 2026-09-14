@@ -999,6 +999,7 @@ mod tests {
         let f = Fixture::new();
         let reference_ids = (0..6).map(|i| format!("asset-{i}")).collect::<Vec<_>>();
         let target = f.library.save_character_settings(CharacterSettingsDraft {
+            reference_regions: Default::default(),
             target: TargetDraft { id:None, expected_revision:None, series_classification_id:Some(f.series.clone()), linked_classification_id:Some(f.child.clone()), display_name:"Six refs".into(), description:String::new(), thumbnail_asset_id:None, enabled:true },
             reference_ids,
         }, true).unwrap();

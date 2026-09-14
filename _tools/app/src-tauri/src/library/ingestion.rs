@@ -1428,6 +1428,68 @@ mod tests {
     }
 
     #[test]
+    fn ingested_batch_is_visible_while_a_character_claim_is_held_or_failed() {
+        let fixture = IngestionFixture::new();
+        let series = fixture.library.create_classification(CreateClassification {
+            kind: ClassificationKind::Root, name: "Visibility fixture".into(), parent_id: None,
+        }).unwrap();
+        fixture.library.save_character_series(crate::library::character_hub::Series {
+            classification_id: series.id.clone(), hero_asset_id: None, auto_classify: true,
+        }).unwrap();
+        let ingest = |index: u8| {
+            let path = fixture._temp.path().join(format!("batch-{index}.png"));
+            write_test_png(&path, [10 + index, 20, 30]);
+            let outcome = fixture.library.ingest_media(IngestMediaRequest {
+                source_path: path, classification_id: Some(series.id.clone()), source_url: None,
+                collected_at: None, replace_duplicate_metadata: false, source_published_at: None,
+                creator_name: None, creator_handle: None, creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000001".into(),
+            }).unwrap();
+            let IngestOutcome::Added { asset } = outcome else { panic!("expected a new fixture"); };
+            asset.id
+        };
+        let first = ingest(1);
+        let (claimed_tx, claimed_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker_library = fixture.library.clone();
+        let worker = std::thread::spawn(move || {
+            let job = worker_library.claim_character_autotag().unwrap().unwrap();
+            claimed_tx.send(job.asset_id.clone()).unwrap();
+            // Deliberately hold the durable claim without holding the database lock.
+            let _ = release_rx.recv_timeout(Duration::from_secs(5));
+            worker_library.connection().unwrap().execute(
+                "UPDATE character_autotag_jobs SET state='failed',review_state='failed',claim_id=NULL WHERE asset_id=?1 AND claim_id=?2",
+                rusqlite::params![job.asset_id, job.claim_id],
+            ).unwrap();
+        });
+        assert_eq!(claimed_rx.recv_timeout(Duration::from_secs(5)).unwrap(), first);
+        let second = ingest(2);
+        let third = ingest(3);
+        let assert_visible = || {
+            let base = fixture.library.list_assets(AssetQuery {
+                classification_id: Some(series.id.clone()), limit: 10, ..Default::default()
+            }).unwrap();
+            assert_eq!(base.items.len(), 3);
+            let page = fixture.library.browse_character_assets(crate::library::character_hub::BrowseQuery {
+                series_id: series.id.clone(), target_id: None, group_id: None,
+                reference_target_id: None, after: None, limit: 10, all: false,
+                series_filter: Some(crate::library::character_hub::SeriesGalleryFilter::Unclassified),
+            }).unwrap();
+            assert_eq!(page.total_count, 3);
+            for id in [&first, &second, &third] {
+                assert!(page.items.iter().any(|asset| &asset.id == id));
+            }
+        };
+        assert_eq!(fixture.library.character_autotag_job(&first).unwrap().unwrap().state, "processing");
+        assert_visible();
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(fixture.library.character_autotag_job(&first).unwrap().unwrap().state, "failed");
+        assert_visible();
+    }
+
+    #[test]
     fn successful_asset_commit_creates_one_pending_cloud_upsert() {
         let fixture = IngestionFixture::new();
         let IngestOutcome::Added { asset } = fixture.ingest() else {

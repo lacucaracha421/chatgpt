@@ -190,8 +190,11 @@ export const libraryGateway: LibraryGateway = {
   },
   restoreCloudMetadataBackup: () =>
     invoke<CloudLibraryRestoreReport>("restore_cloud_metadata_backup"),
-  runDueCloudCaptureSync: () =>
-    invoke<CloudCaptureSyncResult>("run_due_cloud_capture_sync"),
+  runDueCloudCaptureSync: (onProgress) => {
+    const channel = new Channel<IngestOutcome>();
+    channel.onmessage = value => onProgress?.(value);
+    return invoke<CloudCaptureSyncResult>("run_due_cloud_capture_sync", { onProgress: channel });
+  },
   cloudBackfillPreflight: () =>
     invoke<CloudBackfillPreflightReport>("cloud_backfill_preflight"),
   cloudBackfillSeed: () =>

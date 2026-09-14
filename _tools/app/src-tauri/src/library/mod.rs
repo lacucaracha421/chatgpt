@@ -33,6 +33,8 @@ pub mod character_folders;
 pub mod character_hub;
 pub mod character_incremental;
 pub mod character_reference_candidates;
+pub mod character_reference_regions;
+mod character_reference_curation;
 pub mod character_reference_refresh;
 #[cfg(test)]
 mod character_reference_refresh_bench;

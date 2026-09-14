@@ -30,6 +30,8 @@ pub struct ReferenceCandidateSet {
     pub minimum_selection: usize,
     pub items: Vec<AssetSummary>,
     pub suggested_asset_ids: Vec<String>,
+    pub regions: super::character_reference_regions::RegionBindings,
+    pub method: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -49,12 +51,13 @@ struct Candidate {
     fingerprint: Option<[u8; 32]>,
     quality: i64,
     sequence: i64,
+    detected_people: Option<i64>,
 }
 
 pub(super) fn reference_set_hash(target: &Target) -> Result<String> {
     let references = target
         .usable_references()
-        .map(|reference| json!([reference.asset_id, reference.asset_hash]))
+        .map(|reference| if reference.region.is_some() { json!([reference.asset_id, reference.asset_hash, reference.region]) } else { json!([reference.asset_id, reference.asset_hash]) })
         .collect::<Vec<_>>();
     Ok(Sha256::digest(serde_json::to_vec(
         &json!({"references": references}),
@@ -84,11 +87,16 @@ fn minimum_distance(candidate: &Candidate, selected: &[Candidate]) -> u32 {
         .unwrap_or(256)
 }
 
-fn select_diverse_candidates(mut eligible: Vec<Candidate>, limit: usize) -> Vec<Candidate> {
-    eligible.sort_by(quality_cmp);
-    let mut seen_hashes = BTreeSet::new();
-    eligible.retain(|candidate| seen_hashes.insert(candidate.content_hash.clone()));
+fn safety_rank(candidate: &Candidate) -> u8 {
+    match candidate.detected_people {
+        Some(1) => 0,
+        None => 1,
+        Some(_) => 2,
+    }
+}
 
+fn select_diverse_tier(mut eligible: Vec<Candidate>, limit: usize, selected: &mut Vec<Candidate>) {
+    eligible.sort_by(quality_cmp);
     let mut fingerprinted = eligible
         .iter()
         .filter(|candidate| candidate.fingerprint.is_some())
@@ -98,15 +106,11 @@ fn select_diverse_candidates(mut eligible: Vec<Candidate>, limit: usize) -> Vec<
         .into_iter()
         .filter(|candidate| candidate.fingerprint.is_none())
         .collect::<Vec<_>>();
-    let mut selected = Vec::new();
-    if !fingerprinted.is_empty() && limit > 0 {
-        selected.push(fingerprinted.remove(0));
-    }
     while selected.len() < limit && !fingerprinted.is_empty() {
         let mut best = 0usize;
         for index in 1..fingerprinted.len() {
-            let candidate_distance = minimum_distance(&fingerprinted[index], &selected);
-            let best_distance = minimum_distance(&fingerprinted[best], &selected);
+            let candidate_distance = minimum_distance(&fingerprinted[index], selected);
+            let best_distance = minimum_distance(&fingerprinted[best], selected);
             if candidate_distance > best_distance
                 || (candidate_distance == best_distance
                     && quality_cmp(&fingerprinted[index], &fingerprinted[best]).is_lt())
@@ -122,6 +126,25 @@ fn select_diverse_candidates(mut eligible: Vec<Candidate>, limit: usize) -> Vec<
         }
         selected.push(candidate);
     }
+}
+
+fn select_diverse_candidates(mut eligible: Vec<Candidate>, limit: usize) -> Vec<Candidate> {
+    eligible.sort_by(quality_cmp);
+    let mut seen_hashes = BTreeSet::new();
+    eligible.retain(|candidate| seen_hashes.insert(candidate.content_hash.clone()));
+
+    let mut selected = Vec::new();
+    for rank in 0..=2 {
+        let tier = eligible
+            .iter()
+            .filter(|candidate| safety_rank(candidate) == rank)
+            .cloned()
+            .collect::<Vec<_>>();
+        select_diverse_tier(tier, limit, &mut selected);
+        if selected.len() == limit {
+            break;
+        }
+    }
     selected
 }
 
@@ -131,6 +154,10 @@ impl Library {
         target_id: &str,
         limit: usize,
     ) -> Result<ReferenceCandidateSet> {
+        self.reference_candidates_pool(target_id, limit, false)
+    }
+
+    pub(super) fn reference_candidates_pool(&self, target_id: &str, limit: usize, pool: bool) -> Result<ReferenceCandidateSet> {
         if !(1..=20).contains(&limit) {
             return Err(Error::Invalid("레퍼런스 추천 개수는 1~20장입니다."));
         }
@@ -145,7 +172,14 @@ impl Library {
                 SELECT id FROM classification_entries WHERE id=?2
                 UNION ALL SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
              )
-             SELECT r.asset_id,a.content_hash,a.perceptual_hash,COALESCE(a.perceptual_hash_quality,-1),d.sequence
+             SELECT r.asset_id,a.content_hash,a.perceptual_hash,COALESCE(a.perceptual_hash_quality,-1),d.sequence,
+               (SELECT json_array_length(json_extract(p.result_json,'$.evidence.queryBoxes'))
+                FROM character_autotag_evidence e
+                JOIN character_autotag_predictions p ON p.evidence_id=e.id
+                JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
+                WHERE e.asset_id=a.id AND e.content_hash=a.content_hash AND j.state<>'superseded'
+                  AND json_type(json_extract(p.result_json,'$.evidence.queryBoxes'))='array'
+                ORDER BY e.generation DESC,e.id DESC LIMIT 1)
              FROM character_relations r
              JOIN character_decisions d ON d.sequence=r.sequence AND d.origin='manual'
              JOIN assets a ON a.id=r.asset_id AND a.status='normal' AND a.media_kind='image'
@@ -171,13 +205,14 @@ impl Library {
                     fingerprint,
                     quality: row.get(3)?,
                     sequence: row.get(4)?,
+                    detected_people: row.get(5)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let remaining = limit.min(super::characters::MAX_REFERENCES.saturating_sub(
             target.references.len() + target.learned_references.len(),
         ));
-        let selected = select_diverse_candidates(eligible, remaining);
+        let selected = select_diverse_candidates(eligible, if pool { 64 } else { remaining });
         let suggested_asset_ids = selected
             .iter()
             .map(|candidate| candidate.asset_id.clone())
@@ -202,10 +237,23 @@ impl Library {
             },
             items,
             suggested_asset_ids,
+            regions: Default::default(),
+            method: "visual".into(),
         })
     }
 
     pub fn confirm_reference_batch(&self, request: ConfirmReferenceBatch) -> Result<Target> {
+        self.confirm_reference_batch_with_regions(request, Default::default())
+    }
+
+    pub fn confirm_reference_batch_with_regions(
+        &self,
+        request: ConfirmReferenceBatch,
+        regions: super::character_reference_regions::RegionBindings,
+    ) -> Result<Target> {
+        if regions.keys().any(|id| !request.asset_ids.contains(id)) {
+            return Err(Error::Invalid("선택한 추천 이미지의 인물 영역만 적용할 수 있습니다."));
+        }
         let unique = request.asset_ids.iter().collect::<BTreeSet<_>>();
         if unique.len() != request.asset_ids.len() {
             return Err(Error::Invalid(
@@ -337,6 +385,16 @@ impl Library {
                 )?
             }
         };
+        let allowed = result.usable_references()
+            .filter_map(|reference| reference.asset_id.clone())
+            .collect::<Vec<_>>();
+        if super::character_reference_regions::apply_regions(&transaction, &result, &allowed, &regions)? {
+            transaction.execute(
+                "UPDATE character_targets SET revision=revision+1,updated_at=?2 WHERE id=?1",
+                params![result.id, chrono::Utc::now().to_rfc3339()],
+            )?;
+        }
+        let result = self.read_character_target(&transaction, &result.id)?;
         transaction.commit()?;
         Ok(result)
     }
@@ -371,6 +429,76 @@ mod tests {
             })
             .unwrap();
         (f, result.target)
+    }
+
+    fn seed_detected_people(f: &Fixture, target: &Target, asset_id: &str, count: usize) {
+        let (hash, relative_path): (String, String) = f
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT content_hash,relative_path FROM assets WHERE id=?1",
+                [asset_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let evidence_id = format!("reference-candidate-{asset_id}");
+        let boxes = (0..count)
+            .map(|index| vec![index as i64 * 10, 0, index as i64 * 10 + 8, 8])
+            .collect::<Vec<_>>();
+        let connection = f.library.connection().unwrap();
+        connection.execute(
+            "INSERT INTO character_autotag_jobs(asset_id,generation,source_generation,content_hash,relative_path,classification_ids,state,review_state,priority,cause,updated_at)
+             VALUES(?1,1,1,?2,?3,?4,'completed','resolved',1,'ingestion','now')",
+            params![asset_id, hash, relative_path, serde_json::to_string(&vec![&f.series]).unwrap()],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+             VALUES(?1,?2,1,1,?3,'context','runtime','{}','[]','now')",
+            params![evidence_id, asset_id, hash],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json)
+             VALUES(?1,?2,?3,?4,?5)",
+            params![evidence_id, target.id, f.series, target.fingerprint, serde_json::json!({
+                "assetId": asset_id,
+                "contentHash": hash,
+                "state": "unmatched",
+                "evidence": {
+                    "queryBoxes": boxes,
+                    "wholeFallback": count == 0,
+                    "evidence": []
+                },
+                "error": null
+            }).to_string()],
+        ).unwrap();
+    }
+
+    #[test]
+    fn candidates_prefer_single_person_evidence_before_unknown_and_multi_person_images() {
+        let (f, target) = converted_fixture();
+        let connection = f.library.connection().unwrap();
+        for id in ["asset-3", "asset-4"] {
+            connection.execute(
+                "INSERT INTO character_reference_exclusions(target_id,asset_id,created_at) VALUES(?1,?2,'now')",
+                params![target.id, id],
+            ).unwrap();
+        }
+        for (id, quality) in [("asset-0", 100_i64), ("asset-1", 90), ("asset-2", 10)] {
+            connection
+                .execute(
+                    "UPDATE assets SET perceptual_hash=NULL,perceptual_hash_quality=?2 WHERE id=?1",
+                    params![id, quality],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        seed_detected_people(&f, &target, "asset-0", 2);
+        seed_detected_people(&f, &target, "asset-2", 1);
+
+        let page = f.library.reference_candidates(&target.id, 3).unwrap();
+
+        assert_eq!(page.suggested_asset_ids, ["asset-2", "asset-1", "asset-0"]);
     }
 
     #[test]
@@ -528,6 +656,7 @@ mod tests {
             .library
             .save_character_settings(
                 CharacterSettingsDraft {
+                    reference_regions: Default::default(),
                     target: TargetDraft {
                         id: None,
                         expected_revision: None,
@@ -621,6 +750,27 @@ mod tests {
             confirmed.learned_references[0].asset_id.as_deref(),
             Some("asset-5")
         );
+    }
+
+    #[test]
+    fn confirmed_candidate_regions_are_persisted_with_the_reference_batch() {
+        let (f, target) = converted_fixture();
+        let page = f.library.reference_candidates(&target.id, 20).unwrap();
+        let asset_id = page.suggested_asset_ids[0].clone();
+        let content_hash: String = f.library.connection().unwrap().query_row(
+            "SELECT content_hash FROM assets WHERE id=?1", [&asset_id], |row| row.get(0)
+        ).unwrap();
+        let mut regions = super::super::character_reference_regions::RegionBindings::new();
+        regions.insert(asset_id.clone(), super::super::character_reference_regions::RegionBinding {
+            content_hash, baseline_fingerprint: super::super::character_worker::BASELINE.into(), bounds: [0, 0, 1, 1],
+        });
+        let confirmed = f.library.confirm_reference_batch_with_regions(ConfirmReferenceBatch {
+            target_id: target.id, expected_revision: page.target_revision,
+            expected_reference_set_hash: page.reference_set_hash, confirmation_mode: page.confirmation_mode,
+            asset_ids: page.suggested_asset_ids,
+        }, regions.clone()).unwrap();
+        let saved = confirmed.usable_references().find(|reference| reference.asset_id.as_deref() == Some(&asset_id)).unwrap();
+        assert_eq!(saved.region.as_ref(), regions.get(&asset_id));
     }
 
     #[test]

@@ -12,13 +12,16 @@ export type ManualCharacterRequest = { seriesId: string; displayName: string; as
 export type SeriesAssetExclusionRequest = { seriesId: string; assetIds: string[]; excluded: boolean };
 export type CharacterReviewCompletionRequest = { seriesId: string; assetIds: string[] };
 export type ReferenceConfirmationMode = "initialize" | "add_learned";
+export type ReferenceRegionBinding = { contentHash: string; baselineFingerprint: string; bounds: [number, number, number, number] };
+export type ReferenceRegionBindings = Record<string, ReferenceRegionBinding>;
 export type ReferenceCandidateSet = {
   targetId: string; targetRevision: number; referenceSetHash: string; confirmationMode: ReferenceConfirmationMode;
   minimumSelection: number; items: AssetSummary[]; suggestedAssetIds: string[];
+  regions?: ReferenceRegionBindings; method?: string;
 };
 export type ConfirmReferenceBatch = {
   targetId: string; expectedRevision: number; expectedReferenceSetHash: string;
-  confirmationMode: ReferenceConfirmationMode; assetIds: string[];
+  confirmationMode: ReferenceConfirmationMode; assetIds: string[]; regions?: ReferenceRegionBindings;
 };
 export type ReferenceRefreshReceipt = {
   targetId: string; requestRevision: number; state: "pending" | "running" | "failed" | "completed"; eligibleCount: number;
@@ -36,7 +39,7 @@ export const characterHubApi = {
   setSeriesAssetExcluded: (request: SeriesAssetExclusionRequest): Promise<number> => invoke("set_character_series_asset_excluded", { request }),
   excludedAssets: (seriesId: string, after: string | null, limit = 100): Promise<CharacterBrowsePage> => invoke("character_series_excluded_assets", { seriesId, after, limit }),
   referenceCandidates: (targetId: string, limit = 20): Promise<ReferenceCandidateSet> => invoke("reference_candidates", { targetId, limit }),
-  confirmReferenceBatch: (request: ConfirmReferenceBatch): Promise<import("./api").CharacterTarget> => invoke("confirm_reference_batch", { request }),
+  confirmReferenceBatch: ({ regions, ...request }: ConfirmReferenceBatch): Promise<import("./api").CharacterTarget> => invoke("confirm_reference_batch", { request, regions: regions ?? {} }),
   requestReferenceRefresh: (targetId: string, expectedRevision: number): Promise<ReferenceRefreshReceipt> => invoke("request_character_reference_refresh", { targetId, expectedRevision }),
 };
 export type CharacterHubApi = Pick<typeof characterHubApi, "folderExclusions" | "seriesFolders" | "setFolderExcluded" | "series" | "saveSeries" | "browse" | "createManualCharacter" | "completeReview" | "setSeriesAssetExcluded" | "excludedAssets" | "referenceCandidates" | "confirmReferenceBatch" | "requestReferenceRefresh">;

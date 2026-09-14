@@ -16,9 +16,10 @@ export function characterDraft(target: CharacterTarget | null): CharacterEditorD
 }
 
 /** Draft ownership stays with the series so gallery selection never discards typing. */
-export function CharacterRegistry({ draft, target, privacyMode, busy, error, onChange, onPick, onSave, onOpenReference }: {
+export function CharacterRegistry({ draft, target, privacyMode, busy, error, onChange, onPick, onSave, onOpenReference, onRecommendReferences }: {
   draft: CharacterEditorDraft; target: CharacterTarget | null; privacyMode: boolean; busy: boolean; error: string | null;
   onOpenReference?: (assetId: string) => void;
+  onRecommendReferences?: () => void;
   onChange: (draft: CharacterEditorDraft) => void; onPick: (kind: "thumbnail" | "references") => void; onSave: () => void;
 }) {
   return <section className="character-registry" aria-label="캐릭터 설정">
@@ -35,7 +36,7 @@ export function CharacterRegistry({ draft, target, privacyMode, busy, error, onC
       <div className="character-registry__section-body">
         <p className="series-description">직접 선택한 이미지를 모두 같은 기준으로 사용합니다. 자동 확정에는 같은 캐릭터를 지지하는 레퍼런스 6장 이상이 필요합니다.</p>
         <p className="series-description">휴지통 이미지는 제외되며 복원하면 다시 사용합니다. 과거 이미지는 자동으로 다시 분석하지 않습니다.</p>
-        <div className="character-registry__label"><small>{draft.references.length}/{MAX_CHARACTER_REFERENCES}</small><Button size="sm" disabled={busy} onClick={() => onPick("references")}>선택</Button></div>
+        <div className="character-registry__label"><small>{draft.references.length}/{MAX_CHARACTER_REFERENCES}</small><div className="character-actions">{onRecommendReferences && <Button size="sm" variant="ghost" disabled={busy} onClick={onRecommendReferences}>추천으로 보강</Button>}<Button size="sm" disabled={busy} onClick={() => onPick("references")}>선택</Button></div></div>
         <section className="character-learned-references" aria-label="레퍼런스 목록">{draft.references.map((assetId, index) => <div key={assetId}>
           <button type="button" disabled={busy || !onOpenReference} aria-label={`레퍼런스 ${index + 1} 원본 보기`} onClick={() => onOpenReference?.(assetId)}><img loading="lazy" src={thumbnailUrl(assetId)} className={privacyMode ? "character-private" : ""} alt={`레퍼런스 ${index + 1}`} /></button>
           <Button size="sm" variant="ghost" disabled={busy} aria-label={`레퍼런스 ${index + 1} 제거`} onClick={() => onChange({ ...draft, references: draft.references.filter(id => id !== assetId) })}>제거</Button>

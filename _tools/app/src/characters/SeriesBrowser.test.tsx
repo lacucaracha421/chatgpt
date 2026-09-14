@@ -310,6 +310,28 @@ it("offers recovery when a legacy character is disabled", async () => {
 });
 
 
+it("opens suggested reference reinforcement from character settings and refreshes after applying", async () => {
+  const { hubApi, changed } = await mount("hina");
+  const user = userEvent.setup();
+  const toolbar = screen.getByRole("toolbar", { name: "시리즈 도구" });
+  expect(within(toolbar).queryByRole("button", { name: "추천으로 보강" })).not.toBeInTheDocument();
+  await user.click(within(toolbar).getByRole("button", { name: "캐릭터 더보기" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByText("레퍼런스", { selector: "summary span" }));
+  await user.click(within(panel).getByRole("button", { name: "추천으로 보강" }));
+
+  expect(await screen.findByRole("dialog", { name: "레퍼런스 선택" })).toBeVisible();
+  await waitFor(() => expect(hubApi.referenceCandidates).toHaveBeenCalledWith("hina", 20));
+  await user.click(screen.getByRole("button", { name: "2장 적용" }));
+  await waitFor(() => expect(hubApi.confirmReferenceBatch).toHaveBeenCalledWith(expect.objectContaining({
+    targetId: "hina",
+    confirmationMode: "add_learned",
+    assetIds: ["image-5", "image-6"],
+  })));
+  await waitFor(() => expect(changed).toHaveBeenCalled());
+  expect(screen.queryByRole("dialog", { name: "레퍼런스 선택" })).not.toBeInTheDocument();
+});
+
 it("opens manual reference selection from the character folder and saves only the chosen images", async () => {
   const { api, browse, hubApi } = await mount("hina");
   const save = vi.spyOn(api, "saveSettings");

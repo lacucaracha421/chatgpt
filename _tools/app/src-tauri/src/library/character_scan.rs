@@ -500,7 +500,12 @@ impl Library {
         }
         let refs = references
             .iter()
-            .map(|input| self.wire_input(input))
+            .zip(target.usable_references())
+            .map(|(input, reference)| {
+                let mut value = self.wire_input(input)?;
+                value["region"] = serde_json::to_value(&reference.region)?;
+                Ok(value)
+            })
             .collect::<Result<Vec<_>>>()?;
         let hashes: Vec<_> = references.iter().map(|r| r.hash.as_str()).collect();
         for (input, comparison_key) in pending {
@@ -711,6 +716,7 @@ impl Library {
             if hash != row.content_hash { return Err(Error::Stale); }
             self.verify_input(&ScanInput {id:row.asset_id.clone(),hash,path})?;
             let evidence = row.evidence.ok_or(Error::Stale)?;
+            if !super::character_reference_regions::selections_match(&evidence, target) { return Err(Error::Stale); }
             // Manual review may retain its original evidence when new exemplars are
             // added. Every exemplar actually used is still checked below.
             if let Some(learned) = evidence["learnedReferences"].as_array() {

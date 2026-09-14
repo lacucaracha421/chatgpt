@@ -289,7 +289,7 @@ describe("App", () => {
     finishWatch({ checked: 3, changedCollections: 2, skipped: 0, stopReason: null });
 
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole("status")).toHaveTextContent("새 출간 정보가 있는 작품 2개");
+    expect(await screen.findByRole("status")).toHaveTextContent("Kakao 신간 정보가 있는 작품 2개");
   });
 
   it("ignores a stale release-watch result after switching libraries", async () => {
@@ -315,7 +315,7 @@ describe("App", () => {
     });
 
     expect(libraryGateway.listCollections).toHaveBeenCalledTimes(3);
-    expect(screen.queryByText("새 출간 정보가 있는 작품 1개")).not.toBeInTheDocument();
+    expect(screen.queryByText("Kakao 신간 정보가 있는 작품 1개")).not.toBeInTheDocument();
   });
 
   it("shows no release-watch message when startup finds no changes", async () => {
@@ -326,7 +326,7 @@ describe("App", () => {
 
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(/새 출간 정보가 있는 작품/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/(?:Kakao 신간|MangaDex 새 권) 정보가 있는 작품/)).not.toBeInTheDocument();
   });
 
   it("renders the trash workspace without loading an asset page", async () => {
@@ -749,6 +749,37 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: "라이브러리 선택" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows a committed image before the next file in the import batch finishes", async () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(840);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    try {
+      localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+      const libraryGateway = gateway();
+      vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
+      const visible: AssetSummary[] = [];
+      const first = { ...asset, id: "batch-first", originalName: "first.png" };
+      const second = { ...asset, id: "batch-second", originalName: "second.png" };
+      let send: Parameters<DropSubscriber>[0] | undefined;
+      let finish!: (value: { status: "added"; asset: AssetSummary }) => void;
+      const pending = new Promise<{ status: "added"; asset: AssetSummary }>(resolve => { finish = resolve; });
+      const subscribeDrops: DropSubscriber = async handler => { send = handler; return () => undefined; };
+      vi.mocked(libraryGateway.listAssets).mockImplementation(async () => ({ items: [...visible], nextCursor: null }));
+      vi.mocked(libraryGateway.ingestMedia)
+        .mockImplementationOnce(async () => { visible.push(first); return { status: "added", asset: first }; })
+        .mockReturnValueOnce(pending);
+      const { container } = render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+      await userEvent.click(await screen.findByRole("treeitem", { name: "게임" }));
+      await waitFor(() => expect(send).toBeDefined());
+      act(() => send?.({ type: "drop", paths: ["/incoming/first.png", "/incoming/second.png"], position: { x: 0, y: 0 } }));
+      await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(container.querySelector('[data-asset-id="batch-first"]')).toBeInTheDocument());
+      expect(container.querySelector('[data-asset-id="batch-second"]')).not.toBeInTheDocument();
+      visible.push(second);
+      await act(async () => { finish({ status: "added", asset: second }); });
+      await waitFor(() => expect(container.querySelector('[data-asset-id="batch-second"]')).toBeInTheDocument());
+    } finally { width.mockRestore(); height.mockRestore(); }
   });
 
   it("ingests with the selected classification and refreshes the first asset page", async () => {

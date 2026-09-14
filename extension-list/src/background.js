@@ -59,10 +59,36 @@ importScripts("classification-tree.js", "api-client.js", "profile-store.js", "sa
     try { url = new URL(candidate.mediaUrl); } catch { return { ok: false, code: "invalid_url" }; }
     if (url.protocol !== "https:" || url.username || url.password || url.hash) return { ok: false, code: "invalid_url" };
     try {
-      // No filename directory: the browser owns the configured Desktop destination.
-      const downloadId = await chrome.downloads.download({ url: url.href, saveAs: false, conflictAction: "uniquify" });
+      // Callback form also works in Chromium runtimes without Promise support.
+      // Ignore its return value: some variants expose a Promise-like value even
+      // though the callback remains the authority for the actual result.
+      const downloadId = await new Promise((resolve, reject) => {
+        try {
+          chrome.downloads.download({ url: url.href, saveAs: false, conflictAction: "uniquify" }, (id) => {
+            const error = chrome.runtime?.lastError;
+            if (error) reject(error);
+            else if (!Number.isInteger(id)) reject(new Error("Browser did not return a download id"));
+            else resolve(id);
+          });
+        } catch (error) { reject(error); }
+      });
       return { ok: true, downloadId, status: "download_started" };
-    } catch { return { ok: false, code: "download_failed" }; }
+    } catch (error) {
+      const browserMessage = safeDownloadError(error);
+      return { ok: false, code: "download_failed", ...(browserMessage ? { browserMessage } : {}) };
+    }
+  }
+
+  function safeDownloadError(error) {
+    const message = String(error?.message || error || "")
+      .replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+    if (!message) return null;
+    return message
+      .replace(/\b(?:https?|ftp|file|data|blob):[^\s<>"']*/gi, "[URL]")
+      .replace(/\b[A-Za-z]:[\\/][^\s<>"']*/g, "[path]")
+      .replace(/\b(?:Bearer\s+|Basic\s+)[A-Za-z0-9+/=._~-]+/gi, "[credential]")
+      .replace(/\b(?:sk|pk|api|token|secret)[-_][A-Za-z0-9._~-]{8,}\b/gi, "[credential]")
+      .slice(0, 180);
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

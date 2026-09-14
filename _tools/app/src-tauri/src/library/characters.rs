@@ -59,6 +59,8 @@ pub struct CharacterSettingsDraft {
     #[serde(flatten)]
     pub target: TargetDraft,
     pub reference_ids: Vec<String>,
+    #[serde(default)]
+    pub reference_regions: super::character_reference_regions::RegionBindings,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +111,8 @@ pub struct Reference {
     pub asset_hash: String,
     // ready / missing_asset / ineligible / changed_content / missing_file
     pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<super::character_reference_regions::RegionBinding>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -435,6 +439,7 @@ impl Library {
             strict,
             manual_on_create,
         )?;
+        let regions_changed = super::character_reference_regions::apply_regions(&transaction, &saved, &request.reference_ids, &request.reference_regions)?;
         let result = self.replace_character_references_selection_in(
             &transaction,
             &saved.id,
@@ -442,6 +447,10 @@ impl Library {
             &request.reference_ids,
             strict,
         )?;
+        if regions_changed {
+            transaction.execute("UPDATE character_targets SET revision=revision+1 WHERE id=?1", [&saved.id])?;
+        }
+        let result = self.read_character_target(&transaction, &result.id)?;
         transaction.commit()?;
         Ok(result)
     }
@@ -810,6 +819,7 @@ impl Library {
                 [id],
             )?;
         }
+        super::character_reference_regions::prune_regions(transaction, id)?;
         self.read_character_target(transaction, id)
     }
 
@@ -1024,6 +1034,7 @@ impl Library {
                 id:r.get(0)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
                 enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new()
             })).optional()?.ok_or(Error::NotFound)?;
+        let regions = super::character_reference_regions::read_regions(connection, id)?;
         let mut statement = connection.prepare("SELECT slot,asset_id,asset_hash FROM character_references WHERE target_id=?1 ORDER BY slot")?;
         let rows = statement.query_map([id], |r| {
             Ok((
@@ -1058,6 +1069,7 @@ impl Library {
             };
             target.references.push(Reference {
                 slot,
+                region: asset_id.as_ref().and_then(|id| regions.get(id)).cloned(),
                 asset_id,
                 asset_hash,
                 status,
@@ -1118,6 +1130,7 @@ impl Library {
             }
             target.learned_references.push(Reference {
                 slot: target.learned_references.len() as u32,
+                region: regions.get(&asset_id).cloned(),
                 asset_id: Some(asset_id),
                 asset_hash,
                 status,

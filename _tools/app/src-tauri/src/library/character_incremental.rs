@@ -396,7 +396,7 @@ impl Library {
                 }
                 let refs=target.usable_references().map(|r|{
                     let id=r.asset_id.as_ref().ok_or(Error::Stale)?;
-                    Ok(json!({"assetId":id,"hash":r.asset_hash,"path":prepared.sources.get(id).ok_or(Error::Stale)?.path()}))
+                    Ok(json!({"assetId":id,"hash":r.asset_hash,"region":r.region,"path":prepared.sources.get(id).ok_or(Error::Stale)?.path()}))
                 }).collect::<Result<Vec<_>>>()?;
                 let hashes=refs.iter().map(|r|r["hash"].as_str().map(str::to_owned).ok_or(Error::Stale)).collect::<Result<Vec<_>>>()?;
                 let compare_started = Instant::now();

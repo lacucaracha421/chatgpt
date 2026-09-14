@@ -325,6 +325,7 @@ mod tests {
             .library
             .save_character_settings(
                 CharacterSettingsDraft {
+                    reference_regions: Default::default(),
                     target: TargetDraft {
                         id: None,
                         expected_revision: None,

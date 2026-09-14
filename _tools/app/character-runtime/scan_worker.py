@@ -7,7 +7,9 @@ import queue
 import sys
 import threading
 
-from learned_compare import compare_supported, compare_reference_delta
+from reference_regions import compare_bound, compare_bound_delta, inspect_references
+from reference_curation import curate_references
+from runtime import rgb
 from feature_cache import ReferenceBundles, FeatureCache, runtime_fingerprint, extraction_fingerprint, compatible_feature_caches
 from runtime import BASELINE, FINGERPRINT, Runtime
 
@@ -57,6 +59,7 @@ def main():
         instrument(engine, feature_cache, runtime, timings)
         cache.extract = timings.wrap("cache_extract_total", cache.extract)
     refs = None
+    selections = []
     bundles = ReferenceBundles(cache)
     resident = None
     while True:
@@ -70,8 +73,23 @@ def main():
                 if not 5 <= len(items) <= 25 or len({i["hash"] for i in items}) != len(items):
                     raise ValueError("Five anchors and at most twenty distinct approved examples required")
                 refs = bundles.prepare(items)
+                selections = [item.get("region") for item in items]
                 emit({"type": "prepared", "referenceHashes": [r.content_hash for r in refs],
                       "cacheHits": cache.hits, "extractions": cache.misses})
+            elif request["type"] == "inspect_references":
+                items = request["references"]
+                if not 1 <= len(items) <= 25 or len({i["hash"] for i in items}) != len(items):
+                    raise ValueError("Inspect one to twenty-five distinct references")
+                inspected = bundles.prepare(items)
+                result = inspect_references(engine, inspected, [i.get("region") for i in items])
+                for item, row in zip(items, result):
+                    row["assetId"] = item["assetId"]
+                    row["width"], row["height"] = rgb(Path(item["path"])).size
+                emit({"type": "references_inspected", "items": result})
+            elif request["type"] == "curate_references":
+                result = curate_references(engine, cache, request["candidates"],
+                                           request["anchors"], request["limit"])
+                emit({"type": "references_curated", **result})
             elif request["type"] == "load_query":
                 resident = None
                 query = cache.extract(Path(request["path"]), request["hash"])
@@ -86,10 +104,10 @@ def main():
                     raise ValueError("One to twenty distinct added references required")
                 added = bundles.prepare(items)
                 if timings is None:
-                    result = compare_reference_delta(engine, resident[2], request["oldEvidence"], added)
+                    result = compare_bound_delta(engine, resident[2], request["oldEvidence"], added, [i.get("region") for i in items])
                 else:
                     with timings.measure("comparison_total"):
-                        result = compare_reference_delta(engine, resident[2], request["oldEvidence"], added)
+                        result = compare_bound_delta(engine, resident[2], request["oldEvidence"], added, [i.get("region") for i in items])
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})
             elif request["type"] in ("query", "compare_query") and refs is not None:
@@ -100,10 +118,10 @@ def main():
                 else:
                     query = cache.extract(Path(request["path"]), request["hash"])
                 if timings is None:
-                    result = compare_supported(engine, query, refs)
+                    result = compare_bound(engine, query, refs, selections)
                 else:
                     with timings.measure("comparison_total"):
-                        result = compare_supported(engine, query, refs)
+                        result = compare_bound(engine, query, refs, selections)
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})
             else:

@@ -104,11 +104,18 @@ Current remaining scope:
 - preserve conservative automatic confirmation and manual recovery;
 - only pursue CPU/GPU/performance work if it is separately shown to affect normal interaction.
 
+2026-09-14 stage 1: a read-only frozen evidence evaluator is implemented in
+`_tools/app/character-runtime/character_holdout.py`. It preserves pre-feedback
+predictions and explicit labels, screens content/PDQ/reference leakage, and reports
+per-character/series metrics. This is historical evidence replay; real-library
+accuracy and candidate model/crop evaluation remain separate work. Usage and limits:
+[HOLDOUT.md](../../_tools/app/character-runtime/HOLDOUT.md).
+
 Do not restart the old routine review inbox/global-progress UX. Do not initiate a full production backfill as an accuracy experiment.
 
 ## CHAR-AUTO-006 — Show ingested assets before batch character classification finishes
 
-Status: `TODO`
+Status: `VERIFY`
 
 User-visible problem (2026-09-13): when many images arrive together, they can remain absent from normal browsing until character classification for the batch finishes.
 
@@ -118,7 +125,17 @@ Desired contract:
 - character-folder membership appears progressively as results commit;
 - a slow or failed character job never hides an otherwise-valid ingested asset.
 
-Before implementation, trace ingestion → classification → query/publication and reproduce the actual gate. Add a regression with a multi-image batch and deliberately slow character worker.
+Implemented 2026-09-14: ordinary/series galleries coalesce same-scope refreshes
+instead of discarding every in-flight read. Each completed read can publish while
+classification continues; navigation and explicit mutations still invalidate old work.
+Cloud capture ingestion now sends a native channel update after each local commit,
+before acknowledgement and later downloads. Closed/stale UI listeners do not fail
+an import or populate another library.
+
+Regression coverage includes slow overlapping gallery reads, an app-level multi-file
+import, a held/failed native character claim, and a fake-server assertion that local
+publication precedes a failed ACK. Remaining acceptance is the real desktop browsing
+experience on the user's library and native Windows verification.
 
 ## CHAR-AUTO-003 — Cluster-based character candidate research
 

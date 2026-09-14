@@ -1,3 +1,4 @@
+import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { ChevronRightIcon, FolderIcon, PhotoIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { EllipsisHorizontalIcon, PencilIcon } from "../shared/ui/ArchiveIcons";
@@ -25,6 +26,7 @@ import { CharacterRegistry, characterDraft, activeCharacterReferences, MAX_CHARA
 import { CharacterConversion } from "./CharacterConversion";
 import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
+import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
 import { characterApi, type CharacterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
@@ -58,6 +60,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [folderError, setFolderError] = useState<string | null>(null);
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
   const [all, setAll] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
+  const galleryRefreshVersion = useCoalescedRefreshVersion(refreshVersion, loading);
   const [error, setError] = useState<string | null>(null), [editorError, setEditorError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [reload, setReload] = useState(0), [selection, setSelection] = useState(emptySelection);
@@ -66,6 +69,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [pickFromSeries, setPickFromSeries] = useState(false);
   const [picking, setPicking] = useState<Picking | null>(null), [inspector, setInspector] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [referenceSuggestionTarget, setReferenceSuggestionTarget] = useState<CharacterTarget | null>(null);
   const [seriesGalleryState, setSeriesGalleryState] = useState<{ seriesId: string; view: SeriesGalleryView }>(() => ({ seriesId: series.classificationId, view: "unclassified" }));
   const [manualName, setManualName] = useState<string | null>(null);
   const [legacyExcludedCount, setLegacyExcludedCount] = useState(0);
@@ -128,7 +132,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       loadedScope.current = scope; setPage(emptyPage()); setSelection(emptySelection()); setViewer(null);
     }
     void load(); return () => { ++generation.current; };
-  }, [scope, refreshVersion, reload, hubApi]);
+  }, [scope, galleryRefreshVersion, reload, hubApi]);
   useEffect(() => {
     if (targetId || currentGroup || picking) return;
     let active = true;
@@ -230,7 +234,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         try { const asset = await gateway.getAsset(assetId); setExternalAsset(asset); setViewer(assetId); }
         catch (error) { setEditorError(commandErrorMessage(error, "원본을 열지 못했습니다.")); }
       })()}
-      onChange={draft => setEditor({ ...editor, draft })} onPick={beginPick} onSave={() => void saveEditor()} />
+      onChange={draft => setEditor({ ...editor, draft })} onPick={beginPick} onSave={() => void saveEditor()}
+      onRecommendReferences={editor.target ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined} />
       {current?.ready && !current.manualOnly && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void requestHistoricalRefresh(current)}>과거 미분류 이미지 갱신</Button>}
       {current && <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setEditor(null); setConverting(true); }}>일반 폴더로 전환</Button>}
     </>}
@@ -380,6 +385,13 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       </div>
     </Dialog>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
+    {referenceSuggestionTarget && <ReferenceCandidateDialog
+      target={referenceSuggestionTarget}
+      privacyMode={privacyMode}
+      api={hubApi}
+      onClose={() => setReferenceSuggestionTarget(null)}
+      onSaved={() => { setReferenceSuggestionTarget(null); refresh(); }}
+    />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
     <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />

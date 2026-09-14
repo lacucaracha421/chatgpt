@@ -30,6 +30,8 @@
     "targets": "all",
     "resources": {
       "../character-runtime/learned_compare.py": "character-runtime/learned_compare.py",
+      "../character-runtime/reference_regions.py": "character-runtime/reference_regions.py",
+      "../character-runtime/reference_curation.py": "character-runtime/reference_curation.py",
       "../character-runtime/runtime.py": "character-runtime/runtime.py",
       "../character-runtime/baseline.json": "character-runtime/baseline.json",
       "../character-runtime/feature_cache.py": "character-runtime/feature_cache.py",

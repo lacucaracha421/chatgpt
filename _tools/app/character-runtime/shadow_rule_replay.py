@@ -1,8 +1,9 @@
 """Read-only offline replay of character rule variants over stored predictions.
 
-Never writes the library. Recomputes the decision predicate from the reference
+Never writes the library. Recomputes reference-support predicates from the
 distances already stored in character_autotag_predictions, so no model inference,
-no cache invalidation and no re-extraction are involved.
+no cache invalidation and no re-extraction are involved. Cross-character geometry
+arbitration is not replayed; production-gate results are support-only evidence.
 
 Usage:
     python shadow_rule_replay.py --database <library.sqlite> [--folds 5] [--seed 7]
@@ -15,6 +16,11 @@ import random
 import sqlite3
 from collections import Counter, defaultdict
 from pathlib import Path
+
+
+RECOMMENDATION_THRESHOLD = 0.21323118981474148
+AUTOMATIC_REFERENCE_SUPPORT = 6
+AUTOMATIC_MAX_SIXTH_DISTANCE = 0.16
 
 
 def parse_args():
@@ -77,6 +83,7 @@ def load(connection):
             "asset": asset_id,
             "label": 1 if decision == "accepted" else 0,
             "crops": distances,
+            "whole_fallback": evidence.get("wholeFallback") is True,
             "stored_state": payload.get("state"),
         })
     return rows
@@ -85,11 +92,13 @@ def load(connection):
 # ------------------------------------------------------------------- predicates
 
 def best_two(distances):
-    """Per-reference minimum across crops, then the two closest references."""
+    """Return the two closest references from one best query crop."""
     width = min(len(row) for row in distances)
-    per_reference = [min(row[i] for row in distances) for i in range(width)]
-    ordered = sorted(per_reference)
-    return ordered[0], ordered[1]
+    if width < 2:
+        raise ValueError("At least two reference distances are required")
+    ordered = [sorted(row[:width]) for row in distances]
+    best = min(ordered, key=lambda row: (row[1], row[0]))
+    return best[0], best[1]
 
 
 def score(rows, rule):
@@ -123,7 +132,7 @@ def fmt(name, tp, fp, fn, tn):
 
 # ---------------------------------------------------------------- rule families
 
-def rule_second_min(t, k=2):
+def rule_second_min(t):
     return lambda row: best_two(row["crops"])[1] <= t
 
 
@@ -132,28 +141,65 @@ def rule_first_min(t):
 
 
 def rule_support(t, minimum):
-    """Fraction-of-references form: how many references are within t."""
+    """Require one query crop to receive enough reference support."""
     def decide(row):
-        width = min(len(r) for r in row["crops"])
-        per_reference = [min(r[i] for r in row["crops"]) for i in range(width)]
-        return sum(1 for v in per_reference if v <= t) >= minimum
+        width = min(len(values) for values in row["crops"])
+        return any(
+            sum(1 for value in values[:width] if value <= t) >= minimum
+            for values in row["crops"]
+        )
     return decide
 
 
 def rule_mean(t):
     def decide(row):
-        width = min(len(r) for r in row["crops"])
-        per_reference = [min(r[i] for r in row["crops"]) for i in range(width)]
-        return sum(per_reference) / len(per_reference) <= t
+        width = min(len(values) for values in row["crops"])
+        return min(
+            sum(values[:width]) / width
+            for values in row["crops"]
+        ) <= t
     return decide
 
 
+def rule_production_support(
+    minimum=AUTOMATIC_REFERENCE_SUPPORT,
+    maximum_kth_distance=AUTOMATIC_MAX_SIXTH_DISTANCE,
+):
+    """Replay the production reference-support gate on one query crop.
+
+    The native owner also checks competing characters and crop geometry. Those
+    checks require the complete prediction bundle and are outside this pairwise
+    evaluator.
+    """
+    def decide(row):
+        if row.get("whole_fallback"):
+            return False
+        return any(
+            len(values) >= minimum
+            and sorted(values)[minimum - 1] <= maximum_kth_distance
+            for values in row["crops"]
+        )
+    return decide
+
+
+def grouped_buckets(rows, folds, seed):
+    """Split by asset so one image's target labels cannot leak across folds."""
+    if folds < 2:
+        raise ValueError("At least two folds are required")
+    groups = defaultdict(list)
+    for index, row in enumerate(rows):
+        groups[row["asset"]].append(index)
+    keys = list(groups)
+    random.Random(seed).shuffle(keys)
+    buckets = [[] for _ in range(folds)]
+    for position, key in enumerate(keys):
+        buckets[position % folds].extend(groups[key])
+    return buckets
+
+
 def tune(rows, factory, grid, folds, seed):
-    """Honest k-fold: pick the grid point on train, score on held-out."""
-    rng = random.Random(seed)
-    index = list(range(len(rows)))
-    rng.shuffle(index)
-    buckets = [index[i::folds] for i in range(folds)]
+    """Honest grouped k-fold: tune on train, score on held-out assets."""
+    buckets = grouped_buckets(rows, folds, seed)
     tp = fp = fn = tn = 0
     chosen = Counter()
     for k in range(folds):
@@ -180,20 +226,31 @@ def main():
     rows = load(connection)
     connection.close()
 
+    if not rows:
+        print("No manually labeled pairs with replayable evidence were found.")
+        return
+    asset_count = len({row["asset"] for row in rows})
+    folds = min(args.folds, asset_count)
+    if folds < 2:
+        raise SystemExit("At least two distinct assets are required for grouped cross-validation")
+
     positives = sum(r["label"] for r in rows)
     print(f"labeled pairs with replayable evidence: {len(rows)}"
           f"  (accepted={positives}, rejected={len(rows) - positives})")
     print(f"targets: {len({r['target'] for r in rows})}")
-    print(f"folds={args.folds} seed={args.seed}\n")
+    print(f"assets: {asset_count}  folds={folds} seed={args.seed}")
+    print("production result below replays support only; native competitor geometry is not included.\n")
 
     print(f"{'rule':<38} {'prec':>6} {'rec':>6} {'F1':>6}   {'TP/FP/FN/TN'}")
     print("-" * 78)
 
-    # 1. Current stored threshold, in-sample (this is what production does today).
-    got = score(rows, rule_second_min(0.21323118981474148))
-    print(fmt("current T=0.2132 (in-sample)", *got))
+    # 1. Current recommendation and automatic support gates, in-sample.
+    got = score(rows, rule_second_min(RECOMMENDATION_THRESHOLD))
+    print(fmt("recommendation 2nd<=0.2132", *got))
+    got = score(rows, rule_production_support())
+    print(fmt("production auto support gate", *got))
 
-    # 2. Per-target grid sweep, in-sample (upper bound, overfits).
+    # 2. Global recommendation threshold sweep, in-sample (upper bound, overfits).
     grid = [round(0.04 + 0.002 * i, 4) for i in range(120)]
     best = None
     for t in grid:
@@ -204,35 +261,31 @@ def main():
     f1, t, got = best
     print(fmt(f"global T={t} (in-sample oracle)", *got))
 
-    # 3. Honest cross-validation for the three rule families.
+    # 3. Honest grouped cross-validation for recommendation rule families.
     print()
     for name, factory, space in (
-        ("global T (5-fold CV)", rule_second_min, grid),
-        ("support>=k of 5 (5-fold CV)", None, None),
+        (f"global T ({folds}-fold grouped CV)", rule_second_min, grid),
+        (f"support>=k ({folds}-fold grouped CV)", None, None),
     ):
         if name.startswith("support"):
-            space = [(t, k) for t in grid for k in (1, 2, 3, 4)]
-            tp, fp, fn, tn, chosen = tune(rows, rule_support, space, args.folds, args.seed)
+            space = [(t, k) for t in grid for k in (2, 3, 4, 5, 6)]
+            tp, fp, fn, tn, chosen = tune(rows, rule_support, space, folds, args.seed)
             top = ", ".join(f"T={p[0]},k={p[1]}" for p, _ in chosen.most_common(3))
         else:
-            tp, fp, fn, tn, chosen = tune(rows, factory, space, args.folds, args.seed)
+            tp, fp, fn, tn, chosen = tune(rows, factory, space, folds, args.seed)
             top = ", ".join(f"T={p}" for p, _ in chosen.most_common(3))
         print(fmt(name, tp, fp, fn, tn))
         print(f"{'  chosen per fold: ' + top:<38}")
 
     # 4. Per-target thresholds, honest CV.
-    by_target = defaultdict(list)
-    for i, row in enumerate(rows):
-        by_target[row["target"]].append(i)
-    rng = random.Random(args.seed)
-    assignment = {}
-    for target, indices in by_target.items():
-        rng.shuffle(indices)
-        for pos, i in enumerate(indices):
-            assignment[i] = pos % args.folds
+    assignment = {
+        index: fold
+        for fold, indices in enumerate(grouped_buckets(rows, folds, args.seed))
+        for index in indices
+    }
     tp = fp = fn = tn = 0
     fallback = 0
-    for k in range(args.folds):
+    for k in range(folds):
         train = [rows[i] for i in range(len(rows)) if assignment[i] != k]
         holdout = [rows[i] for i in range(len(rows)) if assignment[i] == k]
         per_target = {}
@@ -252,7 +305,7 @@ def main():
             t = per_target.get(row["target"])
             if t is None:
                 fallback += 1
-                t = 0.21323118981474148
+                t = RECOMMENDATION_THRESHOLD
             accept = best_two(row["crops"])[1] <= t
             if accept and row["label"] == 1:
                 tp += 1
@@ -262,7 +315,7 @@ def main():
                 fn += 1
             else:
                 tn += 1
-    print(fmt("per-target T (5-fold CV)", tp, fp, fn, tn))
+    print(fmt(f"per-target T ({folds}-fold grouped CV)", tp, fp, fn, tn))
     print(f"{'  targets falling back to global: ' + str(fallback):<38}")
 
 

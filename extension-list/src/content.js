@@ -120,6 +120,11 @@
     return result.httpStatus ? `서버 저장 실패 · HTTP ${result.httpStatus}` : "서버 저장 실패";
   }
 
+  function temporaryFailureMessage(result) {
+    const detail = String(result?.browserMessage || "").trim();
+    return detail ? `임시 다운로드 실패 · ${detail}` : "임시 다운로드 실패";
+  }
+
   function normalizePostId(value) { const text = String(value ?? "").trim(); return /^\d+$/.test(text) ? text : ""; }
   function findTweetArticle(root, postId) {
     const targetId = normalizePostId(postId); if (!targetId) return null;
@@ -266,7 +271,7 @@
   }
 
   if (globalThis.__LAKOMICS_TEST__) {
-    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, openingClickDisposition, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, normalizePostId, findTweetArticle, autoLikePost, favoriteTweetViaWebApi, TOUCH_LONG_PRESS_MS, MOUSE_OPEN_DELAY_MS };
+    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, openingClickDisposition, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, temporaryFailureMessage, normalizePostId, findTweetArticle, autoLikePost, favoriteTweetViaWebApi, TOUCH_LONG_PRESS_MS, MOUSE_OPEN_DELAY_MS };
     return;
   }
 
@@ -458,7 +463,7 @@
         onTemporary: temporary ? async () => {
           if (/Android/i.test(navigator.userAgent)) { window.location.href = temporary; return true; }
           const result = await runtimeMessage({ type: "collector:temporary", candidate });
-          if (!result?.ok) { showStatus("임시 다운로드 실패", "error"); return false; }
+          if (!result?.ok) { showStatus(temporaryFailureMessage(result), "error"); return false; }
           showStatus("임시 다운로드 시작됨", "success");
           return true;
         } : null,

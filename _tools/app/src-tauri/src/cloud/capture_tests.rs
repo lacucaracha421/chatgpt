@@ -84,6 +84,7 @@ fn capture_specific_ticket(server_addr: &str, capture_id: &str) -> Value {
 
 enum AcknowledgeMode {
     Succeed,
+    AfterPublication(std::sync::Arc<std::sync::atomic::AtomicBool>, u16),
     FailWith(u16),
     Never,
 }
@@ -153,6 +154,10 @@ fn serve_capture_flow(
                             request.respond(Response::empty(200)).unwrap();
                         }
                         AcknowledgeMode::FailWith(status) => {
+                            request.respond(Response::empty(*status)).unwrap();
+                        }
+                        AcknowledgeMode::AfterPublication(published, status) => {
+                            assert!(published.load(std::sync::atomic::Ordering::Acquire));
                             request.respond(Response::empty(*status)).unwrap();
                         }
                         AcknowledgeMode::Never => unreachable!("acknowledge should not be sent"),
@@ -398,6 +403,41 @@ fn duplicate_capture_is_still_acknowledged_without_new_asset() {
     assert_eq!(assets.items.len(), 1);
     handle.join().unwrap();
     handle2.join().unwrap();
+}
+
+#[test]
+fn capture_publication_precedes_remote_acknowledgement_even_when_ack_fails() {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    let published = Arc::new(AtomicBool::new(false));
+    let (base_url, handle) = serve_capture_flow(
+        "capture-1", png_bytes(), PendingListMode::OneCapture,
+        AcknowledgeMode::AfterPublication(published.clone(), 503),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library.set_cloud_settings(super::models::CloudSyncConfig {
+        enabled: true, api_base_url: Some("https://fixture.test".into()),
+    }, true).unwrap();
+    let result = library.sync_next_cloud_capture_with_progress(
+        &CloudClient::new(&base_url).unwrap(), "test-token", &|outcome| {
+            let crate::library::models::IngestOutcome::Added { asset } = outcome else {
+                panic!("expected one committed image");
+            };
+            let page = library.list_assets(crate::library::models::AssetQuery {
+                limit: 10, ..Default::default()
+            }).unwrap();
+            assert!(page.items.iter().any(|item| item.id == asset.id));
+            let receipts: i64 = library.connection().unwrap().query_row(
+                "SELECT COUNT(*) FROM cloud_capture_imports", [], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(receipts, 0);
+            published.store(true, Ordering::Release);
+        },
+    ).unwrap();
+    assert!(published.load(Ordering::Acquire));
+    assert_eq!(result.failed, 1);
+    assert_eq!(result.acknowledged, 0);
+    assert!(handle.join().unwrap().last().unwrap().ends_with("/acknowledge"));
 }
 
 #[test]

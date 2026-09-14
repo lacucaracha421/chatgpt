@@ -76,14 +76,14 @@ impl Library {
     /// `MAX_CAPTURES_PER_SYNC`건까지 순차적으로 수집한다. 성공한 캡처만 원격에서
     /// imported로 표시한다. 방향은 클라우드 → 로컬이며 `cloud_sync_queue`(로컬 →
     /// 클라우드)와 상태를 공유하지 않는다.
-    pub(crate) fn sync_next_cloud_capture(&self) -> Result<CloudCaptureSyncResult, LibraryError> {
+    pub(crate) fn sync_next_cloud_capture(&self, on_ingested: &dyn Fn(&IngestOutcome)) -> Result<CloudCaptureSyncResult, LibraryError> {
         if !self.cloud_capture_enabled()? {
             // The metadata replica remains independent of receiving captures.
-            if self.cloud_sync_config()?.enabled { return self.sync_configured_cloud_capture(); }
+            if self.cloud_sync_config()?.enabled { return self.sync_configured_cloud_capture(on_ingested); }
             return Ok(CloudCaptureSyncResult::default());
         }
         self.begin_cloud_activity("capture")?;
-        let result = self.sync_configured_cloud_capture();
+        let result = self.sync_configured_cloud_capture(on_ingested);
         let (processed, problems, error) = match &result {
             Ok(summary) => (u64::from(summary.acknowledged), u64::from(summary.failed + summary.review_pending),
                 if summary.failed > 0 { Some("수신하지 못한 자료가 있습니다. 서버 연결을 확인한 뒤 다시 시도해 주세요.") }
@@ -94,7 +94,7 @@ impl Library {
         result
     }
 
-    fn sync_configured_cloud_capture(&self) -> Result<CloudCaptureSyncResult, LibraryError> {
+    fn sync_configured_cloud_capture(&self, on_ingested: &dyn Fn(&IngestOutcome)) -> Result<CloudCaptureSyncResult, LibraryError> {
         let config = self.cloud_sync_config()?;
         let base_url = config
             .api_base_url
@@ -102,7 +102,7 @@ impl Library {
         let result = (|| {
             let token = crate::library::credential::read_cloud_api_token_os()?;
             let client = CloudClient::new(&base_url)?;
-            self.sync_next_cloud_capture_cycle_with(&client, &token)
+            self.sync_next_cloud_capture_cycle_with_progress(&client, &token, on_ingested)
         })();
         if config.enabled && result.is_err() {
             self.record_cloud_metadata_activity(Some("모바일 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."))?;
@@ -110,12 +110,20 @@ impl Library {
         result
     }
 
+    #[cfg(test)]
     pub(super) fn sync_next_cloud_capture_cycle_with(
+        &self, client: &CloudClient, token: &str,
+    ) -> Result<CloudCaptureSyncResult, LibraryError> {
+        self.sync_next_cloud_capture_cycle_with_progress(client, token, &|_| {})
+    }
+
+    fn sync_next_cloud_capture_cycle_with_progress(
         &self,
         client: &CloudClient,
         token: &str,
+        on_ingested: &dyn Fn(&IngestOutcome),
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
-        let result = if self.cloud_capture_enabled()? { self.sync_next_cloud_capture_with(client, token)? } else { CloudCaptureSyncResult::default() };
+        let result = if self.cloud_capture_enabled()? { self.sync_next_cloud_capture_with_progress(client, token, on_ingested)? } else { CloudCaptureSyncResult::default() };
         if !self.cloud_sync_config()?.enabled { return Ok(result); }
         // 수집 폴과 같은 주기로 변경된 모바일 읽기 스냅샷만 게시한다. 세대는
         // DB에 남으므로 재시작 후에도 이미 게시한 전체 스냅샷을 반복하지 않는다.
@@ -243,10 +251,18 @@ impl Library {
         client.publish_saved_x_media_snapshot(token, &SavedXMediaSnapshotPublish { keys: &keys })
     }
 
+    #[cfg(test)]
     pub(super) fn sync_next_cloud_capture_with(
+        &self, client: &CloudClient, token: &str,
+    ) -> Result<CloudCaptureSyncResult, LibraryError> {
+        self.sync_next_cloud_capture_with_progress(client, token, &|_| {})
+    }
+
+    pub(super) fn sync_next_cloud_capture_with_progress(
         &self,
         client: &CloudClient,
         token: &str,
+        on_ingested: &dyn Fn(&IngestOutcome),
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
         // 한 번의 폴에서 상한까지 계속 소진한다. 실패한 캡처는 건너뛰고 다음
         // 캡처로 진행하므로 한 건의 오류가 이후 캡처를 막지 않는다.
@@ -302,7 +318,7 @@ impl Library {
                 }
                 continue;
             }
-            match self.consume_cloud_capture(client, token, &capture) {
+            match self.consume_cloud_capture(client, token, &capture, on_ingested) {
                 Ok(outcome) => match outcome {
                     ConsumedCapture::Added { video } => {
                         result.acknowledged += 1;
@@ -336,6 +352,7 @@ impl Library {
         client: &CloudClient,
         token: &str,
         capture: &RemoteCapture,
+        on_ingested: &dyn Fn(&IngestOutcome),
     ) -> Result<ConsumedCapture, LibraryError> {
         let maximum_bytes = match capture.media_kind {
             RemoteCaptureKind::Image | RemoteCaptureKind::AnimatedGif => MAX_CAPTURE_IMAGE_BYTES,
@@ -358,6 +375,8 @@ impl Library {
             return Err(LibraryError::InvalidCloudResponse);
         }
         let outcome = self.ingest_capture_media(capture, temporary.path())?;
+        // Publish after the local commit, before ACK and remaining downloads.
+        on_ingested(&outcome);
         // ingest_media는 성공 시 staging 파일을 library로 이동시키므로
         // TemporaryCaptureDownload의 Drop 정리는 NotFound를 조용히 지나간다.
         drop(temporary);

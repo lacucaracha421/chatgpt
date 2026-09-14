@@ -531,6 +531,16 @@ fn anchors_and_explicit_learning_invalidate_prepared_reference_snapshots() {
     );
     let changed_anchors = prepare_paths(&config).last().unwrap().clone();
     assert_ne!(first, changed_anchors);
+    f.library
+        .record_character_decisions(super::super::characters::DecisionRequest {
+            target_id: target.id.clone(),
+            expected_fingerprint: target.fingerprint.clone(),
+            asset_ids: vec!["asset-5".into()],
+            decision: super::super::characters::DecisionKind::Accepted,
+            baseline_fingerprint: None,
+            scan_id: None,
+        })
+        .unwrap();
     target = f
         .library
         .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
@@ -1200,6 +1210,10 @@ fn manual_decisions_recalculate_cross_series_review_state_from_saved_regions() {
     let predictions = [(&a, 0usize), (&b, 1usize)]
         .into_iter()
         .map(|(target, person)| {
+            let reference_hashes = target
+                .usable_references()
+                .map(|reference| reference.asset_hash.clone())
+                .collect::<Vec<_>>();
             let mut evidence = vec![
                 json!({"matchedReferences": []}),
                 json!({"matchedReferences": []}),
@@ -1217,6 +1231,8 @@ fn manual_decisions_recalculate_cross_series_review_state_from_saved_regions() {
                         "wholeFallback": false,
                         "bestQueryCrop": person,
                         "queryBoxes": [[0,0,40,100],[60,0,100,100]],
+                        "referenceHashes": reference_hashes,
+                        "referenceSelections": [null, null, null, null, null],
                         "evidence": evidence
                     })),
                 },
@@ -1235,6 +1251,20 @@ fn manual_decisions_recalculate_cross_series_review_state_from_saved_regions() {
         .unwrap();
     tx.commit().unwrap();
     let evidence_id: String = c.query_row("SELECT id FROM character_autotag_evidence WHERE asset_id='asset-5'", [], |r| r.get(0)).unwrap();
+    for target in [&a, &b] {
+        let (_, saved) = character_autotag::evidence_row(&c, &evidence_id, &target.id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            super::super::character_reference_regions::selections_match(
+                saved.evidence.as_ref().unwrap(),
+                target,
+            ),
+            "saved incremental evidence must retain the target's reference selections: evidence={:?}, references={:?}",
+            saved.evidence,
+            target.usable_references().collect::<Vec<_>>(),
+        );
+    }
     drop(c);
     assert_eq!(
         f.library

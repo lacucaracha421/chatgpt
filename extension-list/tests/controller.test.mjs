@@ -52,6 +52,11 @@ test('save failures expose useful server reasons', () => {
   assert.equal(content.saveFailureMessage({code:'offline',httpStatus:0}), '서버 연결 실패');
 });
 
+test('temporary download failures expose only the safe browser reason supplied by the worker', () => {
+  assert.equal(content.temporaryFailureMessage({code:'download_failed'}), '임시 다운로드 실패');
+  assert.equal(content.temporaryFailureMessage({code:'download_failed',browserMessage:'Invalid URL [URL]'}), '임시 다운로드 실패 · Invalid URL [URL]');
+});
+
 
 test('opening release click is consumed even when it lands inside the picker', () => {
   assert.equal(content.openingClickDisposition(true, true), 'consume');

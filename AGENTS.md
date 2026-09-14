@@ -11,6 +11,18 @@
 - Keep explanations concise unless detailed analysis is requested.
 - All future changes must support both Windows and Linux. Preserve cross-platform library portability and use platform-appropriate paths, media protocols, and credential backends. Verify affected behavior for both platforms where possible; explicitly report any native platform verification that is unavailable.
 
+## Remote tool efficiency
+
+- When using Remote Desktop Commander or another remote filesystem/shell bridge, minimize round trips without reducing investigation or verification quality.
+- Reuse an existing interactive shell/session for sequential commands in the same task. Start a new process only when isolation, a different runtime, or a long-running dedicated process makes it necessary.
+- Batch small, related shell checks into one interaction when their exit status and output remain clear. For two or more already-known files, prefer a multi-file read over repeated single-file reads.
+- Search first to identify relevant files, symbols, callers, and tests, then read the smallest useful set of files or ranges. Avoid serial directory walking when targeted search can establish scope.
+- Run independent searches concurrently when the tool supports it, then consume their results in batches.
+- Keep output bounded at the source with targeted tests, path-scoped diffs, filters, or concise log tails while retaining enough failure context to diagnose the root cause.
+- Reuse successful verification evidence until a later edit can invalidate it. Follow the Verification section for when to broaden checks.
+- Keep long-running dev servers and test/watch processes in dedicated sessions and poll or interact with them instead of repeatedly relaunching them.
+- Never batch commands in a way that hides failures, changes execution semantics, or makes it unclear which check failed. Correctness and debuggability take precedence over reducing tool calls.
+
 ## Formatting safety
 
 - Do not run write-mode `cargo fmt` (including `--all`, `--manifest-path`, aliases such as `cargo format`, or wrappers that invoke it). Passing file paths after `cargo fmt --` does not safely restrict formatting to those files.

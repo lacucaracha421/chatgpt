@@ -563,25 +563,42 @@ pub async fn character_folder_asset_count(
 pub async fn reference_candidates(
     target_id: String,
     limit: usize,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::library::character_reference_candidates::ReferenceCandidateSet, CommandError> {
+    let (script, settings) = runtime_paths(&app)?;
+    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.reference_candidates(&target_id, limit))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
+    tauri::async_runtime::spawn_blocking(move || {
+        library.semantic_reference_candidates(&target_id, limit, &config)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
 }
 
 #[tauri::command]
 pub async fn confirm_reference_batch(
     request: crate::library::character_reference_candidates::ConfirmReferenceBatch,
+    regions: crate::library::character_reference_regions::RegionBindings,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Target, CommandError> {
+    let (script, settings) = runtime_paths(&app)?;
+    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.confirm_reference_batch(request))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = library.get_character_target(&request.target_id)?;
+        let series = target
+            .series_classification_id
+            .as_deref()
+            .ok_or(Error::Stale)?;
+        library.verify_reference_region_selections(series, &regions, &config)?;
+        library.confirm_reference_batch_with_regions(request, regions)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
 }
 
 #[tauri::command]

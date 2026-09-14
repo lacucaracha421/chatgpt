@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sys
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from PIL import Image
 
 import runtime
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 EXPERIMENT = ROOT / "TEST_kisaki/_experiment"
 
 
@@ -119,13 +120,18 @@ class RuntimeTests(unittest.TestCase):
             sys.path.remove(str(EXPERIMENT))
 
     def test_bounded_metric_matches_full_matrix(self):
-        # Real frozen metric, real cached features; no detector/feature cache in worker.
-        samples = sorted((EXPERIMENT / "crop-cache").glob("*.npy"))[:48]
-        self.assertEqual(len(samples), 48)
-        stack = np.stack([np.load(p, allow_pickle=False) for p in samples]).astype(np.float32)
+        # Real frozen metric with deterministic synthetic feature vectors. The old
+        # experiment crop cache is local-only and must not be required by the suite.
+        model_dir = os.environ.get("LAKOMICS_CHARACTER_TEST_MODELS")
+        if not model_dir:
+            self.skipTest("set LAKOMICS_CHARACTER_TEST_MODELS to run frozen metric parity")
         options = ort.SessionOptions(); options.intra_op_num_threads = 1
+        metric = ort.InferenceSession(str(Path(model_dir) / "model_metrics.onnx"), sess_options=options, providers=["CPUExecutionProvider"])
+        feature_size = metric.get_inputs()[0].shape[-1]
+        self.assertIsInstance(feature_size, int)
+        stack = np.random.default_rng(7).normal(size=(48, feature_size)).astype(np.float32)
         engine = runtime.Runtime.__new__(runtime.Runtime)
-        engine.metric = ort.InferenceSession(str(EXPERIMENT / "models/model_metrics.onnx"), sess_options=options, providers=["CPUExecutionProvider"])
+        engine.metric = metric
         engine.max_metric_vectors = 0
         full = engine.metric.run(["output"], {"input": stack})[0]
         refs = [runtime.Features(str(i), [], stack[i:i+1], False) for i in range(5)]

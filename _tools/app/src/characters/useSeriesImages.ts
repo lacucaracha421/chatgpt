@@ -37,9 +37,14 @@ export function useSeriesImages(seriesId: string | null, referenceTargetId?: str
         if (!active.current) break;
         try {
           const result = await gateway.ingestMedia({ sourcePath, classificationId: seriesId, sourceUrl: null, importSource: "direct", importBatchId: batch });
-          if (result.status === "added") ids.push(result.asset.id);
-          else if (result.status === "exact_duplicate") ids.push(result.existingAssetId);
-          else failures.push("유사 이미지 검토가 필요한 파일이 있습니다.");
+          if (result.status === "added") {
+            ids.push(result.asset.id);
+            if (active.current) setItems(old => mergeNewest(old, result.asset));
+          } else if (result.status === "exact_duplicate") {
+            ids.push(result.existingAssetId);
+            const existing = await gateway.getAsset(result.existingAssetId);
+            if (active.current) setItems(old => mergeNewest(old, existing));
+          } else failures.push("유사 이미지 검토가 필요한 파일이 있습니다.");
         } catch (e) { failures.push(commandErrorMessage(e, "가져오지 못한 파일이 있습니다.")); }
       }
     } catch (e) { failures.push(commandErrorMessage(e, "이미지를 가져오지 못했습니다.")); }
@@ -48,4 +53,9 @@ export function useSeriesImages(seriesId: string | null, referenceTargetId?: str
     return ids;
   }
   return { items, cursor, busy, error, load, importImages };
+}
+
+function mergeNewest(items: AssetSummary[], asset: AssetSummary): AssetSummary[] {
+  return [asset, ...items.filter(item => item.id !== asset.id)].sort((left, right) =>
+    right.collectedAt.localeCompare(left.collectedAt) || right.id.localeCompare(left.id));
 }

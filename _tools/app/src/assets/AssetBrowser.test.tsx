@@ -1180,3 +1180,23 @@ async function selectionAction(name: string) {
   }
   return screen.getByRole("menuitem", { name });
 }
+
+
+it("publishes a completed read during continuous ingestion refreshes", async () => {
+  const gateway = createGateway();
+  let finishFirst!: (value: AssetPage) => void;
+  let finishNext!: (value: AssetPage) => void;
+  vi.mocked(gateway.listAssets)
+    .mockReturnValueOnce(new Promise(resolve => { finishFirst = resolve; }))
+    .mockReturnValue(new Promise(resolve => { finishNext = resolve; }));
+  const { rerender } = render(browserElement(gateway));
+  await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(1));
+  rerender(browserElement(gateway, { refreshVersion: 1 }));
+  rerender(browserElement(gateway, { refreshVersion: 2 }));
+  await act(async () => { finishFirst({ items: [asset(801)], nextCursor: null }); });
+  expect(screen.getByRole("option", { name: "asset-801.png" })).toBeInTheDocument();
+  expect(gateway.listAssets).toHaveBeenCalledTimes(2);
+  rerender(browserElement(gateway, { refreshVersion: 3 }));
+  await act(async () => { finishNext({ items: [asset(802), asset(801)], nextCursor: null }); });
+  expect(screen.getByRole("option", { name: "asset-802.png" })).toBeInTheDocument();
+});

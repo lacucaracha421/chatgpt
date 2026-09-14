@@ -2377,11 +2377,16 @@ pub async fn cloud_backfill_reconcile(
 
 #[tauri::command]
 pub async fn run_due_cloud_capture_sync(
+    on_progress: tauri::ipc::Channel<IngestOutcome>,
     state: State<'_, AppState>,
 ) -> Result<crate::cloud::captures::CloudCaptureSyncResult, CommandError> {
     // 수집 파일 해시·썸네일 작업이 포함되므로 블로킹 스레드에서 실행한다.
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.sync_next_cloud_capture())
+    tauri::async_runtime::spawn_blocking(move || library.sync_next_cloud_capture(&|outcome| {
+        // The client always supplies a channel, even without a progress listener.
+        // A closed window does not fail or repeat an already committed import.
+        let _ = on_progress.send(outcome.clone());
+    }))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

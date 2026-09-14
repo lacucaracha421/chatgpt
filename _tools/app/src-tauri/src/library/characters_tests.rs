@@ -835,6 +835,7 @@ fn character_settings_save_rolls_back_target_changes_when_references_fail() {
         .library
         .save_character_settings(
             CharacterSettingsDraft {
+                reference_regions: Default::default(),
                 target: draft,
                 reference_ids: vec!["asset-6".into()],
             },
@@ -1672,4 +1673,29 @@ fn moved_reference_is_excluded_without_blocking_remaining_references_or_competit
         context.scope["invalidReferenceTargetIds"],
         serde_json::json!([])
     );
+}
+
+
+#[test]
+fn reference_region_settings_persist_and_reject_stale_content_atomically() {
+    let f = Fixture::new();
+    let target = f.ready("Region");
+    f.library.connection().unwrap().execute("UPDATE assets SET width=200,height=200", []).unwrap();
+    let region = serde_json::json!({"contentHash":target.references[0].asset_hash,
+        "baselineFingerprint":crate::library::character_worker::BASELINE,"bounds":[0,0,80,100]});
+    let draft = |revision, hash: &str| serde_json::from_value::<CharacterSettingsDraft>(serde_json::json!({
+        "id":target.id,"expectedRevision":revision,"seriesClassificationId":f.series,
+        "linkedClassificationId":f.child,"displayName":"Region","description":"kept",
+        "thumbnailAssetId":null,"enabled":true,"referenceIds":f.refs,
+        "referenceRegions":{"asset-0":{"contentHash":hash,
+            "baselineFingerprint":crate::library::character_worker::BASELINE,"bounds":[0,0,80,100]}}
+    })).unwrap();
+    let saved = f.library.save_character_settings(draft(target.revision, &target.references[0].asset_hash), true).unwrap();
+    assert_eq!(serde_json::to_value(&saved.references[0]).unwrap()["region"], region);
+    assert_ne!(target.fingerprint, saved.fingerprint);
+    assert!(matches!(f.library.save_character_settings(draft(saved.revision, &"f".repeat(64)), true), Err(Error::Stale)));
+    let after = f.library.get_character_target(&target.id).unwrap();
+    assert_eq!(after.revision, saved.revision);
+    assert_eq!(serde_json::to_value(&after.references[0]).unwrap()["region"], region);
+    assert_eq!(f.library.connection().unwrap().query_row("SELECT COUNT(*) FROM character_reference_refreshes", [], |r|r.get::<_,i64>(0)).unwrap(), 0);
 }

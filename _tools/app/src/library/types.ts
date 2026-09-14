@@ -1073,7 +1073,7 @@ export interface LibraryGateway {
   runDueMobilePublications?(orderIds:string[]): Promise<void>;
   pushCloudCharacters?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<{revision: string; nodes: number}>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
-  runDueCloudCaptureSync(): Promise<CloudCaptureSyncResult>;
+  runDueCloudCaptureSync(onProgress?: (outcome: IngestOutcome) => void): Promise<CloudCaptureSyncResult>;
   cloudBackfillPreflight(): Promise<CloudBackfillPreflightReport>;
   cloudBackfillSeed(): Promise<CloudBackfillSeedReport>;
   cloudBackfillRunCycle(): Promise<CloudBackfillRunSummary>;

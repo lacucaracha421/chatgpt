@@ -575,6 +575,9 @@ impl Library {
         {
             return Ok(None);
         }
+        if !super::character_reference_regions::selections_match(&evidence, target) {
+            return Ok(None);
+        }
         let old_hashes = evidence["referenceHashes"]
             .as_array()
             .map(|rows| {

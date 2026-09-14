@@ -19,7 +19,8 @@ function candidateApi(): ReferenceCandidateApi {
     referenceCandidates: vi.fn().mockResolvedValue({
       targetId: "manual", targetRevision: 1, referenceSetHash: "set-1",
       confirmationMode: "initialize", minimumSelection: 5,
-      items, suggestedAssetIds: items.map(item => item.id),
+      items, suggestedAssetIds: items.map(item => item.id), method: "ccip_core",
+      regions: Object.fromEntries(items.map((item, index) => [item.id, { contentHash: `hash-${index}`, baselineFingerprint: "baseline", bounds: [index, 0, index + 10, 10] }])),
     }),
     confirmReferenceBatch: vi.fn().mockResolvedValue({
       ...fixtureTarget("manual", "마커스"), manualOnly: false,
@@ -41,6 +42,7 @@ it("preselects suggestions, lets the user remove a bad image, and confirms once"
   await waitFor(() => expect(api.confirmReferenceBatch).toHaveBeenCalledWith({
     targetId: "manual", expectedRevision: 1, expectedReferenceSetHash: "set-1",
     confirmationMode: "initialize", assetIds: fixtureAssets.slice(0, 5).map(item => item.id),
+    regions: Object.fromEntries(fixtureAssets.slice(0, 5).map((item, index) => [item.id, { contentHash: `hash-${index}`, baselineFingerprint: "baseline", bounds: [index, 0, index + 10, 10] }])),
   }));
   expect(saved).toHaveBeenCalledTimes(1);
 });

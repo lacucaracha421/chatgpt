@@ -61,6 +61,9 @@ export function ReferenceCandidateDialog({ target, privacyMode, onClose, onSaved
         expectedReferenceSetHash: page.referenceSetHash,
         confirmationMode: page.confirmationMode,
         assetIds: orderedSelected,
+        regions: Object.fromEntries(
+          orderedSelected.flatMap(id => page.regions?.[id] ? [[id, page.regions[id]]] : []),
+        ),
       });
       onSaved(saved);
     } catch (reason) {

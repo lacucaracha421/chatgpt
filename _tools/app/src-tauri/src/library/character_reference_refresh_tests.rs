@@ -954,13 +954,17 @@ fn delta_reuse_requires_a_strict_unchanged_reference_prefix() {
     let target = f.ready("A");
     unresolved(&f, "asset-5");
     let job = f.library.character_autotag_job("asset-5").unwrap().unwrap();
-    let old_hashes = ["a", "b", "c", "d", "e"];
+    let old_hashes = target
+        .usable_references()
+        .map(|reference| reference.asset_hash.clone())
+        .collect::<Vec<_>>();
     let evidence = serde_json::json!({
         "type": "result",
         "assetId": job.asset_id,
         "baselineFingerprint": crate::library::character_worker::BASELINE,
         "contentHash": job.content_hash,
         "referenceHashes": old_hashes,
+        "referenceSelections": [null, null, null, null, null],
         "passed": true,
         "distance": 0.1,
     });
@@ -1006,7 +1010,7 @@ fn delta_reuse_requires_a_strict_unchanged_reference_prefix() {
                 &refresh_job,
                 &target,
                 "runtime",
-                &old_hashes.map(str::to_owned),
+                &old_hashes,
             )
             .unwrap(),
         Some(ReferenceRefreshEvidenceReuse::Exact(_))
@@ -1023,7 +1027,7 @@ fn delta_reuse_requires_a_strict_unchanged_reference_prefix() {
             &refresh_job,
             &target,
             "runtime",
-            &old_hashes.map(str::to_owned),
+            &old_hashes,
         )
         .unwrap()
         .is_none());
@@ -1039,7 +1043,7 @@ fn delta_reuse_requires_a_strict_unchanged_reference_prefix() {
             &refresh_job,
             &target.id,
             "runtime",
-            &["a", "b", "c", "d", "e", "f"].map(str::to_owned),
+            &[old_hashes.clone(), vec!["f".into()]].concat(),
         )
         .unwrap()
         .is_some());
@@ -1050,7 +1054,11 @@ fn delta_reuse_requires_a_strict_unchanged_reference_prefix() {
             &refresh_job,
             &target.id,
             "runtime",
-            &["a", "b", "c", "d", "replacement", "f"].map(str::to_owned),
+            &[
+                old_hashes[..4].to_vec(),
+                vec!["replacement".into(), "f".into()],
+            ]
+            .concat(),
         )
         .unwrap()
         .is_none());

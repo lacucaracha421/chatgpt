@@ -348,3 +348,13 @@ it("streams grouped count through Channel and sends edition requests", async () 
   await libraryGateway.setCatalogGroupRepresentative(preference);
   expect(invoke).toHaveBeenLastCalledWith("set_catalog_group_representative", { query: preference });
 });
+
+
+it("streams committed cloud captures through the native channel", async () => {
+  const onProgress = vi.fn();
+  await libraryGateway.runDueCloudCaptureSync(onProgress);
+  expect(invoke).toHaveBeenLastCalledWith("run_due_cloud_capture_sync", { onProgress: expect.any(Channel) });
+  const outcome = { status: "exact_duplicate", existingAssetId: "asset", classificationChanged: true };
+  invoke.mock.lastCall![1].onProgress.onmessage(outcome);
+  expect(onProgress).toHaveBeenCalledExactlyOnceWith(outcome);
+});

@@ -206,3 +206,43 @@ describe("useCloudCaptureSync", () => {
     expect(onResult).toHaveBeenCalledWith(result);
   });
 });
+
+
+describe("cloud capture publication before remote acknowledgement", () => {
+  const added = { status: "added", asset: { id: "new-image", media: { kind: "image" } } } as import("../library/types").IngestOutcome;
+  it("delivers a committed asset while the remainder of a poll is pending", async () => {
+    let progress: ((value: import("../library/types").IngestOutcome) => void) | undefined;
+    const gateway = { runDueCloudCaptureSync: vi.fn(callback => {
+      progress = callback;
+      return new Promise(() => {});
+    }) } as unknown as LibraryGateway;
+    const onResult = vi.fn();
+    const { unmount } = renderHook(() => useCloudCaptureSync(gateway, "/library", onResult), { wrapper: StrictMode });
+    await act(async () => { progress?.(added); });
+    expect(onResult).toHaveBeenCalledWith(expect.objectContaining({ added: 1, videoAdded: 0 }));
+    expect(gateway.runDueCloudCaptureSync).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+  it("routes progress to the current subscriber and fences a previous library", async () => {
+    const listeners: Array<((value: import("../library/types").IngestOutcome) => void) | undefined> = [];
+    const gateway = { runDueCloudCaptureSync: vi.fn(callback => {
+      listeners.push(callback);
+      return new Promise(() => {});
+    }) } as unknown as LibraryGateway;
+    const oldCallback = vi.fn(), latest = vi.fn();
+    const { rerender, unmount } = renderHook(({ root, callback }) => useCloudCaptureSync(gateway, root, callback),
+      { initialProps: { root: "/first", callback: oldCallback } });
+    rerender({ root: "/first", callback: latest });
+    await act(async () => { listeners[0]?.(added); });
+    expect(oldCallback).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledTimes(1);
+    rerender({ root: "/second", callback: latest });
+    await act(async () => { listeners[0]?.(added); });
+    expect(latest).toHaveBeenCalledTimes(1);
+    await act(async () => { listeners[1]?.(added); });
+    expect(latest).toHaveBeenCalledTimes(2);
+    unmount();
+    await act(async () => { listeners[1]?.(added); });
+    expect(latest).toHaveBeenCalledTimes(2);
+  });
+});

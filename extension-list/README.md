@@ -91,18 +91,26 @@ existing X session sends a bounded FavoriteTweet request for that exact post ID.
 Like failure is reported separately from successful media capture. X can change
 this private web endpoint; a fixture success does not establish live acceptance.
 
-AI translation uses only OpenRouter `google/gemini-2.5-flash-lite`, into Korean.
-Options retain an API key, one automatic on/off switch and Clear cache. The small
-X panel mirrors automatic on/off and Clear cache, and links to options. Other
-providers, model selection/fallback, manual translate, diagnostics and tuning are
-removed. Existing OpenRouter keys and automatic preferences migrate locally;
-retired provider settings and old caches are removed. Keys stay in extension
-storage and the worker: they are never returned to X content scripts or synced
-with the server profile. Visible tweets are translated, including quote text;
-links, hashtags, emoji and explicit line breaks are retained. Results use text
-nodes, not model HTML. The bounded cache is shared across tabs. Disabling auto or
-clearing the cache invalidates in-flight results; authentication/quota failures
-stop new requests until the setting is retried.
+AI translation uses only OpenRouter `google/gemini-3.1-flash-lite`, into Korean.
+Options retain an API key, one automatic on/off switch and Clear cache. On X, a
+compact floating translation icon opens the same controls in a small popover.
+Other providers, model selection/fallback, manual translate, diagnostics and
+tuning remain removed. Existing OpenRouter keys and automatic preferences migrate
+locally; retired provider settings and pre-3.1 translation caches are removed.
+Keys stay in extension storage and the worker: they are never returned to X
+content scripts or synced with the server profile. The worker is warmed as soon as
+the content script starts, and the first visible scan bypasses the normal debounce.
+The tweet nearest the viewport center gets a single fast-lane request whose result
+renders immediately, while the second request slot translates up to four more posts
+in parallel. Later work remains grouped up to four per model call, with at most two
+model calls in flight. Links, hashtags, mentions,
+emoji and explicit line breaks are retained; link placeholders must stay in their
+original order. Results use text nodes, not model HTML. Translation cards use
+X-aware light/dim/lights-out contrast with blue link accents. Network, timeout and
+server failures retry once; 429 responses honor a bounded cooldown and retry
+without treating the API key as missing. Authentication/payment failures pause
+new requests until translation settings are refreshed. The bounded cache is
+shared across tabs, and disabling auto or clearing it invalidates in-flight results.
 
 Reload the extension and X tabs after updating. The new PC temporary-download
 path requires the browser's downloads permission. The extension does not change

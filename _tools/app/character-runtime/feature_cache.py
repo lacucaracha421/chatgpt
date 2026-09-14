@@ -27,7 +27,7 @@ def runtime_fingerprint():
                 "numpy": np.__version__, "onnxruntime": onnxruntime.__version__,
                 "pillow": PIL.__version__, "sources": {
                     name: sha256(here / name) for name in
-                    ("runtime.py", "baseline.json", "feature_cache.py", "scan_worker.py", "learned_compare.py")}}
+                    ("runtime.py", "baseline.json", "feature_cache.py", "scan_worker.py", "learned_compare.py", "reference_regions.py", "reference_curation.py")}}
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
 
