@@ -12,6 +12,9 @@ pub(crate) mod client;
 pub(crate) mod collections;
 pub(crate) mod catalog;
 pub(crate) mod metadata_backup;
+#[cfg(test)]
+#[path = "metadata_backup_tests.rs"]
+mod metadata_backup_tests;
 pub(crate) mod models;
 pub(crate) mod queue;
 mod sync;

@@ -169,9 +169,33 @@ impl Library {
         result
     }
 
+    /// Refuse a whole-database swap when local state already tracks a server authority.
+    ///
+    /// Uses only the current, still-intact database, so a refusal leaves it and the
+    /// pending outbox exactly as they were. An unreadable adoption state is treated
+    /// as unsafe: this is a destructive operation and guessing "not adopted" could
+    /// discard accepted changes.
+    fn refuse_restore_with_adopted_authority(&self) -> Result<(), LibraryError> {
+        let connection = self.unlocked_connection()?;
+        let adopted = super::restore_guard::adopted_domains(&connection)?;
+        drop(connection);
+        if adopted.is_empty() {
+            return Ok(());
+        }
+        Err(LibraryError::RestoreAuthorityActive {
+            domains: adopted.join(", "),
+        })
+    }
+
     fn restore_snapshot_locked(&self, selected_path: &Path) -> Result<(), LibraryError> {
         self.stop_character_scan();
         check_interrupted_restore(&self.root)?;
+        // Refuse before any destructive work. The swap replaces sync cursors,
+        // durable outbox rows and `library_id` along with the canonical tables, so
+        // a database whose local state is already tied to a server authority cannot
+        // be rolled back to an older snapshot (ADR-0037 decision 6). This reads the
+        // still-intact current database, so a refusal preserves it exactly.
+        self.refuse_restore_with_adopted_authority()?;
         let current = self.root.join("library.sqlite");
         let temporary = self.root.join("library.sqlite.restore.part");
         let recovery = self.root.join(format!(
@@ -987,5 +1011,172 @@ mod tests {
 
         assert!(matches!(error, LibraryError::InvalidBackup));
         assert!(!destination.exists());
+    }
+
+    /// Local whole-database restore must stay reachable before any authority cut-over.
+    ///
+    /// This is the compatibility half of the guard: a library that never adopted a
+    /// server authority behaves exactly as it did before the guard existed.
+    #[test]
+    fn a_pre_authority_library_still_restores_a_local_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Before backup".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 9, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "After backup".into(),
+                parent_id: None,
+            })
+            .unwrap();
+
+        library.restore_backup(&backup.id).unwrap();
+
+        let names: Vec<_> = library
+            .list_classifications()
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        assert!(names.iter().any(|name| name == "Before backup"));
+        assert!(!names.iter().any(|name| name == "After backup"));
+    }
+
+    /// The exact local state a refused restore must leave untouched.
+    struct AdoptedState {
+        library_id: String,
+        outbox: Vec<(String, String, i64)>,
+        classifications: Vec<(String, String, Option<String>)>,
+        assets: i64,
+    }
+
+    fn adopted_state(library: &Library) -> AdoptedState {
+        let connection = library.connection().unwrap();
+        let library_id = connection
+            .query_row("SELECT library_id FROM library_settings WHERE singleton = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let outbox = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT operation_id, work_id, desired_state FROM catalog_bookmark_outbox
+                     ORDER BY operation_id",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let classifications = {
+            let mut statement = connection
+                .prepare("SELECT id, name, parent_id FROM classification_entries ORDER BY id")
+                .unwrap();
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let assets = connection
+            .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get(0))
+            .unwrap();
+        AdoptedState {
+            library_id,
+            outbox,
+            classifications,
+            assets,
+        }
+    }
+
+    /// Build a library whose local state has adopted the shipped bookmark authority.
+    fn library_with_adopted_bookmark_authority(library: &Library) {
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO catalog_bookmark_sync
+                    (singleton, library_id, epoch, contract_version, cursor, updated_at)
+                 VALUES (1, ?1, 1, 1, 5, '2026-09-15T00:00:00Z')",
+                ["a1b2c3d4e5f60718293a4b5c6d7e8f90"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO catalog_bookmark_outbox
+                    (operation_id, provider, work_id, desired_state, epoch, base_revision, created_at)
+                 VALUES ('op-1', 'kHentai', '7', 1, 1, 0, '2026-09-15T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+    }
+
+    /// An adopted authority blocks the swap before any destructive step runs.
+    #[test]
+    fn an_adopted_bookmark_authority_refuses_a_local_restore() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Before backup".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 9, 1, 12, 0, 0).unwrap())
+            .unwrap()
+            .unwrap();
+        library_with_adopted_bookmark_authority(&library);
+        let before = adopted_state(&library);
+
+        let error = library.restore_backup(&backup.id).unwrap_err();
+
+        match error {
+            LibraryError::RestoreAuthorityActive { domains } => {
+                assert_eq!(domains, "catalog-bookmarks");
+            }
+            other => panic!("expected an authority refusal, got {other}"),
+        }
+        let after = adopted_state(&library);
+        assert_eq!(after.library_id, before.library_id);
+        assert_eq!(after.outbox, before.outbox);
+        assert_eq!(after.classifications, before.classifications);
+        assert_eq!(after.assets, before.assets);
+        // The refusal is read-only: it must not leave a recovery database or intent
+        // marker behind for the next `Library::open` to trip over.
+        assert!(!library.root().join(super::RESTORE_INTENT).exists());
+        assert!(!fs::read_dir(library.root())
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("library.sqlite.restore-old-")));
+    }
+
+    /// The server-driven restore uses the same shared swap, so the guard covers it.
+    #[test]
+    fn an_adopted_bookmark_authority_refuses_a_cloud_snapshot_restore() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let snapshot = library.root().join("backups").join("cloud-metadata-test.sqlite");
+        library.create_cloud_metadata_snapshot(&snapshot).unwrap();
+        library_with_adopted_bookmark_authority(&library);
+        let before = adopted_state(&library);
+
+        let error = library.restore_cloud_metadata_snapshot(&snapshot).unwrap_err();
+
+        assert!(matches!(error, LibraryError::RestoreAuthorityActive { .. }), "{error}");
+        assert_eq!(adopted_state(&library).library_id, before.library_id);
+        assert_eq!(adopted_state(&library).outbox, before.outbox);
     }
 }

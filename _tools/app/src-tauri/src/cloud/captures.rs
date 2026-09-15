@@ -146,7 +146,20 @@ impl Library {
                 CloudMetadataKind::SavedX => {
                     self.publish_saved_x_media_snapshot_with(client, token)
                 }
-                CloudMetadataKind::Albums => self.publish_album_replica_with(client, token),
+                // After Album authority adoption the legacy snapshot lane is fenced
+                // server-side, and the Album outbox/change protocol owns shared Album
+                // state. 2B's handoff is therefore to *consume* the old generation
+                // locally instead of sending a request that can only be rejected:
+                // migration 0076's dirty triggers still fire — including for a remote
+                // apply — and an un-consumed generation would retry the fenced endpoint
+                // forever and report a permanent publication failure.
+                CloudMetadataKind::Albums => {
+                    if self.album_authority_adopted()? {
+                        Ok(())
+                    } else {
+                        self.publish_album_replica_with(client, token)
+                    }
+                }
             };
             match publish {
                 Ok(()) => self.ack_cloud_metadata_publication(

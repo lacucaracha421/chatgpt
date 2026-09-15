@@ -46,6 +46,9 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `agents/mobile.md` — Mobile direction and current checkpoint.
 - `agents/mobile-character-contract.md` — implemented character read publication/API/mobile navigation, authority limits and verification evidence.
 - `research/server-authority-model-audit-20260913.md` — current PC/server/mobile data mapping, character and Collection gaps, and server-authority transition design inputs; execution status lives in CLOUD-AUTH-001.
+- `research/server-authority-v2-product-decisions-20260915.md` — confirmed Server Authority v2 product decisions, Android/mobile audit findings, and pre-design migration constraints; not an implementation plan.
+- `research/server-authority-v2-pc-audit-20260915.md` — PC publication/recovery audit: stale-snapshot risks, local-vs-shared state, and safe retirement order.
+- `adr/0037-server-authority-v2-replica-and-command-contract.md` — proposed common per-domain authority, client-replica/outbox, recovery and fence contract for the next CLOUD-POST-001 batches.
 - `agents/mobile-consumption-ux.md` — approved Mobile Home/Library/viewer behavior.
 - `edge-extension.md` — current bundled X Collector routing and Cloud Library behavior; `../extension/AGENTS.md` owns extension source rules.
 - `agents/catalog-troubleshooting.md` — catalog transport/checkpoint behavior and rollout safeguards.

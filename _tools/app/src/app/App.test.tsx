@@ -14,6 +14,7 @@ import * as characters from "../characters/api";
 import { characterHubApi } from "../characters/hubApi";
 import { fixtureTarget } from "../characters/characterFixtures";
 import { App, type ExtensionIngestListener } from "./App";
+import { ALBUM_AUTHORITY_CHANGED_EVENT } from "./useAlbumAuthoritySync";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 const { nativeInvoke } = vi.hoisted(() => ({
@@ -626,6 +627,32 @@ describe("App", () => {
 
     await waitFor(() => expect(vi.mocked(libraryGateway.listAssets).mock.calls.length).toBeGreaterThan(assetCallsBefore));
     await waitFor(() => expect(vi.mocked(libraryGateway.preparePendingVideos).mock.calls.length).toBeGreaterThan(prepareCallsBefore));
+  });
+
+  it("refreshes albums and invalidates the asset browser on a remote Album change", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listAlbums).mockResolvedValue([
+      { id: "album-cover", name: "표지", parentId: null, iconKey: null, colorKey: null },
+    ]);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await screen.findByRole("treeitem", { name: "표지" });
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
+    const albumCallsBefore = vi.mocked(libraryGateway.listAlbums).mock.calls.length;
+    const assetCallsBefore = vi.mocked(libraryGateway.listAssets).mock.calls.length;
+
+    // The sync loop announces only passes that changed local Album state; a remote
+    // membership change looks identical to Album metadata, so both must be re-read.
+    act(() => {
+      window.dispatchEvent(new Event(ALBUM_AUTHORITY_CHANGED_EVENT));
+    });
+
+    await waitFor(() =>
+      expect(vi.mocked(libraryGateway.listAlbums).mock.calls.length).toBeGreaterThan(albumCallsBefore),
+    );
+    await waitFor(() =>
+      expect(vi.mocked(libraryGateway.listAssets).mock.calls.length).toBeGreaterThan(assetCallsBefore),
+    );
   });
 
   it("loads and saves the complete validated UI preference object", async () => {

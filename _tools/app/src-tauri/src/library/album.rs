@@ -1,20 +1,44 @@
 use std::collections::BTreeSet;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Transaction};
 
 use super::{
+    album_authority,
     error::LibraryError,
     folder_appearance,
     models::{AlbumEntry, AssetAlbumPatch, CreateAlbum},
     validated_asset_ids, Library,
 };
 
+/// Enqueue the authoritative intent for an accepted local Album mutation.
+///
+/// Called after the local row is written, inside the same transaction, so a crash
+/// can never leave a changed Album with no queued intent nor an intent for an Album
+/// that never changed. When no authority is adopted this appends nothing and the
+/// legacy PC-owned path is byte-identical to before.
+fn enqueue_structural(
+    transaction: &Transaction<'_>,
+    command_type: &str,
+    album_id: &str,
+    fields: serde_json::Map<String, serde_json::Value>,
+) -> Result<(), LibraryError> {
+    let mut fields = fields;
+    if command_type != album_authority::CREATE {
+        // Only a create introduces the Album, so only a create has no prior revision
+        // to compare against. Every other structural command is a compare-and-set.
+        let expected = album_authority::predicted_album_revision(transaction, album_id)?;
+        fields.insert("expectedRevision".into(), expected.into());
+    }
+    Library::enqueue_album_intent(transaction, command_type, album_id, fields)
+}
+
 impl Library {
     pub fn create_album(&self, request: CreateAlbum) -> Result<AlbumEntry, LibraryError> {
         let name = normalized_name(request.name)?;
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
         if let Some(parent_id) = request.parent_id.as_deref() {
-            require_album(&connection, parent_id)?;
+            require_album(&transaction, parent_id)?;
         }
         let entry = AlbumEntry {
             id: uuid::Uuid::new_v4().to_string(),
@@ -24,7 +48,7 @@ impl Library {
             color_key: None,
             asset_count: 0,
         };
-        connection
+        transaction
             .execute(
                 "INSERT INTO albums (id, name, parent_id, icon_key, color_key, created_at)
                  VALUES (?1, ?2, ?3, NULL, NULL, ?4)",
@@ -36,6 +60,19 @@ impl Library {
                 ],
             )
             .map_err(map_duplicate_name)?;
+        let mut fields = serde_json::Map::new();
+        fields.insert("name".into(), entry.name.clone().into());
+        fields.insert(
+            "parentId".into(),
+            match &entry.parent_id {
+                Some(parent_id) => parent_id.clone().into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        fields.insert("iconKey".into(), serde_json::Value::Null);
+        fields.insert("colorKey".into(), serde_json::Value::Null);
+        enqueue_structural(&transaction, album_authority::CREATE, &entry.id, fields)?;
+        transaction.commit()?;
         Ok(entry)
     }
 
@@ -58,8 +95,9 @@ impl Library {
 
     pub fn rename_album(&self, id: &str, name: &str) -> Result<(), LibraryError> {
         let name = normalized_name(name.to_owned())?;
-        let connection = self.connection()?;
-        let changed = connection
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let changed = transaction
             .execute(
                 "UPDATE albums SET name = ?1 WHERE id = ?2",
                 params![name, id],
@@ -68,6 +106,10 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::AlbumNotFound);
         }
+        let mut fields = serde_json::Map::new();
+        fields.insert("name".into(), name.into());
+        enqueue_structural(&transaction, album_authority::RENAME, id, fields)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -98,6 +140,15 @@ impl Library {
                 params![parent_id, id],
             )
             .map_err(map_duplicate_name)?;
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "parentId".into(),
+            match parent_id {
+                Some(parent_id) => parent_id.into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        enqueue_structural(&transaction, album_authority::MOVE, id, fields)?;
         transaction.commit()?;
         Ok(())
     }
@@ -114,7 +165,15 @@ impl Library {
         if has_children {
             return Err(LibraryError::AlbumHasChildren);
         }
+        // The local membership rows go with the Album through the declared
+        // `ON DELETE CASCADE`; only the queued intent is added here.
         transaction.execute("DELETE FROM albums WHERE id = ?1", [id])?;
+        enqueue_structural(
+            &transaction,
+            album_authority::DELETE,
+            id,
+            serde_json::Map::new(),
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -128,14 +187,32 @@ impl Library {
         if !folder_appearance::validate(icon_key, color_key) {
             return Err(LibraryError::InvalidAlbumAppearance);
         }
-        let connection = self.connection()?;
-        let changed = connection.execute(
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
             "UPDATE albums SET icon_key = ?1, color_key = ?2 WHERE id = ?3",
             params![icon_key, color_key, id],
         )?;
         if changed == 0 {
             return Err(LibraryError::AlbumNotFound);
         }
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "iconKey".into(),
+            match icon_key {
+                Some(icon_key) => icon_key.into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        fields.insert(
+            "colorKey".into(),
+            match color_key {
+                Some(color_key) => color_key.into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        enqueue_structural(&transaction, album_authority::APPEARANCE, id, fields)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -148,18 +225,38 @@ impl Library {
         for album_id in add_ids.iter().chain(remove_ids.iter()) {
             require_album(&transaction, album_id)?;
         }
-        for asset_id in asset_ids {
+        for asset_id in &asset_ids {
             for album_id in &remove_ids {
-                transaction.execute(
+                // Each accepted relation change becomes its own intent. A patch is not
+                // one command: the server's membership contract is per relation, and
+                // collapsing the loops would make one queued payload describe several
+                // relations it could not atomically compare-and-set.
+                let removed = transaction.execute(
                     "DELETE FROM asset_albums WHERE asset_id = ?1 AND album_id = ?2",
                     params![asset_id, album_id],
-                )?;
+                )? > 0;
+                if removed {
+                    Library::enqueue_album_membership_intent(
+                        &transaction,
+                        album_id,
+                        asset_id,
+                        false,
+                    )?;
+                }
             }
             for album_id in &add_ids {
-                transaction.execute(
+                let inserted = transaction.execute(
                     "INSERT OR IGNORE INTO asset_albums (asset_id, album_id) VALUES (?1, ?2)",
                     params![asset_id, album_id],
-                )?;
+                )? > 0;
+                if inserted {
+                    Library::enqueue_album_membership_intent(
+                        &transaction,
+                        album_id,
+                        asset_id,
+                        true,
+                    )?;
+                }
             }
         }
         transaction.commit()?;

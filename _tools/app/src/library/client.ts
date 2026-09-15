@@ -86,6 +86,9 @@ import type {
   CloudMetadataBackupResult,
   BookmarkReconciliationResult,
   BookmarkOutboxFlushResult,
+  AlbumReconciliationResult,
+  AlbumOutboxFlushResult,
+  AlbumSyncStatus,
   CloudCollectionsPublishResult,
   CloudLibraryRestoreReport,
   CatalogWorkDetail,
@@ -105,6 +108,19 @@ import type {
   CloudBackfillControlState,
   CloudBackfillReconcileReport,
 } from "./types";
+
+/**
+ * Run a local Album mutation and immediately try to deliver it.
+ *
+ * The durable intent is already committed with the mutation, so a failed send is not
+ * a lost edit: the background loop retries the same operation id. Sending here just
+ * shortens the window where another device sees the old structure.
+ */
+async function albumMutation<T>(run: () => Promise<T>): Promise<T> {
+  const result = await run();
+  try { await invoke("flush_album_outbox"); } catch { /* durable outbox retries in background */ }
+  return result;
+}
 
 export const libraryGateway: LibraryGateway = {
   getLibraryStatistics: () => invoke("get_library_statistics"),
@@ -156,6 +172,10 @@ export const libraryGateway: LibraryGateway = {
     invoke<BookmarkReconciliationResult>("reconcile_catalog_bookmarks"),
   flushCatalogBookmarkOutbox: () =>
     invoke<BookmarkOutboxFlushResult>("flush_catalog_bookmark_outbox"),
+  reconcileAlbumAuthority: () =>
+    invoke<AlbumReconciliationResult>("reconcile_album_authority"),
+  flushAlbumOutbox: () => invoke<AlbumOutboxFlushResult>("flush_album_outbox"),
+  albumSyncStatus: () => invoke<AlbumSyncStatus>("album_sync_status"),
   updateOnlineCatalog: (language, maxPages) =>
     language === undefined && maxPages === undefined
       ? invoke<CatalogUpdateResult>("update_online_catalog")
@@ -238,12 +258,13 @@ export const libraryGateway: LibraryGateway = {
     invoke("update_classification_appearance", { id, iconKey, colorKey }),
   deleteClassification: (id) => invoke("delete_classification", { id }),
   listAlbums: () => invoke<AlbumEntry[]>("list_albums"),
-  createAlbum: (request: CreateAlbum) => invoke<AlbumEntry>("create_album", { request }),
-  renameAlbum: (id, name) => invoke("rename_album", { id, name }),
-  moveAlbum: (id, parentId) => invoke("move_album", { id, parentId }),
+  createAlbum: (request: CreateAlbum) =>
+    albumMutation(() => invoke<AlbumEntry>("create_album", { request })),
+  renameAlbum: (id, name) => albumMutation(() => invoke("rename_album", { id, name })),
+  moveAlbum: (id, parentId) => albumMutation(() => invoke("move_album", { id, parentId })),
   updateAlbumAppearance: (id, iconKey, colorKey) =>
-    invoke("update_album_appearance", { id, iconKey, colorKey }),
-  deleteAlbum: (id) => invoke("delete_album", { id }),
+    albumMutation(() => invoke("update_album_appearance", { id, iconKey, colorKey })),
+  deleteAlbum: (id) => albumMutation(() => invoke("delete_album", { id })),
   listAssets: (query: AssetQuery) =>
     invoke<AssetPage>("list_assets", { query }),
   refreshAssets: (query, assetIds) => invoke<AssetSummary[]>("refresh_assets", { query, assetIds }),
@@ -295,7 +316,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<string[]>("get_asset_classifications", { assetId }),
   setAssetClassification: (request) =>
     invoke("set_asset_classification", { request }),
-  patchAssetAlbums: (patch: AssetAlbumPatch) => invoke("patch_asset_albums", { patch }),
+  patchAssetAlbums: (patch: AssetAlbumPatch) =>
+    albumMutation(() => invoke("patch_asset_albums", { patch })),
   getAssetAlbums: (assetId) => invoke<string[]>("get_asset_albums", { assetId }),
   listCollections: () => invoke<CollectionSummary[]>("list_collections"),
   searchMangaDex: (query) =>

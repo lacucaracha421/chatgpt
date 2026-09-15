@@ -1246,6 +1246,242 @@ fn unchanged_mobile_metadata_is_not_republished_on_the_next_capture_poll() {
 }
 
 #[test]
+fn pre_adoption_album_dirty_state_still_publishes_the_legacy_snapshot() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        for index in 0..4 {
+            let request = server
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .unwrap_or_else(|| panic!("expected a request, saw {urls:?} before #{index}"));
+            let url = request.url().to_string();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/classifications" | "/v1/saved-x-media" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                "/v1/library/album-snapshot" => request
+                    .respond(json_response(json!({ "ok": true })))
+                    .unwrap(),
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    // A local Album mutation dirties the legacy generation, as before adoption.
+    library
+        .create_album(crate::library::models::CreateAlbum {
+            name: "Legacy".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    let urls = handle.join().unwrap();
+    assert!(
+        urls.iter().any(|url| url == "/v1/library/album-snapshot"),
+        "pre-adoption behavior must be unchanged: {urls:?}"
+    );
+}
+
+#[test]
+fn post_adoption_album_generations_are_consumed_without_a_legacy_request() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        // Two full cycles: the second must send no album-snapshot request even though the
+        // first cycle's Album work dirtied the legacy generation.
+        for _ in 0..4 {
+            let mut request = server
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .expect("expected capture or metadata request");
+            let url = request.url().to_string();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/classifications" | "/v1/saved-x-media" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                "/v1/library/album-snapshot" => request
+                    .respond(json_response(json!({ "ok": true })))
+                    .unwrap(),
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        assert!(server
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .unwrap()
+            .is_none());
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    // Adopt Album authority, and dirty the legacy Album generation.
+    library
+        .adopt_album_authority_for_test(
+            "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            1,
+            1,
+            0,
+        )
+        .unwrap();
+    library
+        .create_album(crate::library::models::CreateAlbum {
+            name: "After".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+    // A second cycle proves the generation was consumed, not merely skipped once.
+    library
+        .create_album(crate::library::models::CreateAlbum {
+            name: "After2".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    let urls = handle.join().unwrap();
+    assert!(
+        !urls.iter().any(|url| url == "/v1/library/album-snapshot"),
+        "the fenced legacy lane must not be contacted: {urls:?}"
+    );
+    // The other lanes are untouched.
+    assert!(urls.iter().filter(|url| *url == "/v1/classifications").count() >= 1);
+    // No publication failure is reported, because nothing failed.
+    let activity = super::activity::read_activity(&library.connection().unwrap()).unwrap();
+    assert!(
+        activity[1].metadata_last_error.is_none(),
+        "consuming a legacy generation is not a failure: {:?}",
+        activity[1].metadata_last_error
+    );
+}
+
+#[test]
+fn post_adoption_remote_apply_dirtied_generation_is_consumed_quietly() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        // Drain until the client goes quiet: a fixed count would depend on which unrelated
+        // generations happen to be dirty, while the assertion that matters here is that the
+        // Album lane sends nothing.
+        while let Some(request) = server
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+        {
+            let url = request.url().to_string();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/classifications" | "/v1/saved-x-media" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                "/v1/library/album-snapshot" => request
+                    .respond(json_response(json!({ "ok": true })))
+                    .unwrap(),
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    library
+        .adopt_album_authority_for_test(
+            "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            1,
+            1,
+            0,
+        )
+        .unwrap();
+    // A remote Album apply writes the mirror tables, so migration 0076's dirty triggers
+    // fire even though no local edit happened. The next cycle must consume that
+    // generation rather than retry the fenced route forever.
+    library
+        .install_album_baseline_for_test(
+            &[crate::cloud::client::AlbumProjection {
+                id: "remote-album".into(),
+                name: "Remote".into(),
+                parent_id: None,
+                icon_key: None,
+                color_key: None,
+                deleted: false,
+                entity_revision: 1,
+            }],
+            &[],
+            "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            1,
+            1,
+            3,
+        )
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    let urls = handle.join().unwrap();
+    assert!(
+        !urls.iter().any(|url| url == "/v1/library/album-snapshot"),
+        "a remote apply must not resurrect the legacy lane: {urls:?}"
+    );
+    let activity = super::activity::read_activity(&library.connection().unwrap()).unwrap();
+    assert!(activity[1].metadata_last_error.is_none());
+}
+
+#[test]
 fn album_change_republishes_only_album_metadata() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}", server.server_addr());

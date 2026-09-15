@@ -120,14 +120,18 @@ describe("libraryGateway album contract", () => {
     expect(invoke).toHaveBeenNthCalledWith(1, "create_album", {
       request: { name: "표지", parentId: null },
     });
-    expect(invoke).toHaveBeenNthCalledWith(2, "patch_asset_albums", {
+    // An accepted Album mutation immediately tries to deliver its durable intent, so
+    // the window where another device sees the old structure stays short.
+    expect(invoke).toHaveBeenNthCalledWith(2, "flush_album_outbox");
+    expect(invoke).toHaveBeenNthCalledWith(3, "patch_asset_albums", {
       patch: {
         assetIds: ["asset-1"],
         addAlbumIds: ["album-1"],
         removeAlbumIds: [],
       },
     });
-    expect(invoke).toHaveBeenNthCalledWith(3, "set_asset_classification", {
+    expect(invoke).toHaveBeenNthCalledWith(4, "flush_album_outbox");
+    expect(invoke).toHaveBeenNthCalledWith(5, "set_asset_classification", {
       request: { assetIds: ["asset-1"], classificationId: "folder-1" },
     });
   });

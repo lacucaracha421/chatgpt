@@ -51,15 +51,30 @@ impl Library {
         &self,
     ) -> Result<CloudLibraryRestoreReport, LibraryError> {
         let (client, token) = self.metadata_backup_client()?;
+        self.restore_cloud_library_from_server_with(&client, &token)
+    }
+
+    /// The restore pass against an already-built client, so tests can drive the
+    /// safety gate over a real socket without going through credentials.
+    pub(super) fn restore_cloud_library_from_server_with(
+        &self,
+        client: &CloudClient,
+        token: &str,
+    ) -> Result<CloudLibraryRestoreReport, LibraryError> {
+        // Safety gate before any destructive work. A whole-database restore swaps
+        // authority cursors, bookmark reconciliation state, outbox contents and
+        // `library_id` along with the canonical tables, so once any shared domain is
+        // server-authoritative an old PC snapshot can no longer be rolled in.
+        self.ensure_full_restore_is_safe(client, token)?;
         let staging = self.metadata_backup_staging_path("download");
         let result = (|| {
-            let metadata_byte_size = client.download_metadata_backup(&staging, &token)?;
+            let metadata_byte_size = client.download_metadata_backup(&staging, token)?;
             self.restore_cloud_metadata_snapshot(&staging)?;
             let mut report = CloudLibraryRestoreReport {
                 metadata_byte_size,
                 ..Default::default()
             };
-            self.restore_managed_media(&client, &token, &mut report)?;
+            self.restore_managed_media(client, token, &mut report)?;
             // Video poster/scrub/proxy files are derived from the restored original.
             // A metadata snapshot can say "ready" while a new PC has none of those
             // derivatives yet, so reset those rows to the normal pending pipeline.
@@ -68,6 +83,32 @@ impl Library {
         })();
         cleanup_staging(&staging);
         result
+    }
+
+    /// Refuse a whole-database restore while any shared domain is server-authoritative.
+    ///
+    /// ADR-0037 decision 6: after a domain cut-over the canonical recovery path is
+    /// server-state restoration plus a client replica rebuild. An old PC SQLite
+    /// snapshot can restore stale cursors, outboxes and shared state the server has
+    /// already accepted from another client, so it must not be swapped in.
+    ///
+    /// The check runs before the download and before any destructive step, and it
+    /// fails closed: an authority status that cannot be determined is *not* treated
+    /// as "no authority exists". A server old enough to lack the route never
+    /// activated an authority domain, but the client cannot prove that from here,
+    /// so it reports the unknown state rather than guessing.
+    fn ensure_full_restore_is_safe(
+        &self,
+        client: &CloudClient,
+        token: &str,
+    ) -> Result<(), LibraryError> {
+        let status = client.sync_status(token)?;
+        if status.active || !status.domains.is_empty() {
+            return Err(LibraryError::RestoreAuthorityActive {
+                domains: status.active_domain_names().join(", "),
+            });
+        }
+        Ok(())
     }
 
     fn restore_managed_media(

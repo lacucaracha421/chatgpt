@@ -1,6 +1,14 @@
 pub(crate) mod aladin;
 mod aladin_flow;
 mod album;
+#[cfg(test)]
+#[path = "album_authority_tests.rs"]
+mod album_authority_tests;
+pub(crate) mod album_authority;
+pub(crate) mod album_reconciliation;
+#[cfg(test)]
+#[path = "album_reconciliation_tests.rs"]
+mod album_reconciliation_tests;
 mod asset_metadata;
 pub(crate) mod av_artwork;
 pub(crate) mod av_collection;
@@ -98,6 +106,7 @@ pub(crate) mod remote_media;
 pub(crate) mod remote_progress;
 mod revisit;
 mod revisit_color;
+pub(crate) mod restore_guard;
 mod similarity;
 mod source_group;
 pub mod statistics;

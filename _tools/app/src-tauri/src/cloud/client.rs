@@ -156,12 +156,522 @@ struct MetadataBackupTicket {
     size_bytes: Option<u64>,
 }
 
+/// One active authority domain as reported by `GET /v1/sync/status`.
+///
+/// Per-domain epoch/cursor is the correctness contract; the aggregate response
+/// only reports them so a client can decide which domain loops to run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SyncAuthorityDomain {
+    pub domain: String,
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub cursor: i64,
+}
+
+/// Aggregate authority discovery. `active` is false while every shared domain is
+/// still PC-owned, which is the expected state before a domain cut-over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SyncStatus {
+    pub protocol_version: i64,
+    pub active: bool,
+    pub library_id: Option<String>,
+    pub domains: Vec<SyncAuthorityDomain>,
+}
+
+impl SyncStatus {
+    /// The domain names this server reports as server-authoritative, in order.
+    pub(crate) fn active_domain_names(&self) -> Vec<&str> {
+        self.domains.iter().map(|domain| domain.domain.as_str()).collect()
+    }
+
+    /// Whether this response is self-consistent enough to act on.
+    ///
+    /// The restore guard treats `!active` as proof that no shared domain has moved
+    /// to server authority, so an inconsistent envelope must never reach it. Each
+    /// rule below closes a way a broken or hostile server could claim "nothing is
+    /// active" while actually reporting an active domain:
+    ///
+    /// * `active` must agree with the domain list, so neither field alone decides;
+    /// * an inactive response may not name a library or a domain;
+    /// * an active response must identify its library;
+    /// * every domain must belong to the same library as the envelope, so two
+    ///   libraries cannot be reported through one document;
+    /// * domain names must be non-empty and unique, so counting and lookup agree;
+    /// * epoch/contract must be positive and the cursor may not be negative, since
+    ///   those are the fields a domain loop would replay from.
+    ///
+    /// Identifiers use the same 32-lowercase-hex invariant the server enforces, so
+    /// a placeholder value cannot be mistaken for a library identity.
+    pub(crate) fn is_consistent(&self) -> bool {
+        if self.active != !self.domains.is_empty() {
+            return false;
+        }
+        if self.active {
+            if !self.library_id.as_deref().is_some_and(crate::library::is_valid_library_id) {
+                return false;
+            }
+        } else if self.library_id.is_some() {
+            // An inactive envelope names no library. Reporting one while claiming
+            // nothing is active is the contradiction that must not be trusted.
+            return false;
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for domain in &self.domains {
+            if domain.domain.trim().is_empty()
+                || !seen.insert(domain.domain.as_str())
+                || !crate::library::is_valid_library_id(&domain.library_id)
+                || Some(domain.library_id.as_str()) != self.library_id.as_deref()
+                || domain.epoch < 1
+                || domain.contract_version < 1
+                || domain.cursor < 0
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// The aggregate contract version this build understands.
+///
+/// A future version may redefine what `active` or a domain row means, so it must
+/// never be interpreted by this client's field expectations. One supported
+/// version also keeps "inactive" provable: the envelope is fully validated before
+/// any caller may read it as evidence that nothing has been migrated.
+const SYNC_PROTOCOL_VERSION: i64 = 1;
+
+/// One Album page or change payload, as the server encodes it.
+pub(crate) const ALBUM_BASELINE_ALBUMS_SECTION: &str = "albums";
+pub(crate) const ALBUM_BASELINE_MEMBERSHIPS_SECTION: &str = "memberships";
+
+/// Maximum encoded Album response accepted from the server.
+///
+/// The server bounds one baseline page at 2 MiB and one change page by its item
+/// count, so this leaves room for the envelope without accepting an unbounded body.
+const MAX_ALBUM_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
+/// One authoritative Album projection carried by a change row or baseline page.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumProjection {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub icon_key: Option<String>,
+    pub color_key: Option<String>,
+    pub deleted: bool,
+    pub entity_revision: i64,
+}
+
+/// One authoritative membership projection. `desired_state` is the authoritative
+/// value for *this relation*, so a tombstone is representable and is not the same
+/// as "the relation was never seen".
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumMembershipProjection {
+    pub album_id: String,
+    pub asset_id: String,
+    pub desired_state: bool,
+    pub entity_revision: i64,
+}
+
+/// A baseline page. `complete` is true only on the final membership page, so a
+/// client can never adopt a subset it mistook for the whole domain.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumBaselinePage {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub snapshot_cursor: i64,
+    pub section: String,
+    pub items: serde_json::Value,
+    pub next_after: Option<String>,
+    pub has_more: bool,
+    pub complete: bool,
+}
+
+impl AlbumBaselinePage {
+    /// Decode this page's items for its declared section.
+    ///
+    /// A page whose section does not match its item shape is a malformed response,
+    /// not something to interpret leniently.
+    pub(crate) fn decode(
+        &self,
+    ) -> Result<(Vec<AlbumProjection>, Vec<AlbumMembershipProjection>), LibraryError> {
+        match self.section.as_str() {
+            ALBUM_BASELINE_ALBUMS_SECTION => Ok((
+                serde_json::from_value(self.items.clone())
+                    .map_err(|_| LibraryError::InvalidCloudResponse)?,
+                Vec::new(),
+            )),
+            ALBUM_BASELINE_MEMBERSHIPS_SECTION => Ok((
+                Vec::new(),
+                serde_json::from_value(self.items.clone())
+                    .map_err(|_| LibraryError::InvalidCloudResponse)?,
+            )),
+            _ => Err(LibraryError::InvalidCloudResponse),
+        }
+    }
+}
+
+/// One ordered, self-contained change row.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumChange {
+    pub sequence: i64,
+    pub authority_cursor: i64,
+    pub command_type: String,
+    pub operation_id: String,
+    pub changed_at: String,
+    #[serde(default)]
+    pub album: Option<AlbumProjection>,
+    #[serde(default)]
+    pub membership: Option<AlbumMembershipProjection>,
+}
+
+impl AlbumChange {
+    /// The single canonical delta this change carries.
+    ///
+    /// Exactly one of the two must be present: accepting a row with both, or with
+    /// neither, would let a malformed server silently desynchronize a replica.
+    pub(crate) fn delta(
+        &self,
+    ) -> Result<(Option<&AlbumProjection>, Option<&AlbumMembershipProjection>), LibraryError> {
+        match (&self.album, &self.membership) {
+            (Some(album), None) => Ok((Some(album), None)),
+            (None, Some(membership)) => Ok((None, Some(membership))),
+            _ => Err(LibraryError::InvalidCloudResponse),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumChanges {
+    pub cursor: i64,
+    pub items: Vec<AlbumChange>,
+    pub next_after: i64,
+    pub has_more: bool,
+}
+
+/// The accepted result of one Album command.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AlbumCommandResult {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub command_type: String,
+    pub operation_id: String,
+    pub changed: bool,
+    pub change_sequence: Option<i64>,
+    pub authority_cursor: i64,
+    #[serde(default)]
+    pub album: Option<AlbumProjection>,
+    #[serde(default)]
+    pub membership: Option<AlbumMembershipProjection>,
+}
+
+/// A coded rejection the caller must treat as a structural conflict, not a retry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AlbumConflict {
+    /// The server's coded reason (for example `revisionConflict`).
+    pub code: String,
+    /// The current authoritative state the server reported, as raw JSON.
+    pub detail: serde_json::Value,
+}
+
+/// The outcome of sending one Album command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AlbumCommandOutcome {
+    /// The authority accepted the command; the result is durable and replayable.
+    Accepted(Box<AlbumCommandResult>),
+    /// The authority rejected the command on structural grounds. The intent must be
+    /// preserved rather than rebased automatically.
+    Conflict(AlbumConflict),
+}
+
+/// Maximum domains accepted in one aggregate response. A bounded list keeps a
+/// hostile or broken server from forcing unbounded work in the restore guard.
+const MAX_SYNC_DOMAINS: usize = 512;
+
 pub(crate) struct CloudClient {
     agent: ureq::Agent,
     base_url: url::Url,
 }
 
 impl CloudClient {
+    /// Aggregate sync status: which domains are server-authoritative right now.
+    ///
+    /// Fails closed in every direction, because the only current caller decides
+    /// whether a destructive whole-database restore may proceed:
+    ///
+    /// * an older server without the route (404) cannot report its authority
+    ///   state, so it is `RestoreAuthorityUnknown`, never "no authority";
+    /// * a credential failure stays a credential failure, because that is
+    ///   actionable and is not evidence about authority;
+    /// * an unsupported protocol version is `SyncProtocolUnsupported`;
+    /// * a syntactically valid but semantically inconsistent envelope is
+    ///   `RestoreAuthorityUnknown`, since the client cannot tell whether a domain
+    ///   it failed to parse is in fact active.
+    pub(crate) fn sync_status(&self, token: &str) -> Result<SyncStatus, LibraryError> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Domain {
+            domain: String,
+            library_id: String,
+            epoch: i64,
+            contract_version: i64,
+            cursor: i64,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Status {
+            protocol_version: i64,
+            active: bool,
+            library_id: Option<String>,
+            domains: Vec<Domain>,
+        }
+        let mut response = self
+            .agent
+            .get(self.endpoint("/v1/sync/status")?)
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| match error {
+                // An older server without the route cannot report its authority
+                // state, which is unknown rather than "none".
+                ureq::Error::StatusCode(404) => LibraryError::RestoreAuthorityUnknown,
+                // Authorization/transport problems are reported as themselves: the
+                // caller still refuses to restore, but the user gets an actionable
+                // reason instead of a misleading authority error.
+                other => map_api_error(other, |_| LibraryError::InvalidCloudResponse),
+            })?;
+        // A body this client cannot parse at all is an unreadable authority state.
+        let status = read_json::<Status>(&mut response).map_err(|_| LibraryError::RestoreAuthorityUnknown)?;
+        if status.protocol_version != SYNC_PROTOCOL_VERSION {
+            return Err(LibraryError::SyncProtocolUnsupported);
+        }
+        if status.domains.len() > MAX_SYNC_DOMAINS {
+            return Err(LibraryError::RestoreAuthorityUnknown);
+        }
+        let domains = status
+            .domains
+            .into_iter()
+            .map(|domain| SyncAuthorityDomain {
+                domain: domain.domain,
+                library_id: domain.library_id,
+                epoch: domain.epoch,
+                contract_version: domain.contract_version,
+                cursor: domain.cursor,
+            })
+            .collect::<Vec<_>>();
+        let status = SyncStatus {
+            protocol_version: status.protocol_version,
+            active: status.active,
+            library_id: status.library_id,
+            domains,
+        };
+        if !status.is_consistent() {
+            return Err(LibraryError::RestoreAuthorityUnknown);
+        }
+        Ok(status)
+    }
+
+    /// One Album baseline page against a frozen snapshot cursor.
+    ///
+    /// The first request omits `snapshot` and establishes the cursor; every later
+    /// page supplies the same value, which is what makes the pages describe one
+    /// materialized state. `after` walks the deterministic order inside a section and
+    /// is never a synchronization cursor.
+    pub(crate) fn album_baseline_page(
+        &self,
+        library_id: &str,
+        epoch: i64,
+        snapshot: Option<i64>,
+        section: Option<&str>,
+        after: Option<&str>,
+        token: &str,
+    ) -> Result<AlbumBaselinePage, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || epoch < 1 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        if let Some(section) = section {
+            if !matches!(section, ALBUM_BASELINE_ALBUMS_SECTION | ALBUM_BASELINE_MEMBERSHIPS_SECTION) {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
+        let mut url = url::Url::parse(&self.endpoint("/v1/albums/baseline")?)
+            .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("libraryId", library_id);
+            query.append_pair("epoch", &epoch.to_string());
+            if let Some(snapshot) = snapshot {
+                query.append_pair("snapshot", &snapshot.to_string());
+            }
+            if let Some(section) = section {
+                query.append_pair("section", section);
+            }
+            if let Some(after) = after {
+                query.append_pair("after", after);
+            }
+        }
+        // `http_status_as_error` is disabled for this request so the coded 409 body
+        // survives: the route returns `baselineChanged` when a mutation landed between
+        // pages, and the authority codes when the identity/epoch/contract no longer
+        // matches. Those demand different recovery, and collapsing them into one
+        // generic rejection would make a retryable re-base look like a fatal error.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut response = agent
+            .get(url.as_str())
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| map_album_read_error(error, LibraryError::AlbumSyncRejected(409)))?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            if status == 409 {
+                return Err(match read_json::<AlbumCodedConflict>(&mut response) {
+                    Ok(body) => {
+                        album_conflict_error(body.detail, LibraryError::AlbumBaselineChanged)
+                    }
+                    // An unreadable body is still evidence the request was refused; the
+                    // conservative reading is a changed baseline, which recovers by
+                    // re-reading every page from a fresh snapshot.
+                    Err(_) => LibraryError::AlbumBaselineChanged,
+                });
+            }
+            return Err(map_album_status(status));
+        }
+        read_json_bounded::<AlbumBaselinePage>(&mut response, MAX_ALBUM_RESPONSE_BYTES)
+    }
+
+    /// One page of the ordered Album change log, ascending by sequence.
+    pub(crate) fn album_changes(
+        &self,
+        library_id: &str,
+        epoch: i64,
+        after: i64,
+        limit: u32,
+        token: &str,
+    ) -> Result<AlbumChanges, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || epoch < 1 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        if after < 0 || !(1..=500).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // `http_status_as_error` is disabled for this request so the coded 409 body
+        // survives: an expired cursor and a cursor ahead of the server share a status
+        // but demand different recovery, and neither may be read as "no changes".
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut url = url::Url::parse(&self.endpoint("/v1/albums/changes")?)
+            .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("libraryId", library_id);
+            query.append_pair("epoch", &epoch.to_string());
+            query.append_pair("after", &after.to_string());
+            query.append_pair("limit", &limit.to_string());
+        }
+        let mut response = agent
+            .get(url.as_str())
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| map_album_read_error(error, LibraryError::AlbumCursorAhead))?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            if status == 409 {
+                return Err(match read_json::<AlbumCodedConflict>(&mut response) {
+                    Ok(body) => album_conflict_error(body.detail, LibraryError::AlbumCursorAhead),
+                    Err(_) => LibraryError::AlbumCursorAhead,
+                });
+            }
+            return Err(map_album_status(status));
+        }
+        read_json_bounded::<AlbumChanges>(&mut response, MAX_ALBUM_RESPONSE_BYTES)
+    }
+
+    /// Send one Album command.
+    ///
+    /// The caller retries with the *same* encoded payload and operation id, so the
+    /// server's receipt resolves a lost response instead of applying the intent
+    /// twice. A structural rejection is returned as a coded conflict rather than an
+    /// error, because it is state the caller must preserve, not retry away.
+    pub(crate) fn album_command(
+        &self,
+        body: &serde_json::Value,
+        token: &str,
+    ) -> Result<AlbumCommandOutcome, LibraryError> {
+        let bytes = serde_json::to_vec(body).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if bytes.len() > 16 * 1024 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut response = agent
+            .put(self.endpoint("/v1/albums/commands")?)
+            .header("Authorization", bearer(token)?)
+            .content_type("application/json")
+            .send(&bytes)
+            .map_err(|_| LibraryError::AlbumCommandOutcomeUnknown)?;
+        let status = response.status().as_u16();
+        if status == 200 {
+            let result = read_json_bounded::<AlbumCommandResult>(&mut response, MAX_ALBUM_RESPONSE_BYTES)?;
+            // A 200 is only an acceptance of *this* command if it says so. The caller
+            // deletes the queue row identified by the stored operation id and writes the
+            // returned revision into the confirmed caches, so an echo describing another
+            // operation, entity or contract would retire the wrong intent and record a
+            // revision that belongs to something else. A malformed 200 is therefore a
+            // protocol-integrity failure, not an acceptance.
+            result.validate_against(body)?;
+            return Ok(AlbumCommandOutcome::Accepted(Box::new(result)));
+        }
+        // Coded rejections are read from a bounded structured body and mapped by code,
+        // never by status alone: the route uses one status for an authority identity
+        // failure, a compare-and-set conflict and a semantic structural rejection, and
+        // those demand different handling.
+        let detail = read_json::<AlbumCodedConflict>(&mut response)
+            .map(|body| body.detail)
+            .unwrap_or(serde_json::Value::Null);
+        let code = detail
+            .get("code")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        match classify_album_rejection(code) {
+            AlbumRejection::Authority(error) => Err(error),
+            AlbumRejection::Structural(rejected) => Ok(AlbumCommandOutcome::Conflict(AlbumConflict {
+                code: rejected.to_owned(),
+                detail,
+            })),
+            // An unrecognized code keeps the intent and retries with the identical
+            // operation id. It must **not** fall through to a status-based mapping: doing
+            // so would report an uncoded semantic 422 as `AlbumContractUnsupported` and
+            // strand a perfectly deliverable intent behind a false version skew, which is
+            // the second unsafe direction this mapping exists to remove. Credentials stay
+            // typed because they are actionable and are not evidence about the intent.
+            AlbumRejection::Retryable => match status {
+                401 | 403 => Err(LibraryError::CloudUnauthorized),
+                _ => Err(LibraryError::AlbumCommandOutcomeUnknown),
+            },
+        }
+    }
+
     pub(crate) fn publish_catalog_visibility(&self,body:&serde_json::Value,token:&str)->Result<(),LibraryError>{
         let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
         if bytes.len()>crate::library::mobile_catalog::MAX_USERS{return Err(LibraryError::InvalidCloudResponse)}
@@ -1129,6 +1639,176 @@ fn map_registration_error(error: ureq::Error) -> LibraryError {
 /// stored library/epoch/contract/cursor no longer describes the live authority,
 /// so they surface as the documented recovery states rather than a generic
 /// network error that a blind retry could never resolve.
+/// Map an Album transport failure onto a distinguishable recovery state.
+///
+/// The Album domain keeps its states separate for the same reason the bookmark
+/// domain does: "authority inactive", "stored identity no longer matches", "the
+/// server speaks another contract" and "the transport failed" demand different
+/// actions, and flattening them into one network error would leave a blind retry as
+/// the only response to all four.
+fn map_album_read_error(error: ureq::Error, conflict: LibraryError) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(409) => conflict,
+        // The route rejects an unknown contractVersion with 422, and this client only
+        // ever sends the version it was compiled against.
+        ureq::Error::StatusCode(422) => LibraryError::AlbumContractUnsupported,
+        ureq::Error::StatusCode(401 | 403) => LibraryError::CloudUnauthorized,
+        ureq::Error::StatusCode(status) => LibraryError::AlbumSyncRejected(status),
+        ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+        _ => LibraryError::CloudRequestUnavailable,
+    }
+}
+
+/// Map a non-200 Album status that carried no coded body.
+fn map_album_status(status: u16) -> LibraryError {
+    match status {
+        401 | 403 => LibraryError::CloudUnauthorized,
+        422 => LibraryError::AlbumContractUnsupported,
+        other => LibraryError::AlbumSyncRejected(other),
+    }
+}
+
+/// Translate a coded Album 409 body into the specific recovery state it names.
+///
+/// Every coded reason here shares status 409 and none is interchangeable: expiry needs
+/// a fresh baseline, `cursorAhead` means the identity is skewed, a changed baseline
+/// needs the pages re-read from a fresh snapshot, and an inactive or mismatched
+/// authority is an identity problem no retry can fix. `fallback` is the reading for an
+/// unrecognized code, which each route chooses by what its own retry would cost: the
+/// changes route resumes from its cursor, while the baseline route can only re-read.
+fn album_conflict_error(detail: serde_json::Value, fallback: LibraryError) -> LibraryError {
+    let code = detail.get("code").and_then(|value| value.as_str()).unwrap_or("");
+    match code {
+        "cursorExpired" => LibraryError::AlbumCursorExpired,
+        "cursorAhead" => LibraryError::AlbumCursorAhead,
+        "baselineChanged" | "albumBaselineChanged" => LibraryError::AlbumBaselineChanged,
+        "authorityInactive" => LibraryError::AlbumAuthorityInactive,
+        "authorityLibraryMismatch" | "authorityAmbiguous" => LibraryError::AlbumAuthorityMismatch,
+        "authorityContractUnsupported" => LibraryError::AlbumContractUnsupported,
+        _ => fallback,
+    }
+}
+
+/// What a coded Album rejection means for the intent that produced it.
+///
+/// The distinction is the whole point of reading the code: an authority or protocol
+/// state is not a user conflict, and a semantic structural rejection is not a contract
+/// upgrade. Conflating them either blocks a perfectly retryable intent behind a
+/// misleading "conflict", or tells the user to upgrade a client that is already correct.
+enum AlbumRejection {
+    /// The stored library/epoch/contract no longer describes the live authority, or the
+    /// server speaks a protocol this build cannot. Neither is recoverable by retrying
+    /// the same intent, and neither is something the user resolved.
+    Authority(LibraryError),
+    /// The authority understood the command and refused its content. The intent is
+    /// durable and the user must decide, so it becomes a blocked queue row.
+    Structural(&'static str),
+    /// No usable coded meaning: a lost or unknown result, which stays retryable with the
+    /// identical operation id and payload so the server's receipt resolves it.
+    Retryable,
+}
+
+/// Map a coded Album rejection onto its handling.
+///
+/// The codes are the ones `server/lakomics-api/album_authority.py` actually returns.
+/// `operationConflict` is deliberately an integrity failure rather than a user conflict:
+/// it means one operation id was reused with different content, which is a bug in a
+/// client, and reporting it as "another device changed this" would be a lie.
+fn classify_album_rejection(code: &str) -> AlbumRejection {
+    match code {
+        // Authority identity and contract skew.
+        "authorityInactive" => AlbumRejection::Authority(LibraryError::AlbumAuthorityInactive),
+        "authorityLibraryMismatch" | "authorityAmbiguous" => {
+            AlbumRejection::Authority(LibraryError::AlbumAuthorityMismatch)
+        }
+        "authorityContractUnsupported" | "unsupportedAlbumCommand" => {
+            AlbumRejection::Authority(LibraryError::AlbumContractUnsupported)
+        }
+        // The server understood the transport but rejected the command's shape. Calling
+        // this a contract *upgrade* would be wrong — this build speaks the negotiated
+        // contract — so it gets its own error carrying the server's code, and the intent
+        // stays deliverable rather than being discarded or blocked as the user's fault.
+        "invalidAlbumCommand" | "invalidAlbumRevision" | "emptyAlbumName"
+        | "albumNameTooLong" | "invalidAlbumAppearance" | "invalidAlbumBaseline" => {
+            AlbumRejection::Authority(LibraryError::AlbumCommandRejected {
+                code: code.to_owned(),
+            })
+        }
+        "operationConflict" => AlbumRejection::Authority(LibraryError::AlbumOperationConflict),
+        // `albumBaselineChanged` belongs to the baseline/activation routes, which never
+        // reach this path; a command route returning it is an integrity failure, so the
+        // intent is preserved rather than blocked.
+        "albumBaselineChanged" => AlbumRejection::Retryable,
+        // Meaningful entity/structure rejections: the user's intent is real, the content
+        // was refused, and the intent must be preserved for a decision.
+        "revisionConflict" => AlbumRejection::Structural("revisionConflict"),
+        "duplicateAlbumName" => AlbumRejection::Structural("duplicateAlbumName"),
+        "albumCycle" => AlbumRejection::Structural("albumCycle"),
+        "albumHasChildren" => AlbumRejection::Structural("albumHasChildren"),
+        "albumExists" => AlbumRejection::Structural("albumExists"),
+        "albumNotFound" => AlbumRejection::Structural("albumNotFound"),
+        "invalidAlbumParent" => AlbumRejection::Structural("invalidAlbumParent"),
+        "invalidAlbumMembership" => AlbumRejection::Structural("invalidAlbumMembership"),
+        // Activation-only codes. A command route returning one is an integrity failure, so
+        // the intent is preserved rather than blocked on the user.
+        "albumAuthorityActive" | "albumMembershipAssetsMissing" | "albumSnapshotNotAuthorityReady"
+        | "albumReplicaUnavailable" | "baselineChanged" | "baselinePageTooLarge" => {
+            AlbumRejection::Retryable
+        }
+        _ => AlbumRejection::Retryable,
+    }
+}
+
+impl AlbumCommandResult {
+    /// Prove this accepted result describes the command that was sent.
+    ///
+    /// The caller retires the queue row keyed by the *stored* operation id and writes the
+    /// returned revision into the confirmed caches. An echo that names another operation,
+    /// entity, epoch or contract would therefore retire the wrong intent and record state
+    /// belonging to something else — corrupting the confirmation cache rather than merely
+    /// losing a response. Every identity field must therefore agree exactly, and the
+    /// projection must be the one kind the command targets.
+    pub(crate) fn validate_against(&self, command: &serde_json::Value) -> Result<(), LibraryError> {
+        let field = |key: &str| command.get(key).and_then(|value| value.as_str());
+        let number = |key: &str| command.get(key).and_then(|value| value.as_i64());
+        if field("libraryId") != Some(self.library_id.as_str())
+            || field("operationId") != Some(self.operation_id.as_str())
+            || field("commandType") != Some(self.command_type.as_str())
+            || number("epoch") != Some(self.epoch)
+            || number("contractVersion") != Some(self.contract_version)
+            || self.contract_version != crate::library::album_authority::ALBUM_CONTRACT_VERSION
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let album_id = field("albumId").ok_or(LibraryError::InvalidCloudResponse)?;
+        match (&self.album, &self.membership) {
+            // A membership command answers with the relation it was asked about.
+            (None, Some(membership)) => {
+                if membership.album_id != album_id
+                    || field("assetId") != Some(membership.asset_id.as_str())
+                {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+            }
+            // A structural command answers with its own Album projection.
+            (Some(album), None) => {
+                if album.id != album_id {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+            }
+            // Both or neither: the result does not describe one typed delta.
+            _ => return Err(LibraryError::InvalidCloudResponse),
+        }
+        Ok(())
+    }
+}
+
+/// The coded 409 envelope this client reads before deciding the recovery.
+#[derive(serde::Deserialize)]
+struct AlbumCodedConflict {
+    detail: serde_json::Value,
+}
+
 fn map_bookmark_read_error(error: ureq::Error, conflict: LibraryError) -> LibraryError {
     match error {
         ureq::Error::StatusCode(409) => conflict,

@@ -1,7 +1,8 @@
 # Move shared domains to server authority in stages
 
-Status: Proposed — target contract for CLOUD-AUTH-001; no domain authority switch
-is implemented by the character read projection.
+Status: Accepted as the staged cutover pattern. Catalog bookmarks are the first
+activated server-authority domain; other domains remain on their legacy authority
+until explicitly cut over. The character projection remains read-only.
 
 Intended relationship: partially supersede ADR-0033 only for domains explicitly
 cut over. ADR-0033 remains the current behavior until those domain gates exist.
@@ -78,8 +79,9 @@ retry, concurrent clients, stale snapshot rejection, restart recovery, and later
 Windows/Linux PC reconciliation without lost changes. Server deployment, active
 data migration and service provisioning remain separately authorized actions.
 
-Current read implementation: [mobile character contract](../agents/mobile-character-contract.md).
-Remaining work and ordering are tracked only in [CLOUD-AUTH-001](../roadmap/lakomics-backlog.md).
+Current character read projection: [mobile character contract](../agents/mobile-character-contract.md).
+The broader client/replica contract is clarified by [ADR-0037](0037-server-authority-v2-replica-and-command-contract.md);
+active follow-up is tracked in [CLOUD-POST-001](../roadmap/lakomics-backlog.md#cloud-post-001--서버-원천화-이후-클라이언트-구조-정리).
 
 Implementation checkpoint (2026-09-13): MOBILE-008 adds a bounded server worker for
 new catalog works after an existing PC publication. An additive ledger protects

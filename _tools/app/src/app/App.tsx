@@ -1,5 +1,6 @@
 import {useMobilePublications} from './useMobilePublications';
 import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
+import {ALBUM_AUTHORITY_CHANGED_EVENT, useAlbumAuthoritySync} from './useAlbumAuthoritySync';
 import { characterApi, moveAssetsToCharacter } from "../characters/api";
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
 import { useCharacterHub } from "../characters/useCharacterHub";
@@ -142,6 +143,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useCloudBackfillSupervisor(gateway, libraryRoot);
   useMobilePublications(gateway, libraryRoot);
   useCatalogBookmarkSync(gateway, libraryRoot);
+  useAlbumAuthoritySync(gateway, libraryRoot);
   const cloudProblems = useCloudProblems(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
@@ -267,6 +269,19 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (result.videoAdded > 0) setVideoPreparationTrigger((current) => current + 1);
     if (result.reviewPending > 0) void refreshReviewCount();
   }, [refreshMembershipCounts, refreshReviewCount]);
+  // A remote Album change lands in the local replica without a local action, so both the
+  // sidebar and the visible AssetBrowser have to re-read it; the sync loop announces only
+  // passes whose result actually changed local Album state. The asset refresh matters for
+  // membership changes: Album metadata/counts can look identical while the set of Assets
+  // in the open Album gallery has changed underneath.
+  useEffect(() => {
+    const refresh = () => {
+      void refreshAlbums();
+      setAssetRefresh((current) => current + 1);
+    };
+    window.addEventListener(ALBUM_AUTHORITY_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(ALBUM_AUTHORITY_CHANGED_EVENT, refresh);
+  }, [refreshAlbums]);
   useCloudCaptureSync(gateway, libraryRoot, handleCloudCaptureSync);
   const handleIngestedRef = useRef(handleIngested);
   useLayoutEffect(() => { handleIngestedRef.current = handleIngested; }, [handleIngested]);

@@ -19,6 +19,9 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
+import album_authority
+import authority
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
 API_TOKEN = os.environ.get("LAKOMICS_API_TOKEN", "")
@@ -2403,9 +2406,14 @@ class AlbumReplicaEntry(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=256)
     parent_id: str | None = Field(default=None, max_length=64)
+    #: Snapshot version 2+ fields. Absent means a version-1 publisher, which the server
+    #: still accepts for the display replica but cannot treat as authority-ready.
+    icon_key: str | None = Field(default=None, max_length=64)
+    color_key: str | None = Field(default=None, max_length=64)
 
 
 class AlbumReplicaMedia(BaseModel):
+    """Display-oriented media rows. Normal-visible Assets only, by design."""
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=64)
     date: int = Field(ge=0)
@@ -2415,11 +2423,41 @@ class AlbumReplicaMedia(BaseModel):
     albums: list[str] = Field(max_length=2000)
 
 
-class AlbumReplicaPublish(BaseModel):
+class AlbumReplicaMembership(BaseModel):
+    """One canonical Asset<->Album relation, independent of Asset display status.
+
+    A trashed Asset keeps its Album relations in the PC database, so the canonical
+    membership collection must carry them too. Deriving canonical membership from the
+    display `media` array instead would silently drop those relations at activation
+    and break the product contract that restoring an Asset returns its Albums.
+    """
     model_config = ConfigDict(extra="forbid")
+    album_id: str = Field(alias="albumId", min_length=1, max_length=64)
+    asset_id: str = Field(alias="assetId", min_length=1, max_length=64)
+
+
+class AlbumReplicaPublish(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    #: The wire name is camelCase, matching the Rust publisher. Without this alias the
+    #: model would reject the field as unknown under `extra="forbid"`, so the documented
+    #: contract and the accepted contract would disagree.
+    snapshot_version: int | None = Field(default=None, alias="snapshotVersion")
     published_at: AwareDatetime
     albums: list[AlbumReplicaEntry] = Field(max_length=2000)
     media: list[AlbumReplicaMedia] = Field(max_length=100000)
+    #: Snapshot version 3 only. `None` distinguishes "a version-1/2 publisher that has
+    #: no canonical membership to send" from "a version-3 publisher with no relations",
+    #: which must be an explicit empty list rather than an absence.
+    memberships: list[AlbumReplicaMembership] | None = Field(default=None, max_length=200000)
+
+    def resolved_version(self) -> int:
+        """The snapshot contract version this body represents.
+
+        An older publisher omits the field; a newer one sets it. Deriving the version
+        from the field rather than from content presence keeps "authority-ready" an
+        explicit publisher statement instead of an inference about which keys appeared.
+        """
+        return 1 if self.snapshot_version is None else self.snapshot_version
 
 
 @app.on_event("startup")
@@ -2435,6 +2473,13 @@ def startup_album_replica():
 @app.put("/v1/library/album-snapshot")
 def publish_album_replica(snapshot: AlbumReplicaPublish, authorization: str | None = Header(default=None)):
     require_auth(authorization)
+    version = snapshot.resolved_version()
+    if version not in (1, 2, album_authority.SNAPSHOT_VERSION):
+        # An unknown version cannot be interpreted as any known shape, and guessing
+        # could store albums a later activation would reject.
+        raise HTTPException(422, {"code": "unsupportedAlbumSnapshotVersion",
+                                  "message": "지원하지 않는 앨범 스냅샷 버전입니다.",
+                                  "supported": [1, 2, album_authority.SNAPSHOT_VERSION]})
     ids = {album.id for album in snapshot.albums}
     if len(ids) != len(snapshot.albums) or len({m.id for m in snapshot.media}) != len(snapshot.media):
         raise HTTPException(400, "Duplicate IDs")
@@ -2442,13 +2487,53 @@ def publish_album_replica(snapshot: AlbumReplicaPublish, authorization: str | No
         raise HTTPException(400, "Invalid album parent")
     if any(not m.albums or len(set(m.albums)) != len(m.albums) or not set(m.albums) <= ids for m in snapshot.media):
         raise HTTPException(400, "Invalid album membership")
-    payload = json.dumps({"albums": [a.model_dump() for a in snapshot.albums],
-                          "media": [m.model_dump() for m in snapshot.media]}, separators=(",", ":"), sort_keys=True)
-    if len(payload.encode()) > 16 * 1024 * 1024:
-        raise HTTPException(413, "Album snapshot too large")
+    if version >= 2:
+        # Appearance is canonical Album state, so a version-2+ publisher must state it
+        # explicitly. Validating here means activation never has to guess, and an
+        # unrenderable value is rejected at the publisher rather than stored.
+        for album in snapshot.albums:
+            if not album_authority.valid_appearance(album.icon_key, album.color_key):
+                raise HTTPException(400, "Invalid album appearance")
+    memberships = None
+    if version >= album_authority.SNAPSHOT_VERSION:
+        # Canonical membership is its own collection precisely because it is *not*
+        # display membership: a trashed Asset keeps its Album relations locally, and
+        # activation must see them. Requiring the field (rather than defaulting it)
+        # means a version-3 publisher cannot silently publish an empty canonical set.
+        if snapshot.memberships is None:
+            raise HTTPException(422, {"code": "missingAlbumMemberships",
+                                      "message": "앨범 스냅샷에 canonical 연결 목록이 필요합니다."})
+        seen = set()
+        for membership in snapshot.memberships:
+            key = (membership.album_id, membership.asset_id)
+            if membership.album_id not in ids or key in seen:
+                raise HTTPException(400, "Invalid album membership")
+            seen.add(key)
+        memberships = sorted(seen)
+    payload = json.dumps(
+        {"snapshotVersion": version,
+         "albums": [a.model_dump() for a in snapshot.albums],
+         "media": [m.model_dump() for m in snapshot.media],
+         "memberships": [{"albumId": album_id, "assetId": asset_id}
+                         for album_id, asset_id in (memberships or [])]},
+        separators=(",", ":"), sort_keys=True)
+    # The bound is measured against the documented maxima rather than inherited: the
+    # supported contract allows 2,000 Albums, 100,000 display media rows and 100,000
+    # canonical relations, which exceeds an arbitrary 16 MiB. This is a publisher-only
+    # staging payload, so it is bounded generously but still bounded.
+    if len(payload.encode()) > album_authority.MAX_STAGING_BYTES:
+        raise HTTPException(413, {"code": "albumSnapshotTooLarge",
+                                  "message": "앨범 스냅샷이 허용 크기를 초과합니다.",
+                                  "maxBytes": album_authority.MAX_STAGING_BYTES})
     published = snapshot.published_at.astimezone(timezone.utc).isoformat()
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
+        # Safety Batch 0's reusable fence, called inside the same transaction that
+        # performs the legacy replacement. While no `albums` authority row exists
+        # this is a no-op and the legacy route behaves exactly as before; once the
+        # Album epoch is active the legacy publisher is rejected with a coded
+        # conflict instead of overwriting server-authoritative state.
+        authority.fence_legacy_write(db, album_authority.DOMAIN)
         old = db.execute("SELECT published_at FROM album_replica WHERE singleton=1").fetchone()
         if old and old["published_at"] > published:
             raise HTTPException(409, "Stale album snapshot")
@@ -2456,7 +2541,11 @@ def publish_album_replica(snapshot: AlbumReplicaPublish, authorization: str | No
             ON CONFLICT(singleton) DO UPDATE SET payload=excluded.payload,published_at=excluded.published_at""",
             (payload, published))
         db.commit()
-    return {"ok": True}
+    # The digest identifies the exact bytes now stored, so the publisher can present
+    # it when activating and the server can re-derive from the same snapshot.
+    with get_db() as db:
+        snapshot_digest = album_authority.stored_snapshot_digest(db)
+    return {"ok": True, "snapshotVersion": version, "snapshotDigest": snapshot_digest}
 
 
 @app.get("/v1/library/album-media")
@@ -2525,3 +2614,19 @@ startup_mobile_collections = register_collections(
 from mobile_characters import register_characters
 
 startup_mobile_characters = register_characters(app, get_db, require_auth, mobile_asset_item, _mobile_memberships)
+
+# Aggregate authority discovery. Read-only: it reports which domains already have
+# an authority row and never activates or migrates one. Registered after the domain
+# modules so the same startup ordering still creates `authority_domains` first.
+from sync_status import register_sync_status
+
+startup_sync_status = register_sync_status(app, get_db, require_client)
+
+# Album authority. Startup only creates empty tables: the domain stays PC-owned
+# until a publisher activates its epoch through the activation route, which no
+# environment calls in this batch. The legacy `album-snapshot` publisher above is
+# already fenced by `authority.fence_legacy_write`, which is a no-op until then.
+from album_authority import register_album_authority
+
+startup_album_authority = register_album_authority(
+    app, get_db, require_client, require_publisher)

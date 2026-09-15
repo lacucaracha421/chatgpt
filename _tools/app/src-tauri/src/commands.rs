@@ -164,6 +164,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidCloudResponse => "invalid_cloud_response",
             LibraryError::CloudMetadataBackupNotFound => "cloud_metadata_backup_not_found",
             LibraryError::CloudMetadataBackupTooLarge => "cloud_metadata_backup_too_large",
+            LibraryError::RestoreAuthorityActive { .. } => "restore_authority_active",
+            LibraryError::RestoreAuthorityUnknown => "restore_authority_unknown",
+            LibraryError::SyncProtocolUnsupported => "sync_protocol_unsupported",
             LibraryError::CloudPresignRejected(_) => "cloud_presign_rejected",
             LibraryError::CloudUploadRejected(_) => "cloud_upload_rejected",
             LibraryError::CloudAssetRegistrationRejected(_) => "cloud_asset_registration_rejected",
@@ -206,6 +209,22 @@ impl From<LibraryError> for CommandError {
             LibraryError::CatalogBookmarkRevisionConflict { .. } => {
                 "catalog_bookmark_revision_conflict"
             }
+            LibraryError::AlbumAuthorityInactive => "album_authority_inactive",
+            LibraryError::AlbumAuthorityMismatch => "album_authority_mismatch",
+            LibraryError::AlbumContractUnsupported => "album_contract_unsupported",
+            LibraryError::AlbumCursorAhead => "album_cursor_ahead",
+            LibraryError::AlbumCursorExpired => "album_cursor_expired",
+            LibraryError::AlbumBaselineChanged => "album_baseline_changed",
+            LibraryError::AlbumFirstAdoptionMismatch => "album_first_adoption_mismatch",
+            LibraryError::AlbumSyncRejected(_) => "album_sync_rejected",
+            LibraryError::AlbumRevisionConflict { .. } => "album_revision_conflict",
+            LibraryError::AlbumDuplicateNameFromServer => "album_duplicate_name",
+            LibraryError::AlbumCycleFromServer => "album_cycle",
+            LibraryError::AlbumHasChildrenFromServer => "album_has_children",
+            LibraryError::AlbumOperationConflict => "album_operation_conflict",
+            LibraryError::AlbumCommandRejected { .. } => "album_command_rejected",
+            LibraryError::AlbumNotFoundFromServer => "album_not_found",
+            LibraryError::AlbumCommandOutcomeUnknown => "album_command_outcome_unknown",
             LibraryError::UnsupportedCatalogProvider => "unsupported_catalog_provider",
             LibraryError::CatalogQuerySyntax { .. } => "catalog_query_syntax",
             LibraryError::InvalidCatalogTransportPath => "invalid_catalog_transport_path",
@@ -2362,6 +2381,47 @@ pub fn catalog_bookmark_delivery_state(
         .map_err(CommandError::from)
 }
 
+/// Adopt or catch up with the server Album authority.
+///
+/// Refuses to receive while any local Album intent is unresolved, reported as
+/// `deferredToOutbox`: the user's structural edit takes precedence over an unrelated
+/// remote page that would otherwise overwrite it.
+#[tauri::command]
+pub async fn reconcile_album_authority(
+    state: State<'_, AppState>,
+) -> Result<crate::library::album_reconciliation::AlbumReconciliation, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.reconcile_albums())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Send pending local Album intents to the authority.
+///
+/// Every intent carries the operation id minted with its local mutation, so a repeated
+/// call — including after a restart — cannot duplicate a logical write.
+#[tauri::command]
+pub async fn flush_album_outbox(
+    state: State<'_, AppState>,
+) -> Result<crate::library::album_authority::AlbumOutboxFlush, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.flush_album_outbox())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Local-only Album delivery status, without a network round trip.
+#[tauri::command]
+pub fn album_sync_status(
+    state: State<'_, AppState>,
+) -> Result<crate::library::album_authority::AlbumSyncStatus, CommandError> {
+    current_required(state)?
+        .album_sync_status()
+        .map_err(CommandError::from)
+}
+
 #[tauri::command]
 pub async fn push_cloud_metadata_backup(
     state: State<'_, AppState>,
@@ -3162,6 +3222,27 @@ mod tests {
         for (error, code) in cases {
             let value = serde_json::to_value(CommandError::from(error)).unwrap();
             assert_eq!(value["code"], code);
+        }
+    }
+
+    /// The restore guard's refusals are user-visible states, not generic failures.
+    #[test]
+    fn restore_guard_errors_have_stable_codes_and_no_internal_paths() {
+        let active = CommandError::from(LibraryError::RestoreAuthorityActive {
+            domains: "catalog-bookmarks".into(),
+        });
+        assert_eq!(active.code, "restore_authority_active");
+        assert!(active.message.contains("catalog-bookmarks"));
+
+        let unknown = CommandError::from(LibraryError::RestoreAuthorityUnknown);
+        assert_eq!(unknown.code, "restore_authority_unknown");
+
+        let unsupported = CommandError::from(LibraryError::SyncProtocolUnsupported);
+        assert_eq!(unsupported.code, "sync_protocol_unsupported");
+
+        for message in [active.message, unknown.message, unsupported.message] {
+            assert!(!message.contains("library.sqlite"));
+            assert!(!message.contains("C:\\library"));
         }
     }
 

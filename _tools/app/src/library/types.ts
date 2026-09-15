@@ -136,6 +136,21 @@ export type BookmarkReconciliationResult = {
 export type BookmarkOutboxFlushResult = {
   sent: number; alreadyCurrent: number; pending: number; rebased: boolean; authorityUnavailable: boolean;
 };
+export type AlbumReconciliationResult = {
+  adopted: boolean; adoptedBaseline: boolean; appliedChanges: number;
+  serverCursor: number | null; localCursor: number | null; behindBy: number;
+  /** Confirmed relations projected into `asset_albums` locally by this pass. */
+  rematerializedMemberships: number;
+  deferredToOutbox: boolean;
+};
+export type AlbumOutboxFlushResult = {
+  sent: number; noOp: number; blocked: number; pending: number; stopped: boolean;
+};
+export type AlbumSyncStatus = {
+  adopted: boolean; libraryId: string | null; epoch: number | null; contractVersion: number | null;
+  cursor: number | null; pendingCount: number; blockedCount: number;
+  oldestPendingOperationId: string | null;
+};
 export type CloudLibraryRestoreReport = {
   metadataByteSize: number;
   totalAssets: number;
@@ -1068,6 +1083,9 @@ export interface LibraryGateway {
   setOnlineCatalogBookmark(identity: CatalogWorkIdentity, bookmarked: boolean): Promise<void>;
   reconcileCatalogBookmarks?(): Promise<BookmarkReconciliationResult>;
   flushCatalogBookmarkOutbox?(): Promise<BookmarkOutboxFlushResult>;
+  reconcileAlbumAuthority?(): Promise<AlbumReconciliationResult>;
+  flushAlbumOutbox?(): Promise<AlbumOutboxFlushResult>;
+  albumSyncStatus?(): Promise<AlbumSyncStatus>;
   updateOnlineCatalog(language?: CatalogLanguage, maxPages?: number): Promise<CatalogUpdateResult>;
   resetJapaneseCatalogCheckpoint(): Promise<CatalogStatus>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;

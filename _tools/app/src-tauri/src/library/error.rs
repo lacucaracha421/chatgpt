@@ -52,6 +52,14 @@ pub enum LibraryError {
     CloudMetadataBackupNotFound,
     #[error("서버 메타데이터 백업이 허용 크기를 초과합니다")]
     CloudMetadataBackupTooLarge,
+    #[error(
+        "이 라이브러리는 서버 관리 영역({domains})을 포함하므로 예전 방식의 전체 DB 복원을 할 수 없습니다. 서버 상태에서 다시 구성해야 합니다."
+    )]
+    RestoreAuthorityActive { domains: String },
+    #[error("서버의 동기화 권위 상태를 확인하지 못해 전체 DB 복원을 중단했습니다.")]
+    RestoreAuthorityUnknown,
+    #[error("서버의 동기화 프로토콜 버전을 이 PC가 지원하지 않습니다.")]
+    SyncProtocolUnsupported,
     #[error("업로드 URL 발급 요청이 거부됐습니다: HTTP {0}")]
     CloudPresignRejected(u16),
     #[error("R2 업로드가 거부됐습니다: HTTP {0}")]
@@ -123,6 +131,38 @@ pub enum LibraryError {
         current_revision: i64,
         current_desired_state: bool,
     },
+    #[error("서버 앨범 권위가 아직 활성화되지 않았습니다")]
+    AlbumAuthorityInactive,
+    #[error("서버 앨범 권위가 이 라이브러리와 일치하지 않습니다")]
+    AlbumAuthorityMismatch,
+    #[error("서버 앨범 계약 버전을 이 PC가 지원하지 않습니다")]
+    AlbumContractUnsupported,
+    #[error("서버 앨범 이력이 이 PC보다 뒤처져 있습니다. 전체 기준선을 다시 받아야 합니다")]
+    AlbumCursorAhead,
+    #[error("서버가 보관하는 앨범 이력이 만료되어 이어받을 수 없습니다. 전체 기준선을 다시 받습니다")]
+    AlbumCursorExpired,
+    #[error("기준선을 읽는 동안 서버 앨범 상태가 변경되었습니다. 다시 시작해야 합니다")]
+    AlbumBaselineChanged,
+    #[error("첫 앨범 기준선이 이 PC의 현재 앨범 상태와 일치하지 않습니다")]
+    AlbumFirstAdoptionMismatch,
+    #[error("서버 앨범 동기화 요청이 거부됐습니다: HTTP {0}")]
+    AlbumSyncRejected(u16),
+    #[error("앨범은 다른 기기에서 먼저 변경됐습니다(현재 revision {current_revision})")]
+    AlbumRevisionConflict { current_revision: i64 },
+    #[error("같은 위치에 같은 이름의 앨범이 이미 있습니다")]
+    AlbumDuplicateNameFromServer,
+    #[error("앨범 계층에 순환이 생깁니다")]
+    AlbumCycleFromServer,
+    #[error("하위 앨범이 있는 앨범은 삭제할 수 없습니다")]
+    AlbumHasChildrenFromServer,
+    #[error("같은 작업 ID가 다른 내용으로 이미 사용되었습니다")]
+    AlbumOperationConflict,
+    #[error("서버가 앨범 명령의 형식을 거부했습니다: {code}")]
+    AlbumCommandRejected { code: String },
+    #[error("앨범을 찾을 수 없습니다")]
+    AlbumNotFoundFromServer,
+    #[error("전송한 앨범 명령에 대한 응답을 확인하지 못했습니다")]
+    AlbumCommandOutcomeUnknown,
     #[error("지원하지 않는 온라인 카탈로그 제공자입니다")]
     UnsupportedCatalogProvider,
     #[error("검색식 {start}..{end} 위치: {message}")]
