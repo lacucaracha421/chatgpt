@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 78;
+pub(crate) const SCHEMA_VERSION: i64 = 81;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -400,6 +400,19 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 77 {
             transaction.execute_batch(include_str!("../../migrations/0078_character_reference_regions.sql"))?;
         }
+        if version <= 78 {
+            transaction
+                .execute_batch(include_str!("../../migrations/0079_library_identity.sql"))?;
+            validate_library_identity(&transaction)?;
+        }
+        if version <= 79 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0080_bookmark_reconciliation.sql"
+            ))?;
+        }
+        if version <= 80 {
+            transaction.execute_batch(include_str!("../../migrations/0081_bookmark_outbox.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -413,6 +426,35 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
     connection.pragma_update(None, "foreign_keys", "ON")?;
     migration?;
 
+    Ok(())
+}
+
+/// Stable identity invariant: 32 lowercase hexadecimal characters, nothing else.
+pub(crate) fn is_valid_library_id(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Narrow pre-commit check for migration 0079: exactly one singleton settings row
+/// carrying one valid identity. Deliberately not a general schema validator.
+fn validate_library_identity(connection: &Connection) -> Result<(), LibraryError> {
+    let valid: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM library_settings
+         WHERE singleton = 1
+           AND library_id IS NOT NULL
+           AND length(library_id) = 32
+           AND library_id NOT GLOB '*[^0-9a-f]*'",
+        [],
+        |row| row.get(0),
+    )?;
+    let total: i64 = connection.query_row("SELECT COUNT(*) FROM library_settings", [], |row| {
+        row.get(0)
+    })?;
+    if valid != 1 || total != 1 {
+        return Err(LibraryError::Database(rusqlite::Error::InvalidQuery));
+    }
     Ok(())
 }
 
@@ -435,12 +477,16 @@ pub(super) fn prepare_snapshot_for_restore(path: &Path) -> Result<(), LibraryErr
 }
 
 #[cfg(test)]
+#[path = "library_identity_tests.rs"]
+mod library_identity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     // Build the actual historical schema; downgrading user_version on today's
     // schema leaves later tables behind and cannot exercise an upgrade faithfully.
-    fn historical_schema(connection: &mut Connection, version: usize) {
+    pub(super) fn historical_schema(connection: &mut Connection, version: usize) {
         connection
             .pragma_update(None, "foreign_keys", "OFF")
             .unwrap();
@@ -3158,6 +3204,101 @@ mod tests {
             .execute(
                 "INSERT INTO release_watch_subscriptions VALUES ('missing','kakao',NULL)",
                 []
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn v80_adds_an_empty_bookmark_reconciliation_table() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 79);
+
+        migrate_to_latest(&mut connection, 79).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        // No authority is adopted by migrating: the table exists but is empty, so
+        // every pre-B5 read path stays byte-identical.
+        let rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM catalog_bookmark_sync", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(rows, 0);
+        // The table is singleton-keyed, so a second state row cannot be inserted.
+        connection
+            .execute(
+                "INSERT INTO catalog_bookmark_sync (singleton, library_id, epoch, contract_version, cursor, updated_at)
+                 VALUES (1,'a1b2c3d4e5f60718293a4b5c6d7e8f90',1,1,0,'2026-09-14T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO catalog_bookmark_sync (singleton, library_id, epoch, contract_version, cursor, updated_at)
+                 VALUES (2,'a1b2c3d4e5f60718293a4b5c6d7e8f90',1,1,0,'2026-09-14T00:00:00Z')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO catalog_bookmark_sync (singleton, library_id, epoch, contract_version, cursor, updated_at)
+                 VALUES (1,'a1b2c3d4e5f60718293a4b5c6d7e8f90',1,1,-1,'2026-09-14T00:00:00Z')",
+                [],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn v81_adds_an_empty_bookmark_outbox_and_revision_cache() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 80);
+
+        migrate_to_latest(&mut connection, 80).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        // Migrating enqueues nothing: an existing library becomes B6-capable
+        // without inventing an operation for bookmarks it already holds.
+        for table in ["catalog_bookmark_outbox", "catalog_bookmark_revisions"] {
+            let rows: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
+        // One intent per entity, and one revision per entity.
+        connection
+            .execute(
+                "INSERT INTO catalog_bookmark_outbox VALUES('op','kHentai','3',1,1,0,'2026-09-15T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO catalog_bookmark_outbox VALUES('op2','kHentai','3',0,1,0,'2026-09-15T00:00:00Z')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO catalog_bookmark_revisions VALUES('kHentai','3',1)",
+                [],
+            )
+            .is_ok());
+        assert!(connection
+            .execute(
+                "INSERT INTO catalog_bookmark_revisions VALUES('kHentai','3',2)",
+                [],
             )
             .is_err());
     }

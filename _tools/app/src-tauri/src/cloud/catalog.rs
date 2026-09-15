@@ -1,4 +1,10 @@
 //! User-triggered catalog publication. No automatic work or source writes.
+//!
+//! All three calls here are `publisher` operations on the server (upload a
+//! replica, read the publication pointer, publish a projection), so this path
+//! deliberately uses the **publisher** credential. Ordinary capture, sync,
+//! thumbnail and B5/B6 bookmark traffic keeps using the general cloud token,
+//! which is client-scoped; neither credential implies the other.
 use crate::library::{credential,error::LibraryError,Library};
 use super::publication::{report, Reporter};
 use super::client::CloudClient;
@@ -10,13 +16,14 @@ impl Library {
         report(progress, "connecting", 0, None, "items");
         let config=self.cloud_sync_config()?;
         let client=CloudClient::new(config.api_base_url.as_deref().ok_or(LibraryError::InvalidCloudSyncConfig)?)?;
-        let token=credential::read_cloud_api_token_os()?;
+        let token=credential::read_cloud_publisher_token_os()?;
+        let library_id=self.library_id()?;
         let base=client.mobile_catalog_revision(&token)?;
         let snapshot=self.export_mobile_catalog_snapshot_with_progress(progress)?;
         report(progress, "uploading", 0, Some(snapshot.bytes), "bytes");
         client.upload_mobile_catalog(&snapshot.content_digest,snapshot.file.try_clone().map_err(|_|LibraryError::InvalidOnlineCatalog)?,&token,progress)?;
         report(progress, "publishing", 0, None, "items");
-        let result=client.publish_mobile_catalog(&serde_json::json!({"version":1,"baseRevision":base,"contentDigest":snapshot.content_digest,"userSnapshot":snapshot.users}),&token)?;
+        let result=client.publish_mobile_catalog(&serde_json::json!({"version":1,"baseRevision":base,"contentDigest":snapshot.content_digest,"userSnapshot":snapshot.users}),&token,&library_id)?;
         Ok(MobileCatalogPublishResult {publication_revision:result.0,published_at:result.1,works:snapshot.works,bytes:snapshot.bytes})
     }
 }

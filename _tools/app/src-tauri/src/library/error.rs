@@ -98,6 +98,31 @@ pub enum LibraryError {
     OnlineCatalogWorkNotFound,
     #[error("온라인 카탈로그 데이터가 올바르지 않습니다")]
     InvalidOnlineCatalog,
+    #[error(
+        "서버 북마크 권위가 이 라이브러리와 일치하지 않습니다. 카탈로그 권위를 다시 확인해 주세요."
+    )]
+    CatalogBookmarkAuthorityMismatch,
+    #[error("서버 북마크 형식이 이 PC 버전에서 지원되지 않습니다. Lakomics를 업데이트해 주세요.")]
+    CatalogBookmarkContractUnsupported,
+    #[error(
+        "서버 북마크 이력이 이 PC보다 뒤처져 있습니다. 전체 북마크 기준을 다시 받아야 합니다."
+    )]
+    CatalogBookmarkCursorAhead,
+    #[error(
+        "서버가 보관하는 북마크 이력이 만료되어 이어받을 수 없습니다. 전체 북마크 기준을 다시 받습니다."
+    )]
+    CatalogBookmarkCursorExpired,
+    #[error("서버 북마크 동기화 요청이 거부됐습니다: HTTP {0}")]
+    CatalogBookmarkSyncRejected(u16),
+    #[error("서버 북마크 권위가 아직 쓰기를 광고하지 않습니다.")]
+    CatalogBookmarkAuthorityUnavailable,
+    #[error(
+        "서버 북마크가 다른 기기에서 먼저 변경됐습니다(현재 revision {current_revision}, 원하는 상태 {current_desired_state})."
+    )]
+    CatalogBookmarkRevisionConflict {
+        current_revision: i64,
+        current_desired_state: bool,
+    },
     #[error("지원하지 않는 온라인 카탈로그 제공자입니다")]
     UnsupportedCatalogProvider,
     #[error("검색식 {start}..{end} 위치: {message}")]

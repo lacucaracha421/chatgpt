@@ -7,6 +7,14 @@ pub(crate) mod av_collection;
 pub(crate) mod av_models;
 mod backup;
 pub mod book_migration;
+pub(crate) mod bookmark_outbox;
+#[cfg(test)]
+#[path = "bookmark_outbox_tests.rs"]
+mod bookmark_outbox_tests;
+pub(crate) mod bookmark_reconciliation;
+#[cfg(test)]
+#[path = "bookmark_reconciliation_tests.rs"]
+mod bookmark_reconciliation_tests;
 pub(crate) mod catalog_checkpoint;
 #[cfg(test)]
 mod catalog_count_fixture_tests;
@@ -51,6 +59,7 @@ pub(crate) mod collection_source;
 mod collection_volume;
 pub(crate) mod credential;
 mod db;
+pub(crate) use db::is_valid_library_id;
 mod drag_out;
 pub(crate) mod kakao_books;
 #[cfg(target_os = "linux")]
@@ -329,6 +338,20 @@ impl Library {
             [policy.retention_days],
         )?;
         Ok(())
+    }
+
+    /// Durable identity minted by migration 0079. Read-only by design: a library
+    /// never mints or repairs its identity outside that migration transaction.
+    pub(crate) fn library_id(&self) -> Result<String, LibraryError> {
+        let value: Option<String> = self.connection()?.query_row(
+            "SELECT library_id FROM library_settings WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        match value {
+            Some(value) if db::is_valid_library_id(&value) => Ok(value),
+            _ => Err(LibraryError::Database(rusqlite::Error::InvalidQuery)),
+        }
     }
 
     pub fn manga_root(&self) -> Result<Option<String>, LibraryError> {

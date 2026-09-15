@@ -1,18 +1,39 @@
 declare global {
   interface Window { LakomicsNative?: {request(id: string, operation: string, payload: string): void; cancel(id: string): void} }
 }
-type Reply = {id: string; ok: boolean; data?: unknown; error?: string; status?: number};
+type Reply = {id: string; ok: boolean; data?: unknown; error?: string; status?: number; details?: unknown};
 type Pending = {resolve(value: unknown): void; reject(error: Error): void; cleanup(): void};
 const pending = new Map<string, Pending>();
 let sequence = 0;
 let developmentTransport: ((op: string, payload: Record<string, unknown>) => Promise<unknown>) | undefined;
+
+/**
+ * A native/API failure that keeps the server's own status and structured detail.
+ *
+ * The native bridge already distinguishes authorization, timeout and transport
+ * failures in its message. The status and the server's `detail` are carried
+ * alongside so a caller can tell an authoritative revision conflict from an
+ * identity mismatch instead of treating every non-2xx as one generic failure.
+ * Nothing here is rendered directly: callers format their own text.
+ */
+export class ApiError extends Error {
+  readonly status: number | null;
+  readonly details: unknown;
+  constructor(message: string, status: number | null, details: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.details = details;
+  }
+}
+
 window.addEventListener('lakomics-native', event => {
   const reply = (event as CustomEvent<Reply>).detail;
   const entry = pending.get(reply?.id);
   if (!entry) return;
   pending.delete(reply.id); entry.cleanup();
   if (reply.ok) entry.resolve(reply.data);
-  else entry.reject(Object.assign(new Error(typeof reply.error === 'string' ? reply.error : '요청을 완료하지 못했습니다.'), {status: reply.status}));
+  else entry.reject(new ApiError(typeof reply.error === 'string' ? reply.error : '요청을 완료하지 못했습니다.', typeof reply.status === 'number' ? reply.status : null, reply.details));
 });
 export function setDevelopmentTransport(transport: typeof developmentTransport) {
   if (import.meta.env.DEV) developmentTransport = transport;
@@ -35,8 +56,11 @@ export function native<T>(operation: string, payload: Record<string, unknown> = 
     catch { pending.delete(id); cleanup(); reject(new Error('앱 연결을 시작하지 못했습니다.')); }
   });
 }
-export function api<T>(path: string, signal?: AbortSignal, body?: unknown): Promise<T> {
-  return native<T>('api', {path, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : {body})}, signal);
+export function api<T>(path: string, signal?: AbortSignal, body?: unknown, method?: 'GET' | 'POST' | 'PUT'): Promise<T> {
+  // An explicit method only ever refines a body-bearing request; a bodyless call
+  // stays a read, so no existing caller can accidentally become a write.
+  const resolved = method ?? (body === undefined ? 'GET' : 'POST');
+  return native<T>('api', {path, method: resolved, ...(body === undefined ? {} : {body})}, signal);
 }
 export function errorText(error: unknown): string {
   if (error instanceof DOMException && error.name === 'AbortError') return '';

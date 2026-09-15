@@ -28,6 +28,21 @@ public final class NetworkPolicyTest {
  for(String method:new String[]{"GET","POST"})pass(()->NetworkPolicy.api("/v1/mobile-catalog/refresh",method));
  for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/refresh",method));
  reject(()->NetworkPolicy.api("/v1/mobile-catalog/refresh/anything","POST"));
+ // B7: the catalog bookmark command is the only catalog write, and only as PUT.
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/kHentai/42","PUT"));
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/kHentai/03","PUT"));
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/heliotrope/42","PUT"));
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/kHentai/work-id_1","PUT"));
+ for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/kHentai/42",method));
+ // The write stays scoped to one known provider and one opaque id segment: no
+ // traversal, no extra path segment, no unknown provider. A query string is
+ // stripped before matching, exactly as for every other route, and grants no
+ // additional target.
+ for(String p:new String[]{"/v1/mobile-catalog/bookmarks/kHentai","/v1/mobile-catalog/bookmarks/kHentai/","/v1/mobile-catalog/bookmarks","/v1/mobile-catalog/bookmarks/mangadex/42","/v1/mobile-catalog/bookmarks/kHentai/42/reader","/v1/mobile-catalog/bookmarks/kHentai/../42","/v1/mobile-catalog/bookmarks/kHentai/4%2F2","/v1/mobile-catalog/bookmarks/kHentai/4.2","/v1/mobile-catalog/bookmarks/kHentai/42#x"})reject(()->NetworkPolicy.api(p,"PUT"));
+ reject(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/kHentai/42","POST"));
+ for(String method:new String[]{"GET","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/mangadex/42",method));
+ StringBuilder longWorkId=new StringBuilder("/v1/mobile-catalog/bookmarks/kHentai/");for(int i=0;i<65;i++)longWorkId.append('1');
+ reject(()->NetworkPolicy.api(longWorkId.toString(),"PUT"));
  StringBuilder longQuery=new StringBuilder("/v1/mobile-catalog/search?text=");for(int i=0;i<1365;i++)longQuery.append("%EA%B0%80");pass(()->NetworkPolicy.api(longQuery.toString(),"GET"));
  for(int i=0;i<5000;i++)longQuery.append('a');reject(()->NetworkPolicy.api(longQuery.toString(),"GET"));
  for(String path:new String[]{"/v1/library/characters","/v1/library/characters/assets?node=character%3Aid&revision=abc"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}

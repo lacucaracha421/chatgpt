@@ -12,6 +12,11 @@ use linux::LinuxCredentialBackend as OsCredentialBackend;
 const KAKAO_TARGET: &str = "Lakomics/KakaoBooks";
 const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
 const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
+/// Catalog publication/authority-management credential. Deliberately separate
+/// from the general cloud token: publication is a `publisher` operation on the
+/// server, while ordinary capture/sync/thumbnail APIs stay client-scoped. Holding
+/// one must not imply the other.
+const CLOUD_PUBLISHER_TARGET: &str = "Lakomics/CloudPublisher";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
 
@@ -225,6 +230,28 @@ pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
     read_cloud_api_token(&OsCredentialBackend)
 }
 
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn cloud_publisher_token_status() -> Result<bool, LibraryError> {
+    cloud_publisher_token_status_with(&OsCredentialBackend)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn set_cloud_publisher_token_os(token: &str) -> Result<(), LibraryError> {
+    set_cloud_publisher_token(&OsCredentialBackend, token)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn delete_cloud_publisher_token_os() -> Result<(), LibraryError> {
+    OsCredentialBackend
+        .delete(CLOUD_PUBLISHER_TARGET)
+        .map_err(map_backend_error)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn read_cloud_publisher_token_os() -> Result<String, LibraryError> {
+    read_cloud_publisher_token(&OsCredentialBackend)
+}
+
 #[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn aladin_key_status() -> Result<bool, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
@@ -262,6 +289,26 @@ pub(crate) fn delete_cloud_api_token_os() -> Result<(), LibraryError> {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn cloud_publisher_token_status() -> Result<bool, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn set_cloud_publisher_token_os(_token: &str) -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn delete_cloud_publisher_token_os() -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn read_cloud_publisher_token_os() -> Result<String, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
@@ -356,9 +403,11 @@ mod tests {
     use std::{cell::RefCell, collections::HashMap};
 
     use super::{
-        read_cloud_api_token, read_igdb_credentials_with, read_tmdb_token_with,
-        set_cloud_api_token, set_igdb_credentials_with, set_tmdb_token_with, CredentialBackend,
-        CredentialError, CredentialService, ALADIN_TARGET, CLOUD_API_TARGET, TMDB_TARGET,
+        read_cloud_api_token, read_cloud_publisher_token, read_igdb_credentials_with,
+        read_tmdb_token_with, set_cloud_api_token, set_cloud_publisher_token,
+        set_igdb_credentials_with, set_tmdb_token_with, cloud_publisher_token_status_with,
+        CredentialBackend, CredentialError, CredentialService, ALADIN_TARGET, CLOUD_API_TARGET,
+        CLOUD_PUBLISHER_TARGET, TMDB_TARGET,
     };
     use crate::library::error::LibraryError;
 
@@ -506,6 +555,50 @@ mod tests {
     }
 
     #[test]
+    fn publisher_token_is_a_separate_credential_from_the_cloud_token() {
+        let backend = FakeBackend::default();
+
+        set_cloud_api_token(&backend, "client-credential").unwrap();
+        set_cloud_publisher_token(&backend, "publisher-credential").unwrap();
+        // Each is readable under its own target and neither overwrites the other:
+        // publication must not be authorized by the general client credential.
+        assert_eq!(
+            read_cloud_api_token(&backend).unwrap(),
+            "client-credential"
+        );
+        assert_eq!(
+            read_cloud_publisher_token(&backend).unwrap(),
+            "publisher-credential"
+        );
+        assert_eq!(
+            backend.values.borrow().get(CLOUD_PUBLISHER_TARGET).unwrap(),
+            b"publisher-credential"
+        );
+        assert!(cloud_publisher_token_status_with(&backend).unwrap());
+    }
+
+    #[test]
+    fn an_absent_publisher_token_is_reported_rather_than_borrowed() {
+        let backend = FakeBackend::default();
+        set_cloud_api_token(&backend, "client-credential").unwrap();
+        // A configured client credential must not make publication look configured.
+        assert!(!cloud_publisher_token_status_with(&backend).unwrap());
+        assert!(matches!(
+            read_cloud_publisher_token(&backend),
+            Err(LibraryError::CloudCredentialNotConfigured)
+        ));
+    }
+
+    #[test]
+    fn publisher_token_rejects_empty_values() {
+        let backend = FakeBackend::default();
+        assert!(matches!(
+            set_cloud_publisher_token(&backend, "   "),
+            Err(LibraryError::InvalidCloudCredentialValue)
+        ));
+    }
+
+    #[test]
     fn stores_cloud_token_in_its_own_credential_target() {
         let backend = FakeBackend::default();
 
@@ -530,27 +623,64 @@ fn validate_cloud_api_token(token: &str) -> Result<String, LibraryError> {
     Ok(token.to_owned())
 }
 
-fn set_cloud_api_token<B: CredentialBackend>(backend: &B, token: &str) -> Result<(), LibraryError> {
+fn set_secret<B: CredentialBackend>(
+    backend: &B,
+    target: &str,
+    token: &str,
+) -> Result<(), LibraryError> {
     let token = validate_cloud_api_token(token)?;
-    backend
-        .write(CLOUD_API_TARGET, token.as_bytes())
-        .map_err(map_backend_error)
+    backend.write(target, token.as_bytes()).map_err(map_backend_error)
 }
 
-fn read_cloud_api_token<B: CredentialBackend>(backend: &B) -> Result<String, LibraryError> {
+fn read_secret<B: CredentialBackend>(
+    backend: &B,
+    target: &str,
+) -> Result<String, LibraryError> {
     let value = backend
-        .read(CLOUD_API_TARGET)
+        .read(target)
         .map_err(map_backend_error)?
         .ok_or(LibraryError::CloudCredentialNotConfigured)?;
     let token = String::from_utf8(value).map_err(|_| LibraryError::InvalidCloudCredentialValue)?;
     validate_cloud_api_token(&token)
 }
 
-fn cloud_api_token_status_with<B: CredentialBackend>(backend: &B) -> Result<bool, LibraryError> {
+fn secret_status<B: CredentialBackend>(
+    backend: &B,
+    target: &str,
+) -> Result<bool, LibraryError> {
     backend
-        .read(CLOUD_API_TARGET)
+        .read(target)
         .map(|value| value.is_some())
         .map_err(map_backend_error)
+}
+
+fn set_cloud_api_token<B: CredentialBackend>(backend: &B, token: &str) -> Result<(), LibraryError> {
+    set_secret(backend, CLOUD_API_TARGET, token)
+}
+
+fn read_cloud_api_token<B: CredentialBackend>(backend: &B) -> Result<String, LibraryError> {
+    read_secret(backend, CLOUD_API_TARGET)
+}
+
+fn cloud_api_token_status_with<B: CredentialBackend>(backend: &B) -> Result<bool, LibraryError> {
+    secret_status(backend, CLOUD_API_TARGET)
+}
+
+fn set_cloud_publisher_token<B: CredentialBackend>(
+    backend: &B,
+    token: &str,
+) -> Result<(), LibraryError> {
+    set_secret(backend, CLOUD_PUBLISHER_TARGET, token)
+}
+
+fn read_cloud_publisher_token<B: CredentialBackend>(backend: &B) -> Result<String, LibraryError> {
+    read_secret(backend, CLOUD_PUBLISHER_TARGET)
+}
+
+fn cloud_publisher_token_status_with<B: CredentialBackend>(
+    backend: &B,
+) -> Result<bool, LibraryError> {
+    secret_status(backend, CLOUD_PUBLISHER_TARGET)
 }
 
 fn validate_igdb_credentials(

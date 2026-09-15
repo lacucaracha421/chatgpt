@@ -123,12 +123,15 @@ describe('mobile catalog reads',()=>{
     expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked')&&path.includes('sort=latest'))).toBe(true);
   });
   it('uses a ready total without issuing the extra count request',async()=>{
-    mocks.api.mockResolvedValueOnce({...page,countToken:null,totalCount:1,countStatus:'ready'});render(<Catalog active paused={false} backRef={{current:null}}/>);
+    mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{publicationRevision:'p1'}:{...page,countToken:null,totalCount:1,countStatus:'ready'});
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
     await screen.findByText('1',{selector:'.catalog-total'});expect(mocks.api.mock.calls.some(([path])=>path.includes('/count?'))).toBe(false);
   });
   it('distinguishes unpublished from a published empty search',async()=>{
-    mocks.api.mockResolvedValueOnce({...page,ready:false,items:[],countToken:null});render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('카탈로그가 아직 공유되지 않았습니다');
-    mocks.api.mockResolvedValueOnce({...page,items:[],countToken:null,totalCount:0,countStatus:'ready'});fireEvent.click(screen.getByRole('button',{name:'카탈로그 새로고침'}));await screen.findByText('검색 결과가 없습니다');expect(screen.queryByText('카탈로그가 아직 공유되지 않았습니다')).toBeNull();
+    let published=false;
+    mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{publicationRevision:'p1'}:published?{...page,items:[],countToken:null,totalCount:0,countStatus:'ready'}:{...page,ready:false,items:[],countToken:null});
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('카탈로그가 아직 공유되지 않았습니다');published=true;
+    fireEvent.click(screen.getByRole('button',{name:'카탈로그 새로고침'}));await screen.findByText('검색 결과가 없습니다');expect(screen.queryByText('카탈로그가 아직 공유되지 않았습니다')).toBeNull();
   });
   it('resumes an aborted count without fetching the retained page again',async()=>{
     let countCalls=0;mocks.api.mockImplementation(async(path:string)=>{

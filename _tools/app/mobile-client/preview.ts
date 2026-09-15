@@ -3,12 +3,34 @@ let demoNotes:MobileNote[]=[{id:'a'.repeat(32),title:'다음에 볼 작품',body
 // Development-only fixtures. Vite removes this module from the production APK.
 import type {RefreshJob} from './CatalogRefresh';
 let refreshDemo:{job:RefreshJob;started:number}|null=null;
+/**
+ * Demo authority state for the catalog bookmark toggle, keyed by work identity.
+ *
+ * The catalog's own `bookmarked` flag is the seed, so the fixture is internally
+ * consistent: a detail read and a command answer describe the same state.
+ */
 import type {Asset} from './types';
 import type {CollectionDetail} from './collectionModel';
 const palettes = [['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3']];
 function art(index: number, w: number, h: number) {
   const p = palettes[index % palettes.length];
   return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 600 800" preserveAspectRatio="none"><rect width="600" height="800" fill="${p[0]}"/><circle cx="${180+index%3*95}" cy="190" r="85" fill="${p[3]}"/><path d="M0 480L140 280 320 580 460 370 600 490V800H0" fill="${p[2]}"/><path d="M0 610L240 420 430 630 600 530V800H0" fill="${p[1]}"/><path d="M290 800L370 600 343 482 393 607 346 800" fill="${p[3]}" opacity=".7"/><path d="M25 25H575V775H25Z" fill="none" stroke="${p[3]}" opacity=".3"/><text x="45" y="745" fill="${p[3]}" font-family="sans-serif" font-size="15" letter-spacing="7">STUDY / ${String(index+1).padStart(2,'0')}</text></svg>`)}`;
+}
+/**
+ * Demo authority state for the catalog bookmark toggle, keyed by work identity.
+ *
+ * The catalog's own `bookmarked` flag is the seed, so the fixture is internally
+ * consistent: a detail read and a command answer describe the same state.
+ */
+const demoBookmarks=new Map<string,{desired:boolean;revision:number}>();
+/** The demo catalog rows, shared by search, detail and the bookmark authority. */
+const demoCatalog=Array.from({length:48},(_,i)=>({provider:'kHentai' as const,providerWorkId:String(i+1),groupId:`demo-group-${i}`,title:['밤의 도서관','여름의 항로','계절의 기록','조용한 정원','먼 바다에서','푸른 궤도'][i%6]+(i>5?` ${Math.floor(i/6)+1}`:''),titleJpn:null,artists:['서유진','Studio Field','하루'][i%3].split(','),series:[] as string[],thumbnailUrl:art(i,600,900),bookmarked:i%3===0,hasBookmarkedVersion:i%3===0,fileCount:24+i*2,views:12480-i*167,posted:1788000000-i*86400,versionCount:i%5===0?2:1}));
+/** The authoritative demo state for one work, seeded from the catalog row. */
+function demoBookmarkState(workId:string):{desired:boolean;revision:number}{
+  const stored=demoBookmarks.get(`kHentai:${workId}`);
+  if(stored)return stored;
+  const seed=demoCatalog.find(item=>item.providerWorkId===workId)?.bookmarked??false;
+  return {desired:seed,revision:0};
 }
 const authors = ['bluealex1203','YanghuiyaRBQ','koragen1925','moon_archive','atelier.04'];
 const assets: Asset[] = Array.from({length:120}, (_, i) => {
@@ -28,6 +50,22 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if (op === 'pickerStatus' || op === 'pickerRefresh') return {supported:true,eligible:false,selected:false,syncing:false,scanned:120,mediaCount:120,albumCount:7,ready:true,lastSyncedAt:Date.now(),error:''};
   if (op === 'status' || op === 'configure') return {configured:true,endpoint:'https://preview.invalid'};
   if (op === 'disconnect') return {configured:false,endpoint:''};
+  // The demo catalog owns its domain and advertises the write capability, so the
+  // browser preview can exercise the real toggle instead of a disabled one.
+  const demoLibraryId = 'a'.repeat(32);
+  if (op === 'bookmarkCommand') {
+    const workId = String(payload.providerWorkId);
+    const key = `kHentai:${workId}`;
+    const desired = payload.desiredState === true;
+    const current = demoBookmarkState(workId);
+    // Mirror the server's compare-and-set: an already-matching state is idempotent,
+    // and a stale expectedRevision is reported as a recoverable conflict.
+    if (current.desired === desired) return {libraryId: demoLibraryId, epoch: 1, contractVersion: 1, provider: payload.provider, providerWorkId: workId, desiredState: desired, entityRevision: current.revision, changed: false};
+    if (current.revision !== payload.expectedRevision) return {conflict: {revision: current.revision, desiredState: current.desired}};
+    const revision = current.revision + 1;
+    demoBookmarks.set(key, {desired, revision});
+    return {libraryId: demoLibraryId, epoch: 1, contractVersion: 1, provider: payload.provider, providerWorkId: workId, desiredState: desired, entityRevision: revision, changed: true};
+  }
   if (op !== 'api') return {};
   const url = new URL(String(payload.path),'https://preview.invalid');
   if(url.pathname.startsWith('/v1/library/characters')) {
@@ -45,7 +83,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     return {revision,items:selected.slice(offset,offset+limit),totalCount:selected.length,sourceCount:selected.length,has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
   }
   if(url.pathname==='/v1/collections/status')return {revision:'demo-1'};
-  if(url.pathname==='/v1/mobile-catalog/status')return {publicationRevision:'demo-catalog',capabilities:{refreshRequest:true}};
+  if(url.pathname==='/v1/mobile-catalog/status')return {publicationRevision:'demo-catalog',authorityLibraryId:demoLibraryId,authorityEpoch:1,authorityContractVersion:1,capabilities:{providers:['kHentai'],read:true,bookmarkWrite:true,refreshRequest:true}};
   if(url.pathname==='/v1/mobile-catalog/refresh'){
     if(payload.method==='POST'){
       const body=payload.body as {operationId:string;language:'korean'|'japanese'};
@@ -55,7 +93,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     return {job:refreshDemo?.job??null};
   }
   if(url.pathname.startsWith('/v1/mobile-catalog/')){
-    const catalog=Array.from({length:48},(_,i)=>({provider:'kHentai',providerWorkId:String(i+1),groupId:`demo-group-${i}`,title:['밤의 도서관','여름의 항로','계절의 기록','조용한 정원','먼 바다에서','푸른 궤도'][i%6]+(i>5?` ${Math.floor(i/6)+1}`:''),titleJpn:null,artists:['서유진','Studio Field','하루'][i%3].split(','),series:[],thumbnailUrl:art(i,600,900),bookmarked:i%3===0,hasBookmarkedVersion:i%3===0,fileCount:24+i*2,views:12480-i*167,posted:1788000000-i*86400,versionCount:i%5===0?2:1}));
+    const catalog=demoCatalog;
     const decode=(name:string)=>JSON.parse(url.searchParams.get(name)??'{}') as {offset?:number;language?:string;text?:string;scope?:string;limit?:number};
     if(url.pathname.endsWith('/search')){
       const q=url.searchParams.has('cursor')?decode('cursor'):{language:url.searchParams.get('language')??'korean',text:url.searchParams.get('text')??'',scope:url.searchParams.get('scope')??'all',limit:40};
@@ -65,7 +103,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     }
     if(url.pathname.endsWith('/count'))return {publicationRevision:'demo-catalog',totalCount:JSON.parse(url.searchParams.get('token')??'{}').count??0};
     if(url.pathname.endsWith('/reader')){const workId=url.pathname.split('/').slice(-2)[0];return {publicationRevision:'demo-catalog',provider:'kHentai',providerWorkId:workId,manifestExpiresAt:1800000000,pages:Array.from({length:28},(_,index)=>({index,url:`https://demo.siam-cdn.net/${workId}/${index}.webp?expires=1800000000`,name:`${String(index+1).padStart(3,'0')}.webp`,width:900,height:1350,expiresAt:1800000000}))};}
-    if(url.pathname.includes('/works/')){const workId=url.pathname.split('/').slice(-1)[0];const item=catalog.find(item=>item.providerWorkId===workId)??catalog[0];return {publicationRevision:'demo-catalog',item:{...item,uploader:'Archive',category:1,updated:null,fileSize:null,rating:null,tagGroups:[{namespace:'artist',values:item.artists},{namespace:'language',values:['korean']}]}};}
+    if(url.pathname.includes('/works/')){const workId=url.pathname.split('/').slice(-1)[0];const item=catalog.find(item=>item.providerWorkId===workId)??catalog[0];const state=demoBookmarkState(item.providerWorkId);return {publicationRevision:'demo-catalog',item:{...item,bookmarked:state.desired,bookmarkRevision:state.revision,uploader:'Archive',category:1,updated:null,fileSize:null,rating:null,tagGroups:[{namespace:'artist',values:item.artists},{namespace:'language',values:['korean']}]}};}
     if(url.pathname.endsWith('/editions')){const group=url.pathname.split('/').slice(-2)[0];const item=catalog.find(item=>item.groupId===group)??catalog[0];return {publicationRevision:'demo-catalog',groupId:item.groupId,selectedProviderWorkId:null,items:[item],nextCursor:null,totalCount:1};}
   }
   if(url.pathname==='/v1/collections'){

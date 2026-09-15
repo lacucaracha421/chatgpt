@@ -2504,11 +2504,16 @@ startup_notes = register_notes(app, get_db, require_auth)
 
 from mobile_collections import register_collections
 from mobile_catalog import register_mobile_catalog
+from api_auth import client_guard, publisher_guard
+
+require_client = client_guard(get_db, API_TOKEN)
+require_publisher = publisher_guard(get_db)
 
 startup_mobile_catalog = register_mobile_catalog(
     app, get_db, require_auth, lambda: DB_PATH.parent / "mobile-catalog", lambda: API_TOKEN,
     lambda work_id: _catalog_cached_get(f"{KHENTAI_ORIGIN}/r/{work_id}").body.decode("utf-8"),
     refresh_fetcher=_catalog_refresh_page,
+    require_client=require_client, require_publisher=require_publisher,
 )
 from r2 import presign_put as _collection_presign_put
 

@@ -55,6 +55,11 @@ pub(super) struct CatalogLookupCache {
 }
 
 impl Library {
+    /// Set the PC-owned bookmark state for one work.
+    ///
+    /// The local effect and its durable operation commit in one transaction, so a
+    /// crash cannot leave a changed bookmark with no queued intent, nor a queued
+    /// intent for a bookmark that never changed.
     pub fn set_online_catalog_bookmark(
         &self,
         identity: &CatalogWorkIdentity,
@@ -62,22 +67,32 @@ impl Library {
     ) -> Result<(), LibraryError> {
         identity.validate()?;
         let connection = self.connection()?;
+        let mut connection = connection;
+        let transaction = connection.transaction()?;
         let provider_tag = identity.provider.as_str();
         let work_id = identity.provider_work_id.as_str();
-        if bookmarked {
-            connection.execute(
+        let changed = if bookmarked {
+            transaction.execute(
                 "INSERT INTO online_catalog_bookmarks (provider, work_id, created_at)
                  VALUES (?1, ?2, ?3)
                  ON CONFLICT(provider, work_id) DO NOTHING",
                 rusqlite::params![provider_tag, work_id, chrono::Utc::now().to_rfc3339()],
-            )?;
+            )? > 0
         } else {
-            connection.execute(
+            transaction.execute(
                 "DELETE FROM online_catalog_bookmarks
                  WHERE provider = ?1 AND work_id = ?2",
                 [provider_tag, work_id],
-            )?;
-        }
+            )? > 0
+        };
+        super::bookmark_outbox::enqueue_local_mutation(
+            &transaction,
+            provider_tag,
+            work_id,
+            bookmarked,
+            changed,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 

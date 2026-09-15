@@ -195,6 +195,11 @@ def freeze_query(db, query):
     query = dict(query)
     query["hasHidden"], query["hasBlocked"] = map(bool, db.execute("SELECT EXISTS(SELECT 1 FROM online_catalog_hidden_categories),EXISTS(SELECT 1 FROM online_catalog_blocked_tags)").fetchone())
     query["preparedState"] = bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mobile_catalog_work_state'").fetchone())
+    # Server-owned bookmarks are detected from this connection's temp schema, never
+    # inferred from publication contents. With authority active the baked
+    # work state bookmark column is stale by construction.
+    query["authorityBookmarks"] = bool(db.execute(
+        "SELECT 1 FROM sqlite_temp_master WHERE type='table' AND name='online_catalog_bookmarks'").fetchone())
     seconds = {"hotDay": 86400, "hotWeek": 604800, "hotMonth": 2592000}.get(query["sort"])
     if seconds and "hotCutoff" not in query:
         where, params = eligible(query)
@@ -212,7 +217,10 @@ def cte(query):
     sql, values = compile_query(parse_query(query["text"]))
     params.extend(values)
     if query["scope"] == "bookmarked":
-        sql += " AND " + ("work._bookmarked=1" if query.get("preparedState") else "EXISTS(SELECT 1 FROM online_catalog_bookmarks b WHERE b.provider='kHentai' AND b.work_id=CAST(work.Id AS TEXT))")
+        if query.get("preparedState") and not query.get("authorityBookmarks"):
+            sql += " AND work._bookmarked=1"
+        else:
+            sql += " AND EXISTS(SELECT 1 FROM online_catalog_bookmarks b WHERE b.provider='kHentai' AND b.work_id=CAST(work.Id AS TEXT))"
     if "hotCutoff" in query:
         sql += " AND work.Posted>=?"
         params.append(query["hotCutoff"])

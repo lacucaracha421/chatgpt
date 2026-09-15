@@ -193,6 +193,19 @@ impl From<LibraryError> for CommandError {
             LibraryError::OnlineCatalogNotInstalled => "online_catalog_not_installed",
             LibraryError::OnlineCatalogWorkNotFound => "online_catalog_work_not_found",
             LibraryError::InvalidOnlineCatalog => "invalid_online_catalog",
+            LibraryError::CatalogBookmarkAuthorityMismatch => "catalog_bookmark_authority_mismatch",
+            LibraryError::CatalogBookmarkContractUnsupported => {
+                "catalog_bookmark_contract_unsupported"
+            }
+            LibraryError::CatalogBookmarkCursorAhead => "catalog_bookmark_cursor_ahead",
+            LibraryError::CatalogBookmarkCursorExpired => "catalog_bookmark_cursor_expired",
+            LibraryError::CatalogBookmarkSyncRejected(_) => "catalog_bookmark_sync_rejected",
+            LibraryError::CatalogBookmarkAuthorityUnavailable => {
+                "catalog_bookmark_authority_unavailable"
+            }
+            LibraryError::CatalogBookmarkRevisionConflict { .. } => {
+                "catalog_bookmark_revision_conflict"
+            }
             LibraryError::UnsupportedCatalogProvider => "unsupported_catalog_provider",
             LibraryError::CatalogQuerySyntax { .. } => "catalog_query_syntax",
             LibraryError::InvalidCatalogTransportPath => "invalid_catalog_transport_path",
@@ -2213,6 +2226,43 @@ pub async fn delete_cloud_api_token() -> Result<CloudCredentialStatus, CommandEr
     .map_err(|_| background_task_error())?
 }
 
+/// Store the catalog publisher credential.
+///
+/// Separate from the general cloud token because catalog publication and
+/// authority management are `publisher` operations on the server. The raw value
+/// goes only to the OS credential store; it is never returned, logged, or written
+/// into library settings.
+#[tauri::command]
+pub async fn set_cloud_publisher_token(token: String) -> Result<CloudCredentialStatus, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        credential::set_cloud_publisher_token_os(&token).map_err(CommandError::from)?;
+    Ok(CloudCredentialStatus { configured: true })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+}
+
+#[tauri::command]
+pub async fn delete_cloud_publisher_token() -> Result<CloudCredentialStatus, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        credential::delete_cloud_publisher_token_os().map_err(CommandError::from)?;
+    Ok(CloudCredentialStatus { configured: false })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+}
+
+/// Whether a publisher credential is stored. Reports presence only, never a value.
+#[tauri::command]
+pub async fn cloud_publisher_token_status() -> Result<CloudCredentialStatus, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let configured = credential::cloud_publisher_token_status().map_err(CommandError::from)?;
+    Ok(CloudCredentialStatus { configured })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+}
+
 #[tauri::command]
 pub async fn create_extension_pairing(
     state: State<'_, AppState>,
@@ -2266,6 +2316,50 @@ pub async fn push_cloud_catalog(
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.push_cloud_catalog(&|progress| { let _ = on_progress.send(progress); }))
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+/// Adopt or catch up with the server-owned bookmark authority (B5, receive only).
+///
+/// Read-only against the server: no bookmark command is sent from here.
+#[tauri::command]
+pub async fn reconcile_catalog_bookmarks(
+    state: State<'_, AppState>,
+) -> Result<crate::library::bookmark_reconciliation::BookmarkReconciliation, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.reconcile_catalog_bookmarks())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Send pending local bookmark intents to the authority (B6).
+///
+/// Every intent carries the operation id minted with its local mutation, so a
+/// repeated call — including after a restart — cannot duplicate a logical write.
+#[tauri::command]
+pub async fn flush_catalog_bookmark_outbox(
+    state: State<'_, AppState>,
+) -> Result<crate::library::bookmark_outbox::BookmarkOutboxFlush, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.flush_catalog_bookmark_outbox())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Pending/confirmed delivery state for one bookmark entity (B6).
+///
+/// Local-only: it reports what this PC has queued and what the authority has
+/// already confirmed, without requiring a network round trip.
+#[tauri::command]
+pub fn catalog_bookmark_delivery_state(
+    provider: String,
+    work_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::bookmark_outbox::BookmarkDeliveryState, CommandError> {
+    current_required(state)?
+        .catalog_bookmark_delivery_state(&provider, &work_id)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

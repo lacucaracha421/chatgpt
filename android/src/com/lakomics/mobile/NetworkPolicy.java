@@ -32,8 +32,12 @@ final class NetworkPolicy {
   post=post || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}/artworks/[A-Za-z0-9_-]{1,128}/media-ticket");
   get=get || p.equals("/v1/mobile-catalog/refresh");
   post=post || p.equals("/v1/mobile-catalog/refresh");
+  // The catalog bookmark command: one desired-state write per work identity, and
+  // nothing else. The id charset excludes `/`, `.`, `%` and `?`, so the segment
+  // cannot traverse or re-encode into a different entity.
+  boolean bookmarkPut=p.matches("/v1/mobile-catalog/bookmarks/(kHentai|heliotrope)/[0-9A-Za-z_-]{1,64}");
   get=get || p.matches("/v1/notes/[a-f0-9]{64}");
-  boolean put=p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
+  boolean put=bookmarkPut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
   if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post))throw new IllegalArgumentException("Unsupported read operation");
  }
 }

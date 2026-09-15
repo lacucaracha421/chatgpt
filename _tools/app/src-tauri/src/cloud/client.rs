@@ -48,6 +48,107 @@ pub(crate) struct RestoreMediaTicket {
     pub error: Option<String>,
 }
 
+/// Authority metadata from `/status`. All fields are `None` until the bookmark
+/// domain stops being PC-owned, so "absent" is a normal state, not an error.
+///
+/// `bookmark_write` is the advertised capability, not the authority identity: a
+/// server can hold an authority and still advertise writes as unsupported. B6
+/// sends nothing unless that capability is true.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct MobileCatalogAuthority {
+    pub library_id: Option<String>,
+    pub epoch: Option<i64>,
+    pub contract_version: Option<i64>,
+    pub cursor: Option<i64>,
+    pub bookmark_write: bool,
+}
+
+/// One materialized bookmark row from the authoritative snapshot.
+///
+/// The bookmark table itself stores presence only, but `entity_revision` is
+/// carried into the local authority-revision cache: a B6 command must present the
+/// revision its intent was composed against, and re-bookmarking a tombstone means
+/// presenting *that tombstone's* revision. `updatedAt` is still not stored.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MobileCatalogBookmarkItem {
+    pub provider: String,
+    pub work_id: String,
+    pub desired_state: bool,
+    pub entity_revision: i64,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MobileCatalogBookmarkSnapshot {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub cursor: i64,
+    pub items: Vec<MobileCatalogBookmarkItem>,
+}
+
+/// One ordered change-log row. `sequence` is validated for ordering;
+/// `entity_revision` feeds the local authority-revision cache for the same reason
+/// it does on a snapshot item.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MobileCatalogChange {
+    pub sequence: i64,
+    pub provider: String,
+    pub work_id: String,
+    pub desired_state: bool,
+    pub entity_revision: i64,
+    pub created_at: Option<String>,
+}
+
+/// One desired-state bookmark command: exactly the landed B4 payload shape, and
+/// the whole payload this PC stores for an operation.
+///
+/// `operation_id` is minted once when the *local mutation* is accepted and is
+/// reused verbatim on every transport retry, so the server's receipt resolves a
+/// lost response instead of recording a second logical write.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MobileCatalogBookmarkCommand {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub operation_id: String,
+    pub expected_revision: i64,
+    pub desired_state: bool,
+}
+
+/// The server's recorded result for one command.
+///
+/// `changed` is false when the desired state was already authoritative: the
+/// command is still accepted and receipted, so a retry stays idempotent and no
+/// second logical write is manufactured.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MobileCatalogBookmarkCommandResult {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub provider: String,
+    pub work_id: String,
+    pub desired_state: bool,
+    pub entity_revision: i64,
+    pub changed: bool,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MobileCatalogBookmarkChanges {
+    pub cursor: i64,
+    pub items: Vec<MobileCatalogChange>,
+    pub next_after: i64,
+    pub has_more: bool,
+}
+
+
 #[derive(serde::Deserialize)]
 struct MetadataBackupTicket {
     download_url: String,
@@ -83,16 +184,245 @@ impl CloudClient {
         let body:serde_json::Value=read_json(&mut response)?;
         if body["contentDigest"].as_str()!=Some(digest) || body["ready"]!=true {return Err(LibraryError::InvalidCloudResponse);} Ok(())
     }
-    pub(crate) fn publish_mobile_catalog(&self,body:&serde_json::Value,token:&str)->Result<(String,String),LibraryError>{
+    pub(crate) fn publish_mobile_catalog(&self,body:&serde_json::Value,token:&str,library_id:&str)->Result<(String,String),LibraryError>{
+        if !crate::library::is_valid_library_id(library_id) {return Err(LibraryError::InvalidCloudResponse);}
         let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
         if bytes.len()>crate::library::mobile_catalog::MAX_USERS+4096 {return Err(LibraryError::InvalidCloudResponse);}
         let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
-        let mut response=agent.put(self.endpoint("/v1/mobile-catalog/publication")?).header("Authorization",bearer(token)?).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
+        let mut response=agent.put(self.endpoint("/v1/mobile-catalog/publication")?).header("Authorization",bearer(token)?).header("X-Lakomics-Library-Id",library_id).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
         let value:serde_json::Value=read_json(&mut response)?;
         let revision=value["publicationRevision"].as_str().filter(|s|s.len()==64).ok_or(LibraryError::InvalidCloudResponse)?;
         let published=value["publishedAt"].as_str().ok_or(LibraryError::InvalidCloudResponse)?;
         Ok((revision.to_owned(),published.to_owned()))
     }
+    /// Authority metadata advertised by `/status` (B3 added it for PC sync).
+    /// Every authority field is `None` while the bookmark domain is still
+    /// PC-owned.
+    pub(crate) fn mobile_catalog_authority(
+        &self,
+        token: &str,
+    ) -> Result<MobileCatalogAuthority, LibraryError> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Capabilities {
+            #[serde(default)]
+            bookmark_write: bool,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Status {
+            authority_library_id: Option<String>,
+            authority_epoch: Option<i64>,
+            authority_contract_version: Option<i64>,
+            authority_cursor: Option<i64>,
+            // A server older than the capability field advertises nothing, which is
+            // read as "no write accepted" rather than as a malformed response.
+            #[serde(default)]
+            capabilities: Option<Capabilities>,
+        }
+        let mut response = self
+            .agent
+            .get(self.endpoint("/v1/mobile-catalog/status")?)
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| {
+                map_bookmark_read_error(error, LibraryError::CatalogBookmarkSyncRejected(409))
+            })?;
+        let status = read_json::<Status>(&mut response)?;
+        Ok(MobileCatalogAuthority {
+            library_id: status.authority_library_id,
+            epoch: status.authority_epoch,
+            contract_version: status.authority_contract_version,
+            cursor: status.authority_cursor,
+            bookmark_write: status
+                .capabilities
+                .is_some_and(|capabilities| capabilities.bookmark_write),
+        })
+    }
+
+    /// Full authoritative baseline. Used for the initial adoption and for an
+    /// explicit re-base after the change cursor proves stale.
+    pub(crate) fn mobile_catalog_bookmark_snapshot(
+        &self,
+        library_id: &str,
+        epoch: i64,
+        token: &str,
+    ) -> Result<MobileCatalogBookmarkSnapshot, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let mut response = self
+            .agent
+            .get(self.endpoint(&format!(
+                "/v1/mobile-catalog/bookmarks?libraryId={library_id}&epoch={epoch}"
+            ))?)
+            .header("Authorization", bearer(token)?)
+            .call()
+            // Params come from validated authority state, so a 409 here is an
+            // identity/contract mismatch rather than a cursor problem.
+            .map_err(|error| {
+                map_bookmark_read_error(error, LibraryError::CatalogBookmarkAuthorityMismatch)
+            })?;
+        let snapshot = read_json_bounded::<MobileCatalogBookmarkSnapshot>(
+            &mut response,
+            crate::library::mobile_catalog::MAX_USERS,
+        )?;
+        Ok(snapshot)
+    }
+
+    /// One page of the ordered change log, ascending by sequence.
+    pub(crate) fn mobile_catalog_bookmark_changes(
+        &self,
+        library_id: &str,
+        epoch: i64,
+        after: i64,
+        limit: u32,
+        token: &str,
+    ) -> Result<MobileCatalogBookmarkChanges, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        if after < 0 || !(1..=500).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // `http_status_as_error` is disabled for this one request so the coded 409
+        // body survives: the route distinguishes a cursor *ahead* of the server
+        // from a cursor whose history has expired, and the two share a status.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut response = agent
+            .get(self.endpoint(&format!("/v1/mobile-catalog/bookmarks/changes?libraryId={library_id}&epoch={epoch}&after={after}&limit={limit}"))?)
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| map_bookmark_read_error(error, LibraryError::CatalogBookmarkCursorAhead))?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            if status == 409 {
+                // Both outcomes mean "adopt a fresh baseline"; they differ only in
+                // the reason reported to the user, and neither may be read as
+                // "no changes".
+                return Err(match read_json::<ChangesConflictBody>(&mut response) {
+                    Ok(body) => match body.detail {
+                        ChangesConflictDetail::CursorExpired => {
+                            LibraryError::CatalogBookmarkCursorExpired
+                        }
+                        ChangesConflictDetail::Other => LibraryError::CatalogBookmarkCursorAhead,
+                    },
+                    Err(_) => LibraryError::CatalogBookmarkCursorAhead,
+                });
+            }
+            return Err(map_bookmark_read_error(
+                ureq::Error::StatusCode(status),
+                LibraryError::CatalogBookmarkCursorAhead,
+            ));
+        }
+        let changes =
+            read_json_bounded::<MobileCatalogBookmarkChanges>(&mut response, 1024 * 1024)?;
+        Ok(changes)
+    }
+
+    /// Send one bookmark command. The caller retries with the *same* command
+    /// value, so `operationId` is stable and the server's receipt resolves a lost
+    /// response instead of applying the intent twice.
+    ///
+    /// Status mapping keeps each failure a distinct recoverable state:
+    ///
+    /// * 401/403 → authorization (the credential, not the intent, is wrong);
+    /// * 409 with `revisionConflict` → the PC's `expectedRevision` is stale, and
+    ///   the body carries the current authoritative entity state;
+    /// * any other 409 → identity/epoch/contract skew, which only a receive-side
+    ///   re-base can resolve;
+    /// * 422 → the server speaks another contract, which no retry can fix.
+    ///
+    /// `http_status_as_error` is disabled for this one request so the 409 body
+    /// survives to be read; a conflict without its detail is treated as identity
+    /// skew rather than guessed at.
+    pub(crate) fn mobile_catalog_bookmark_command(
+        &self,
+        provider: &str,
+        work_id: &str,
+        command: &MobileCatalogBookmarkCommand,
+        token: &str,
+    ) -> Result<MobileCatalogBookmarkCommandResult, LibraryError> {
+        if !matches!(provider, "kHentai" | "heliotrope") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        if work_id.is_empty() || work_id.len() > 65536 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        if !crate::library::is_valid_library_id(&command.library_id)
+            || command.epoch < 1
+            || command.contract_version < 1
+            || uuid::Uuid::parse_str(&command.operation_id).is_err()
+            || command.expected_revision < 0
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let body = serde_json::to_vec(command).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if body.len() > 4096 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // The path is built from a validated provider and the exact stored work id.
+        // Segment encoding is the URL parser's job; concatenating a raw id into a
+        // path could produce a different entity than the one the intent names.
+        let mut url = self
+            .base_url
+            .join("/v1/mobile-catalog/bookmarks")
+            .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
+        url.path_segments_mut()
+            .map_err(|_| LibraryError::InvalidCloudSyncConfig)?
+            .pop_if_empty()
+            .extend([provider, work_id]);
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut response = agent
+            .put(url.as_str())
+            .header("Authorization", bearer(token)?)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(map_bookmark_command_error)?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            if status == 409 {
+                return Err(match read_json::<ConflictBody>(&mut response) {
+                    Ok(body) => match body.detail {
+                        ConflictDetail::Revision { current } => {
+                            LibraryError::CatalogBookmarkRevisionConflict {
+                                current_revision: current.entity_revision,
+                                current_desired_state: current.desired_state,
+                            }
+                        }
+                        ConflictDetail::Other => LibraryError::CatalogBookmarkAuthorityMismatch,
+                    },
+                    Err(_) => LibraryError::CatalogBookmarkAuthorityMismatch,
+                });
+            }
+            return Err(match status {
+                422 => LibraryError::CatalogBookmarkContractUnsupported,
+                401 | 403 => LibraryError::CloudUnauthorized,
+                other => LibraryError::CatalogBookmarkSyncRejected(other),
+            });
+        }
+        let result = read_json::<MobileCatalogBookmarkCommandResult>(&mut response)?;
+        if result.library_id != command.library_id
+            || result.epoch != command.epoch
+            || result.contract_version != command.contract_version
+            || result.provider != provider
+            || result.work_id != work_id
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(result)
+    }
+
     pub(crate) fn notes_list(&self, vault: &str, cursor:i64, token:&str) -> crate::library::notes::Result<crate::library::notes::Page> {
         let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
         let mut response=agent.get(self.endpoint(&format!("/v1/notes/{vault}?after={cursor}&limit=10"))?)
@@ -790,6 +1120,85 @@ fn map_registration_error(error: ureq::Error) -> LibraryError {
         return LibraryError::CloudObjectKeyConflict;
     }
     map_api_error(error, LibraryError::CloudAssetRegistrationRejected)
+}
+
+/// Bookmark reads distinguish *authority state* from transient transport failure.
+///
+/// 503 is the server's "authority ambiguous / unavailable" state, which is a
+/// retryable authority problem, not a bad request. 409 and 422 mean the caller's
+/// stored library/epoch/contract/cursor no longer describes the live authority,
+/// so they surface as the documented recovery states rather than a generic
+/// network error that a blind retry could never resolve.
+fn map_bookmark_read_error(error: ureq::Error, conflict: LibraryError) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(409) => conflict,
+        // The route rejects an unknown contractVersion with 422; this client only
+        // ever sends the version it was compiled against, so a 422 means the
+        // server moved to a contract this build cannot speak.
+        ureq::Error::StatusCode(422) => LibraryError::CatalogBookmarkContractUnsupported,
+        ureq::Error::StatusCode(401 | 403) => LibraryError::CloudUnauthorized,
+        ureq::Error::StatusCode(503) => LibraryError::CatalogBookmarkSyncRejected(503),
+        ureq::Error::StatusCode(status) => LibraryError::CatalogBookmarkSyncRejected(status),
+        ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+        _ => LibraryError::CloudRequestUnavailable,
+    }
+}
+
+/// A command rejection keeps the authority state the caller needs to recover.
+///
+/// The route reports a stale `expectedRevision` as 409 with `code:
+/// revisionConflict` and the current entity state; that body is parsed by the
+/// caller, which disables `http_status_as_error` for this one request so the
+/// response survives. Any other 409 means the stored library/epoch/contract no
+/// longer describes the live authority, and 422 means the server speaks a version
+/// contract this build cannot. None of these is a generic network failure, so
+/// none is flattened into one.
+fn map_bookmark_command_error(error: ureq::Error) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(409) => LibraryError::CatalogBookmarkAuthorityMismatch,
+        ureq::Error::StatusCode(422) => LibraryError::CatalogBookmarkContractUnsupported,
+        ureq::Error::StatusCode(401 | 403) => LibraryError::CloudUnauthorized,
+        ureq::Error::StatusCode(503) => LibraryError::CatalogBookmarkSyncRejected(503),
+        ureq::Error::StatusCode(status) => LibraryError::CatalogBookmarkSyncRejected(status),
+        ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+        _ => LibraryError::CloudRequestUnavailable,
+    }
+}
+
+/// The `revisionConflict` 409 body: the current authoritative entity state.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictCurrent {
+    desired_state: bool,
+    entity_revision: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "code")]
+enum ConflictDetail {
+    #[serde(rename = "revisionConflict")]
+    Revision { current: ConflictCurrent },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(serde::Deserialize)]
+struct ConflictBody {
+    detail: ConflictDetail,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "code")]
+enum ChangesConflictDetail {
+    #[serde(rename = "cursorExpired")]
+    CursorExpired,
+    #[serde(other)]
+    Other,
+}
+
+#[derive(serde::Deserialize)]
+struct ChangesConflictBody {
+    detail: ChangesConflictDetail,
 }
 
 fn map_api_error(error: ureq::Error, rejected: fn(u16) -> LibraryError) -> LibraryError {

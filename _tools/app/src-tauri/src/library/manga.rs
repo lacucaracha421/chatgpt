@@ -948,6 +948,16 @@ pub(crate) fn apply_exact_catalog_recovery(
             )? > 0
         };
         if inserted {
+            // A recovery that creates a bookmark is a PC-owned bookmark mutation,
+            // so its operation commits with the link and series-removal writes
+            // below rather than as a second, separable step.
+            super::bookmark_outbox::enqueue_local_mutation(
+                &transaction,
+                provider,
+                &work_id,
+                true,
+                true,
+            )?;
             created_bookmarks += 1;
         }
         transaction.execute(
@@ -1056,6 +1066,15 @@ pub(crate) fn apply_selected_catalog_recovery(
             )? > 0
         };
         if inserted {
+            // Same rule as exact recovery: the created bookmark and its operation
+            // are one committed change.
+            super::bookmark_outbox::enqueue_local_mutation(
+                &transaction,
+                provider,
+                &work_id,
+                true,
+                true,
+            )?;
             created_bookmarks += 1;
         }
         transaction.execute(

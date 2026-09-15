@@ -66,7 +66,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   },[remember]);
   const appliedInitialNode=useRef<string|undefined>(undefined);
   useEffect(()=>{if(active&&initialNode&&appliedInitialNode.current!==initialNode){appliedInitialNode.current=initialNode;navigate({node:initialNode,filter:'all'});}},[initialNode,active,navigate]);
-  usePublicationCheck(active&&!paused,'/v1/library/characters/status',index?.revision,()=>setRetry(n=>n+1));
+  usePublicationCheck(active&&!paused,'/v1/library/characters/status',index?.revision,(_reply,changed)=>{if(changed)setRetry(n=>n+1);});
   useEffect(()=>{
     backRef.current=()=>{
       const s=latest.current;

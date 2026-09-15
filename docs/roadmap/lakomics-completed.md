@@ -2,6 +2,31 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-15 — Server authority bookmark pilot
+
+### CLOUD-AUTH-001 — staged server authority foundation
+
+Status: `DONE` — B1/B3/B4/B5/B6/B7/B8.1 and the B8 production gate completed. There is intentionally no B2 artifact in the repository.
+
+- Server authority now has stable library/epoch identity, revision-fenced idempotent bookmark commands, receipts, ordered changes, baseline/cursor recovery, 180-day retained replay history, explicit `cursorExpired`, and a 3 MiB / 200k-item baseline guard. PC B5 receive reconciliation and B6 durable outbox, plus Android/shared-web B7 durable intents, use the same server-owned state.
+- The live role boundary is enforced at the server: the legacy shared token is client-only for catalog reads and ordinary bookmark mutations; publisher operations require a separately provisioned publisher credential. The PC stores that credential under the dedicated `Lakomics/CloudPublisher` OS-credential target. A live client probe returned 200 for status/snapshot and 401 for the publisher-only activation route.
+- Before activation, the production catalog was republished from the current PC snapshot so the server baseline contained all **263** existing bookmarks. The encoded user snapshot was about **19.4 KiB**, far below the 3 MiB recovery bound. Authority activation then adopted epoch 1 / cursor 0 against that exact publication.
+- Production backup `/home/linuxuser/lakomics-api/backups/b8-authority-20260915T053318Z/` contains the pre-rollout server code plus a **22,319,104-byte** SQLite online backup with `quick_check=ok`. `/home/linuxuser/lakomics-api/backups/b8-enable-20260915T063151Z/mobile_catalog.py` retains the pre-capability source for the final write-enable rollback point. The service finished `active/running` with `NRestarts=0`.
+- `bookmarkWrite` is advertised only when an authority row exists. Final server verification passed **409/409** tests, and the deployed status returned `bookmarkWrite=true` after authority activation.
+- Final pre-commit verification: mobile **136/136**; Rust bookmark **62 passed / 1 ignored**; Rust `cloud::` **102 passed / 1 ignored**; Rust credential **17 passed / 1 ignored**; `cargo check --lib` and `git diff --check` both clean. The signed Android build also passed NetworkPolicy 141, DocumentTree 19, ThumbnailCache 19, MediaTransfer 22, TemporaryImagePolicy 23 and NotesCrypto 4 before the device install.
+
+### MOBILE-007 — Catalog bookmark changes across devices
+
+Status: `DONE` — production two-direction canary and Galaxy Tab acceptance completed 2026-09-15.
+
+- A freshly built signed Android **0.6.2 (18)** APK (SHA-256 `163277f659d0f6b050c68166b855320a203776c8f7b6a781776822039d5564aa`) was installed in place on the Galaxy Tab S11. Before write enable, the real Catalog detail showed the bookmark button present but disabled; after capability activation it became usable.
+- Mobile → server → PC: the user bookmarked `kHentai/4190161`. The server committed sequence 1 / entity revision 1 and one receipt; PC B5 then advanced cursor 0→1, applied exactly one change, and kept the B6 outbox at zero.
+- PC → server → mobile: the same item was temporarily removed through the real PC B6 outbox, producing sequence 2 / revision 2, then restored through the same path as sequence 3 / revision 3. The user confirmed the restored `북마크됨` state on the tablet. This preserves the user-created bookmark rather than leaving a synthetic canary state behind.
+- Final convergence: server cursor **3**, three changes/receipts, desired state true at revision 3; PC cursor **3**, revision 3 and outbox **0**. Both production SQLite databases returned `quick_check=ok`. The live server snapshot contained **264** bookmarks (the 263 activation baseline plus the user's new bookmark).
+- The canary also proved remote receive does not manufacture an outgoing intent: after replaying the PC-originated echo changes, PC caught up cursor 1→3 with the outbox still empty.
+
+The next authority work is no longer another bookmark phase. Post-authority client simplification remains active backlog item `CLOUD-POST-001`; broader mobile write domains stay deferred until explicitly selected.
+
 ## Closure checkpoint — 2026-09-13
 
 - `NOTE-001B` closed as DONE by user acceptance.

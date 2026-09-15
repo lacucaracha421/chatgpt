@@ -12,6 +12,7 @@ import time
 from contextlib import contextmanager, closing
 from pathlib import Path
 from fastapi import HTTPException
+import catalog_bookmarks
 from mobile_catalog_query import count_groups, freeze_query, search_groups
 
 MAX_CONTENT = 512 * 1024 * 1024
@@ -309,13 +310,25 @@ def prepared_items(db, query, offset, limit, total):
         return None
     return items[offset:offset + limit]
 
-def publish(body, root, get_db, *, additions=(), finalize=None):
+def publish(body, root, get_db, *, additions=(), finalize=None,
+            external_publisher=False, publisher_library_id=None):
+    """Commit a catalog publication.
+
+    Owns the whole authority fence: the initial derivation snapshot and the final
+    check inside the commit transaction. Callers never supply a trusted snapshot.
+    External PC publication additionally proves it speaks for the active library;
+    server-internal republishing (``external_publisher=False``) does not.
+    """
     if not isinstance(body, dict) or set(body) != {"version", "baseRevision", "contentDigest", "userSnapshot"} or body["version"] != 1:
         fail()
     content = checked_digest(body["contentDigest"])
     if body["baseRevision"] is not None:
         checked_digest(body["baseRevision"])
     users = validate_users(body["userSnapshot"])
+    # Initial snapshot. The control-database connection is closed again before any
+    # materialization or prepare work, so no read lock is held meanwhile.
+    authority = catalog_bookmarks.load(get_db)
+    users = _fenced_users(users, authority)
     with get_db() as db:
         artifact = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [content]).fetchone()
         if artifact is None or not artifact_path(root, content).is_file():
@@ -336,17 +349,21 @@ def publish(body, root, get_db, *, additions=(), finalize=None):
         already_current = bool(prior and prior["revision"] == revision)
         if not already_current and (prior["revision"] if prior else None) != body["baseRevision"]:
             fail(409, "Catalog publication changed; refresh before publishing")
-        if already_current:
-            published_at = prior["published_at"]
-        else:
-            published_at = None
         if prior and not already_current and prior["content_digest"] != content and prior["user_revision"] != user_revision and db.execute("SELECT EXISTS(SELECT 1 FROM mobile_catalog_publications WHERE content_digest=?)", [content]).fetchone()[0]:
             fail(409, "A rollback must retain the current user snapshot")
     prepare_users(root, content, revision, users)
-    if published_at is not None and finalize is None:
-        return dict(publicationRevision=revision, publishedAt=published_at, userRevision=user_revision)
+    expected = catalog_bookmarks.signature(authority)
     with get_db() as db:
         db.execute("BEGIN IMMEDIATE")
+        # Final fence. Authority may have activated, changed library/epoch, or
+        # moved its cursor while this publication was preparing; an already-current
+        # publication must still prove it is fenced.
+        final = catalog_bookmarks.snapshot_from(db)
+        if catalog_bookmarks.signature(final) != expected:
+            fail(409, "Catalog bookmark authority changed; refresh before publishing")
+        if external_publisher and final is not None:
+            if publisher_library_id is None or publisher_library_id != final["libraryId"]:
+                fail(409, "Catalog publication library does not match the active authority")
         prior = current(db)
         if (prior["revision"] if prior else None) != body["baseRevision"]:
             if not prior or prior["revision"] != revision:
@@ -361,8 +378,22 @@ def publish(body, root, get_db, *, additions=(), finalize=None):
         row = current(db)
         return dict(publicationRevision=revision, publishedAt=row["published_at"], userRevision=user_revision)
 
+
+def _fenced_users(users, authority):
+    """Replace PC bookmark values with server-owned state when authority is active.
+
+    The incoming snapshot has already been shape-validated; the derived snapshot
+    is revalidated so every revision digest derives from authority.
+    """
+    if authority is None:
+        return users
+    derived = dict(users)
+    derived["bookmarks"] = sorted([[provider, work_id, created] for provider, work_id, created in authority["bookmarks"]], key=encode)
+    return validate_users(derived)
+
+
 @contextmanager
-def open_publication(root, get_db, revision=None):
+def open_publication(root, get_db, revision=None, bookmarks=None):
     with get_db() as control:
         row = current(control) if revision is None else control.execute("SELECT * FROM mobile_catalog_publications WHERE revision=?", [checked_digest(revision)]).fetchone()
         if row is None:
@@ -371,6 +402,11 @@ def open_publication(root, get_db, revision=None):
     db = sqlite3.connect(readable_users_path(root, publication["revision"]).as_uri() + "?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     try:
+        if bookmarks is not None:
+            # Server-owned bookmarks shadow the baked copy before the immutable
+            # read transaction starts. Inactive authority creates no shadow, so
+            # this path is untouched while the domain is PC-owned.
+            catalog_bookmarks.attach_shadow(db, bookmarks)
         db.execute("ATTACH DATABASE ? AS catalog", [artifact_path(root, publication["content_digest"]).as_uri() + "?mode=ro"])
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")

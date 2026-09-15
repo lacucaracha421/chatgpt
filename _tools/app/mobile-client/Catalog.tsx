@@ -1,12 +1,15 @@
 import {usePublicationCheck} from './usePublicationCheck';
 import {HeaderTools} from './HeaderTools';
-import {useEffect,useRef,useState,type MutableRefObject} from 'react';
+import {useCallback,useEffect,useRef,useState,type MutableRefObject} from 'react';
 import {ArrowLeftIcon,ArrowPathIcon,BookmarkIcon,BookOpenIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline';
+import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {Button,IconButton} from './ui';
 import {api,errorText} from './transport';
 import {catalogImageTicket} from './catalogMedia';
 import {CatalogReader} from './CatalogReader';
 import {CatalogRefresh} from './CatalogRefresh';
+import {useBookmarks,usePendingRetry} from './useBookmarks';
+import {BOOKMARK_CONTRACT_VERSION,type BookmarkAuthority} from './bookmarkOutbox';
 import {DEFAULT_CATALOG_QUERY,catalogPath,catalogDetailPath,catalogEditionsPath,catalogReaderPath,catalogTagQuery,catalogError,type CatalogQuery,type CatalogItem,type CatalogPage,type CatalogDetail,type CatalogEditions,type CatalogReaderManifest} from './catalogModel';
 import './Catalog.css';
 
@@ -43,6 +46,23 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
   const [editions,setEditions]=useState<CatalogEditions|null>(null),[editionCursor,setEditionCursor]=useState<string|null>(null),[editionError,setEditionError]=useState('');
   const [reader,setReader]=useState<CatalogReaderManifest|null>(null),[readerBusy,setReaderBusy]=useState(false),[readerError,setReaderError]=useState('');
   const committed=useRef(''),list=useRef<HTMLDivElement>(null),scroll=useRef(0),publication=useRef<string|null>(null);
+  const published=page?.publicationRevision;
+  const statusPath='/v1/mobile-catalog/status';
+  const [authority,setAuthority]=useState<BookmarkAuthority|null>(null);
+  const onStatus=useCallback((reply:unknown,changed:boolean)=>{
+    // The authority is re-read on every check, because a server can start or stop
+    // advertising the write capability without the publication moving.
+    const status=reply as {authorityLibraryId?:string|null;authorityEpoch?:number|null;authorityContractVersion?:number|null;capabilities?:{bookmarkWrite?:boolean}};
+    const epoch=status.authorityEpoch;
+    setAuthority(status.authorityLibraryId!=null&&status.capabilities?.bookmarkWrite===true&&typeof epoch==='number'&&epoch>=1
+      ?{libraryId:status.authorityLibraryId,epoch,contractVersion:status.authorityContractVersion??BOOKMARK_CONTRACT_VERSION}
+      :null);
+    if(changed)reload();
+  },[]);
+  usePublicationCheck(active&&!paused&&!selected&&!reader,statusPath,published,onStatus);
+  const bookmarks=useBookmarks({active:active&&!paused,authority});
+  const pendingWork=selected?bookmarks.hasPending(selected.provider,selected.providerWorkId):false;
+  usePendingRetry(active&&!paused,pendingWork,bookmarks.flush);
   const pageCache=useRef(new Map<string,CatalogPage>()),detailCache=useRef(new Map<string,CatalogDetail>()),editionCache=useRef(new Map<string,CatalogEditions>()),readerCache=useRef(new Map<string,CatalogReaderManifest>());
   const prefetches=useRef(new Map<string,AbortController>()),readerRequest=useRef<AbortController|null>(null);
   const path=catalogPath(query,cursor),key=`${path}:${refresh}`;
@@ -94,7 +114,7 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
     const cacheKey=`${page.publicationRevision}:${selected.provider}:${selected.providerWorkId}`,cached=lruGet(detailCache.current,cacheKey);
     if(cached){setDetail(cached);setDetailError('');return;}
     const controller=new AbortController();setDetail(null);setDetailError('');
-    void api<{publicationRevision:string;item:CatalogDetail}>(catalogDetailPath(selected,page.context),controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===page.publicationRevision){lruSet(detailCache.current,cacheKey,result.item,48);setDetail(result.item);}}).catch(reason=>{if(!controller.signal.aborted)setDetailError(catalogError(reason)||errorText(reason));});
+    void api<{publicationRevision:string;item:CatalogDetail&{bookmarkRevision?:number}}>(catalogDetailPath(selected,page.context),controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===page.publicationRevision){lruSet(detailCache.current,cacheKey,result.item,48);setDetail(result.item);if(typeof result.item.bookmarkRevision==='number')bookmarks.observe(result.item.provider,result.item.providerWorkId,result.item.bookmarkRevision,result.item.bookmarked);}}).catch(reason=>{if(!controller.signal.aborted)setDetailError(catalogError(reason)||errorText(reason));});
     return()=>controller.abort();
   },[selected,page?.context,page?.publicationRevision,active,paused,detailRefresh]);
   useEffect(()=>{
@@ -115,11 +135,41 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
       if(controller.signal.aborted||currentReaderOwner.current!==owner||result.publicationRevision!==page.publicationRevision||result.provider!==selected.provider||result.providerWorkId!==selected.providerWorkId)return;lruSet(readerCache.current,cacheKey,result,24);setReader(result);
     }).catch(reason=>{if(!controller.signal.aborted)setReaderError(catalogError(reason)||errorText(reason));}).finally(()=>{if(readerRequest.current===controller){readerRequest.current=null;setReaderBusy(false);}});
   };
+  function visibleEditionBookmark(item:CatalogEditions['items'][number]){
+    if(detail?.provider===item.provider&&detail.providerWorkId===item.providerWorkId){
+      return bookmarks.stateFor(detail.provider,detail.providerWorkId,detail.bookmarked,detail.bookmarkRevision);
+    }
+    return bookmarks.stateFor(item.provider,item.providerWorkId,item.bookmarked);
+  }
+  function visibleGroupBookmark(item:CatalogItem){
+    const direct=bookmarks.stateFor(item.provider,item.providerWorkId,item.bookmarked);
+    if(direct.pending&&direct.desired)return {desired:true,pending:true};
+    if(editions?.groupId===item.groupId&&editions.items.length===editions.totalCount){
+      const states=editions.items.map(visibleEditionBookmark);
+      return {desired:states.some(state=>state.desired),pending:states.some(state=>state.pending)};
+    }
+    if(direct.pending&&!direct.desired&&item.versionCount===1)return {desired:false,pending:true};
+    return {desired:item.hasBookmarkedVersion,pending:direct.pending};
+  }
+  function applyBookmarkPresentation(provider:'kHentai',providerWorkId:string,desired:boolean){
+    const groupId=selected?.provider===provider&&selected.providerWorkId===providerWorkId?selected.groupId:null;
+    const completeEditions=groupId&&editions?.groupId===groupId&&editions.items.length===editions.totalCount?editions.items:null;
+    const groupDesired=(item:CatalogItem)=>{
+      if(!groupId||item.groupId!==groupId)return item.hasBookmarkedVersion;
+      if(desired)return true;
+      if(completeEditions)return completeEditions.some(version=>version.providerWorkId!==providerWorkId&&visibleEditionBookmark(version).desired);
+      return item.versionCount===1?false:item.hasBookmarkedVersion;
+    };
+    setPage(current=>current?{...current,items:current.items.map(item=>item.groupId===groupId?{...item,bookmarked:item.providerWorkId===providerWorkId?desired:item.bookmarked,hasBookmarkedVersion:groupDesired(item)}:item)}:current);
+    setSelected(current=>current&&current.provider===provider&&current.providerWorkId===providerWorkId?{...current,bookmarked:desired,hasBookmarkedVersion:groupDesired(current)}:current);
+    setDetail(current=>current&&current.provider===provider&&current.providerWorkId===providerWorkId?{...current,bookmarked:desired}:current);
+    setEditions(current=>current?{...current,items:current.items.map(item=>item.provider===provider&&item.providerWorkId===providerWorkId?{...item,bookmarked:desired}:item)}:current);
+    pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();
+  }
   function change(next:Partial<CatalogQuery>){setQuery(current=>({...current,...next}));setCursor(null);setPrevious([]);setSelected(null);setReader(null);scroll.current=0;}
   function open(item:CatalogItem){scroll.current=list.current?.scrollTop??0;setSelected(item);setEditionCursor(null);setEditions(null);setReader(null);setReaderError('');}
   function reload(){for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();readerCache.current.clear();committed.current='';setCursor(null);setPrevious([]);setSelected(null);setReader(null);setRefresh(n=>n+1);}
 
-  usePublicationCheck(active&&!paused&&!selected&&!reader,'/v1/mobile-catalog/status',page?.publicationRevision,reload);
   return <section className="mobile-catalog" style={{display:active?'flex':'none'}} aria-label="만화 카탈로그">
     <div className="catalog-content" style={{display:selected?'none':undefined}}>
       <HeaderTools active={active}><span className="numeric catalog-total">{page?.countStatus==='ready'?page.totalCount?.toLocaleString():''}</span>{page?.ready?<CatalogRefresh active={active&&!paused&&!selected} language={query.language} publication={page.publicationRevision} endpoint={endpoint} onPublished={reload}/>:<IconButton label="카탈로그 새로고침" icon={ArrowPathIcon} disabled={busy} onClick={reload}/>}</HeaderTools>
@@ -128,11 +178,11 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
       <div className="catalog-filters"><select aria-label="카탈로그 언어" value={query.language} onChange={event=>change({language:event.target.value as CatalogQuery['language']})}><option value="korean">한국어</option><option value="japanese">일본어</option><option value="all">전체 언어</option></select><select aria-label="카탈로그 정렬" value={query.sort} onChange={event=>change({sort:event.target.value as CatalogQuery['sort']})}><option value="latest">최신순</option><option value="views">조회순</option><option value="hotDay">오늘 인기</option><option value="hotWeek">이번 주 인기</option><option value="hotMonth">이번 달 인기</option></select><Button variant="ghost" aria-pressed={query.scope==='bookmarked'} onClick={()=>change(query.scope==='all'?{scope:'bookmarked',sort:'latest'}:{scope:'all'})}><BookmarkIcon/>북마크</Button></div>
       {busy&&<div className="loading-line" role="status" aria-label="카탈로그 불러오는 중"/>}{error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{committed.current='';setRefresh(n=>n+1);}}>다시 시도</Button></div>}{countError&&<div className="catalog-count-error">개수를 확인하지 못했습니다.<Button size="sm" variant="ghost" onClick={()=>setCountRetry(n=>n+1)}>다시 시도</Button></div>}
       <div ref={list} className="catalog-scroll" onScroll={event=>{scroll.current=event.currentTarget.scrollTop;}}>
-        {page?.ready===false?<div className="empty-state"><BookOpenIcon/><h2>카탈로그가 아직 공유되지 않았습니다</h2><p>PC 설정의 온라인 카탈로그에서 모바일에 게시해 주세요.</p></div>:page?.ready&&<>{page.items.length?<div className="catalog-grid">{page.items.map(item=><button className="catalog-card" disabled={busy||committed.current!==key} key={`${item.provider}:${item.groupId}`} onClick={()=>open(item)}><div className="catalog-cover"><CatalogCover item={item} revision={page.publicationRevision??'0'.repeat(64)} active={active&&!paused&&!selected&&!reader}/><span className="catalog-cover-pages">{item.fileCount}p</span>{item.hasBookmarkedVersion&&<BookmarkIcon className="catalog-saved" aria-label="북마크됨"/>}</div><strong>{item.title}</strong><span>{item.artists.join(' · ')||'작가 미상'}</span>{item.versionCount>1&&<span>{item.versionCount}개 판본</span>}</button>)}</div>:<div className="empty-state"><h2>검색 결과가 없습니다</h2><p>검색어나 언어 조건을 바꿔 보세요.</p></div>}<footer className="page-footer"><Button disabled={!previous.length||busy} onClick={()=>{setCursor(previous[previous.length-1]??null);setPrevious(value=>value.slice(0,-1));}}>이전</Button><span>{previous.length+1}</span><Button disabled={!page.nextCursor||busy} onClick={()=>{setPrevious(value=>[...value,cursor]);setCursor(page.nextCursor);}}>다음</Button></footer></>}
+        {page?.ready===false?<div className="empty-state"><BookOpenIcon/><h2>카탈로그가 아직 공유되지 않았습니다</h2><p>PC 설정의 온라인 카탈로그에서 모바일에 게시해 주세요.</p></div>:page?.ready&&<>{page.items.length?<div className="catalog-grid">{page.items.map(item=>{const state=visibleGroupBookmark(item);return <button className="catalog-card" disabled={busy||committed.current!==key} key={`${item.provider}:${item.groupId}`} onClick={()=>open(item)}><div className="catalog-cover"><CatalogCover item={item} revision={page.publicationRevision??'0'.repeat(64)} active={active&&!paused&&!selected&&!reader}/><span className="catalog-cover-pages">{item.fileCount}p</span>{state.desired&&<BookmarkSolidIcon className={`catalog-saved${state.pending?' catalog-saved--pending':''}`} aria-label={state.pending?'북마크 저장 대기':'북마크됨'}/>}</div><strong>{item.title}</strong><span>{item.artists.join(' · ')||'작가 미상'}</span>{item.versionCount>1&&<span>{item.versionCount}개 판본</span>}</button>;})}</div>:<div className="empty-state"><h2>검색 결과가 없습니다</h2><p>검색어나 언어 조건을 바꿔 보세요.</p></div>}<footer className="page-footer"><Button disabled={!previous.length||busy} onClick={()=>{setCursor(previous[previous.length-1]??null);setPrevious(value=>value.slice(0,-1));}}>이전</Button><span>{previous.length+1}</span><Button disabled={!page.nextCursor||busy} onClick={()=>{setPrevious(value=>[...value,cursor]);setCursor(page.nextCursor);}}>다음</Button></footer></>}
       </div>
     </div>
-    {selected&&<div className="catalog-detail"><div className="catalog-heading"><IconButton label="카탈로그 목록으로" icon={ArrowLeftIcon} onClick={()=>setSelected(null)}/><span>상세 정보</span></div>{detailError?<div role="alert" className="inline-error">{detailError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:!detail?<p role="status">상세 정보를 불러오는 중…</p>:<><div className="catalog-detail-intro"><div className="catalog-detail-cover"><CatalogCover item={{...selected,thumbnailUrl:detail.thumbnailUrl}} revision={page?.publicationRevision??'0'.repeat(64)} active={active&&!paused&&!reader}/></div><div><h2>{detail.title}</h2>{detail.titleJpn&&detail.titleJpn!==detail.title&&<p className="muted">{detail.titleJpn}</p>}<p>{detail.fileCount}페이지 · 조회 {detail.views.toLocaleString()}</p>{detail.bookmarked&&<p className="catalog-bookmark-label"><BookmarkIcon/>북마크됨</p>}<Button className="catalog-read-action" disabled={readerBusy} onClick={()=>loadReader(false)}><BookOpenIcon/>{readerBusy?'페이지 확인 중…':'읽기'}</Button>{readerError&&<p className="catalog-reader-error">{readerError}</p>}</div></div><div className="catalog-tags">{detail.tagGroups.map(group=><div key={group.namespace}><h3>{group.namespace}</h3><div>{group.values.map(value=><Button key={value} size="sm" variant="ghost" onClick={()=>{const text=catalogTagQuery(group.namespace,value);setDraft(text);change({text});}}>{group.labels?.[value]??value}</Button>)}</div></div>)}</div></>}
-      <section className="catalog-editions" aria-label="카탈로그 판본"><h3>판본{editions?` · ${editions.totalCount}`:''}</h3>{editionError?<div role="alert">{editionError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:editions?.items.map(item=><button key={item.providerWorkId} className="catalog-edition" aria-current={detail?.providerWorkId===item.providerWorkId?'true':undefined} onClick={()=>setSelected(current=>current?{...current,...item}:current)}><span>{item.title}</span><small>{item.fileCount}p{item.bookmarked?' · 북마크':''}</small></button>)}{editionCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(null)}>처음 판본</Button>}{editions?.nextCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(editions.nextCursor)}>다음 판본</Button>}</section>
+    {selected&&<div className="catalog-detail"><div className="catalog-heading"><IconButton label="카탈로그 목록으로" icon={ArrowLeftIcon} onClick={()=>setSelected(null)}/><span>상세 정보</span></div>{detailError?<div role="alert" className="inline-error">{detailError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:!detail?<p role="status">상세 정보를 불러오는 중…</p>:<><div className="catalog-detail-intro"><div className="catalog-detail-cover"><CatalogCover item={{...selected,thumbnailUrl:detail.thumbnailUrl}} revision={page?.publicationRevision??'0'.repeat(64)} active={active&&!paused&&!reader}/></div><div><h2>{detail.title}</h2>{detail.titleJpn&&detail.titleJpn!==detail.title&&<p className="muted">{detail.titleJpn}</p>}<p>{detail.fileCount}페이지 · 조회 {detail.views.toLocaleString()}</p>{(()=>{const state=bookmarks.stateFor(detail.provider,detail.providerWorkId,detail.bookmarked,detail.bookmarkRevision);const MarkIcon=state.desired?BookmarkSolidIcon:BookmarkIcon;return <><div className="catalog-primary-actions"><Button className="catalog-read-action" disabled={readerBusy} onClick={()=>loadReader(false)}><BookOpenIcon/>{readerBusy?'페이지 확인 중…':'읽기'}</Button><Button className="catalog-bookmark-action" aria-label={state.pending?state.desired?'북마크 저장 중':'북마크 해제 중':state.desired?'북마크 해제':'북마크'} aria-pressed={state.desired} disabled={!authority&&!state.pending} onClick={()=>{const desired=!state.desired;bookmarks.toggle(detail.provider,detail.providerWorkId,desired);applyBookmarkPresentation(detail.provider,detail.providerWorkId,desired);}}><MarkIcon className={state.pending?'catalog-bookmark-pending':undefined}/>{state.desired?'북마크됨':'북마크'}</Button></div>{bookmarks.failure?<span className="catalog-bookmark-state catalog-bookmark-error" role="alert">{bookmarks.failure}</span>:state.pending&&<span className="catalog-bookmark-state" role="status">저장 대기</span>}</>;})()}{readerError&&<p className="catalog-reader-error">{readerError}</p>}</div></div><div className="catalog-tags">{detail.tagGroups.map(group=><div key={group.namespace}><h3>{group.namespace}</h3><div>{group.values.map(value=><Button key={value} size="sm" variant="ghost" onClick={()=>{const text=catalogTagQuery(group.namespace,value);setDraft(text);change({text});}}>{group.labels?.[value]??value}</Button>)}</div></div>)}</div></>}
+      <section className="catalog-editions" aria-label="카탈로그 판본"><h3>판본{editions?` · ${editions.totalCount}`:''}</h3>{editionError?<div role="alert">{editionError}<Button onClick={()=>setDetailRefresh(n=>n+1)}>다시 시도</Button></div>:editions?.items.map(item=>{const state=visibleEditionBookmark(item);return <button key={item.providerWorkId} className="catalog-edition" aria-current={detail?.providerWorkId===item.providerWorkId?'true':undefined} onClick={()=>setSelected(current=>current?{...current,...item}:current)}><span>{item.title}</span><small>{item.fileCount}p{state.desired?' · 북마크':''}{state.pending?' · 저장 대기':''}</small></button>;})}{editionCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(null)}>처음 판본</Button>}{editions?.nextCursor&&<Button variant="ghost" onClick={()=>setEditionCursor(editions.nextCursor)}>다음 판본</Button>}</section>
     </div>}
     {reader&&selected&&<CatalogReader manifest={reader} title={detail?.title??selected.title} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy}/>}
   </section>;

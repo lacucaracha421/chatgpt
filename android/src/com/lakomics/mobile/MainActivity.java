@@ -38,8 +38,8 @@ public final class MainActivity extends Activity {
  private WebResourceResponse asset(Uri u){try{String p=u.getPath();if(p==null || p.contains("..") || p.contains("\\"))return denied();if(p.startsWith("/media-cache/") || p.startsWith("/thumbnail-cache/")){String[] parts=p.split("/");if(parts.length!=4 || media==null)return denied();String type=u.getQueryParameter("mime");if(!MediaRepository.imageMime(type))type="image/webp";Map<String,String> cacheHeaders=new HashMap<>();cacheHeaders.put("Cache-Control","no-store");cacheHeaders.put("X-Content-Type-Options","nosniff");return new WebResourceResponse(type,null,200,"OK",cacheHeaders,media.stream(parts[3],Long.parseLong(parts[2])));}if(p.equals("/"))p="/index.html";String mime=p.endsWith(".html")?"text/html":p.endsWith(".js")?"text/javascript":p.endsWith(".css")?"text/css":p.endsWith(".woff2")?"font/woff2":p.endsWith(".ttf")?"font/ttf":p.endsWith(".svg")?"image/svg+xml":"application/octet-stream";
   Map<String,String> headers=new HashMap<>();headers.put("Cache-Control","no-store");headers.put("X-Content-Type-Options","nosniff");headers.put("Content-Security-Policy","default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src https: blob:; font-src 'self'; connect-src https:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'");return new WebResourceResponse(mime,"UTF-8",200,"OK",headers,getAssets().open(p.substring(1)));}catch(Exception e){return denied();}}
  private void emit(String event,JSONObject detail){runOnUiThread(()->{if(!destroyed && web!=null && web.getUrl()!=null && web.getUrl().startsWith(ORIGIN+"/"))web.evaluateJavascript("window.dispatchEvent(new CustomEvent("+JSONObject.quote(event)+",{detail:"+(detail==null?"null":detail.toString())+"}))",null);});}
- private void reply(String id,boolean ok,Object data,String error){reply(id,ok,data,error,null);}
- private void reply(String id,boolean ok,Object data,String error,Integer status){try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",ok).put("status",status==null?JSONObject.NULL:status).put("data",data==null?JSONObject.NULL:data).put("error",error==null?JSONObject.NULL:error));}catch(JSONException ignored){}}
+ private void reply(String id,boolean ok,Object data,String error){reply(id,ok,data,error,null,null);}
+ private void reply(String id,boolean ok,Object data,String error,Integer status,Object details){try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",ok).put("status",status==null?JSONObject.NULL:status).put("data",data==null?JSONObject.NULL:data).put("error",error==null?JSONObject.NULL:error).put("details",details==null?JSONObject.NULL:details));}catch(JSONException ignored){}}
  private void cancelOtherRequests(CancellationSignal current){for(CancellationSignal s:active.values())if(s!=current)s.cancel();}
  private static String errorMessage(Exception e){
   if(e instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)e).status;if(status==401 || status==403)return "인증에 실패했습니다. 토큰을 확인해 주세요.";if(status==404)return "요청한 정보를 찾을 수 없습니다.";return "서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";}
@@ -82,11 +82,21 @@ public final class MainActivity extends Activity {
      case "configure": String endpoint=NetworkPolicy.endpoint(p.getString("endpoint"),p.optBoolean("allowPrivateHttp",false));String token=p.getString("token");client.validate(endpoint,token,signal);LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();settings.write(endpoint,token,p.optBoolean("allowPrivateHttp",false));cancelOtherRequests(signal);if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();} data=settings.status();break;
      case "disconnect":LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();cancelOtherRequests(signal);settings.clear();if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();}data=settings.status();break;
      case "api":data=client.api(p.getString("path"),p.optString("method","GET"),p.optJSONObject("body"),signal);break;
+     case "bookmarkCommand": String provider=p.getString("provider");String workId=p.getString("providerWorkId");if(!provider.matches("kHentai|heliotrope") || !workId.matches("[0-9A-Za-z_-]{1,64}"))throw new IllegalArgumentException("Invalid bookmark identity");BookmarkCommand.validate(p);JSONObject command=BookmarkCommand.body(p);
+      try{data=client.api(BookmarkCommand.path(provider,workId),"PUT",command,signal);}
+      catch(CloudClient.HttpFailure failure){
+       // A revision conflict is a recoverable state, not a failure: it carries the
+       // authoritative revision the client must re-base the same intent onto.
+       BookmarkCommand.Conflict conflict=BookmarkCommand.conflict(failure.detailObject());
+       if(conflict!=null){JSONObject resolved=new JSONObject();resolved.put("conflict",new JSONObject().put("revision",conflict.revision).put("desiredState",conflict.desired));data=resolved;}
+       else throw failure;
+      }
+      break;
      case "openExternal":Uri uri=Uri.parse(p.getString("url"));if(!Arrays.asList("http","https").contains(uri.getScheme()) || uri.getHost()==null || uri.getUserInfo()!=null)throw new Exception();runOnUiThread(()->{try{startActivity(new Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE));}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();
     }if(!signal.isCanceled())reply(id,true,data,null);
-   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null);}finally{active.remove(id,signal);}});}catch(RejectedExecutionException e){active.remove(id,signal);reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.");}
+   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}finally{active.remove(id,signal);}});}catch(RejectedExecutionException e){active.remove(id,signal);reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,null);}
   }
  }
  @Override public void onBackPressed(){emit("lakomics-back",null);}
