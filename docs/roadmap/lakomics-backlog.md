@@ -2,17 +2,19 @@
 
 Living source of truth for **active** Lakomics work only. Completed, superseded, applied, and incident-only records live in [lakomics-completed.md](lakomics-completed.md).
 
-Reconciled 2026-09-15 after the production server-authority/bookmark pilot completed end-to-end. This incorporates current source inspection and the user's current product acceptance; it is not a new Windows full-system audit.
+Reconciled 2026-09-15 after the production server-authority/bookmark pilot completed end-to-end and the first real-use automatic-convergence follow-up landed. This incorporates current source inspection and the user's current product acceptance; it is not a new Windows full-system audit.
 
 ## Current priority
 
-1. **CLOUD-POST-001** — simplify PC/Android around the now-proven server-authority model.
-2. **CHAR-AUTO-006** — newly ingested images must appear immediately instead of waiting for a whole character-classification batch.
+1. **CLOUD-POST-001** — continue simplifying PC/Android around the now-proven server-authority model.
+2. **MEDIA-R2-001** — spend available R2 capacity on fitting immutable image/video derivatives instead of repeatedly moving oversized originals.
 3. **CHAR-AUTO-001** — calibrate the remaining character-classification accuracy annoyance using representative mistakes.
 4. **SIMILARITY-004** — discover near-duplicates that already coexist in the library.
 5. **WORKS-001** — small Film polish: cast/director, release information, and related works.
 
-Later / optional: AV source-and-candidate selection (`LONG-001`), image mirror/rotation matching (`SIMILARITY-002B`), and optional provider work (`CATALOG-002B`). Similar-video calibration stays deferred until representative samples naturally appear.
+Verification-only, close opportunistically through normal use: `CHAR-AUTO-006`, `CLOUD-UI-001`, `EXT-011`, `EXT-012`.
+
+Later / optional: AV source-and-candidate selection (`LONG-001`), image mirror/rotation matching (`SIMILARITY-002B`), Artist hub (`ARTIST-001`), and optional provider work (`CATALOG-002B`). Similar-video calibration stays deferred until representative samples naturally appear.
 
 ## Status legend
 
@@ -40,15 +42,21 @@ Later / optional: AV source-and-candidate selection (`LONG-001`), image mirror/r
 
 ## CLOUD-POST-001 — 서버 원천화 이후 클라이언트 구조 정리
 
-Status: `TODO` — the gate cleared on 2026-09-15 when the bookmark authority pilot completed production deployment and two-direction device canaries. No post-authority client simplification has started yet.
+Status: `IN_PROGRESS` — the first post-authority client slice landed on 2026-09-15 after real use exposed that B5/B6 existed but had no automatic runtime orchestration. Broader domain migration/simplification has not started yet.
 
 Goal: once shared domains are genuinely server-authoritative, stop treating the server as a mobile publication target. PC and Android become clients with local replicas/caches; the server owns canonical shared state.
 
+First landed slice — Catalog bookmarks (`e3a5fb2`):
+- PC now runs receive -> durable outbox flush -> optional receive automatically while a library is open, every 5 seconds plus online/focus recovery. A local PC bookmark mutation also attempts an immediate flush; failure leaves the durable intent queued for the background loop.
+- Android Catalog watches the independent authority cursor every 5 seconds while active. A bookmark-only change refreshes list/detail bookmark state even when the immutable Catalog publication revision did not move.
+- Real-use follow-up reproduced both missing directions before the fix: an Android removal existed on server sequence 4 while PC stayed at cursor 3, and a PC bookmark remained in a one-row outbox with no server row. With the fix live, normal runtime converged without manual operator commands to server/PC cursor 5, PC outbox 0, 264 live bookmarks and `quick_check=ok` on both databases; the user observed the tablet update.
+- Five-second polling is the accepted baseline for this personal-state domain. SSE/WebSocket remains optional only if later domains show a concrete need for lower latency.
+
+Next scope:
 - Remove the product-level `PC -> publish -> mobile` mental model for domains that have moved to server authority. Existing `useMobilePublications`, manual `모바일 ... 업데이트/게시` controls, and one-way publication state should be retired or repurposed only after an equivalent server-owned live domain exists.
 - Keep the PC SQLite/library instead of turning every screen into a remote REST query. It becomes a fast materialized replica plus workstation-only state: filesystem integration, drag-out, local paths, GPU/FFmpeg work, bulk ingest and recovery.
-- Generalize the proven cursor + revision + durable outbox + idempotent operation pattern beyond catalog bookmarks so each new shared domain does not invent its own synchronization protocol.
+- Generalize the proven cursor + revision + durable outbox + idempotent operation pattern beyond catalog bookmarks so each new shared domain does not invent its own synchronization protocol. Publication revision and authority cursor are separate clocks and must not be conflated.
 - Device-only presentation/preferences remain local; shared user data and domain state converge through the server authority.
-- Real-time SSE/WebSocket notification is optional polish after durable replicas work; do not prioritize sub-second push over correct local-first startup/reconciliation.
 
 Acceptance: normal use no longer exposes a manual "publish to mobile" concept for migrated domains; PC and Android can render cached state immediately, work through temporary disconnection where supported, and deterministically converge to the same server state.
 
@@ -304,14 +312,6 @@ Status: `PARTIAL`
 
 Inventory and recorded-era activity statistics are implemented. Remaining work is targeted native acceptance/metric-definition cleanup only; do not infer historical activity from file timestamps.
 
-## PERF-NAV-001 — Folder/tab/image presentation latency
-
-Status: `VERIFY`
-
-Major navigation/query optimizations are implemented and the user has observed a clear improvement. Keep only targeted native timing investigation if a new concrete slowdown is reported; do not restart the completed synthetic optimization pass.
-
-Reference: [desktop navigation measurements](../performance/desktop-navigation-20260912.md).
-
 ## ARTIST-001 — Replace Revisit tab with an Artist hub
 
 Status: `TODO` — low priority / product direction.
@@ -351,12 +351,12 @@ Implementation exists. Remaining scope is targeted real X/Titanium/Galaxy accept
 
 This is guidance, not authorization to start or mutate production data.
 
-1. `CLOUD-POST-001` post-authority PC/Android simplification.
-2. `CHAR-AUTO-006` immediate batch-ingest visibility.
+1. `CLOUD-POST-001` continue post-authority PC/Android simplification beyond the proven bookmark slice.
+2. `MEDIA-R2-001` add fitting immutable derived-media variants while R2 capacity is available.
 3. `CHAR-AUTO-001` measured accuracy calibration.
 4. `SIMILARITY-004` existing-library discovery.
 5. `WORKS-001` small Film polish.
 6. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
 7. `SIMILARITY-002B` transform matching when useful.
 
-Verification-only items may be closed opportunistically when the user naturally exercises them. HOLD items should not be promoted without a new product reason.
+Verification-only items (`CHAR-AUTO-006`, `CLOUD-UI-001`, `EXT-011`, `EXT-012`) may be closed opportunistically when the user naturally exercises them. HOLD items should not be promoted without a new product reason.

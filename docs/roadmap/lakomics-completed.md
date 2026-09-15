@@ -22,10 +22,25 @@ Status: `DONE` — production two-direction canary and Galaxy Tab acceptance com
 - A freshly built signed Android **0.6.2 (18)** APK (SHA-256 `163277f659d0f6b050c68166b855320a203776c8f7b6a781776822039d5564aa`) was installed in place on the Galaxy Tab S11. Before write enable, the real Catalog detail showed the bookmark button present but disabled; after capability activation it became usable.
 - Mobile → server → PC: the user bookmarked `kHentai/4190161`. The server committed sequence 1 / entity revision 1 and one receipt; PC B5 then advanced cursor 0→1, applied exactly one change, and kept the B6 outbox at zero.
 - PC → server → mobile: the same item was temporarily removed through the real PC B6 outbox, producing sequence 2 / revision 2, then restored through the same path as sequence 3 / revision 3. The user confirmed the restored `북마크됨` state on the tablet. This preserves the user-created bookmark rather than leaving a synthetic canary state behind.
-- Final convergence: server cursor **3**, three changes/receipts, desired state true at revision 3; PC cursor **3**, revision 3 and outbox **0**. Both production SQLite databases returned `quick_check=ok`. The live server snapshot contained **264** bookmarks (the 263 activation baseline plus the user's new bookmark).
+- Final canary convergence: server cursor **3**, three changes/receipts, desired state true at revision 3; PC cursor **3**, revision 3 and outbox **0**. Both production SQLite databases returned `quick_check=ok`. The live server snapshot contained **264** bookmarks (the 263 activation baseline plus the user's new bookmark).
 - The canary also proved remote receive does not manufacture an outgoing intent: after replaying the PC-originated echo changes, PC caught up cursor 1→3 with the outbox still empty.
 
+#### Real-use automatic-convergence follow-up — 2026-09-15
+
+Normal use immediately exposed a gap that the operator-driven canary had hidden: B5 receive reconciliation and B6 outbox delivery existed, but the desktop runtime did not call them automatically, and Android watched Catalog publication revision rather than the independent bookmark authority cursor. The user observed both directions staying stale without manual intervention.
+
+- Read-only diagnosis reproduced the exact split: Android had already committed removal sequence **4** for `kHentai/4190161` while PC remained at cursor **3**; separately, PC held one pending outbox row for `kHentai/4190800` while the server had no row for that work.
+- Commit `e3a5fb2` added automatic desktop receive → flush → optional receive every five seconds plus online/focus recovery, an immediate flush attempt after local PC bookmark changes, and Android five-second `authorityCursor` observation independent of Catalog publication revision.
+- With the fix live, those existing real user changes converged without operator B5/B6 commands: server and PC cursor **5**, PC outbox **0**, **264** live bookmarks on both sides, `4190161` removed and `4190800` present, with `quick_check=ok` on both databases. The user then confirmed the tablet reflected the remote state.
+- Verification after the fix: affected desktop/client suites **101/101**, mobile focused cursor/bookmark tests **10/10**, full mobile suite **137/137**, TypeScript checks and mobile build passed. The replacement 0.6.2 APK passed the existing native policy/cache/crypto checks and was installed in place on the Galaxy Tab.
+
 The next authority work is no longer another bookmark phase. Post-authority client simplification remains active backlog item `CLOUD-POST-001`; broader mobile write domains stay deferred until explicitly selected.
+
+### PERF-NAV-001 — Folder/tab/image presentation latency
+
+Status: `DONE` — archived 2026-09-15. The navigation/query optimization pass is implemented and the user observed a clear improvement in normal use. The synthetic optimization work should not remain an active verification item merely because future regressions are possible. If a new concrete slowdown appears, investigate that regression from fresh native timings rather than reopening the old optimization pass wholesale.
+
+Reference: [desktop navigation measurements](../performance/desktop-navigation-20260912.md).
 
 ## Closure checkpoint — 2026-09-13
 
