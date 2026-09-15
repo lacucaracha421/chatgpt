@@ -214,21 +214,30 @@ describe("libraryGateway online catalog contract", () => {
       identity,
       bookmarked: true,
     });
-    expect(invoke).toHaveBeenNthCalledWith(10, "resolve_online_catalog_work", { identity });
-    expect(invoke).toHaveBeenNthCalledWith(11, "get_remote_reading_progress", { identity });
-    expect(invoke).toHaveBeenNthCalledWith(12, "save_remote_reading_progress", {
+    expect(invoke).toHaveBeenNthCalledWith(10, "flush_catalog_bookmark_outbox");
+    expect(invoke).toHaveBeenNthCalledWith(11, "resolve_online_catalog_work", { identity });
+    expect(invoke).toHaveBeenNthCalledWith(12, "get_remote_reading_progress", { identity });
+    expect(invoke).toHaveBeenNthCalledWith(13, "save_remote_reading_progress", {
       progress: { ...identity, lastPage: 2, pageCount: 10, lastReadAt: "" },
     });
-    expect(invoke).toHaveBeenNthCalledWith(13, "clear_remote_manga_cache");
-    expect(invoke).toHaveBeenNthCalledWith(14, "get_catalog_visibility_policy");
-    expect(invoke).toHaveBeenNthCalledWith(15, "set_catalog_category_hidden", {
+    expect(invoke).toHaveBeenNthCalledWith(14, "clear_remote_manga_cache");
+    expect(invoke).toHaveBeenNthCalledWith(15, "get_catalog_visibility_policy");
+    expect(invoke).toHaveBeenNthCalledWith(16, "set_catalog_category_hidden", {
       category: 2,
       hidden: true,
     });
-    expect(invoke).toHaveBeenNthCalledWith(16, "set_catalog_tag_blocked", {
+    expect(invoke).toHaveBeenNthCalledWith(17, "set_catalog_tag_blocked", {
       tag: { namespace: "artist", value: "sample" },
       blocked: true,
     });
+  });
+
+  it("maps bookmark reconciliation and durable outbox commands", async () => {
+    await libraryGateway.reconcileCatalogBookmarks?.();
+    await libraryGateway.flushCatalogBookmarkOutbox?.();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "reconcile_catalog_bookmarks");
+    expect(invoke).toHaveBeenNthCalledWith(2, "flush_catalog_bookmark_outbox");
   });
 
   it("keeps legacy catalog update calls argument-free and forwards Japanese bounds", async () => {

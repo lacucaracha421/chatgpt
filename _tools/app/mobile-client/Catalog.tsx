@@ -46,20 +46,25 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
   const [editions,setEditions]=useState<CatalogEditions|null>(null),[editionCursor,setEditionCursor]=useState<string|null>(null),[editionError,setEditionError]=useState('');
   const [reader,setReader]=useState<CatalogReaderManifest|null>(null),[readerBusy,setReaderBusy]=useState(false),[readerError,setReaderError]=useState('');
   const committed=useRef(''),list=useRef<HTMLDivElement>(null),scroll=useRef(0),publication=useRef<string|null>(null);
+  const authorityCursor=useRef<number|null|undefined>(undefined);
   const published=page?.publicationRevision;
   const statusPath='/v1/mobile-catalog/status';
   const [authority,setAuthority]=useState<BookmarkAuthority|null>(null);
   const onStatus=useCallback((reply:unknown,changed:boolean)=>{
     // The authority is re-read on every check, because a server can start or stop
     // advertising the write capability without the publication moving.
-    const status=reply as {authorityLibraryId?:string|null;authorityEpoch?:number|null;authorityContractVersion?:number|null;capabilities?:{bookmarkWrite?:boolean}};
+    const status=reply as {authorityLibraryId?:string|null;authorityEpoch?:number|null;authorityContractVersion?:number|null;authorityCursor?:number|null;capabilities?:{bookmarkWrite?:boolean}};
     const epoch=status.authorityEpoch;
+    const nextCursor=typeof status.authorityCursor==='number'?status.authorityCursor:null;
+    const bookmarkChanged=authorityCursor.current!==undefined&&authorityCursor.current!==nextCursor;
+    authorityCursor.current=nextCursor;
     setAuthority(status.authorityLibraryId!=null&&status.capabilities?.bookmarkWrite===true&&typeof epoch==='number'&&epoch>=1
       ?{libraryId:status.authorityLibraryId,epoch,contractVersion:status.authorityContractVersion??BOOKMARK_CONTRACT_VERSION}
       :null);
     if(changed)reload();
-  },[]);
-  usePublicationCheck(active&&!paused&&!selected&&!reader,statusPath,published,onStatus);
+    else if(bookmarkChanged)refreshBookmarks();
+  },[selected]);
+  usePublicationCheck(active&&!paused&&!reader,statusPath,published,onStatus,5_000);
   const bookmarks=useBookmarks({active:active&&!paused,authority});
   const pendingWork=selected?bookmarks.hasPending(selected.provider,selected.providerWorkId):false;
   usePendingRetry(active&&!paused,pendingWork,bookmarks.flush);
@@ -168,6 +173,7 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
   }
   function change(next:Partial<CatalogQuery>){setQuery(current=>({...current,...next}));setCursor(null);setPrevious([]);setSelected(null);setReader(null);scroll.current=0;}
   function open(item:CatalogItem){scroll.current=list.current?.scrollTop??0;setSelected(item);setEditionCursor(null);setEditions(null);setReader(null);setReaderError('');}
+  function refreshBookmarks(){for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();committed.current='';setRefresh(n=>n+1);if(selected)setDetailRefresh(n=>n+1);}
   function reload(){for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();pageCache.current.clear();detailCache.current.clear();editionCache.current.clear();readerCache.current.clear();committed.current='';setCursor(null);setPrevious([]);setSelected(null);setReader(null);setRefresh(n=>n+1);}
 
   return <section className="mobile-catalog" style={{display:active?'flex':'none'}} aria-label="만화 카탈로그">

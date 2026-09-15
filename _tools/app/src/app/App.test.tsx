@@ -236,6 +236,25 @@ describe("App", () => {
     expect(localStorage.getItem("lakomics.libraryPath")).toBe("C:\\Lakomics");
   });
 
+  it("runs bookmark receive and outbox delivery automatically after opening a library", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const reconcile = vi.fn().mockResolvedValue({ appliedChanges: 1, adoptedBaseline: false });
+    const flush = vi.fn().mockResolvedValue({ sent: 0, alreadyCurrent: 0, pending: 0, rebased: false, authorityUnavailable: false });
+    const libraryGateway = Object.assign(gateway(), {
+      reconcileCatalogBookmarks: reconcile,
+      flushCatalogBookmarkOutbox: flush,
+    });
+    const changed = vi.fn();
+    window.addEventListener("lakomics-catalog-bookmarks-changed", changed);
+
+    render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+
+    await waitFor(() => expect(reconcile).toHaveBeenCalled());
+    expect(flush).toHaveBeenCalled();
+    await waitFor(() => expect(changed).toHaveBeenCalled());
+    window.removeEventListener("lakomics-catalog-bookmarks-changed", changed);
+  });
+
   it("shows Secret only while the registered external vault is available", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();

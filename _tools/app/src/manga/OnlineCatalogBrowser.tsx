@@ -7,6 +7,7 @@ import { SearchSurface } from "../layout/SearchSurface";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
 import { Toggle } from "../shared/ui/Toggle";
 import { useLibrary } from "../library/LibraryContext";
+import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
 import { catalogStreamStatus } from "../library/catalogStreams";
 import { commandErrorMessage } from "../library/errorMessage";
 import type {
@@ -178,6 +179,20 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway]);
+
+  useEffect(() => {
+    const refreshBookmarks = () => {
+      void refreshSearch.current(true);
+      if (!detail) return;
+      const request = ++detailRequest.current;
+      const identity = catalogIdentityOf(detail);
+      void gateway.getOnlineCatalogWorkDetail(identity).then((next) => {
+        if (mounted.current && request === detailRequest.current) setDetail(next);
+      }).catch(() => undefined);
+    };
+    window.addEventListener(CATALOG_BOOKMARKS_CHANGED_EVENT, refreshBookmarks);
+    return () => window.removeEventListener(CATALOG_BOOKMARKS_CHANGED_EVENT, refreshBookmarks);
+  }, [gateway, detail]);
 
   useEffect(() => {
     const request = ++suggestionRequest.current;

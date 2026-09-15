@@ -1,4 +1,5 @@
 import {useMobilePublications} from './useMobilePublications';
+import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
 import { characterApi, moveAssetsToCharacter } from "../characters/api";
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
 import { useCharacterHub } from "../characters/useCharacterHub";
@@ -140,6 +141,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useOnlineCatalogUpdate(gateway, libraryRoot);
   useCloudBackfillSupervisor(gateway, libraryRoot);
   useMobilePublications(gateway, libraryRoot);
+  useCatalogBookmarkSync(gateway, libraryRoot);
   const cloudProblems = useCloudProblems(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);

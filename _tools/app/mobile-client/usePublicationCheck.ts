@@ -9,7 +9,7 @@ import {api} from './transport';
  * so callers that own a bookmark queue observe it here instead of issuing a
  * second request for the same document.
  */
-export function usePublicationCheck(active:boolean,path:string,revision:string|null|undefined,onChange:(reply:unknown,changed:boolean)=>void) {
+export function usePublicationCheck(active:boolean,path:string,revision:string|null|undefined,onChange:(reply:unknown,changed:boolean)=>void,intervalMs=60_000) {
   const latest=useRef({revision,onChange});latest.current={revision,onChange};
   useEffect(()=>{
     if(!active)return;const controller=new AbortController();let running=false;
@@ -22,9 +22,9 @@ export function usePublicationCheck(active:boolean,path:string,revision:string|n
       // against, so the first check is reported as unchanged.
       const changed=latest.current.revision!==undefined&&next!==latest.current.revision;
       latest.current.onChange(value,changed);
-    }catch{/* Retain current content and retry on foreground/minute tick. */}finally{running=false;}};
-    void check();const timer=setInterval(()=>void check(),60_000);
+    }catch{/* Retain current content and retry on foreground/timer tick. */}finally{running=false;}};
+    void check();const timer=setInterval(()=>void check(),intervalMs);
     window.addEventListener('lakomics-resume',check);document.addEventListener('visibilitychange',check);
     return()=>{controller.abort();clearInterval(timer);window.removeEventListener('lakomics-resume',check);document.removeEventListener('visibilitychange',check);};
-  },[active,path]);
+  },[active,path,intervalMs]);
 }

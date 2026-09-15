@@ -84,6 +84,8 @@ import type {
   CloudCaptureConnectionStatus,
   ExtensionPairingLink,
   CloudMetadataBackupResult,
+  BookmarkReconciliationResult,
+  BookmarkOutboxFlushResult,
   CloudCollectionsPublishResult,
   CloudLibraryRestoreReport,
   CatalogWorkDetail,
@@ -146,8 +148,14 @@ export const libraryGateway: LibraryGateway = {
     invoke<CatalogSuggestion[]>("suggest_online_catalog", { text, limit }),
   getOnlineCatalogWorkDetail: (identity) =>
     invoke<CatalogWorkDetail>("get_online_catalog_work_detail", { identity }),
-  setOnlineCatalogBookmark: (identity, bookmarked) =>
-    invoke("set_online_catalog_bookmark", { identity, bookmarked }),
+  setOnlineCatalogBookmark: async (identity, bookmarked) => {
+    await invoke("set_online_catalog_bookmark", { identity, bookmarked });
+    try { await invoke("flush_catalog_bookmark_outbox"); } catch { /* durable outbox retries in background */ }
+  },
+  reconcileCatalogBookmarks: () =>
+    invoke<BookmarkReconciliationResult>("reconcile_catalog_bookmarks"),
+  flushCatalogBookmarkOutbox: () =>
+    invoke<BookmarkOutboxFlushResult>("flush_catalog_bookmark_outbox"),
   updateOnlineCatalog: (language, maxPages) =>
     language === undefined && maxPages === undefined
       ? invoke<CatalogUpdateResult>("update_online_catalog")

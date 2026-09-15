@@ -128,6 +128,14 @@ export type CloudCaptureConnectionStatus = { pendingCount: number };
 export type ExtensionPairingLink = { pairingUrl: string; expiresAt: string };
 export type CloudMetadataBackupResult = { byteSize: number };
 export type CloudCollectionsPublishResult = { collections: number; artworks: number; uploaded: number; revision: string };
+export type BookmarkReconciliationResult = {
+  libraryId: string | null; epoch: number | null; contractVersion: number | null;
+  serverCursor: number | null; localCursor: number | null; behindBy: number;
+  appliedChanges: number; adoptedBaseline: boolean;
+};
+export type BookmarkOutboxFlushResult = {
+  sent: number; alreadyCurrent: number; pending: number; rebased: boolean; authorityUnavailable: boolean;
+};
 export type CloudLibraryRestoreReport = {
   metadataByteSize: number;
   totalAssets: number;
@@ -1058,6 +1066,8 @@ export interface LibraryGateway {
   suggestOnlineCatalog(text: string, limit: number): Promise<CatalogSuggestion[]>;
   getOnlineCatalogWorkDetail(identity: CatalogWorkIdentity): Promise<CatalogWorkDetail>;
   setOnlineCatalogBookmark(identity: CatalogWorkIdentity, bookmarked: boolean): Promise<void>;
+  reconcileCatalogBookmarks?(): Promise<BookmarkReconciliationResult>;
+  flushCatalogBookmarkOutbox?(): Promise<BookmarkOutboxFlushResult>;
   updateOnlineCatalog(language?: CatalogLanguage, maxPages?: number): Promise<CatalogUpdateResult>;
   resetJapaneseCatalogCheckpoint(): Promise<CatalogStatus>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;

@@ -650,6 +650,17 @@ it("opens bookmarks without the default hot-day date restriction", async () => {
   ));
 });
 
+it("quietly refreshes when background bookmark reconciliation changes local state", async () => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway);
+  await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+  const before = vi.mocked(gateway.searchCatalogGroups).mock.calls.length;
+
+  act(() => window.dispatchEvent(new Event("lakomics-catalog-bookmarks-changed")));
+
+  await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(before + 1));
+});
+
 function renderBrowser(gateway: LibraryGateway, initialScope: "all" | "bookmarked" = "all") {
   return render(
     <LibraryProvider gateway={gateway}>

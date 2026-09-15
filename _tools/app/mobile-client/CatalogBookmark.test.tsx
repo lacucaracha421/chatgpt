@@ -13,8 +13,8 @@ const page:CatalogPage={ready:true,publicationRevision:'p1',publishedAt:null,ite
 const detail={...item,tagGroups:[],uploader:null,category:1,updated:null,fileSize:null,rating:null,bookmarkRevision:0};
 
 /** A server that owns the domain, advertises the write capability, and accepts commands. */
-function status(write=true){
-  return {ready:true,publicationRevision:'p1',authorityLibraryId:write?LIBRARY:null,authorityEpoch:write?1:null,authorityContractVersion:write?1:null,capabilities:{providers:['kHentai'],read:true,bookmarkWrite:write,refreshRequest:false}};
+function status(write=true,cursor=0){
+  return {ready:true,publicationRevision:'p1',authorityLibraryId:write?LIBRARY:null,authorityEpoch:write?1:null,authorityContractVersion:write?1:null,authorityCursor:write?cursor:null,capabilities:{providers:['kHentai'],read:true,bookmarkWrite:write,refreshRequest:false}};
 }
 const accepted={libraryId:LIBRARY,epoch:1,contractVersion:1,provider:'kHentai',providerWorkId:'42',desiredState:true,entityRevision:1,changed:true};
 
@@ -121,6 +121,24 @@ describe('catalog bookmark toggle',()=>{
     await act(async()=>reply.resolve({...accepted,desiredState:false,entityRevision:2}));
     await waitFor(()=>expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toBe('{}'));
     expect(document.querySelector('.catalog-saved')).toBeNull();
+  });
+
+  it('refreshes an open detail when the authority cursor advances without a new publication',async()=>{
+    let cursor=0,remote=false;
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return status(true,cursor);
+      if(path.includes('/works/'))return {publicationRevision:'p1',item:{...detail,bookmarked:remote,bookmarkRevision:cursor}};
+      if(path.includes('/editions?'))return {publicationRevision:'p1',groupId:'group',selectedProviderWorkId:null,items:[{...item,bookmarked:remote}],nextCursor:null,totalCount:1};
+      return {...page,items:[{...item,bookmarked:remote,hasBookmarkedVersion:remote}]};
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByText('밤의 도서관'));
+    expect(await screen.findByRole('button',{name:'북마크'})).toBeTruthy();
+
+    cursor=1;remote=true;
+    act(()=>window.dispatchEvent(new Event('lakomics-resume')));
+
+    await waitFor(()=>expect(screen.getByRole('button',{name:'북마크 해제'})).toBeTruthy());
   });
 
   it('does not offer a write while the capability is unadvertised',async()=>{
