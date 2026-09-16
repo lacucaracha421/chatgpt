@@ -456,15 +456,20 @@ class ActivationTests(AlbumAuthorityFixture):
             self.assertIsNone(db.execute(
                 "SELECT payload FROM album_replica WHERE singleton=1").fetchone())
 
-    def test_membership_referencing_a_missing_asset_is_rejected_before_activation(self):
+    def test_activation_retains_membership_for_asset_not_yet_materialized_on_server(self):
         snapshot = fixture_snapshot(memberships=[{"albumId": "root",
                                                   "assetId": "no-such-asset"}])
         self.publish(snapshot)
         response = self.activate({"libraryId": LIBRARY,
                                   "expectedSnapshotDigest": self.snapshot_digest(snapshot)})
-        self.assertEqual(response.status_code, 409, response.text)
-        self.assertEqual(response.json()["detail"]["code"], "albumMembershipAssetsMissing")
-        self.assertEqual(self.authority_rows(), [])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["membershipCount"], 1)
+        self.assertEqual(self.member_rows(), [("root", "no-such-asset", 1, 1)])
+        error, baseline = self.baseline_pages()
+        self.assertIsNone(error)
+        self.assertEqual(baseline["memberships"][("root", "no-such-asset")], {
+            "albumId": "root", "assetId": "no-such-asset",
+            "desiredState": True, "entityRevision": 1})
 
     def test_identical_retry_is_idempotent_and_a_different_second_is_rejected(self):
         self.publish()
@@ -581,6 +586,14 @@ class CommandTests(AlbumAuthorityFixture):
         self.assertEqual(deleted.status_code, 200, deleted.text)
         self.assertTrue(deleted.json()["album"]["deleted"])
         self.assertEqual(deleted.json()["album"]["entityRevision"], 5)
+
+    def test_new_membership_command_still_requires_a_committed_asset(self):
+        response = self.command(album_authority.MEMBERSHIP, R1, album_id="other",
+                                assetId="no-such-asset", desiredState=True,
+                                expectedRevision=0)
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "invalidAlbumMembership")
+        self.assertNotIn(("other", "no-such-asset", 1, 1), self.member_rows())
 
     def test_every_mutation_appends_one_change_and_advances_only_its_own_cursor(self):
         with self.get_db() as db:

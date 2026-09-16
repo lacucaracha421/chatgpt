@@ -42,6 +42,7 @@ A2 = "20000000-0000-4000-8000-000000000002"
 A3 = "20000000-0000-4000-8000-000000000003"
 A4 = "20000000-0000-4000-8000-000000000004"
 A5 = "20000000-0000-4000-8000-000000000005"
+MISSING = "20000000-0000-4000-8000-000000000006"
 
 
 class AlbumAssetsProjectionTests(unittest.TestCase):
@@ -212,6 +213,31 @@ class AlbumAssetsProjectionTests(unittest.TestCase):
         self.assertEqual(items[0]["classification_ids"],
                          ["10000000-0000-4000-8000-000000000001"])
         self.assertEqual(items[1]["classification_ids"], [])
+
+    def test_activation_retains_missing_asset_until_it_is_materialized(self):
+        digest = self.publish(
+            [{"id": ALBUM, "name": "업로드용", "parent_id": None,
+              "icon_key": None, "color_key": None}],
+            [{"albumId": ALBUM, "assetId": MISSING}])
+        activated = self.client.post(
+            "/v1/albums/authority/activate", headers=self.publisher,
+            json={"libraryId": LIBRARY, "expectedSnapshotDigest": digest["snapshotDigest"]})
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertEqual(activated.json()["membershipCount"], 1)
+
+        before, _ = self.walk(ALBUM, limit=50)
+        self.assertNotIn(MISSING, [item["id"] for item in before])
+
+        with api_app.get_db() as db:
+            db.execute(
+                "INSERT INTO assets(id,kind,object_key,thumbnail_key,content_type,size_bytes,"
+                "created_at,updated_at,collected_at,committed,committed_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (MISSING, "image", f"objects/{MISSING}", f"thumbs/{MISSING}", "image/png",
+                 128, "2026-01-06", "2026-01-06", "2026-01-06", 1, "2026-01-06"))
+            db.commit()
+        after, _ = self.walk(ALBUM, limit=50)
+        self.assertIn(MISSING, [item["id"] for item in after])
 
     def test_uncommitted_assets_are_not_displayable(self):
         self.activate()

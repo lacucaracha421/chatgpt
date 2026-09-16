@@ -1198,11 +1198,13 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                         fail(409, "albumBaselineChanged",
                              "앨범 기준선이 변경되었습니다. 다시 준비해 주세요.")
                     rows, pairs, snapshot_version = staged_snapshot(stored)
-                    missing = _missing_assets(db, pairs)
-                    if missing:
-                        fail(409, "albumMembershipAssetsMissing",
-                             "아직 서버에 없는 자산이 앨범에 연결되어 있습니다.",
-                             missing=len(missing), sample=missing[:5])
+                    # Activation is a trusted migration of the PC's canonical Album
+                    # relations. Some relations legitimately point at Assets currently
+                    # outside the server replica (for example local trash): retain their
+                    # stable ids and revisions here. Album display uses an INNER JOIN to
+                    # committed Assets, so these withheld relations remain invisible until
+                    # the Asset is materialized later. Ordinary membership commands still
+                    # require a committed Asset before accepting desiredState=true.
                     state = activate(db, library_id=library_id, rows=rows, pairs=pairs,
                                      baseline_digest=baseline_identity(rows, pairs),
                                      baseline_revision=expected, now=now,
@@ -1411,24 +1413,6 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
         return await run_in_threadpool(run)
 
     return lambda: startup(get_db)
-
-
-def _missing_assets(db, pairs):
-    """Membership must reference existing canonical Assets.
-
-    Checking here keeps "membership references existing Assets" true from the first
-    baseline instead of relying on read-time filtering that would hide the gap.
-    """
-    asset_ids = sorted({asset_id for _album_id, asset_id in pairs})
-    if not asset_ids:
-        return []
-    known = set()
-    for offset in range(0, len(asset_ids), 500):
-        chunk = asset_ids[offset:offset + 500]
-        placeholders = ",".join("?" for _ in chunk)
-        known.update(row[0] for row in db.execute(
-            f"SELECT id FROM assets WHERE committed=1 AND id IN ({placeholders})", chunk))
-    return sorted(set(asset_ids) - known)
 
 
 def prune(get_db, days=RETENTION_DAYS, receipt_days=RECEIPT_RETENTION_DAYS, now=None):
