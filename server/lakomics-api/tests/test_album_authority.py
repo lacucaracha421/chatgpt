@@ -1121,6 +1121,15 @@ class BaselinePagingTests(AlbumAuthorityFixture):
         self.assertEqual(response.status_code, 200, response.text)
         return len(media)
 
+    def test_album_baseline_items_explicitly_mark_live_projection(self):
+        self.activate_with_memberships(0)
+        page = self.baseline().json()
+        self.assertEqual(page["section"], album_authority.ALBUMS_SECTION)
+        self.assertTrue(page["items"])
+        for item in page["items"]:
+            self.assertIn("deleted", item)
+            self.assertFalse(item["deleted"])
+
     def test_a_fresh_baseline_exposes_a_tombstone_revision_for_a_later_readd(self):
         """The exact false-conflict sequence this change fixes.
 

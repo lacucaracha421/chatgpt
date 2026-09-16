@@ -1246,7 +1246,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     fetched = album_page(db, libraryId, after, limit + 1)
                     items = [{"id": item["album_id"], "name": item["name"],
                               "parentId": item["parent_id"], "iconKey": item["icon_key"],
-                              "colorKey": item["color_key"],
+                              "colorKey": item["color_key"], "deleted": bool(item["deleted"]),
                               "entityRevision": item["entity_revision"]} for item in fetched[:limit]]
                     has_more = len(fetched) > limit
                     next_after = items[-1]["id"] if has_more and items else None
