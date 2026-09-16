@@ -60,6 +60,8 @@ proceeds exactly as before, and startup only creates empty tables. There is no
 automatic activation: :func:`activate` runs solely from the publisher-only route,
 which this batch does not call in any environment.
 """
+import base64
+import binascii
 import datetime
 import hashlib
 import json
@@ -113,6 +115,14 @@ MAX_STAGING_BYTES = 96 * 1024 * 1024
 #: documented maxima with maximum-length identifiers rather than trusting an estimate.
 DEFAULT_ALBUM_PAGE = 500
 MAX_ALBUM_PAGE = 1_000
+# The Album -> Asset read projection is a *display* page, not an authority page, so it
+# is bounded like the existing mobile Asset listing rather than like the baseline.
+DEFAULT_ALBUM_ASSET_PAGE = 50
+MAX_ALBUM_ASSET_PAGE = 100
+#: Tag inside the opaque Asset-page cursor. It exists so a cursor minted for another
+#: read cannot be replayed here and silently mis-walk a page.
+ALBUM_ASSETS_SORT = "album-assets"
+
 DEFAULT_MEMBERSHIP_PAGE = 1_000
 MAX_MEMBERSHIP_PAGE = 2_000
 MAX_BASELINE_PAGE_BYTES = 2 * 1024 * 1024
@@ -526,6 +536,82 @@ def split_membership_key(value):
         return "", ""
     album_id, _, asset_id = value.partition(":")
     return album_id, asset_id
+
+
+def encode_asset_cursor(album_id, sort_at, asset_id):
+    payload = json.dumps([ALBUM_ASSETS_SORT, album_id, sort_at, asset_id],
+                         separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
+
+
+def decode_asset_cursor(cursor, album_id):
+    """Resolve one Album Asset page cursor, or reject it.
+
+    ``album_id`` is part of the payload, not just an argument, so a cursor cannot be
+    presented with a different Album and silently resume at an unrelated offset.
+    """
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.b64decode(cursor + padding, altchars=b"-_", validate=True))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        fail(422, "invalidAlbumAssetsCursor", "앨범 자산 커서가 올바르지 않습니다.")
+    if (not isinstance(payload, list) or len(payload) != 4
+            or not all(isinstance(value, str) and value for value in payload)
+            or payload[0] != ALBUM_ASSETS_SORT or payload[1] != album_id):
+        fail(422, "invalidAlbumAssetsCursor", "앨범 자산 커서가 올바르지 않습니다.")
+    return payload[2], payload[3]
+
+
+def default_asset_item(row, classification_ids=None):
+    """Fallback mobile Asset projection.
+
+    Kept field-for-field identical to ``app.mobile_asset_item``; the shipped app
+    injects its own mapper so there is exactly one projection in production.
+    """
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "content_type": row["content_type"],
+        "size_bytes": row["size_bytes"],
+        "width": None,
+        "height": None,
+        "duration_ms": None,
+        "collected_at": row["collected_at"],
+        "committed_at": row["committed_at"],
+        "source_published_at": row["source_published_at"],
+        "source_url": row["source_url"],
+        "creator_name": row["creator_name"],
+        "creator_handle": row["creator_handle"],
+        "import_source": row["import_source"],
+        "classification_ids": list(classification_ids or []),
+        "original_available": bool(row["object_key"]),
+        "thumbnail_available": bool(row["thumbnail_key"]),
+        "committed": True,
+    }
+
+
+def asset_classification_ids(db, rows):
+    """Classification memberships for one page of Assets.
+
+    Classification is a different domain from Album; it is included only because the
+    published mobile Asset projection carries it and a consumer that cached this page
+    must not need a second round trip to learn it.
+    """
+    memberships = {row["id"]: [] for row in rows}
+    if not rows:
+        return memberships
+    placeholders = ",".join("?" for _ in rows)
+    for relation in db.execute(
+        f"""
+        SELECT asset_id, classification_id
+        FROM asset_classifications
+        WHERE asset_id IN ({placeholders})
+        ORDER BY asset_id, classification_id
+        """,
+        [row["id"] for row in rows],
+    ).fetchall():
+        memberships[relation["asset_id"]].append(relation["classification_id"])
+    return memberships
 
 
 def encode_page(library_id, epoch, contract_version, snapshot_cursor, section, items,
@@ -1076,7 +1162,10 @@ def parse_baseline_request(params, epoch):
     return snapshot, section, after, limit
 
 
-def register_album_authority(app, get_db, require_client, require_publisher):
+def register_album_authority(app, get_db, require_client, require_publisher, asset_item=None):
+    # The mobile Asset projection is injected so this module never grows a second
+    # definition of the display shape the app already publishes.
+    asset_item = asset_item or default_asset_item
     # The FastAPI startup hook receives an event argument, while the closure returned
     # to the caller is invoked directly by tests like the other domain modules. They
     # are kept separate so neither signature surprises the other.
@@ -1173,6 +1262,91 @@ def register_album_authority(app, get_db, require_client, require_publisher):
                                   if has_more and items else None)
                 return encode_page(row["libraryId"], row["epoch"], row["contractVersion"],
                                    snapshot_cursor, section, items, next_after, has_more)
+        return await run_in_threadpool(run)
+
+    @app.get(PREFIX + "/assets")
+    async def album_assets(request: Request, libraryId: str, epoch: int, albumId: str,
+                           cursor: str | None = None, limit: int = DEFAULT_ALBUM_ASSET_PAGE,
+                           authorization: str | None = Header(default=None)):
+        """Bounded read-only projection of one Album's displayable Assets.
+
+        This is the authority read for Album *contents*. Membership comes from
+        authoritative ``desired_state=1`` rows, so a tombstoned relation is absent and
+        an Album deleted by a later command is not browsable at all. Asset display
+        metadata is joined from the committed Asset table instead of being copied into
+        the replica: Album authority owns the relation, the Asset domain owns how an
+        Asset is presented.
+        """
+        require_client(authorization)
+        if not set(request.query_params) <= {"libraryId", "epoch", "albumId", "cursor", "limit"}:
+            fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+        if (not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1
+                or not ALBUM_ID_PATTERN.fullmatch(albumId)
+                or not 1 <= limit <= MAX_ALBUM_ASSET_PAGE):
+            fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+        after = None if cursor is None else decode_asset_cursor(cursor, albumId)
+
+        def run():
+            with get_db() as db:
+                row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                album = db.execute(
+                    "SELECT deleted FROM album_authority_state"
+                    " WHERE library_id=? AND album_id=?", [libraryId, albumId]).fetchone()
+                if album is None or album["deleted"]:
+                    # A tombstone is not an empty Album. Reporting "no assets" would let
+                    # a consumer that still holds the deleted Album render it as empty
+                    # rather than as gone.
+                    fail(404, "albumNotFound", "앨범을 찾을 수 없습니다.", albumId=albumId)
+                if after is None:
+                    cursor_clause = ""
+                    params = [libraryId, albumId, limit + 1]
+                else:
+                    # Strict inequality on the (sort key, id) pair: every page is
+                    # disjoint from the previous one, so the walk cannot loop.
+                    cursor_clause = """
+                        AND (
+                            COALESCE(asset.collected_at, asset.created_at) < ?
+                            OR (
+                                COALESCE(asset.collected_at, asset.created_at) = ?
+                                AND asset.id < ?
+                            )
+                        )
+                    """
+                    params = [libraryId, albumId, after[0], after[0], after[1], limit + 1]
+                rows = db.execute(
+                    f"""
+                    SELECT asset.*,
+                           COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
+                    FROM album_authority_members AS member
+                    JOIN assets AS asset ON asset.id = member.asset_id
+                    WHERE member.library_id = ?
+                      AND member.album_id = ?
+                      AND member.desired_state = 1
+                      AND asset.committed = 1
+                      {cursor_clause}
+                    ORDER BY mobile_sort_at DESC, asset.id DESC
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+                has_more = len(rows) > limit
+                page_rows = rows[:limit]
+                memberships = asset_classification_ids(db, page_rows)
+                items = [asset_item(item, memberships.get(item["id"], []))
+                         for item in page_rows]
+                next_cursor = None
+                if has_more and page_rows:
+                    last = page_rows[-1]
+                    next_cursor = encode_asset_cursor(albumId, last["mobile_sort_at"], last["id"])
+                    if next_cursor == cursor:
+                        # Unreachable while the ordering is strict; if it ever happens
+                        # a client would page forever, so it must be an error, not a loop.
+                        fail(503, "albumAssetsCursorStalled",
+                             "앨범 자산 페이지 커서가 진행하지 않았습니다.", albumId=albumId)
+                return {"libraryId": row["libraryId"], "epoch": row["epoch"],
+                        "contractVersion": row["contractVersion"], "albumId": albumId,
+                        "items": items, "nextCursor": next_cursor, "hasMore": has_more}
+
         return await run_in_threadpool(run)
 
     @app.get(PREFIX + "/changes")

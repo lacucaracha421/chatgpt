@@ -2629,4 +2629,4 @@ startup_sync_status = register_sync_status(app, get_db, require_client)
 from album_authority import register_album_authority
 
 startup_album_authority = register_album_authority(
-    app, get_db, require_client, require_publisher)
+    app, get_db, require_client, require_publisher, asset_item=mobile_asset_item)

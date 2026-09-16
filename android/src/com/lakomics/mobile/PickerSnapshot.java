@@ -15,6 +15,8 @@ final class PickerSnapshot {
             this.width=width; this.height=height; this.albums=Collections.unmodifiableSet(new TreeSet<>(albums)); this.generation=generation;
         }
         Media generation(long value) { return new Media(id,mime,date,size,duration,width,height,albums,value); }
+        /** The same Asset carrying a wider collection set, keeping its generation. */
+        Media collections(Set<String> value) { return new Media(id,mime,date,size,duration,width,height,value,generation); }
         boolean same(Media m) { return m!=null && mime.equals(m.mime) && date==m.date && size==m.size && duration==m.duration && width==m.width && height==m.height && albums.equals(m.albums); }
     }
     final String collection;

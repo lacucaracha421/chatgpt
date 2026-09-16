@@ -55,9 +55,28 @@ def main():
         checks = ['NetworkPolicy', 'DocumentTreePolicy', 'ThumbnailCache', 'PickerSnapshot',
                   'MediaTransfer', 'TemporaryImagePolicy', 'NotesCrypto']
         sources = [p for name in checks for p in (root / f'src/com/lakomics/mobile/{name}.java', root / f'tests/{name}Test.java')]
+        # The additive Album collection projection is platform-free like the checks above,
+        # but it reads the Album replica types, so those are compiled with it.
+        sources += [root / 'src/com/lakomics/mobile/AlbumCollections.java',
+                    root / 'src/com/lakomics/mobile/AlbumReplica.java',
+                    root / 'src/com/lakomics/mobile/Json.java',
+                    root / 'tests/AlbumCollectionsTest.java']
         run(javac, '-encoding', 'UTF-8', '-d', tests, *sources)
-        for name in checks:
+        for name in checks + ['AlbumCollections']:
             run(java_cmd, '-cp', tests, f'com.lakomics.mobile.{name}Test')
+        # The Album replica check needs neither the Android runtime nor an Android
+        # database: the sync engine and the store depend on the platform-free JSON
+        # reader and on the storage seam, so it runs on the plain JVM against a real
+        # SQLite engine and a real local HTTP fixture.
+        replica_sources = ['Json', 'AlbumReplica', 'AlbumAuthoritySync', 'ReplicaDb',
+                           'ReplicaSchema', 'LibraryReplicaStore', 'ForegroundSchedule']
+        replica = [p for name in replica_sources for p in (root / f'src/com/lakomics/mobile/{name}.java',)]
+        run(javac, '-encoding', 'UTF-8', '-d', tests, *replica, root / 'tests/AlbumReplicaTest.java',
+            root / 'tests/AlbumReplicaScheduleTest.java')
+        run(java_cmd, '-cp', tests, 'com.lakomics.mobile.AlbumReplicaTest')
+        # The schedule check is deliberately Android-free: the defect it covers is a
+        # transition defect, so it drives the state machine instead of an activity.
+        run(java_cmd, '-cp', tests, 'com.lakomics.mobile.AlbumReplicaScheduleTest')
         jar = work / 'classes.jar'
         run(exe(java / 'bin', 'jar'), 'cf', jar, '-C', classes, '.')
         run(exe(bt, 'd8'), '--release', '--min-api', '26', '--lib', android, '--output', dex, jar)

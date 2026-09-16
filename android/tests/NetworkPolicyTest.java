@@ -55,6 +55,28 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/notes/"+vault+"/../bad","PUT"));
  pass(()->NetworkPolicy.api("/v1/library/characters/status","GET"));
  pass(()->NetworkPolicy.api("/v1/collections/status","GET"));
+ // Album authority replication: exactly three read-only paths, and no write reaches
+ // the Album domain at all. `PUT /v1/albums/commands` is the domain's one mutation,
+ // and 2C-1 must not be able to issue it.
+ for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/albums/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));
+ // The authority-backed Album contents projection, allowed only for GET.
+ pass(()->NetworkPolicy.api("/v1/albums/assets?libraryId=0123456789abcdef0123456789abcdef&epoch=1&albumId=root&limit=40","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/albums/assets",method));
+ reject(()->NetworkPolicy.api("/v1/albums/assets/extra","GET"));
+ reject(()->NetworkPolicy.api("/v1/albums/assetsx","GET"));
+ reject(()->NetworkPolicy.api("/v1/albums/../albums/assets","GET"));
+ // The Album namespace stays read-only: every path that could express a mutation is
+ // still absent, so adding the contents read did not widen the write surface.
+ reject(()->NetworkPolicy.api("/v1/albums/commands","PUT"));
+ reject(()->NetworkPolicy.api("/v1/albums/authority/activate","POST"));
+ for(String path:new String[]{"/v1/albums/commands","/v1/albums/commands/","/v1/albums/authority/activate","/v1/albums","/v1/albums/","/v1/sync","/v1/sync/","/v1/sync/status/extra","/v1/sync/statusx","/v1/albums/baseline/extra","/v1/albums/baselinex","/v1/albums/commands/x"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline","/v1/albums/changes"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ reject(()->NetworkPolicy.api("/v1/albums/../albums/baseline","GET"));
+ reject(()->NetworkPolicy.api("/v1/albums/baseline%2f..","GET"));
+ // Unrelated writes stay blocked, so widening this allowlist did not widen any other.
+ // The paths that legitimately accept these methods are excluded on purpose: a media
+ // ticket is a read capability, and catalog refresh is a bounded server-side read.
+ for(String path:new String[]{"/v1/library/assets/a-1/prepare","/v1/library/album-snapshot","/v1/library/album-media","/v1/library/metadata-backup","/v1/collections/replica","/v1/collections/artworks/prepare","/v1/mobile-catalog/publication","/v1/library/classifications","/v1/library/assets","/v1/library/revisit","/v1/captures/pending","/v1/library/characters"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

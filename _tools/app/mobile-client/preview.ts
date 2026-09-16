@@ -50,6 +50,13 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if (op === 'pickerStatus' || op === 'pickerRefresh') return {supported:true,eligible:false,selected:false,syncing:false,scanned:120,mediaCount:120,albumCount:7,ready:true,lastSyncedAt:Date.now(),error:''};
   if (op === 'status' || op === 'configure') return {configured:true,endpoint:'https://preview.invalid'};
   if (op === 'disconnect') return {configured:false,endpoint:''};
+  // The demo Albums section mirrors the additive contract: an adopted replica with a
+  // nested Album, so the browser preview can show that Albums sit beside the
+  // Classification sidebar instead of replacing it.
+  if (op === 'albumTree') return {adopted:true,libraryId:'a'.repeat(32),epoch:1,contractVersion:1,cursor:12,code:'',albums:[
+    {id:'upload',name:'업로드용',parentId:null,iconKey:null,colorKey:null},
+    {id:'temp',name:'임시',parentId:'upload',iconKey:null,colorKey:null},
+    {id:'other',name:'Other',parentId:null,iconKey:null,colorKey:null}]};
   // The demo catalog owns its domain and advertises the write capability, so the
   // browser preview can exercise the real toggle instead of a disabled one.
   const demoLibraryId = 'a'.repeat(32);
@@ -116,6 +123,13 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if(url.pathname.startsWith('/v1/collections/'))return {revision:'demo-1',item:collections.find(item=>item.id===url.pathname.split('/')[3])};
   if (url.pathname.includes('media-ticket')) {const id = url.pathname.split('/')[4]; return {url:assets.find(a => a.id === id)?.preview,expires_in:300};}
   if (url.pathname.endsWith('/classifications')) return {items:[{id:'game',name:'게임',parent_id:null,asset_count:120},{id:'wuthering',name:'명조',parent_id:'game',asset_count:48},{id:'reverse',name:'리버스',parent_id:'game',asset_count:52},{id:'zenless',name:'젠레스',parent_id:'game',asset_count:20},{id:'art',name:'일러스트',parent_id:null,asset_count:36},{id:'landscape',name:'풍경',parent_id:'art',asset_count:24},{id:'design',name:'디자인',parent_id:'art',asset_count:12}]};
+  // Album contents come from the authority projection, not from a client-side list, so
+  // the preview exercises the same paged read the device does.
+  if (url.pathname === '/v1/albums/assets') {
+    const start=Number(url.searchParams.get('cursor')??0),size=Number(url.searchParams.get('limit')??40);
+    const page=assets.slice(start,start+size);
+    return {libraryId:url.searchParams.get('libraryId'),epoch:1,contractVersion:1,albumId:url.searchParams.get('albumId'),items:page,hasMore:start+size<assets.length,nextCursor:start+size<assets.length?String(start+size):null};
+  }
   if (url.pathname.endsWith('/revisit')) return {bundles:[{kind:'date',title:'과거의 이날',items:assets.slice(0,8)},{kind:'creator',title:'다시 만난 작가',groups:[{creator_key:'bluealex1203',creator_name:'bluealex1203',asset_count:24,items:assets.slice(0,4)}]}]};
   if (url.pathname.includes('/captures')) return {captures:[]};
   const offset = Number(url.searchParams.get('cursor') ?? 0), limit = Number(url.searchParams.get('limit') ?? 40);

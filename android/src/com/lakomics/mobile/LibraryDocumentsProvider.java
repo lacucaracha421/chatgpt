@@ -32,7 +32,15 @@ public final class LibraryDocumentsProvider extends DocumentsProvider {
  private boolean configured(){try{return settings.status().getBoolean("configured");}catch(Exception e){return false;}}
  @Override public Cursor queryRoots(String[] projection){MatrixCursor c=new MatrixCursor(projection==null?ROOT_COLUMNS:projection);if(configured()){Map<String,Object> values=new HashMap<>();values.put("root_id","library");values.put("document_id",ROOT);values.put("title","Lakomics");values.put("summary","Cloud Library · read only");values.put("flags",DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD);values.put("mime_types","image/*\nvideo/*");add(c,values);}c.setNotificationUri(getContext().getContentResolver(),DocumentsContract.buildRootsUri(AUTHORITY));return c;}
  private void add(MatrixCursor c,Map<String,Object> values){MatrixCursor.RowBuilder row=c.newRow();for(String col:c.getColumnNames())row.add(values.get(col));}
- private void directory(MatrixCursor c,String id,String name){Map<String,Object> v=new HashMap<>();v.put("document_id",id);v.put("_display_name",name);v.put("mime_type",DocumentsContract.Document.MIME_TYPE_DIR);v.put("flags",DocumentsContract.Document.FLAG_DIR_PREFERS_GRID|(id.startsWith("page:")?DocumentsContract.Document.FLAG_DIR_BLOCKS_OPEN_DOCUMENT_TREE:0));add(c,v);}
+ private void directory(MatrixCursor c,String id,String name){Map<String,Object> v=new HashMap<>();v.put("document_id",id);v.put("_display_name",name);v.put("mime_type",DocumentsContract.Document.MIME_TYPE_DIR);v.put("flags",DocumentsContract.Document.FLAG_DIR_PREFERS_GRID|((id.startsWith("page:")||id.startsWith("album-page:"))?DocumentsContract.Document.FLAG_DIR_BLOCKS_OPEN_DOCUMENT_TREE:0));add(c,v);}
+ /** Live Album rows for the configured connection, empty when nothing is adopted. */
+ private Map<String,AlbumReplica.Album> albums(){return AlbumReplicaService.get(getContext()).liveAlbums();}
+ /** The Albums section exists only while this connection has adopted Album authority. */
+ private boolean albumsAdopted(){Map<String,AlbumReplica.Album> live=albums();for(AlbumReplica.Album album:live.values())if(!album.deleted)return true;return false;}
+ /** Top-level Albums, or the child Albums of one Album. Sorted by name so a folder listing is stable. */
+ private void albumNodes(MatrixCursor c,String parentId){List<AlbumReplica.Album> rows=new ArrayList<>();for(AlbumReplica.Album album:albums().values())if(!album.deleted && Objects.equals(album.parentId,parentId))rows.add(album);rows.sort(Comparator.comparing((AlbumReplica.Album album)->album.name).thenComparing(album->album.id));for(AlbumReplica.Album album:rows)directory(c,"album:"+album.id,album.name);}
+ private JSONObject page(String token)throws Exception{return new JSONObject(new String(Base64.decode(token,Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8));}
+ private static String pageToken(JSONObject value){return Base64.encodeToString(value.toString().getBytes(StandardCharsets.UTF_8),Base64.URL_SAFE|Base64.NO_WRAP);}
  private void asset(MatrixCursor c,JSONObject a)throws Exception{String id=a.getString("id");Map<String,Object> v=new HashMap<>();v.put("document_id","asset:"+id);String mime=a.optString("content_type","application/octet-stream");String ext=android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);v.put("_display_name",id+(ext==null?"":"."+ext));v.put("mime_type",mime);v.put("_size",a.optLong("size_bytes",0));v.put("flags",a.optBoolean("thumbnail_available")?DocumentsContract.Document.FLAG_SUPPORTS_THUMBNAIL:0);add(c,v);}
  private synchronized JSONArray classifications(CancellationSignal cancel)throws Exception{if(System.currentTimeMillis()-classesAt>60000 || classesGeneration!=generation){classes=api("/v1/library/classifications","GET",null,cancel).getJSONArray("items");classesAt=System.currentTimeMillis();classesGeneration=generation;}return classes;}
  private String nameFor(String id,CancellationSignal cancel)throws Exception{JSONArray a=classifications(cancel);for(int i=0;i<a.length();i++)if(a.getJSONObject(i).getString("id").equals(id))return a.getJSONObject(i).optString("name",id);throw new FileNotFoundException("Classification unavailable");}
@@ -40,16 +48,24 @@ public final class LibraryDocumentsProvider extends DocumentsProvider {
  private void remember(JSONObject a)throws Exception{File f=metaFile(a.getString("id"));try(FileOutputStream out=new FileOutputStream(f)){out.write(a.toString().getBytes(StandardCharsets.UTF_8));}trim(metadata,8L*1024*1024,null);}
  private JSONObject recalled(String id)throws Exception{return recalled(id,null);}
  private JSONObject recalled(String id,CancellationSignal cancel)throws Exception{File f=metaFile(id);if(!f.isFile()){JSONObject ticket=api("/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","original"),cancel);JSONObject a=new JSONObject().put("id",id).put("content_type",ticket.optString("content_type","application/octet-stream")).put("size_bytes",ticket.optLong("size_bytes",0)).put("thumbnail_available",false);remember(a);return a;}try(FileInputStream in=new FileInputStream(f)){ByteArrayOutputStream out=new ByteArrayOutputStream();CloudClient.copy(in,out,65536,null);return new JSONObject(out.toString("UTF-8"));}}
- @Override public Cursor queryDocument(String id,String[] projection)throws FileNotFoundException{MatrixCursor c=new MatrixCursor(projection==null?DOC_COLUMNS:projection);try{synchronized(CONNECTION_LOCK){if(!configured())throw new Exception();if(id.equals(ROOT))directory(c,id,"Lakomics");else if(id.equals(ALL))directory(c,id,"All assets");else if(id.startsWith("class:"))directory(c,id,nameFor(id.substring(6),null));else if(id.startsWith("page:"))directory(c,id,"More assets");else if(id.startsWith("asset:"))asset(c,recalled(id.substring(6)));else throw new Exception();}}catch(Exception e){throw missing();}return c;}
+ @Override public Cursor queryDocument(String id,String[] projection)throws FileNotFoundException{MatrixCursor c=new MatrixCursor(projection==null?DOC_COLUMNS:projection);try{synchronized(CONNECTION_LOCK){if(!configured())throw new Exception();if(id.equals(ROOT))directory(c,id,"Lakomics");else if(id.equals(ALL))directory(c,id,"All assets");else if(id.equals(DocumentTreePolicy.ALBUMS)){if(!albumsAdopted())throw new Exception();directory(c,id,"Albums");}else if(id.startsWith("album:")){AlbumReplica.Album album=albums().get(id.substring(6));if(album==null || album.deleted)throw new Exception();directory(c,id,album.name);}else if(id.startsWith("class:"))directory(c,id,nameFor(id.substring(6),null));else if(id.startsWith("page:") || id.startsWith("album-page:"))directory(c,id,"More assets");else if(id.startsWith("asset:"))asset(c,recalled(id.substring(6)));else throw new Exception();}}catch(Exception e){throw missing();}return c;}
  @Override public Cursor queryChildDocuments(String parent,String[] projection,String sortOrder)throws FileNotFoundException{return children(parent,projection,new CancellationSignal());}
  @Override public Cursor queryChildDocuments(String parent,String[] projection,Bundle args)throws FileNotFoundException{return children(parent,projection,new CancellationSignal());}
  private Cursor children(String parent,String[] projection,CancellationSignal cancel)throws FileNotFoundException{
   MatrixCursor c=new MatrixCursor(projection==null?DOC_COLUMNS:projection);Uri notify=DocumentsContract.buildChildDocumentsUri(AUTHORITY,parent);c.setNotificationUri(getContext().getContentResolver(),notify);
   try{synchronized(CONNECTION_LOCK){cancel.throwIfCanceled();if(!configured())throw new Exception();String classId="",cursor="";
-   if(parent.startsWith("page:")){JSONObject page=new JSONObject(new String(Base64.decode(parent.substring(5),Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8));classId=page.getString("classification");cursor=page.getString("cursor");}
+   // The Album section reads the authority projection and the local replica. It is
+   // reachable only while this connection has adopted Album authority, and its absence
+   // never affects the Classification tree below.
+   if(parent.equals(DocumentTreePolicy.ALBUMS)){if(!albumsAdopted())throw new Exception();albumNodes(c,null);return c;}
+   if(parent.startsWith("album:")){String albumId=parent.substring(6);AlbumReplica.Album album=albums().get(albumId);if(album==null || album.deleted)throw new Exception();albumNodes(c,albumId);albumAssets(c,albumId,"",cancel);return c;}
+ if(parent.startsWith("album-page:")){JSONObject token=page(parent.substring(11));String albumId=token.getString("album");AlbumReplica.Adopted adopted=AlbumReplicaService.get(getContext()).adopted();if(adopted==null || adopted.epoch!=token.getLong("epoch"))throw new Exception();AlbumReplica.Album album=albums().get(albumId);if(album==null || album.deleted)throw new Exception();albumAssets(c,albumId,token.getString("cursor"),cancel);return c;}
+   if(parent.startsWith("page:")){JSONObject page=page(parent.substring(5));classId=page.getString("classification");cursor=page.getString("cursor");}
    else if(parent.equals(ROOT) || parent.startsWith("class:") || parent.equals(ALL)){
     if(parent.startsWith("class:"))classId=parent.substring(6);
     if(parent.equals(ROOT))directory(c,ALL,"All assets");
+    // The Albums section is added beside the Classification tree, never merged into it.
+    if(parent.equals(ROOT) && albumsAdopted())directory(c,DocumentTreePolicy.ALBUMS,"Albums");
     if(!parent.equals(ALL)){JSONArray list=classifications(cancel);for(int i=0;i<list.length();i++){JSONObject entry=list.getJSONObject(i);String ancestor=entry.isNull("parent_id")?"":entry.optString("parent_id","");if(ancestor.equals(classId))directory(c,"class:"+entry.getString("id"),entry.optString("name","Classification"));}}
     if(parent.equals(ROOT))return c;
    }else throw new Exception();
@@ -58,12 +74,37 @@ public final class LibraryDocumentsProvider extends DocumentsProvider {
    if(!result.isNull("next_cursor") && !result.optString("next_cursor").isEmpty()){String p=new JSONObject().put("classification",classId).put("cursor",result.getString("next_cursor")).toString();directory(c,"page:"+Base64.encodeToString(p.getBytes(StandardCharsets.UTF_8),Base64.URL_SAFE|Base64.NO_WRAP),"More assets →");}
   }}catch(OperationCanceledException e){c.close();throw e;}catch(Exception e){Bundle extras=new Bundle();extras.putString(DocumentsContract.EXTRA_ERROR,"Cannot load cloud library. Open Lakomics to check your connection.");c.setExtras(extras);}return c;
  }
+ /** Whether `document` is a live `album:<id>` for the adopted replica. */
+ private boolean liveAlbum(String document){if(!document.startsWith("album:"))return false;AlbumReplica.Album album=albums().get(document.substring(6));return album!=null && !album.deleted;}
+ /**
+  * One page of an Album's Assets from the authority-backed projection.
+  *
+  * The identity in the request is the one this installation adopted, and it is part of
+  * the page token: a token minted under one epoch cannot continue a walk under another,
+  * and a re-adoption invalidates outstanding tokens instead of silently resuming a
+  * different snapshot.
+  */
+ private JSONObject albumAssets(MatrixCursor c,String albumId,String cursor,CancellationSignal cancel)throws Exception{
+  AlbumReplica.Adopted adopted=AlbumReplicaService.get(getContext()).adopted();
+  if(adopted==null)throw new Exception();
+  String path="/v1/albums/assets?libraryId="+Uri.encode(adopted.libraryId)+"&epoch="+adopted.epoch+"&albumId="+Uri.encode(albumId)+"&limit=100"+(cursor.isEmpty()?"":"&cursor="+Uri.encode(cursor));
+  JSONObject result=api(path,"GET",null,cancel);JSONArray items=result.getJSONArray("items");
+  for(int i=0;i<items.length();i++){JSONObject a=items.getJSONObject(i);remember(a);asset(c,a);}
+  String next=result.isNull("nextCursor")?"":result.optString("nextCursor","");
+  if(!next.isEmpty())directory(c,"album-page:"+pageToken(new JSONObject().put("album",albumId).put("epoch",adopted.epoch).put("cursor",next)),"More assets →");
+  return result;
+ }
  @Override public boolean isChildDocument(String parent,String document){
   // A continuation can be navigated to pick files, but cannot widen a tree grant.
   if(parent.equals(document) || parent.startsWith("page:"))return false;
   try{synchronized(CONNECTION_LOCK){if(!configured())return false;
    // Cached gallery metadata is display-only; tree grants require current server evidence.
    if(parent.startsWith("class:") && document.startsWith("asset:"))return api("/v1/library/classifications/"+Uri.encode(parent.substring(6))+"/contains/"+Uri.encode(document.substring(6)),"GET",null,null).optBoolean("is_child",false);
+   // The Albums section is only real for Albums this connection actually holds live, so a
+   // stale document id cannot name a section that the replica no longer contains.
+   if(parent.equals(DocumentTreePolicy.ALBUMS))return albumsAdopted() && liveAlbum(document);
+   if(parent.startsWith("album:"))return liveAlbum(parent);
+   if(document.startsWith("album:") || document.equals(DocumentTreePolicy.ALBUMS) || document.startsWith("album-page:"))return false;
    String pageClass=null;if(document.startsWith("page:"))pageClass=new JSONObject(new String(Base64.decode(document.substring(5),Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8)).getString("classification");
    Map<String,String> parents=new HashMap<>();List<String> memberships=new ArrayList<>();
    if(parent.startsWith("class:")){JSONArray list=api("/v1/library/classifications","GET",null,null).getJSONArray("items");for(int i=0;i<list.length();i++){JSONObject c=list.getJSONObject(i);parents.put(c.getString("id"),c.isNull("parent_id")?null:c.optString("parent_id",null));}

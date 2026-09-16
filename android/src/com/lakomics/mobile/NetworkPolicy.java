@@ -26,6 +26,15 @@ final class NetworkPolicy {
   String p=path.split("\\?",2)[0];
   boolean get=p.equals("/v1/library/classifications") || p.equals("/v1/library/assets") || p.equals("/v1/library/revisit") || p.equals("/v1/library/revisit/date") || p.matches("/v1/library/revisit/creator/[A-Za-z0-9_%.-]+/assets") || p.equals("/v1/captures/pending") || p.matches("/v1/captures/[A-Za-z0-9_-]+/download");
   get=get || p.equals("/v1/library/characters") || p.equals("/v1/library/characters/assets") || p.equals("/v1/library/characters/status");
+  // Album authority replication, read only. The domain's one write route
+  // (`/v1/albums/commands`) is deliberately absent: this build adopts and replays
+  // Album state without ever producing one, so the allowlist must not carry a
+  // permission no code path uses.
+  get=get || p.equals("/v1/sync/status") || p.equals("/v1/albums/baseline") || p.equals("/v1/albums/changes");
+  // The authority-backed Album contents read, added with its first consumer (the
+  // DocumentsProvider Albums section). Still read-only: `/v1/albums/commands` remains
+  // absent, so this allowlist cannot express an Album mutation.
+  get=get || p.equals("/v1/albums/assets");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   get=get || p.equals("/v1/collections") || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}");
   get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");

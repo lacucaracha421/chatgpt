@@ -504,8 +504,256 @@ authority; the legacy publication lane is consumed, not deleted):
   `invalidAlbumMembership`. An uncoded or unknown result stays retryable with the identical
   operation id and payload, and a 422 no longer collapses into `AlbumContractUnsupported`.
 
-Android 2C is the remaining Album batch, and it must consume the baseline's tombstone
-rows for compare-and-set exactly as the PC does.
+Android 2C-1 landed 2026-09-16 (below). The remaining Album work is 2C-2: additive
+Album readers and then Album editing.
+
+**Correction (2026-09-16): Classification and Album are separate canonical domains.**
+An earlier draft of 2C-2 described it as cutting Photo Picker, `LibraryDocumentsProvider`
+and the WebView Library *from* a classification-backed model *to* the Album replica. That
+framing was wrong, and the source proves it:
+
+* `classifications`/`classification_entries` (migration 0001, `kind IN
+  ('root','work','tag')`) and `albums` (migration 0008) are different tables with different
+  schemas, different hierarchies and different ids. Neither is derived from the other.
+* The desktop UI already distinguishes the two actions: `target.kind === "album" ?
+  "앨범에 추가" : "폴더로 이동"`. Adding to an Album and moving to a folder are different
+  user operations.
+* The WebView Library sidebar renders Classification *plus* Character/Group navigation from
+  the character index, which has no Album equivalent at all.
+
+So the existing `class:<classification-id>` Photo Picker collections and
+`class:<classification-id>` DocumentsProvider directories are **not** a second canonical
+Album source: they are the Classification domain exposed through Android collection/folder
+APIs. Album Authority governs only Albums and Album↔Asset membership, and its work is
+additive. `class:` and `album:` identifiers coexist because they name different domains, and
+Classification/Character navigation is never removed, replaced, renamed or retired as part of
+Album Authority work. When Album authority is inactive, or the current Android connection
+scope has not adopted it, only Album-specific surfaces are absent; Classification and
+Character functionality continues unchanged.
+
+Two further consequences follow from that boundary:
+
+* **`/v1/library/album-media` is not the new authority read source.** It reads the legacy
+  display-oriented `album_replica` snapshot, whose shape mixes Album state with Asset display
+  state. An authority read needs a dedicated projection over authoritative membership.
+* **Album membership alone cannot render Asset rows.** The replica stores Album identity,
+  hierarchy and `(albumId, assetId, desiredState, entityRevision)` only — no content type,
+  size or dates. Asset metadata must keep coming from the Asset projection, and Asset
+  metadata must not be duplicated into `library-replica.sqlite`.
+
+Album authority Android 2C-1 — durable read-only Album replica foundation, landed
+2026-09-16 (implementation checkpoint only; Album authority is **not active anywhere**,
+Android Album writes are still disabled, and no production Album authority was
+activated). This batch is deliberately smaller than PC 2B.
+
+- **A second, general-purpose Android database.** `library-replica.sqlite` is app-private
+  and separate from `notes.sqlite`, because Notes is an encrypted personal domain with its
+  own sync rules and merging the two would couple an encrypted store to a plaintext
+  authority replica that must be replaceable wholesale. `PRAGMA user_version` 1 holds the
+  Album domain. `LibraryReplicaStore` owns every rule about what the replica holds — which
+  rows are written, which are retained as tombstones, when the cursor moves, and what one
+  transaction contains — over a semantic `ReplicaDb` seam; `AndroidReplicaDb` is a
+  mechanical translation that also owns the file location. The seam is deliberately not a
+  SQL executor: passing SQL through it would put the schema and the transaction semantics
+  on the Android side, leaving the store's rules testable only by re-implementing SQLite.
+- **Retained tombstones on both lineages.** `album_state.deleted` and
+  `album_membership_state.desired_state = 0` are revision state, not absence. The baseline
+  carries membership tombstones so a fresh client can compose the next command for a
+  relation someone already removed instead of presenting a false revision 0, and deleting
+  an Album retires its live relations without bumping them, because the delete change row
+  carries only the Album tombstone and an invented relation revision could not be
+  reproduced by replaying it.
+- **Android is already a replica, so first adoption does not compare against local
+  canonical state.** The PC's `AlbumFirstAdoptionMismatch` rule exists because activation
+  ran from that PC's own staged snapshot; on Android a difference is convergence, not
+  divergence. Adoption is still complete-or-fail: every page is accumulated outside the
+  live replica and installed in one transaction only after the final membership page
+  reports `complete`, so a failed or interrupted walk leaves the previous replica byte-
+  identical.
+- **Ordered replay with a single transaction boundary.** Contiguity is checked against the
+  stored cursor *inside* the transaction that writes the page and advances the cursor, so
+  the cursor can never advance over a change that was not applied. Progress is measured
+  against the cursor a page was requested from, which is what makes honest multi-page
+  catch-up work rather than reporting `hasMore` as a protocol error.
+- **Coded recovery, never status-based.** `cursorExpired`, `cursorAhead` and
+  `baselineChanged` all arrive as 409 and all recover by adopting a fresh baseline; mapping
+  by status would collapse them into one meaning. That recovery is safe in this batch
+  precisely because there is no Android write queue: there is no unaccepted intent a
+  baseline could overwrite. `authorityInactive` and `authorityContractUnsupported` write
+  nothing, and an identity/epoch change re-adopts because the stored cursor describes a
+  different authority.
+- **The allowlist is the enforcement, not a convention.** `NetworkPolicy` gains exactly
+  three read-only paths and `PUT /v1/albums/commands` stays blocked, so a future editing
+  batch cannot appear by accident. The 4 MiB generic response limit is unchanged: baseline
+  pages are server-bounded at 2 MiB.
+- **Foreground-only scheduling.** `AlbumReplicaService` reconciles on resume and then about
+  every 5 s, is single-flight, takes no wake lock and schedules no WorkManager job. A pass
+  in flight when the connection changes is invalidated so it cannot publish the replaced
+  account's state. The replica is scoped by an opaque endpoint+token hash following the
+  existing native cache convention, and a connection change clears it without touching
+  user media.
+- **Consumers are deliberately not cut over.** `PickerLibrary`/`PickerSnapshot`
+  `class:<classification-id>` albums, `LibraryDocumentsProvider` metadata caching and the
+  WebView Library's server-direct reads are all unchanged; `album:<album-id>` is not added
+  to Photo Picker yet. The bridge gains one read-only `albumStatus` operation and no Album
+  mutation operation.
+- Verification: 124 new native checks against a real local HTTP fixture and a real SQLite
+  engine, with the atomicity and contiguity claims mutation-tested; NetworkPolicy 266,
+  DocumentTreePolicy 19, ThumbnailCache 19, MediaTransfer 22, TemporaryImagePolicy 23,
+  NotesCrypto 4 and PickerSnapshot unchanged; 137 existing mobile frontend tests; and the
+  server's own `tests/test_album_authority.py` (63 passed). The real server's baseline and
+  change documents were additionally fed through the shipped Java parser and engine
+  validation. Android device/runtime verification is unperformed.
+
+Album authority Android 2C-1.3 — Scope H read isolation, landed 2026-09-16 (still no
+active Album authority; Android Album writes remain disabled):
+
+- **Replica reads are scope-aware at the store boundary.** `adopted(scope)` already hid an
+  authority stored under another connection, but `status()`, `albums()` and `memberships()`
+  returned the stored rows regardless of which connection owned them, and
+  `AlbumAuthoritySync.liveAlbums()`/`liveMemberships()` exposed those unscoped reads. A
+  connection that was told "not adopted" could therefore still be handed the previous
+  connection's Albums, memberships and diagnostic counts.
+- Every read now takes the scope explicitly: `State.status(scope)`,
+  `State.albums(scope, liveOnly)`, `State.memberships(scope, liveOnly)`, and the sync-facing
+  `status(scope)` / `liveAlbums(scope)` / `liveMemberships(scope)`. The scope is a required
+  argument rather than an implicit field, so 2C-2 consumers cannot drift back onto an
+  unscoped path.
+- A private `owns(scope)` performs the check, and it runs **inside the same lock** as the row
+  read it guards. Reading the authority and the rows in two separate critical sections would
+  let a replacement land between them and serve one connection's rows under another's
+  identity.
+- Rows are hidden, never deleted. A mismatched read returns nothing and zero counts; the
+  durable revision state, including tombstones, stays in place for whichever scope owns it.
+  Only an explicit replacement/reset performs the existing clear.
+- `AlbumReplicaService.status()` resolves the configured scope once and uses it for both the
+  identity and the counters, so the two cannot describe different connections.
+- Verification: 190 AlbumReplicaTest checks (33 new Scope H checks) and 39
+  AlbumReplicaScheduleTest checks, NetworkPolicy 266, DocumentTreePolicy 19, ThumbnailCache
+  19, MediaTransfer 22, TemporaryImagePolicy 23, NotesCrypto 4 and PickerSnapshot unchanged,
+  native compilation against android-35, `d8 --release` DEX packaging and `git diff --check`.
+  Each of the four scope checks (albums, memberships, counts, ownership predicate) was
+  mutation-tested. Baseline adoption, incremental replay, timer generations, owed-pass
+  behavior and NetworkPolicy are unchanged.
+
+Album authority Android 2C-1.2 — generation, ordering and wire-boundary corrections,
+landed 2026-09-16 (still no active Album authority; Android Album writes remain disabled):
+
+- **Arm generations are real, not a shared flag.** A restart disarms and re-arms in one
+  step, so a repeating task left over from the cancelled arm saw `armed == true` again —
+  for a *newer* arm — and ran a pass that no longer belonged to it. Each armed timer now
+  carries a generation, and `tick` compares it under the same monitor that arms and
+  disarms; the callback also runs while that monitor is held, so a restart either completes
+  before a tick or waits for it. That makes the boundary atomic rather than a narrowed race
+  window.
+- **Replacement ordering is explicit.** `restartAfter(invalidate)` runs the invalidation
+  *before* arming, because arming invokes the immediate pass synchronously: arming first let
+  the replacement connection's own reconciliation be invalidated by the clear that followed
+  it, and since that pass had started nothing was recorded as owed, so the new connection
+  waited for the next interval. `ForegroundSchedule` now owns both steps so their order
+  cannot be reintroduced as a caller mistake.
+- **A refused immediate pass is owed, not dropped.** Single-flight refuses a request while
+  a pass is in flight. The immediate callback reports whether it started, and
+  `passFinished()` starts an owed pass when the slot frees — so a resume or a replacement
+  connection reconciles as soon as single-flight permits instead of at the next interval.
+  A stopped schedule owes nothing.
+- **A successful changes page is bounded by the advertised authority cursor.** The server
+  answers `after > cursor` with 409 `cursorAhead`, so in any 200 both the requested cursor
+  and the resulting `nextAfter` are bounded by `cursor`. Without this, an empty page that
+  claimed to continue past the authority was accepted whenever `hasMore` agreed with it —
+  which it does when both sides are false. The continuation rule and the store's contiguity
+  rule are unchanged and still protect their own invariants.
+- Verification: 157 AlbumReplicaTest checks and 39 AlbumReplicaScheduleTest checks,
+  NetworkPolicy 266, DocumentTreePolicy 19, ThumbnailCache 19, MediaTransfer 22,
+  TemporaryImagePolicy 23, NotesCrypto 4, PickerSnapshot unchanged, 137 mobile frontend
+  tests, the server's own album suite (63 passed), native compilation, `d8 --release` DEX
+  packaging and `git diff --check`. The real server's documents were re-fed through the
+  shipped parser. Every rule above was mutation-tested, including the two bounds separately
+  and the lock boundary across the callback.
+
+Album authority Android 2C-1.1 — lifecycle fix and changes-page hardening, landed
+2026-09-16 (still no active Album authority; Android Album writes remain disabled):
+
+- **Connection replacement no longer stops reconciliation.** `reset()` stops polling, and
+  `configure` called it without any pause/resume cycle to re-arm the loop, so after
+  configuring or replacing the connection while the activity stayed foregrounded, Album
+  reconciliation stayed stopped until the user backgrounded and resumed the app. The
+  transitions now live in `ForegroundSchedule`, and `configure` uses
+  `AlbumReplicaService.replaceConnection()`, which restarts the schedule and clears the
+  replica in one step. It deliberately does **not** compose `reset()` with a restart:
+  `stop()` means "the activity left the foreground", so clearing first would make the
+  restart unable to re-arm. `disconnect` still uses `reset()` — it must not poll against a
+  configuration that no longer exists.
+- `ForegroundSchedule` is the smallest seam that makes this testable: it owns whether the
+  activity is foregrounded, whether the repeating pass is armed, and the handle that
+  cancels it. A tick already dequeued when the pass was cancelled is ignored by the state
+  machine itself, so no caller has to remember to check. The connection-race `attempt`
+  guard, scope isolation, replica clearing and single-flight behavior are unchanged.
+- **The changes page must now describe exactly the rows it sent.** The parser requires
+  `nextAfter` to equal the last change's `sequence` (or the requested cursor for an empty
+  page) and `hasMore` to equal `nextAfter < cursor`, which is how the server derives both.
+  A page whose continuation disagrees with its rows, or that omits rows and would otherwise
+  look like an honest empty page, is refused before it is committed. The engine keeps its
+  own progress guard, because an empty page that honestly reports more work without
+  advancing satisfies the parser and would otherwise be requested forever.
+
+Android 2C-2 remains, under the corrected boundary above: add Album-specific surfaces
+alongside the untouched Classification/Character navigation, then expose Album editing with a
+durable outbox. No Classification/Character surface is retired by this work, and the legacy
+`album_replica`-backed publication path is a separate retirement question.
+
+### Album authority 2C-2 — domain-boundary correction, authority Album contents read, additive Android readers
+
+Landed 2026-09-16. No production Album authority was activated; the acceptance sequence
+below ran on an isolated test server.
+
+**Server.** `GET /v1/albums/assets` is the authority-backed Album contents projection.
+It requires an active Album authority and validates `libraryId`/`epoch`/contract like the
+other Album read routes; contents come from `album_authority_members` rows with
+`desired_state = 1` joined to committed `assets`; a deleted Album returns
+`404 albumNotFound` rather than an empty page; pagination is a strict
+`(COALESCE(collected_at, created_at), id)` descending walk with the Album id bound into
+the cursor, so a cursor cannot be replayed against another Album and the walk cannot loop.
+Asset display metadata is joined from the Asset domain, never copied into the replica.
+The mobile Asset projection is injected from `app.mobile_asset_item`, so there is exactly
+one display shape. `/v1/albums/commands` remains the only write route and Android still
+does not call it.
+
+**Android.** `AlbumCollections` is the platform-free additive projection: visible Albums
+and live memberships become `album:<album-id>` collections beside the untouched
+`class:<classification-id>` ones, tombstones are hidden while retained, and an unadopted
+or replaced connection contributes nothing. The Photo Picker merges those memberships onto
+Assets it already found eligible, so an Album cannot make an ineligible Asset visible. The
+DocumentsProvider exposes an explicit `Albums` directory beside the Classification tree
+and reads its contents from `/v1/albums/assets`; `DocumentTreePolicy` keeps the two
+namespaces mutually unreachable. The WebView adds a distinct Albums section that renders
+nothing while Album authority is unadopted. `/v1/albums/assets` was added to
+`NetworkPolicy` only now that a consumer exists.
+
+**Corrected during review.** An earlier draft of 2C-2 described this as a
+Classification-to-Album source cutover (see the correction above). It is additive:
+`class:` and `album:` coexist, Classification/Character navigation is unchanged, and only
+Album-specific surfaces are absent when Album authority is inactive.
+
+**Galaxy Tab device acceptance, 2026-09-16.** The isolated authority fixture was exercised
+end to end on the Galaxy Tab. The WebView Album dialog exposed two device-only integration
+defects that are now covered by regressions: `/v1/albums/assets` returns camelCase
+`hasMore`/`nextCursor`, and the portrait drawer's visible Album reader must not inherit the
+hidden desktop reader's paused state. With those fixes, a 45-Asset Album requested its
+40-item first page and its 5-item continuation on device. Android Photo Picker then showed
+Classification and Album collections side by side, including parent/child Album paths, and
+a 10-member child Album returned exactly those 10 Assets. The personal-device cloud-provider
+allowlist was switched from the retired PoC package to `com.lakomics.mobile`, after which the
+main `com.lakomics.mobile.cloud` provider supplied the collections. A real HTTPS PNG fixture
+was fetched through media tickets, displayed in Photo Picker, selected, and uploaded by the
+calling app. SAF/DocumentsProvider showed the separate `Albums` tree, rendered the same real
+thumbnail when `thumbnail_available` was advertised, and a temporary receiver app read the
+selected original as 8,090 bytes with the expected SHA-256. The temporary server and media
+fixture were isolated under `/tmp`; no production Album authority or production data was
+modified.
+
+**Still not done.** Android Album writes and their outbox, and the retirement of the
+legacy `album_replica`-backed publication path.
 
 ## Consequences
 Positive:

@@ -98,6 +98,19 @@ input[type=checkbox] { accent-color:var(--color-accent); width:20px; height:20px
 .settings-note { padding:22px 0; border-top:1px solid var(--color-border); }.settings-note h3 { font-size:14px; margin-bottom:8px; font-weight:500; }.settings-note p { color:var(--color-muted); font-size:13px; line-height:1.8; }
 .settings-foot { display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--color-muted); }.settings-foot .ui-button { font-size:12px; }
 .classification-index { min-height:0; display:flex; flex:1; flex-direction:column; }
+/* The Albums section is separate from the Classification tree: it reuses the same row
+   idiom so it reads as part of the sidebar, but never nests inside the classification
+   hierarchy. It renders nothing at all while Album authority is unadopted. */
+.album-section { border-top:1px solid var(--color-border); margin-top:16px; padding-top:4px; }
+.album-section .index-title { padding:12px 12px 8px; }
+.album-list { list-style:none; margin:0; padding:0 0 16px; overflow:auto; max-height:40vh; }
+.album-list button { display:flex; align-items:center; gap:10px; width:100%; min-height:40px; padding:8px 12px; border:0; background:none; text-align:left; font-size:14px; color:inherit; }
+.album-list button svg { width:16px; color:var(--color-muted); }
+.album-list button.active, .album-list button:hover { background:var(--color-accent); color:var(--color-on-accent); }
+.album-list button.active svg, .album-list button:hover svg { color:inherit; }
+.album-dialog-content { display:flex; flex-direction:column; min-height:0; height:min(70dvh,720px); }
+.album-dialog-content>.gallery-scroll { flex:1; min-height:0; }
+.album-footer { display:flex; justify-content:flex-end; padding-top:12px; }
 .classification-search { display:flex; align-items:center; margin:8px 0 16px; gap:8px; }.classification-search input { width:100%; background:none; border:0; border-bottom:1px solid var(--color-border); border-radius:0; }.classification-search svg { width:18px; color:var(--color-muted); }
 .index-recent { justify-content:flex-start; }
 .index-heading { display:flex; align-items:center; justify-content:space-between; padding:22px 12px 10px; color:var(--color-muted); font-size:12px; }

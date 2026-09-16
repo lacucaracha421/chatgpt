@@ -63,7 +63,11 @@ final class PickerLibrary {
                 if(cursor.isEmpty()){if(response.optBoolean("has_more",false))throw new IOException("Incomplete page");break;}
                 if(items.length()==0||cursor.length()>7000||!cursors.add(cursor))throw new IOException("Invalid page continuation");
             }
-            check(attempt,revision,signal);PickerSnapshot next=snapshot.merge(rows,albums,System.currentTimeMillis());byte[] encoded=encode(next,revision);
+            check(attempt,revision,signal);AlbumCollections authoritative=AlbumReplicaService.get(context).collections();
+            // Additive: when Album authority is unadopted this contributes nothing and the
+            // Classification collections published above are unchanged.
+            albums.putAll(authoritative.names);
+            PickerSnapshot next=snapshot.merge(authoritative.merge(rows),albums,System.currentTimeMillis());byte[] encoded=encode(next,revision);
             synchronized(this){check(attempt,revision,signal);save(encoded);snapshot=next;error="";}
             notifyPicker();
         }catch(Exception e){synchronized(this){if(epoch==attempt)error=e instanceof OperationCanceledException?"":"Library refresh failed. Previous library remains available; retry from Lakomics.";}}

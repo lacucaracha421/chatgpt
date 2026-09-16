@@ -1,4 +1,4 @@
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import type {HomeProps} from './Home';
@@ -49,6 +49,31 @@ it('keeps visited Catalog and Notes panels separate when returning Home',async()
   expect(screen.queryByRole('button',{name:'메모 동기화'})).toBeNull();expect(screen.queryByRole('region',{name:'메모',exact:true})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});expect(screen.queryByRole('button',{name:'메모 동기화'})).toBeNull();
 });
+it('keeps drawer Albums live so near-end pagination can append',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
+  const originalApi=mocks.api.getMockImplementation()!;
+  mocks.native.mockImplementation(async(op:string)=>op==='albumTree'
+    ? {adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'root',name:'업로드용',parentId:null,iconKey:null,colorKey:null}]}
+    : {configured:true,endpoint:'https://example.invalid'});
+  mocks.api.mockImplementation((path:string)=>{
+    if(path.startsWith('/v1/albums/assets?')){
+      const cursor=new URLSearchParams(path.split('?')[1]).get('cursor');
+      return Promise.resolve(cursor
+        ? {items:[{id:'album-2',kind:'image'}],hasMore:false,nextCursor:null}
+        : {items:[{id:'album-1',kind:'image'}],hasMore:true,nextCursor:'album-next'});
+    }
+    return originalApi(path);
+  });
+  render(<App/>); await screen.findByText('tile-a1');
+  fireEvent.click(screen.getByRole('button',{name:'사이드바 열기'}));
+  const drawer=await screen.findByRole('dialog',{name:'분류'});
+  fireEvent.click(await within(drawer).findByText('업로드용'));
+  const first=await screen.findByText('tile-album-1');
+  fireEvent.scroll(first.parentElement!);
+  await screen.findByText('tile-album-2');
+  expect(mocks.api.mock.calls.some(([path])=>String(path).includes('cursor=album-next'))).toBe(true);
+});
+
 describe('committed view and browsing',()=>{
   it('renders metadata without waiting for thumbnails and appends past 100 without replacing the view',async()=>{
     const original=mocks.api.getMockImplementation()!;

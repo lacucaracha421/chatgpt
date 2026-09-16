@@ -58,6 +58,8 @@ public final class MainActivity extends Activity {
   if(Build.VERSION.SDK_INT>=33)try{status.put("eligible",android.provider.MediaStore.isSupportedCloudMediaProviderAuthority(getContentResolver(),PickerLibrary.AUTHORITY));status.put("selected",android.provider.MediaStore.isCurrentCloudMediaProviderAuthority(getContentResolver(),PickerLibrary.AUTHORITY));}catch(RuntimeException ignored){}
   return status;
  }
+ /** Album replica status. Read-only: no Album mutation is reachable from the bridge. */
+ private JSONObject albumStatus()throws Exception{return AlbumReplicaService.get(this).status();}
  private JSONObject thumbnail(String id,CancellationSignal signal)throws Exception{return media==null?client.api("/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","thumbnail"),signal):media.browser(id,"thumbnail","image/webp",signal);}
  final class Bridge {
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
@@ -77,10 +79,16 @@ public final class MainActivity extends Activity {
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
      case "pickerStatus":data=pickerStatus();break;
+     case "albumStatus":data=albumStatus();break;
+     case "albumTree":data=albumStatus().put("albums",AlbumReplicaService.get(MainActivity.this).albumList());break;
      case "pickerRefresh":PickerLibrary.get(MainActivity.this).refresh(true);data=pickerStatus();break;
      case "openPickerSettings":if(Build.VERSION.SDK_INT<33)throw new UnsupportedOperationException();Intent pickerSettings=new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES_SETTINGS);if(pickerSettings.resolveActivity(getPackageManager())==null)throw new UnsupportedOperationException();runOnUiThread(()->{try{startActivity(pickerSettings);}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
-     case "configure": String endpoint=NetworkPolicy.endpoint(p.getString("endpoint"),p.optBoolean("allowPrivateHttp",false));String token=p.getString("token");client.validate(endpoint,token,signal);LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();settings.write(endpoint,token,p.optBoolean("allowPrivateHttp",false));cancelOtherRequests(signal);if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();} data=settings.status();break;
-     case "disconnect":LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();cancelOtherRequests(signal);settings.clear();if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();}data=settings.status();break;
+     case "configure": String endpoint=NetworkPolicy.endpoint(p.getString("endpoint"),p.optBoolean("allowPrivateHttp",false));String token=p.getString("token");client.validate(endpoint,token,signal);LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();settings.write(endpoint,token,p.optBoolean("allowPrivateHttp",false));cancelOtherRequests(signal);if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();
+      // A replacement connection clears the old replica and keeps Album reconciliation
+      // running. Configuring does not pause the activity, so a bare reset would stop the
+      // loop until the user backgrounded and resumed the app.
+      AlbumReplicaService.get(MainActivity.this).replaceConnection();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();} data=settings.status();break;
+     case "disconnect":LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();cancelOtherRequests(signal);settings.clear();if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();AlbumReplicaService.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();}data=settings.status();break;
      case "api":data=client.api(p.getString("path"),p.optString("method","GET"),p.optJSONObject("body"),signal);break;
      case "bookmarkCommand": String provider=p.getString("provider");String workId=p.getString("providerWorkId");if(!provider.matches("kHentai|heliotrope") || !workId.matches("[0-9A-Za-z_-]{1,64}"))throw new IllegalArgumentException("Invalid bookmark identity");BookmarkCommand.validate(p);JSONObject command=BookmarkCommand.body(p);
       try{data=client.api(BookmarkCommand.path(provider,workId),"PUT",command,signal);}
@@ -107,7 +115,10 @@ public final class MainActivity extends Activity {
   }else getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
  @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused)hideStatusBar();}
- @Override protected void onResume(){super.onResume();hideStatusBar();if(web!=null){web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).refresh(false);}}
- @Override protected void onPause(){if(web!=null)web.onPause();super.onPause();}
+ @Override protected void onResume(){super.onResume();hideStatusBar();if(web!=null){web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).refresh(false);}
+  // Foreground-only Album replication: this resumes polling and reconciles now, and
+  // onPause stops it. Nothing here keeps the device awake or runs in the background.
+  AlbumReplicaService.get(this).start();}
+ @Override protected void onPause(){if(web!=null)web.onPause();AlbumReplicaService.get(this).stop();super.onPause();}
  @Override protected void onDestroy(){destroyed=true;stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }
