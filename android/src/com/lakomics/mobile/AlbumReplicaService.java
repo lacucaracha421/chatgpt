@@ -11,6 +11,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -70,6 +71,8 @@ final class AlbumReplicaService {
 
     private LibraryReplicaStore store;
     private AlbumAuthoritySync sync;
+    private AlbumMembershipOutbox outbox;
+    private AlbumSyncPass cycle;
     private long lastAttempt;
     private volatile boolean syncing;
     private volatile String code = "";
@@ -217,13 +220,28 @@ final class AlbumReplicaService {
             return;
         }
         try {
-            AlbumAuthoritySync engine;
+            AlbumSyncPass pass;
             synchronized (gate) {
-                engine = engine();
+                engine();
+                pass = cycle;
             }
-            AlbumAuthoritySync.Result result = engine.reconcile(scope);
+            AlbumSyncPass.Result completed = pass.run(scope);
+            if (completed.flush.sent > 0 || completed.flush.noOp > 0) {
+                // External picker collections are a published snapshot, so refresh them
+                // after the server accepts a membership change. The refresh is async and
+                // retains the previous snapshot if the network disappears again.
+                PickerLibrary.get(context).refresh(true);
+            }
+            if (completed.receive == null) {
+                String blocked = firstBlockedCode(scope);
+                record(startedUnder, null, blocked, blocked == null ? null : message(blocked));
+                return;
+            }
+            AlbumAuthoritySync.Result result = completed.receive;
             record(startedUnder, result, result.code,
                     result.code == null ? null : message(result.code));
+        } catch (AlbumMembershipOutbox.Failure failure) {
+            record(startedUnder, null, failure.code, message(failure.code));
         } catch (Exception unavailable) {
             // A replica store that cannot be opened is reported once per pass. It never
             // falls back to another database, and never touches user media.
@@ -251,7 +269,7 @@ final class AlbumReplicaService {
     }
 
     /** One authenticated GET over the existing native transport policy. */
-    private final class Transport implements AlbumReplica.Transport {
+    private final class Transport implements AlbumReplica.Transport, AlbumMembershipOutbox.Transport {
         @Override
         public String get(String path) throws Exception {
             try {
@@ -260,6 +278,17 @@ final class AlbumReplicaService {
                 // The rejected body is what carries the coded reason, so it is passed
                 // through rather than replaced by the status.
                 throw new AlbumReplica.HttpFailure(failure.status, failure.detail);
+            }
+        }
+
+        @Override
+        public String put(String path, String payload) throws Exception {
+            try {
+                // The payload is frozen in the durable outbox. Parsing only adapts it to
+                // the existing authenticated client; no field is regenerated or rebased.
+                return client.api(path, "PUT", new JSONObject(payload), null).toString();
+            } catch (CloudClient.HttpFailure failure) {
+                throw new AlbumMembershipOutbox.HttpFailure(failure.status, failure.detail);
             }
         }
     }
@@ -320,6 +349,8 @@ final class AlbumReplicaService {
             value.put("albumTombstoneCount", counter(counters, "albumTombstoneCount"));
             value.put("membershipCount", counter(counters, "membershipCount"));
             value.put("membershipTombstoneCount", counter(counters, "membershipTombstoneCount"));
+            value.put("outboxPendingCount", counter(counters, "outboxPendingCount"));
+            value.put("outboxBlockedCount", counter(counters, "outboxBlockedCount"));
             AlbumAuthoritySync.Result result = last;
             value.put("appliedChanges", result == null ? 0 : result.appliedChanges);
             value.put("serverCursor", result == null || result.serverCursor == null
@@ -347,8 +378,11 @@ final class AlbumReplicaService {
     private AlbumAuthoritySync engine() {
         if (sync == null) {
             store = new LibraryReplicaStore(AndroidReplicaDb.open(context));
-            sync = new AlbumAuthoritySync(new Transport(), store,
-                    () -> Instant.now().toString());
+            Transport transport = new Transport();
+            AlbumReplica.Clock clock = () -> Instant.now().toString();
+            sync = new AlbumAuthoritySync(transport, store, clock);
+            outbox = new AlbumMembershipOutbox(transport, store, clock);
+            cycle = new AlbumSyncPass(outbox, sync);
         }
         return sync;
     }
@@ -417,6 +451,83 @@ final class AlbumReplicaService {
     }
 
     // -----------------------------------------------------------------------
+    // Membership editor (2C-3)
+    // -----------------------------------------------------------------------
+
+    JSONObject membershipState(String assetId) {
+        if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Asset id");
+        }
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            JSONObject value = new JSONObject();
+            JSONArray rows = new JSONArray();
+            try {
+                if (scope.isEmpty()) return value.put("adopted", false).put("albums", rows);
+                engine();
+                AlbumReplica.Adopted authority = store.adopted(scope);
+                if (authority == null) return value.put("adopted", false).put("albums", rows);
+                Map<String, AlbumReplica.Album> albums = store.albums(scope, true);
+                Map<String, AlbumReplica.Member> members = store.memberships(scope, false);
+                List<ReplicaDb.OutboxRow> queued = store.outbox(scope);
+                List<AlbumReplica.Album> ordered = new ArrayList<>(albums.values());
+                ordered.sort(Comparator.comparing((AlbumReplica.Album album) -> album.name)
+                        .thenComparing(album -> album.id));
+                for (AlbumReplica.Album album : ordered) {
+                    AlbumReplica.Member member = members.get(album.id + ":" + assetId);
+                    boolean pending = false, blocked = false;
+                    String conflict = null;
+                    for (ReplicaDb.OutboxRow row : queued) {
+                        if (!row.albumId.equals(album.id) || !row.assetId.equals(assetId)) continue;
+                        if (row.blocked()) { blocked = true; if (conflict == null) conflict = row.conflictCode; }
+                        else pending = true;
+                    }
+                    rows.put(new JSONObject()
+                            .put("id", album.id)
+                            .put("name", album.name)
+                            .put("parentId", album.parentId == null ? JSONObject.NULL : album.parentId)
+                            .put("desiredState", member != null && member.desiredState)
+                            .put("pending", pending)
+                            .put("blocked", blocked)
+                            .put("conflictCode", conflict == null ? JSONObject.NULL : conflict));
+                }
+                return value.put("adopted", true)
+                        .put("libraryId", authority.libraryId)
+                        .put("epoch", authority.epoch)
+                        .put("albums", rows);
+            } catch (Exception unrepresentable) {
+                throw new IllegalStateException("Album membership state unavailable");
+            }
+        }
+    }
+
+    JSONObject setMembership(String assetId, String albumId, boolean desiredState) {
+        if (albumId == null || !albumId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Album id");
+        }
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            if (scope.isEmpty()) throw new IllegalStateException("Not configured");
+            engine();
+            LibraryReplicaStore.MembershipEdit edit = store.queueMembership(scope, albumId, assetId,
+                    desiredState, UUID.randomUUID().toString(), Instant.now().toString());
+            JSONObject value = membershipState(assetId);
+            if (edit.changed) request(true);
+            return value;
+        }
+    }
+
+    private String firstBlockedCode(String scope) {
+        synchronized (gate) {
+            if (store == null) return null;
+            for (ReplicaDb.OutboxRow row : store.outbox(scope)) {
+                if (row.blocked()) return row.conflictCode == null ? "albumWriteConflict" : row.conflictCode;
+            }
+            return null;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Additive Album collections (2C-2)
     // -----------------------------------------------------------------------
 
@@ -474,6 +585,14 @@ final class AlbumReplicaService {
                 return "라이브러리 복제본을 열 수 없습니다.";
             case AlbumReplica.CODE_BASELINE_TOO_LARGE:
                 return "앨범 기준선이 허용 크기를 초과했습니다.";
+            case "revisionConflict":
+            case "albumWriteConflict":
+                return "앨범 변경이 다른 기기의 변경과 충돌했습니다.";
+            case "epochMismatch":
+            case AlbumReplica.CODE_LIBRARY_MISMATCH:
+                return "앨범 권위가 변경되어 저장 대기 중인 변경을 자동 적용할 수 없습니다.";
+            case AlbumMembershipOutbox.CODE_PROTOCOL_INTEGRITY:
+                return "서버의 앨범 변경 응답을 확인할 수 없습니다. 변경은 저장 대기 상태로 유지됩니다.";
             default:
                 return "앨범 동기화를 완료하지 못했습니다. 잠시 후 다시 시도합니다.";
         }

@@ -752,8 +752,77 @@ selected original as 8,090 bytes with the expected SHA-256. The temporary server
 fixture were isolated under `/tmp`; no production Album authority or production data was
 modified.
 
-**Still not done.** Android Album writes and their outbox, and the retirement of the
-legacy `album_replica`-backed publication path.
+### Album authority Android 2C-3 — membership-only optimistic writes and durable outbox
+
+Implemented 2026-09-16 without production authority activation or production data writes.
+The first Android write slice is intentionally **membership-only**: a Viewer Asset can be
+added to or removed from an existing Album. Album create/rename/move/delete/appearance stay
+PC-only, and Classification/Character behavior is unchanged.
+
+`library-replica.sqlite` schema version 3 owns `album_authority_outbox`. A real local
+membership transition writes the optimistic `album_membership_state` value and one immutable
+`setAlbumMembership` command in the same SQLite transaction; selecting the already-desired
+state is a no-op. Multiple real toggles for one relation remain strict FIFO rather than being
+coalesced, and each later command predicts its `expectedRevision` from the last confirmed
+membership revision plus its queued predecessors, matching the PC model. The stored operation
+id and payload are reused after a lost response. A semantic conflict is retained as a durable
+`blocked` row and stops later delivery; the optimistic choice remains visible rather than
+silently choosing a winner.
+
+The foreground Album cycle is now **flush -> receive only when the outbox is clean**.
+Successful acceptance updates confirmed membership revision and retires only that outbox row;
+a later optimistic toggle for the same relation is not overwritten. Each outbox row stores
+its `libraryId`, epoch and contract version as durable identity in addition to the frozen
+payload. Baseline re-adoption and incremental change application re-project only queued
+intents composed for that exact authority identity. A replacement library/epoch/contract
+blocks mismatched rows inside the same transaction that installs the new confirmed state, so
+an old optimistic choice can never appear inside a replacement library and is never silently
+rebased across revision lineages. `cursorExpired` recovery under the same identity still
+replays pending intent after the fresh baseline. Because the outbox contains state the server
+may not know yet, an unknown future replica schema is no longer deleted by an older app: it is
+preserved and opening fails closed. The known read-only v1 schema creates v3 directly. The
+unreleased intermediate v2 schema upgrades conservatively to v3: missing library/contract
+identity columns receive non-sendable sentinel values, preserving any row while forcing it to
+block instead of guessing its authority.
+
+Android's network allowlist now exposes exactly one Album write route,
+`PUT /v1/albums/commands`; all other Album mutation paths remain denied. Accepted command
+responses are validated against the stored library/epoch/contract/operation/entity/desired
+state before a queue row can be retired. Photo Picker refresh is requested after accepted
+membership writes so its published collection snapshot can catch up without making it a
+second source of truth.
+
+Viewer adds an `앨범` action with a hierarchy-preserving checkbox dialog. Local persistence
+changes the checkbox immediately; pending rows show `저장 대기`, blocked rows show
+`동기화 충돌` and cannot be toggled again in this batch, and the dialog re-reads the small
+native replica state about every five seconds. Conflict resolution (retry/cancel/choose a
+winner) is deliberately deferred instead of inventing an automatic merge policy.
+
+Verification covers atomic optimistic enqueue, same-state no-op suppression, FIFO revision
+prediction, SQLite restart durability, lost-response retry with the same stored payload,
+strict accepted-result validation, durable conflict blocking, flush-before-receive ordering,
+baseline replay of pending intent, library/epoch replacement recovery, future-schema
+fail-closed behavior and network allowlisting. The mobile frontend suite covers Viewer entry,
+hierarchy, optimistic checkbox state, pending/conflict presentation and five-second local
+refresh.
+
+**Galaxy Tab isolated write acceptance, 2026-09-16.** The production Android storage/outbox
+classes were executed directly on the real tablet runtime through a temporary `app_process`
+harness, using only `/data/local/tmp` and an isolated PC test server. The device created a
+real Android SQLite replica, enqueued `root` ↔ `asset_1` from confirmed tombstone revision 3,
+sent the stored `setAlbumMembership` payload through the production `NetworkPolicy`, received
+and validated a 200 acceptance, retired the outbox row and retained `desiredState=true` at
+confirmed revision 4. Final device output was `PASS android-sqlite schema=3 identity-bound outbox=0 sent=1
+desired=true revision=4`; the isolated server independently logged one
+`PUT /v1/albums/commands` 200 for the same operation id. The main Lakomics package/settings
+and production Album authority/data were not used for the write fixture. The normal APK was
+also updated in place from the intermediate v2 database to v3 and cold-started successfully
+with no fatal, missing-column or SQLite migration error in the startup log.
+
+**Still not done.** Android structural Album editing, user-facing conflict-resolution actions,
+and retirement of the legacy `album_replica`-backed publication path. The Viewer checkbox UI
+has automated coverage but has not been manually driven against an isolated full-app authority
+fixture; production Album data must not be used merely to obtain that UI acceptance evidence.
 
 ## Consequences
 Positive:

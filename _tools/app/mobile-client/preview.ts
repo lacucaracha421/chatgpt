@@ -37,6 +37,16 @@ const assets: Asset[] = Array.from({length:120}, (_, i) => {
   const [w,h] = [[600,800],[900,600],[600,960],[800,800],[1200,680]][i%5];
   return {id:`demo-${i}`,kind:'image',width:w,height:h,ratio:w/h,creator_handle:authors[i%authors.length],collected_at:`2026-09-${String(6 - Math.floor(i/25)).padStart(2,'0')}T12:00:00Z`,content_type:'image/svg+xml',size_bytes:483217,thumbnail_available:true,preview:art(i,w,h)};
 });
+const demoAlbums=[
+  {id:'upload',name:'업로드용',parentId:null,iconKey:null,colorKey:null},
+  {id:'temp',name:'임시',parentId:'upload',iconKey:null,colorKey:null},
+  {id:'other',name:'Other',parentId:null,iconKey:null,colorKey:null},
+];
+const demoAlbumMemberships=new Map<string,Set<string>>([['demo-0',new Set(['temp'])]]);
+function demoMembershipState(assetId:string){
+  const selected=demoAlbumMemberships.get(assetId)??new Set<string>();
+  return {adopted:true,libraryId:'a'.repeat(32),epoch:1,albums:demoAlbums.map(album=>({...album,desiredState:selected.has(album.id),pending:false,blocked:false,conflictCode:null}))};
+}
 const collectionNames={game:['여름의 항로','조용한 행성','먼 바다의 기억','숲의 기록'],manga:['밤의 도서관','여름과 파도','푸른 궤도','작은 정원'],movie:['오후의 빛','도시의 창','먼 곳에서','겨울의 초상']};
 const collections:CollectionDetail[]=(['game','manga','movie'] as const).flatMap(type=>Array.from({length:12},(_,i)=>({id:`collection-${type}-${i}`,name:collectionNames[type][i%4]+(i>3?` ${Math.floor(i/4)+1}`:''),type,publisher:type==='game'?'Field Publishing':null,platforms:type==='game'?'Windows · PlayStation · Switch':null,genres:type==='manga'?'판타지 · 모험':'드라마 · 모험',seasonDateRange:type==='movie'&&i%2===0?['2024-04-01','2026-06-30']:null,productionCompany:type==='movie'?'Studio Archive':null,externalScore:type==='movie'?86:null,runtimeMinutes:type==='movie'?24:null,series:type==='movie'?{status:'방영 종료',cast:['서유진','하루'],seasons:[{id:1,seasonNumber:1,name:'시즌 1',airDate:'2024-04-01',posterArtworkId:`cover-${i}`,episodes:Array.from({length:12},(_,episode)=>({id:episode+1,episodeNumber:episode+1,name:`기억의 장면 ${episode+1}`,airDate:'2024-04-01',runtimeMinutes:24}))}]}:null,showcase:i<7,showcaseOrder:i,year:2024+i%3,myScore:i%4===0?null:i%2===0?4.5:3,createdAt:`2026-09-${String(i+1).padStart(2,'0')}T00:00:00Z`,author:type==='manga'?'서유진':null,developer:type==='game'?'Studio Field':null,director:type==='movie'?'이수현':null,selectedWorkArtworkId:`cover-${i}`,selectedHeroArtworkId:type==='game'?`hero-${i}`:null,selectedBackdropArtworkId:type==='movie'?`hero-${i}`:null,overview:'조용히 보관해 두었다가 다시 꺼내 보는 작품. 빛과 계절, 그리고 오래 남아 있는 장면들을 따라갑니다.',volumes:type==='manga'?Array.from({length:8},(_,v)=>({id:`volume-${v}`,volumeNumber:v%5+1,editionIndex:v<5?0:1,displayLabel:`${v%5+1}권`,coverArtworkId:`volume-cover-${v}`})):[],artworks:[{id:`hero-${i}`,kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true},{id:`cover-${i}`,kind:'cover',selected:true,thumbnailAvailable:true,originalAvailable:true}]})));
 export async function demoTransport(op: string, payload: Record<string, unknown>): Promise<unknown> {
@@ -53,10 +63,14 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   // The demo Albums section mirrors the additive contract: an adopted replica with a
   // nested Album, so the browser preview can show that Albums sit beside the
   // Classification sidebar instead of replacing it.
-  if (op === 'albumTree') return {adopted:true,libraryId:'a'.repeat(32),epoch:1,contractVersion:1,cursor:12,code:'',albums:[
-    {id:'upload',name:'업로드용',parentId:null,iconKey:null,colorKey:null},
-    {id:'temp',name:'임시',parentId:'upload',iconKey:null,colorKey:null},
-    {id:'other',name:'Other',parentId:null,iconKey:null,colorKey:null}]};
+  if (op === 'albumTree') return {adopted:true,libraryId:'a'.repeat(32),epoch:1,contractVersion:1,cursor:12,code:'',albums:demoAlbums};
+  if (op === 'albumMemberships') return demoMembershipState(String(payload.assetId));
+  if (op === 'albumMembershipSet') {
+    const assetId=String(payload.assetId),albumId=String(payload.albumId),selected=new Set(demoAlbumMemberships.get(assetId)??[]);
+    if(payload.desiredState===true)selected.add(albumId);else selected.delete(albumId);
+    demoAlbumMemberships.set(assetId,selected);
+    return demoMembershipState(assetId);
+  }
   // The demo catalog owns its domain and advertises the write capability, so the
   // browser preview can exercise the real toggle instead of a disabled one.
   const demoLibraryId = 'a'.repeat(32);

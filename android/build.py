@@ -68,7 +68,7 @@ def main():
         # database: the sync engine and the store depend on the platform-free JSON
         # reader and on the storage seam, so it runs on the plain JVM against a real
         # SQLite engine and a real local HTTP fixture.
-        replica_sources = ['Json', 'AlbumReplica', 'AlbumAuthoritySync', 'ReplicaDb',
+        replica_sources = ['Json', 'AlbumReplica', 'AlbumAuthoritySync', 'AlbumMembershipOutbox', 'AlbumSyncPass', 'ReplicaDb',
                            'ReplicaSchema', 'LibraryReplicaStore', 'ForegroundSchedule']
         replica = [p for name in replica_sources for p in (root / f'src/com/lakomics/mobile/{name}.java',)]
         run(javac, '-encoding', 'UTF-8', '-d', tests, *replica, root / 'tests/AlbumReplicaTest.java',

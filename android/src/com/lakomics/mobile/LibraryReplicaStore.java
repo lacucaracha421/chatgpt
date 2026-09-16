@@ -22,6 +22,22 @@ import java.util.concurrent.locks.ReentrantLock;
  * and its cursor advance must not be able to interleave with a baseline install.
  */
 final class LibraryReplicaStore implements AlbumReplica.State {
+    static final String MEMBERSHIP_COMMAND = "setAlbumMembership";
+
+    static final class MembershipEdit {
+        final boolean changed;
+        final boolean desiredState;
+        final long expectedRevision;
+        final String operationId;
+
+        MembershipEdit(boolean changed, boolean desiredState, long expectedRevision,
+                       String operationId) {
+            this.changed = changed;
+            this.desiredState = desiredState;
+            this.expectedRevision = expectedRevision;
+            this.operationId = operationId;
+        }
+    }
     private final ReplicaDb db;
     private final ReentrantLock lock = new ReentrantLock();
 
@@ -82,6 +98,8 @@ final class LibraryReplicaStore implements AlbumReplica.State {
         value.put("albumTombstoneCount", 0L);
         value.put("membershipCount", 0L);
         value.put("membershipTombstoneCount", 0L);
+        value.put("outboxPendingCount", 0L);
+        value.put("outboxBlockedCount", 0L);
         return value;
     }
 
@@ -117,6 +135,12 @@ final class LibraryReplicaStore implements AlbumReplica.State {
             value.put("albumTombstoneCount", albumTombstones);
             value.put("membershipCount", members);
             value.put("membershipTombstoneCount", memberTombstones);
+            long pending = 0, blocked = 0;
+            for (ReplicaDb.OutboxRow row : db.outbox()) {
+                if (row.blocked()) blocked++; else pending++;
+            }
+            value.put("outboxPendingCount", pending);
+            value.put("outboxBlockedCount", blocked);
             return value;
         } finally {
             lock.unlock();
@@ -130,6 +154,7 @@ final class LibraryReplicaStore implements AlbumReplica.State {
         try {
             db.begin();
             try {
+                db.clearOutbox();
                 db.clearMembers();
                 db.clearAlbums();
                 db.clearAuthority();
@@ -183,6 +208,174 @@ final class LibraryReplicaStore implements AlbumReplica.State {
         }
     }
 
+    /** Durable outgoing intents for the owning connection, oldest first. */
+    List<ReplicaDb.OutboxRow> outbox(String scope) {
+        lock.lock();
+        try {
+            if (!owns(scope)) return java.util.Collections.emptyList();
+            return new java.util.ArrayList<>(db.outbox());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Apply one local membership choice and append its immutable command in one transaction.
+     * The relation revision remains the last confirmed server revision; queued predecessors
+     * predict the expectation for this command without pretending they were confirmed.
+     */
+    MembershipEdit queueMembership(String scope, String albumId, String assetId,
+                                   boolean desiredState, String operationId, String now) {
+        if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Asset id");
+        }
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority authority = db.authority();
+                if (authority == null || !authority.scope.equals(scope)) {
+                    throw new IllegalStateException("Album authority is not adopted");
+                }
+                boolean albumLive = false;
+                for (AlbumReplica.Album album : db.albums(true)) {
+                    if (album.id.equals(albumId)) { albumLive = true; break; }
+                }
+                if (!albumLive) throw new IllegalArgumentException("Unknown Album");
+                AlbumReplica.Member current = db.member(albumId, assetId);
+                boolean currentDesired = current != null && current.desiredState;
+                long confirmedRevision = current == null ? 0 : current.entityRevision;
+                List<ReplicaDb.OutboxRow> queued = db.outbox();
+                long predecessorCount = 0;
+                long nextSeq = 1;
+                for (ReplicaDb.OutboxRow row : queued) {
+                    nextSeq = Math.max(nextSeq, row.seq + 1);
+                    if (row.albumId.equals(albumId) && row.assetId.equals(assetId)) {
+                        if (row.blocked()) throw new IllegalStateException("Album membership is blocked");
+                        predecessorCount++;
+                    }
+                }
+                if (currentDesired == desiredState) {
+                    db.rollback();
+                    return new MembershipEdit(false, desiredState,
+                            confirmedRevision + predecessorCount, operationId);
+                }
+                long expected = confirmedRevision + predecessorCount;
+                String payload = membershipPayload(authority, operationId, albumId, assetId,
+                        desiredState, expected);
+                db.writeMember(new AlbumReplica.Member(albumId, assetId, desiredState,
+                        confirmedRevision), now);
+                db.writeOutbox(new ReplicaDb.OutboxRow(nextSeq, operationId, MEMBERSHIP_COMMAND,
+                        albumId, assetId, authority.libraryId, authority.epoch,
+                        authority.contractVersion, desiredState, expected, payload,
+                        "pending", null, null, now));
+                db.commit();
+                return new MembershipEdit(true, desiredState, expected, operationId);
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Retire one accepted row while keeping any later optimistic choice visible. */
+    void confirmMembership(String scope, long seq, AlbumReplica.Member confirmed, String now) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                if (!owns(scope)) throw new IllegalStateException("Album authority scope changed");
+                ReplicaDb.OutboxRow accepted = null;
+                for (ReplicaDb.OutboxRow row : db.outbox()) if (row.seq == seq) accepted = row;
+                if (accepted == null || !accepted.albumId.equals(confirmed.albumId)
+                        || !accepted.assetId.equals(confirmed.assetId)) {
+                    throw new IllegalStateException("Album command outcome mismatch");
+                }
+                AlbumReplica.Member visible = db.member(confirmed.albumId, confirmed.assetId);
+                boolean desired = visible == null ? confirmed.desiredState : visible.desiredState;
+                db.writeMember(new AlbumReplica.Member(confirmed.albumId, confirmed.assetId,
+                        desired, confirmed.entityRevision), now);
+                db.deleteOutbox(seq);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Mark one semantic conflict durable; payload and operation id stay unchanged. */
+    void blockMembership(String scope, long seq, String code, String detail) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                if (!owns(scope)) throw new IllegalStateException("Album authority scope changed");
+                db.blockOutbox(seq, code, detail);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Reapply only intents composed for this exact authority identity.
+     *
+     * A replacement library/epoch/contract is a different revision lineage. Those rows
+     * remain durable but become blocked in the same transaction that installs the new
+     * confirmed state, so an old optimistic choice can never appear inside the new library.
+     */
+    private void replayOutbox(ReplicaDb.StoredAuthority authority, String now) {
+        for (ReplicaDb.OutboxRow row : db.outbox()) {
+            String mismatch = null;
+            if (!row.libraryId.equals(authority.libraryId)) mismatch = AlbumReplica.CODE_LIBRARY_MISMATCH;
+            else if (row.epoch != authority.epoch) mismatch = "epochMismatch";
+            else if (row.contractVersion != authority.contractVersion) mismatch = AlbumReplica.CODE_CONTRACT_UNSUPPORTED;
+            if (mismatch != null) {
+                if (!row.blocked()) db.blockOutbox(row.seq, mismatch, null);
+                continue;
+            }
+            if (row.blocked()) continue;
+            AlbumReplica.Member current = db.member(row.albumId, row.assetId);
+            long revision = current == null ? 0 : current.entityRevision;
+            db.writeMember(new AlbumReplica.Member(row.albumId, row.assetId,
+                    row.desiredState, revision), now);
+        }
+    }
+
+    private static String membershipPayload(ReplicaDb.StoredAuthority authority, String operationId,
+                                            String albumId, String assetId, boolean desiredState,
+                                            long expectedRevision) {
+        return "{\"libraryId\":" + quote(authority.libraryId)
+                + ",\"epoch\":" + authority.epoch
+                + ",\"contractVersion\":" + authority.contractVersion
+                + ",\"operationId\":" + quote(operationId)
+                + ",\"commandType\":\"setAlbumMembership\""
+                + ",\"albumId\":" + quote(albumId)
+                + ",\"assetId\":" + quote(assetId)
+                + ",\"desiredState\":" + desiredState
+                + ",\"expectedRevision\":" + expectedRevision + "}";
+    }
+
+    private static String quote(String value) {
+        StringBuilder out = new StringBuilder(value.length() + 2).append('"');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '"' || c == '\\') out.append('\\').append(c);
+            else if (c < 0x20) out.append(String.format("\\u%04x", (int) c));
+            else out.append(c);
+        }
+        return out.append('"').toString();
+    }
+
     // -----------------------------------------------------------------------
     // Writes
     // -----------------------------------------------------------------------
@@ -208,9 +401,11 @@ final class LibraryReplicaStore implements AlbumReplica.State {
                     if (!album.deleted) db.writeAlbum(album, now);
                 }
                 for (AlbumReplica.Member member : members) db.writeMember(member, now);
-                db.writeAuthority(new ReplicaDb.StoredAuthority(authority.scope,
+                ReplicaDb.StoredAuthority stored = new ReplicaDb.StoredAuthority(authority.scope,
                         authority.libraryId, authority.epoch, authority.contractVersion,
-                        authority.cursor, authority.adoptedAt, authority.reconciledAt));
+                        authority.cursor, authority.adoptedAt, authority.reconciledAt);
+                db.writeAuthority(stored);
+                replayOutbox(stored, now);
                 db.commit();
             } catch (RuntimeException failure) {
                 db.rollback();
@@ -247,6 +442,10 @@ final class LibraryReplicaStore implements AlbumReplica.State {
                     if (change.album != null) applyAlbum(change.album, now);
                     if (change.member != null) db.writeMember(change.member, now);
                 }
+                // A receive can race a local edit that arrived after the pass checked the
+                // queue. Replaying the durable intents inside this same transaction keeps
+                // the user-visible desired state from being overwritten by confirmed rows.
+                replayOutbox(stored, now);
                 if (!changes.isEmpty()) {
                     db.setCursor(changes.get(changes.size() - 1).sequence, now);
                 }

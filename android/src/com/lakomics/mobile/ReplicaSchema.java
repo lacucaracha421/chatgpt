@@ -8,13 +8,43 @@ package com.lakomics.mobile;
  * statement that is no longer valid SQLite fails in the harness rather than only on a
  * device, and neither side can drift into its own idea of the schema.
  *
- * The replica is disposable by construction: everything here is rebuildable from the
- * server, which is why an unrecognised version is replaced rather than migrated. User
- * media, notes and device caches are not represented here at all.
+ * Version 1 contained only rebuildable server state. Version 2 adds a durable outgoing
+ * outbox, so the database is no longer disposable while local intent is pending: known
+ * older schemas upgrade in place and an unknown future schema fails closed without deleting
+ * the file. User media, notes and device caches are still not represented here.
  */
 final class ReplicaSchema {
-    /** Version 1 is the Album domain. */
-    static final int VERSION = 1;
+    /** Version 3 binds every durable Album command to its authority identity. */
+    static final int VERSION = 3;
+
+    /** v0 is fresh and v1 is the read-only Album replica; both upgrade in place. */
+    static boolean canUpgradeFrom(int version) {
+        return version >= 0 && version < VERSION;
+    }
+
+    /**
+     * A future schema may contain unsent local intent, so an older build must preserve
+     * the file and fail closed instead of deleting a database it cannot interpret.
+     */
+    static void requireReadableVersion(int version) {
+        if (version > VERSION) {
+            throw new IllegalStateException("Replica database was written by a newer app");
+        }
+    }
+
+    /**
+     * The unreleased intermediate v2 outbox did not store library/contract identity.
+     * Existing rows cannot be safely reconstructed from the current authority after a
+     * replacement, so they receive sentinel values. The v3 replay/flush guards preserve
+     * them but block them before display or network delivery instead of guessing.
+     */
+    static String[] upgradeStatements(int version) {
+        if (version == 2) return new String[]{
+                "ALTER TABLE album_authority_outbox ADD COLUMN library_id TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE album_authority_outbox ADD COLUMN contract_version INTEGER NOT NULL DEFAULT 0",
+        };
+        return new String[0];
+    }
 
     static final String[] DDL = {
             "CREATE TABLE IF NOT EXISTS album_authority("
@@ -31,6 +61,15 @@ final class ReplicaSchema {
                     + "album_id TEXT NOT NULL,asset_id TEXT NOT NULL,"
                     + "desired_state INTEGER NOT NULL,entity_revision INTEGER NOT NULL,"
                     + "updated_at TEXT NOT NULL,PRIMARY KEY(album_id,asset_id))",
+            "CREATE TABLE IF NOT EXISTS album_authority_outbox("
+                    + "seq INTEGER PRIMARY KEY,operation_id TEXT NOT NULL UNIQUE,"
+                    + "command_type TEXT NOT NULL,album_id TEXT NOT NULL,asset_id TEXT NOT NULL,"
+                    + "library_id TEXT NOT NULL,epoch INTEGER NOT NULL,contract_version INTEGER NOT NULL,"
+                    + "desired_state INTEGER NOT NULL,"
+                    + "expected_revision INTEGER NOT NULL,payload TEXT NOT NULL,"
+                    + "state TEXT NOT NULL CHECK(state IN ('pending','blocked')),"
+                    + "conflict_code TEXT,conflict_detail TEXT,created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS album_outbox_state ON album_authority_outbox(state,seq)",
     };
 
     /** The adoption row and its cursor. `singleton=1` is the adoption marker itself. */
@@ -72,6 +111,20 @@ final class ReplicaSchema {
     static final String READ_MEMBERS =
             "SELECT album_id,asset_id,desired_state,entity_revision"
                     + " FROM album_membership_state";
+    static final String READ_MEMBER = READ_MEMBERS + " WHERE album_id=? AND asset_id=?";
+    static final String READ_OUTBOX =
+            "SELECT seq,operation_id,command_type,album_id,asset_id,library_id,epoch,contract_version,"
+                    + "desired_state,expected_revision,payload,state,conflict_code,conflict_detail,created_at"
+                    + " FROM album_authority_outbox ORDER BY seq";
+    static final String WRITE_OUTBOX =
+            "INSERT INTO album_authority_outbox(seq,operation_id,command_type,album_id,asset_id,"
+                    + "library_id,epoch,contract_version,desired_state,expected_revision,payload,state,"
+                    + "conflict_code,conflict_detail,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',NULL,NULL,?)";
+    static final String DELETE_OUTBOX = "DELETE FROM album_authority_outbox WHERE seq=?";
+    static final String BLOCK_OUTBOX =
+            "UPDATE album_authority_outbox SET state='blocked',conflict_code=?,conflict_detail=?"
+                    + " WHERE seq=?";
+    static final String CLEAR_OUTBOX = "DELETE FROM album_authority_outbox";
 
     private ReplicaSchema() {}
 }

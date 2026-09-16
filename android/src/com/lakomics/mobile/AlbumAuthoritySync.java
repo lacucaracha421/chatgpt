@@ -9,9 +9,10 @@ import java.util.Map;
  * Album authority receive on Android: baseline adoption and ordered change replay.
  *
  * Android is already a replica, so this engine never compares a baseline against local
- * canonical state the way the main PC must. There is also no outbox here: this batch
- * emits no Album command at all, and the absence is enforced by the network allowlist
- * rather than by convention, so a future editing batch cannot appear by accident.
+ * canonical state the way the main PC must. Outgoing membership intent is owned by the
+ * separate durable outbox layer; this receive engine only installs confirmed server state.
+ * The store replays queued desired states inside baseline/change transactions so recovery
+ * cannot overwrite an unsent local choice.
  *
  * Two invariants carry correctness, and both are enforced where they can be observed
  * rather than trusted:
@@ -185,8 +186,9 @@ final class AlbumAuthoritySync {
                 // Expiry means retained history no longer covers this cursor, and a
                 // cursor ahead of the server means the identity is skewed. Both recover
                 // the same way — a fresh complete baseline replaces only this domain's
-                // replica. That is safe precisely because this batch has no write queue:
-                // there is no unaccepted local intent that a baseline could overwrite.
+                // replica. The store preserves the durable outbox and replays its desired
+                // states after installing the confirmed baseline, so recovery cannot erase
+                // an unaccepted local membership choice.
                 Result recovered = adopt(scope, remote, result, true);
                 recovered.code = failure.code;
                 return recovered;

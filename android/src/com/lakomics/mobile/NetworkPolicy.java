@@ -26,14 +26,10 @@ final class NetworkPolicy {
   String p=path.split("\\?",2)[0];
   boolean get=p.equals("/v1/library/classifications") || p.equals("/v1/library/assets") || p.equals("/v1/library/revisit") || p.equals("/v1/library/revisit/date") || p.matches("/v1/library/revisit/creator/[A-Za-z0-9_%.-]+/assets") || p.equals("/v1/captures/pending") || p.matches("/v1/captures/[A-Za-z0-9_-]+/download");
   get=get || p.equals("/v1/library/characters") || p.equals("/v1/library/characters/assets") || p.equals("/v1/library/characters/status");
-  // Album authority replication, read only. The domain's one write route
-  // (`/v1/albums/commands`) is deliberately absent: this build adopts and replays
-  // Album state without ever producing one, so the allowlist must not carry a
-  // permission no code path uses.
+  // Album authority reads remain narrowly allowlisted. The one write route is added
+  // separately below with its first durable-outbox consumer.
   get=get || p.equals("/v1/sync/status") || p.equals("/v1/albums/baseline") || p.equals("/v1/albums/changes");
-  // The authority-backed Album contents read, added with its first consumer (the
-  // DocumentsProvider Albums section). Still read-only: `/v1/albums/commands` remains
-  // absent, so this allowlist cannot express an Album mutation.
+  // The authority-backed Album contents read is still GET-only.
   get=get || p.equals("/v1/albums/assets");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   get=get || p.equals("/v1/collections") || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}");
@@ -45,8 +41,9 @@ final class NetworkPolicy {
   // nothing else. The id charset excludes `/`, `.`, `%` and `?`, so the segment
   // cannot traverse or re-encode into a different entity.
   boolean bookmarkPut=p.matches("/v1/mobile-catalog/bookmarks/(kHentai|heliotrope)/[0-9A-Za-z_-]{1,64}");
+  boolean albumPut=p.equals("/v1/albums/commands");
   get=get || p.matches("/v1/notes/[a-f0-9]{64}");
-  boolean put=bookmarkPut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
+  boolean put=bookmarkPut || albumPut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
   if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post))throw new IllegalArgumentException("Unsupported read operation");
  }
 }

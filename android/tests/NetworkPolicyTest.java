@@ -55,9 +55,8 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/notes/"+vault+"/../bad","PUT"));
  pass(()->NetworkPolicy.api("/v1/library/characters/status","GET"));
  pass(()->NetworkPolicy.api("/v1/collections/status","GET"));
- // Album authority replication: exactly three read-only paths, and no write reaches
- // the Album domain at all. `PUT /v1/albums/commands` is the domain's one mutation,
- // and 2C-1 must not be able to issue it.
+ // Album authority replication keeps its read paths. 2C-3 adds exactly the domain's
+ // one typed mutation route, PUT /v1/albums/commands, and no other Album write.
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/albums/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));
  // The authority-backed Album contents projection, allowed only for GET.
  pass(()->NetworkPolicy.api("/v1/albums/assets?libraryId=0123456789abcdef0123456789abcdef&epoch=1&albumId=root&limit=40","GET"));
@@ -65,11 +64,11 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/albums/assets/extra","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/assetsx","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/../albums/assets","GET"));
- // The Album namespace stays read-only: every path that could express a mutation is
- // still absent, so adding the contents read did not widen the write surface.
- reject(()->NetworkPolicy.api("/v1/albums/commands","PUT"));
+ // Membership outbox delivery gets exactly one write route.
+ pass(()->NetworkPolicy.api("/v1/albums/commands","PUT"));
+ for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/albums/commands",method));
  reject(()->NetworkPolicy.api("/v1/albums/authority/activate","POST"));
- for(String path:new String[]{"/v1/albums/commands","/v1/albums/commands/","/v1/albums/authority/activate","/v1/albums","/v1/albums/","/v1/sync","/v1/sync/","/v1/sync/status/extra","/v1/sync/statusx","/v1/albums/baseline/extra","/v1/albums/baselinex","/v1/albums/commands/x"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ for(String path:new String[]{"/v1/albums/commands/","/v1/albums/authority/activate","/v1/albums","/v1/albums/","/v1/sync","/v1/sync/","/v1/sync/status/extra","/v1/sync/statusx","/v1/albums/baseline/extra","/v1/albums/baselinex","/v1/albums/commands/x"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline","/v1/albums/changes"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  reject(()->NetworkPolicy.api("/v1/albums/../albums/baseline","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/baseline%2f..","GET"));

@@ -186,3 +186,10 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .collection-date{display:block;font-size:11px;color:var(--color-muted);margin-top:3px}.collection-total{white-space:nowrap;font-size:12px}
 .viewer-info{padding:20px 24px;border-radius:12px;background:var(--color-sidebar);box-shadow:0 12px 48px #0008}.viewer-info-heading>span{font-size:10px;letter-spacing:2px;color:var(--color-muted)}.viewer-info-heading h2{margin:8px 0 0;font-size:19px;line-height:1.4;overflow-wrap:anywhere}.viewer-info dl{border-block:1px solid var(--color-border);padding-block:18px;grid-template-columns:70px minmax(0,1fr);line-height:1.5}.viewer-info dd{font-variant-numeric:tabular-nums}.viewer-info>button{margin-right:6px}
 .folder-tools{display:flex;align-items:center;gap:0}.folder-tools button{width:36px;min-width:36px;padding:8px}@media(max-width:600px){.app-header:has(.folder-tools) .brand>span{display:none}}
+.viewer-actions{display:flex;align-items:center;gap:2px}
+.album-membership-list{display:flex;flex-direction:column;max-height:min(62dvh,620px);overflow:auto;margin-top:12px}
+.album-membership-row{min-height:46px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--color-border);padding-right:10px}
+.album-membership-row>svg{width:17px;color:var(--color-muted)}
+.album-membership-name{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.album-membership-row small{color:var(--color-muted);white-space:nowrap;font-size:11px}
+.album-membership-row.is-blocked small{color:var(--color-danger)}

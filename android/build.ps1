@@ -38,7 +38,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # The Album replica check runs on the plain JVM: the engine and store avoid Android
 # types, so it exercises the shipped schema and rules against a real SQLite engine and
 # a local HTTP fixture instead of a substituted stub.
-$taskReplicaSources=@('Json','AlbumReplica','AlbumAuthoritySync','ReplicaDb','ReplicaSchema','LibraryReplicaStore','ForegroundSchedule') | ForEach-Object { Join-Path $PSScriptRoot "src/com/lakomics/mobile/$_.java" }
+$taskReplicaSources=@('Json','AlbumReplica','AlbumAuthoritySync','AlbumMembershipOutbox','AlbumSyncPass','ReplicaDb','ReplicaSchema','LibraryReplicaStore','ForegroundSchedule') | ForEach-Object { Join-Path $PSScriptRoot "src/com/lakomics/mobile/$_.java" }
 & "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests @taskReplicaSources (Join-Path $PSScriptRoot 'tests/AlbumReplicaTest.java') (Join-Path $PSScriptRoot 'tests/AlbumReplicaScheduleTest.java')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.AlbumReplicaTest

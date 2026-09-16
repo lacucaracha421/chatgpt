@@ -41,19 +41,11 @@ final class AndroidReplicaDb implements ReplicaDb {
 
     private void migrate() {
         int version = db.getVersion();
-        if (version > ReplicaSchema.VERSION) {
-            // A newer build wrote this file, so its schema cannot be interpreted here. It
-            // is a replica and holds nothing that exists nowhere else, so it is rebuilt
-            // from the server rather than guessed at. User media lives in other
-            // directories and is not touched by this.
-            db.close();
-            if (!file.delete()) throw new IllegalStateException("Cannot replace the replica database");
-            open();
-            version = db.getVersion();
-        }
-        if (version >= ReplicaSchema.VERSION) return;
+        ReplicaSchema.requireReadableVersion(version);
+        if (!ReplicaSchema.canUpgradeFrom(version)) return;
         db.beginTransaction();
         try {
+            for (String statement : ReplicaSchema.upgradeStatements(version)) db.execSQL(statement);
             for (String statement : ReplicaSchema.DDL) db.execSQL(statement);
             db.setVersion(ReplicaSchema.VERSION);
             db.setTransactionSuccessful();
@@ -103,6 +95,31 @@ final class AndroidReplicaDb implements ReplicaDb {
     }
 
     @Override
+    public AlbumReplica.Member member(String albumId, String assetId) {
+        try (Cursor cursor = db.rawQuery(ReplicaSchema.READ_MEMBER, new String[]{albumId, assetId})) {
+            if (!cursor.moveToFirst()) return null;
+            return new AlbumReplica.Member(cursor.getString(0), cursor.getString(1),
+                    cursor.getInt(2) != 0, cursor.getLong(3));
+        }
+    }
+
+    @Override
+    public List<OutboxRow> outbox() {
+        List<OutboxRow> rows = new ArrayList<>();
+        try (Cursor cursor = db.rawQuery(ReplicaSchema.READ_OUTBOX, null)) {
+            while (cursor.moveToNext()) {
+                rows.add(new OutboxRow(cursor.getLong(0), cursor.getString(1), cursor.getString(2),
+                        cursor.getString(3), cursor.getString(4), cursor.getString(5),
+                        cursor.getLong(6), cursor.getLong(7), cursor.getInt(8) != 0,
+                        cursor.getLong(9), cursor.getString(10), cursor.getString(11),
+                        cursor.isNull(12) ? null : cursor.getString(12),
+                        cursor.isNull(13) ? null : cursor.getString(13), cursor.getString(14)));
+            }
+        }
+        return rows;
+    }
+
+    @Override
     public void writeAuthority(StoredAuthority authority) {
         db.execSQL(ReplicaSchema.WRITE_AUTHORITY, new Object[]{authority.scope, authority.libraryId,
                 authority.epoch, authority.contractVersion, authority.cursor,
@@ -135,6 +152,26 @@ final class AndroidReplicaDb implements ReplicaDb {
     public void clearMembers() {
         db.execSQL(ReplicaSchema.CLEAR_MEMBERS);
     }
+
+    @Override
+    public void writeOutbox(OutboxRow row) {
+        db.execSQL(ReplicaSchema.WRITE_OUTBOX, new Object[]{row.seq, row.operationId, row.commandType,
+                row.albumId, row.assetId, row.libraryId, row.epoch, row.contractVersion,
+                row.desiredState ? 1 : 0, row.expectedRevision, row.payload, row.createdAt});
+    }
+
+    @Override
+    public void deleteOutbox(long seq) {
+        db.execSQL(ReplicaSchema.DELETE_OUTBOX, new Object[]{seq});
+    }
+
+    @Override
+    public void blockOutbox(long seq, String code, String detail) {
+        db.execSQL(ReplicaSchema.BLOCK_OUTBOX, new Object[]{code, detail, seq});
+    }
+
+    @Override
+    public void clearOutbox() { db.execSQL(ReplicaSchema.CLEAR_OUTBOX); }
 
     @Override
     public void clearAuthority() {

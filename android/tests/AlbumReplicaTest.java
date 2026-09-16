@@ -67,6 +67,7 @@ public final class AlbumReplicaTest {
     private static final AlbumReplica.Clock CLOCK = () -> "2026-09-16T00:00:00Z";
 
     private static final String LIBRARY = "0123456789abcdef0123456789abcdef";
+    private static final String OTHER_LIBRARY = "fedcba9876543210fedcba9876543210";
 
     /**
      * The one place this check serializes JSON.
@@ -372,6 +373,29 @@ public final class AlbumReplicaTest {
         }
 
         @Override
+        public AlbumReplica.Member member(String albumId, String assetId) {
+            List<List<Object>> rows = select(ReplicaSchema.READ_MEMBER, albumId, assetId);
+            if (rows.isEmpty()) return null;
+            List<Object> row = rows.get(0);
+            return new AlbumReplica.Member((String) row.get(0), (String) row.get(1),
+                    asLong(row.get(2)) != 0, asLong(row.get(3)));
+        }
+
+        @Override
+        public List<OutboxRow> outbox() {
+            List<OutboxRow> result = new ArrayList<>();
+            for (List<Object> row : select(ReplicaSchema.READ_OUTBOX)) {
+                result.add(new OutboxRow(asLong(row.get(0)), (String) row.get(1),
+                        (String) row.get(2), (String) row.get(3), (String) row.get(4),
+                        (String) row.get(5), asLong(row.get(6)), asLong(row.get(7)),
+                        asLong(row.get(8)) != 0, asLong(row.get(9)), (String) row.get(10),
+                        (String) row.get(11), (String) row.get(12), (String) row.get(13),
+                        (String) row.get(14)));
+            }
+            return result;
+        }
+
+        @Override
         public void writeAuthority(StoredAuthority authority) {
             exec(ReplicaSchema.WRITE_AUTHORITY, authority.scope, authority.libraryId,
                     authority.epoch, authority.contractVersion, authority.cursor,
@@ -400,6 +424,24 @@ public final class AlbumReplicaTest {
 
         @Override
         public void clearMembers() { exec(ReplicaSchema.CLEAR_MEMBERS); }
+
+        @Override
+        public void writeOutbox(OutboxRow row) {
+            exec(ReplicaSchema.WRITE_OUTBOX, row.seq, row.operationId, row.commandType,
+                    row.albumId, row.assetId, row.libraryId, row.epoch, row.contractVersion,
+                    row.desiredState ? 1 : 0, row.expectedRevision, row.payload, row.createdAt);
+        }
+
+        @Override
+        public void deleteOutbox(long seq) { exec(ReplicaSchema.DELETE_OUTBOX, seq); }
+
+        @Override
+        public void blockOutbox(long seq, String code, String detail) {
+            exec(ReplicaSchema.BLOCK_OUTBOX, code, detail, seq);
+        }
+
+        @Override
+        public void clearOutbox() { exec(ReplicaSchema.CLEAR_OUTBOX); }
 
         @Override
         public void clearAuthority() { exec(ReplicaSchema.CLEAR_AUTHORITY); }
@@ -491,8 +533,10 @@ public final class AlbumReplicaTest {
         private StoredAuthority authority;
         private final Map<String, AlbumReplica.Album> albums = new LinkedHashMap<>();
         private final Map<String, AlbumReplica.Member> members = new LinkedHashMap<>();
+        private final Map<Long, OutboxRow> outbox = new LinkedHashMap<>();
         private Map<String, AlbumReplica.Album> albumSnapshot;
         private Map<String, AlbumReplica.Member> memberSnapshot;
+        private Map<Long, OutboxRow> outboxSnapshot;
         private StoredAuthority authoritySnapshot;
         private boolean open;
         /**
@@ -523,6 +567,18 @@ public final class AlbumReplicaTest {
             }
             rows.sort(Comparator.comparing((AlbumReplica.Member member) -> member.albumId)
                     .thenComparing(member -> member.assetId));
+            return rows;
+        }
+
+        @Override
+        public AlbumReplica.Member member(String albumId, String assetId) {
+            return members.get(albumId + ":" + assetId);
+        }
+
+        @Override
+        public List<OutboxRow> outbox() {
+            List<OutboxRow> rows = new ArrayList<>(outbox.values());
+            rows.sort(Comparator.comparingLong(row -> row.seq));
             return rows;
         }
 
@@ -560,6 +616,25 @@ public final class AlbumReplicaTest {
         public void clearMembers() { members.clear(); }
 
         @Override
+        public void writeOutbox(OutboxRow row) { outbox.put(row.seq, row); }
+
+        @Override
+        public void deleteOutbox(long seq) { outbox.remove(seq); }
+
+        @Override
+        public void blockOutbox(long seq, String code, String detail) {
+            OutboxRow row = outbox.get(seq);
+            if (row == null) return;
+            outbox.put(seq, new OutboxRow(row.seq, row.operationId, row.commandType,
+                    row.albumId, row.assetId, row.libraryId, row.epoch, row.contractVersion,
+                    row.desiredState, row.expectedRevision, row.payload, "blocked", code, detail,
+                    row.createdAt));
+        }
+
+        @Override
+        public void clearOutbox() { outbox.clear(); }
+
+        @Override
         public void clearAuthority() { authority = null; }
 
         @Override
@@ -582,6 +657,7 @@ public final class AlbumReplicaTest {
             authoritySnapshot = authority;
             albumSnapshot = new LinkedHashMap<>(albums);
             memberSnapshot = new LinkedHashMap<>(members);
+            outboxSnapshot = new LinkedHashMap<>(outbox);
             open = true;
         }
 
@@ -599,6 +675,8 @@ public final class AlbumReplicaTest {
             albums.putAll(albumSnapshot);
             members.clear();
             members.putAll(memberSnapshot);
+            outbox.clear();
+            outbox.putAll(outboxSnapshot);
             open = false;
         }
 
@@ -788,11 +866,395 @@ public final class AlbumReplicaTest {
             changePageContinuationIsPinned(directory);
             successfulChangePageCannotExceedTheAuthorityCursor(directory);
             malformedResponsesAreRejected(directory);
+            optimisticMembershipQueueIsAtomicAndSkipsNoOps(directory);
+            baselineReplacementReplaysPendingMembershipIntent(directory);
+            confirmationPreservesLaterOptimisticStateAndBlocksConflict(directory);
+            membershipOutboxSurvivesProcessRestart(directory);
+            membershipOutboxFlushesFifoAndConfirms(directory);
+            lostCommandResponseRetriesIdenticalPayload(directory);
+            membershipConflictBlocksDurablyAndStopsFifo(directory);
+            malformedAcceptedMembershipOutcomeStaysPending(directory);
+            blockedOutboxDefersReceive(directory);
+            cleanOutboxFlushesBeforeReceive(directory);
+            authorityMismatchStillReAdoptsBeforeRetry(directory);
+            futureReplicaVersionFailsClosedInsteadOfDeletingOutbox();
+            v2OutboxSchemaHasAConservativeV3Upgrade();
+            invalidAssetIdentityCannotEnterTheOutbox();
+            unknownCommandRejectionRemainsRetryableAndPending();
         } finally {
             deleteTree(directory);
         }
         System.out.println("AlbumReplicaTest passed: " + checks + " checks"
                 + " (baseline adoption, ordered replay, cursor recovery, durability, isolation)");
+    }
+
+    private static void optimisticMembershipQueueIsAtomicAndSkipsNoOps(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        LibraryReplicaStore.MembershipEdit add = store.queueMembership(
+                "scope-a", "root", "asset_2", true,
+                "10000000-0000-0000-0000-000000000001", CLOCK.now());
+        check(add.changed, "A real membership toggle is queued");
+        equal(3L, add.expectedRevision, "The tombstone revision is the first expectation");
+        equal(true, store.memberships("scope-a", false).get("root:asset_2").desiredState,
+                "The optimistic desired state is visible immediately");
+        List<ReplicaDb.OutboxRow> first = store.outbox("scope-a");
+        equal(1, first.size(), "One real toggle creates one durable intent");
+        check(first.get(0).payload.contains("\"expectedRevision\":3"),
+                "The frozen payload carries the revision observed at enqueue time");
+
+        LibraryReplicaStore.MembershipEdit noop = store.queueMembership(
+                "scope-a", "root", "asset_2", true,
+                "10000000-0000-0000-0000-000000000002", CLOCK.now());
+        check(!noop.changed, "Selecting the already optimistic state is a no-op");
+        equal(1, store.outbox("scope-a").size(), "A no-op never adds another intent");
+
+        LibraryReplicaStore.MembershipEdit remove = store.queueMembership(
+                "scope-a", "root", "asset_2", false,
+                "10000000-0000-0000-0000-000000000003", CLOCK.now());
+        equal(4L, remove.expectedRevision,
+                "A later real toggle predicts the revision produced by the queued predecessor");
+        equal(false, store.memberships("scope-a", false).get("root:asset_2").desiredState,
+                "The latest optimistic state wins locally");
+        equal(2, store.outbox("scope-a").size(), "Both real state transitions stay FIFO");
+        store.close();
+    }
+
+    private static void baselineReplacementReplaysPendingMembershipIntent(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "20000000-0000-0000-0000-000000000001", CLOCK.now());
+        List<AlbumReplica.Album> albums = Arrays.asList(
+                new AlbumReplica.Album("root", "Root", null, "folder", "blue", false, 4));
+        List<AlbumReplica.Member> members = Arrays.asList(
+                new AlbumReplica.Member("root", "asset_2", false, 8));
+        store.installBaseline(new AlbumReplica.Adopted("scope-a", LIBRARY, 1, 1, 20,
+                CLOCK.now(), CLOCK.now()), albums, members, CLOCK.now());
+        AlbumReplica.Member visible = store.memberships("scope-a", false).get("root:asset_2");
+        equal(true, visible.desiredState,
+                "A fresh server baseline is followed by replay of the unsent local intent");
+        equal(8L, visible.entityRevision,
+                "Replay preserves the newly confirmed server revision rather than inventing one");
+        equal(1, store.outbox("scope-a").size(), "Baseline recovery never discards the outbox");
+        store.close();
+    }
+
+    private static void confirmationPreservesLaterOptimisticStateAndBlocksConflict(Path directory)
+            throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "30000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.queueMembership("scope-a", "root", "asset_2", false,
+                "30000000-0000-0000-0000-000000000002", CLOCK.now());
+        ReplicaDb.OutboxRow first = store.outbox("scope-a").get(0);
+        store.confirmMembership("scope-a", first.seq,
+                new AlbumReplica.Member("root", "asset_2", true, 4), CLOCK.now());
+        equal(1, store.outbox("scope-a").size(), "Only the accepted intent is retired");
+        AlbumReplica.Member visible = store.memberships("scope-a", false).get("root:asset_2");
+        equal(false, visible.desiredState,
+                "Confirmation cannot overwrite a later optimistic toggle for the same relation");
+        equal(4L, visible.entityRevision, "The confirmed server revision still advances");
+
+        ReplicaDb.OutboxRow second = store.outbox("scope-a").get(0);
+        store.blockMembership("scope-a", second.seq, "revisionConflict", "{\"authorityCursor\":9}");
+        ReplicaDb.OutboxRow blocked = store.outbox("scope-a").get(0);
+        equal("blocked", blocked.state, "A semantic conflict is durable rather than deleted");
+        equal("revisionConflict", blocked.conflictCode, "The coded conflict stays observable");
+        Map<String,Object> counters = store.status("scope-a");
+        equal(0L, counters.get("outboxPendingCount"), "Blocked intent is not counted pending");
+        equal(1L, counters.get("outboxBlockedCount"), "Blocked intent is exposed diagnostically");
+        store.close();
+    }
+
+    private static void membershipOutboxSurvivesProcessRestart(Path directory) throws Exception {
+        Path file = directory.resolve("membership-outbox.sqlite");
+        SqliteDb first = new SqliteDb(file);
+        LibraryReplicaStore store = new LibraryReplicaStore(first);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "40000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.close();
+
+        SqliteDb reopened = new SqliteDb(file);
+        LibraryReplicaStore restored = new LibraryReplicaStore(reopened);
+        equal(1, restored.outbox("scope-a").size(), "A process restart keeps the pending intent");
+        equal(true, restored.memberships("scope-a", false).get("root:asset_2").desiredState,
+                "A process restart keeps the optimistic presentation too");
+        restored.close();
+    }
+
+    private static String acceptedMembership(ReplicaDb.OutboxRow row, boolean changed,
+                                             long revision, long cursor, boolean desired) {
+        return "{\"libraryId\":\"" + LIBRARY + "\",\"epoch\":1,\"contractVersion\":1,"
+                + "\"commandType\":\"setAlbumMembership\",\"operationId\":\""
+                + row.operationId + "\",\"changed\":" + changed
+                + ",\"changeSequence\":" + (changed ? Long.toString(cursor) : "null")
+                + ",\"authorityCursor\":" + cursor + ",\"album\":null,\"membership\":"
+                + member(row.albumId, row.assetId, desired, revision)
+                + ",\"updatedAt\":\"2026-09-16T00:00:01Z\"}";
+    }
+
+    private static void membershipOutboxFlushesFifoAndConfirms(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "50000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.queueMembership("scope-a", "root", "asset_2", false,
+                "50000000-0000-0000-0000-000000000002", CLOCK.now());
+        List<String> payloads = new ArrayList<>();
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            payloads.add(payload);
+            ReplicaDb.OutboxRow row = store.outbox("scope-a").get(0);
+            long revision = row.expectedRevision + 1;
+            return acceptedMembership(row, true, revision, 8 + payloads.size(), row.desiredState);
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush result = engine.flush("scope-a");
+        equal(2, result.sent, "Two real transitions are delivered in FIFO order");
+        equal(0, store.outbox("scope-a").size(), "Accepted intents leave the queue");
+        equal(false, store.memberships("scope-a", false).get("root:asset_2").desiredState,
+                "The final local state matches the final accepted intent");
+        equal(5L, store.memberships("scope-a", false).get("root:asset_2").entityRevision,
+                "Each accepted transition advances the confirmed revision");
+        check(payloads.get(0).contains("\"expectedRevision\":3"),
+                "The first payload uses the confirmed tombstone revision");
+        check(payloads.get(1).contains("\"expectedRevision\":4"),
+                "The second payload uses the predicted predecessor revision");
+        store.close();
+    }
+
+    private static void lostCommandResponseRetriesIdenticalPayload(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "60000000-0000-0000-0000-000000000001", CLOCK.now());
+        List<String> payloads = new ArrayList<>();
+        final boolean[] lost = {false};
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            payloads.add(payload);
+            if (!lost[0]) { lost[0] = true; throw new java.io.IOException("lost response"); }
+            return acceptedMembership(store.outbox("scope-a").get(0), true, 4, 8, true);
+        }, store, CLOCK);
+        try {
+            engine.flush("scope-a");
+            throw new AssertionError("A lost response must surface as retryable");
+        } catch (AlbumMembershipOutbox.Failure failure) {
+            check(failure.retryable, "A lost response is retryable");
+        }
+        equal(1, store.outbox("scope-a").size(), "A lost response keeps the intent pending");
+        engine.flush("scope-a");
+        equal(payloads.get(0), payloads.get(1),
+                "Retry uses byte-identical stored payload and operation id");
+        equal(0, store.outbox("scope-a").size(), "The receipted retry retires the intent");
+        store.close();
+    }
+
+    private static void membershipConflictBlocksDurablyAndStopsFifo(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "70000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.queueMembership("scope-a", "child", "asset_1", false,
+                "70000000-0000-0000-0000-000000000002", CLOCK.now());
+        final int[] calls = {0};
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            calls[0]++;
+            throw new AlbumMembershipOutbox.HttpFailure(409,
+                    "{\"detail\":{\"code\":\"revisionConflict\",\"authorityCursor\":9}}" );
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush result = engine.flush("scope-a");
+        equal(1, calls[0], "Delivery stops at the first unresolved membership intent");
+        equal(1, result.blocked, "The rejected intent becomes blocked");
+        equal(1, result.pending, "Later FIFO work remains pending and unsent");
+        List<ReplicaDb.OutboxRow> rows = store.outbox("scope-a");
+        equal("blocked", rows.get(0).state, "The conflict survives as queue state");
+        equal("revisionConflict", rows.get(0).conflictCode, "The server code is retained");
+        equal("pending", rows.get(1).state, "A later relation is not sent around the conflict");
+        store.close();
+    }
+
+    private static void malformedAcceptedMembershipOutcomeStaysPending(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "80000000-0000-0000-0000-000000000001", CLOCK.now());
+        AlbumMembershipOutbox engine = new AlbumMembershipOutbox((path, payload) -> {
+            ReplicaDb.OutboxRow row = store.outbox("scope-a").get(0);
+            return acceptedMembership(row, true, 4, 8, true)
+                    .replace(row.operationId, "80000000-0000-0000-0000-000000000099");
+        }, store, CLOCK);
+        try {
+            engine.flush("scope-a");
+            throw new AssertionError("A mismatched acceptance must not retire the intent");
+        } catch (AlbumMembershipOutbox.Failure failure) {
+            equal(AlbumMembershipOutbox.CODE_PROTOCOL_INTEGRITY, failure.code,
+                    "A mismatched echo is a protocol-integrity failure");
+        }
+        equal(1, store.outbox("scope-a").size(), "Malformed 200 leaves the intent pending");
+        equal("pending", store.outbox("scope-a").get(0).state,
+                "Malformed 200 is never converted into a semantic conflict");
+        store.close();
+    }
+
+    private static void blockedOutboxDefersReceive(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "90000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.blockMembership("scope-a", store.outbox("scope-a").get(0).seq,
+                "revisionConflict", "{}");
+        try (Fixture fixture = new Fixture(target -> Fixture.Response.ok(status(LIBRARY, 1, 1, 7)))) {
+            AlbumMembershipOutbox writer = new AlbumMembershipOutbox((path, payload) -> {
+                throw new AssertionError("A blocked queue must not call the command endpoint");
+            }, store, CLOCK);
+            AlbumAuthoritySync reader = new AlbumAuthoritySync(transport(fixture), store, CLOCK);
+            AlbumSyncPass.Result result = new AlbumSyncPass(writer, reader).run("scope-a");
+            equal(1, result.flush.blocked, "The cycle reports the durable blocker");
+            equal(null, result.receive, "Receive is deferred while any outbox row is blocked");
+            equal(0, fixture.paths().size(), "No read request is sent around a blocked intent");
+        }
+        store.close();
+    }
+
+    private static void cleanOutboxFlushesBeforeReceive(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "91000000-0000-0000-0000-000000000001", CLOCK.now());
+        final boolean[] commandAccepted = {false};
+        try (Fixture fixture = new Fixture(target -> {
+            check(commandAccepted[0], "Receive starts only after the pending command is accepted");
+            if (target.startsWith("/v1/sync/status")) return Fixture.Response.ok(status(LIBRARY, 1, 1, 7));
+            if (target.startsWith("/v1/albums/changes")) return Fixture.Response.ok(changes(7, "", 7, false));
+            return Fixture.Response.error(500, "unexpected");
+        })) {
+            AlbumMembershipOutbox writer = new AlbumMembershipOutbox((path, payload) -> {
+                commandAccepted[0] = true;
+                ReplicaDb.OutboxRow row = store.outbox("scope-a").get(0);
+                return acceptedMembership(row, false, 4, 7, true);
+            }, store, CLOCK);
+            AlbumAuthoritySync reader = new AlbumAuthoritySync(transport(fixture), store, CLOCK);
+            AlbumSyncPass.Result result = new AlbumSyncPass(writer, reader).run("scope-a");
+            equal(1, result.flush.noOp, "An accepted no-op still clears the durable intent");
+            check(result.receive != null, "A clean queue proceeds to the receive half");
+            equal(2, fixture.paths().size(), "A clean cycle reaches status then the empty changes page");
+        }
+        store.close();
+    }
+
+    private static void authorityMismatchStillReAdoptsBeforeRetry(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "92000000-0000-0000-0000-000000000001", CLOCK.now());
+        final int[] writes = {0};
+        try (Fixture fixture = new Fixture(target -> {
+            if (target.startsWith("/v1/sync/status")) return Fixture.Response.ok(status(OTHER_LIBRARY, 1, 1, 0));
+            if (albumsPageTarget(target)) return Fixture.Response.ok(reidentify(
+                    albumsPage(0, album("root", "Root", null, "folder", "blue", 1), null, false), OTHER_LIBRARY, 1));
+            if (membersPageTarget(target)) return Fixture.Response.ok(reidentify(
+                    membersPage(0, member("root", "asset_2", false, 1), null, false), OTHER_LIBRARY, 1));
+            return Fixture.Response.error(500, "unexpected");
+        })) {
+            AlbumMembershipOutbox writer = new AlbumMembershipOutbox((path, payload) -> {
+                writes[0]++;
+                throw new AlbumMembershipOutbox.HttpFailure(409,
+                        "{\"detail\":{\"code\":\"authorityLibraryMismatch\"}}");
+            }, store, CLOCK);
+            AlbumAuthoritySync reader = new AlbumAuthoritySync(transport(fixture), store, CLOCK);
+            try {
+                new AlbumSyncPass(writer, reader).run("scope-a");
+                throw new AssertionError("The original write still reports its mismatch");
+            } catch (AlbumMembershipOutbox.Failure failure) {
+                equal("authorityLibraryMismatch", failure.code,
+                        "The write failure stays visible after receive recovery");
+            }
+            equal(OTHER_LIBRARY, store.adopted("scope-a").libraryId,
+                    "A write identity mismatch still lets receive adopt the replacement library");
+            equal(1, store.outbox("scope-a").size(),
+                    "Re-adoption preserves the unsent local intent");
+            equal("blocked", store.outbox("scope-a").get(0).state,
+                    "Replacement authority blocks the old-library intent during baseline install");
+            equal(false, store.memberships("scope-a", false).get("root:asset_2").desiredState,
+                    "Old-library optimistic state is never projected into the replacement library");
+            equal(1, writes[0], "Only the original stale-library write reached the network");
+            AlbumMembershipOutbox.Flush next = writer.flush("scope-a");
+            equal(1, next.blocked, "The old-library intent remains a durable blocker next pass");
+            equal(1, writes[0], "A blocked replacement intent never reaches the network again");
+        }
+        store.close();
+    }
+
+    private static void futureReplicaVersionFailsClosedInsteadOfDeletingOutbox() {
+        check(ReplicaSchema.canUpgradeFrom(0), "A fresh replica can initialize schema v2");
+        check(ReplicaSchema.canUpgradeFrom(1), "The read-only v1 replica upgrades in place");
+        check(!ReplicaSchema.canUpgradeFrom(ReplicaSchema.VERSION), "Current schema needs no migration");
+        try {
+            ReplicaSchema.requireReadableVersion(ReplicaSchema.VERSION + 1);
+            throw new AssertionError("A future replica version must fail closed");
+        } catch (IllegalStateException expected) {
+            check(true, "Future schema is preserved instead of deleted by an older client");
+        }
+    }
+
+    private static void invalidAssetIdentityCannotEnterTheOutbox() {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        try {
+            store.queueMembership("scope-a", "root", "../asset", true,
+                    "93000000-0000-0000-0000-000000000001", CLOCK.now());
+            throw new AssertionError("An invalid Asset id must be rejected before persistence");
+        } catch (IllegalArgumentException expected) {
+            check(true, "Invalid Asset identity is rejected at the durable store boundary");
+        }
+        equal(0, store.outbox("scope-a").size(), "Rejected identity leaves no durable intent");
+        store.close();
+    }
+
+    private static void unknownCommandRejectionRemainsRetryableAndPending() {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "94000000-0000-0000-0000-000000000001", CLOCK.now());
+        AlbumMembershipOutbox writer = new AlbumMembershipOutbox((path, payload) -> {
+            throw new AlbumMembershipOutbox.HttpFailure(422,
+                    "{\"detail\":{\"code\":\"futureMembershipRule\"}}");
+        }, store, CLOCK);
+        try {
+            writer.flush("scope-a");
+            throw new AssertionError("An unknown coded rejection must remain unresolved");
+        } catch (AlbumMembershipOutbox.Failure failure) {
+            equal("futureMembershipRule", failure.code, "Unknown server code remains visible");
+            check(failure.retryable, "Unknown future rejection is retryable rather than blocked");
+        }
+        equal("pending", store.outbox("scope-a").get(0).state,
+                "Unknown rejection preserves the immutable pending intent");
+        store.close();
+    }
+
+    private static void v2OutboxSchemaHasAConservativeV3Upgrade() {
+        equal(3, ReplicaSchema.VERSION, "Identity-bound Android outbox is schema v3");
+        String[] upgrade = ReplicaSchema.upgradeStatements(2);
+        equal(2, upgrade.length, "The intermediate v2 outbox needs two identity columns");
+        check(upgrade[0].contains("library_id") && upgrade[0].contains("DEFAULT ''"),
+                "Unknown v2 library identity is preserved as a non-sendable sentinel");
+        check(upgrade[1].contains("contract_version") && upgrade[1].contains("DEFAULT 0"),
+                "Unknown v2 contract identity is preserved as a non-sendable sentinel");
+        equal(0, ReplicaSchema.upgradeStatements(1).length,
+                "Read-only v1 creates the final schema directly rather than altering a missing outbox");
     }
 
     private static void inactiveAuthorityLeavesAndroidUnadopted(Path directory) throws Exception {

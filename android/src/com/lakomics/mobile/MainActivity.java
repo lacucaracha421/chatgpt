@@ -81,6 +81,8 @@ public final class MainActivity extends Activity {
      case "pickerStatus":data=pickerStatus();break;
      case "albumStatus":data=albumStatus();break;
      case "albumTree":data=albumStatus().put("albums",AlbumReplicaService.get(MainActivity.this).albumList());break;
+     case "albumMemberships":data=AlbumReplicaService.get(MainActivity.this).membershipState(p.getString("assetId"));break;
+     case "albumMembershipSet":data=AlbumReplicaService.get(MainActivity.this).setMembership(p.getString("assetId"),p.getString("albumId"),p.getBoolean("desiredState"));break;
      case "pickerRefresh":PickerLibrary.get(MainActivity.this).refresh(true);data=pickerStatus();break;
      case "openPickerSettings":if(Build.VERSION.SDK_INT<33)throw new UnsupportedOperationException();Intent pickerSettings=new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES_SETTINGS);if(pickerSettings.resolveActivity(getPackageManager())==null)throw new UnsupportedOperationException();runOnUiThread(()->{try{startActivity(pickerSettings);}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
      case "configure": String endpoint=NetworkPolicy.endpoint(p.getString("endpoint"),p.optBoolean("allowPrivateHttp",false));String token=p.getString("token");client.validate(endpoint,token,signal);LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();settings.write(endpoint,token,p.optBoolean("allowPrivateHttp",false));cancelOtherRequests(signal);if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();

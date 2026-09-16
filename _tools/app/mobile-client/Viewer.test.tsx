@@ -3,6 +3,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 const mocks=vi.hoisted(()=>({ticket:vi.fn(),decode:vi.fn()}));
 vi.mock('./media',()=>({mediaTicket:mocks.ticket,decodeImage:mocks.decode,invalidateTicket:vi.fn()}));
+vi.mock('./AlbumMembershipEditor',()=>({AlbumMembershipEditor:({open}:{open:boolean})=>open?<div>album-editor-open</div>:null}));
 import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
 afterEach(cleanup);
@@ -60,6 +61,11 @@ describe('progressive viewer',()=>{
   });
   it('requests the next asset page when approaching the loaded end',()=>{
     const more=vi.fn();render(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}} onNearEnd={more}/>);expect(more).toHaveBeenCalledOnce();
+  });
+  it('opens the Album membership editor from the viewer chrome',()=>{
+    render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'앨범'}));
+    expect(screen.getByText('album-editor-open')).toBeTruthy();
   });
   it('native video control gestures cannot navigate the gallery',async()=>{
     const change=vi.fn(); const {container}=render(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={change} onClose={()=>{}}/>);
