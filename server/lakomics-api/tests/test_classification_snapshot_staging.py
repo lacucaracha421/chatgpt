@@ -818,18 +818,14 @@ class StagingIsNotActivationTests(StagingFixture):
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(response.json()["detail"]["code"], "authorityInactive")
 
-    def test_no_classification_activation_route_exists(self):
-        """2A ships no activation path at all — not even an unused one.
-
-        Album authority legitimately has its own activation route, so the assertion is
-        scoped to the classifications domain rather than to the `/activate` suffix.
-        """
+    def test_staging_does_not_activate_even_though_the_cutover_route_now_exists(self):
+        """2A.2 registers activation; a staging PUT alone still creates no epoch."""
+        self.assertEqual(self.publish(v2_body()).status_code, 200)
         paths = {route.path for route in api_app.app.routes}
-        self.assertNotIn("/v1/classifications/authority/activate", paths)
-        self.assertFalse([path for path in paths if path.startswith("/v1/classifications/authority") and path.endswith("/activate")])
-        self.assertEqual(
-            self.client.post("/v1/classifications/authority/activate", json={}).status_code,
-            404)
+        self.assertIn("/v1/classifications/authority/activate", paths)
+        domains, rows = self.authority_state()
+        self.assertEqual(domains, [])
+        self.assertTrue(all(count == 0 for count in rows.values()))
 
     def test_legacy_writer_is_not_fenced_after_staging(self):
         """Staging is not the fence: the publisher must keep publishing."""

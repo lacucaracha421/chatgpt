@@ -11,8 +11,8 @@ Staging stores a **validated source**, not activated authority state. A version-
 publication is fully validated and stored deterministically so a later activation can
 bind itself to the exact stored state; it does **not** create an ``authority_domains``
 row, does not populate ``classification_authority_*`` canonical state, and does not
-fence the legacy writer. Activation, the legacy-write fence, the PC replica and the
-Android slices remain 2A.2/2B/later work.
+fence the legacy writer by itself. The 2A.2 activation route consumes this stored v2
+source explicitly and atomically; the PC replica and Android slices remain later work.
 
 The staging table is the shipped ``classification_snapshots`` singleton, so the legacy
 readers (``GET /v1/classifications``, ``/meta``, the extension bootstrap and the mobile
@@ -322,6 +322,11 @@ def validate_roles(roles, entries):
         if classification_id not in known:
             fail(422, "invalidClassificationRole", "스냅샷에 없는 분류가 역할 대상입니다.",
                  role=name, classificationId=classification_id)
+        target = next(row for row in entries if row["id"] == classification_id)
+        if name == "originals" and (target["kind"] != "root" or target["parentId"] is not None):
+            fail(422, "invalidClassificationRole",
+                 "보호 역할(originals)은 최상위 루트 분류여야 합니다.",
+                 role=name, classificationId=classification_id)
         rows.append({"role": name, "classificationId": classification_id})
     # An authority-ready snapshot must state the protected role, because a fresh replica
     # has no other source for it and the authority enforces it by id.
@@ -405,6 +410,33 @@ def stage(body):
     return version, canonical_text(stored), _digest(digest_source)
 
 
+
+def authority_ready_state(payload_text):
+    """Revalidate and return the canonical collections a cutover may activate.
+
+    Publication already validates version 2, but activation re-runs the contract from
+    the bytes actually stored in SQLite. This keeps a manually corrupted/stale staging
+    row from becoming authority merely because a caller can name its digest.
+    """
+    try:
+        payload = json.loads(payload_text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        fail(422, "invalidClassificationSnapshot", "저장된 분류 스냅샷을 읽을 수 없습니다.")
+    version = payload.get("snapshotVersion", SNAPSHOT_VERSION) if isinstance(payload, dict) else None
+    if version != AUTHORITY_READY_VERSION:
+        fail(409, "classificationSnapshotNotAuthorityReady",
+             "분류 스냅샷이 서버 권위 활성화에 필요한 버전이 아닙니다.",
+             snapshotVersion=version, requiredVersion=AUTHORITY_READY_VERSION)
+    entries_raw = payload.get("entries")
+    assignments_raw = payload.get("assignments")
+    roles_raw = payload.get("roles")
+    if not isinstance(entries_raw, list) or not isinstance(assignments_raw, list) or not isinstance(roles_raw, list):
+        fail(422, "invalidClassificationSnapshot", "저장된 분류 canonical 상태가 올바르지 않습니다.")
+    entries = validate_entries(entries_raw)
+    assignments = validate_assignments(assignments_raw, entries)
+    roles = validate_roles(roles_raw, entries)
+    return entries, assignments, roles, version
+
 def stored_digest(payload_text):
     """The digest of a stored staging payload.
 
@@ -480,7 +512,7 @@ def entries_changed(stored_payload_text, entries):
 
 __all__ = [
     "AUTHORITY_READY_VERSION", "MAX_STAGING_BYTES", "SNAPSHOT_VERSION", "SUPPORTED_ROLES",
-    "SUPPORTED_VERSIONS", "entries_changed", "fail", "legacy_entries", "stage",
+    "SUPPORTED_VERSIONS", "authority_ready_state", "entries_changed", "fail", "legacy_entries", "stage",
     "stale_check", "stored_digest", "validate_assignments", "validate_body",
     "validate_entries", "validate_hierarchy", "validate_roles",
 ]

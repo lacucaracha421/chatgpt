@@ -103,24 +103,29 @@ client cannot originate a structural mutation until the server can enforce every
 structural rule itself. Authorization deliberately precedes command validation, so an
 under-privileged caller cannot probe the command contract.
 
-# Inactive safety
+# Inactive safety and cutover boundary
 
-Nothing here changes behavior while no ``authority_domains(domain='classifications')``
-row exists. Read and command routes reject with ``authorityInactive``, startup only
-creates empty tables, and no legacy route is touched: ``PUT /v1/classifications``,
-``GET /v1/classifications``, ``GET /v1/library/classifications`` and the replication
-routes keep behaving exactly as before. There is no activation path in this batch —
-not even an unused one — because staging, the legacy fence and baseline derivation
-are 2A.1/2A.2 work.
+Registering this module still changes no product state by itself. While no
+``authority_domains(domain='classifications')`` row exists, baseline/change/command
+routes report ``authorityInactive`` and every authority-aware legacy path falls back to
+the shipped behavior. The publisher-only activation route is explicit and digest-bound:
+it derives canonical state only from the stored version-2 staging snapshot inside one
+``BEGIN IMMEDIATE`` transaction. Creating the authority row and typed baseline in that
+transaction is the cutover fence; merely staging or restarting the server never activates
+the domain.
+
+After activation, the old whole-snapshot publisher is fenced, Asset replication continues
+but no longer mutates Classification relations, and security-sensitive capture/SAF checks
+read canonical authority state. Broader mobile/PC read adoption is intentionally later.
 
 # Deferred to later batches
 
-* staging a versioned snapshot, digest-bound activation and the legacy snapshot fence;
-* fencing the classification portion of asset replication and capture validation;
-* the PC durable replica/outbox and the Android replica/read/write slices;
+* the PC durable replica/outbox and write cutover;
+* Android Classification replica/read/write slices and migration of general mobile read
+  projections away from the legacy compatibility tables;
+* production activation/canary and eventual retirement of legacy compatibility paths;
 * carrying the character-series id set needed to enforce the series-into-originals
-  rule server-side, which is what would let the client-side-only constraint be
-  relaxed.
+  rule server-side, which is what would let the client-side-only constraint be relaxed.
 """
 import datetime
 import hashlib
@@ -567,6 +572,117 @@ def expired_cursor(row):
                                       "authorityCursor": row["cursor"],
                                       "retentionDays": RETENTION_DAYS})
 
+
+
+# ---------------------------------------------------------------------------
+# Activation
+# ---------------------------------------------------------------------------
+
+def parse_activation(body):
+    """Validate the tiny operator request that binds activation to staged bytes."""
+    if not isinstance(body, dict) or set(body) != {"libraryId", "expectedSnapshotDigest"}:
+        fail(422, "invalidClassificationBaseline", "분류 활성화 요청이 올바르지 않습니다.")
+    library_id = body["libraryId"]
+    expected = body["expectedSnapshotDigest"]
+    if not isinstance(library_id, str) or not LIBRARY_ID_PATTERN.fullmatch(library_id):
+        fail(422, "invalidClassificationBaseline", "라이브러리 ID가 올바르지 않습니다.")
+    if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        fail(422, "invalidClassificationBaseline", "분류 기준선 digest가 올바르지 않습니다.")
+    return library_id, expected
+
+
+def _activation_counts(db, library_id):
+    return (
+        db.execute("SELECT COUNT(*) FROM classification_authority_state WHERE library_id=?",
+                   [library_id]).fetchone()[0],
+        db.execute("SELECT COUNT(*) FROM classification_authority_assignments WHERE library_id=?",
+                   [library_id]).fetchone()[0],
+        db.execute("SELECT COUNT(*) FROM classification_authority_roles WHERE library_id=?",
+                   [library_id]).fetchone()[0],
+    )
+
+
+def public_state(library_id, epoch, contract_version, cursor, baseline_digest,
+                 baseline_revision, activated_at, counts, snapshot_version):
+    return {
+        "libraryId": library_id, "epoch": epoch, "contractVersion": contract_version,
+        "cursor": cursor, "baselineDigest": baseline_digest,
+        "baselineRevision": baseline_revision, "activatedAt": activated_at,
+        "classificationCount": counts[0], "assignmentCount": counts[1],
+        "roleCount": counts[2], "snapshotVersion": snapshot_version,
+    }
+
+
+def activate(db, *, library_id, entries, assignments, roles, baseline_digest,
+             baseline_revision, now, snapshot_version):
+    """Create epoch 1 from one revalidated staged v2 snapshot, atomically.
+
+    The caller owns ``BEGIN IMMEDIATE`` and derives every collection from the stored
+    staging row in that same transaction. Creating ``authority_domains`` is the fence:
+    after this transaction commits, legacy writers observe the row and cannot overwrite
+    canonical state. An identical retry is idempotent; no second baseline can replace an
+    active epoch.
+    """
+    active_domains = authority.active_domains(db)
+    libraries = sorted({entry["libraryId"] for entry in active_domains})
+    if len(libraries) > 1:
+        fail(503, authority.CODE_AUTHORITY_AMBIGUOUS,
+             "동기화 권위 상태가 모호합니다.", domain=DOMAIN, libraries=libraries)
+    if libraries and libraries[0] != library_id:
+        fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH,
+             "기존 서버 권위와 다른 라이브러리를 활성화할 수 없습니다.",
+             domain=DOMAIN, libraryId=libraries[0])
+
+    existing = authority.active_domain(db, DOMAIN)
+    if existing is not None:
+        if existing["libraryId"] == library_id and existing["baselineDigest"] == baseline_digest:
+            counts = _activation_counts(db, library_id)
+            return public_state(existing["libraryId"], existing["epoch"],
+                                existing["contractVersion"], existing["cursor"],
+                                existing["baselineDigest"], existing["baselineRevision"],
+                                existing["activatedAt"], counts, snapshot_version)
+        fail(409, "classificationAuthorityActive",
+             "분류 권위가 이미 활성화되어 있습니다.", domain=DOMAIN)
+
+    # Typed rows without an authority row indicate an interrupted/manual state that this
+    # endpoint did not create. Never guess whether they are disposable.
+    for table in ("classification_authority_state", "classification_authority_assignments",
+                  "classification_authority_roles", "classification_authority_changes",
+                  "classification_authority_receipts", "classification_authority_retention"):
+        if db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None:
+            fail(409, "classificationAuthorityStateExists",
+                 "활성화되지 않은 분류 권위 상태가 이미 존재합니다.", domain=DOMAIN)
+
+    try:
+        db.executemany(
+            "INSERT INTO classification_authority_state(library_id,classification_id,kind,name,"
+            "parent_id,icon_key,color_key,deleted,entity_revision,created_at,updated_at)"
+            " VALUES(?,?,?,?,?,?,?,0,1,?,?)",
+            [[library_id, row["id"], row["kind"], row["name"], row["parentId"],
+              row["iconKey"], row["colorKey"], now, now] for row in entries])
+        db.executemany(
+            "INSERT INTO classification_authority_assignments(library_id,asset_id,"
+            "classification_id,entity_revision,created_at,updated_at) VALUES(?,?,?,1,?,?)",
+            [[library_id, row["assetId"], row["classificationId"], now, now]
+             for row in assignments])
+        db.executemany(
+            "INSERT INTO classification_authority_roles(library_id,role,classification_id)"
+            " VALUES(?,?,?)",
+            [[library_id, row["role"], row["classificationId"]] for row in roles])
+    except sqlite3.IntegrityError:
+        fail(422, "invalidClassificationBaseline",
+             "분류 기준선을 권위 상태로 만들 수 없습니다.")
+
+    db.execute(
+        "INSERT INTO authority_domains(library_id,domain,epoch,contract_version,change_cursor,"
+        "baseline_digest,baseline_revision,activated_at) VALUES(?,?,?,?,?,?,?,?)",
+        [library_id, DOMAIN, 1, CONTRACT_VERSION, 0, baseline_digest, baseline_revision, now])
+    db.execute(
+        "INSERT INTO classification_authority_retention(library_id,epoch,pruned_through,pruned_at)"
+        " VALUES(?,?,0,NULL)", [library_id, 1])
+    counts = (len(entries), len(assignments), len(roles))
+    return public_state(library_id, 1, CONTRACT_VERSION, 0, baseline_digest,
+                        baseline_revision, now, counts, snapshot_version)
 
 # ---------------------------------------------------------------------------
 # Commands
@@ -1113,6 +1229,53 @@ def register_classification_authority(app, get_db, require_client, require_publi
     through this route.
     """
     app.on_event("startup")(lambda _event=None: startup(get_db))
+
+    @app.post(PREFIX + "/activate")
+    async def activate_authority(request: Request, authorization: str | None = Header(default=None)):
+        require_publisher(authorization)
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > 64 * 1024:
+                fail(413, "invalidClassificationBaseline", "분류 활성화 요청이 너무 큽니다.")
+            data.extend(chunk)
+        try:
+            body = json.loads(data)
+        except (ValueError, UnicodeError):
+            fail(422, "invalidClassificationBaseline", "분류 활성화 요청을 읽을 수 없습니다.")
+        library_id, expected = parse_activation(body)
+
+        def run():
+            # Local import avoids a module-import cycle: staging deliberately reuses
+            # validators from this authority module. At request time both modules are
+            # fully initialized.
+            import classification_snapshot
+
+            with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    stored = db.execute(
+                        "SELECT payload,published_at FROM classification_snapshots"
+                        " WHERE singleton=1").fetchone()
+                    if stored is None:
+                        fail(409, "classificationSnapshotMissing",
+                             "활성화할 분류 스냅샷이 없습니다.")
+                    actual = classification_snapshot.stored_digest(stored["payload"])
+                    if actual != expected:
+                        fail(409, "classificationBaselineChanged",
+                             "분류 기준선이 변경되었습니다. 다시 준비해 주세요.")
+                    entries, assignments, roles, snapshot_version = (
+                        classification_snapshot.authority_ready_state(stored["payload"]))
+                    state = activate(
+                        db, library_id=library_id, entries=entries, assignments=assignments,
+                        roles=roles, baseline_digest=actual,
+                        baseline_revision=stored["published_at"], now=now_iso(),
+                        snapshot_version=snapshot_version)
+                    db.commit()
+                    return state
+                except BaseException:
+                    db.rollback()
+                    raise
+        return await run_in_threadpool(run)
 
     @app.get(PREFIX + "/baseline")
     async def classification_baseline(request: Request, libraryId: str, epoch: int,

@@ -371,15 +371,16 @@ class InactiveClassificationAuthorityTests(ClassificationAuthorityFixture):
                                 " WHERE singleton=1").fetchone()[0]
         self.assertEqual(stored, payload)
 
-    def test_the_module_ships_no_activation_route(self):
-        """2A must not be able to activate the domain even by accident."""
+    def test_the_module_registers_activation_but_startup_still_activates_nothing(self):
         paths = {route.path for route in self.app.routes}
         self.assertIn(BASELINE, paths)
         self.assertIn(CHANGES, paths)
         self.assertIn(COMMANDS, paths)
-        self.assertFalse([path for path in paths if path.endswith("/authority/activate")])
-        self.assertEqual(
-            self.client.post("/v1/classifications/authority/activate", json={}).status_code, 404)
+        self.assertIn("/v1/classifications/authority/activate", paths)
+        with self.get_db() as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM authority_domains WHERE domain=?",
+                [classification_authority.DOMAIN]).fetchone()[0], 0)
 
     def test_baseline_and_changes_require_authentication(self):
         self.assertEqual(self.client.get(BASELINE, params={"libraryId": LIBRARY,

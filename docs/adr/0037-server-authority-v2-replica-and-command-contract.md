@@ -1006,10 +1006,12 @@ production data was touched, and no legacy publication/replication/capture route
 
 ### Classification 2A.1 — server-side staging contract, landed 2026-09-16
 
-Implementation checkpoint only. Classification authority is **still not active anywhere**, no
-production data was touched, and the shipped PC publisher/legacy readers remain wire-compatible.
-Publication timestamps are now required to be timezone-aware so staleness can be ordered by instant;
-the shipped publisher already emits RFC3339 timestamps with an offset.
+Historical implementation checkpoint: at the 2A.1 landing, Classification authority was not
+active and the shipped PC publisher/legacy readers remained wire-compatible. Publication timestamps
+are required to be timezone-aware so staleness can be ordered by instant; the shipped publisher
+already emits RFC3339 timestamps with an offset. A later explicitly authorized rollout deployed
+this server half, upgraded the PC publisher, and staged the real v2 snapshot; that rollout is
+recorded below and still did **not** activate Classification authority.
 
 This is the **server-first half** of the rolling upgrade: the server now accepts an
 authority-ready snapshot while continuing to accept the shipped version-1 publisher unchanged,
@@ -1063,9 +1065,10 @@ publisher is deliberately not changed by this batch.
   display `entries`/`published_at`/`revision` explicitly, while a stored version-2 row never leaks
   `assignments`, `roles`, `snapshotVersion` or canonical-only normalization to an old reader. The
   extension bootstrap and the mobile readers keep working while the domain is inactive.
-- **Staging is not activation**: no `authority_domains` row is created, no
-  `classification_authority_*` canonical state is populated, the legacy writer is not fenced, and
-  there is no activation route. Staging stores a validated source.
+- **Staging is not activation**: a staging PUT creates no `authority_domains` row and populates no
+  `classification_authority_*` canonical state. At the 2A.1 landing there was intentionally no
+  activation route; 2A.2 below adds an explicit publisher-only route, but staging by itself remains
+  inert and leaves every legacy path unfenced.
 - Verification: `tests/test_classification_snapshot_staging.py` (75 tests, 30 subtests) covers v1
   acceptance/verbatim storage/bound/revision semantics, v2 acceptance and storage, explicit
   collections, unsupported versions, all entry/hierarchy/appearance rules, assignment cardinality
@@ -1080,10 +1083,71 @@ publisher is deliberately not changed by this batch.
   `classification_roles`. Entries, assignments and roles are read under one SQLite transaction,
   so one upload cannot mix hierarchy from one local instant with assignments from another. The
   legacy `assetCount` projection still counts normal Assets only. Focused verification passed all
-  26 Cloud Capture tests plus the two Classification-list regressions. No production v2 snapshot
-  has been published yet; that first staging write remains a separately authorized production-data
-  operation.
+  26 Cloud Capture tests plus the two Classification-list regressions. The later authorized rollout
+  deployed 2A.1 first and then staged the real v2 snapshot: 58 Classifications, 8,915 single-valued
+  assignments (including 45 relations for locally trashed Assets), one `originals` role, zero
+  multi-assigned Assets, and digest
+  `1aab6e0848e7f4f2daf8d3be2f5661b17ebef158e4d66e0742f2fdbcd6caf65f`. Legacy display revision
+  remained 453 and Classification authority remained inactive.
 
+
+### Classification 2A.2 — digest-bound cutover fences, implemented locally 2026-09-16
+
+Implementation checkpoint only. This code is **not deployed** and production Classification
+authority remains inactive. The production server still holds the validated v2 staging snapshot
+above; no activation, production mutation, client cutover or legacy retirement was performed by
+this batch.
+
+- **Activation is explicit, publisher-only and bound to the stored staging bytes.**
+  `POST /v1/classifications/authority/activate` accepts only `libraryId` and
+  `expectedSnapshotDigest`. Inside one `BEGIN IMMEDIATE`, the server rereads the stored
+  `classification_snapshots` row, recomputes its canonical digest, revalidates the stored v2
+  `entries`/`assignments`/`roles`, and only then creates epoch 1 / contract 1 / cursor 0 plus the
+  typed authority baseline. Caller-supplied canonical state is impossible. Version 1 is refused
+  with `classificationSnapshotNotAuthorityReady`; a digest mismatch is
+  `classificationBaselineChanged`; identical activation retry is idempotent. Trusted staged
+  assignments to Assets not currently materialized on the server are retained at revision 1,
+  matching the Album migration exception.
+- **Cross-domain library identity is checked before activation.** A single-library server may not
+  activate Classification under a `libraryId` that disagrees with already-active Album/Bookmark
+  domains; that request fails with `authorityLibraryMismatch`. An already-inconsistent multi-library
+  authority registry fails closed as `authorityAmbiguous`. Unowned typed Classification rows without
+  an authority-domain row are also refused rather than guessed disposable.
+- **The protected role is activation-ready state, not a label hint.** v2 staging now additionally
+  requires `originals` to name a top-level `root`; the stored payload is revalidated again at
+  activation. The role remains immutable and has no command.
+- **The whole-snapshot legacy writer is fenced atomically with cutover.**
+  `PUT /v1/classifications` calls the shared `authority.fence_legacy_write` inside the same write
+  transaction that would replace staging. While inactive it is a no-op; once activation commits,
+  later snapshot publication receives `legacyWriterFenced` and cannot replace the staged/authority
+  generation.
+- **Asset replication survives the cutover, Classification replication does not.**
+  `POST /v1/replication/commit` continues to commit media/Asset metadata and advance its existing
+  metadata revision after Classification activation, but it stops deleting/inserting
+  `asset_classifications`. Thus a stale PC may continue the Asset replication lane without being
+  able to overwrite canonical Classification assignment. While inactive the route preserves the
+  shipped relation-write behavior exactly. General compatibility reads backed by
+  `asset_classifications` are intentionally migrated later, before production activation.
+- **Security-sensitive reads switch immediately once authority is active.** SAF
+  `/v1/library/classifications/{classificationId}/contains/{assetId}` checks the committed Asset,
+  canonical single assignment and canonical parent chain in one read transaction after cutover;
+  before cutover it retains the legacy snapshot + replicated-membership behavior. Extension Capture
+  validation likewise checks live, non-tombstoned authority Classification ids after cutover, so a
+  deleted Classification cannot remain usable merely because the frozen legacy display snapshot
+  still contains it. Admin Capture behavior is unchanged.
+- **Scope boundary:** `/v1/library/classifications`, general `/v1/library/assets` Classification
+  filtering/projection, PC durable replica/outbox, Android Classification replica/write support,
+  production activation/canary and legacy-table retirement remain later batches. In particular,
+  2A.2 does not try to mirror authority assignments back into `asset_classifications`: staged
+  authority legitimately contains trash/unmaterialized Asset ids that the legacy FK-backed table
+  cannot represent, and dual-writing would recreate two writers.
+- Verification: the new `tests/test_classification_cutover.py` has 8 integration tests covering
+  digest binding, v2/publisher gates, idempotent activation, baseline readability, unmaterialized
+  assignments, `originals` root enforcement, cross-domain library identity, snapshot fencing,
+  replication relation suppression, SAF authority membership and Capture stale-id rejection. The
+  focused Classification/staging/replication/mobile/capture regression set passed 339 tests / 94
+  subtests before the final identity guard; the final full server suite passed **719 tests / 109
+  subtests**.
 
 
 Production migration, deployment, active-data writes, R2 cleanup and Git writes remain

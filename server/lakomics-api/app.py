@@ -21,6 +21,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstrai
 
 import album_authority
 import authority
+import classification_authority
 import classification_snapshot
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -965,6 +966,23 @@ def get_library_metadata_backup(authorization: str | None = Header(default=None)
     }
 
 
+def _classification_is_live_for_capture(db: sqlite3.Connection, classification_id: str) -> bool:
+    """Use canonical authority after cutover, legacy staging before cutover."""
+    active = authority.active_domain(db, classification_authority.DOMAIN)
+    if active is not None:
+        row = classification_authority.classification_row(
+            db, active["libraryId"], classification_id)
+        return row is not None and not bool(row["deleted"])
+    snapshot = db.execute(
+        "SELECT payload FROM classification_snapshots WHERE singleton=1").fetchone()
+    if snapshot is None:
+        return False
+    return any(
+        isinstance(entry, dict) and entry.get("id") == classification_id
+        for entry in classification_snapshot.legacy_entries(snapshot["payload"])
+    )
+
+
 def valid_capture_source_url(value: str, source: str) -> bool:
     try:
         url = urlparse(value)
@@ -994,10 +1012,9 @@ def create_capture(
     if not classification_id or len(classification_id) > 200:
         raise HTTPException(status_code=400, detail="Invalid classification_id")
     if principal != "admin":
-        snapshot = _classification_snapshot()
-        live_ids = {str(entry.get("id")) for entry in snapshot.get("entries", []) if isinstance(entry, dict) and entry.get("id")}
-        if classification_id not in live_ids:
-            raise HTTPException(status_code=409, detail={"code": "classification_stale"})
+        with get_db() as db:
+            if not _classification_is_live_for_capture(db, classification_id):
+                raise HTTPException(status_code=409, detail={"code": "classification_stale"})
 
     if not valid_capture_source_url(capture.source_url, capture.source):
         raise HTTPException(status_code=400, detail="Invalid source URL")
@@ -1354,10 +1371,12 @@ async def publish_classification_snapshot(
     incoming_published_at = classification_snapshot._parse_published_at(body["published_at"])
 
     with get_db() as db:
-        # One write transaction covers the staleness read and the replacement, so two
-        # concurrent publications cannot both pass the check and then both write.
+        # One write transaction covers the authority fence, staleness read and replacement.
+        # The fence is inert before cutover; after activation it prevents an old PC
+        # snapshot from replacing the canonical hierarchy that activation just adopted.
         db.execute("BEGIN IMMEDIATE")
         try:
+            authority.fence_legacy_write(db, classification_authority.DOMAIN)
             row = db.execute(
                 "SELECT payload,published_at,revision FROM classification_snapshots WHERE singleton=1"
             ).fetchone()
@@ -1635,11 +1654,39 @@ def mobile_tree_membership(classification_id: str, asset_id: str, authorization:
     require_auth(authorization)
     with get_db() as db:
         db.execute("BEGIN")
+        active = authority.active_domain(db, classification_authority.DOMAIN)
+        if active is not None:
+            # SAF tree grants are a security decision, so after cutover both the target
+            # hierarchy and the Asset's one canonical assignment come from authority.
+            if db.execute("SELECT 1 FROM assets WHERE id=? AND committed=1",
+                          [asset_id]).fetchone() is None:
+                return {"is_child": False}
+            target = classification_authority.classification_row(
+                db, active["libraryId"], classification_id)
+            if target is None or target["deleted"]:
+                return {"is_child": False}
+            assignment = classification_authority.assignment_row(
+                db, active["libraryId"], asset_id)
+            current = assignment["classification_id"] if assignment is not None else None
+            seen = set()
+            while current is not None and current not in seen:
+                if current == classification_id:
+                    return {"is_child": True}
+                seen.add(current)
+                row = classification_authority.classification_row(
+                    db, active["libraryId"], current)
+                if row is None or row["deleted"]:
+                    break
+                current = row["parent_id"]
+            return {"is_child": False}
+
+        # Before cutover preserve the shipped snapshot + replicated-membership behavior.
         snapshot = db.execute("SELECT payload FROM classification_snapshots WHERE singleton=1").fetchone()
         if snapshot is None:
             return {"is_child": False}
-        entries = json.loads(snapshot["payload"]).get("entries", [])
-        parents = {entry["id"]: entry.get("parentId") for entry in entries if isinstance(entry.get("id"), str)}
+        entries = classification_snapshot.legacy_entries(snapshot["payload"])
+        parents = {entry["id"]: entry.get("parentId") for entry in entries
+                   if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
         if classification_id not in parents:
             return {"is_child": False}
         memberships = db.execute("SELECT ac.classification_id FROM asset_classifications ac JOIN assets a ON a.id=ac.asset_id WHERE a.id=? AND a.committed=1", (asset_id,)).fetchall()
@@ -2443,20 +2490,26 @@ def replication_commit(
                 ts,
             ),
         )
-        db.execute(
-            "DELETE FROM asset_classifications WHERE asset_id = ?",
-            (request.asset_id,),
-        )
-        for classification_id in sorted(set(request.classification_ids)):
+        # Asset replication remains valid after Classification cutover, but its embedded
+        # legacy relationship projection no longer owns Classification state. Preserve
+        # the old writes byte-for-byte while inactive; once authority exists, leave
+        # `asset_classifications` untouched so a stale replication commit cannot revert
+        # an accepted authority command.
+        if authority.active_domain(db, classification_authority.DOMAIN) is None:
             db.execute(
-                """
-                INSERT INTO asset_classifications
-                    (asset_id, classification_id, added_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(asset_id, classification_id) DO NOTHING
-                """,
-                (request.asset_id, classification_id, ts),
+                "DELETE FROM asset_classifications WHERE asset_id = ?",
+                (request.asset_id,),
             )
+            for classification_id in sorted(set(request.classification_ids)):
+                db.execute(
+                    """
+                    INSERT INTO asset_classifications
+                        (asset_id, classification_id, added_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(asset_id, classification_id) DO NOTHING
+                    """,
+                    (request.asset_id, classification_id, ts),
+                )
         if request.expected_revision is not None:
             db.execute("UPDATE assets SET metadata_revision=metadata_revision+1, metadata_commit_id=? WHERE id=?",
                        (request.commit_id, request.asset_id))
