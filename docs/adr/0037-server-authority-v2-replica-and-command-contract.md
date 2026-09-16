@@ -298,8 +298,11 @@ client adopts it yet):
 - Preserved PC invariants: trimmed non-empty names, case-insensitive unique sibling
   names, parent must exist, no self/descendant cycles, no delete with children,
   appearance values restricted to the `folder_appearance.rs` key sets (compared by
-  test, not trusted), membership references existing Albums and committed Assets,
-  idempotent add/remove as explicit desired state. A sibling-name UNIQUE violation at
+  test, not trusted), ordinary membership adds require an existing Album and committed
+  Asset, and add/remove uses explicit desired state. Activation is the migration exception:
+  a trusted version-3 baseline may retain a relation to an Asset not yet materialized on
+  the server (for example local trash), while read projections hide that relation until
+  the Asset becomes committed. A sibling-name UNIQUE violation at
   a valid current revision returns `duplicateAlbumName`; only a stale revision returns
   `revisionConflict`, matching the PC's own distinction.
 - **Activation is bound to the staged snapshot, not to caller-supplied state.**
@@ -324,10 +327,13 @@ client adopts it yet):
   moves to trash and restoring it must return its Albums. A version-3 snapshot must
   state the field explicitly: an absent set is rejected as `missingAlbumMemberships`
   rather than read as empty, so a publisher cannot silently publish no canonical
-  membership. Activation rejects a membership whose Asset is not a committed server
-  Asset. The legacy `/v1/library/album-media` route is unchanged, so a trashed Asset
-  does not start appearing in display output just because canonical membership is now
-  richer.
+  membership. Activation retains canonical relations even when their Asset is not yet
+  materialized in the server Asset replica; this is required for local-trash relations
+  that must survive restore. Authority reads join only committed Assets, so such withheld
+  relations remain invisible until the Asset is materialized later. Ordinary new
+  membership commands still reject `desiredState=true` for a missing/uncommitted Asset.
+  The legacy `/v1/library/album-media` route is unchanged, so a trashed Asset does not
+  start appearing in display output just because canonical membership is now richer.
 - `POST /v1/albums/authority/activate` (publisher-only) writes the derived typed state,
   creates the `albums` epoch at cursor 0 and fences the legacy writer in that same
   transaction. Idempotent only for an identical retry (same digest and revision);
@@ -793,10 +799,12 @@ membership writes so its published collection snapshot can catch up without maki
 second source of truth.
 
 Viewer adds an `앨범` action with a hierarchy-preserving checkbox dialog. Local persistence
-changes the checkbox immediately; pending rows show `저장 대기`, blocked rows show
-`동기화 충돌` and cannot be toggled again in this batch, and the dialog re-reads the small
-native replica state about every five seconds. Conflict resolution (retry/cancel/choose a
-winner) is deliberately deferred instead of inventing an automatic merge policy.
+changes the checkbox immediately; pending rows show `저장 대기` and blocked rows show
+`동기화 충돌`. 2C-4 adds explicit conflict resolution instead of an automatic merge policy:
+`서버 상태 사용` discards the blocking intent, restores confirmed authority state and then
+replays later immutable FIFO intents for presentation; `내 선택 다시 적용` discards the
+blocker and creates a brand-new operation id/payload against the current authority identity
+and confirmed membership revision. Later queued payloads are never silently rebased.
 
 Verification covers atomic optimistic enqueue, same-state no-op suppression, FIFO revision
 prediction, SQLite restart durability, lost-response retry with the same stored payload,
@@ -819,10 +827,23 @@ and production Album authority/data were not used for the write fixture. The nor
 also updated in place from the intermediate v2 database to v3 and cold-started successfully
 with no fatal, missing-column or SQLite migration error in the startup log.
 
-**Still not done.** Android structural Album editing, user-facing conflict-resolution actions,
-and retirement of the legacy `album_replica`-backed publication path. The Viewer checkbox UI
-has automated coverage but has not been manually driven against an isolated full-app authority
-fixture; production Album data must not be used merely to obtain that UI acceptance evidence.
+**Production Album cutover, 2026-09-16.** After a verified SQLite online backup and a
+version-3 staged snapshot, production Album authority activated at epoch 1 / contract 1 with
+3 Albums and 39 canonical memberships. Seven baseline relations initially failed the committed-
+Asset activation guard; all seven were local-trash Assets, so activation was corrected to retain
+trusted staged relations while Album display continues to hide unmaterialized Assets. The focused
+server authority/asset regression suite passed 111 tests before the hotfix was deployed. PC then
+adopted the same authority, consumed the legacy Album publication generation locally instead of
+sending a fenced snapshot, and Android adopted through the existing Tailscale Serve connection.
+A reversible membership canary completed both directions: PC remove/add advanced the authority
+cursor 0 -> 2 and Android followed; Android remove/add advanced 2 -> 4 and PC followed. Final
+state restored the relation live at revision 5 with PC outbox 0 and all 39 memberships present.
+The user performed the frontend membership toggles; verification outside the UI used server/PC
+state and logs.
+
+**Still not done.** Android structural Album editing and retirement/removal of the legacy
+`album_replica` publication implementation. The path is fenced and no longer the writer after
+cutover, but code/schema removal remains a separate follow-up.
 
 ## Consequences
 Positive:
