@@ -616,7 +616,10 @@ public final class AlbumReplicaTest {
         public void clearMembers() { members.clear(); }
 
         @Override
-        public void writeOutbox(OutboxRow row) { outbox.put(row.seq, row); }
+        public void writeOutbox(OutboxRow row) {
+            if ("writeOutbox".equals(failOn)) throw new IllegalStateException("Injected outbox failure");
+            outbox.put(row.seq, row);
+        }
 
         @Override
         public void deleteOutbox(long seq) { outbox.remove(seq); }
@@ -873,6 +876,12 @@ public final class AlbumReplicaTest {
             membershipOutboxFlushesFifoAndConfirms(directory);
             lostCommandResponseRetriesIdenticalPayload(directory);
             membershipConflictBlocksDurablyAndStopsFifo(directory);
+            useServerResolutionRestoresAuthorityThenReplaysLaterFifo(directory);
+            useServerResolutionNeverSendsTheCanceledIntent(directory);
+            retryResolutionCreatesFreshOperationFromAuthorityRevision(directory);
+            retryResolutionIsAtomicAndDurable(directory);
+            replacementAuthorityResolutionUsesReplacementIdentity(directory);
+            malformedConflictResolutionNeverDestroysIntent(directory);
             malformedAcceptedMembershipOutcomeStaysPending(directory);
             blockedOutboxDefersReceive(directory);
             cleanOutboxFlushesBeforeReceive(directory);
@@ -1080,7 +1089,228 @@ public final class AlbumReplicaTest {
         store.close();
     }
 
-    private static void malformedAcceptedMembershipOutcomeStaysPending(Path directory) throws Exception {
+    private static String membershipConflict(String albumId, String assetId,
+                                             boolean desiredState, long revision) {
+        return "{\"detail\":{\"code\":\"revisionConflict\",\"authorityCursor\":9,\"current\":"
+                + member(albumId, assetId, desiredState, revision) + "}}";
+    }
+
+    private static void useServerResolutionRestoresAuthorityThenReplaysLaterFifo(Path directory)
+            throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+        "71000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.queueMembership("scope-a", "root", "asset_2", false,
+        "71000000-0000-0000-0000-000000000002", CLOCK.now());
+        store.queueMembership("scope-a", "root", "asset_2", true,
+        "71000000-0000-0000-0000-000000000003", CLOCK.now());
+        List<ReplicaDb.OutboxRow> before = store.outbox("scope-a");
+        String secondPayload = before.get(1).payload;
+        String thirdPayload = before.get(2).payload;
+        store.blockMembership("scope-a", before.get(0).seq, "revisionConflict",
+        membershipConflict("root", "asset_2", false, 8));
+
+        store.useServerMembership("scope-a", "root", "asset_2", CLOCK.now());
+
+        List<ReplicaDb.OutboxRow> after = store.outbox("scope-a");
+        equal(2, after.size(), "Using server state retires only the blocked intent");
+        equal("71000000-0000-0000-0000-000000000002", after.get(0).operationId,
+        "The next FIFO intent becomes the queue head");
+        equal(secondPayload, after.get(0).payload,
+        "A later immutable payload is never silently rebased");
+        equal(thirdPayload, after.get(1).payload,
+        "Every later immutable payload is retained byte-for-byte");
+        AlbumReplica.Member visible = store.memberships("scope-a", false).get("root:asset_2");
+        equal(8L, visible.entityRevision,
+        "Resolution first restores the authoritative revision from the conflict");
+        equal(true, visible.desiredState,
+        "Then later pending intents are replayed in FIFO order onto the authoritative base");
+        store.close();
+    }
+
+    private static void useServerResolutionNeverSendsTheCanceledIntent(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+                "72000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.queueMembership("scope-a", "child", "asset_1", false,
+                "72000000-0000-0000-0000-000000000002", CLOCK.now());
+        ReplicaDb.OutboxRow blocked = store.outbox("scope-a").get(0);
+        store.blockMembership("scope-a", blocked.seq, "revisionConflict",
+                membershipConflict("root", "asset_2", false, 8));
+        store.useServerMembership("scope-a", "root", "asset_2", CLOCK.now());
+        List<String> payloads = new ArrayList<>();
+        AlbumMembershipOutbox writer = new AlbumMembershipOutbox((path, payload) -> {
+            payloads.add(payload);
+            ReplicaDb.OutboxRow row = store.outbox("scope-a").get(0);
+            return acceptedMembership(row, true, row.expectedRevision + 1, 10, row.desiredState);
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush flush = writer.flush("scope-a");
+        equal(1, payloads.size(), "Resolving the blocker lets the next FIFO intent proceed");
+        check(!payloads.get(0).contains(blocked.operationId),
+                "Using server state never sends the canceled operation");
+        check(payloads.get(0).contains("72000000-0000-0000-0000-000000000002"),
+                "Only the later FIFO operation reaches the command endpoint");
+        equal(1, flush.sent, "The later FIFO intent is delivered after explicit resolution");
+        equal(0, flush.pending, "The queue drains after the later intent is accepted");
+        equal(0, flush.blocked, "The resolved conflict no longer blocks delivery");
+        equal(false, store.memberships("scope-a", false).get("root:asset_2").desiredState,
+                "The canceled relation converges to server state without an extra command");
+        store.close();
+    }
+
+    private static void retryResolutionCreatesFreshOperationFromAuthorityRevision(Path directory)
+    throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+        "73000000-0000-0000-0000-000000000001", CLOCK.now());
+        store.queueMembership("scope-a", "child", "asset_1", false,
+        "73000000-0000-0000-0000-000000000002", CLOCK.now());
+        ReplicaDb.OutboxRow original = store.outbox("scope-a").get(0);
+        long originalSeq = original.seq;
+        String originalPayload = original.payload;
+        store.blockMembership("scope-a", original.seq, "revisionConflict",
+        membershipConflict("root", "asset_2", false, 12));
+
+        LibraryReplicaStore.MembershipEdit retried = store.retryBlockedMembership(
+        "scope-a", "root", "asset_2",
+        "73000000-0000-0000-0000-000000000099", CLOCK.now());
+
+        check(retried.changed, "Explicit retry creates a fresh pending operation");
+        equal(12L, retried.expectedRevision,
+        "The fresh operation composes from the authoritative conflict revision");
+        List<ReplicaDb.OutboxRow> rows = store.outbox("scope-a");
+        equal(2, rows.size(), "Retry replaces the blocker without dropping later FIFO work");
+        ReplicaDb.OutboxRow fresh = rows.get(0);
+        equal(originalSeq, fresh.seq, "The fresh retry occupies the blocked intent's FIFO position");
+        equal("73000000-0000-0000-0000-000000000099", fresh.operationId,
+        "Retry uses a new operation id");
+        check(!fresh.payload.equals(originalPayload), "Retry never mutates or reuses the rejected payload");
+        check(fresh.payload.contains("\"expectedRevision\":12"),
+        "The fresh payload freezes the current authoritative revision");
+        equal("73000000-0000-0000-0000-000000000002", rows.get(1).operationId,
+        "Unrelated later work stays behind the fresh retry");
+        store.close();
+    }
+
+    private static void retryResolutionIsAtomicAndDurable(Path directory) throws Exception {
+        Path file = directory.resolve("membership-resolution.sqlite");
+        SqliteDb db = new SqliteDb(file);
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+        "74000000-0000-0000-0000-000000000001", CLOCK.now());
+        ReplicaDb.OutboxRow original = store.outbox("scope-a").get(0);
+        store.blockMembership("scope-a", original.seq, "revisionConflict",
+        membershipConflict("root", "asset_2", false, 14));
+        store.retryBlockedMembership("scope-a", "root", "asset_2",
+        "74000000-0000-0000-0000-000000000099", CLOCK.now());
+        store.close();
+
+        SqliteDb reopenedDb = new SqliteDb(file);
+        LibraryReplicaStore reopened = new LibraryReplicaStore(reopenedDb);
+        List<ReplicaDb.OutboxRow> durable = reopened.outbox("scope-a");
+        equal(1, durable.size(), "A restart sees exactly one resolved retry intent");
+        equal("pending", durable.get(0).state, "The fresh retry survives restart as pending");
+        equal("74000000-0000-0000-0000-000000000099", durable.get(0).operationId,
+        "The rejected operation id cannot reappear after a successful resolution commit");
+        equal(14L, reopened.memberships("scope-a", false).get("root:asset_2").entityRevision,
+        "The authoritative base revision commits with the fresh intent");
+        reopened.close();
+
+        MemoryDb failingDb = new MemoryDb();
+        LibraryReplicaStore failing = new LibraryReplicaStore(failingDb);
+        installReferenceBaseline(failing, "scope-a");
+        failing.queueMembership("scope-a", "root", "asset_2", true,
+        "74000000-0000-0000-0000-000000000010", CLOCK.now());
+        ReplicaDb.OutboxRow blocker = failing.outbox("scope-a").get(0);
+        failing.blockMembership("scope-a", blocker.seq, "revisionConflict",
+        membershipConflict("root", "asset_2", false, 15));
+        failingDb.failOn = "writeOutbox";
+        try {
+            failing.retryBlockedMembership("scope-a", "root", "asset_2",
+            "74000000-0000-0000-0000-000000000011", CLOCK.now());
+            throw new AssertionError("An interrupted resolution must roll back atomically");
+        } catch (IllegalStateException expected) {
+            check(true, "Injected resolution failure is observed");
+        }
+        List<ReplicaDb.OutboxRow> rolledBack = failing.outbox("scope-a");
+        equal(1, rolledBack.size(), "Rollback preserves the original blocker");
+        equal("blocked", rolledBack.get(0).state, "Rollback cannot turn the blocker pending");
+        equal(blocker.operationId, rolledBack.get(0).operationId,
+        "Rollback preserves the original immutable operation");
+        failing.close();
+    }
+
+    private static void replacementAuthorityResolutionUsesReplacementIdentity(Path directory)
+    throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+        "75000000-0000-0000-0000-000000000001", CLOCK.now());
+        List<AlbumReplica.Album> albums = Arrays.asList(
+        new AlbumReplica.Album("root", "Root", null, "folder", "blue", false, 1));
+        List<AlbumReplica.Member> members = Arrays.asList(
+        new AlbumReplica.Member("root", "asset_2", false, 21));
+        store.installBaseline(new AlbumReplica.Adopted("scope-a", OTHER_LIBRARY, 2, 1, 30,
+        CLOCK.now(), CLOCK.now()), albums, members, CLOCK.now());
+        equal("blocked", store.outbox("scope-a").get(0).state,
+        "Replacement authority blocks the stale identity before projection");
+
+        store.retryBlockedMembership("scope-a", "root", "asset_2",
+        "75000000-0000-0000-0000-000000000099", CLOCK.now());
+
+        ReplicaDb.OutboxRow fresh = store.outbox("scope-a").get(0);
+        equal(OTHER_LIBRARY, fresh.libraryId, "Retry binds to the replacement library identity");
+        equal(2L, fresh.epoch, "Retry binds to the replacement epoch");
+        equal(1L, fresh.contractVersion, "Retry binds to the replacement contract");
+        equal(21L, fresh.expectedRevision,
+        "Retry composes from the replacement authority's confirmed membership revision");
+        check(fresh.payload.contains("\"libraryId\":\"" + OTHER_LIBRARY + "\"")
+        && fresh.payload.contains("\"epoch\":2")
+        && fresh.payload.contains("\"expectedRevision\":21"),
+        "The frozen retry payload contains only replacement-authority identity and revision");
+        store.close();
+    }
+
+    private static void malformedConflictResolutionNeverDestroysIntent(Path directory) throws Exception {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        store.queueMembership("scope-a", "root", "asset_2", true,
+        "76000000-0000-0000-0000-000000000001", CLOCK.now());
+        ReplicaDb.OutboxRow original = store.outbox("scope-a").get(0);
+        store.blockMembership("scope-a", original.seq, "revisionConflict",
+        "{\"detail\":{\"code\":\"revisionConflict\",\"current\":{\"albumId\":\"other\"}}}");
+        try {
+            store.useServerMembership("scope-a", "root", "asset_2", CLOCK.now());
+            throw new AssertionError("Malformed conflict state must not be resolved by guessing");
+        } catch (IllegalStateException expected) {
+            check(true, "Malformed conflict state refuses server-state resolution");
+        }
+        try {
+            store.retryBlockedMembership("scope-a", "root", "asset_2",
+            "76000000-0000-0000-0000-000000000099", CLOCK.now());
+            throw new AssertionError("Malformed conflict state must not create a fresh command");
+        } catch (IllegalStateException expected) {
+            check(true, "Malformed conflict state refuses retry composition");
+        }
+        List<ReplicaDb.OutboxRow> rows = store.outbox("scope-a");
+        equal(1, rows.size(), "Malformed conflict data never deletes durable intent");
+        equal("blocked", rows.get(0).state, "Malformed conflict data leaves the blocker intact");
+        equal(original.operationId, rows.get(0).operationId,
+        "Malformed conflict data cannot replace the immutable operation id");
+        store.close();
+    }
+
+
+private static void malformedAcceptedMembershipOutcomeStaysPending(Path directory) throws Exception {
         MemoryDb db = new MemoryDb();
         LibraryReplicaStore store = new LibraryReplicaStore(db);
         installReferenceBaseline(store, "scope-a");

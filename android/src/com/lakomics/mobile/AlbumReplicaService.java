@@ -313,10 +313,10 @@ final class AlbumReplicaService {
      * Replica status for the native bridge.
      *
      * Read-only, and free of credentials, object keys and URLs: a diagnostic and
-     * adoption surface, not a control surface. There is no Album mutation operation on
-     * the bridge at all. The stored identity is read back from the replica rather than
-     * reported from the last pass, so a restarted process reports what it actually
-     * holds.
+     * adoption surface, not a control surface. Membership commands and explicit conflict
+     * resolution live on separate bridge operations. The stored identity is read back from
+     * the replica rather than reported from the last pass, so a restarted process reports
+     * what it actually holds.
      */
     JSONObject status() {
         try {
@@ -451,7 +451,7 @@ final class AlbumReplicaService {
     }
 
     // -----------------------------------------------------------------------
-    // Membership editor (2C-3)
+    // Membership editor and conflict resolution (2C-3 / 2C-4)
     // -----------------------------------------------------------------------
 
     JSONObject membershipState(String assetId) {
@@ -513,6 +513,31 @@ final class AlbumReplicaService {
                     desiredState, UUID.randomUUID().toString(), Instant.now().toString());
             JSONObject value = membershipState(assetId);
             if (edit.changed) request(true);
+            return value;
+        }
+    }
+
+    /** Resolve one durable membership conflict only after an explicit user choice. */
+    JSONObject resolveMembership(String assetId, String albumId, String action) {
+        if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")
+                || albumId == null || !albumId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Album membership identity");
+        }
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            if (scope.isEmpty()) throw new IllegalStateException("Not configured");
+            engine();
+            String now = Instant.now().toString();
+            if ("useServerState".equals(action)) {
+                store.useServerMembership(scope, albumId, assetId, now);
+            } else if ("applyAgain".equals(action)) {
+                store.retryBlockedMembership(scope, albumId, assetId,
+                        UUID.randomUUID().toString(), now);
+            } else {
+                throw new IllegalArgumentException("Invalid Album conflict action");
+            }
+            JSONObject value = membershipState(assetId);
+            request(true);
             return value;
         }
     }

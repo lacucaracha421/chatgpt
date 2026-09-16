@@ -52,6 +52,32 @@ describe('Album membership editor',()=>{
     expect(screen.getByText('동기화 충돌')).toBeTruthy();
   });
 
+  it('lets the user explicitly discard the blocked intent and refreshes to server state',async()=>{
+    const blocked=state([{...albums[0],desiredState:true,blocked:true,conflictCode:'revisionConflict'}]);
+    const resolved=state([{...albums[0],desiredState:false,blocked:false,conflictCode:null}]);
+    mocks.native.mockResolvedValueOnce(blocked).mockResolvedValueOnce(resolved);
+    render(<AlbumMembershipEditor assetId="asset_1" open onClose={()=>{}}/>);
+    await screen.findByText('동기화 충돌');
+    fireEvent.click(screen.getByRole('button',{name:'서버 상태 사용'}));
+    expect(mocks.native).toHaveBeenLastCalledWith('albumMembershipResolve',
+      {assetId:'asset_1',albumId:'root',action:'useServerState'});
+    await waitFor(()=>expect((screen.getByRole('checkbox',{name:'루트'}) as HTMLInputElement).checked).toBe(false));
+    expect(screen.queryByText('동기화 충돌')).toBeNull();
+  });
+
+  it('lets the user retry with a fresh native operation and refreshes to pending state',async()=>{
+    const blocked=state([{...albums[0],desiredState:true,blocked:true,conflictCode:'revisionConflict'}]);
+    const retried=state([{...albums[0],desiredState:true,pending:true,blocked:false,conflictCode:null}]);
+    mocks.native.mockResolvedValueOnce(blocked).mockResolvedValueOnce(retried);
+    render(<AlbumMembershipEditor assetId="asset_1" open onClose={()=>{}}/>);
+    await screen.findByText('동기화 충돌');
+    fireEvent.click(screen.getByRole('button',{name:'내 선택 다시 적용'}));
+    expect(mocks.native).toHaveBeenLastCalledWith('albumMembershipResolve',
+      {assetId:'asset_1',albumId:'root',action:'applyAgain'});
+    await waitFor(()=>expect(screen.getByText('저장 대기')).toBeTruthy());
+    expect(screen.queryByText('동기화 충돌')).toBeNull();
+  });
+
   it('refreshes small native state every five seconds while open',async()=>{
     vi.useFakeTimers();
     mocks.native.mockResolvedValueOnce(state([{...albums[0],desiredState:true,pending:true}]))

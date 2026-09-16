@@ -327,6 +327,155 @@ final class LibraryReplicaStore implements AlbumReplica.State {
     }
 
     /**
+     * Explicitly resolve the oldest blocked intent for one relation by accepting the
+     * authoritative state that rejected it. The rejected row is retired, then every later
+     * immutable intent is replayed as presentation only; none of those payloads is rebased.
+     */
+    void useServerMembership(String scope, String albumId, String assetId, String now) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority authority = requireAuthority(scope);
+                ReplicaDb.OutboxRow blocked = requireBlockedMembership(albumId, assetId);
+                AlbumReplica.Member authoritative = authoritativeMembership(authority, blocked);
+                db.writeMember(authoritative, now);
+                db.deleteOutbox(blocked.seq);
+                replayOutbox(authority, now);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Explicitly retry the oldest blocked intent for one relation as a brand-new command.
+     *
+     * The old payload and operation id are never modified or reused. The fresh row takes
+     * the old row's local sequence so it remains at the same FIFO position, but its CAS
+     * revision and authority identity are composed from the authority state known now.
+     */
+    MembershipEdit retryBlockedMembership(String scope, String albumId, String assetId,
+                                          String operationId, String now) {
+        if (operationId == null || operationId.isEmpty() || operationId.length() > 128) {
+            throw new IllegalArgumentException("Invalid operation id");
+        }
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority authority = requireAuthority(scope);
+                ReplicaDb.OutboxRow blocked = requireBlockedMembership(albumId, assetId);
+                AlbumReplica.Member authoritative = authoritativeMembership(authority, blocked);
+                long expected = authoritative.entityRevision;
+                String payload = membershipPayload(authority, operationId, albumId, assetId,
+                        blocked.desiredState, expected);
+                db.writeMember(authoritative, now);
+                db.deleteOutbox(blocked.seq);
+                db.writeOutbox(new ReplicaDb.OutboxRow(blocked.seq, operationId,
+                        MEMBERSHIP_COMMAND, albumId, assetId, authority.libraryId, authority.epoch,
+                        authority.contractVersion, blocked.desiredState, expected, payload,
+                        "pending", null, null, now));
+                replayOutbox(authority, now);
+                db.commit();
+                return new MembershipEdit(true, blocked.desiredState, expected, operationId);
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Caller holds {@link #lock} and an open database transaction. */
+    private ReplicaDb.StoredAuthority requireAuthority(String scope) {
+        ReplicaDb.StoredAuthority authority = db.authority();
+        if (authority == null || !authority.scope.equals(scope)) {
+            throw new IllegalStateException("Album authority is not adopted");
+        }
+        return authority;
+    }
+
+    /** Oldest blocked row for this relation. Caller holds {@link #lock}. */
+    private ReplicaDb.OutboxRow requireBlockedMembership(String albumId, String assetId) {
+        for (ReplicaDb.OutboxRow row : db.outbox()) {
+            if (row.blocked() && row.albumId.equals(albumId) && row.assetId.equals(assetId)) {
+                return row;
+            }
+        }
+        throw new IllegalStateException("Album membership is not blocked");
+    }
+
+    /**
+     * Recover the authoritative base represented by a durable conflict.
+     *
+     * A replacement authority has already installed a new baseline before stale-identity
+     * rows are blocked, so its current relation row is the authoritative base. For a
+     * same-identity revision conflict the server response itself is the only safe source
+     * of the newer relation state. Known terminal membership rejections happen after the
+     * previous confirmed toggle was observed and do not mutate the relation, so the
+     * pre-toggle state/revision remains the base until receive catches up structurally.
+     */
+    private AlbumReplica.Member authoritativeMembership(ReplicaDb.StoredAuthority authority,
+                                                        ReplicaDb.OutboxRow blocked) {
+        boolean sameIdentity = blocked.libraryId.equals(authority.libraryId)
+                && blocked.epoch == authority.epoch
+                && blocked.contractVersion == authority.contractVersion;
+        if (!sameIdentity) {
+            AlbumReplica.Member current = db.member(blocked.albumId, blocked.assetId);
+            return current == null
+                    ? new AlbumReplica.Member(blocked.albumId, blocked.assetId, false, 0)
+                    : current;
+        }
+        if ("revisionConflict".equals(blocked.conflictCode)) {
+            return revisionConflictMembership(blocked);
+        }
+        if ("invalidAlbumMembership".equals(blocked.conflictCode)
+                || "albumNotFound".equals(blocked.conflictCode)) {
+            return new AlbumReplica.Member(blocked.albumId, blocked.assetId,
+                    !blocked.desiredState, blocked.expectedRevision);
+        }
+        throw new IllegalStateException("Unsupported Album conflict state");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static AlbumReplica.Member revisionConflictMembership(ReplicaDb.OutboxRow blocked) {
+        try {
+            Object parsed = Json.parse(blocked.conflictDetail);
+            if (!(parsed instanceof Map)) throw new IllegalArgumentException("Expected object");
+            Map<String, Object> root = (Map<String, Object>) parsed;
+            Object detailValue = root.get("detail");
+            if (!(detailValue instanceof Map)) throw new IllegalArgumentException("Expected detail");
+            Map<String, Object> detail = (Map<String, Object>) detailValue;
+            if (!"revisionConflict".equals(detail.get("code"))) {
+                throw new IllegalArgumentException("Unexpected conflict code");
+            }
+            Object currentValue = detail.get("current");
+            if (!(currentValue instanceof Map)) throw new IllegalArgumentException("Expected current");
+            Map<String, Object> current = (Map<String, Object>) currentValue;
+            Object album = current.get("albumId");
+            Object asset = current.get("assetId");
+            Object desired = current.get("desiredState");
+            Object revision = current.get("entityRevision");
+            if (!(album instanceof String) || !(asset instanceof String)
+                    || !(desired instanceof Boolean) || !(revision instanceof Long)
+                    || !blocked.albumId.equals(album) || !blocked.assetId.equals(asset)
+                    || ((Long) revision) < 0 || ((Boolean) desired) == blocked.desiredState) {
+                throw new IllegalArgumentException("Invalid membership conflict projection");
+            }
+            return new AlbumReplica.Member((String) album, (String) asset,
+                    (Boolean) desired, (Long) revision);
+        } catch (RuntimeException malformed) {
+            throw new IllegalStateException("Album conflict state is incomplete", malformed);
+        }
+    }
+
+    /**
      * Reapply only intents composed for this exact authority identity.
      *
      * A replacement library/epoch/contract is a different revision lineage. Those rows

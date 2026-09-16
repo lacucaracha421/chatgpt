@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {FolderIcon,XMarkIcon} from '@heroicons/react/24/outline';
-import {Dialog,DialogDescription,IconButton} from './ui';
+import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {errorText,native} from './transport';
 
 export interface MembershipAlbum {
@@ -64,16 +64,31 @@ export function AlbumMembershipEditor({assetId,open,onClose}:{assetId:string;ope
     }catch(reason){setState(previous);setError(errorText(reason));}
     finally{setSaving(current=>{const next=new Set(current);next.delete(album.id);return next;});}
   };
+  const resolve=async(album:MembershipAlbum,action:'useServerState'|'applyAgain')=>{
+    if(!album.blocked||saving.has(album.id)||!state)return;
+    setSaving(current=>new Set(current).add(album.id));setError('');
+    try{
+      const next=await native<AlbumMembershipState>('albumMembershipResolve',{assetId,albumId:album.id,action});
+      setState(next);
+    }catch(reason){setError(errorText(reason));}
+    finally{setSaving(current=>{const next=new Set(current);next.delete(album.id);return next;});}
+  };
   return <Dialog open={open} title="앨범" onClose={onClose}>
     <DialogDescription className="sr-only">현재 자산을 앨범에 추가하거나 제거합니다. 오프라인 변경은 저장 대기 상태로 유지됩니다.</DialogDescription>
     <div className="dialog-header"><span>앨범에 추가</span><IconButton label="앨범 선택 닫기" icon={XMarkIcon} onClick={onClose}/></div>
     {!state&&!error&&<div className="loading-line" role="status" aria-label="앨범 상태를 불러오는 중"/>}
     {error&&<p className="error-message" role="alert">{error}</p>}
     {state&&!state.adopted&&<p className="hint">앨범 동기화가 준비된 뒤 편집할 수 있습니다.</p>}
-    {state?.adopted&&<div className="album-membership-list">{flattenMembershipAlbums(state.albums).map(({album,depth})=><label key={album.id} className={`album-membership-row${album.blocked?' is-blocked':''}`} style={{paddingLeft:12+depth*20}}>
-      <input type="checkbox" aria-label={album.name} checked={album.desiredState} disabled={album.blocked||saving.has(album.id)} onChange={()=>void toggle(album)}/>
-      <FolderIcon/><span className="album-membership-name">{album.name}</span>
-      {album.blocked?<small role="status">동기화 충돌</small>:album.pending?<small role="status">저장 대기</small>:null}
-    </label>)}</div>}
+    {state?.adopted&&<div className="album-membership-list">{flattenMembershipAlbums(state.albums).map(({album,depth})=><div key={album.id} className={`album-membership-entry${album.blocked?' is-blocked':''}`}>
+      <label className="album-membership-row" style={{paddingLeft:12+depth*20}}>
+        <input type="checkbox" aria-label={album.name} checked={album.desiredState} disabled={album.blocked||saving.has(album.id)} onChange={()=>void toggle(album)}/>
+        <FolderIcon/><span className="album-membership-name">{album.name}</span>
+        {album.blocked?<small role="status">동기화 충돌</small>:album.pending?<small role="status">저장 대기</small>:null}
+      </label>
+      {album.blocked&&<div className="album-membership-conflict-actions">
+        <Button size="sm" variant="secondary" disabled={saving.has(album.id)} onClick={()=>void resolve(album,'useServerState')}>서버 상태 사용</Button>
+        <Button size="sm" variant="secondary" disabled={saving.has(album.id)} onClick={()=>void resolve(album,'applyAgain')}>내 선택 다시 적용</Button>
+      </div>}
+    </div>)}</div>}
   </Dialog>;
 }
