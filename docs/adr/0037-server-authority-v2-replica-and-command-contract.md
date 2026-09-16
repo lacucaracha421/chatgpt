@@ -841,6 +841,23 @@ state restored the relation live at revision 5 with PC outbox 0 and all 39 membe
 The user performed the frontend membership toggles; verification outside the UI used server/PC
 state and logs.
 
+**Galaxy Tab production conflict-resolution acceptance, 2026-09-16.** The signed 2C-4
+APK was installed in place and both explicit conflict actions were exercised against the live
+Album authority with a reversible stale-revision scenario on the same `임시` membership.
+For `서버 상태 사용`, Android's queued remove first received `409 revisionConflict` after PC
+advanced the relation to revision 7; resolving the blocker produced no new command receipt or
+cursor advance, restored the server's live membership locally, and Android resumed polling from
+`after=7`. For `내 선택 다시 적용`, a second queued remove conflicted after PC advanced the
+relation to revision 9; resolving it generated a fresh operation against the current confirmed
+revision, the new `PUT /v1/albums/commands` returned 200, and authority advanced to cursor 10
+with `desired_state=false`, revision 10. PC then reconciled that exact state with outbox 0. The
+user restored the membership normally; final authority/PC state is cursor 11,
+`desired_state=true`, membership revision 11, PC outbox 0. The later live membership total is
+40 rather than the activation baseline's 39 because an independent `업로드용` membership was
+added earlier at authority sequence 5; server and PC agree on 40. All frontend conflict actions
+were performed by the user; command/receipt/cursor and PC convergence evidence came from the
+server and local replica state.
+
 **Still not done.** Android structural Album editing and retirement/removal of the legacy
 `album_replica` publication implementation. The path is fenced and no longer the writer after
 cutover, but code/schema removal remains a separate follow-up.
