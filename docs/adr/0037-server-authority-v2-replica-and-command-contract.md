@@ -1091,12 +1091,12 @@ publisher is deliberately not changed by this batch.
   remained 453 and Classification authority remained inactive.
 
 
-### Classification 2A.2 — digest-bound cutover fences, implemented locally 2026-09-16
+### Classification 2A.2 — digest-bound cutover fences, deployed inactive 2026-09-16
 
-Implementation checkpoint only. This code is **not deployed** and production Classification
-authority remains inactive. The production server still holds the validated v2 staging snapshot
-above; no activation, production mutation, client cutover or legacy retirement was performed by
-this batch.
+Implementation and inactive-deployment checkpoint. The 2A.2 server code is deployed, but production
+Classification authority remains **inactive**: there is still no `authority_domains` row for the
+domain and all six `classification_authority_*` tables remain empty. No activation, client cutover
+or legacy retirement was performed by this batch.
 
 - **Activation is explicit, publisher-only and bound to the stored staging bytes.**
   `POST /v1/classifications/authority/activate` accepts only `libraryId` and
@@ -1148,6 +1148,20 @@ this batch.
   focused Classification/staging/replication/mobile/capture regression set passed 339 tests / 94
   subtests before the final identity guard; the final full server suite passed **719 tests / 109
   subtests**.
+- **Inactive production deployment:** Git commit `da01a1f` was pushed to `main`; the deployed
+  `app.py`, `classification_authority.py` and `classification_snapshot.py` SHA-256 values are
+  `09be2c6e...88be0`, `a1606c29...dd037` and `a0bd34b7...0b0af`. Before replacement, the deployed
+  three-file baseline matched Git commit `40a3c4f` byte-for-byte and an SQLite online backup was
+  retained at `backups/classification-2a2-20260916T142415Z/` (`23,810,048` bytes,
+  `quick_check=ok`). The new process (`PID 1346986`) is active; raw and Tailscale HTTPS health both
+  return 200, and an unauthenticated activation probe returns 401 rather than 404, proving the new
+  route is loaded without invoking it. Production DB verification still shows zero Classification
+  authority/domain rows. During the pre-restart window the **old** server process accepted a normal
+  PC v2 publication at `2026-09-16T14:25:23Z`, advancing staging revision `453 -> 454`, assignments
+  `8,915 -> 8,918` and canonical digest to
+  `bce1a49f3d5bbb823806e01bfcd1e7f450749bf051d6deda75e52d8439b1b9ee`; this happened before the
+  2A.2 process started and is recorded as normal pre-activation staging churn, not as evidence of the
+  new fence behavior.
 
 
 Production migration, deployment, active-data writes, R2 cleanup and Git writes remain
