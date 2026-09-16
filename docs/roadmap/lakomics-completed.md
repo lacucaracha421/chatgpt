@@ -2,6 +2,18 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-16 — Cloud diagnostics acceptance
+
+### CLOUD-UI-001 — Durable Cloud status, diagnostics, and problem surface
+
+Status: `DONE` — real-world failure and automatic recovery acceptance completed 2026-09-16.
+
+- The production PC started from a clean state: no failed replication queue rows and no durable Cloud activity errors.
+- The user temporarily changed the Cloud endpoint from `http://100.76.119.29:32146` to the unreachable `http://127.0.0.1:9`. The UI surfaced **2** synchronization problems, matching the two independently persisted failures: Cloud → PC capture transport and PC → Cloud metadata publication.
+- Backend inspection confirmed `capture.last_error`/`problems=1` plus `replication.metadata_last_error`, while the asset replication queue still had **0 failed rows** and its existing **8 pending** rows were not converted into failures.
+- After restoring the real endpoint, the next normal capture and metadata publication cycles succeeded automatically. Both durable errors cleared to `NULL`, problem counts returned to zero, and the user confirmed the `동기화 문제 2개` navigation indicator disappeared without a manual repair action.
+- This closes the targeted acceptance requirement for durable problem surfacing and recovery. Future concrete Cloud failures should be treated as new regressions rather than reopening the completed full-backfill work.
+
 ## Closure checkpoint — 2026-09-15 — Server authority bookmark pilot
 
 ### CLOUD-AUTH-001 — staged server authority foundation

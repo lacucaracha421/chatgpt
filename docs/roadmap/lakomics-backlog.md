@@ -12,7 +12,7 @@ Reconciled 2026-09-15 after the production server-authority/bookmark pilot compl
 4. **SIMILARITY-004** — discover near-duplicates that already coexist in the library.
 5. **WORKS-001** — small Film polish: cast/director, release information, and related works.
 
-Verification-only, close opportunistically through normal use: `CHAR-AUTO-006`, `CLOUD-UI-001`, `EXT-011`, `EXT-012`.
+Verification-only, close opportunistically through normal use: `CHAR-AUTO-006`, `EXT-011`, `EXT-012`.
 
 Later / optional: AV source-and-candidate selection (`LONG-001`), image mirror/rotation matching (`SIMILARITY-002B`), Artist hub (`ARTIST-001`), optional provider work (`CATALOG-002B`), Jev decision-model evaluation (`AI-JEV-001`), and Zed IDE workflow evaluation (`DEV-ZED-001`). Similar-video calibration stays deferred until representative samples naturally appear.
 
@@ -187,12 +187,6 @@ Acceptance: a supported edit can be made with PC off, survives offline retry/res
 Status: `IN_PROGRESS` — server refresh worker and Android request/status UI already exist.
 
 Remaining is bounded live-source/native acceptance and fuller PC/server grouping reconciliation. This is a server operation lane, not an expansion of normal mobile editing. Keep it behind the authority/reconciliation rules proven by the archived `CLOUD-AUTH-001` contract where domains overlap.
-
-## CLOUD-UI-001 — Durable Cloud status, diagnostics, and problem surface
-
-Status: `VERIFY`
-
-Implementation exists. Keep only targeted real-world acceptance for durable error/status recovery; do not reopen completed replication/backfill work.
 
 ## MOBILE-003 — Safe global deletion / tombstone protocol
 
