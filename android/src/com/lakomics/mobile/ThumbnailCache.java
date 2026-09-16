@@ -8,7 +8,9 @@ import java.util.*;
 /** Private, disposable media bytes. Network work runs outside the disk lock. */
 final class ThumbnailCache {
  static final long LIMIT=1024L*1024*1024, MAX_FILE=16L*1024*1024;
- private static final long MAX_AGE=7L*24*60*60*1000;
+ /** The one native cache lifetime. WebView must never let a copy outlive it. */
+ static final long MAX_AGE_SECONDS=7L*24*60*60;
+ private static final long MAX_AGE=MAX_AGE_SECONDS*1000;
  interface Download {void write(File file)throws Exception;}
  private final File directory;
  private final long limit;

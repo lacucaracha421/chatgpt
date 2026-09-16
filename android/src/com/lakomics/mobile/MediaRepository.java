@@ -73,7 +73,10 @@ final class MediaRepository {
  }
  static boolean imageMime(String mime){return mime!=null && mime.matches("image/(jpeg|png|webp|gif|avif|heic|heif|bmp)");}
  private JSONObject local(Scope scope,String mime)throws Exception{
-  return new JSONObject().put("url","https://app.lakomics.local/media-cache/"+scope.generation+"/"+scope.key+"?mime="+Uri.encode(mime)+"&v="+System.nanoTime()).put("expires_in",240);
+  // The URL stays stable for the lifetime of one cached object so WebView can reuse its
+  // own copy. A replaced connection or a cleared cache moves the generation, which
+  // changes this URL, so the namespace remains invalidated by the existing paths.
+  return new JSONObject().put("url","https://app.lakomics.local/media-cache/"+scope.generation+"/"+scope.key+"?mime="+Uri.encode(mime)).put("expires_in",240);
  }
  JSONObject browser(String id,String variant,String mime,CancellationSignal signal)throws Exception{
   Scope scope=scope(id,variant);

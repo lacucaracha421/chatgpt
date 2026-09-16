@@ -18,17 +18,55 @@ afterEach(cleanup);
 describe('mobile catalog reads',()=>{
   it('ignores a reader response after the catalog becomes inactive even if transport ignores abort',async()=>{
     const original=mocks.api.getMockImplementation()!;
-    let resolve!:(value:unknown)=>void;
-    mocks.api.mockImplementation((path,...args)=>path.includes('/reader?')?new Promise(r=>{resolve=r;}):original(path,...args));
+    const deferred=Promise.withResolvers<unknown>();
+    let reads=0;
+    mocks.api.mockImplementation((path,...args)=>{
+      if(!path.includes('/reader?'))return original(path,...args);
+      if(++reads===1)return deferred.promise;
+      return original(path,...args);
+    });
     const backRef={current:null};
     const {rerender}=render(<Catalog active paused={false} backRef={backRef}/>);
     fireEvent.click(await screen.findByText('밤의 도서관'));
+    // The settled detail page has already started the one background manifest request.
     fireEvent.click(await screen.findByRole('button',{name:'읽기'}));
-    await waitFor(()=>expect(resolve).toBeTypeOf('function'));
+    await waitFor(()=>expect(reads).toBe(1));
     rerender(<Catalog active={false} paused={false} backRef={backRef}/>);
-    await act(async()=>resolve({publicationRevision:'p1',provider:'kHentai',providerWorkId:'42',manifestExpiresAt:1800000000,pages:[]}));
+    await act(async()=>deferred.resolve({publicationRevision:'p1',provider:'kHentai',providerWorkId:'42',manifestExpiresAt:1800000000,pages:[]}));
     rerender(<Catalog active paused={false} backRef={backRef}/>);
     expect(screen.queryByRole('button',{name:'읽기 닫기'})).toBeNull();
+    // The abandoned response was never cached, so the next read asks again and shows real pages.
+    fireEvent.click(await screen.findByRole('button',{name:'읽기'}));
+    await screen.findByRole('img',{name:'1페이지'});
+    expect(mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'))).toHaveLength(2);
+  });
+  it('never caches a prefetched manifest that belongs to another work',async()=>{
+    const original=mocks.api.getMockImplementation()!;
+    const deferred=Promise.withResolvers<unknown>();
+    let reads=0;
+    mocks.api.mockImplementation((path,...args)=>{
+      if(!path.includes('/reader?'))return original(path,...args);
+      return ++reads===1?deferred.promise:original(path,...args);
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByText('밤의 도서관'));await screen.findByText('40페이지 · 조회 1,200');
+    await waitFor(()=>expect(reads).toBe(1));
+    // The background response names a different work, so it must not become the cached manifest.
+    await act(async()=>deferred.resolve({publicationRevision:'p1',provider:'kHentai',providerWorkId:'77',manifestExpiresAt:1800000000,pages:[]}));
+    fireEvent.click(screen.getByRole('button',{name:'읽기'}));
+    await screen.findByRole('img',{name:'1페이지'});
+    expect(reads).toBe(2);
+  });
+  it('prefetches the reader manifest once and reuses it for the explicit read',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByText('밤의 도서관'));await screen.findByText('40페이지 · 조회 1,200');
+    await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'))).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button',{name:'읽기'}));
+    await screen.findByRole('button',{name:'읽기 닫기'});
+    expect(mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'))).toHaveLength(1);
+    // Manifest-only: the reader still asks the native layer for the pages it displays.
+    await screen.findByRole('img',{name:'1페이지'});
+    expect(mocks.native.mock.calls.filter(([op])=>op==='catalogImage').length).toBeLessThanOrEqual(3);
   });
   it('delivers a usable page while count is pending and keeps it on count failure',async()=>{
     let reject!:(e:Error)=>void;mocks.api.mockImplementation(path=>path.includes('/count?')?new Promise((_,r)=>{reject=r;}):Promise.resolve(page));

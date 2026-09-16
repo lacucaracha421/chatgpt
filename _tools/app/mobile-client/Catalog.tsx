@@ -16,6 +16,10 @@ import './Catalog.css';
 function lruGet<K,V>(map:Map<K,V>,key:K){const value=map.get(key);if(value!==undefined){map.delete(key);map.set(key,value);}return value;}
 function lruSet<K,V>(map:Map<K,V>,key:K,value:V,limit:number){map.delete(key);map.set(key,value);while(map.size>limit)map.delete(map.keys().next().value!);}
 
+/** The one background reader-manifest request for the currently selected work. */
+type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
+function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string){return `${revision}:${item.provider}:${item.providerWorkId}`;}
+
 function CatalogCover({item,revision,active}:{item:CatalogItem;revision:string;active:boolean}){
   const [url,setUrl]=useState(''),[failed,setFailed]=useState(false),[visible,setVisible]=useState(false);
   const host=useRef<HTMLSpanElement>(null);
@@ -69,15 +73,16 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
   const pendingWork=selected?bookmarks.hasPending(selected.provider,selected.providerWorkId):false;
   usePendingRetry(active&&!paused,pendingWork,bookmarks.flush);
   const pageCache=useRef(new Map<string,CatalogPage>()),detailCache=useRef(new Map<string,CatalogDetail>()),editionCache=useRef(new Map<string,CatalogEditions>()),readerCache=useRef(new Map<string,CatalogReaderManifest>());
-  const prefetches=useRef(new Map<string,AbortController>()),readerRequest=useRef<AbortController|null>(null);
+  const prefetches=useRef(new Map<string,AbortController>()),readerRequest=useRef<AbortController|null>(null),readerPrefetch=useRef<ReaderPrefetch|null>(null);
   const path=catalogPath(query,cursor),key=`${path}:${refresh}`;
 
   const readerOwner = `${active}:${paused}:${selected?.provider ?? ''}:${selected?.providerWorkId ?? ''}:${page?.publicationRevision ?? ''}:${page?.context ?? ''}:${key}`;
   const currentReaderOwner = useRef(readerOwner); currentReaderOwner.current = readerOwner;
   useEffect(() => {
     readerRequest.current?.abort(); readerRequest.current = null;
+    readerPrefetch.current?.controller.abort(); readerPrefetch.current = null;
     setReader(null); setReaderBusy(false); setReaderError('');
-    return () => { readerRequest.current?.abort(); };
+    return () => { readerRequest.current?.abort(); readerPrefetch.current?.controller.abort(); };
   }, [readerOwner]);
 
   const resetPublicationCaches=(revision:string|null)=>{
@@ -90,7 +95,7 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
     const controller=new AbortController();prefetches.current.set(next,controller);
     void api<CatalogPage>(next,controller.signal).then(value=>{if(!controller.signal.aborted&&value.publicationRevision===result.publicationRevision)lruSet(pageCache.current,next,value,12);}).catch(()=>{}).finally(()=>prefetches.current.delete(next));
   };
-  useEffect(()=>()=>{for(const controller of prefetches.current.values())controller.abort();readerRequest.current?.abort();},[]);
+  useEffect(()=>()=>{for(const controller of prefetches.current.values())controller.abort();readerRequest.current?.abort();readerPrefetch.current?.controller.abort();},[]);
   useEffect(()=>{
     if(!active||paused||committed.current===key)return;
     const cached=lruGet(pageCache.current,path);
@@ -130,13 +135,38 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
     void api<CatalogEditions>(requestPath,controller.signal).then(result=>{if(!controller.signal.aborted&&result.publicationRevision===page.publicationRevision){lruSet(editionCache.current,cacheKey,result,48);setEditions(result);}}).catch(reason=>{if(!controller.signal.aborted)setEditionError(catalogError(reason)||errorText(reason));});
     return()=>controller.abort();
   },[selected?.groupId,page?.context,page?.publicationRevision,editionCursor,active,paused,detailRefresh]);
+  useEffect(()=>{
+    // The detail page is already open, so the reader manifest can be fetched while the
+    // user decides. This is manifest-only: page bytes stay demand-driven.
+    if(!active||paused||!selected||!detail||!page?.context||!page.publicationRevision||reader)return;
+    const owner=readerOwner,revision=page.publicationRevision,cacheKey=readerCacheKey(selected,revision);
+    if(readerPrefetch.current?.cacheKey===cacheKey&&readerPrefetch.current.owner===owner)return;
+    readerPrefetch.current?.controller.abort();readerPrefetch.current=null;
+    if(lruGet(readerCache.current,cacheKey))return;
+    const controller=new AbortController();
+    const promise=api<CatalogReaderManifest>(catalogReaderPath(selected,page.context),controller.signal);
+    readerPrefetch.current={cacheKey,owner,controller,promise};
+    // A transport that ignores abort must still be unable to publish stale work.
+    void promise.then(result=>{
+      if(controller.signal.aborted||currentReaderOwner.current!==owner||result.publicationRevision!==revision||result.provider!==selected.provider||result.providerWorkId!==selected.providerWorkId)return;
+      lruSet(readerCache.current,cacheKey,result,24);
+    }).catch(()=>{/* Background work stays invisible; the 읽기 action is the retry path. */}).finally(()=>{if(readerPrefetch.current?.controller===controller)readerPrefetch.current=null;});
+  },[active,paused,selected,detail,page?.context,page?.publicationRevision,reader,readerOwner]);
 
   function closeReader(){readerRequest.current?.abort();readerRequest.current=null;setReaderBusy(false);setReader(null);}
   const loadReader=(force=false)=>{
-    if(!active||paused||!selected||!page?.context||!page.publicationRevision)return;const owner=readerOwner;const cacheKey=`${page.publicationRevision}:${selected.provider}:${selected.providerWorkId}`;
+    if(!active||paused||!selected||!page?.context||!page.publicationRevision)return;const owner=readerOwner;const cacheKey=readerCacheKey(selected,page.publicationRevision);
     if(!force){const cached=lruGet(readerCache.current,cacheKey);if(cached){setReader(cached);setReaderError('');return;}}
     readerRequest.current?.abort();const controller=new AbortController();readerRequest.current=controller;setReaderBusy(true);setReaderError('');
-    void api<CatalogReaderManifest>(catalogReaderPath(selected,page.context),controller.signal).then(result=>{
+    // An explicit Read adopts the request that is already in flight for this exact
+    // publication/work/context instead of asking the server for a second copy. A forced
+    // refresh discards that request and asks the server for a fresh manifest.
+    const running=readerPrefetch.current,reusable=!force&&running&&running.cacheKey===cacheKey&&running.owner===owner?running:null;
+    // A forced refresh must not adopt the background request, and the background request
+    // must not publish itself after the user asked for fresh data.
+    if(running&&!reusable){running.controller.abort();readerPrefetch.current=null;}
+    const request=reusable?reusable.promise:api<CatalogReaderManifest>(catalogReaderPath(selected,page.context),controller.signal);
+    void request.then(result=>{
       if(controller.signal.aborted||currentReaderOwner.current!==owner||result.publicationRevision!==page.publicationRevision||result.provider!==selected.provider||result.providerWorkId!==selected.providerWorkId)return;lruSet(readerCache.current,cacheKey,result,24);setReader(result);
     }).catch(reason=>{if(!controller.signal.aborted)setReaderError(catalogError(reason)||errorText(reason));}).finally(()=>{if(readerRequest.current===controller){readerRequest.current=null;setReaderBusy(false);}});
   };
