@@ -144,20 +144,7 @@ impl Library {
 
     pub fn list_classifications(&self) -> Result<Vec<ClassificationEntry>, LibraryError> {
         let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
-                    COALESCE(counts.asset_count, 0) AS asset_count
-             FROM classification_entries AS entry
-             LEFT JOIN (
-                 SELECT link.classification_id, COUNT(*) AS asset_count
-                 FROM asset_classifications AS link
-                 JOIN assets AS asset ON asset.id = link.asset_id
-                 WHERE asset.status = 'normal'
-                 GROUP BY link.classification_id
-             ) AS counts ON counts.classification_id = entry.id
-             ORDER BY entry.parent_id, entry.name COLLATE NOCASE, entry.id",
-        )?;
-        read_entries(&mut statement, [])
+        list_classifications_in(&connection)
     }
 
     pub fn delete_classification(&self, id: &str) -> Result<(), LibraryError> {
@@ -400,6 +387,25 @@ fn classification_has_role(
         params![id, role],
         |row| row.get(0),
     )?)
+}
+
+pub(crate) fn list_classifications_in(
+    connection: &Connection,
+) -> Result<Vec<ClassificationEntry>, LibraryError> {
+    let mut statement = connection.prepare(
+        "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
+                COALESCE(counts.asset_count, 0) AS asset_count
+         FROM classification_entries AS entry
+         LEFT JOIN (
+             SELECT link.classification_id, COUNT(*) AS asset_count
+             FROM asset_classifications AS link
+             JOIN assets AS asset ON asset.id = link.asset_id
+             WHERE asset.status = 'normal'
+             GROUP BY link.classification_id
+         ) AS counts ON counts.classification_id = entry.id
+         ORDER BY entry.parent_id, entry.name COLLATE NOCASE, entry.id",
+    )?;
+    read_entries(&mut statement, [])
 }
 
 fn find_classification(

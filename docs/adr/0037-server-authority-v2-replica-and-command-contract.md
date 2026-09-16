@@ -53,6 +53,34 @@ A domain should be the smallest set of state that needs one authority epoch,
 retention policy and atomic invariant. Do not create one domain per SQL table, and
 do not combine unrelated semantics merely to reuse transport code.
 
+### Classification authority checkpoint — 2026-09-16
+
+The next Classification cutover uses one `classifications` authority domain for
+the hierarchy, appearance and the direct Asset → Classification assignment. These
+are one atomic boundary because deleting a non-root classification reparents its
+directly assigned Assets to the parent, deleting a root clears those assignments,
+and moving a classification may derive a new `kind`. Splitting structure from the
+assignment would therefore require cross-domain atomicity and preserve the current
+stale-writer race.
+
+Classification assignment is **single-valued per Asset** in the authority contract:
+`asset_id -> classification_id | null`. This matches the shipped product operation
+and normal-library invariant; N:N organization remains the separate Album domain.
+Compatibility reads may continue exposing `classification_ids`, but authority-backed
+normal Assets produce only `[]` or `[classification_id]`. Activation must reject,
+not silently collapse, staged source data containing more than one Classification
+for the same Asset.
+
+The immutable `originals` role is carried in the Classification baseline. Authority
+v1 enforces the id-level protections server-side: the protected Classification may
+not be renamed, moved or deleted, and the role itself is not a mutable command. The
+existing rule that a character-series subtree may not be moved into `originals`
+remains a PC-derived Character constraint for this cutover; Classification Authority
+does not absorb Character-series state merely to enforce that rule. Non-PC structural
+Classification editing therefore remains disabled until every accepted structural
+command can be enforced by the authoritative contract. Mobile membership/assignment
+editing may be added independently once the domain is active and replicated.
+
 ## Decision 2: common command envelope, domain-specific semantics
 All mutable server-authority domains reuse the same command conventions:
 
@@ -889,6 +917,174 @@ Before calling the substrate proven beyond bookmarks, tests/evidence must cover:
 - a stale PC snapshot and a legacy full-DB restore cannot overwrite an active domain;
 - a fresh PC can pair to the same `library_id` in a different local path and rebuild;
 - Windows/Linux PC and Android can converge the same domain after restart/offline use.
+
+
+### Classification authority 2A — inactive server substrate, landed 2026-09-16
+
+Implementation checkpoint only. Classification authority is **not active anywhere**, no
+production data was touched, and no legacy publication/replication/capture route changed.
+
+- `server/lakomics-api/classification_authority.py` owns the `classifications` domain:
+  `classification_authority_state` (kind, name, parent, appearance, tombstone,
+  `entity_revision`), `classification_authority_assignments`, `classification_authority_roles`,
+  receipts, ordered changes and retention. It reuses the Safety Batch 0 `authority_domains`
+  registry and adds no generic canonical-state abstraction.
+- **Domain boundary**: hierarchy, appearance and the direct Asset -> Classification assignment
+  are one epoch because deleting a non-root classification reparents its directly assigned
+  Assets, deleting a root clears them, and a move may derive a new `kind`. Asset presentation
+  metadata and the trashed-vs-normal distinction are not Classification state; character-series
+  membership is not absorbed either.
+- **Assignment is single-valued**: `(library_id, asset_id) -> classification_id | null`, keyed
+  by the Asset, deliberately not Album's independent relation. An unassigned Asset is a retained
+  row at `entity_revision >= 1`, so clearing is a comparable value and two Classifications can
+  never both hold one Asset. Compatibility reads may still expose `classification_ids` as `[]`
+  or `[classification_id]`. 2A.1 must reject, not collapse, staged data assigning one Asset to
+  several Classifications.
+- Commands: `createClassification`, `renameClassification`, `moveClassification`,
+  `deleteClassification`, `updateClassificationAppearance`, `setAssetClassification`, with the
+  ADR-0037 envelope and per-command compare-and-set. Derived move semantics are preserved
+  (`root` under a parent becomes `tag`, `tag` at top level becomes `root`; a `work` keeps the
+  PC's parent rules), as are trimmed non-empty names, case-insensitive sibling uniqueness via a
+  **partial** unique index (a tombstone must not reserve its name), parent/kind validation,
+  cycle prevention, and the appearance key sets compared against `folder_appearance.rs` by test.
+- **Delete is one atomic change.** The PC moves every directly assigned Asset to the deleted
+  node's parent, or clears them for a root. That effect is expressed as **one** change row — the
+  Classification tombstone plus a deterministic assignment transition
+  (`fromClassificationId` -> `toClassificationId`, every matching assignment revision
+  incrementing by exactly one, with an `affectsAssignments` count) — so `GET /changes` can never
+  split a delete into an externally committable partial state. Emitting one row per affected
+  Asset would let a replica commit a page where the Classification is already deleted while only
+  some assignments moved. Because the baseline carries every assignment row, including unassigned
+  and not-yet-materialized ones, a replica at the preceding cursor applies the whole transition
+  in one local transaction with no point read, and one accepted state-changing command advances
+  the cursor exactly once. Idempotency remains owned solely by the
+  `(library_id, epoch, operation_id)` receipt.
+- **The protected role ships in the baseline.** `originals` is immutable authority state that no
+  command can produce, so it has no change row to be learned from; a small deterministic `roles`
+  projection is carried on every baseline page instead, so a fresh PC rebuilds the protected id
+  from server authority alone. It is carried whole rather than as a second paginated section
+  (v1 has exactly one role, bounded by the schema's own `CHECK`), and its worst-case encoded cost
+  is measured by test.
+- **Structural commands are publisher-only.** `setAssetClassification` accepts an ordinary client
+  credential because assignment is the normal organization action; create/rename/move/delete/
+  appearance require the publisher role, since R2 leaves the character-series-into-originals rule
+  to the PC and the server therefore cannot yet enforce every structural invariant itself. This
+  reuses the shipped `client_guard`/`publisher_guard` roles, and the legacy shared credential is a
+  client and never gains publisher capability. Authorization runs before envelope validation, so
+  an under-privileged caller cannot probe the structural command contract.
+- **Each baseline page is internally coherent.** The baseline route opens one explicit read
+  transaction covering the authority-row/cursor read and the page-state read; without it Python's
+  sqlite3 issues two independent snapshots, so a command committing between them would produce a
+  response labeled with an older `snapshotCursor` while carrying newer canonical state. The
+  cross-request `baselineChanged` check is unchanged.
+- **U1 boundary (v1)**: the immutable `originals` role is carried, and the server refuses
+  rename/move/delete of the protected id (and the role has no command at all). The PC-side rule
+  that a character-series subtree may not move into `originals` stays a Character-domain derived
+  constraint; Classification Authority does not carry series state to enforce it. Non-PC
+  structural editing therefore stays disabled, and Android structural editing is out of scope.
+- **No activation path ships in this batch**, not even an unused route. Routes are
+  `/v1/classifications/authority/{baseline,changes,commands}` under a dedicated prefix, because
+  `/v1/classifications` and `/v1/classifications/meta` already belong to the legacy published
+  snapshot; while no authority row exists every route returns `authorityInactive`, and the
+  baseline uses the Album contract (frozen `snapshotCursor`, `baselineChanged`, two ordered
+  sections, `complete` only on the final assignment page, `cursorExpired`/`cursorAhead`).
+- Verification: `tests/test_classification_authority.py` (114 tests, 48 subtests) covers inactive
+  behavior including a legacy-state immutability check, create/rename/move/appearance/delete
+  validation, derived kinds, cycles, sibling uniqueness, `originals` protection, assignment
+  create/change/clear, stale-revision conflicts, idempotent retry and operation-id reuse, baseline
+  paging and determinism, baseline + ordered-change replay equivalence, cursor semantics, the
+  role projection on every page, the client/publisher authorization boundary, and delete
+  atomicity under a changes-page limit smaller than the affected assignment count. Fourteen
+  mutations of the load-bearing rules were each detected, including a delete split back into
+  per-asset rows and a baseline missing its read transaction. The full server suite passed 635
+  tests.
+- **Follow-up (not fixed here): `album_authority.py` has the same baseline read pattern.** Its
+  baseline and assets routes read the authority row and then page state without an explicit read
+  transaction, so the same two-snapshot window exists there. It is outside this correction pass's
+  Classification scope and is recorded as a separate follow-up rather than widened into Album
+  code.
+
+### Classification 2A.1 — server-side staging contract, landed 2026-09-16
+
+Implementation checkpoint only. Classification authority is **still not active anywhere**, no
+production data was touched, and the shipped PC publisher/legacy readers remain wire-compatible.
+Publication timestamps are now required to be timezone-aware so staleness can be ordered by instant;
+the shipped publisher already emits RFC3339 timestamps with an offset.
+
+This is the **server-first half** of the rolling upgrade: the server now accepts an
+authority-ready snapshot while continuing to accept the shipped version-1 publisher unchanged,
+so a new PC build can never publish a shape an older deployed server would reject. The PC
+publisher is deliberately not changed by this batch.
+
+- `server/lakomics-api/classification_snapshot.py` owns staging. `PUT /v1/classifications` now
+  reads its body raw so the size guard applies before parsing and so "collection absent" stays
+  distinguishable from "collection explicitly empty".
+- **Version 1 keeps the shipped wire/data shape**: an absent `snapshotVersion` means 1, its entries
+  are stored **verbatim and opaque**, its 512 KiB bound is unchanged, and no canonical collection is
+  added. The new publication-order check requires an aware timestamp; the shipped publisher already
+  satisfies that. Validating v1 entries would break a deployed client — the publisher always
+  serializes the display-only `assetCount`, and can carry an appearance key predating the current
+  UI. v1 bytes are a display/publication representation, not canonical staging input.
+- **Version 2 is fully validated** and must state `assignments` and `roles` explicitly; an absent
+  collection is rejected with `missingClassificationAssignments`/`missingClassificationRoles`
+  rather than defaulted, because defaulting it would let a publisher silently stage "no
+  assignment" or "no protected role" and activation would read that as real user state.
+  Unsupported versions are rejected with `unsupportedClassificationSnapshotVersion`.
+- Entry `kind` is **preserved from the publisher and validated**, never derived: `work` is a legal
+  schema kind that cannot be reconstructed from the parent alone. Staging also enforces id
+  validity/uniqueness, trimmed non-empty bounded names, root/work/tag parent compatibility
+  (including for a parentless entry), parent existence, no self-parent or cycle,
+  case-insensitive sibling-name uniqueness, and renderable appearance keys — so a structurally
+  invalid snapshot is refused instead of normalized into a different hierarchy.
+- Assignment is single-valued (`assetId -> classificationId`): a duplicate Asset is
+  `duplicateClassificationAssignment`, and a reference to a Classification outside the staged set
+  is rejected. A staged assignment deliberately does **not** require the Asset to exist or be
+  committed server-side, so a locally trashed Asset keeps its assignment (the Album activation
+  precedent). The ordinary `setAssetClassification` command keeps its committed-Asset rule.
+- `roles` must carry exactly one supported `originals` role naming a staged Classification
+  (`missingClassificationOriginalsRole`, `duplicateClassificationRole`,
+  `unsupportedClassificationRole`, `invalidClassificationRole`). There is no role mutation API.
+- **Staleness**: one `BEGIN IMMEDIATE` covers the stored-timestamp read and the replacement. A
+  strictly newer instant wins; an equal instant is accepted only when the canonical staging state
+  is identical (an idempotent retry), otherwise `staleClassificationSnapshot`; an uninterpretable
+  legacy stored instant imposes no ordering, so a publisher is never wedged by a server-side
+  timestamp problem. Timestamps are normalized to UTC, so order is by instant, not by text.
+- **Bound**: `MAX_STAGING_BYTES = 96 MiB` (Album's shared publisher-only bound) replaces 512 KiB,
+  which could not hold the measured 8,907 assignments. Measured by test at maximum row width: the
+  active library encodes to ~2.57 MiB and 20,000 classifications plus 100,000 assignments to
+  ~57.5 MiB. Exceeding it is a coded 413, never truncation.
+- **Canonical authority identity is separated from the legacy display projection.** Version 2 stores
+  normalized authority `entries` plus an internal `legacyEntries` sidecar preserving publisher order
+  and display-only fields such as `assetCount`. `snapshotDigest` is recomputed from the stored
+  canonical `entries`/`assignments`/`roles` only, excluding `published_at` and `legacyEntries`, so
+  display-count churn cannot change authority identity. `GET /meta` gains additive
+  `snapshotVersion`/`snapshotDigest`; the legacy `revision` continues to count display-entry changes.
+- **Legacy reads are unchanged in projection**: `GET /v1/classifications` returns the preserved
+  display `entries`/`published_at`/`revision` explicitly, while a stored version-2 row never leaks
+  `assignments`, `roles`, `snapshotVersion` or canonical-only normalization to an old reader. The
+  extension bootstrap and the mobile readers keep working while the domain is inactive.
+- **Staging is not activation**: no `authority_domains` row is created, no
+  `classification_authority_*` canonical state is populated, the legacy writer is not fenced, and
+  there is no activation route. Staging stores a validated source.
+- Verification: `tests/test_classification_snapshot_staging.py` (75 tests, 30 subtests) covers v1
+  acceptance/verbatim storage/bound/revision semantics, v2 acceptance and storage, explicit
+  collections, unsupported versions, all entry/hierarchy/appearance rules, assignment cardinality
+  and unmaterialized Assets, role requirements, staleness and offset normalization, digest
+  determinism, legacy read compatibility, non-activation, and the measured bounds. Five mutations
+  of the load-bearing rules were each detected. A final review also pinned non-object JSON, strict
+  integer snapshot versions, and the split between canonical authority entries and legacy display
+  entries. The full server suite passed 711 tests / 109 subtests.
+- **PC publisher v2 is implemented locally after the server-first deployment.**
+  `ClassificationSnapshotPublish` now sends `snapshotVersion: 2`, canonical `assignments` from
+  `asset_classifications` with no Asset-status predicate, and immutable `roles` from
+  `classification_roles`. Entries, assignments and roles are read under one SQLite transaction,
+  so one upload cannot mix hierarchy from one local instant with assignments from another. The
+  legacy `assetCount` projection still counts normal Assets only. Focused verification passed all
+  26 Cloud Capture tests plus the two Classification-list regressions. No production v2 snapshot
+  has been published yet; that first staging write remains a separately authorized production-data
+  operation.
+
+
 
 Production migration, deployment, active-data writes, R2 cleanup and Git writes remain
 separately authorized operations under repository policy.

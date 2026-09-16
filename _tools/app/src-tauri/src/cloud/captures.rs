@@ -6,8 +6,8 @@ use uuid::Uuid;
 use super::{
     client::CloudClient,
     models::{
-        ClassificationSnapshotPublish, RemoteCapture, RemoteCaptureKind,
-        SavedXMediaSnapshotPublish,
+        ClassificationAssignment, ClassificationRole, ClassificationSnapshotPublish,
+        RemoteCapture, RemoteCaptureKind, SavedXMediaSnapshotPublish,
     },
 };
 use crate::library::{
@@ -236,20 +236,55 @@ impl Library {
         Ok(client.list_pending_captures(&token)?.len() as u32)
     }
 
-    /// 현재 분류 상태의 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의
-    /// 원본이며 VPS는 모바일 확장이 PC 없이 donut을 그리기 위한 최소 사본만
-    /// 저장한다. 게시 실패는 수집 폴을 막지 않는다.
+    /// 현재 분류 상태의 authority-ready v2 스냅샷을 VPS staging에 게시한다.
+    /// 게시 실패는 수집 폴을 막지 않으며, 실제 authority activation은 별도 단계다.
     fn publish_classification_snapshot_with(
         &self,
         client: &CloudClient,
         token: &str,
     ) -> Result<(), LibraryError> {
-        let entries = self.list_classifications()?;
+        const SNAPSHOT_VERSION: i64 = 2;
+        let (entries, assignments, roles) = {
+            let mut connection = self.connection()?;
+            let transaction = connection.transaction()?;
+            let entries = crate::library::list_classifications_in(&transaction)?;
+            // Canonical assignment intentionally has no Asset-status predicate: trash
+            // retains its Classification so restore returns to the same folder.
+            let assignments = transaction
+                .prepare(
+                    "SELECT asset_id,classification_id FROM asset_classifications
+                     ORDER BY asset_id,classification_id",
+                )?
+                .query_map([], |row| {
+                    Ok(ClassificationAssignment {
+                        asset_id: row.get(0)?,
+                        classification_id: row.get(1)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let roles = transaction
+                .prepare(
+                    "SELECT role,classification_id FROM classification_roles
+                     ORDER BY role",
+                )?
+                .query_map([], |row| {
+                    Ok(ClassificationRole {
+                        role: row.get(0)?,
+                        classification_id: row.get(1)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            transaction.commit()?;
+            (entries, assignments, roles)
+        };
         let published_at = chrono::Utc::now().to_rfc3339();
         client.publish_classification_snapshot(
             token,
             &ClassificationSnapshotPublish {
+                snapshot_version: SNAPSHOT_VERSION,
                 entries: &entries,
+                assignments: &assignments,
+                roles: &roles,
                 published_at: &published_at,
             },
         )

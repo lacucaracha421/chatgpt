@@ -171,13 +171,30 @@ pub(crate) struct AcknowledgeCaptureRequest {
     pub imported_at: String,
 }
 
-/// PC 라이브러리가 VPS에 게시하는 분류 스냅샷. 모바일 확장의 donut은
-/// entries(레이아웃·핀은 확장 로컬 상태)만 소비하므로 확장 API 계약인
-/// camelCase ClassificationEntry 배열을 그대로 전달한다. VPS는 이 스냅샷의
-/// 보관소일 뿐 분류 데이터의 원본이 아니다.
+/// PC 라이브러리가 VPS에 게시하는 분류 staging 스냅샷. legacy readers는
+/// `entries`만 소비하지만 v2는 향후 authority activation이 검증할 canonical
+/// assignment/role state도 함께 전달한다.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationAssignment {
+    pub asset_id: String,
+    pub classification_id: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationRole {
+    pub role: String,
+    pub classification_id: String,
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct ClassificationSnapshotPublish<'a> {
+    #[serde(rename = "snapshotVersion")]
+    pub snapshot_version: i64,
     pub entries: &'a [crate::library::models::ClassificationEntry],
+    pub assignments: &'a [ClassificationAssignment],
+    pub roles: &'a [ClassificationRole],
     pub published_at: &'a str,
 }
 

@@ -1154,6 +1154,52 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
         })
         .unwrap();
 
+    let classified_source = temp.path().join("classified.png");
+    fs::write(&classified_source, distinct_png_bytes(77)).unwrap();
+    library
+        .ingest_media(crate::library::models::IngestMediaRequest {
+            source_path: classified_source,
+            classification_id: None,
+            source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: crate::library::models::ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000003".into(),
+        })
+        .unwrap();
+
+    // Classification snapshot v2 must carry canonical assignment and role state even
+    // when the Asset is locally trashed. The display `assetCount` still excludes trash.
+    let (asset_id, originals_id): (String, String) = {
+        let connection = library.connection().unwrap();
+        let asset_id = connection
+            .query_row("SELECT id FROM assets WHERE source_url IS NULL ORDER BY id LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        let originals_id = connection
+            .query_row(
+                "SELECT classification_id FROM classification_roles WHERE role='originals'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        (asset_id, originals_id)
+    };
+    library
+        .set_asset_classification(crate::library::models::SetAssetClassification {
+            asset_ids: vec![asset_id.clone()],
+            classification_id: Some(originals_id.clone()),
+        })
+        .unwrap();
+    library
+        .connection()
+        .unwrap()
+        .execute("UPDATE assets SET status='trash' WHERE id=?1", [&asset_id])
+        .unwrap();
+
     let result = library
         .sync_next_cloud_capture_cycle_with(&CloudClient::new(&base_url).unwrap(), "test-token")
         .unwrap();
@@ -1175,6 +1221,26 @@ fn snapshot_publish_serializes_saved_keys_and_failure_does_not_fail_sync_cycle()
             "/v1/library/album-snapshot",
         ]
     );
+    let classification_body: Value = serde_json::from_str(&requests[1].1).unwrap();
+    assert_eq!(classification_body["snapshotVersion"], json!(2));
+    assert!(classification_body["published_at"].is_string());
+    let assignments = classification_body["assignments"].as_array().unwrap();
+    assert_eq!(assignments, &[json!({
+        "assetId": asset_id,
+        "classificationId": originals_id,
+    })]);
+    assert_eq!(classification_body["roles"], json!([{
+        "role": "originals",
+        "classificationId": originals_id,
+    }]));
+    let originals = classification_body["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == originals_id)
+        .unwrap();
+    assert_eq!(originals["assetCount"], json!(0));
+
     let saved_body: Value = serde_json::from_str(&requests[2].1).unwrap();
     assert_eq!(saved_body, json!({ "keys": ["123:2"] }));
 }

@@ -21,6 +21,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstrai
 
 import album_authority
 import authority
+import classification_snapshot
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
@@ -731,8 +732,10 @@ def _classification_snapshot() -> dict:
         row = db.execute("SELECT payload,revision FROM classification_snapshots WHERE singleton=1").fetchone()
     if row is None:
         return {"entries": [], "revision": 0}
-    payload = json.loads(row["payload"])
-    return {"entries": payload.get("entries", []), "revision": int(row["revision"])}
+    # Entries only, for any stored version: the extension bootstrap must keep working
+    # without understanding canonical collections or `snapshotVersion`.
+    return {"entries": classification_snapshot.legacy_entries(row["payload"]),
+            "revision": int(row["revision"])}
 
 
 @app.post("/v1/extension/pairings")
@@ -1290,52 +1293,107 @@ def acknowledge_capture_imported(
 
 
 # --- Classification snapshot (PC -> VPS publish, extension read) -----------
-# The PC Lakomics app owns classification data; the VPS only stores the latest
-# published snapshot so the mobile extension needs no live PC connection.
-
-class ClassificationSnapshotPublish(BaseModel):
-    entries: list[dict]
-    published_at: str
-
-
-MAX_SNAPSHOT_BYTES = 512 * 1024
+# The PC Lakomics app owns classification data; the VPS stages the latest published
+# snapshot so the mobile extension needs no live PC connection.
+#
+# Versioning (2A.1, server-first half of the classification rolling upgrade):
+#
+# * version 1 is the shipped body (`entries` + `published_at`); an absent
+#   `snapshotVersion` means 1, so the deployed publisher needs no change;
+# * version 2 adds canonical `assignments` and `roles`, and is what a later activation
+#   derives authority state from.
+#
+# The body is read raw rather than through a Pydantic model so the size bound can be
+# applied before parsing, and so an absent canonical collection stays distinguishable
+# from an explicitly empty one.
+MAX_LEGACY_SNAPSHOT_BYTES = 512 * 1024
 
 
 @app.put("/v1/classifications")
-def publish_classification_snapshot(
-    snapshot: ClassificationSnapshotPublish,
+async def publish_classification_snapshot(
+    request: Request,
     authorization: str | None = Header(default=None),
 ):
     require_auth(authorization)
 
-    payload = snapshot.model_dump_json()
-    if len(payload) > MAX_SNAPSHOT_BYTES:
-        raise HTTPException(status_code=413, detail="Snapshot too large")
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > classification_snapshot.MAX_STAGING_BYTES:
+                raise HTTPException(status_code=413, detail="Snapshot too large")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > classification_snapshot.MAX_STAGING_BYTES:
+            raise HTTPException(status_code=413, detail="Snapshot too large")
+        data.extend(chunk)
+    if not data:
+        raise HTTPException(status_code=422, detail={"code": "invalidClassificationSnapshot",
+                                                     "message": "분류 스냅샷을 읽을 수 없습니다."})
+    try:
+        body = json.loads(data)
+    except (ValueError, UnicodeError):
+        raise HTTPException(status_code=422, detail={"code": "invalidClassificationSnapshot",
+                                                     "message": "분류 스냅샷을 읽을 수 없습니다."})
+
+    # The version decides how strictly the body is validated and how large it may be, so
+    # it is resolved before anything else reads the content.
+    version = classification_snapshot.resolve_version(body)
+    if version < classification_snapshot.AUTHORITY_READY_VERSION:
+        # Version 1 keeps its shipped bound and its opaque entries: the deployed
+        # publisher is authoritative for its own display shape, and tightening either
+        # would be a behavior change to a client this batch must not affect.
+        if len(data) > MAX_LEGACY_SNAPSHOT_BYTES:
+            raise HTTPException(status_code=413, detail="Snapshot too large")
+
+    # Staging stores a validated source, never activated authority state: no
+    # `authority_domains` row is written here and the legacy writer is not fenced.
+    staged_version, payload, snapshot_digest = classification_snapshot.stage(body)
+    incoming_published_at = classification_snapshot._parse_published_at(body["published_at"])
 
     with get_db() as db:
-        row = db.execute("SELECT payload,revision FROM classification_snapshots WHERE singleton=1").fetchone()
-        revision = 1
-        if row is not None:
-            try:
-                previous_entries = json.loads(row["payload"]).get("entries", [])
-            except (TypeError, ValueError, AttributeError):
-                previous_entries = []
-            revision = int(row["revision"]) + (previous_entries != snapshot.entries)
-        db.execute(
-            """
-            INSERT INTO classification_snapshots (singleton, payload, published_at, updated_at, revision)
-            VALUES (1, ?, ?, ?, ?)
-            ON CONFLICT(singleton) DO UPDATE SET
-                payload = excluded.payload,
-                published_at = excluded.published_at,
-                updated_at = excluded.updated_at,
-                revision = excluded.revision
-            """,
-            (payload, snapshot.published_at, now_iso(), revision),
-        )
-        db.commit()
+        # One write transaction covers the staleness read and the replacement, so two
+        # concurrent publications cannot both pass the check and then both write.
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            row = db.execute(
+                "SELECT payload,published_at,revision FROM classification_snapshots WHERE singleton=1"
+            ).fetchone()
+            revision = 1
+            if row is not None:
+                decision = classification_snapshot.stale_check(
+                    row["published_at"], row["payload"], incoming_published_at, snapshot_digest)
+                # The legacy revision counts *display* entry changes and is preserved
+                # independently from authority digest identity. Version 2 keeps a
+                # legacyEntries sidecar precisely so display-only fields such as
+                # assetCount do not disappear or spuriously bump on every publication.
+                display_changed = classification_snapshot.entries_changed(
+                    row["payload"], body["entries"])
+                revision = int(row["revision"]) + int(display_changed)
+                if decision == "identical" and not display_changed:
+                    # An exact display+canonical retry at the same instant is idempotent.
+                    revision = int(row["revision"])
+            db.execute(
+                """
+                INSERT INTO classification_snapshots (singleton, payload, published_at, updated_at, revision)
+                VALUES (1, ?, ?, ?, ?)
+                ON CONFLICT(singleton) DO UPDATE SET
+                    payload = excluded.payload,
+                    published_at = excluded.published_at,
+                    updated_at = excluded.updated_at,
+                    revision = excluded.revision
+                """,
+                (payload, body["published_at"], now_iso(), revision),
+            )
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
 
-    return {"ok": True, "published_at": snapshot.published_at, "revision": revision}
+    return {"ok": True, "snapshotVersion": version, "snapshotDigest": snapshot_digest,
+            "published_at": body["published_at"], "revision": revision}
 
 
 @app.get("/v1/classifications")
@@ -1352,9 +1410,13 @@ def get_classification_snapshot(
     if row is None:
         raise HTTPException(status_code=404, detail="No classification snapshot published yet")
 
+    # The legacy shape is returned explicitly. A version-2 row keeps its canonical
+    # `assignments`/`roles` in the same stored payload, and existing readers must neither
+    # receive them nor be required to understand `snapshotVersion`.
     payload = json.loads(row["payload"])
-    payload["revision"] = int(row["revision"])
-    return payload
+    return {"entries": classification_snapshot.legacy_entries(row["payload"]),
+            "published_at": payload.get("published_at"),
+            "revision": int(row["revision"])}
 
 
 @app.get("/v1/classifications/meta")
@@ -1365,13 +1427,20 @@ def classification_snapshot_meta(
 
     with get_db() as db:
         row = db.execute(
-            "SELECT published_at, updated_at, revision FROM classification_snapshots WHERE singleton = 1"
+            "SELECT published_at, updated_at, revision, payload FROM classification_snapshots WHERE singleton = 1"
         ).fetchone()
 
     if row is None:
         raise HTTPException(status_code=404, detail="No classification snapshot published yet")
 
-    return dict(row)
+    # `snapshotVersion`/`snapshotDigest` are additive: an older reader that only knows
+    # published_at/updated_at/revision keeps working, and a publisher can observe which
+    # version the server currently holds before staging a new one.
+    payload = json.loads(row["payload"])
+    return {"published_at": row["published_at"], "updated_at": row["updated_at"],
+            "revision": row["revision"],
+            "snapshotVersion": payload.get("snapshotVersion", classification_snapshot.SNAPSHOT_VERSION),
+            "snapshotDigest": classification_snapshot.stored_digest(row["payload"])}
 
 
 # --- Saved X media snapshot (PC -> VPS publish, extension read) ------------
@@ -2630,3 +2699,15 @@ from album_authority import register_album_authority
 
 startup_album_authority = register_album_authority(
     app, get_db, require_client, require_publisher, asset_item=mobile_asset_item)
+
+# Classification authority substrate (2A). Startup only creates empty tables, and
+# the module deliberately ships no activation route: the domain stays PC-owned until
+# a later batch stages a baseline, fences the legacy writers and activates an epoch.
+# Every authority read/command route reports `authorityInactive` while no
+# `authority_domains(domain='classifications')` row exists, so the legacy snapshot,
+# replication and capture paths above are untouched. Structural commands require the
+# publisher role; only `setAssetClassification` accepts an ordinary client credential.
+from classification_authority import register_classification_authority
+
+startup_classification_authority = register_classification_authority(
+    app, get_db, require_client, require_publisher)

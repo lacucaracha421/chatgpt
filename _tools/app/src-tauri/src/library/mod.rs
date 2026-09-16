@@ -61,6 +61,7 @@ pub(crate) mod character_worker;
 pub mod character_workflow;
 pub mod characters;
 mod classification;
+pub(crate) use classification::list_classifications_in;
 pub mod cloud_preflight;
 pub(crate) mod collection;
 pub(crate) mod collection_source;
