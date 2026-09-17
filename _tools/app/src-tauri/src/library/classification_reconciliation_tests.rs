@@ -276,6 +276,61 @@ fn adopt_one_root(library: &Library, cursor: i64) {
         .unwrap();
 }
 
+/// Make `id` an Asset that Character reconsideration actually applies to.
+///
+/// `character_autotag::enqueue` is deliberately a no-op for an Asset that is not a
+/// normal image or that resolves to no Character scope, so a test that wants to observe
+/// a queued reconsideration has to build both.
+fn make_character_eligible(library: &Library, id: &str, series: &str) {
+    let connection = library.connection().unwrap();
+    connection
+        .execute(
+            "UPDATE assets SET media_kind = 'image', status = 'normal' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+    // The series root must sit outside the `originals` role subtree: Character scope
+    // resolution excludes that whole subtree, so a series under it would make every
+    // enqueue a no-op and the test would prove nothing.
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO classification_entries (id, kind, name, parent_id, created_at)
+             VALUES (?1, 'root', ?1, NULL, '2026-09-16T00:00:00Z')",
+            [series],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO character_series (classification_id, auto_classify)
+             VALUES (?1, 1)",
+            [series],
+        )
+        .unwrap();
+}
+
+/// The Asset's durable Character reconsideration job, if one exists.
+fn character_job(connection: &Connection, asset_id: &str) -> Option<(String, String, String)> {
+    connection
+        .query_row(
+            "SELECT state, cause, classification_ids FROM character_autotag_jobs
+             WHERE asset_id = ?1",
+            [asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .ok()
+}
+
+/// Any legacy relation-replication intent queued for an Asset.
+fn cloud_queue_rows(connection: &Connection, asset_id: &str) -> i64 {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM cloud_sync_queue WHERE entity_id = ?1",
+            [asset_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
 // ---------------------------------------------------------------------------
 // 1. Migration creates empty receive tables and no adoption
 // ---------------------------------------------------------------------------
@@ -341,63 +396,68 @@ fn pre_adoption_classification_behavior_is_unchanged() {
 // 5/9. Exact first adoption succeeds and does not rewrite product tables
 // ---------------------------------------------------------------------------
 
+/// Exact first adoption must write **zero** product-table rows.
+///
+/// The strongest available proof is to make any such write fail: these triggers abort
+/// every INSERT/UPDATE/DELETE on the three product tables, so an adoption that touched
+/// them could not possibly succeed. The adoption therefore passing is evidence it wrote
+/// only the durable authority metadata and revision caches.
 #[test]
-fn an_exact_first_adoption_installs_only_authority_metadata() {
+fn an_exact_first_adoption_performs_no_product_table_writes() {
     let (_temp, library) = open();
     insert_asset(&library, "asset-1");
-    let created = library
+    // A Character series with derived state, so an unnecessary rewrite would have
+    // something real to damage.
+    library
         .connection()
         .unwrap()
-        .execute(
+        .execute_batch(
             "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
              VALUES ('originals', 'root', '오리지널', NULL, '2026-09-16T00:00:00Z'),
-                    ('series', 'tag', '시리즈', 'originals', '2026-09-16T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-    assert_eq!(created, 2);
-    library
-        .connection()
-        .unwrap()
-        .execute(
-            "INSERT INTO classification_roles (role, classification_id) VALUES ('originals', 'originals')",
-            [],
-        )
-        .unwrap();
-    library
-        .connection()
-        .unwrap()
-        .execute(
-            "INSERT INTO asset_classifications (asset_id, classification_id) VALUES ('asset-1', 'series')",
-            [],
-        )
-        .unwrap();
-
-    library
-        .require_classification_first_adoption_match_for_test(
-            &[
-                classification("originals", "오리지널", None, 1),
-                classification("series", "시리즈", Some("originals"), 1),
-            ],
-            &[assignment("asset-1", Some("series"), 1)],
-            &[originals("originals")],
+                    ('franchise', 'root', '작품군', NULL, '2026-09-16T00:00:00Z');
+             INSERT INTO classification_roles (role, classification_id)
+             VALUES ('originals', 'originals');
+             INSERT INTO asset_classifications (asset_id, classification_id)
+             VALUES ('asset-1', 'franchise');
+             INSERT INTO character_series (classification_id) VALUES ('franchise');
+             CREATE TRIGGER guard_classification_entries
+               BEFORE INSERT ON classification_entries
+               BEGIN SELECT RAISE(ABORT, 'product write: classification_entries'); END;
+             CREATE TRIGGER guard_classification_entries_update
+               BEFORE UPDATE ON classification_entries
+               BEGIN SELECT RAISE(ABORT, 'product write: classification_entries'); END;
+             CREATE TRIGGER guard_classification_entries_delete
+               BEFORE DELETE ON classification_entries
+               BEGIN SELECT RAISE(ABORT, 'product write: classification_entries'); END;
+             CREATE TRIGGER guard_asset_classifications
+               BEFORE INSERT ON asset_classifications
+               BEGIN SELECT RAISE(ABORT, 'product write: asset_classifications'); END;
+             CREATE TRIGGER guard_asset_classifications_delete
+               BEFORE DELETE ON asset_classifications
+               BEGIN SELECT RAISE(ABORT, 'product write: asset_classifications'); END;
+             CREATE TRIGGER guard_classification_roles
+               BEFORE INSERT ON classification_roles
+               BEGIN SELECT RAISE(ABORT, 'product write: classification_roles'); END;
+             CREATE TRIGGER guard_classification_roles_delete
+               BEFORE DELETE ON classification_roles
+               BEGIN SELECT RAISE(ABORT, 'product write: classification_roles'); END;",
         )
         .unwrap();
 
     library
-        .install_classification_baseline_for_test(
+        .adopt_first_classification_baseline_for_test(
             &[
                 classification("originals", "오리지널", None, 1),
-                classification("series", "시리즈", Some("originals"), 1),
+                classification("franchise", "작품군", None, 1),
             ],
-            &[assignment("asset-1", Some("series"), 1)],
+            &[assignment("asset-1", Some("franchise"), 1)],
             &[originals("originals")],
             LIBRARY,
             1,
             1,
             4,
         )
-        .unwrap();
+        .expect("an exact first adoption writes no product tables, so no guard may fire");
 
     let connection = library.connection().unwrap();
     assert_eq!(
@@ -408,35 +468,72 @@ fn an_exact_first_adoption_installs_only_authority_metadata() {
     assert_eq!(
         revision_cache(&connection),
         [
-            ("originals".to_owned(), 1, 0),
-            ("series".to_owned(), 1, 0)
+            ("franchise".to_owned(), 1, 0),
+            ("originals".to_owned(), 1, 0)
         ]
     );
     assert_eq!(
         assignment_cache(&connection),
-        [("asset-1".to_owned(), Some("series".to_owned()), 1)]
+        [("asset-1".to_owned(), Some("franchise".to_owned()), 1)]
     );
-    // Product state is the same state the baseline describes, so it is still there and
-    // still exactly as it was.
-    assert_eq!(projections(&connection), [("asset-1".to_owned(), "series".to_owned())]);
+    // Product state is exactly what it was before the adoption.
+    assert_eq!(projections(&connection), [("asset-1".to_owned(), "franchise".to_owned())]);
     assert_eq!(roles(&connection), [("originals".to_owned(), "originals".to_owned())]);
     assert_eq!(
         entries(&connection),
         [
+            ("franchise".to_owned(), "root".to_owned(), "작품군".to_owned(), None),
             ("originals".to_owned(), "root".to_owned(), "오리지널".to_owned(), None),
-            (
-                "series".to_owned(),
-                "tag".to_owned(),
-                "시리즈".to_owned(),
-                Some("originals".to_owned())
-            ),
         ]
     );
+    let character_rows: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM character_series WHERE classification_id = 'franchise'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(character_rows, 1, "Character state was not disturbed");
 }
 
-// ---------------------------------------------------------------------------
-// 6. First adoption hierarchy mismatch fails atomically
-// ---------------------------------------------------------------------------
+/// The comparison and the metadata write now share one transaction, so the adoption row
+/// can never describe a state the comparison did not actually see.
+#[test]
+fn a_first_adoption_failure_leaves_no_authority_row() {
+    let (_temp, library) = open();
+    library
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
+             VALUES ('originals', 'root', '다른 이름', NULL, '2026-09-16T00:00:00Z');
+             INSERT INTO classification_roles (role, classification_id)
+             VALUES ('originals', 'originals');",
+        )
+        .unwrap();
+    let error = library
+        .adopt_first_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            &[],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            4,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        LibraryError::ClassificationFirstAdoptionMismatch
+    ));
+    let connection = library.connection().unwrap();
+    assert!(
+        authority(&connection).is_none(),
+        "a refused adoption must leave no marker for a later pass to build on"
+    );
+    assert!(revision_cache(&connection).is_empty());
+    assert!(assignment_cache(&connection).is_empty());
+}
 
 #[test]
 fn a_first_adoption_hierarchy_mismatch_writes_nothing() {
@@ -452,13 +549,15 @@ fn a_first_adoption_hierarchy_mismatch_writes_nothing() {
         )
         .unwrap();
     let error = library
-        .require_classification_first_adoption_match_for_test(
-            &[
-                classification("originals", "오리지널", None, 1),
-                classification("series", "시리즈", Some("originals"), 1),
-            ],
+        .adopt_first_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1),
+                classification("series", "시리즈", Some("originals"), 1),],
             &[],
             &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            4,
         )
         .unwrap_err();
     assert!(matches!(
@@ -509,10 +608,14 @@ fn a_first_adoption_assignment_mismatch_writes_nothing() {
         )
         .unwrap();
     let error = library
-        .require_classification_first_adoption_match_for_test(
+        .adopt_first_classification_baseline_for_test(
             &[classification("originals", "오리지널", None, 1)],
             &[],
             &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            4,
         )
         .unwrap_err();
     assert!(matches!(
@@ -568,10 +671,14 @@ fn first_adoption_compares_assignments_for_trashed_assets_too() {
     // Classification assignment deliberately survives local trash, so a status filter
     // would have reported a false mismatch here.
     library
-        .require_classification_first_adoption_match_for_test(
+        .adopt_first_classification_baseline_for_test(
             &[classification("originals", "오리지널", None, 1)],
             &[assignment("asset-1", Some("originals"), 1)],
             &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            4,
         )
         .unwrap();
 }
@@ -579,6 +686,83 @@ fn first_adoption_compares_assignments_for_trashed_assets_too() {
 // ---------------------------------------------------------------------------
 // 8. First adoption role mismatch fails atomically
 // ---------------------------------------------------------------------------
+
+/// A baseline assignment for an Asset this PC does not hold must fail first adoption.
+///
+/// The authority was activated from this PC's own staged snapshot, so a non-null
+/// assignment naming an Asset that is now absent locally means local canonical state
+/// changed after staging. Accepting it would adopt that divergence silently.
+#[test]
+fn a_first_adoption_assignment_for_a_locally_absent_asset_is_a_mismatch() {
+    let (_temp, library) = open();
+    // Structure and role match the baseline exactly; only the extra assignment differs.
+    library
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
+             VALUES ('originals', 'root', '오리지널', NULL, '2026-09-16T00:00:00Z');
+             INSERT INTO classification_roles (role, classification_id)
+             VALUES ('originals', 'originals');",
+        )
+        .unwrap();
+    let error = library
+        .adopt_first_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            // `absent-elsewhere` is not in local `assets` at all.
+            &[assignment("absent-elsewhere", Some("originals"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            4,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        LibraryError::ClassificationFirstAdoptionMismatch
+    ));
+    let connection = library.connection().unwrap();
+    assert!(authority(&connection).is_none());
+    assert!(revision_cache(&connection).is_empty());
+    assert!(assignment_cache(&connection).is_empty());
+    assert!(entries(&connection).iter().any(|(id, _, _, _)| id == "originals"));
+}
+
+/// An explicit null row is effective unassigned state, so it corresponds to no local
+/// relation and must not be read as a missing assignment.
+#[test]
+fn a_first_adoption_null_assignment_row_is_effective_unassigned_state() {
+    let (_temp, library) = open();
+    library
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
+             VALUES ('originals', 'root', '오리지널', NULL, '2026-09-16T00:00:00Z');
+             INSERT INTO classification_roles (role, classification_id)
+             VALUES ('originals', 'originals');",
+        )
+        .unwrap();
+    library
+        .adopt_first_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            &[assignment("asset-1", None, 3)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            5,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(
+        assignment_cache(&connection),
+        [("asset-1".to_owned(), None, 3)],
+        "the null row is cached as revision state"
+    );
+    assert!(projections(&connection).is_empty());
+}
 
 #[test]
 fn a_first_adoption_role_mismatch_writes_nothing() {
@@ -602,13 +786,15 @@ fn a_first_adoption_role_mismatch_writes_nothing() {
         )
         .unwrap();
     let error = library
-        .require_classification_first_adoption_match_for_test(
-            &[
-                classification("originals", "오리지널", None, 1),
-                classification("other", "기타", None, 1),
-            ],
+        .adopt_first_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1),
+                classification("other", "기타", None, 1),],
             &[],
             &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            4,
         )
         .unwrap_err();
     assert!(matches!(
@@ -793,6 +979,390 @@ fn a_deferred_null_assignment_clears_a_stale_local_relation() {
 // ---------------------------------------------------------------------------
 // 15/16. Strict sequence contiguity and atomic page/cursor commit
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 3. Received assignment changes queue Character reconsideration
+// ---------------------------------------------------------------------------
+
+/// A received assignment change is semantically the same change a local edit makes, so it
+/// must queue Character reconsideration for the Asset it moved — and nothing else.
+///
+/// `originals` and everything under it are deliberately *outside* Character scope
+/// (`resolve_character_scope` excludes the whole role subtree), so `franchise` is a
+/// separate root registered as a Character series: moving an Asset onto it is a real
+/// reconsideration, while moving to `series` under `originals` would be a no-op.
+#[test]
+fn a_received_assignment_change_queues_character_reconsideration() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("series", "시리즈", Some("originals"), 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("series"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    {
+        let connection = library.connection().unwrap();
+        assert!(
+            character_job(&connection, "asset-1").is_none(),
+            "adopting the matching local state is not itself a change"
+        );
+    }
+    // The authority moves the Asset from an out-of-scope folder onto a Character series.
+    library
+        .apply_classification_page_for_test(
+            &[assignment_change(2, assignment("asset-1", Some("franchise"), 2))],
+            2,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    let (state, cause, classifications) =
+        character_job(&connection, "asset-1").expect("received change must queue reconsideration");
+    assert_eq!(state, "pending");
+    assert_eq!(cause, "classification");
+    assert!(
+        classifications.contains("franchise"),
+        "the queued job carries the new classification: {classifications}"
+    );
+    // Receive-only: no send work of any kind is created.
+    assert_eq!(cloud_queue_rows(&connection, "asset-1"), 0);
+    assert_eq!(outbox_tables(&connection), 0);
+}
+
+/// An authoritative unassign takes the Asset out of every Character scope, so the receive
+/// path must run the same Character step a local unassign runs — superseding existing
+/// work rather than leaving it claiming a resolution no worker can produce.
+#[test]
+fn a_received_unassign_runs_the_character_step() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    library
+        .apply_classification_page_for_test(
+            &[assignment_change(2, assignment("asset-1", None, 2))],
+            2,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert!(projections(&connection).is_empty());
+    // A queued job must not survive the change as `pending`, because the Asset can no
+    // longer resolve to any Character scope.
+    if let Some((state, _, _)) = character_job(&connection, "asset-1") {
+        assert_eq!(state, "superseded");
+    }
+    assert_eq!(cloud_queue_rows(&connection, "asset-1"), 0);
+}
+
+#[test]
+fn a_delete_transition_queues_character_reconsideration_for_affected_assets() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+                classification("tagger", "태그", Some("franchise"), 1),
+            ],
+            &[assignment("asset-1", Some("tagger"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    // Deleting the tag moves its Assets up to `franchise`, which *is* the Character series.
+    library
+        .apply_classification_page_for_test(
+            &[delete_change(
+                2,
+                tombstone("tagger", "태그", 2),
+                transition("tagger", Some("franchise"), 1),
+            )],
+            2,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(projections(&connection), [("asset-1".to_owned(), "franchise".to_owned())]);
+    let (state, cause, classifications) = character_job(&connection, "asset-1")
+        .expect("the transition moved this Asset's assignment, so reconsideration is owed");
+    assert_eq!(state, "pending");
+    assert_eq!(cause, "classification");
+    assert!(classifications.contains("franchise"), "{classifications}");
+    assert_eq!(cloud_queue_rows(&connection, "asset-1"), 0);
+}
+
+/// Deferred materialization must be **one** transaction for every projection it makes.
+///
+/// Two Assets both need their stale relation replaced. The injected failure fires only on
+/// the *second* Asset, after the first has already been reconciled — the exact situation a
+/// per-Asset commit could not recover from, since the first Asset's new relation and the
+/// second's stale one would both survive. One transaction means neither change is visible.
+#[test]
+fn deferred_materialization_rolls_back_every_projection_on_failure() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    insert_asset(&library, "asset-2");
+    make_character_eligible(&library, "asset-1", "franchise");
+    make_character_eligible(&library, "asset-2", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+                classification("stale", "예전", None, 1),
+            ],
+            // The authority's confirmed values differ from the local relations below.
+            &[
+                assignment("asset-1", Some("franchise"), 5),
+                assignment("asset-2", Some("franchise"), 6),
+            ],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            3,
+        )
+        .unwrap();
+    // Installing already applied those values, which is not what this test is about:
+    // start from a clean slate where both projections are stale.
+    library
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "DELETE FROM character_autotag_jobs;
+             UPDATE asset_classifications SET classification_id = 'stale'
+               WHERE asset_id IN ('asset-1', 'asset-2');
+             CREATE TRIGGER fail_second_asset_character_step
+               BEFORE INSERT ON character_autotag_jobs
+               WHEN NEW.asset_id = 'asset-2'
+               BEGIN SELECT RAISE(ABORT, 'later reconciliation step failed'); END;",
+        )
+        .unwrap();
+    let error = library
+        .materialize_deferred_classification_assignments()
+        .unwrap_err();
+    assert!(
+        matches!(&error, LibraryError::Database(_)),
+        "the injected failure must surface: {error:?}"
+    );
+    {
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            projections(&connection),
+            [
+                ("asset-1".to_owned(), "stale".to_owned()),
+                ("asset-2".to_owned(), "stale".to_owned()),
+            ],
+            "the first Asset's new relation must roll back with the second Asset's failure"
+        );
+        assert!(character_job(&connection, "asset-1").is_none());
+        // The caches and cursor are authority state, untouched either way.
+        assert_eq!(
+            assignment_cache(&connection),
+            [
+                ("asset-1".to_owned(), Some("franchise".to_owned()), 5),
+                ("asset-2".to_owned(), Some("franchise".to_owned()), 6),
+            ]
+        );
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 3)));
+        connection
+            .execute("DROP TRIGGER fail_second_asset_character_step", [])
+            .unwrap();
+    }
+    // With the injected failure removed, the same projection completes for both Assets and
+    // each ends holding exactly one Classification — never both at once.
+    assert_eq!(
+        library.materialize_deferred_classification_assignments().unwrap(),
+        2
+    );
+    let connection = library.connection().unwrap();
+    assert_eq!(
+        projections(&connection),
+        [
+            ("asset-1".to_owned(), "franchise".to_owned()),
+            ("asset-2".to_owned(), "franchise".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn an_assignment_cached_for_a_missing_asset_queues_nothing_yet() {
+    let (_temp, library) = open();
+    adopt_one_root(&library, 0);
+    library
+        .apply_classification_page_for_test(
+            &[assignment_change(1, assignment("absent", Some("originals"), 1))],
+            1,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert!(projections(&connection).is_empty());
+    assert_eq!(
+        character_job(&connection, "absent"),
+        None,
+        "there is no local Asset to reconsider"
+    );
+    assert_eq!(cloud_queue_rows(&connection, "absent"), 0);
+}
+
+#[test]
+fn deferred_materialization_queues_character_reconsideration_when_the_asset_appears() {
+    let (_temp, library) = open();
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            // The authority already assigned an Asset this PC had not materialized.
+            &[assignment("later", Some("franchise"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            3,
+        )
+        .unwrap();
+    assert_eq!(
+        library.materialize_deferred_classification_assignments().unwrap(),
+        0
+    );
+    insert_asset(&library, "later");
+    make_character_eligible(&library, "later", "franchise");
+    assert_eq!(
+        library.materialize_deferred_classification_assignments().unwrap(),
+        1
+    );
+    let connection = library.connection().unwrap();
+    assert_eq!(projections(&connection), [("later".to_owned(), "franchise".to_owned())]);
+    let (state, cause, _) = character_job(&connection, "later")
+        .expect("the deferred projection changed this Asset's assignment");
+    assert_eq!(state, "pending");
+    assert_eq!(cause, "classification");
+    assert_eq!(cloud_queue_rows(&connection, "later"), 0);
+}
+
+#[test]
+fn an_idempotent_assignment_projection_queues_no_character_work() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    // Installing the baseline materialized an assignment that had no local relation, so
+    // it legitimately queued work. Clear that (as a completed pass would) to isolate what
+    // the *re-projection* alone contributes.
+    library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_jobs", [])
+        .unwrap();
+    // Re-projecting the same authoritative value is not a change.
+    library
+        .apply_classification_page_for_test(
+            &[assignment_change(2, assignment("asset-1", Some("franchise"), 2))],
+            2,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(projections(&connection), [("asset-1".to_owned(), "franchise".to_owned())]);
+    assert_eq!(
+        character_job(&connection, "asset-1"),
+        None,
+        "no visible change means no derived work"
+    );
+    // The revision cache still advances, because that is authority state, not a change
+    // to the Asset's assignment.
+    assert_eq!(
+        assignment_cache(&connection),
+        [("asset-1".to_owned(), Some("franchise".to_owned()), 2)]
+    );
+}
+
+#[test]
+fn a_received_change_creates_no_legacy_replication_intent() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("series", "시리즈", Some("originals"), 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("series"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    let before = {
+        let connection = library.connection().unwrap();
+        connection
+            .query_row("SELECT COUNT(*) FROM cloud_sync_queue", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    library
+        .apply_classification_page_for_test(
+            &[assignment_change(2, assignment("asset-1", Some("franchise"), 2))],
+            2,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    let after = connection
+        .query_row("SELECT COUNT(*) FROM cloud_sync_queue", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap();
+    assert_eq!(
+        after, before,
+        "the receive path must not enqueue legacy replication work"
+    );
+}
 
 #[test]
 fn a_change_page_applies_and_advances_the_cursor_together() {
@@ -1240,6 +1810,7 @@ fn a_transition_count_mismatch_rolls_back_the_cursor_and_the_state() {
         .install_classification_baseline_for_test(
             &[
                 classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
                 classification("series", "시리즈", Some("originals"), 1),
             ],
             &[assignment("asset-1", Some("series"), 1)],
