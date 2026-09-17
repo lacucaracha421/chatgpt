@@ -2473,18 +2473,702 @@ fn a_negative_snapshot_cursor_is_refused_before_the_request_is_sent() {
 }
 
 // ---------------------------------------------------------------------------
-// Integration: the real CloudClient over a real socket
+// 3. Rebase Character reconsideration from true before/after state
 // ---------------------------------------------------------------------------
 
-/// The full orchestration against a real HTTP server: `/v1/sync/status`, baseline pages
-/// and change pages. A mocked transport would hide the wire contract, so these run the
-/// production `CloudClient` over a real socket.
+/// A rebase must queue reconsideration from the *pre-rebase* assignment state.
 ///
-/// The scripted bodies are the **server's** exact encoding, taken from
-/// `server/lakomics-api/classification_authority.py` (`encode_page`, `change_items`,
-/// `classification_projection`, `assignment_projection`, `role_projection`) and
-/// `sync_status.py`. `the_server_wire_fixture_deserializes_through_the_client_contract`
-/// additionally reads the checked-in cross-language fixture.
+/// The rebase clears `asset_classifications` globally before projecting the baseline, so a
+/// per-row comparison would see `null -> B` instead of the real transition. Each case
+/// below therefore pins exactly what the whole-state comparison has to get right.
+#[test]
+fn a_rebase_queues_reconsideration_for_a_changed_assignment() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+                classification("elsewhere", "다른곳", None, 1),
+            ],
+            // Local: assigned to `elsewhere`, which is outside Character scope.
+            &[assignment("asset-1", Some("elsewhere"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_jobs", [])
+        .unwrap();
+    // The authority rebases onto the Character series.
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+                classification("elsewhere", "다른곳", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 2)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(projections(&connection), [("asset-1".to_owned(), "franchise".to_owned())]);
+    let (state, cause, _) = character_job(&connection, "asset-1")
+        .expect("A -> B must queue one reconsideration");
+    assert_eq!(state, "pending");
+    assert_eq!(cause, "classification");
+    assert_eq!(cloud_queue_rows(&connection, "asset-1"), 0);
+}
+
+/// `A -> null` is the case a per-row comparison loses entirely: after the global clear both
+/// sides look empty, so the Asset's reconsideration would be silently dropped.
+#[test]
+fn a_rebase_to_unassigned_queues_reconsideration() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_jobs", [])
+        .unwrap();
+    // The authority now reports the Asset as unassigned.
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", None, 2)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert!(projections(&connection).is_empty());
+    // Leaving Character scope supersedes rather than queues, which is the same rule the
+    // incremental path follows. What matters is that the pre-rebase state was *seen*: a
+    // per-row comparison would leave no job at all even if one had been pending.
+    if let Some((state, _, _)) = character_job(&connection, "asset-1") {
+        assert_eq!(state, "superseded");
+    }
+}
+
+/// The authoritative baseline need not mention the Asset at all: absence is still a change
+/// away from the local relation, and the comparison must treat it that way.
+#[test]
+fn a_rebase_to_no_authoritative_row_queues_reconsideration() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    library.connection().unwrap().execute("DELETE FROM character_autotag_jobs", []).unwrap();
+    // No assignment row for asset-1 at all, and no `elsewhere` Classification either.
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert!(
+        projections(&connection).is_empty(),
+        "an absent authoritative row clears the local relation"
+    );
+    if let Some((state, _, _)) = character_job(&connection, "asset-1") {
+        assert_eq!(state, "superseded");
+    }
+}
+
+/// The reverse false positive: `A -> A` must not manufacture work. A per-row comparison
+/// would read this as `null -> A` after the global clear and queue a spurious job.
+#[test]
+fn a_rebase_with_an_unchanged_assignment_queues_nothing() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    library.connection().unwrap().execute("DELETE FROM character_autotag_jobs", []).unwrap();
+    // A later rebase carrying the identical assignment.
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 4)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(projections(&connection), [("asset-1".to_owned(), "franchise".to_owned())]);
+    assert_eq!(
+        character_job(&connection, "asset-1"),
+        None,
+        "A -> A is not a change, so no reconsideration may be queued"
+    );
+}
+
+/// A large unchanged assignment set must not manufacture jobs: the comparison is per Asset
+/// and by value, not per baseline row.
+#[test]
+fn a_rebase_over_a_large_unchanged_assignment_set_queues_nothing() {
+    let (_temp, library) = open();
+    let classifications: Vec<ClassificationProjection> = std::iter::once(classification(
+        "originals",
+        "오리지널",
+        None,
+        1,
+    ))
+    .chain((0..25).map(|index| {
+        classification(&format!("series-{index}"), &format!("시리즈 {index}"), None, 1)
+    }))
+    .collect();
+    let mut assignments = Vec::new();
+    for index in 0..25 {
+        insert_asset(&library, &format!("asset-{index}"));
+        make_character_eligible(&library, &format!("asset-{index}"), "series-0");
+        assignments.push(assignment(
+            &format!("asset-{index}"),
+            Some(&format!("series-{index}")),
+            1,
+        ));
+    }
+    library
+        .install_classification_baseline_for_test(
+            &classifications,
+            &assignments,
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    library.connection().unwrap().execute("DELETE FROM character_autotag_jobs", []).unwrap();
+    // The same set again, with only revisions advanced.
+    let advanced: Vec<ClassificationAssignmentProjection> = assignments
+        .iter()
+        .map(|value| {
+            assignment(
+                &value.asset_id,
+                value.classification_id.as_deref(),
+                value.entity_revision + 1,
+            )
+        })
+        .collect();
+    library
+        .install_classification_baseline_for_test(
+            &classifications,
+            &advanced,
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    let jobs: i64 = connection
+        .query_row("SELECT COUNT(*) FROM character_autotag_jobs", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(jobs, 0, "an unchanged rebase owes no Character work at all");
+}
+
+/// A failure after the assignment materialization must roll back the materialized changes
+/// *and* the reconsideration work, because a rebase is one transaction.
+#[test]
+fn a_failed_rebase_rolls_back_materialization_and_reconsideration() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    make_character_eligible(&library, "asset-1", "franchise");
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+                classification("elsewhere", "다른곳", None, 1),
+            ],
+            // Local state: assigned somewhere outside Character scope.
+            &[assignment("asset-1", Some("elsewhere"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    library.connection().unwrap().execute("DELETE FROM character_autotag_jobs", []).unwrap();
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "CREATE TRIGGER fail_rebase_character_step BEFORE INSERT ON character_autotag_jobs
+             BEGIN SELECT RAISE(ABORT, 'rebase character step failed'); END",
+            [],
+        )
+        .unwrap();
+    // The authority moves the Asset onto the Character series, so the Character step
+    // definitely runs — and, with the trigger in place, definitely fails.
+    let error = library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+                classification("elsewhere", "다른곳", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 2)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap_err();
+    assert!(matches!(&error, LibraryError::Database(_)), "{error:?}");
+    {
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            projections(&connection),
+            [("asset-1".to_owned(), "elsewhere".to_owned())],
+            "the materialized assignment change rolled back"
+        );
+        assert!(
+            character_job(&connection, "asset-1").is_none(),
+            "the queued reconsideration rolled back"
+        );
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 1, 1, 1)),
+            "the cursor rolled back with them"
+        );
+        assert_eq!(
+            assignment_cache(&connection),
+            [("asset-1".to_owned(), Some("elsewhere".to_owned()), 1)]
+        );
+        connection.execute("DROP TRIGGER fail_rebase_character_step", []).unwrap();
+    }
+    // With the injected failure gone the same rebase completes.
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("franchise", "작품군", None, 1),
+                classification("elsewhere", "다른곳", None, 1),
+            ],
+            &[assignment("asset-1", Some("franchise"), 2)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(projections(&connection), [("asset-1".to_owned(), "franchise".to_owned())]);
+    assert!(character_job(&connection, "asset-1").is_some());
+}
+
+// ---------------------------------------------------------------------------
+// 4. A missing Classification is corruption, not a deferred projection
+// ---------------------------------------------------------------------------
+
+/// An incremental change whose assignment names a Classification this PC does not have is a
+/// corrupt replica, not a pending projection: the server validates every assignment target.
+#[test]
+fn an_incremental_assignment_to_a_missing_classification_fails_closed() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    adopt_one_root(&library, 5);
+    let error = library
+        .apply_classification_page_for_test(
+            // `absent` is not in `classification_entries`.
+            &[assignment_change(6, assignment("asset-1", Some("absent"), 1))],
+            6,
+        )
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::InvalidCloudResponse));
+    let connection = library.connection().unwrap();
+    assert!(
+        projections(&connection).is_empty(),
+        "no relation may be left materialized"
+    );
+    assert!(
+        assignment_cache(&connection).is_empty(),
+        "the revision written earlier in the page must roll back with it"
+    );
+    assert_eq!(
+        authority(&connection),
+        Some((LIBRARY.to_owned(), 1, 1, 5)),
+        "the cursor must not advance over a page that failed"
+    );
+}
+
+/// The same rule for the deferred step: a cached assignment whose target Classification has
+/// gone missing must fail rather than silently reporting success.
+#[test]
+fn deferred_materialization_fails_when_the_target_classification_is_absent() {
+    let (_temp, library) = open();
+    library
+        .install_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            // Cached for an Asset this PC had not materialized, pointing at `later`.
+            &[assignment("asset-1", Some("later"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            3,
+        )
+        .unwrap();
+    // The Asset appears, but `later` was never a live Classification: the target cannot be
+    // satisfied, which is corruption rather than a projection that is merely pending.
+    insert_asset(&library, "asset-1");
+    let error = library
+        .materialize_deferred_classification_assignments()
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::InvalidCloudResponse));
+    let connection = library.connection().unwrap();
+    assert!(projections(&connection).is_empty());
+    assert_eq!(
+        assignment_cache(&connection),
+        [("asset-1".to_owned(), Some("later".to_owned()), 1)],
+        "the cache is authority state and is left exactly as it was"
+    );
+    assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 3)));
+}
+
+/// A missing *Asset* remains a legitimate deferred projection.
+#[test]
+fn an_assignment_targeting_a_missing_asset_is_still_deferred() {
+    let (_temp, library) = open();
+    library
+        .install_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            &[assignment("not-here", Some("originals"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            3,
+        )
+        .unwrap();
+    let connection = library.connection().unwrap();
+    assert!(projections(&connection).is_empty());
+    assert_eq!(
+        assignment_cache(&connection),
+        [("not-here".to_owned(), Some("originals".to_owned()), 1)]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Envelope and change-row validation
+// ---------------------------------------------------------------------------
+
+/// Build a change page for the validator unit tests.
+fn changes_page(
+    library_id: &str,
+    epoch: i64,
+    contract_version: i64,
+    cursor: i64,
+    items: serde_json::Value,
+    next_after: i64,
+    has_more: bool,
+) -> crate::cloud::client::ClassificationChanges {
+    serde_json::from_value(serde_json::json!({
+        "libraryId": library_id,
+        "epoch": epoch,
+        "contractVersion": contract_version,
+        "cursor": cursor,
+        "items": items,
+        "nextAfter": next_after,
+        "hasMore": has_more,
+    }))
+    .unwrap()
+}
+
+fn classification_item_json(
+    id: &str,
+    kind: &str,
+    name: &str,
+    revision: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "kind": kind, "name": name, "parentId": null,
+        "iconKey": null, "colorKey": null, "deleted": false, "entityRevision": revision
+    })
+}
+
+/// One valid `renameClassification` row at `sequence`.
+fn one_change(sequence: i64) -> serde_json::Value {
+    serde_json::json!([{
+        "sequence": sequence, "authorityCursor": sequence,
+        "commandType": "renameClassification", "operationId": "op-1",
+        "changedAt": "2026-09-16T00:00:00Z",
+        "classification": classification_item_json("originals", "root", "새 이름", 2)
+    }])
+}
+
+#[test]
+fn a_changes_page_must_name_the_authority_it_was_requested_from() {
+    let valid = changes_page(LIBRARY, 1, 1, 5, one_change(4), 4, true);
+    assert!(valid.validate(LIBRARY, 1, 4).is_ok());
+
+    for bad in [
+        changes_page(OTHER_LIBRARY, 1, 1, 5, one_change(4), 4, true),
+        changes_page(LIBRARY, 2, 1, 5, one_change(4), 4, true),
+        changes_page(LIBRARY, 1, 2, 5, one_change(4), 4, true),
+    ] {
+        assert!(matches!(
+            bad.validate(LIBRARY, 1, 4),
+            Err(LibraryError::ClassificationAuthorityMismatch)
+        ));
+    }
+}
+
+#[test]
+fn a_changes_page_cursor_envelope_must_agree_with_itself() {
+    // A valid page: one item at 4, the authority ahead at 5, so more remains.
+    assert!(changes_page(LIBRARY, 1, 1, 5, one_change(4), 4, true)
+        .validate(LIBRARY, 1, 4)
+        .is_ok());
+    // A valid empty page sits exactly on the requested cursor with nothing more.
+    assert!(changes_page(LIBRARY, 1, 1, 3, serde_json::json!([]), 3, false)
+        .validate(LIBRARY, 1, 3)
+        .is_ok());
+
+    let invalid = [
+        (
+            "nextAfter beyond the authority cursor",
+            changes_page(LIBRARY, 1, 1, 4, one_change(5), 5, false),
+        ),
+        (
+            "nextAfter behind the requested cursor",
+            // Requested from 5, but the page reports a cursor at 3.
+            changes_page(LIBRARY, 1, 1, 9, one_change(3), 3, true),
+        ),
+        (
+            "hasMore understated",
+            changes_page(LIBRARY, 1, 1, 9, one_change(4), 4, false),
+        ),
+        (
+            "hasMore overstated",
+            changes_page(LIBRARY, 1, 1, 4, one_change(4), 4, true),
+        ),
+        (
+            "empty page advanced",
+            changes_page(LIBRARY, 1, 1, 9, serde_json::json!([]), 7, true),
+        ),
+        (
+            "final row disagrees with nextAfter",
+            changes_page(LIBRARY, 1, 1, 9, one_change(4), 6, true),
+        ),
+        (
+            "negative cursor",
+            changes_page(LIBRARY, 1, 1, -1, one_change(-1), -1, false),
+        ),
+    ];
+    // Validated from a cursor of 5 so the "behind the requested cursor" vector is genuinely
+    // behind it rather than merely equal.
+    for (label, page) in invalid {
+        assert!(
+            matches!(page.validate(LIBRARY, 1, 5), Err(LibraryError::InvalidCloudResponse)),
+            "{label} must be refused"
+        );
+    }
+}
+
+#[test]
+fn a_change_row_must_label_the_payload_it_carries() {
+    let make = |command: &str,
+                classification: Option<serde_json::Value>,
+                assignment: Option<serde_json::Value>,
+                transition: Option<serde_json::Value>| {
+        let mut row = serde_json::json!({
+            "sequence": 7, "authorityCursor": 7, "commandType": command,
+            "operationId": "op-7", "changedAt": "2026-09-16T00:00:00Z"
+        });
+        if let Some(value) = classification {
+            row["classification"] = value;
+        }
+        if let Some(value) = assignment {
+            row["assignment"] = value;
+        }
+        if let Some(value) = transition {
+            row["assignmentTransition"] = value;
+        }
+        serde_json::from_value::<ClassificationChange>(row).unwrap()
+    };
+    let live = || classification_item_json("originals", "root", "오리지널", 1);
+    let tomb = || {
+        let mut value = classification_item_json("originals", "root", "오리지널", 2);
+        value["deleted"] = serde_json::json!(true);
+        value
+    };
+    let assign = || {
+        serde_json::json!({
+            "assetId": "asset-1", "classificationId": "originals", "entityRevision": 1
+        })
+    };
+    let trans = || {
+        serde_json::json!({
+            "fromClassificationId": "originals",
+            "toClassificationId": null,
+            "affectsAssignments": 0
+        })
+    };
+
+    // Every legal command/payload pairing.
+    for command in [
+        "createClassification",
+        "renameClassification",
+        "moveClassification",
+        "updateClassificationAppearance",
+    ] {
+        assert!(
+            make(command, Some(live()), None, None).delta().is_ok(),
+            "{command} with one live Classification is valid"
+        );
+    }
+    assert!(make("setAssetClassification", None, Some(assign()), None)
+        .delta()
+        .is_ok());
+    assert!(make("deleteClassification", Some(tomb()), None, Some(trans()))
+        .delta()
+        .is_ok());
+
+    let malformed = [
+        (
+            "unknown command name",
+            make("frobnicate", Some(live()), None, None),
+        ),
+        (
+            "assignment labelled rename",
+            make("renameClassification", None, Some(assign()), None),
+        ),
+        (
+            "live Classification labelled delete",
+            make("deleteClassification", Some(live()), None, Some(trans())),
+        ),
+        (
+            "tombstone under rename",
+            make("renameClassification", Some(tomb()), None, None),
+        ),
+        (
+            "delete without its transition",
+            make("deleteClassification", Some(tomb()), None, None),
+        ),
+        (
+            "transition under rename",
+            make("renameClassification", Some(live()), None, Some(trans())),
+        ),
+        (
+            "classification and assignment together",
+            make("renameClassification", Some(live()), Some(assign()), None),
+        ),
+        (
+            "transition without a payload",
+            make("deleteClassification", None, None, Some(trans())),
+        ),
+    ];
+    for (label, row) in malformed {
+        assert!(
+            matches!(row.delta(), Err(LibraryError::InvalidCloudResponse)),
+            "{label} must be refused"
+        );
+    }
+}
+
+#[test]
+fn a_change_row_must_carry_its_own_sequence_as_the_authority_cursor() {
+    let row: ClassificationChange = serde_json::from_value(serde_json::json!({
+        "sequence": 7, "authorityCursor": 8, "commandType": "renameClassification",
+        "operationId": "op-7", "changedAt": "2026-09-16T00:00:00Z",
+        "classification": classification_item_json("originals", "root", "오리지널", 1)
+    }))
+    .unwrap();
+    assert!(matches!(row.delta(), Err(LibraryError::InvalidCloudResponse)));
+}
+
+/// An empty page is not progress, so it must leave the cursor exactly where it was.
+#[test]
+fn an_empty_change_page_does_not_advance_the_cursor() {
+    let (_temp, library) = open();
+    adopt_one_root(&library, 5);
+    library.apply_classification_page_for_test(&[], 5).unwrap();
+    let connection = library.connection().unwrap();
+    assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 5)));
+}
+
 // ---------------------------------------------------------------------------
 // Integration: the real CloudClient over a real socket
 // ---------------------------------------------------------------------------
@@ -3210,6 +3894,123 @@ mod integration {
                             "toClassificationId": "originals",
                             "affectsAssignments": 0
                         }
+                    }],
+                    "nextAfter": 4, "hasMore": false
+                }),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        adopt_one_root(&library, 3);
+        let error = library
+            .reconcile_classification_authority(&client, "token")
+            .unwrap_err();
+        server.finish();
+        assert!(matches!(error, LibraryError::InvalidCloudResponse));
+        let connection = library.connection().unwrap();
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 3)));
+    }
+
+    /// A malformed or foreign `/changes` page must be refused by the real client before any
+    /// local write, leaving the replica and the cursor exactly where they were.
+    #[test]
+    fn a_malformed_change_page_leaves_the_replica_unchanged() {
+        fn page(
+            library_id: &str,
+            epoch: i64,
+            contract_version: i64,
+            cursor: i64,
+            items: serde_json::Value,
+            next_after: i64,
+            has_more: bool,
+        ) -> serde_json::Value {
+            serde_json::json!({
+                "libraryId": library_id,
+                "epoch": epoch,
+                "contractVersion": contract_version,
+                "cursor": cursor,
+                "items": items,
+                "nextAfter": next_after,
+                "hasMore": has_more,
+            })
+        }
+        let change = serde_json::json!([{
+            "sequence": 4, "authorityCursor": 4,
+            "commandType": "renameClassification", "operationId": "op-4",
+            "changedAt": "2026-09-16T00:00:00Z",
+            "classification": classification_item("originals", "root", "새 이름", None, 2)
+        }]);
+        let cases = [
+            (
+                "wrong libraryId",
+                page(OTHER_LIBRARY, 1, 1, 5, change.clone(), 4, true),
+            ),
+            ("wrong epoch", page(LIBRARY, 9, 1, 5, change.clone(), 4, true)),
+            ("wrong contractVersion", page(LIBRARY, 1, 9, 5, change.clone(), 4, true)),
+            (
+                "nextAfter beyond the cursor",
+                page(LIBRARY, 1, 1, 4, change.clone(), 5, false),
+            ),
+            (
+                "nextAfter behind the requested cursor",
+                page(LIBRARY, 1, 1, 9, change.clone(), 2, true),
+            ),
+            (
+                "hasMore disagrees with the cursors",
+                page(LIBRARY, 1, 1, 9, change.clone(), 4, false),
+            ),
+            (
+                "empty page advances",
+                page(LIBRARY, 1, 1, 9, serde_json::json!([]), 7, true),
+            ),
+        ];
+        for (label, body) in cases {
+            let script = vec![(status_body(9), 200), (body, 200)];
+            let server = Scripted::start(script);
+            let client = CloudClient::new(&server.base).unwrap();
+            let (_temp, library) = open();
+            pin_library_id(&library);
+            adopt_one_root(&library, 3);
+            let error = library
+                .reconcile_classification_authority(&client, "token")
+                .unwrap_err();
+            server.finish();
+            assert!(
+                matches!(
+                    error,
+                    LibraryError::InvalidCloudResponse | LibraryError::ClassificationAuthorityMismatch
+                ),
+                "{label} must be refused, got {error:?}"
+            );
+            let connection = library.connection().unwrap();
+            assert_eq!(
+                authority(&connection),
+                Some((LIBRARY.to_owned(), 1, 1, 3)),
+                "{label} must not move the cursor"
+            );
+            assert!(
+                !entries(&connection).iter().any(|(id, _, name, _)| id == "originals" && name == "새 이름"),
+                "{label} must not apply the row"
+            );
+        }
+    }
+
+    /// A row whose `authorityCursor` disagrees with its sequence is not the change it claims.
+    #[test]
+    fn a_change_row_with_a_mismatched_authority_cursor_is_refused() {
+        let script = vec![
+            (status_body(4), 200),
+            (
+                serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1, "cursor": 4,
+                    "items": [{
+                        "sequence": 4, "authorityCursor": 3,
+                        "commandType": "renameClassification", "operationId": "op-4",
+                        "changedAt": "2026-09-16T00:00:00Z",
+                        "classification": classification_item("originals", "root", "새 이름", None, 2)
                     }],
                     "nextAfter": 4, "hasMore": false
                 }),
