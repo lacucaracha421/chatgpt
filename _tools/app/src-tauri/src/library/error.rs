@@ -131,6 +131,22 @@ pub enum LibraryError {
         current_revision: i64,
         current_desired_state: bool,
     },
+    #[error("서버 분류 권위가 아직 활성화되지 않았습니다")]
+    ClassificationAuthorityInactive,
+    #[error("서버 분류 권위가 이 라이브러리와 일치하지 않습니다")]
+    ClassificationAuthorityMismatch,
+    #[error("서버 분류 계약 버전을 이 PC가 지원하지 않습니다")]
+    ClassificationContractUnsupported,
+    #[error("서버 분류 이력이 이 PC보다 뒤처져 있습니다. 전체 기준선을 다시 받아야 합니다")]
+    ClassificationCursorAhead,
+    #[error("서버가 보관하는 분류 이력이 만료되어 이어받을 수 없습니다. 전체 기준선을 다시 받습니다")]
+    ClassificationCursorExpired,
+    #[error("기준선을 읽는 동안 서버 분류 상태가 변경되었습니다. 다시 시작해야 합니다")]
+    ClassificationBaselineChanged,
+    #[error("첫 분류 기준선이 이 PC의 현재 분류 상태와 일치하지 않습니다")]
+    ClassificationFirstAdoptionMismatch,
+    #[error("서버 분류 동기화 요청이 거부됐습니다: HTTP {0}")]
+    ClassificationSyncRejected(u16),
     #[error("서버 앨범 권위가 아직 활성화되지 않았습니다")]
     AlbumAuthorityInactive,
     #[error("서버 앨범 권위가 이 라이브러리와 일치하지 않습니다")]

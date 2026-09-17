@@ -397,6 +397,209 @@ pub(crate) enum AlbumCommandOutcome {
 /// hostile or broken server from forcing unbounded work in the restore guard.
 const MAX_SYNC_DOMAINS: usize = 512;
 
+/// The shared domain name the server reports Classification authority under.
+pub(crate) const CLASSIFICATION_DOMAIN: &str = "classifications";
+
+/// The Classification domain contract this build speaks.
+pub(crate) const CLASSIFICATION_CONTRACT_VERSION: i64 = 1;
+
+/// Baseline sections, in the order the server emits them.
+pub(crate) const CLASSIFICATION_BASELINE_SECTIONS_SECTION: &str = "classifications";
+pub(crate) const CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION: &str = "assignments";
+
+/// Maximum encoded Classification response accepted from the server.
+///
+/// The server bounds one baseline page at 2 MiB and one change page by its item
+/// count, so this leaves room for the envelope without accepting an unbounded body.
+/// It matches the Album bound deliberately: both domains stream the same shape of
+/// bounded page, and a smaller Classification-specific bound would only risk
+/// rejecting a legal page.
+const MAX_CLASSIFICATION_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
+/// One Classification projection carried by a baseline page or a change row.
+///
+/// `deleted` is present on live rows too (always false) so one type describes both
+/// a live node and the tombstone a delete change carries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationProjection {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub icon_key: Option<String>,
+    pub color_key: Option<String>,
+    pub deleted: bool,
+    pub entity_revision: i64,
+}
+
+/// One Asset assignment projection.
+///
+/// `classification_id` is nullable by contract: `None` is the authoritative
+/// *unassigned* state at `entity_revision >= 1`, which is not the same as this PC
+/// never having been told about the Asset.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationAssignmentProjection {
+    pub asset_id: String,
+    pub classification_id: Option<String>,
+    pub entity_revision: i64,
+}
+
+/// One immutable role binding. v1 has exactly the `originals` role, and it is
+/// carried on *every* baseline page because no command can produce it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationRoleProjection {
+    pub role: String,
+    pub classification_id: String,
+}
+
+/// The deterministic assignment transition a delete change carries.
+///
+/// `affects_assignments` is the server's own count of assignments that named the
+/// deleted Classification, which is what lets a replica prove its cached lineage is
+/// complete before applying the move.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationAssignmentTransition {
+    pub from_classification_id: String,
+    pub to_classification_id: Option<String>,
+    pub affects_assignments: i64,
+}
+
+/// A baseline page.
+///
+/// `complete` is true only on the final assignment page, so a client can never adopt
+/// a subset it mistook for the whole domain.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationBaselinePage {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub snapshot_cursor: i64,
+    pub section: String,
+    pub roles: Vec<ClassificationRoleProjection>,
+    pub items: serde_json::Value,
+    pub next_after: Option<String>,
+    pub has_more: bool,
+    pub complete: bool,
+}
+
+impl ClassificationBaselinePage {
+    /// Decode this page's items for its declared section.
+    ///
+    /// A page whose section does not match its item shape is a malformed response,
+    /// not something to interpret leniently.
+    pub(crate) fn decode(
+        &self,
+    ) -> Result<
+        (
+            Vec<ClassificationProjection>,
+            Vec<ClassificationAssignmentProjection>,
+        ),
+        LibraryError,
+    > {
+        match self.section.as_str() {
+            CLASSIFICATION_BASELINE_SECTIONS_SECTION => Ok((
+                serde_json::from_value(self.items.clone())
+                    .map_err(|_| LibraryError::InvalidCloudResponse)?,
+                Vec::new(),
+            )),
+            CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION => Ok((
+                Vec::new(),
+                serde_json::from_value(self.items.clone())
+                    .map_err(|_| LibraryError::InvalidCloudResponse)?,
+            )),
+            _ => Err(LibraryError::InvalidCloudResponse),
+        }
+    }
+}
+
+/// One ordered, self-contained change row.
+///
+/// A normal change carries exactly one delta; a delete change deliberately carries
+/// **two** related parts — the Classification tombstone and the assignment
+/// transition — because the server expresses a delete as one indivisible change.
+/// [`ClassificationChange::delta`] is the single place that shape is interpreted.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationChange {
+    pub sequence: i64,
+    pub authority_cursor: i64,
+    pub command_type: String,
+    pub operation_id: String,
+    pub changed_at: String,
+    #[serde(default)]
+    pub classification: Option<ClassificationProjection>,
+    #[serde(default)]
+    pub assignment: Option<ClassificationAssignmentProjection>,
+    #[serde(default)]
+    pub assignment_transition: Option<ClassificationAssignmentTransition>,
+}
+
+impl ClassificationChange {
+    /// The canonical delta this change carries.
+    ///
+    /// Three shapes are valid and nothing else:
+    ///
+    /// * one Classification projection alone (create/rename/move/appearance);
+    /// * one assignment projection alone (`setAssetClassification`);
+    /// * a Classification tombstone plus its assignment transition (delete).
+    ///
+    /// The delete shape is *not* a malformed multi-delta row: it is the one change
+    /// the server emits to make a delete unobservable as two states. A transition
+    /// without a tombstone, a transition on a live Classification, or any shape
+    /// carrying parts of different kinds is refused rather than guessed at.
+    pub(crate) fn delta(
+        &self,
+    ) -> Result<
+        (
+            Option<&ClassificationProjection>,
+            Option<&ClassificationAssignmentProjection>,
+            Option<&ClassificationAssignmentTransition>,
+        ),
+        LibraryError,
+    > {
+        match (&self.classification, &self.assignment, &self.assignment_transition) {
+            (Some(classification), None, None) => {
+                if classification.deleted {
+                    // A tombstone is only ever emitted together with the transition
+                    // that moves its assignments, so a bare tombstone would leave the
+                    // replica unable to resolve the lineage it describes.
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+                Ok((Some(classification), None, None))
+            }
+            (None, Some(assignment), None) => Ok((None, Some(assignment), None)),
+            (Some(classification), None, Some(transition)) => {
+                if !classification.deleted {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+                if transition.from_classification_id != classification.id {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+                if transition.affects_assignments < 0 {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+                Ok((Some(classification), None, Some(transition)))
+            }
+            _ => Err(LibraryError::InvalidCloudResponse),
+        }
+    }
+}
+
+/// One page of the ordered Classification change log.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationChanges {
+    pub cursor: i64,
+    pub items: Vec<ClassificationChange>,
+    pub next_after: i64,
+    pub has_more: bool,
+}
+
 pub(crate) struct CloudClient {
     agent: ureq::Agent,
     base_url: url::Url,
@@ -601,6 +804,155 @@ impl CloudClient {
             return Err(map_album_status(status));
         }
         read_json_bounded::<AlbumChanges>(&mut response, MAX_ALBUM_RESPONSE_BYTES)
+    }
+
+    /// One Classification baseline page against a frozen snapshot cursor.
+    ///
+    /// The first request omits `snapshot` and establishes the cursor; every later
+    /// page supplies the same value, which is what makes the pages describe one
+    /// materialized state. `after` walks the deterministic order inside a section and
+    /// is never a synchronization cursor.
+    pub(crate) fn classification_baseline_page(
+        &self,
+        library_id: &str,
+        epoch: i64,
+        snapshot: Option<i64>,
+        section: Option<&str>,
+        after: Option<&str>,
+        token: &str,
+    ) -> Result<ClassificationBaselinePage, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || epoch < 1 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        if let Some(section) = section {
+            if !matches!(
+                section,
+                CLASSIFICATION_BASELINE_SECTIONS_SECTION
+                    | CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION
+            ) {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
+        if let Some(snapshot) = snapshot {
+            if snapshot < 0 {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
+        let mut url =
+            url::Url::parse(&self.endpoint("/v1/classifications/authority/baseline")?)
+                .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("libraryId", library_id);
+            query.append_pair("epoch", &epoch.to_string());
+            if let Some(snapshot) = snapshot {
+                query.append_pair("snapshot", &snapshot.to_string());
+            }
+            if let Some(section) = section {
+                query.append_pair("section", section);
+            }
+            if let Some(after) = after {
+                query.append_pair("after", after);
+            }
+        }
+        // `http_status_as_error` is disabled for this request so the coded 409 body
+        // survives: the route returns `baselineChanged` when a mutation landed between
+        // pages, and the shared authority codes when the identity/epoch/contract no
+        // longer matches. Those demand different recovery, and collapsing them into one
+        // generic rejection would make a retryable re-base look like a fatal error.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut response = agent
+            .get(url.as_str())
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| {
+                map_classification_read_error(error, LibraryError::ClassificationSyncRejected(409))
+            })?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            if status == 409 {
+                return Err(match read_json::<AlbumCodedConflict>(&mut response) {
+                    Ok(body) => classification_conflict_error(
+                        body.detail,
+                        LibraryError::ClassificationBaselineChanged,
+                    ),
+                    // An unreadable body is still evidence the request was refused; the
+                    // conservative reading is a changed baseline, which recovers by
+                    // re-reading every page from a fresh snapshot.
+                    Err(_) => LibraryError::ClassificationBaselineChanged,
+                });
+            }
+            return Err(map_classification_status(status));
+        }
+        read_json_bounded::<ClassificationBaselinePage>(
+            &mut response,
+            MAX_CLASSIFICATION_RESPONSE_BYTES,
+        )
+    }
+
+    /// One page of the ordered Classification change log, ascending by sequence.
+    pub(crate) fn classification_changes(
+        &self,
+        library_id: &str,
+        epoch: i64,
+        after: i64,
+        limit: u32,
+        token: &str,
+    ) -> Result<ClassificationChanges, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || epoch < 1 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        if after < 0 || !(1..=500).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // `http_status_as_error` is disabled for this request so the coded 409 body
+        // survives: an expired cursor, a cursor ahead of the server and a changed
+        // baseline share a status but demand different recovery, and none may be read
+        // as "no changes".
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut url = url::Url::parse(&self.endpoint("/v1/classifications/authority/changes")?)
+            .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("libraryId", library_id);
+            query.append_pair("epoch", &epoch.to_string());
+            query.append_pair("after", &after.to_string());
+            query.append_pair("limit", &limit.to_string());
+        }
+        let mut response = agent
+            .get(url.as_str())
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| {
+                map_classification_read_error(error, LibraryError::ClassificationCursorAhead)
+            })?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            if status == 409 {
+                return Err(match read_json::<AlbumCodedConflict>(&mut response) {
+                    Ok(body) => classification_conflict_error(
+                        body.detail,
+                        LibraryError::ClassificationCursorAhead,
+                    ),
+                    Err(_) => LibraryError::ClassificationCursorAhead,
+                });
+            }
+            return Err(map_classification_status(status));
+        }
+        read_json_bounded::<ClassificationChanges>(
+            &mut response,
+            MAX_CLASSIFICATION_RESPONSE_BYTES,
+        )
     }
 
     /// Send one Album command.
@@ -1665,6 +2017,68 @@ fn map_album_status(status: u16) -> LibraryError {
         401 | 403 => LibraryError::CloudUnauthorized,
         422 => LibraryError::AlbumContractUnsupported,
         other => LibraryError::AlbumSyncRejected(other),
+    }
+}
+
+/// Map a Classification transport failure onto a distinguishable recovery state.
+///
+/// The Classification domain keeps its states separate for the same reason Album and
+/// Bookmark do: "authority inactive", "stored identity no longer matches", "the server
+/// speaks another contract", a changed baseline, an expired cursor and "the transport
+/// failed" demand different actions, and flattening them into one network error would
+/// leave a blind retry as the only response to all of them.
+fn map_classification_read_error(error: ureq::Error, conflict: LibraryError) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(409) => conflict,
+        // The shared authority registry rejects an unsupported contract version with
+        // 409 `authorityContractUnsupported` (handled by the coded-body mapping) while
+        // the route's own validation uses 422; this client only ever sends the version
+        // it was compiled against, so both mean the server moved on.
+        ureq::Error::StatusCode(422) => LibraryError::ClassificationContractUnsupported,
+        ureq::Error::StatusCode(401 | 403) => LibraryError::CloudUnauthorized,
+        ureq::Error::StatusCode(status) => LibraryError::ClassificationSyncRejected(status),
+        ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+        _ => LibraryError::CloudRequestUnavailable,
+    }
+}
+
+/// Map a non-200 Classification status that carried no coded body.
+fn map_classification_status(status: u16) -> LibraryError {
+    match status {
+        401 | 403 => LibraryError::CloudUnauthorized,
+        422 => LibraryError::ClassificationContractUnsupported,
+        // 503 is the shared registry's "authority ambiguous" state on the read routes,
+        // which is a retryable authority problem rather than a malformed request.
+        503 => LibraryError::ClassificationSyncRejected(503),
+        other => LibraryError::ClassificationSyncRejected(other),
+    }
+}
+
+/// Translate a coded Classification 409 body into the specific recovery state it names.
+///
+/// Every coded reason here shares status 409 and none is interchangeable: expiry needs
+/// a fresh baseline, `cursorAhead` is identity skew, a changed baseline needs the pages
+/// re-read from a fresh snapshot, and an inactive or mismatched authority is an identity
+/// problem no retry can fix. `fallback` is the reading for an unrecognized code, which
+/// each route chooses by what its own retry would cost: the changes route resumes from
+/// its cursor, while the baseline route can only re-read.
+fn classification_conflict_error(
+    detail: serde_json::Value,
+    fallback: LibraryError,
+) -> LibraryError {
+    let code = detail.get("code").and_then(|value| value.as_str()).unwrap_or("");
+    match code {
+        "cursorExpired" => LibraryError::ClassificationCursorExpired,
+        "cursorAhead" => LibraryError::ClassificationCursorAhead,
+        "baselineChanged" | "classificationBaselineChanged" => {
+            LibraryError::ClassificationBaselineChanged
+        }
+        "authorityInactive" => LibraryError::ClassificationAuthorityInactive,
+        "authorityLibraryMismatch" | "authorityAmbiguous" => {
+            LibraryError::ClassificationAuthorityMismatch
+        }
+        "authorityContractUnsupported" => LibraryError::ClassificationContractUnsupported,
+        _ => fallback,
     }
 }
 

@@ -209,6 +209,18 @@ impl From<LibraryError> for CommandError {
             LibraryError::CatalogBookmarkRevisionConflict { .. } => {
                 "catalog_bookmark_revision_conflict"
             }
+            LibraryError::ClassificationAuthorityInactive => "classification_authority_inactive",
+            LibraryError::ClassificationAuthorityMismatch => "classification_authority_mismatch",
+            LibraryError::ClassificationContractUnsupported => {
+                "classification_contract_unsupported"
+            }
+            LibraryError::ClassificationCursorAhead => "classification_cursor_ahead",
+            LibraryError::ClassificationCursorExpired => "classification_cursor_expired",
+            LibraryError::ClassificationBaselineChanged => "classification_baseline_changed",
+            LibraryError::ClassificationFirstAdoptionMismatch => {
+                "classification_first_adoption_mismatch"
+            }
+            LibraryError::ClassificationSyncRejected(_) => "classification_sync_rejected",
             LibraryError::AlbumAuthorityInactive => "album_authority_inactive",
             LibraryError::AlbumAuthorityMismatch => "album_authority_mismatch",
             LibraryError::AlbumContractUnsupported => "album_contract_unsupported",
@@ -2392,6 +2404,26 @@ pub async fn reconcile_album_authority(
 ) -> Result<crate::library::album_reconciliation::AlbumReconciliation, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.reconcile_albums())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Adopt or catch up with the server Classification authority.
+///
+/// Receive-only: this batch teaches the PC to apply server Classification state, and
+/// there is deliberately no Classification outbox or flush command yet. The send half
+/// (2B.1) adds the queue, the operation ids and the local mutation rewiring that would
+/// give that queue work to do.
+#[tauri::command]
+pub async fn reconcile_classification_authority(
+    state: State<'_, AppState>,
+) -> Result<
+    crate::library::classification_authority::ClassificationReconciliation,
+    CommandError,
+> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.reconcile_classifications())
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

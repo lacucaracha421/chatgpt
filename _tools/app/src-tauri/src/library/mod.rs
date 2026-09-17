@@ -62,6 +62,11 @@ pub mod character_workflow;
 pub mod characters;
 mod classification;
 pub(crate) use classification::list_classifications_in;
+pub(crate) mod classification_authority;
+pub(crate) mod classification_reconciliation;
+#[cfg(test)]
+#[path = "classification_reconciliation_tests.rs"]
+mod classification_reconciliation_tests;
 pub mod cloud_preflight;
 pub(crate) mod collection;
 pub(crate) mod collection_source;

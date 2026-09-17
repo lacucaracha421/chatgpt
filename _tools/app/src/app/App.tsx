@@ -1,6 +1,10 @@
 import {useMobilePublications} from './useMobilePublications';
 import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
 import {ALBUM_AUTHORITY_CHANGED_EVENT, useAlbumAuthoritySync} from './useAlbumAuthoritySync';
+import {
+  CLASSIFICATION_AUTHORITY_CHANGED_EVENT,
+  useClassificationAuthoritySync,
+} from './useClassificationAuthoritySync';
 import { characterApi, moveAssetsToCharacter } from "../characters/api";
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
 import { useCharacterHub } from "../characters/useCharacterHub";
@@ -144,6 +148,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useMobilePublications(gateway, libraryRoot);
   useCatalogBookmarkSync(gateway, libraryRoot);
   useAlbumAuthoritySync(gateway, libraryRoot);
+  useClassificationAuthoritySync(gateway, libraryRoot);
   const cloudProblems = useCloudProblems(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
@@ -282,6 +287,18 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     window.addEventListener(ALBUM_AUTHORITY_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(ALBUM_AUTHORITY_CHANGED_EVENT, refresh);
   }, [refreshAlbums]);
+  // A remote Classification change lands in the local replica without a local action, so
+  // the sidebar and any open Classification view have to re-read it. The asset refresh
+  // matters for assignment changes: the Classification list can look identical while the
+  // set of Assets in the open folder has changed underneath.
+  useEffect(() => {
+    const refresh = () => {
+      void refreshClassifications();
+      setAssetRefresh((current) => current + 1);
+    };
+    window.addEventListener(CLASSIFICATION_AUTHORITY_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(CLASSIFICATION_AUTHORITY_CHANGED_EVENT, refresh);
+  }, [refreshClassifications]);
   useCloudCaptureSync(gateway, libraryRoot, handleCloudCaptureSync);
   const handleIngestedRef = useRef(handleIngested);
   useLayoutEffect(() => { handleIngestedRef.current = handleIngested; }, [handleIngested]);
