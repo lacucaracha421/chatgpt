@@ -195,3 +195,22 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .album-membership-name{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
 .album-membership-row small{color:var(--color-muted);white-space:nowrap;font-size:11px}
 .album-membership-entry.is-blocked small{color:var(--color-danger)}
+/* Single-Asset Classification assignment.
+   The picker composes with the existing Classification tree idiom rather than introducing a
+   parallel one: it carries `.classification-index` (which also selects the portrait
+   left-side full-height drawer treatment above) and renders `.tree-row` rows, so only the
+   selection mark, the current row and the status line are new. */
+.classification-assignment-editor .dialog-header { display:flex; align-items:center; justify-content:space-between; }
+.classification-assignment-mark { width:12px; min-width:12px; color:var(--color-accent); font-size:12px; line-height:1; }
+/* The shared tree rule gives `span:first-of-type` the flexible width, which here is the
+   selection mark rather than the name. The mark keeps its fixed width and the name takes the
+   flexible slot, so the row behaves like every other tree row. */
+.classification-assignment-editor .tree-select>span:first-of-type { flex:none; overflow:visible; text-overflow:clip; }
+.classification-assignment-editor .tree-select>.classification-assignment-name { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.tree-row.is-current .classification-assignment-name { font-weight:600; }
+.tree-row.is-current .tree-select { color:var(--color-accent); }
+.tree-select:disabled { opacity:.55; }
+.classification-assignment-breadcrumb { font-size:11px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:45%; }
+.classification-assignment-status { padding:10px 12px; color:var(--color-muted); font-size:12px; }
+.classification-assignment-status.is-blocked { color:var(--color-danger); }
+.classification-assignment-search-results { display:flex; flex-direction:column; }

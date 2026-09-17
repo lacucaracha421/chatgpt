@@ -4,6 +4,7 @@ import type {Asset} from './types';
 const mocks=vi.hoisted(()=>({ticket:vi.fn(),decode:vi.fn()}));
 vi.mock('./media',()=>({mediaTicket:mocks.ticket,decodeImage:mocks.decode,invalidateTicket:vi.fn()}));
 vi.mock('./AlbumMembershipEditor',()=>({AlbumMembershipEditor:({open}:{open:boolean})=>open?<div>album-editor-open</div>:null}));
+vi.mock('./ClassificationAssignmentEditor',()=>({ClassificationAssignmentEditor:({open}:{open:boolean})=>open?<div>classification-editor-open</div>:null}));
 import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
 afterEach(cleanup);
@@ -66,6 +67,41 @@ describe('progressive viewer',()=>{
     render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     fireEvent.click(screen.getByRole('button',{name:'앨범'}));
     expect(screen.getByText('album-editor-open')).toBeTruthy();
+  });
+  it('exposes a 분류 action that opens the Classification picker',()=>{
+    render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(screen.queryByText('classification-editor-open')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'분류'}));
+    expect(screen.getByText('classification-editor-open')).toBeTruthy();
+  });
+  // The three Viewer overlays are mutually exclusive: opening one closes the others.
+  it('keeps 분류, 앨범 and 정보 mutually exclusive',()=>{
+    render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'분류'}));
+    fireEvent.click(screen.getByRole('button',{name:'앨범'}));
+    expect(screen.getByText('album-editor-open')).toBeTruthy();
+    expect(screen.queryByText('classification-editor-open')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    expect(screen.queryByText('album-editor-open')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'분류'}));
+    expect(screen.getByText('classification-editor-open')).toBeTruthy();
+    expect(screen.queryByText('album-editor-open')).toBeNull();
+  });
+  it('does not swipe to another Asset while the Classification picker is open',()=>{
+    const change=vi.fn();
+    render(<Viewer items={items} index={0} onIndex={change} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'분류'}));
+    const surface=document.querySelector('.viewer-surface')!;
+    fireEvent.pointerDown(surface,{pointerId:1,button:0,clientX:600,clientY:300});
+    fireEvent.pointerUp(surface,{pointerId:1,clientX:200,clientY:300});
+    expect(change).not.toHaveBeenCalled();
+  });
+  it('resets a stale Classification picker when the Asset changes',async()=>{
+    const {rerender}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'분류'}));
+    expect(screen.getByText('classification-editor-open')).toBeTruthy();
+    rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(screen.queryByText('classification-editor-open')).toBeNull());
   });
   it('native video control gestures cannot navigate the gallery',async()=>{
     const change=vi.fn(); const {container}=render(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={change} onClose={()=>{}}/>);

@@ -1,11 +1,12 @@
 import {useEffect, useRef, useState} from 'react';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon, MagnifyingGlassMinusIcon, FolderIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon, MagnifyingGlassMinusIcon, FolderIcon, TagIcon} from '@heroicons/react/24/outline';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import type {Asset} from './types';
 import {dateLabel, imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText, native} from './transport';
 import {AlbumMembershipEditor} from './AlbumMembershipEditor';
+import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 
 export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void}) {
   const asset = items[index];
@@ -17,6 +18,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
   const [retry, setRetry] = useState(0);
   const [info, setInfo] = useState(false);
   const [albumOpen, setAlbumOpen] = useState(false);
+  const [classificationOpen, setClassificationOpen] = useState(false);
   const [chrome, setChrome] = useState(true);
   const [transform, setTransform] = useState({scale: 1, x: 0, y: 0});
   const surface = useRef<HTMLDivElement>(null);
@@ -26,7 +28,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
   useEffect(() => {
     const controller = new AbortController();
-    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setChrome(true);
+    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setChrome(true);
     gesture.current.points.clear();
     const load = async () => {
       try {
@@ -51,9 +53,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
     return () => controller.abort();
   }, [original, items, index]);
   useEffect(() => {
-    if (!chrome || info || albumOpen || asset.kind === 'video') return;
+    if (!chrome || info || albumOpen || classificationOpen || asset.kind === 'video') return;
     const timer = setTimeout(() => setChrome(false), 4000); return () => clearTimeout(timer);
-  }, [chrome, info, albumOpen, asset.id, asset.kind]);
+  }, [chrome, info, albumOpen, classificationOpen, asset.id, asset.kind]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
   const waiting = () => {clearTimeout(stallTimer.current);stallTimer.current=setTimeout(() => setError('영상 연결이 지연되고 있습니다. 계속 기다리거나 다시 시도해 주세요.'),15000);};
   const playing = () => {clearTimeout(stallTimer.current);setError('');};
@@ -70,9 +72,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다.</DialogDescription>
     <div className={`viewer ${chrome ? 'chrome-visible' : ''}`}>
-      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions"><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setInfo(!info); setChrome(true);}}/></div></header>
+      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions"><IconButton label="분류" icon={TagIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(true);setChrome(true);}}/><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setInfo(!info); setChrome(true);}}/></div></header>
       <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}`} onPointerDown={event => {
-        if (event.button > 0 || info || albumOpen) return;
+        if (event.button > 0 || info || albumOpen || classificationOpen) return;
         if(asset.kind==='video'&&video.current){const rect=video.current.getBoundingClientRect();if(event.clientY>rect.bottom-64)return;}
         if(asset.kind!=='video')event.currentTarget.setPointerCapture?.(event.pointerId);
         const g = gesture.current; g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
@@ -114,6 +116,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
       {transform.scale > 1 && <div className="zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={() => setTransform({scale:1,x:0,y:0})}/></div>}
       <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span>{asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
+      <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
       {info && <section className="viewer-info"><div className="viewer-info-heading"><span>{asset.kind==='video'?'VIDEO':'IMAGE'}</span><h2>{asset.creator_name||asset.creator_handle||'미디어 정보'}</h2></div><dl>{(asset.creator_name||asset.creator_handle)&&<><dt>작가</dt><dd>{asset.creator_name||asset.creator_handle}</dd></>}<dt>{asset.pending ? '수집 요청' : '수집일'}</dt><dd>{dateLabel(asset)}</dd>{asset.width&&asset.height?<><dt>해상도</dt><dd>{asset.width.toLocaleString()} × {asset.height.toLocaleString()}</dd></>:null}<dt>형식</dt><dd>{asset.content_type || asset.kind}</dd>{asset.size_bytes != null && <><dt>크기</dt><dd>{(asset.size_bytes / 1048576).toFixed(1)} MB</dd></>}</dl>{asset.source_url && /^https?:\/\//.test(asset.source_url) && <Button onClick={() => { void native('openExternal', {url:asset.source_url}).catch(e => setError(errorText(e))); }}><ArrowTopRightOnSquareIcon/>출처 열기</Button>}<Button variant="ghost" onClick={() => setInfo(false)}>정보 닫기</Button></section>}
     </div>
   </Dialog>;

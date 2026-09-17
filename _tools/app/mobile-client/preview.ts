@@ -43,6 +43,42 @@ const demoAlbums=[
   {id:'other',name:'Other',parentId:null,iconKey:null,colorKey:null},
 ];
 const demoAlbumMemberships=new Map<string,Set<string>>([['demo-0',new Set(['temp'])]]);
+/**
+ * Demo Classification state, mirroring the native contract: a live hierarchy, one
+ * single-valued assignment per Asset, and durable optimistic intent.
+ *
+ * `pending` is modelled as a queued intent that a later refresh confirms, so the preview can
+ * exercise the 저장 대기 → confirmed transition instead of only its resting state.
+ */
+const demoClassifications=[
+  {id:'game',name:'게임',kind:'root' as const,parentId:null,iconKey:'puzzle',colorKey:'blue'},
+  {id:'wuthering',name:'명조',kind:'tag' as const,parentId:'game',iconKey:null,colorKey:null},
+  {id:'reverse',name:'리버스',kind:'tag' as const,parentId:'game',iconKey:null,colorKey:null},
+  {id:'art',name:'일러스트',kind:'root' as const,parentId:null,iconKey:'photo',colorKey:'purple'},
+  {id:'landscape',name:'풍경',kind:'tag' as const,parentId:'art',iconKey:null,colorKey:'green'},
+];
+const demoAssignments=new Map<string,string|null>([['demo-0','wuthering']]);
+/**
+ * When each Asset's queued assignment was made.
+ *
+ * A real queued write stays pending until the foreground pass flushes it, so the demo keeps
+ * the same shape: the intent is reported pending for a short window and then confirmed. That
+ * is what lets the preview show 저장 대기 at all, instead of confirming instantly and hiding the
+ * state the editor exists to display.
+ */
+const demoAssignmentQueuedAt=new Map<string,number>();
+const DEMO_PENDING_MILLIS=6_000;
+function demoAssignmentState(assetId:string){
+  const queuedAt=demoAssignmentQueuedAt.get(assetId);
+  const pending=queuedAt!==undefined&&Date.now()-queuedAt<DEMO_PENDING_MILLIS;
+  if(queuedAt!==undefined&&!pending)demoAssignmentQueuedAt.delete(assetId);
+  const blocked=assetId==='demo-3';
+  return {adopted:true,assetId,libraryId:'a'.repeat(32),epoch:1,
+    classificationId:demoAssignments.get(assetId)??null,
+    pending,blocked,conflictCode:blocked?'classificationNotFound':null,
+    conflictMessage:blocked?'분류 변경을 적용할 수 없습니다. 분류가 삭제되었는지 확인해 주세요.':'',
+    classifications:demoClassifications};
+}
 function demoMembershipState(assetId:string){
   const selected=demoAlbumMemberships.get(assetId)??new Set<string>();
   return {adopted:true,libraryId:'a'.repeat(32),epoch:1,albums:demoAlbums.map(album=>({...album,desiredState:selected.has(album.id),pending:false,blocked:false,conflictCode:null}))};
@@ -70,6 +106,16 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     if(payload.desiredState===true)selected.add(albumId);else selected.delete(albumId);
     demoAlbumMemberships.set(assetId,selected);
     return demoMembershipState(assetId);
+  }
+  // Classification assignment mirrors the native contract: the write is durable immediately
+  // and reported pending, and the periodic read is what turns it confirmed — so the preview
+  // shows the same 저장 대기 transition the device does.
+  if (op === 'classificationAssignmentState') return demoAssignmentState(String(payload.assetId));
+  if (op === 'classificationAssignmentSet') {
+    const assetId=String(payload.assetId);
+    demoAssignments.set(assetId,payload.classificationId==null?null:String(payload.classificationId));
+    demoAssignmentQueuedAt.set(assetId,Date.now());
+    return demoAssignmentState(assetId);
   }
   // The demo catalog owns its domain and advertises the write capability, so the
   // browser preview can exercise the real toggle instead of a disabled one.
