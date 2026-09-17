@@ -1,0 +1,113 @@
+{
+ "_generatedBy": "server/lakomics-api/classification_authority.py encode_page/classification_projection/assignment_projection + change_items shape",
+ "assignmentPage": {
+  "complete": true,
+  "contractVersion": 1,
+  "epoch": 1,
+  "hasMore": false,
+  "items": [
+   {
+    "assetId": "asset-1",
+    "classificationId": "series",
+    "entityRevision": 1
+   },
+   {
+    "assetId": "asset-2",
+    "classificationId": null,
+    "entityRevision": 3
+   }
+  ],
+  "libraryId": "a1b2c3d4e5f60718293a6b5c6d7e8f90",
+  "nextAfter": null,
+  "roles": [
+   {
+    "classificationId": "originals",
+    "role": "originals"
+   }
+  ],
+  "section": "assignments",
+  "snapshotCursor": 7
+ },
+ "changes": {
+  "contractVersion": 1,
+  "cursor": 12,
+  "epoch": 1,
+  "hasMore": false,
+  "items": [
+   {
+    "assignment": {
+     "assetId": "asset-1",
+     "classificationId": "series",
+     "entityRevision": 1
+    },
+    "authorityCursor": 11,
+    "changedAt": "2026-09-16T00:00:00Z",
+    "commandType": "setAssetClassification",
+    "operationId": "op-assign",
+    "sequence": 11
+   },
+   {
+    "assignmentTransition": {
+     "affectsAssignments": 1,
+     "fromClassificationId": "series",
+     "toClassificationId": "originals"
+    },
+    "authorityCursor": 12,
+    "changedAt": "2026-09-16T00:00:00Z",
+    "classification": {
+     "colorKey": "blue",
+     "deleted": true,
+     "entityRevision": 3,
+     "iconKey": "star",
+     "id": "series",
+     "kind": "tag",
+     "name": "시리즈",
+     "parentId": null
+    },
+    "commandType": "deleteClassification",
+    "operationId": "op-delete",
+    "sequence": 12
+   }
+  ],
+  "libraryId": "a1b2c3d4e5f60718293a6b5c6d7e8f90",
+  "nextAfter": 12
+ },
+ "classificationPage": {
+  "complete": false,
+  "contractVersion": 1,
+  "epoch": 1,
+  "hasMore": false,
+  "items": [
+   {
+    "colorKey": null,
+    "deleted": false,
+    "entityRevision": 1,
+    "iconKey": "sparkles",
+    "id": "originals",
+    "kind": "root",
+    "name": "오리지널",
+    "parentId": null
+   },
+   {
+    "colorKey": "blue",
+    "deleted": false,
+    "entityRevision": 2,
+    "iconKey": "star",
+    "id": "series",
+    "kind": "tag",
+    "name": "시리즈",
+    "parentId": "originals"
+   }
+  ],
+  "libraryId": "a1b2c3d4e5f60718293a6b5c6d7e8f90",
+  "nextAfter": null,
+  "roles": [
+   {
+    "classificationId": "originals",
+    "role": "originals"
+   }
+  ],
+  "section": "classifications",
+  "snapshotCursor": 7
+ }
+}

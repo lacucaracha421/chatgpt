@@ -87,6 +87,7 @@ import type {
   BookmarkReconciliationResult,
   BookmarkOutboxFlushResult,
   AlbumReconciliationResult,
+  ClassificationReconciliationResult,
   AlbumOutboxFlushResult,
   AlbumSyncStatus,
   CloudCollectionsPublishResult,
@@ -174,6 +175,9 @@ export const libraryGateway: LibraryGateway = {
     invoke<BookmarkOutboxFlushResult>("flush_catalog_bookmark_outbox"),
   reconcileAlbumAuthority: () =>
     invoke<AlbumReconciliationResult>("reconcile_album_authority"),
+  // Receive-only for 2B: there is deliberately no Classification flush command yet.
+  reconcileClassificationAuthority: () =>
+    invoke<ClassificationReconciliationResult>("reconcile_classification_authority"),
   flushAlbumOutbox: () => invoke<AlbumOutboxFlushResult>("flush_album_outbox"),
   albumSyncStatus: () => invoke<AlbumSyncStatus>("album_sync_status"),
   updateOnlineCatalog: (language, maxPages) =>

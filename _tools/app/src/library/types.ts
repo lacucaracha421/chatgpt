@@ -143,6 +143,12 @@ export type AlbumReconciliationResult = {
   rematerializedMemberships: number;
   deferredToOutbox: boolean;
 };
+export type ClassificationReconciliationResult = {
+  adopted: boolean; adoptedBaseline: boolean; appliedChanges: number;
+  serverCursor: number | null; localCursor: number | null; behindBy: number;
+  /** Confirmed assignments projected into `asset_classifications` by this pass. */
+  rematerializedAssignments: number;
+};
 export type AlbumOutboxFlushResult = {
   sent: number; noOp: number; blocked: number; pending: number; stopped: boolean;
 };
@@ -1084,6 +1090,7 @@ export interface LibraryGateway {
   reconcileCatalogBookmarks?(): Promise<BookmarkReconciliationResult>;
   flushCatalogBookmarkOutbox?(): Promise<BookmarkOutboxFlushResult>;
   reconcileAlbumAuthority?(): Promise<AlbumReconciliationResult>;
+  reconcileClassificationAuthority?(): Promise<ClassificationReconciliationResult>;
   flushAlbumOutbox?(): Promise<AlbumOutboxFlushResult>;
   albumSyncStatus?(): Promise<AlbumSyncStatus>;
   updateOnlineCatalog(language?: CatalogLanguage, maxPages?: number): Promise<CatalogUpdateResult>;
