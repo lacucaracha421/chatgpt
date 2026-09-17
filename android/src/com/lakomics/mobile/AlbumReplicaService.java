@@ -74,6 +74,8 @@ final class AlbumReplicaService {
     private AlbumMembershipOutbox outbox;
     private AlbumSyncPass cycle;
     private ClassificationAuthoritySync classification;
+    private ClassificationAssignmentOutbox classificationWriter;
+    private ClassificationSyncPass classificationCycle;
     private long lastAttempt;
     private volatile boolean syncing;
     private volatile String code = "";
@@ -284,33 +286,62 @@ final class AlbumReplicaService {
     }
 
     /**
-     * Reconcile the Classification read replica, reporting its state but never failing the
-     * caller's pass.
+     * Reconcile the Classification domain: flush local assignment intents, then receive.
      *
-     * A Classification problem is recorded as a code so the status surface can show it, but
-     * it does not throw: the Album lane already succeeded or failed on its own terms, and
-     * one domain's authority state must not be reported as another's.
+     * Reported as a code but never thrown: the Album lane already succeeded or failed on its
+     * own terms, and one domain's authority state must not be reported as another's.
+     *
+     * A durable blocked conflict outranks the receive code, because it is the state the user
+     * has to act on: the receive may then report a perfectly healthy domain that says nothing
+     * about the intent still waiting for a decision.
      */
     private void reconcileClassifications(String scope, int startedUnder) {
-        ClassificationAuthoritySync reader;
+        ClassificationSyncPass cycle;
         synchronized (gate) {
-            reader = classification;
+            cycle = classificationCycle;
         }
-        if (reader == null) return;
+        if (cycle == null) return;
         try {
-            ClassificationAuthoritySync.Result result = reader.reconcile(scope);
-            synchronized (gate) {
-                if (startedUnder != attempt) return;
-                lastClassification = result;
-                classificationCode = result.code == null ? "" : result.code;
-            }
+            ClassificationSyncPass.Result completed = cycle.run(scope);
+            String blocked = firstClassificationBlockedCode(scope);
+            publishClassification(startedUnder, completed.receive,
+                    blocked == null ? null : blocked);
+        } catch (ClassificationAssignmentOutbox.Failure failure) {
+            publishClassification(startedUnder, null, failure.code);
         } catch (Exception unavailable) {
             // A replica store that cannot be opened is reported, never worked around by
             // falling back to a different database or to unsynchronized network reads.
-            synchronized (gate) {
-                if (startedUnder != attempt) return;
-                classificationCode = ClassificationReplica.CODE_STORE_UNAVAILABLE;
+            publishClassification(startedUnder, null, ClassificationReplica.CODE_STORE_UNAVAILABLE);
+        }
+    }
+
+    /**
+     * Publish what the Classification lane learned, unless the connection changed.
+     *
+     * An explicit failure code outranks the receive's own code, so a durable conflict or a
+     * write failure is never masked by a healthy receive result.
+     */
+    private void publishClassification(int startedUnder, ClassificationAuthoritySync.Result result,
+                                       String failureCode) {
+        synchronized (gate) {
+            if (startedUnder != attempt) return;
+            if (result != null) lastClassification = result;
+            String code = failureCode != null ? failureCode : result == null ? null : result.code;
+            classificationCode = code == null ? "" : code;
+        }
+    }
+
+    /** The coded state of the oldest blocked Classification assignment intent, or null. */
+    private String firstClassificationBlockedCode(String scope) {
+        synchronized (gate) {
+            if (store == null) return null;
+            for (ReplicaDb.ClassificationAssignment row : store.classificationOutbox(scope)) {
+                if (row.blocked()) {
+                    return row.conflictCode == null ? "classificationWriteConflict"
+                            : row.conflictCode;
+                }
             }
+            return null;
         }
     }
 
@@ -327,6 +358,28 @@ final class AlbumReplicaService {
                 return client.api(path, "GET", null, null).toString();
             } catch (CloudClient.HttpFailure failure) {
                 throw new ClassificationReplica.HttpFailure(failure.status, failure.detail);
+            }
+        }
+    }
+
+    /**
+     * The Classification assignment write transport.
+     *
+     * PUT to one route only. The path is not a parameter of any caller-visible operation:
+     * {@link ClassificationAssignmentOutbox#COMMAND_PATH} is what the writer passes, and
+     * `NetworkPolicy` independently refuses every other Classification write method and path,
+     * so the narrow surface is enforced twice rather than assumed.
+     */
+    private final class WriteTransport implements ClassificationAssignmentOutbox.Transport {
+        @Override
+        public String put(String path, String payload) throws Exception {
+            try {
+                // The payload is frozen in the durable outbox. Parsing it only adapts it to
+                // the existing authenticated client; no field is regenerated or rebased.
+                return client.api(path, "PUT", new JSONObject(payload), null).toString();
+            } catch (CloudClient.HttpFailure failure) {
+                throw new ClassificationAssignmentOutbox.HttpFailure(failure.status,
+                        failure.detail);
             }
         }
     }
@@ -420,7 +473,7 @@ final class AlbumReplicaService {
             ClassificationReplica.Adopted classifications = null;
             Map<String, Object> classificationCounters = null;
             synchronized (gate) {
-                if (store != null) classificationCounters = store.status(scope);
+                if (store != null) classificationCounters = store.classificationStatus(scope);
                 if (classification != null) classifications = classification.adopted(scope);
             }
             value.put("classificationAdopted", classifications != null);
@@ -431,12 +484,17 @@ final class AlbumReplicaService {
             value.put("classificationCursor",
                     classifications == null ? JSONObject.NULL : classifications.cursor);
             value.put("classificationCode", classificationCode);
+            value.put("classificationError", classificationMessage(classificationCode));
             value.put("classificationCount", counter(classificationCounters, "classificationCount"));
             value.put("classificationTombstoneCount",
                     counter(classificationCounters, "classificationTombstoneCount"));
             value.put("assignmentCount", counter(classificationCounters, "assignmentCount"));
             value.put("assignmentTombstoneCount",
                     counter(classificationCounters, "assignmentTombstoneCount"));
+            value.put("classificationOutboxPendingCount",
+                    counter(classificationCounters, "classificationOutboxPendingCount"));
+            value.put("classificationOutboxBlockedCount",
+                    counter(classificationCounters, "classificationOutboxBlockedCount"));
             AlbumAuthoritySync.Result result = last;
             value.put("appliedChanges", result == null ? 0 : result.appliedChanges);
             value.put("serverCursor", result == null || result.serverCursor == null
@@ -469,11 +527,16 @@ final class AlbumReplicaService {
             sync = new AlbumAuthoritySync(transport, store, clock);
             outbox = new AlbumMembershipOutbox(transport, store, clock);
             cycle = new AlbumSyncPass(outbox, sync);
-            // The Classification read replica shares this store and this transport, but it
-            // is a separate domain with its own authority row, cursor and lifecycle. It has
-            // no outbox: Android issues no Classification command in this phase.
-            classification = new ClassificationAuthoritySync(new ClassificationTransport(), store,
+            // The Classification domain shares this store and transport but keeps its own
+            // authority row, cursor and lifecycle. Its write surface is the one assignment
+            // command: the same transport is reused, and the writer constructs the command
+            // so no caller-supplied payload can reach the authority.
+            ClassificationTransport classificationTransport = new ClassificationTransport();
+            classification = new ClassificationAuthoritySync(classificationTransport, store,
                     () -> Instant.now().toString());
+            classificationWriter = new ClassificationAssignmentOutbox(new WriteTransport(), store,
+                    () -> Instant.now().toString());
+            classificationCycle = new ClassificationSyncPass(classificationWriter, classification);
         }
         return sync;
     }
@@ -644,6 +707,96 @@ final class AlbumReplicaService {
     }
 
     // -----------------------------------------------------------------------
+    // Single-Asset Classification editor (v5)
+    // -----------------------------------------------------------------------
+
+    /**
+     * One Asset's Classification assignment plus the live hierarchy the editor renders.
+     *
+     * Read-only. The hierarchy is the adopted live replica, so a tombstoned Classification
+     * cannot be offered as a destination, and the value is the *visible* assignment —
+     * composed from the confirmed lineage plus this Asset's queued intents — so a pending
+     * choice is what the dialog shows.
+     */
+    JSONObject classificationAssignmentState(String assetId) {
+        if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Asset id");
+        }
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            JSONObject value = new JSONObject();
+            JSONArray rows = new JSONArray();
+            try {
+                if (scope.isEmpty()) return value.put("adopted", false).put("classifications", rows);
+                engine();
+                ClassificationReplica.Adopted authority = store.classificationAdopted(scope);
+                if (authority == null) {
+                    return value.put("adopted", false).put("classifications", rows);
+                }
+                LibraryReplicaStore.AssignmentState assignment =
+                        store.classificationAssignment(scope, assetId);
+                Map<String, ClassificationReplica.Node> nodes = store.classificationNodes(scope, true);
+                List<ClassificationReplica.Node> ordered = new ArrayList<>(nodes.values());
+                ordered.sort(Comparator.comparing((ClassificationReplica.Node node) -> node.name)
+                        .thenComparing(node -> node.id));
+                for (ClassificationReplica.Node node : ordered) {
+                    rows.put(new JSONObject()
+                            .put("id", node.id)
+                            .put("kind", node.kind)
+                            .put("name", node.name)
+                            .put("parentId", node.parentId == null ? JSONObject.NULL : node.parentId)
+                            .put("iconKey", node.iconKey == null ? JSONObject.NULL : node.iconKey)
+                            .put("colorKey", node.colorKey == null ? JSONObject.NULL : node.colorKey));
+                }
+                String conflict = assignment == null || assignment.conflictCode == null
+                        ? null : assignment.conflictCode;
+                return value.put("adopted", true)
+                        .put("assetId", assetId)
+                        .put("classificationId", assignment == null || assignment.classificationId == null
+                                ? JSONObject.NULL : assignment.classificationId)
+                        .put("pending", assignment != null && assignment.pending)
+                        .put("blocked", assignment != null && assignment.blocked)
+                        .put("conflictCode", conflict == null ? JSONObject.NULL : conflict)
+                        .put("conflictMessage", conflict == null ? "" : classificationMessage(conflict))
+                        .put("libraryId", authority.libraryId)
+                        .put("epoch", authority.epoch)
+                        .put("classifications", rows);
+            } catch (Exception unrepresentable) {
+                throw new IllegalStateException("Classification assignment state unavailable");
+            }
+        }
+    }
+
+    /**
+     * Set one Asset's Classification, or clear it with a null id.
+     *
+     * The enqueue is durable before this returns, so a WebView that sees success can rely on
+     * the intent surviving process death. The requested Classification is validated against
+     * the adopted live replica — a tombstoned id is gone rather than empty — and the protected
+     * `originals` role is deliberately allowed: the authority protects it from
+     * rename/move/delete only, and assignment to it is an ordinary operation.
+     */
+    JSONObject setClassificationAssignment(String assetId, String classificationId) {
+        if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Asset id");
+        }
+        if (classificationId != null && !classificationId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Classification id");
+        }
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            if (scope.isEmpty()) throw new IllegalStateException("Not configured");
+            engine();
+            LibraryReplicaStore.AssignmentEdit edit = store.queueClassificationAssignment(scope,
+                    assetId, classificationId, UUID.randomUUID().toString(),
+                    Instant.now().toString());
+            JSONObject value = classificationAssignmentState(assetId);
+            if (edit.changed) request(true);
+            return value;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Additive Album collections (2C-2)
     // -----------------------------------------------------------------------
 
@@ -711,6 +864,35 @@ final class AlbumReplicaService {
                 return "서버의 앨범 변경 응답을 확인할 수 없습니다. 변경은 저장 대기 상태로 유지됩니다.";
             default:
                 return "앨범 동기화를 완료하지 못했습니다. 잠시 후 다시 시도합니다.";
+        }
+    }
+
+    /**
+     * Sanitized Korean text for the Classification domain's own states.
+     *
+     * Separate from {@link #message} because the domains differ: a Classification contract
+     * failure is not an Album one, and reporting a domain's state under the other domain's
+     * wording would tell the user to act on the wrong problem.
+     */
+    private static String classificationMessage(String code) {
+        if (code.isEmpty() || ClassificationReplica.CODE_INACTIVE.equals(code)) return "";
+        switch (code) {
+            case ClassificationReplica.CODE_UNAUTHORIZED:
+                return "서버 인증에 실패했습니다. 연결 설정을 확인해 주세요.";
+            case ClassificationReplica.CODE_CONTRACT_UNSUPPORTED:
+                return "서버가 지원하지 않는 분류 동기화 버전입니다. 앱 업데이트가 필요합니다.";
+            case ClassificationReplica.CODE_STORE_UNAVAILABLE:
+                return "라이브러리 복제본을 열 수 없습니다.";
+            case ClassificationReplica.CODE_LIBRARY_MISMATCH:
+            case "epochMismatch":
+                return "분류 권위가 변경되어 저장 대기 중인 변경을 자동 적용할 수 없습니다.";
+            case "classificationNotFound":
+            case "classificationWriteConflict":
+                return "분류 변경을 적용할 수 없습니다. 분류가 삭제되었는지 확인해 주세요.";
+            case ClassificationAssignmentOutbox.CODE_PROTOCOL_INTEGRITY:
+                return "서버의 분류 변경 응답을 확인할 수 없습니다. 변경은 저장 대기 상태로 유지됩니다.";
+            default:
+                return "분류 동기화를 완료하지 못했습니다. 잠시 후 다시 시도합니다.";
         }
     }
 }

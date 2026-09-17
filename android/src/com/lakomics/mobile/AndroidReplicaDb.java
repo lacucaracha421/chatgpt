@@ -39,15 +39,33 @@ final class AndroidReplicaDb implements ReplicaDb {
         db.enableWriteAheadLogging();
     }
 
+    /**
+     * Upgrade in place through the one shared definition of the upgrade.
+     *
+     * Only the transaction is owned here: the column adds, the DDL and the version stamp
+     * are decided by {@link ReplicaSchema#migrate}, so the check harness that drives the
+     * same call over a real SQLite engine observes the shipped sequence rather than a
+     * paraphrase of it.
+     */
     private void migrate() {
-        int version = db.getVersion();
-        ReplicaSchema.requireReadableVersion(version);
-        if (!ReplicaSchema.canUpgradeFrom(version)) return;
         db.beginTransaction();
         try {
-            for (String statement : ReplicaSchema.upgradeStatements(version)) db.execSQL(statement);
-            for (String statement : ReplicaSchema.DDL) db.execSQL(statement);
-            db.setVersion(ReplicaSchema.VERSION);
+            ReplicaSchema.migrate(new ReplicaSchema.Statements() {
+                @Override
+                public int version() {
+                    return db.getVersion();
+                }
+
+                @Override
+                public void execute(String statement) {
+                    db.execSQL(statement);
+                }
+
+                @Override
+                public void setVersion(int version) {
+                    db.setVersion(version);
+                }
+            });
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -265,6 +283,11 @@ final class AndroidReplicaDb implements ReplicaDb {
     }
 
     @Override
+    public void clearAssignment(String assetId) {
+        db.execSQL(ReplicaSchema.CLEAR_CLASSIFICATION_ASSIGNMENT, new Object[]{assetId});
+    }
+
+    @Override
     public void writeClassificationRole(String role, String classificationId) {
         db.execSQL(ReplicaSchema.WRITE_CLASSIFICATION_ROLE, new Object[]{role, classificationId});
     }
@@ -297,6 +320,55 @@ final class AndroidReplicaDb implements ReplicaDb {
     @Override
     public void setClassificationReconciledAt(String now) {
         db.execSQL(ReplicaSchema.SET_CLASSIFICATION_RECONCILED, new Object[]{now});
+    }
+
+    // -----------------------------------------------------------------------
+    // Classification assignment outbox (v5)
+    // -----------------------------------------------------------------------
+
+    @Override
+    public List<ClassificationAssignment> classificationOutbox() {
+        List<ClassificationAssignment> rows = new ArrayList<>();
+        try (Cursor cursor = db.rawQuery(ReplicaSchema.READ_CLASSIFICATION_OUTBOX, null)) {
+            while (cursor.moveToNext()) {
+                rows.add(new ClassificationAssignment(cursor.getLong(0), cursor.getString(1),
+                        cursor.getString(2), cursor.getString(3),
+                        cursor.isNull(4) ? null : cursor.getString(4), cursor.getString(5),
+                        cursor.getLong(6), cursor.getLong(7), cursor.getLong(8),
+                        cursor.getString(9), cursor.getString(10),
+                        cursor.isNull(11) ? null : cursor.getString(11),
+                        cursor.isNull(12) ? null : cursor.getString(12), cursor.getString(13)));
+            }
+        }
+        return rows;
+    }
+
+    @Override
+    public void writeClassificationOutbox(ClassificationAssignment row) {
+        db.execSQL(ReplicaSchema.WRITE_CLASSIFICATION_OUTBOX, new Object[]{row.seq,
+                row.operationId, row.commandType, row.assetId, row.classificationId, row.libraryId,
+                row.epoch, row.contractVersion, row.expectedRevision, row.payload, row.createdAt});
+    }
+
+    @Override
+    public void deleteClassificationOutbox(long seq) {
+        db.execSQL(ReplicaSchema.DELETE_CLASSIFICATION_OUTBOX, new Object[]{seq});
+    }
+
+    @Override
+    public void blockClassificationOutbox(long seq, String code, String detail) {
+        db.execSQL(ReplicaSchema.BLOCK_CLASSIFICATION_OUTBOX, new Object[]{code, detail, seq});
+    }
+
+    @Override
+    public void rebaseClassificationOutbox(long seq, long expectedRevision, String payload) {
+        db.execSQL(ReplicaSchema.REBASE_CLASSIFICATION_OUTBOX,
+                new Object[]{expectedRevision, payload, seq});
+    }
+
+    @Override
+    public void clearClassificationOutbox() {
+        db.execSQL(ReplicaSchema.CLEAR_CLASSIFICATION_OUTBOX);
     }
 
     @Override

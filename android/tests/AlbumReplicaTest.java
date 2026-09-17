@@ -460,7 +460,6 @@ public final class AlbumReplicaTest {
 
         @Override
         public StoredAuthority classificationAuthority() { return null; }
-
         @Override
         public List<ClassificationReplica.Node> classifications(boolean liveOnly) {
             return new ArrayList<>();
@@ -485,6 +484,11 @@ public final class AlbumReplicaTest {
         public void applyAssignmentTransition(String from, String to, String now) { }
 
         @Override
+        public void clearAssignment(String assetId) {
+            exec(ReplicaSchema.CLEAR_CLASSIFICATION_ASSIGNMENT, assetId);
+        }
+
+        @Override
         public void writeClassificationRole(String role, String classificationId) { }
 
         @Override
@@ -506,6 +510,31 @@ public final class AlbumReplicaTest {
 
         @Override
         public void setClassificationReconciledAt(String now) { }
+
+        // ---- Classification assignment outbox (v5): unused by the Album checks, so the
+        // ---- real statements run only where they are exercised (ClassificationAssignmentTest).
+
+        @Override
+        public List<ClassificationAssignment> classificationOutbox() { return new ArrayList<>(); }
+
+        @Override
+        public void writeClassificationOutbox(ClassificationAssignment row) { }
+
+        @Override
+        public void deleteClassificationOutbox(long seq) { }
+
+        @Override
+        public void blockClassificationOutbox(long seq, String code, String detail) { }
+
+        @Override
+        public void rebaseClassificationOutbox(long seq, long expectedRevision, String payload) {
+            exec(ReplicaSchema.REBASE_CLASSIFICATION_OUTBOX, expectedRevision, payload, seq);
+        }
+
+        @Override
+        public void clearClassificationOutbox() {
+            exec(ReplicaSchema.CLEAR_CLASSIFICATION_OUTBOX);
+        }
 
         /**
          * One real SQL transaction.
@@ -737,6 +766,9 @@ public final class AlbumReplicaTest {
         public void applyAssignmentTransition(String from, String to, String now) { }
 
         @Override
+        public void clearAssignment(String assetId) { }
+
+        @Override
         public void writeClassificationRole(String role, String classificationId) { }
 
         @Override
@@ -756,6 +788,26 @@ public final class AlbumReplicaTest {
 
         @Override
         public void setClassificationReconciledAt(String now) { }
+
+        // ---- Classification assignment outbox (v5): unused by the Album checks. ----
+
+        @Override
+        public List<ClassificationAssignment> classificationOutbox() { return new ArrayList<>(); }
+
+        @Override
+        public void writeClassificationOutbox(ClassificationAssignment row) { }
+
+        @Override
+        public void deleteClassificationOutbox(long seq) { }
+
+        @Override
+        public void blockClassificationOutbox(long seq, String code, String detail) { }
+
+        @Override
+        public void rebaseClassificationOutbox(long seq, long expectedRevision, String payload) { }
+
+        @Override
+        public void clearClassificationOutbox() { }
 
         @Override
         public void begin() {
@@ -1578,10 +1630,11 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
     }
 
     private static void v2OutboxSchemaHasAConservativeV3Upgrade() {
-        // v4 added the read-only Classification replica beside the Album domain. The v2
-        // outbox upgrade below is unchanged and still what this check pins.
-        equal(4, ReplicaSchema.VERSION,
-                "Schema v4 adds the Classification read replica to the identity-bound v3 outbox");
+        // v4 added the read-only Classification replica beside the Album domain, and v5 adds
+        // the Classification assignment outbox. Both arrive through the same additive DDL,
+        // so the v2 outbox upgrade below is unchanged and still what this check pins.
+        equal(5, ReplicaSchema.VERSION,
+                "Schema v5 adds the Classification assignment outbox to the identity-bound v3 outbox");
         String[] upgrade = ReplicaSchema.upgradeStatements(2);
         equal(2, upgrade.length, "The intermediate v2 outbox needs two identity columns");
         check(upgrade[0].contains("library_id") && upgrade[0].contains("DEFAULT ''"),
@@ -1593,6 +1646,9 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
         equal(0, ReplicaSchema.upgradeStatements(3).length,
                 "The v3 Album replica gains the Classification tables from the same DDL, with"
                         + " no outbox to alter");
+        equal(0, ReplicaSchema.upgradeStatements(4).length,
+                "The v4 replica gains the Classification assignment outbox from the same DDL,"
+                        + " so its upgrade needs no ALTER either");
     }
 
     private static void inactiveAuthorityLeavesAndroidUnadopted(Path directory) throws Exception {

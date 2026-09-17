@@ -23,6 +23,8 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 final class LibraryReplicaStore implements AlbumReplica.State, ClassificationReplica.State {
     static final String MEMBERSHIP_COMMAND = "setAlbumMembership";
+    /** The one Classification command Android may issue. Structural commands stay PC-only. */
+    static final String ASSIGNMENT_COMMAND = "setAssetClassification";
 
     static final class MembershipEdit {
         final boolean changed;
@@ -712,6 +714,8 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
                 value.put("classificationTombstoneCount", 0L);
                 value.put("assignmentCount", 0L);
                 value.put("assignmentTombstoneCount", 0L);
+                value.put("classificationOutboxPendingCount", 0L);
+                value.put("classificationOutboxBlockedCount", 0L);
                 return value;
             }
             long live = 0, tombstoned = 0;
@@ -726,6 +730,12 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
             value.put("classificationTombstoneCount", tombstoned);
             value.put("assignmentCount", assigned);
             value.put("assignmentTombstoneCount", unassigned);
+            long pending = 0, blocked = 0;
+            for (ReplicaDb.ClassificationAssignment row : db.classificationOutbox()) {
+                if (row.blocked()) blocked++; else pending++;
+            }
+            value.put("classificationOutboxPendingCount", pending);
+            value.put("classificationOutboxBlockedCount", blocked);
             return value;
         } finally {
             lock.unlock();
@@ -877,6 +887,10 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
         try {
             db.begin();
             try {
+                // The assignment outbox belongs to this domain: a replaced connection's
+                // unsent Classification intents are its rows, so leaving them would let the
+                // new connection inherit another account's pending edit.
+                db.clearClassificationOutbox();
                 db.clearClassificationRole();
                 db.clearAssignments();
                 db.clearClassifications();
@@ -889,6 +903,361 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
         } finally {
             lock.unlock();
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Classification assignment write (v5)
+    // -----------------------------------------------------------------------
+
+    /** One local assignment edit: what it did, and the expectation it froze. */
+    static final class AssignmentEdit {
+        final boolean changed;
+        final String classificationId;
+        final long expectedRevision;
+        final String operationId;
+
+        AssignmentEdit(boolean changed, String classificationId, long expectedRevision,
+                       String operationId) {
+            this.changed = changed;
+            this.classificationId = classificationId;
+            this.expectedRevision = expectedRevision;
+            this.operationId = operationId;
+        }
+    }
+
+    /**
+     * One Asset's visible assignment, derived rather than materialized.
+     *
+     * `classification_assignment_state` stays strictly the last *server-confirmed* lineage:
+     * a delete's transition verifies its affected count against those rows, so writing an
+     * optimistic value into them would make the replica's own lineage disagree with the
+     * authority's and refuse its next legitimate transition. The optimistic value is
+     * therefore composed here — this Asset's queued intents replayed in FIFO order over the
+     * confirmed row — which also means it cannot survive as a phantom once the queue empties.
+     */
+    static final class AssignmentState {
+        /** The visible value: the last queued intent, or the confirmed value. */
+        final String classificationId;
+        /** The last server-confirmed revision; never a predicted one. */
+        final long confirmedRevision;
+        /** Whether the authority has ever told this replica about the Asset at all. */
+        final boolean confirmed;
+        final boolean pending;
+        final boolean blocked;
+        final String conflictCode;
+
+        AssignmentState(String classificationId, long confirmedRevision, boolean confirmed,
+                        boolean pending, boolean blocked, String conflictCode) {
+            this.classificationId = classificationId;
+            this.confirmedRevision = confirmedRevision;
+            this.confirmed = confirmed;
+            this.pending = pending;
+            this.blocked = blocked;
+            this.conflictCode = conflictCode;
+        }
+    }
+
+    /**
+     * Apply one local Classification choice and append its immutable command in one
+     * transaction.
+     *
+     * The confirmed revision is deliberately not advanced: it describes the server. The
+     * successor expectation is composed from the confirmed revision plus the same Asset's
+     * preceding pending state changes, each of which the server will consume exactly one
+     * revision for.
+     */
+    AssignmentEdit queueClassificationAssignment(String scope, String assetId,
+                                                 String classificationId, String operationId,
+                                                 String now) {
+        if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Asset id");
+        }
+        if (operationId == null || operationId.isEmpty() || operationId.length() > 128) {
+            throw new IllegalArgumentException("Invalid operation id");
+        }
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority authority = requireClassificationAuthority(scope);
+                // A tombstoned Classification is gone rather than empty, so it cannot be
+                // assigned. The protected `originals` role is deliberately *not* refused:
+                // the authority protects it from rename/move/delete only, and assignment
+                // to it is an ordinary operation the server accepts.
+                if (classificationId != null) {
+                    boolean live = false;
+                    for (ClassificationReplica.Node node : db.classifications(true)) {
+                        if (node.id.equals(classificationId)) { live = true; break; }
+                    }
+                    if (!live) throw new IllegalArgumentException("Unknown Classification");
+                }
+                long confirmedRevision = 0;
+                boolean confirmed = false;
+                String confirmedValue = null;
+                for (ClassificationReplica.Assignment assignment : db.assignments()) {
+                    if (assignment.assetId.equals(assetId)) {
+                        confirmed = true;
+                        confirmedRevision = assignment.entityRevision;
+                        confirmedValue = assignment.classificationId;
+                        break;
+                    }
+                }
+                List<ReplicaDb.ClassificationAssignment> queued = db.classificationOutbox();
+                long predecessorCount = 0;
+                long nextSeq = 1;
+                for (ReplicaDb.ClassificationAssignment row : queued) {
+                    nextSeq = Math.max(nextSeq, row.seq + 1);
+                    if (!row.assetId.equals(assetId)) continue;
+                    // A blocked predecessor needs a user decision before this Asset's
+                    // lineage can advance again, so stacking another intent behind it would
+                    // only queue work that cannot legally follow.
+                    if (row.blocked()) {
+                        throw new IllegalStateException("Classification assignment is blocked");
+                    }
+                    predecessorCount++;
+                }
+                if (java.util.Objects.equals(
+                        visibleClassification(confirmedValue, confirmed, queued, assetId),
+                        classificationId)) {
+                    db.rollback();
+                    return new AssignmentEdit(false, classificationId,
+                            confirmedRevision + predecessorCount, operationId);
+                }
+                long expected = confirmedRevision + predecessorCount;
+                String payload = classificationPayload(authority, operationId, assetId,
+                        classificationId, expected);
+                db.writeClassificationOutbox(new ReplicaDb.ClassificationAssignment(nextSeq,
+                        operationId, LibraryReplicaStore.ASSIGNMENT_COMMAND, assetId,
+                        classificationId, authority.libraryId, authority.epoch,
+                        authority.contractVersion, expected, payload, "pending", null, null, now));
+                db.commit();
+                return new AssignmentEdit(true, classificationId, expected, operationId);
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * One Asset's visible assignment for the native bridge.
+     *
+     * Reads the confirmed lineage and the queue under one lock, so the value cannot be
+     * composed from rows that disagree about which connection owns them.
+     */
+    AssignmentState classificationAssignment(String scope, String assetId) {
+        if (assetId == null || !assetId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("Invalid Asset id");
+        }
+        lock.lock();
+        try {
+            ReplicaDb.StoredAuthority authority = db.classificationAuthority();
+            if (authority == null || !authority.scope.equals(scope)) return null;
+            boolean confirmed = false;
+            long revision = 0;
+            String confirmedValue = null;
+            for (ClassificationReplica.Assignment assignment : db.assignments()) {
+                if (assignment.assetId.equals(assetId)) {
+                    confirmed = true;
+                    revision = assignment.entityRevision;
+                    confirmedValue = assignment.classificationId;
+                    break;
+                }
+            }
+            List<ReplicaDb.ClassificationAssignment> queued = db.classificationOutbox();
+            boolean pending = false, blocked = false;
+            String conflict = null;
+            for (ReplicaDb.ClassificationAssignment row : queued) {
+                if (!row.assetId.equals(assetId)) continue;
+                if (row.blocked()) {
+                    blocked = true;
+                    if (conflict == null) conflict = row.conflictCode;
+                } else {
+                    pending = true;
+                }
+            }
+            return new AssignmentState(
+                    visibleClassification(confirmedValue, confirmed, queued, assetId),
+                    revision, confirmed, pending, blocked, conflict);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Durable Classification assignment intents for the owning connection, oldest first. */
+    List<ReplicaDb.ClassificationAssignment> classificationOutbox(String scope) {
+        lock.lock();
+        try {
+            ReplicaDb.StoredAuthority authority = db.classificationAuthority();
+            if (authority == null || !authority.scope.equals(scope)) {
+                return java.util.Collections.emptyList();
+            }
+            return new java.util.ArrayList<>(db.classificationOutbox());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Retire one accepted intent and record the confirmed lineage it reported.
+     *
+     * A returned revision of 0 is the authority's own representation of "this Asset has no
+     * assignment row", which this replica expresses by absence; storing a row would turn
+     * "never seen" into the distinct state "unassigned at revision 0" that no later command
+     * could compare against.
+     */
+    void confirmClassificationAssignment(String scope, long seq,
+                                         ClassificationReplica.Assignment confirmed, String now) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                requireClassificationAuthority(scope);
+                ReplicaDb.ClassificationAssignment accepted = null;
+                for (ReplicaDb.ClassificationAssignment row : db.classificationOutbox()) {
+                    if (row.seq == seq) accepted = row;
+                }
+                if (accepted == null || !accepted.assetId.equals(confirmed.assetId)) {
+                    throw new IllegalStateException("Classification command outcome mismatch");
+                }
+                if (confirmed.entityRevision == 0) {
+                    db.clearAssignment(confirmed.assetId);
+                } else {
+                    db.writeAssignment(confirmed, now);
+                }
+                db.deleteClassificationOutbox(seq);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Mark one semantic conflict durable; payload and operation id stay unchanged. */
+    void blockClassificationAssignment(String scope, long seq, String code, String detail) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                requireClassificationAuthority(scope);
+                db.blockClassificationOutbox(seq, code, detail);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Rebase one unaccepted assignment intent onto the authority's current revision.
+     *
+     * The rejected command was never accepted or receipted, and an assignment is a
+     * desired-state scalar whose meaning is the desired Classification alone, so presenting
+     * the *same* logical intent against the revision the authority actually holds is legal.
+     * Everything except the expectation is preserved: the operation id, command type, Asset,
+     * desired value, library, epoch and contract all come from the row's own frozen columns,
+     * so the retry differs from the first attempt in exactly one field. The row is not
+     * retired: the next pass resends it.
+     */
+    void rebaseClassificationAssignment(String scope, long seq, long currentRevision, String now) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                requireClassificationAuthority(scope);
+                ReplicaDb.ClassificationAssignment row = null;
+                for (ReplicaDb.ClassificationAssignment candidate : db.classificationOutbox()) {
+                    if (candidate.seq == seq) row = candidate;
+                }
+                if (row == null) throw new IllegalStateException("Classification intent is gone");
+                if (row.blocked()) {
+                    throw new IllegalStateException("Classification intent is blocked");
+                }
+                if (currentRevision < 0) {
+                    throw new IllegalStateException("Classification conflict revision is invalid");
+                }
+                // Every preserved field comes from the row's own frozen columns and the
+                // payload is rebuilt by the same deterministic construction that froze it,
+                // so only `expectedRevision` moves — by construction, not by convention.
+                String payload = classificationPayload(row.libraryId, row.epoch, row.contractVersion,
+                        row.operationId, row.assetId, row.classificationId, currentRevision);
+                db.rebaseClassificationOutbox(seq, currentRevision, payload);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * The visible intended assignment for one Asset, or null for a never-seen Asset.
+     *
+     * Queued intents are replayed in FIFO order over the confirmed value, so the last one
+     * wins. A blocked intent still contributes: it is the user's choice awaiting a decision,
+     * and hiding it would make the UI show a state the user never chose. The confirmed value
+     * and the queue are both supplied by the caller, which read them inside one critical
+     * section, so the composition cannot combine two different snapshots.
+     */
+    private static String visibleClassification(String confirmedValue, boolean confirmed,
+                                                List<ReplicaDb.ClassificationAssignment> queued,
+                                                String assetId) {
+        String value = confirmed ? confirmedValue : null;
+        for (ReplicaDb.ClassificationAssignment row : queued) {
+            if (row.assetId.equals(assetId)) value = row.classificationId;
+        }
+        return value;
+    }
+
+    /** Caller holds {@link #lock} and an open transaction. */
+    private ReplicaDb.StoredAuthority requireClassificationAuthority(String scope) {
+        ReplicaDb.StoredAuthority authority = db.classificationAuthority();
+        if (authority == null || !authority.scope.equals(scope)) {
+            throw new IllegalStateException("Classification authority is not adopted");
+        }
+        return authority;
+    }
+
+    private static String classificationPayload(ReplicaDb.StoredAuthority authority,
+                                                String operationId, String assetId,
+                                                String classificationId, long expectedRevision) {
+        return classificationPayload(authority.libraryId, authority.epoch,
+                authority.contractVersion, operationId, assetId, classificationId,
+                expectedRevision);
+    }
+
+    /**
+     * One frozen assignment command body.
+     *
+     * The identity fields are parameters rather than read from the authority so the two
+     * callers can each supply the bytes they must preserve: the enqueue passes the adopted
+     * authority, and the rebase passes the row's *own* frozen columns, which makes "a rebase
+     * changes the expectation and nothing else" true by construction instead of by an
+     * argument that the two happen to be equal at that moment.
+     */
+    private static String classificationPayload(String libraryId, long epoch,
+                                                long contractVersion, String operationId,
+                                                String assetId, String classificationId,
+                                                long expectedRevision) {
+        return "{\"libraryId\":" + quote(libraryId)
+                + ",\"epoch\":" + epoch
+                + ",\"contractVersion\":" + contractVersion
+                + ",\"operationId\":" + quote(operationId)
+                + ",\"commandType\":\"" + ASSIGNMENT_COMMAND + "\""
+                + ",\"assetId\":" + quote(assetId)
+                + ",\"classificationId\":" + (classificationId == null
+                        ? "null" : quote(classificationId))
+                + ",\"expectedRevision\":" + expectedRevision + "}";
     }
 
     private void applyAlbum(AlbumReplica.Album album, String now) {

@@ -84,6 +84,13 @@ public final class MainActivity extends Activity {
      case "albumMemberships":data=AlbumReplicaService.get(MainActivity.this).membershipState(p.getString("assetId"));break;
      case "albumMembershipSet":data=AlbumReplicaService.get(MainActivity.this).setMembership(p.getString("assetId"),p.getString("albumId"),p.getBoolean("desiredState"));break;
      case "albumMembershipResolve":data=AlbumReplicaService.get(MainActivity.this).resolveMembership(p.getString("assetId"),p.getString("albumId"),p.getString("action"));break;
+     // The single-Asset Classification editor. Both operations are narrow: the read
+     // returns the visible assignment plus the live hierarchy, and the write accepts only
+     // an Asset id and a desired Classification id (null for unassigned). The native layer
+     // owns every protocol field — operation id, library, epoch, contract, command name and
+     // expected revision — so no raw Classification command can be constructed here.
+     case "classificationAssignmentState":data=AlbumReplicaService.get(MainActivity.this).classificationAssignmentState(p.getString("assetId"));break;
+     case "classificationAssignmentSet":data=AlbumReplicaService.get(MainActivity.this).setClassificationAssignment(p.getString("assetId"),p.isNull("classificationId")?null:p.getString("classificationId"));break;
      case "pickerRefresh":PickerLibrary.get(MainActivity.this).refresh(true);data=pickerStatus();break;
      case "openPickerSettings":if(Build.VERSION.SDK_INT<33)throw new UnsupportedOperationException();Intent pickerSettings=new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES_SETTINGS);if(pickerSettings.resolveActivity(getPackageManager())==null)throw new UnsupportedOperationException();runOnUiThread(()->{try{startActivity(pickerSettings);}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
      case "configure": String endpoint=NetworkPolicy.endpoint(p.getString("endpoint"),p.optBoolean("allowPrivateHttp",false));String token=p.getString("token");client.validate(endpoint,token,signal);LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();settings.write(endpoint,token,p.optBoolean("allowPrivateHttp",false));cancelOtherRequests(signal);if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();

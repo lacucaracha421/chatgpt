@@ -70,14 +70,24 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/albums/authority/activate","POST"));
  for(String path:new String[]{"/v1/albums/commands/","/v1/albums/authority/activate","/v1/albums","/v1/albums/","/v1/sync","/v1/sync/","/v1/sync/status/extra","/v1/sync/statusx","/v1/albums/baseline/extra","/v1/albums/baselinex","/v1/albums/commands/x"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline","/v1/albums/changes"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
- // Classification authority is a READ replica in this phase: exactly the two read routes
- // are reachable, and the command route is denied for every method so a Classification
- // mobile write cannot be issued by any caller.
+ // Classification authority: exactly the two read routes stay GET-only, and the domain's
+ // one typed mutation route is added as PUT. The route also carries structural commands for
+ // the PC publisher, but Android cannot reach them: ClassificationAssignmentOutbox
+ // constructs `setAssetClassification` internally and the server requires the publisher role
+ // for every other command. Activate and every malformed variant stay denied.
  for(String path:new String[]{"/v1/classifications/authority/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/classifications/authority/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));
  for(String path:new String[]{"/v1/classifications/authority/baseline","/v1/classifications/authority/changes"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
- for(String path:new String[]{"/v1/classifications/authority/commands","/v1/classifications/authority/activate","/v1/classifications/authority","/v1/classifications/authority/","/v1/classifications/authority/baseline/extra","/v1/classifications/authority/baselinex","/v1/classifications/authority/changes/extra"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ // The assignment command route: PUT only, and only at this exact path.
+ pass(()->NetworkPolicy.api("/v1/classifications/authority/commands","PUT"));
+ for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/classifications/authority/commands",method));
+ for(String path:new String[]{"/v1/classifications/authority/activate","/v1/classifications/authority","/v1/classifications/authority/","/v1/classifications/authority/baseline/extra","/v1/classifications/authority/baselinex","/v1/classifications/authority/changes/extra","/v1/classifications/authority/commands/","/v1/classifications/authority/commands/extra","/v1/classifications/authorityx/commands"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  reject(()->NetworkPolicy.api("/v1/classifications/authority/../authority/baseline","GET"));
  reject(()->NetworkPolicy.api("/v1/classifications/authority/baseline%2f..","GET"));
+ reject(()->NetworkPolicy.api("/v1/classifications/authority/../authority/commands","PUT"));
+ reject(()->NetworkPolicy.api("/v1/classifications/authority/commands%2f..","PUT"));
+ // A query string is stripped before matching, exactly as for every other route, and grants
+ // no additional target.
+ reject(()->NetworkPolicy.api("/v1/classifications/authority/activate?libraryId=0123456789abcdef0123456789abcdef","PUT"));
  reject(()->NetworkPolicy.api("/v1/albums/../albums/baseline","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/baseline%2f..","GET"));
  // Unrelated writes stay blocked, so widening this allowlist did not widen any other.

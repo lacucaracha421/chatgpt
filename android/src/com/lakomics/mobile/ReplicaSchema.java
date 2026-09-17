@@ -16,10 +16,17 @@ package com.lakomics.mobile;
  * Version 4 adds the read-only Classification replica. Each domain keeps its own singleton
  * authority row, so one domain can be adopted while another is not, and a domain's rows
  * are cleared only by that domain's own reset.
+ *
+ * Version 5 adds the Classification *assignment* outbox. It is deliberately a second
+ * outbox table rather than a column set on the Album one: the two domains have different
+ * command shapes, different revision lineages and different conflict rules, and one table
+ * would have to express both. The Classification write surface stays narrow — Android
+ * sends only `setAssetClassification`, and only at one Asset at a time — so the table
+ * stores exactly what that one command needs.
  */
 final class ReplicaSchema {
-    /** Version 4 adds the Classification read replica beside the Album domain. */
-    static final int VERSION = 4;
+    /** Version 5 adds the Classification assignment write outbox. */
+    static final int VERSION = 5;
 
     /** v0 is fresh, v1-v3 are older replicas; all upgrade in place. */
     static boolean canUpgradeFrom(int version) {
@@ -34,6 +41,33 @@ final class ReplicaSchema {
         if (version > VERSION) {
             throw new IllegalStateException("Replica database was written by a newer app");
         }
+    }
+
+    /**
+     * The three storage operations an in-place upgrade needs.
+     *
+     * It exists so the upgrade *sequence* has one definition. A caller cannot skip the
+     * column adds, run the DDL without the version stamp, or stamp a version it did not
+     * reach: it supplies the executor and this class decides what an upgrade is. The
+     * transaction stays with the caller, because that is the only engine-specific part.
+     */
+    interface Statements {
+        /** The version currently stamped on the database. */
+        int version();
+
+        void execute(String statement);
+
+        void setVersion(int version);
+    }
+
+    /** Upgrade one database in place to {@link #VERSION}. Caller owns the transaction. */
+    static void migrate(Statements db) {
+        int version = db.version();
+        requireReadableVersion(version);
+        if (!canUpgradeFrom(version)) return;
+        for (String statement : upgradeStatements(version)) db.execute(statement);
+        for (String statement : DDL) db.execute(statement);
+        db.setVersion(VERSION);
     }
 
     /**
@@ -102,6 +136,27 @@ final class ReplicaSchema {
             // from a baseline and is what makes the protected id interpretable.
             "CREATE TABLE IF NOT EXISTS classification_role_state("
                     + "role TEXT PRIMARY KEY,classification_id TEXT NOT NULL)",
+            // ---------------------------------------------------------------
+            // Classification assignment outbox (v5). One Asset at a time: the server's
+            // command is keyed by the Asset and each row is the whole of one logical
+            // intent, so batching several Assets into one row would make the aggregate
+            // all-or-nothing where the contract is per-Asset.
+            //
+            // `classification_id` is nullable *and* stored separately from the payload:
+            // null is the canonical unassigned state, which is a real desired value and
+            // not the absence of one, so it cannot be represented by a missing column.
+            // ---------------------------------------------------------------
+            "CREATE TABLE IF NOT EXISTS classification_assignment_outbox("
+                    + "seq INTEGER PRIMARY KEY,operation_id TEXT NOT NULL UNIQUE,"
+                    + "command_type TEXT NOT NULL,asset_id TEXT NOT NULL,classification_id TEXT,"
+                    + "library_id TEXT NOT NULL,epoch INTEGER NOT NULL,contract_version INTEGER NOT NULL,"
+                    + "expected_revision INTEGER NOT NULL,payload TEXT NOT NULL,"
+                    + "state TEXT NOT NULL CHECK(state IN ('pending','blocked')),"
+                    + "conflict_code TEXT,conflict_detail TEXT,created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS classification_outbox_state"
+                    + " ON classification_assignment_outbox(state,seq)",
+            "CREATE INDEX IF NOT EXISTS classification_outbox_asset"
+                    + " ON classification_assignment_outbox(asset_id,seq)",
     };
 
     /** The adoption row and its cursor. `singleton=1` is the adoption marker itself. */
@@ -153,6 +208,8 @@ final class ReplicaSchema {
                     + "entity_revision,updated_at) VALUES(?,?,?,?)";
     static final String READ_CLASSIFICATION_ASSIGNMENTS =
             "SELECT asset_id,classification_id,entity_revision FROM classification_assignment_state";
+    static final String CLEAR_CLASSIFICATION_ASSIGNMENT =
+            "DELETE FROM classification_assignment_state WHERE asset_id=?";
     /**
      * The deterministic assignment transition one delete performed.
      *
@@ -178,6 +235,47 @@ final class ReplicaSchema {
             "UPDATE classification_authority SET cursor=?,reconciled_at=? WHERE singleton=1";
     static final String SET_CLASSIFICATION_RECONCILED =
             "UPDATE classification_authority SET reconciled_at=? WHERE singleton=1";
+
+    /**
+     * The Classification assignment outbox.
+     *
+     * Returns the whole queue in FIFO order, which is what both readers need: the flush
+     * delivers strictly oldest-first so a retry or rebase of one intent cannot be
+     * reordered against another, and the optimistic projection filters this same order by
+     * Asset rather than reading a second shape.
+     */
+    static final String READ_CLASSIFICATION_OUTBOX =
+            "SELECT seq,operation_id,command_type,asset_id,classification_id,library_id,epoch,"
+                    + "contract_version,expected_revision,payload,state,conflict_code,"
+                    + "conflict_detail,created_at FROM classification_assignment_outbox ORDER BY seq";
+    /**
+     * One frozen intent. `state` starts pending and the conflict columns start empty, so a
+     * fresh row cannot carry a conflict it was never told about.
+     */
+    static final String WRITE_CLASSIFICATION_OUTBOX =
+            "INSERT INTO classification_assignment_outbox(seq,operation_id,command_type,asset_id,"
+                    + "classification_id,library_id,epoch,contract_version,expected_revision,payload,"
+                    + "state,conflict_code,conflict_detail,created_at)"
+                    + " VALUES(?,?,?,?,?,?,?,?,?,?,'pending',NULL,NULL,?)";
+    static final String DELETE_CLASSIFICATION_OUTBOX =
+            "DELETE FROM classification_assignment_outbox WHERE seq=?";
+    static final String BLOCK_CLASSIFICATION_OUTBOX =
+            "UPDATE classification_assignment_outbox SET state='blocked',conflict_code=?,"
+                    + "conflict_detail=? WHERE seq=?";
+    /**
+     * Rewrite one intent's expectation onto the authority's current revision.
+     *
+     * The payload column is replaced together with the separate expectation column so the
+     * two cannot disagree: the payload is what is sent, and the column is what the
+     * projection predicts from, so a rebase that moved only one of them would either send
+     * a stale expectation or compose a wrong one. The operation id is not touched, because
+     * the retry is the same logical intent.
+     */
+    static final String REBASE_CLASSIFICATION_OUTBOX =
+            "UPDATE classification_assignment_outbox SET expected_revision=?,payload=?"
+                    + " WHERE seq=?";
+    static final String CLEAR_CLASSIFICATION_OUTBOX =
+            "DELETE FROM classification_assignment_outbox";
 
     static final String CLEAR_ALBUMS = "DELETE FROM album_state";
     static final String CLEAR_MEMBERS = "DELETE FROM album_membership_state";

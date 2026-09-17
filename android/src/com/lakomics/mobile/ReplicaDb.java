@@ -107,6 +107,16 @@ interface ReplicaDb {
     void writeAssignment(ClassificationReplica.Assignment assignment, String now);
 
     /**
+     * Remove one Asset's assignment lineage row.
+     *
+     * This is how "the authority holds no row for this Asset" is represented, which is a
+     * different state from an authoritative *unassigned* row at a real revision. A
+     * revision-0 projection therefore clears the row instead of storing a row that claims
+     * a revision the authority never reported.
+     */
+    void clearAssignment(String assetId);
+
+    /**
      * Move every assignment naming `from` to `to`, incrementing each revision by one.
      *
      * Removing rows instead would destroy the revision a later command must present, and
@@ -129,6 +139,36 @@ interface ReplicaDb {
     void setClassificationCursor(long cursor, String now);
 
     void setClassificationReconciledAt(String now);
+
+    /**
+     * Durable Classification assignment intents in FIFO order.
+     *
+     * One table for the whole queue rather than a per-Asset read: the flush must deliver
+     * strictly oldest-first, and the optimistic projection filters this same order by
+     * Asset, so a second read shape could only disagree with the first.
+     */
+    List<ClassificationAssignment> classificationOutbox();
+
+    /** Insert one frozen outgoing assignment intent. */
+    void writeClassificationOutbox(ClassificationAssignment row);
+
+    /** Retire one accepted intent. */
+    void deleteClassificationOutbox(long seq);
+
+    /** Preserve one rejected intent as a durable conflict. */
+    void blockClassificationOutbox(long seq, String code, String detail);
+
+    /**
+     * Rewrite one intent's expectation onto the authority's current assignment revision.
+     *
+     * The stored payload moves with the column, because the payload is what is sent and the
+     * column is what the projection predicts from; the operation id is deliberately not
+     * touched, so the retry remains the same logical intent.
+     */
+    void rebaseClassificationOutbox(long seq, long expectedRevision, String payload);
+
+    /** Remove every Classification assignment intent. Domain reset only. */
+    void clearClassificationOutbox();
 
     void begin();
 
@@ -169,6 +209,54 @@ interface ReplicaDb {
             this.epoch = epoch;
             this.contractVersion = contractVersion;
             this.desiredState = desiredState;
+            this.expectedRevision = expectedRevision;
+            this.payload = payload;
+            this.state = state;
+            this.conflictCode = conflictCode;
+            this.conflictDetail = conflictDetail;
+            this.createdAt = createdAt;
+        }
+
+        boolean blocked() { return "blocked".equals(state); }
+    }
+
+    /**
+     * One durable outgoing Classification assignment intent. Payload bytes never change
+     * across retries.
+     *
+     * `classificationId` is nullable and separate from the payload on purpose: `null` is
+     * the canonical *unassigned* desired state, a real value the user chose, so it cannot
+     * be represented by the column's absence.
+     */
+    final class ClassificationAssignment {
+        final long seq;
+        final String operationId;
+        final String commandType;
+        final String assetId;
+        final String classificationId;
+        final String libraryId;
+        final long epoch;
+        final long contractVersion;
+        final long expectedRevision;
+        final String payload;
+        final String state;
+        final String conflictCode;
+        final String conflictDetail;
+        final String createdAt;
+
+        ClassificationAssignment(long seq, String operationId, String commandType, String assetId,
+                                 String classificationId, String libraryId, long epoch,
+                                 long contractVersion, long expectedRevision, String payload,
+                                 String state, String conflictCode, String conflictDetail,
+                                 String createdAt) {
+            this.seq = seq;
+            this.operationId = operationId;
+            this.commandType = commandType;
+            this.assetId = assetId;
+            this.classificationId = classificationId;
+            this.libraryId = libraryId;
+            this.epoch = epoch;
+            this.contractVersion = contractVersion;
             this.expectedRevision = expectedRevision;
             this.payload = payload;
             this.state = state;

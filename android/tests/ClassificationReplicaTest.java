@@ -101,7 +101,7 @@ public final class ClassificationReplicaTest {
             accountChangeCannotExposeTheOldReplica(directory);
             wrongScopeReadsNothingAndKeepsTheRowsDurable(directory);
             // Boundaries that must not move.
-            noMobileWriteIsEverEmitted(directory);
+            readEngineIssuesNoWriteAndTheOutboxIsTheOnlyWriteSurface(directory);
             classificationResetLeavesAlbumDomainIntact(directory);
             malformedResponsesAreRejected(directory);
         } finally {
@@ -1205,14 +1205,16 @@ public final class ClassificationReplicaTest {
     // -----------------------------------------------------------------------
 
     /**
-     * The read replica can never emit a mobile Classification write.
+     * The read engine issues no write, and the assignment outbox is the only write surface.
      *
-     * This is the phase boundary, enforced structurally: the transport the engine is given
-     * exposes GET only, and a full reconcile — including every coded failure path — makes no
-     * other request. Android Classification writes belong to a later phase, and no part of
-     * this read path can issue one by accident.
+     * This is the boundary that replaced "Android Classification write does not exist": the
+     * read replica must stay a read replica, and the one write path must be the dedicated
+     * assignment writer rather than anything reachable through the sync engine. It is
+     * asserted structurally — the transport's declared methods and the shipped schema — so a
+     * future caller cannot widen the surface by accident.
      */
-    private static void noMobileWriteIsEverEmitted(Path directory) throws Exception {
+    private static void readEngineIssuesNoWriteAndTheOutboxIsTheOnlyWriteSurface(Path directory)
+            throws Exception {
         SqliteDb db = new SqliteDb(directory.resolve("no-write.sqlite"));
         LibraryReplicaStore store = new LibraryReplicaStore(db);
         // A pass that adopts, one that catches up, and one that hits every coded failure.
@@ -1236,19 +1238,20 @@ public final class ClassificationReplicaTest {
                 check(path.startsWith("/v1/sync/status")
                                 || path.startsWith(ClassificationReplica.BASELINE_PATH)
                                 || path.startsWith(ClassificationReplica.CHANGES_PATH),
-                        "Only the three read routes are ever requested: " + path);
+                        "The read engine requests only the three read routes: " + path);
             }
             check(!fixture.paths().isEmpty(), "The pass did make requests");
         }
-        // The engine holds no write seam at all, so there is no method that could send one.
+        // The read engine holds no write seam at all, so there is no method that could send
+        // one: reads and writes are different objects, not different arguments.
         for (java.lang.reflect.Method method
                 : ClassificationReplica.Transport.class.getDeclaredMethods()) {
             equal("get", method.getName(),
-                    "The Classification transport exposes GET only");
+                    "The Classification read transport exposes GET only");
         }
-        // And no Classification outbox table exists to hold an outgoing command.
-        equal(0L, db.countClassificationOutboxTables(),
-                "The replica schema carries no Classification outbox");
+        // The assignment outbox exists in v5, and it is the only outbox this domain has.
+        equal(1L, db.countClassificationOutboxTables(),
+                "The v5 schema carries exactly the Classification assignment outbox");
         store.close();
     }
 
@@ -1555,7 +1558,12 @@ public final class ClassificationReplicaTest {
             return classificationAuthority() == null ? 0 : 1;
         }
 
-        /** Whether the schema carries any Classification outbox table at all. */
+        /**
+         * How many Classification outbox tables the schema carries.
+         *
+         * Asserted as an exact count rather than "at least one": the domain has exactly the
+         * assignment outbox, so an extra table would mean a second write surface appeared.
+         */
         long countClassificationOutboxTables() {
             List<List<Object>> rows = select("SELECT COUNT(*) FROM sqlite_master"
                     + " WHERE type='table' AND name LIKE '%classification%outbox%'");
@@ -1733,6 +1741,11 @@ public final class ClassificationReplicaTest {
         }
 
         @Override
+        public void clearAssignment(String assetId) {
+            exec(ReplicaSchema.CLEAR_CLASSIFICATION_ASSIGNMENT, assetId);
+        }
+
+        @Override
         public void writeClassificationRole(String role, String classificationId) {
             exec(ReplicaSchema.WRITE_CLASSIFICATION_ROLE, role, classificationId);
         }
@@ -1759,6 +1772,32 @@ public final class ClassificationReplicaTest {
         @Override
         public void setClassificationReconciledAt(String now) {
             exec(ReplicaSchema.SET_CLASSIFICATION_RECONCILED, now);
+        }
+
+        // ---- Classification assignment outbox (v5) ----
+        //
+        // The read replica checks above must keep seeing only GET traffic, so these run the
+        // real statements where a check exercises them (ClassificationAssignmentTest) and
+        // stay inert here.
+
+        @Override
+        public List<ClassificationAssignment> classificationOutbox() { return new ArrayList<>(); }
+
+        @Override
+        public void writeClassificationOutbox(ClassificationAssignment row) { }
+
+        @Override
+        public void deleteClassificationOutbox(long seq) { }
+
+        @Override
+        public void blockClassificationOutbox(long seq, String code, String detail) { }
+
+        @Override
+        public void rebaseClassificationOutbox(long seq, long expectedRevision, String payload) { }
+
+        @Override
+        public void clearClassificationOutbox() {
+            exec(ReplicaSchema.CLEAR_CLASSIFICATION_OUTBOX);
         }
 
         // ---- Transactions ----

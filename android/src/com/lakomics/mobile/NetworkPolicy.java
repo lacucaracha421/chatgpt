@@ -31,11 +31,14 @@ final class NetworkPolicy {
   get=get || p.equals("/v1/sync/status") || p.equals("/v1/albums/baseline") || p.equals("/v1/albums/changes");
   // The authority-backed Album contents read is still GET-only.
   get=get || p.equals("/v1/albums/assets");
-  // Classification authority reads. Exactly the two read routes: this phase is a read
-  // replica, and Android Classification writes belong to a later phase. The command route
-  // `/v1/classifications/authority/commands` is deliberately absent from every allowlist
-  // below, so a write cannot be reached even by a future caller.
+  // Classification authority reads. Exactly the two read routes.
   get=get || p.equals("/v1/classifications/authority/baseline") || p.equals("/v1/classifications/authority/changes");
+  // The Classification assignment command: one desired-state write per Asset, and nothing
+  // else. The authority's structural commands travel on the *same* server route, but
+  // `ClassificationAssignmentOutbox` constructs `setAssetClassification` internally and the
+  // server requires the publisher role for every other command, so Android cannot reach a
+  // structural mutation through this path. Activate stays absent from every allowlist.
+  boolean classificationPut=p.equals("/v1/classifications/authority/commands");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   get=get || p.equals("/v1/collections") || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}");
   get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");
@@ -48,7 +51,7 @@ final class NetworkPolicy {
   boolean bookmarkPut=p.matches("/v1/mobile-catalog/bookmarks/(kHentai|heliotrope)/[0-9A-Za-z_-]{1,64}");
   boolean albumPut=p.equals("/v1/albums/commands");
   get=get || p.matches("/v1/notes/[a-f0-9]{64}");
-  boolean put=bookmarkPut || albumPut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
+  boolean put=bookmarkPut || albumPut || classificationPut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
   if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post))throw new IllegalArgumentException("Unsupported read operation");
  }
 }

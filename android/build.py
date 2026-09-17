@@ -81,13 +81,17 @@ def main():
                        for import_line in path.read_text(encoding='utf-8').splitlines()))
         replica_tests = [root / 'tests/AlbumReplicaTest.java',
                          root / 'tests/AlbumReplicaScheduleTest.java',
-                         root / 'tests/ClassificationReplicaTest.java']
+                         root / 'tests/ClassificationReplicaTest.java',
+                         root / 'tests/ClassificationAssignmentTest.java']
         run(javac, '-encoding', 'UTF-8', '-d', tests, *replica_sources, *replica_tests)
         run(java_cmd, '-cp', tests, 'com.lakomics.mobile.AlbumReplicaTest')
         # The schedule check is deliberately Android-free: the defect it covers is a
         # transition defect, so it drives the state machine instead of an activity.
         run(java_cmd, '-cp', tests, 'com.lakomics.mobile.AlbumReplicaScheduleTest')
         run(java_cmd, '-cp', tests, 'com.lakomics.mobile.ClassificationReplicaTest')
+        # The Classification *write* checks drive the v4->v5 upgrade on a real database, the
+        # durable assignment outbox and the revision-conflict rebase over a real HTTP fixture.
+        run(java_cmd, '-cp', tests, 'com.lakomics.mobile.ClassificationAssignmentTest')
         jar = work / 'classes.jar'
         run(exe(java / 'bin', 'jar'), 'cf', jar, '-C', classes, '.')
         run(exe(bt, 'd8'), '--release', '--min-api', '26', '--lib', android, '--output', dex, jar)
