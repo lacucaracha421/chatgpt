@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 84;
+pub(crate) const SCHEMA_VERSION: i64 = 85;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -424,6 +424,11 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 83 {
             transaction.execute_batch(include_str!(
                 "../../migrations/0084_classification_authority_outbox.sql"
+            ))?;
+        }
+        if version <= 84 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0085_classification_legacy_trigger_retirement.sql"
             ))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
@@ -1136,6 +1141,95 @@ mod tests {
             assert_eq!(reopened.query_row("SELECT COUNT(*) FROM character_autotag_admissions", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
             assert_eq!(std::fs::read_dir(temp.path().join("backups")).unwrap().count(), 1);
         }
+    }
+
+    #[test]
+    fn classification_legacy_triggers_stop_dirtying_once_authority_is_adopted() {
+        // Upgrading a pre-2E database must leave an unadopted library with the legacy
+        // Classification dirty behaviour, and must stop maintaining that state once the
+        // authority adoption row exists. 0084 is the last pre-2E migration, so
+        // `historical_schema(.., 84)` is exactly the schema this migration upgrades.
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 84);
+        migrate_to_latest(&mut connection, 84).unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,
+                                    thumbnail_relative_path,byte_size,width,height,collected_at)
+                 VALUES('a','h','image','a.png','assets/a.png','t/a.webp',1,1,1,'now');
+                 INSERT INTO classification_entries(id,kind,name,parent_id,created_at)
+                 VALUES('root','root','루트',NULL,'now');",
+            )
+            .unwrap();
+
+        let generation = |connection: &Connection| -> i64 {
+            connection
+                .query_row(
+                    "SELECT generation FROM cloud_metadata_publication_state
+                     WHERE kind = 'classifications'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+
+        let before = generation(&connection);
+        connection
+            .execute(
+                "INSERT INTO asset_classifications(asset_id,classification_id) VALUES('a','root')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            generation(&connection),
+            before + 1,
+            "an unadopted library still dirties the legacy Classification generation"
+        );
+
+        // Adopt, then mutate again through the same statement.
+        connection
+            .execute(
+                "INSERT INTO classification_authority_sync(singleton,library_id,epoch,
+                    contract_version,cursor,updated_at)
+                 VALUES(1,'0123456789abcdef0123456789abcdef',1,1,0,'now')",
+                [],
+            )
+            .unwrap();
+        let adopted = generation(&connection);
+        connection
+            .execute(
+                "DELETE FROM asset_classifications WHERE asset_id='a'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_classifications(asset_id,classification_id) VALUES('a','root')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            generation(&connection),
+            adopted,
+            "an adopted library must not maintain the retired legacy counter"
+        );
+        // The other legacy domains are genuinely shared and must be untouched.
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM cloud_metadata_publication_state",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
     }
 
     #[test]

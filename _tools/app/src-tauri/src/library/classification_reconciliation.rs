@@ -1047,45 +1047,49 @@ fn project_assignment_impl(
         return Ok(false);
     }
     let before = local_assignment_state(transaction, asset_id)?;
-    match classification_id {
-        None => {
-            // Absent is absent: the authority says this Asset holds no Classification,
-            // so any local relation for it is stale.
-            transaction.execute(
-                "DELETE FROM asset_classifications WHERE asset_id = ?1",
-                [asset_id],
-            )?;
+    if let Some(classification_id) = classification_id {
+        let materializable: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id = ?1)",
+            [classification_id],
+            |row| row.get(0),
+        )?;
+        if !materializable {
+            // A missing *Asset* is a legitimate deferred projection; a missing
+            // *Classification* is not. The server cannot produce a non-null assignment to
+            // a Classification that does not exist: ordinary commands validate the
+            // target, staging validates every assignment target, and a delete moves its
+            // Assets away atomically. So a locally materialized Asset pointing at an
+            // absent Classification means this replica is corrupt, and caching-and-
+            // advancing would hide that behind a relation that silently never appears.
+            //
+            // Checked even when the local value already agrees, because the check is a
+            // read: it costs nothing and keeps replica corruption detectable.
+            return Err(LibraryError::InvalidCloudResponse);
         }
-        Some(classification_id) => {
-            let materializable: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id = ?1)",
-                [classification_id],
-                |row| row.get(0),
-            )?;
-            if !materializable {
-                // A missing *Asset* is a legitimate deferred projection; a missing
-                // *Classification* is not. The server cannot produce a non-null
-                // assignment to a Classification that does not exist: ordinary commands
-                // validate the target, staging validates every assignment target, and a
-                // delete moves its Assets away atomically. So a locally materialized
-                // Asset pointing at an absent Classification means this replica is
-                // corrupt, and caching-and-advancing would hide that behind a relation
-                // that silently never appears.
-                return Err(LibraryError::InvalidCloudResponse);
-            }
-            // Assignment is single-valued, so the new relation replaces any other.
-            transaction.execute(
-                "DELETE FROM asset_classifications WHERE asset_id = ?1",
-                [asset_id],
-            )?;
+    }
+    // A confirmed value that already matches the local relation needs no write. Writing
+    // it anyway (DELETE + INSERT, since assignment is single-valued) would be invisible
+    // in the end state but not free: it rewrites the row and fires the table's triggers
+    // for every confirmed assignment on every receive pass. Skipping it is what keeps a
+    // clean pass read-only, so it is part of the projection's contract rather than an
+    // optimization — an unchanged projection must not create derived work.
+    let desired: Vec<String> = classification_id
+        .map(|classification_id| vec![classification_id.to_owned()])
+        .unwrap_or_default();
+    if before != desired {
+        // Assignment is single-valued, so the new relation replaces any other.
+        transaction.execute(
+            "DELETE FROM asset_classifications WHERE asset_id = ?1",
+            [asset_id],
+        )?;
+        if let Some(classification_id) = classification_id {
             transaction.execute(
                 "INSERT INTO asset_classifications (asset_id, classification_id) VALUES (?1, ?2)",
                 params![asset_id, classification_id],
             )?;
         }
     }
-    let after = local_assignment_state(transaction, asset_id)?;
-    if before == after {
+    if before == desired {
         // An idempotent projection is not a change, so it must not create derived work.
         return Ok(false);
     }

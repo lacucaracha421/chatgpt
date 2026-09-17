@@ -4403,3 +4403,170 @@ fn a_clean_outbox_permits_the_receive() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// 36. Clean receive passes do not maintain the retired legacy dirty state
+// ---------------------------------------------------------------------------
+
+/// A clean authority pass must not touch the legacy Classification publication state.
+///
+/// Production measured this as real cost, not a theoretical one: authority receive
+/// rewrites each confirmed assignment (DELETE + INSERT, because assignment is
+/// single-valued) and migration 0076's triggers turned each rewrite into a `cloud_metadata_publication_state`
+/// increment, so a five-second pass over 8,936 assignments fired roughly 17,900
+/// updates with nothing to publish — the legacy lane is fenced after adoption and the
+/// generation is consumed locally rather than sent.
+///
+/// This pins the whole property end to end: repeated passes over unchanged confirmed
+/// authority state leave the legacy Classification generation, the Album and saved_x
+/// domains, the authority cursor, the authority caches and the outbox all exactly as
+/// they were.
+#[test]
+fn clean_receive_passes_do_not_maintain_the_legacy_classification_generation() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    insert_asset(&library, "asset-2");
+    // Adopt a real baseline so the confirmed assignment cache and the visible relations
+    // hold values that a subsequent pass re-projects.
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("series", "시리즈", Some("originals"), 1),
+            ],
+            &[
+                assignment("asset-1", Some("series"), 1),
+                assignment("asset-2", Some("originals"), 1),
+            ],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+
+    let generations = |connection: &Connection| -> Vec<(String, i64)> {
+        let mut statement = connection
+            .prepare(
+                "SELECT kind, generation FROM cloud_metadata_publication_state ORDER BY kind",
+            )
+            .unwrap();
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        rows.collect::<Result<Vec<_>, _>>().unwrap()
+    };
+
+    let connection = library.connection().unwrap();
+    let before_generations = generations(&connection);
+    let before_classification_generation = generation_of(&connection, "classifications");
+    let before_projections = projections(&connection);
+    let before_cursor = authority(&connection).map(|value| value.3);
+    let before_assignments = assignment_cache(&connection);
+    assert!(
+        before_projections.len() == 2 && before_assignments.len() == 2,
+        "the fixture must carry confirmed state for a pass to re-project"
+    );
+    // The library lock is not reentrant, so release it before driving passes that take
+    // it themselves.
+    drop(connection);
+
+    // Five clean passes, standing in for the five-second production loop. Each one
+    // re-projects every confirmed assignment it knows about.
+    for _ in 0..5 {
+        let rematerialized = library
+            .materialize_deferred_classification_assignments()
+            .unwrap();
+        assert_eq!(
+            rematerialized, 0,
+            "an already-correct projection is not a change and must report none"
+        );
+    }
+
+    let connection = library.connection().unwrap();
+    assert_eq!(
+        generations(&connection),
+        before_generations,
+        "a clean pass must not dirty any legacy publication domain"
+    );
+    assert_eq!(
+        generation_of(&connection, "classifications"),
+        before_classification_generation,
+        "the legacy Classification generation in particular must not grow"
+    );
+    assert_eq!(projections(&connection), before_projections);
+    assert_eq!(assignment_cache(&connection), before_assignments);
+    assert_eq!(authority(&connection).map(|value| value.3), before_cursor, "no cursor movement without server changes");
+    assert!(outbox_rows(&connection).is_empty(), "a clean pass mints no intent");
+}
+
+/// The legacy Classification generation for one kind.
+fn generation_of(connection: &Connection, kind: &str) -> Option<i64> {
+    connection
+        .query_row(
+            "SELECT generation FROM cloud_metadata_publication_state WHERE kind = ?1",
+            [kind],
+            |row| row.get(0),
+        )
+        .ok()
+}
+
+/// A clean pass must not rewrite assignment rows at all.
+///
+/// The counter check above proves the retired legacy state stops growing, but it cannot
+/// see a projection that still rewrites every row and merely stops *counting* it. This
+/// measures the writes themselves through a temporary counting trigger, so the property
+/// "an unchanged projection performs no DML" is pinned independently of the legacy
+/// counter's existence.
+#[test]
+fn a_clean_pass_rewrites_no_assignment_rows() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    library
+        .install_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            &[assignment("asset-1", Some("originals"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    {
+        let connection = library.connection().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE classification_write_probe (writes INTEGER NOT NULL);
+                 INSERT INTO classification_write_probe VALUES (0);
+                 CREATE TRIGGER classification_write_probe_insert
+                 AFTER INSERT ON asset_classifications BEGIN
+                  UPDATE classification_write_probe SET writes = writes + 1;
+                 END;
+                 CREATE TRIGGER classification_write_probe_delete
+                 AFTER DELETE ON asset_classifications BEGIN
+                  UPDATE classification_write_probe SET writes = writes + 1;
+                 END;",
+            )
+            .unwrap();
+    }
+    for _ in 0..5 {
+        library
+            .materialize_deferred_classification_assignments()
+            .unwrap();
+    }
+    let connection = library.connection().unwrap();
+    let writes: i64 = connection
+        .query_row("SELECT writes FROM classification_write_probe", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        writes, 0,
+        "re-projecting a value that is already correct must not write the row"
+    );
+    assert_eq!(
+        projections(&connection),
+        [("asset-1".to_owned(), "originals".to_owned())],
+        "the projection is still correct"
+    );
+}
