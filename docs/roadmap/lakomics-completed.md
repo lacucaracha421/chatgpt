@@ -2135,6 +2135,90 @@ CLOUD-UI-001 and STATS-001A/B await native acceptance. WORKS-001 has the TV/seas
 structure implemented, with related-work/richer Film surfaces still partial.
 
 
+### Classification Authority Android write — single-Asset assignment (2026-09-18)
+
+Android gains its first Classification *write*: from the mobile Viewer the user can assign one
+Asset to a Classification or leave it unassigned. Structural Classification commands remain
+unreachable from Android, and multi-Asset/batch assignment is deliberately not part of this batch.
+
+**Replica schema v5.** `library-replica.sqlite` moves 4 → 5 and adds
+`classification_assignment_outbox` (`seq` FIFO primary key, `operation_id` UNIQUE, command type,
+asset id, nullable desired Classification id, library id, epoch, contract version, expected
+assignment revision, the frozen payload, `pending`/`blocked` state, conflict code/detail, created
+at). It is a second outbox rather than columns on the Album one because the two domains have
+different command shapes, revision lineages and conflict rules. The upgrade is additive DDL, so it
+needs no `ALTER`: a real v4 database filled with identity, cursor, live and tombstoned nodes,
+assigned and authoritative-unassigned lineage, the immutable role, Album state and a pending Album
+outbox row upgrades in place with every row intact, and the new table starts empty. The upgrade
+*sequence* now has one definition (`ReplicaSchema.migrate`), which both the Android adapter and the
+JVM harness drive, so the shipped sequence is what the check observes.
+
+**Optimistic state is derived, not materialized.** `classification_assignment_state` remains only
+the last server-confirmed lineage. That is load-bearing: a delete's assignment transition verifies
+its affected count against those rows, so writing an optimistic value into them would make this
+replica's lineage disagree with the authority's and refuse its next legitimate transition. The
+visible value is composed on read by replaying one Asset's queued intents over its confirmed row,
+so it is immediate, survives process death (the queue is durable), and cannot survive as a phantom
+once the queue empties. Enqueueing never advances the confirmed revision; the successor expectation
+is confirmed revision + that Asset's preceding pending state changes, and only that Asset's —
+independent Assets keep independent lineages. A desired state equal to the current *visible* state
+appends nothing. `null` is a real desired value, not the absence of one, so it is a nullable column
+separate from the payload.
+
+**Delivery.** `ClassificationAssignmentOutbox` sends only
+`PUT /v1/classifications/authority/commands` and only the `setAssetClassification` payload frozen
+at enqueue time; the native layer constructs the operation id, library, epoch, contract, command
+name and expected revision, so the WebView can supply only an Asset id and a desired Classification
+id. It re-proves the stored payload agrees with the row's own columns before sending, and validates
+every accepted identity, the cursor/sequence semantics, and the returned assignment identity,
+revision and desired value — a mismatched 200 is a protocol-integrity error that preserves the
+intent rather than retiring the wrong row. A lost response or restart retries the byte-identical
+payload and operation id.
+
+**Revision-conflict rebase** matches the PC's semantics exactly: an *unaccepted* `revisionConflict`
+on this desired-state scalar is rebased onto the authority's current assignment revision, preserving
+the operation id and every other field and rebuilding the payload from the row's *own* frozen
+identity; the pass stops so the retry is the next step, and the user's choice is never blocked. A
+conflict body naming another Asset is refused as a protocol failure instead of rewriting a correct
+expectation with a foreign revision. Structural/terminal codes (`classificationNotFound`) block
+durably with the user's intent visible; identity mismatches block rather than guess a cross-identity
+mapping; an unknown or transient code (notably `invalidClassificationAssignment`, a cross-domain
+ordering state that resolves itself) stays pending with the identical payload.
+
+**Foreground pass.** A small `ClassificationSyncPass` flushes then receives inside the existing
+five-second foreground loop — no second scheduler, no wake lock, no WorkManager. Unlike the Album
+pass it does *not* defer its receive while an intent is pending: Classification assignment is not
+materialized, so a received page cannot hide a pending choice, and deferring would stall exactly the
+identity-recovery case the reader exists to resolve. `NetworkPolicy` gains only
+`PUT /v1/classifications/authority/commands`; `activate`, structural surfaces, malformed variants
+and traversal/re-encoding forms stay denied.
+
+**Editor.** `ClassificationAssignmentEditor` renders the native replica through the mobile Library's
+existing Classification tree idiom — the same `.classification-index` container (which is also what
+selects the existing portrait left-side full-height drawer treatment), `.tree-row`/`.tree-expander`/
+`.tree-leaf`/`.tree-select` rows and `.classification-search` field — opened by one new icon action
+in the Viewer toolbar. It offers exactly one Classification or an explicit `미분류`, seeds expansion
+to the current Classification's ancestor path (kept local so Library navigation state is untouched),
+and searches the local tree client-side with each result carrying its ancestry. A tap is the whole
+operation: the picker closes once the native layer has durably recorded the intent, and a failed
+enqueue keeps it open with the previous selection intact. Pending is quiet (`저장 대기`); a blocked
+conflict is stronger. Character series/groups/characters and synthetic `character-group:*` navigation
+ids are structurally impossible to assign because the picker projects only real Classification nodes.
+
+**Verification.** `ClassificationAssignmentTest` 217 checks (v4→v5 upgrade on a real SQLite engine,
+optimistic assignment, no-op and expected-revision composition, restart durability, scope isolation,
+durable FIFO delivery, lost-response identity, the rebase and its refusal case, blocked/transient
+rejections, malformed acceptances, no-op acceptance, identity-mismatch blocking, receive-cannot-hide
+a pending choice, cursor advancement, restart between enqueue and flush, and other-device conflict
+convergence), `AlbumReplicaTest` 303, `AlbumReplicaScheduleTest` 39, `ClassificationReplicaTest` 151
+(the 2C "no write exists" invariant is replaced by "the assignment outbox is the only write surface",
+asserted structurally), `NetworkPolicy` 340 and the other native checks unchanged; 181 mobile
+frontend checks including 25 new editor/Viewer ones; `mobile:build` clean. Ten load-bearing
+behaviours were mutation-tested and every mutation was killed. Browser preview verified the drawer,
+search with breadcrumb, tap-to-assign-and-close and the pending→confirmed transition at portrait
+tablet and phone widths. Windows build-script parity is by inspection; APK/device acceptance is
+recorded separately.
+
 ### Classification Authority 2E — legacy dirty-mechanism retirement (2026-09-17)
 
 Two separable commits: the Android release-build verification repair, then the 2E retirement.

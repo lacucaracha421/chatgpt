@@ -74,12 +74,15 @@ for the same Asset.
 The immutable `originals` role is carried in the Classification baseline. Authority
 v1 enforces the id-level protections server-side: the protected Classification may
 not be renamed, moved or deleted, and the role itself is not a mutable command. The
-existing rule that a character-series subtree may not be moved into `originals`
+Existing rule that a character-series subtree may not be moved into `originals`
 remains a PC-derived Character constraint for this cutover; Classification Authority
 does not absorb Character-series state merely to enforce that rule. Non-PC structural
 Classification editing therefore remains disabled until every accepted structural
-command can be enforced by the authoritative contract. Mobile membership/assignment
-editing may be added independently once the domain is active and replicated.
+command can be enforced by the authoritative contract. **Mobile membership/assignment
+editing has since been added independently, as this checkpoint anticipated:** Android
+now issues `setAssetClassification` only, through a durable single-Asset outbox, while
+structural Classification commands stay PC/publisher-only. See the 2026-09-18 Android
+write record in `roadmap/lakomics-completed.md`.
 
 ## Decision 2: common command envelope, domain-specific semantics
 All mutable server-authority domains reuse the same command conventions:
