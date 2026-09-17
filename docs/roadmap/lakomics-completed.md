@@ -2135,6 +2135,28 @@ CLOUD-UI-001 and STATS-001A/B await native acceptance. WORKS-001 has the TV/seas
 structure implemented, with related-work/richer Film surfaces still partial.
 
 
+### Classification Authority 2D — production activation and canary (2026-09-17)
+
+User explicitly authorized production activation plus the reversible assignment canary. Production
+Classification authority is now **active**: epoch 1 / contract 1 / starting cursor 0, under the same
+canonical `libraryId` as the active `albums` (cursor 11) and `catalog-bookmarks` (cursor 12) domains.
+
+- [x] Pre-activation online backup: `backups/classification-2d-20260917T114545Z/lakomics.sqlite3`, `24,825,856` bytes, SHA-256 `91df1c3b747a5d43c9af8051e6d499d42fe3a26c0c29393b1430288262d2e29b`, `quick_check=ok`, zero-violation `foreign_key_check`; deployed server sources and the systemd unit preserved alongside it.
+- [x] Freshly staged v2 snapshot (not a reused digest): revision `464`, digest `83ad4705438467e28b9f460af11a7ddfb344c626b1339e0d01184ee3a9181b21`, 58 classifications / 8,936 assignments / 1 `originals` role; digest independently reproduced from PC canonical state and accepted by the server's own staging and activation validators.
+- [x] No deployment required: deployed server sources were already byte-identical to the activation source and the deployed route/method set matched `main` exactly.
+- [x] Activation accepted via the digest-bound publisher-authenticated route: epoch 1, contract 1, cursor 0, counts 58 / 8,936 / 1, `activatedAt 2026-09-17T12:19:50Z`.
+- [x] Legacy writer fence confirmed in production: `PUT /v1/classifications` returns `409 legacyWriterFenced` and staging stayed at revision 464; no successful legacy publication after activation.
+- [x] PC 2B.1 adoption: epoch 1 / contract 1 / cursor 0, 58 classification revisions and 8,936 assignment revisions confirmed, outbox zero throughout.
+- [x] Android 2C adoption: APK 0.6.2 built from the activation source, installed in place on the Galaxy Tab; complete baseline fetched `2026-09-17T12:33:33Z`, then ordered-change polling to the same identity.
+- [x] Reversible canary through the normal PC product drag path: asset `15e472db-…` moved `나히아 → 백합` (sequence 1, revision 2) and back to `나히아` (sequence 2, revision 3); one command, one cursor increment and one revision increment per step, outbox returned to zero each time, Android advanced `0 → 2`.
+- [x] Final state: canary asset back at its original `ce594b93-…` classification, no multi-valued assignment, Album and bookmark cursors unchanged, server `quick_check=ok`, service active with `NRestarts=0`, health 200 on raw and Tailscale HTTPS paths.
+
+No rollback was required. There is still no supported deactivation path, so the standing
+post-activation rollback remains a full restore of the backup above after stopping
+Classification-capable clients. Two follow-ups are recorded in ADR-0037: the PC receive loop
+rewrites confirmed assignments each pass (legacy dirty-counter write amplification only), and the
+`android/build.py`/`build.ps1` JVM check lists still omit the two new 2C classes.
+
 ### MOBILE-009 — Portrait UX, automatic publications and encrypted Notes (2026-09-13)
 
 User approved implementation of the discussed scope. Execution order:

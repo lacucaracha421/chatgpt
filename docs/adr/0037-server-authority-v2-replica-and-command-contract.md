@@ -1166,3 +1166,67 @@ or legacy retirement was performed by this batch.
 
 Production migration, deployment, active-data writes, R2 cleanup and Git writes remain
 separately authorized operations under repository policy.
+
+### Classification 2D — production activation and canary, landed 2026-09-17
+
+The user explicitly authorized production activation and the reversible assignment canary.
+Classification authority is **active** in production as epoch 1 / contract 1, starting at
+**cursor 0**, alongside the already-active `albums` (cursor 11) and `catalog-bookmarks`
+(cursor 12) domains under the same canonical `libraryId`
+`e6395585d5eeae9540ec9b8f8e96d98c`.
+
+- **No server deployment was needed.** The deployed `app.py`, `classification_authority.py` and
+  `classification_snapshot.py` were already byte-identical to the activation source
+  (`09be2c6e…88be0`, `a1606c29…dd037`, `a0bd34b7…0b0af`), `git diff` from the 2A.2 deploy commit
+  to `main` was empty for `server/`, and the deployed OpenAPI route/method set matched a locally
+  generated one exactly (71 routes).
+- **The baseline was freshly staged, not reused.** A pre-activation PC publication produced staging
+  revision `464`, `snapshotVersion 2`, digest
+  `83ad4705438467e28b9f460af11a7ddfb344c626b1339e0d01184ee3a9181b21`, with 58 classifications,
+  8,936 assignments and 1 role. The digest was independently reproduced from current PC canonical
+  state and accepted by the server's own `stage()`/`authority_ready_state()` validators before
+  activation. Assignments grew `8,927 -> 8,936` since preflight because the PC was legitimately
+  running: it ingested assets and Character autotag applied 9 new tag assignments.
+- **Activation response:** `libraryId` unchanged, `epoch 1`, `contractVersion 1`, `cursor 0`,
+  `classificationCount 58`, `assignmentCount 8,936`, `roleCount 1`,
+  `baselineDigest 83ad4705…1b21`, `activatedAt 2026-09-17T12:19:50Z`. The digest-bound request used
+  the publisher credential; the client credential is rejected with 401 for activation.
+- **Legacy writer fence verified in production.** `PUT /v1/classifications` now returns
+  `409 {"code":"legacyWriterFenced","epoch":1}` and staging remained at revision 464, so the
+  pre-activation display snapshot is no longer replaceable. The fence is the first statement inside
+  the publishing transaction, so it rejects before any mutation. The only post-activation
+  `PUT /v1/classifications` entries are this verification attempt plus two earlier
+  under-credentialed probes (401); no successful legacy publication occurred after activation.
+- **Client adoption.** The PC adopted epoch 1 / contract 1 / cursor 0, populated 58 confirmed
+  Classification revisions and 8,936 confirmed assignment revisions, and its durable outbox stayed
+  at zero throughout. A first adoption writes only the three durable authority tables and requires
+  the baseline to match local canonical state exactly, so the pre-activation staging had to be
+  re-verified against live PC state immediately before activation. Android (2C, APK 0.6.2 built
+  from this source) fetched the complete baseline at `2026-09-17T12:33:33Z` and then polled ordered
+  changes, converging to the same identity.
+- **Reversible assignment canary.** Through the normal PC product path (asset card dragged onto a
+  sidebar Classification), asset `15e472db-acde-415d-8ec8-595f6f5cee3a` moved `나히아` →
+  `백합` as server sequence 1 (`operationId f103070c-…`, assignment revision 2), then back to
+  `나히아` as sequence 2 (`operationId 5832acc4-…`, revision 3). Each step produced exactly one
+  command, one cursor increment, one assignment-revision increment and a zeroed outbox, and Android
+  advanced its ordered cursor `0 -> 2`. Final state is the original `ce594b93-…` at revision 3, with
+  no multi-valued assignment anywhere.
+- **Cross-domain and service sanity.** Album (cursor 11) and catalog-bookmark (cursor 12) authority
+  identities were unchanged; server `quick_check=ok`, `foreign_key_check` clean, service
+  active with `NRestarts=0`, health 200 on both raw and Tailscale HTTPS paths.
+- **Rollback boundary.** There is still no supported deactivation path, so the canonical
+  post-activation rollback remains a full restore of the pre-activation online backup at
+  `backups/classification-2d-20260917T114545Z/lakomics.sqlite3` (`24,825,856` bytes, SHA-256
+  `91df1c3b747a5d43c9af8051e6d499d42fe3a26c0c29393b1430288262d2e29b`, `quick_check=ok`, zero
+  violation `foreign_key_check`) after stopping all Classification-capable clients. No rollback was
+  required.
+- **Known follow-up (not a blocker):** the PC receive loop rewrites every confirmed assignment each
+  pass, so migration 0076's `classifications` dirty counter churns continuously while still being
+  consumed locally rather than re-published. This is write amplification on the legacy counters
+  only; it does not affect authority correctness and is later cleanup.
+
+The `android/build.py` and `build.ps1` JVM check lists were not extended for 2C, so the documented
+release procedure cannot build a 2C APK: the harness compile step omits `ClassificationReplica` and
+`ClassificationAuthoritySync`, which `LibraryReplicaStore`/`ReplicaDb` now require. The release APK
+itself compiles from the full source tree and was built correctly; the check list needs the two new
+classes (and `ClassificationReplicaTest`) added.
