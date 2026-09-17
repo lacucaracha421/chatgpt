@@ -64,19 +64,30 @@ def main():
         run(javac, '-encoding', 'UTF-8', '-d', tests, *sources)
         for name in checks + ['AlbumCollections']:
             run(java_cmd, '-cp', tests, f'com.lakomics.mobile.{name}Test')
-        # The Album replica check needs neither the Android runtime nor an Android
-        # database: the sync engine and the store depend on the platform-free JSON
-        # reader and on the storage seam, so it runs on the plain JVM against a real
-        # SQLite engine and a real local HTTP fixture.
-        replica_sources = ['Json', 'AlbumReplica', 'AlbumAuthoritySync', 'AlbumMembershipOutbox', 'AlbumSyncPass', 'ReplicaDb',
-                           'ReplicaSchema', 'LibraryReplicaStore', 'ForegroundSchedule']
-        replica = [p for name in replica_sources for p in (root / f'src/com/lakomics/mobile/{name}.java',)]
-        run(javac, '-encoding', 'UTF-8', '-d', tests, *replica, root / 'tests/AlbumReplicaTest.java',
-            root / 'tests/AlbumReplicaScheduleTest.java')
+        # The Album and Classification replica checks need neither the Android runtime
+        # nor an Android database: the sync engines and the store depend on the
+        # platform-free JSON reader and on the storage seam, so they run on the plain
+        # JVM against a real SQLite engine and a real local HTTP fixture.
+        #
+        # The source set is derived rather than hand-listed. It *is* the invariant —
+        # "every replica source that links neither the Android runtime nor Android's
+        # `org.json` stub" — and a written list is a copy of that invariant that goes
+        # stale silently: adding Classification 2C left the old list without its two
+        # classes, which broke this step (and therefore the whole release build)
+        # without any test noticing.
+        replica_sources = sorted(
+            path for path in (root / 'src/com/lakomics/mobile').glob('*.java')
+            if not any(import_line.startswith(('import android.', 'import androidx.', 'import org.json'))
+                       for import_line in path.read_text(encoding='utf-8').splitlines()))
+        replica_tests = [root / 'tests/AlbumReplicaTest.java',
+                         root / 'tests/AlbumReplicaScheduleTest.java',
+                         root / 'tests/ClassificationReplicaTest.java']
+        run(javac, '-encoding', 'UTF-8', '-d', tests, *replica_sources, *replica_tests)
         run(java_cmd, '-cp', tests, 'com.lakomics.mobile.AlbumReplicaTest')
         # The schedule check is deliberately Android-free: the defect it covers is a
         # transition defect, so it drives the state machine instead of an activity.
         run(java_cmd, '-cp', tests, 'com.lakomics.mobile.AlbumReplicaScheduleTest')
+        run(java_cmd, '-cp', tests, 'com.lakomics.mobile.ClassificationReplicaTest')
         jar = work / 'classes.jar'
         run(exe(java / 'bin', 'jar'), 'cf', jar, '-C', classes, '.')
         run(exe(bt, 'd8'), '--release', '--min-api', '26', '--lib', android, '--output', dex, jar)

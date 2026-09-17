@@ -35,17 +35,29 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.TemporaryImagePolicyTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-# The Album replica check runs on the plain JVM: the engine and store avoid Android
-# types, so it exercises the shipped schema and rules against a real SQLite engine and
-# a local HTTP fixture instead of a substituted stub.
-$taskReplicaSources=@('Json','AlbumReplica','AlbumAuthoritySync','AlbumMembershipOutbox','AlbumSyncPass','ReplicaDb','ReplicaSchema','LibraryReplicaStore','ForegroundSchedule') | ForEach-Object { Join-Path $PSScriptRoot "src/com/lakomics/mobile/$_.java" }
-& "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests @taskReplicaSources (Join-Path $PSScriptRoot 'tests/AlbumReplicaTest.java') (Join-Path $PSScriptRoot 'tests/AlbumReplicaScheduleTest.java')
+# The Album and Classification replica checks run on the plain JVM: the engines and
+# the store avoid Android types, so they exercise the shipped schema and rules against
+# a real SQLite engine and a local HTTP fixture instead of a substituted stub.
+#
+# The source set is derived rather than hand-listed. It *is* the invariant — "every
+# replica source that links neither the Android runtime nor Android's `org.json`
+# stub" — and a written list is a copy of that invariant that goes stale silently:
+# adding Classification 2C left the old list without its two classes, which broke this
+# step (and therefore the whole release build) without any test noticing.
+$taskReplicaSources=Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src/com/lakomics/mobile') -Filter '*.java' |
+ ForEach-Object {
+  $taskImports=Get-Content -LiteralPath $_.FullName | Where-Object { $_ -match '^import ' }
+  if (-not ($taskImports | Where-Object { $_ -match '^import (android\.|androidx\.|org\.json)' })) { $_.FullName }
+ }
+& "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests @taskReplicaSources (Join-Path $PSScriptRoot 'tests/AlbumReplicaTest.java') (Join-Path $PSScriptRoot 'tests/AlbumReplicaScheduleTest.java') (Join-Path $PSScriptRoot 'tests/ClassificationReplicaTest.java')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.AlbumReplicaTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # The schedule check covers a lifecycle transition, so it drives the state machine
 # directly rather than an Android activity.
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.AlbumReplicaScheduleTest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.ClassificationReplicaTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($CompileOnly) { Write-Output 'Native compile and network policy tests passed.'; exit 0 }
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'assets/index.html'))) { throw 'Build the app/mobile-client Vite bundle first; android/assets/index.html is required.' }
