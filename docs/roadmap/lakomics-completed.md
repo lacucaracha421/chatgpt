@@ -2135,6 +2135,35 @@ CLOUD-UI-001 and STATS-001A/B await native acceptance. WORKS-001 has the TV/seas
 structure implemented, with related-work/richer Film surfaces still partial.
 
 
+### Classification Authority 2E — legacy dirty-mechanism retirement (2026-09-17)
+
+Two separable commits: the Android release-build verification repair, then the 2E retirement.
+
+**Android release-build repair (commit `4760908`).** `android/build.py` and `build.ps1` listed the
+sources they compiled for the plain JVM by hand. Classification 2C made `LibraryReplicaStore` and
+`ReplicaDb` reference `ClassificationReplica`, so the stale list stopped compiling and the documented
+release build failed before packaging even though the shipped source was correct. Both scripts now
+derive the set from the tree — replica sources importing neither the Android runtime nor `org.json` —
+and compile and run `ClassificationReplicaTest` alongside the Album replica checks. The derived rule
+is recorded in `android/README.md`.
+
+- [x] Normal Android release build succeeds from a clean tree (no isolated-copy workaround).
+- [x] APK contains `ClassificationReplica`/`ClassificationAuthoritySync`; no Classification write/outbox and no `authority/commands` string.
+- [x] Album 302, schedule 39, Classification 151 replica checks run inside the build.
+
+**2E retirement (commit `b9b9ac6`).**
+
+- [x] Eliminated the write amplification: `project_assignment_impl` skips the write when the local relation already holds the authoritative value, and migration `0085` guards the Classification triggers from 0076 on the absence of the adoption row. Pre-adoption behaviour is byte-identical, and 0076 is untouched so old databases still upgrade.
+- [x] Production measurement: the legacy Classification generation had been climbing ~357/minute; after 2E it was frozen for 60 s across repeated five-second sync passes, with `albums` (110) and `saved_x` (252) unchanged.
+- [x] Retained the shared publication table and the `saved_x`/`albums` lanes, the fenced `PUT /v1/classifications` and its staging row, all compatibility reads with their Android/DocumentsProvider/Picker/extension consumers, and every historical migration.
+
+Migration `0085` applied to the live PC library through the normal startup path, which took its own
+`pre-migration-20260917-132918-v84-711bf03b-…` backup (`quick_check=ok`, authority epoch 1 / cursor 2
+intact) as the rollback boundary. No server deployment was needed: 2E changes no server file.
+Authority stayed epoch 1 / cursor 2 with outbox 0, the canary asset remained at its restored revision
+3, and the fenced legacy writer re-returned `409 legacyWriterFenced` with staging unchanged at
+revision 464.
+
 ### Classification Authority 2D — production activation and canary (2026-09-17)
 
 User explicitly authorized production activation plus the reversible assignment canary. Production

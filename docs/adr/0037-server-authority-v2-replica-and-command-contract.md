@@ -1220,13 +1220,68 @@ Classification authority is **active** in production as epoch 1 / contract 1, st
   `91df1c3b747a5d43c9af8051e6d499d42fe3a26c0c29393b1430288262d2e29b`, `quick_check=ok`, zero
   violation `foreign_key_check`) after stopping all Classification-capable clients. No rollback was
   required.
-- **Known follow-up (not a blocker):** the PC receive loop rewrites every confirmed assignment each
-  pass, so migration 0076's `classifications` dirty counter churns continuously while still being
-  consumed locally rather than re-published. This is write amplification on the legacy counters
-  only; it does not affect authority correctness and is later cleanup.
+- **Follow-up, resolved by 2E:** the PC receive loop used to rewrite every confirmed assignment
+  each pass, so migration 0076's `classifications` dirty counter churned continuously while still
+  being consumed locally rather than re-published. Authority 2E removed it; see below.
 
 The `android/build.py` and `build.ps1` JVM check lists were not extended for 2C, so the documented
-release procedure cannot build a 2C APK: the harness compile step omits `ClassificationReplica` and
-`ClassificationAuthoritySync`, which `LibraryReplicaStore`/`ReplicaDb` now require. The release APK
-itself compiles from the full source tree and was built correctly; the check list needs the two new
-classes (and `ClassificationReplicaTest`) added.
+release procedure could not build a 2C APK: the harness compile step omitted `ClassificationReplica`
+and `ClassificationAuthoritySync`, which `LibraryReplicaStore`/`ReplicaDb` now require. **Fixed in
+2E's first commit** by deriving that source set from the tree instead of listing it.
+
+### Classification 2E — legacy dirty-mechanism retirement and build-path repair, landed 2026-09-17
+
+Activation is proven and stable, so the legacy Classification publication machinery that is now
+provably superseded was retired. Two separable commits: the Android release-build verification
+repair, then the retirement itself.
+
+**Android release-build repair.** `android/build.py` and `build.ps1` hand-listed the sources they
+compiled for the plain JVM. Classification 2C made `LibraryReplicaStore`/`ReplicaDb` reference
+`ClassificationReplica`, so the stale list stopped compiling and the documented release build
+failed *before packaging* — from a clean checkout, with the shipped source correct. The list was a
+copy of an invariant ("replica sources importing neither the Android runtime nor `org.json`"), so
+both scripts now derive it from the tree, compile `ClassificationReplicaTest` with the Album replica
+tests and run it. Adding a replica class no longer requires editing a list.
+
+**What was retired.** Only the mechanisms whose own producer is gone:
+
+- `project_assignment_impl` no longer writes when the local relation already holds the authoritative
+  value. The write is a `DELETE` + `INSERT` (assignment is single-valued), so it fired two triggers
+  per confirmed assignment per pass while changing nothing. The Classification-target validation
+  stays unconditional because it is a read.
+- Migration **0085** replaces the Classification-specific triggers from 0076 with versions guarded on
+  the absence of the adoption singleton row, reusing 0082/0083's "row present means adopted"
+  convention. Pre-adoption behaviour is byte-identical. The Asset triggers that also served
+  `saved_x`/`albums` keep those kinds unconditionally. 0076 itself is untouched, so old databases
+  still upgrade.
+
+**Deliberately retained, and why:**
+
+- `cloud_metadata_publication_state` and the `saved_x`/`albums` lanes: shared, still live producers.
+- `PUT /v1/classifications` and its staging row: the fence *is* what makes an old writer unable to
+  regain authority, and staging still serves recovery. Retiring a fenced writer buys nothing while
+  the fence already holds and costs the recovery path. Production re-confirmed `409
+  legacyWriterFenced` with staging unchanged at revision 464.
+- Compatibility reads `GET /v1/classifications`, `/v1/classifications/meta`, `/v1/library/classifications`
+  and `/v1/library/classifications/{id}/contains/{asset}`: all still have consumers. The extension
+  bootstrap serves its own `/v1/classifications` from the locally-open library, Android's
+  `LibraryDocumentsProvider`, `PickerLibrary` and `CloudClient` read `/v1/library/classifications`,
+  and the `contains` route is authority-backed after cutover. None was removed; a live read returned
+  58 items after 2E.
+- Historical migrations: required for upgrading real older databases.
+
+**Verification.** The clean-pass regression test fails under either pre-2E behaviour (the legacy
+Classification generation went 8 → 28 over five passes) and passes after it; a second test counts the
+assignment writes directly through a temporary trigger and fails when the skip is removed (10 → 0);
+a migration test upgrades an 0084 database and asserts both the unadopted dirtying and the adopted
+silence. Classification 187, cloud 124, album 53, bookmark 64, db 56 and restore-guard 9 pass;
+`cargo check` clean; the Android release build still produces a 2C APK with no Classification
+write/outbox. Six Rust lib failures and 38 frontend failures are pre-existing, byte-identical at this
+commit's parent, and separately recorded rather than patched.
+
+**Production.** No server deploy was needed: 2E changes no server file. The PC applied migration 0085
+through its normal startup path, which took its own `v84` pre-migration backup. The legacy
+Classification generation, which had been climbing ~357 increments/minute, was then measured frozen
+for 60 s across repeated five-second sync passes while `albums` (110) and `saved_x` (252) stayed
+unchanged. Authority stayed epoch 1 / cursor 2, outbox 0, canary asset at its restored revision 3,
+and the service healthy with `NRestarts=0`.
