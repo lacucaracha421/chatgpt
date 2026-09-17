@@ -10,7 +10,8 @@ describe('post-authority mobile preview', () => {
     fireEvent.click(screen.getByRole('button', {name: '저장 대기 3'}));
     expect(screen.getByRole('dialog', {name: 'Activity & Sync'})).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', {name: 'Activity 닫기'}));
+    const closeButtons = screen.getAllByRole('button', {name: 'Activity 닫기'});
+    fireEvent.click(closeButtons[closeButtons.length - 1]);
     expect(screen.queryByRole('dialog', {name: 'Activity & Sync'})).not.toBeInTheDocument();
   });
 
