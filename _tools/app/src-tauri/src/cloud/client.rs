@@ -539,19 +539,33 @@ pub(crate) struct ClassificationChange {
     pub assignment_transition: Option<ClassificationAssignmentTransition>,
 }
 
+/// Command names, matching the server's exactly. Each one fixes which payload shape is
+/// legal, so a row whose payload disagrees with its label is malformed rather than
+/// merely surprising.
+pub(crate) const CLASSIFICATION_CREATE: &str = "createClassification";
+pub(crate) const CLASSIFICATION_RENAME: &str = "renameClassification";
+pub(crate) const CLASSIFICATION_MOVE: &str = "moveClassification";
+pub(crate) const CLASSIFICATION_APPEARANCE: &str = "updateClassificationAppearance";
+pub(crate) const CLASSIFICATION_DELETE: &str = "deleteClassification";
+pub(crate) const CLASSIFICATION_ASSIGNMENT: &str = "setAssetClassification";
+
 impl ClassificationChange {
     /// The canonical delta this change carries.
     ///
     /// Three shapes are valid and nothing else:
     ///
-    /// * one Classification projection alone (create/rename/move/appearance);
+    /// * one live Classification projection alone (create/rename/move/appearance);
     /// * one assignment projection alone (`setAssetClassification`);
-    /// * a Classification tombstone plus its assignment transition (delete).
+    /// * a Classification tombstone plus its assignment transition (`deleteClassification`).
     ///
     /// The delete shape is *not* a malformed multi-delta row: it is the one change
-    /// the server emits to make a delete unobservable as two states. A transition
-    /// without a tombstone, a transition on a live Classification, or any shape
-    /// carrying parts of different kinds is refused rather than guessed at.
+    /// the server emits to make a delete unobservable as two states. Everything else is
+    /// refused rather than guessed at, including a payload that disagrees with its own
+    /// `commandType` — a row labelled `renameClassification` that actually carries an
+    /// assignment would otherwise be applied as whatever its payload claimed.
+    ///
+    /// `authorityCursor` is required to equal `sequence`: the server emits that identity
+    /// for every row, so a disagreement means the row is not the change it claims to be.
     pub(crate) fn delta(
         &self,
     ) -> Result<
@@ -562,8 +576,23 @@ impl ClassificationChange {
         ),
         LibraryError,
     > {
-        match (&self.classification, &self.assignment, &self.assignment_transition) {
-            (Some(classification), None, None) => {
+        if self.authority_cursor != self.sequence {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        match (
+            self.command_type.as_str(),
+            &self.classification,
+            &self.assignment,
+            &self.assignment_transition,
+        ) {
+            // A structural command carries exactly one live Classification.
+            (
+                CLASSIFICATION_CREATE | CLASSIFICATION_RENAME | CLASSIFICATION_MOVE
+                | CLASSIFICATION_APPEARANCE,
+                Some(classification),
+                None,
+                None,
+            ) => {
                 if classification.deleted {
                     // A tombstone is only ever emitted together with the transition
                     // that moves its assignments, so a bare tombstone would leave the
@@ -572,8 +601,15 @@ impl ClassificationChange {
                 }
                 Ok((Some(classification), None, None))
             }
-            (None, Some(assignment), None) => Ok((None, Some(assignment), None)),
-            (Some(classification), None, Some(transition)) => {
+            // Assignment is its own lineage and carries no Classification projection.
+            (CLASSIFICATION_ASSIGNMENT, None, Some(assignment), None) => {
+                if assignment.entity_revision < 1 {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+                Ok((None, Some(assignment), None))
+            }
+            // A delete is the tombstone *and* the transition, together.
+            (CLASSIFICATION_DELETE, Some(classification), None, Some(transition)) => {
                 if !classification.deleted {
                     return Err(LibraryError::InvalidCloudResponse);
                 }
@@ -591,13 +627,71 @@ impl ClassificationChange {
 }
 
 /// One page of the ordered Classification change log.
+///
+/// The identity fields are carried so a replica can prove a page belongs to the authority
+/// it asked for: without them a response from another library, epoch or contract would be
+/// applied as if it were this replica's own.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClassificationChanges {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
     pub cursor: i64,
     pub items: Vec<ClassificationChange>,
     pub next_after: i64,
     pub has_more: bool,
+}
+
+impl ClassificationChanges {
+    /// Validate this page against the authority it was requested from, and against the
+    /// server's own cursor envelope.
+    ///
+    /// Fails closed on every malformed field rather than normalizing: `after` is the
+    /// cursor the request was made from, and the server defines the envelope exactly as
+    /// `nextAfter = last item sequence, or requested after when items is empty` and
+    /// `hasMore = nextAfter < cursor`.
+    pub(crate) fn validate(
+        &self,
+        authority_library_id: &str,
+        authority_epoch: i64,
+        requested_after: i64,
+    ) -> Result<(), LibraryError> {
+        if self.library_id != authority_library_id
+            || self.epoch != authority_epoch
+            || self.contract_version != CLASSIFICATION_CONTRACT_VERSION
+        {
+            return Err(LibraryError::ClassificationAuthorityMismatch);
+        }
+        if self.cursor < 0 || self.next_after < 0 || requested_after < 0 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // The page can neither reach past the authority nor move behind the cursor the
+        // request was made from.
+        if self.next_after > self.cursor || self.next_after < requested_after {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // `hasMore` is derived from the same two numbers, so a disagreement means the
+        // page describes a progression it does not actually have.
+        if self.has_more != (self.next_after < self.cursor) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        match self.items.last() {
+            // An empty page may not advance: the only honest cursor is the requested one.
+            None => {
+                if self.next_after != requested_after {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+            }
+            // A non-empty page advances exactly to its final row's sequence.
+            Some(last) => {
+                if last.sequence != self.next_after {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(crate) struct CloudClient {

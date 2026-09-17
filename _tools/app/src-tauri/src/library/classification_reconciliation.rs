@@ -378,6 +378,12 @@ impl Library {
         // transaction must be consistent — so a genuinely dangling parent or a relation
         // to a Classification the baseline does not carry is still refused.
         transaction.pragma_update(None, "defer_foreign_keys", "ON")?;
+        // The complete effective assignment state *before* this rebase touches anything.
+        // Reading it here is what makes the Character comparison below correct: the global
+        // clear of `asset_classifications` further down would otherwise erase the local
+        // side of the comparison, so `A -> null` would look like `null -> null` and
+        // `A -> A` would look like `null -> A`.
+        let before = local_assignment_view(&transaction)?;
         // A valid server history can end at a name arrangement that cannot be reached
         // by applying the final rows one at a time: if a sibling was renamed away from a
         // name and another node now holds that name, inserting the new holder before
@@ -436,12 +442,20 @@ impl Library {
         // authority no longer lists has no revision this PC can justify presenting.
         write_baseline_revision_caches(&transaction, baseline, &now)?;
         for assignment in &baseline.assignments {
-            materialize_assignment(
+            // Projection only: Character work is decided once, below, from the whole
+            // before/after comparison. Enqueueing per row here would compare against a
+            // table that has already been cleared.
+            project_without_enqueue(
                 &transaction,
                 &assignment.asset_id,
                 assignment.classification_id.as_deref(),
             )?;
         }
+        // Character reconsideration is owed exactly for the locally materialized Assets
+        // whose effective assignment this rebase actually changed. Comparing the whole
+        // state once covers every transition — including an authoritative *absence* of a
+        // row, which clears a local relation without appearing as a baseline assignment.
+        enqueue_changed_assignments(&transaction, &before)?;
         let authority = ClassificationAuthority {
             library_id: remote.library_id.clone(),
             epoch: remote.epoch,
@@ -476,6 +490,11 @@ impl Library {
                 CATCH_UP_LIMIT,
                 token,
             )?;
+            // Prove the page belongs to this authority and advances the way the server's
+            // own envelope says it does, before a single local write happens. A page from
+            // another library/epoch/contract, or one whose cursor arithmetic disagrees
+            // with itself, is not information this replica may act on.
+            page.validate(&authority.library_id, authority.epoch, requested)?;
             if !page.items.is_empty() {
                 // The page's changes and the cursor that describes them commit together,
                 // and the ordering check happens inside that same transaction.
@@ -898,6 +917,58 @@ fn materialize_assignment(
     Ok(())
 }
 
+/// Project an authoritative assignment value without deciding Character work.
+///
+/// Used by the rebase, which compares the whole before/after state once at the end
+/// instead of per row. Every other caller wants [`project_assignment`].
+fn project_without_enqueue(
+    transaction: &Transaction<'_>,
+    asset_id: &str,
+    classification_id: Option<&str>,
+) -> Result<(), LibraryError> {
+    project_assignment_impl(transaction, asset_id, classification_id, false)?;
+    Ok(())
+}
+
+/// Queue Character reconsideration for every locally materialized Asset whose effective
+/// assignment differs from `before`.
+///
+/// The authority only describes the lineages it carries, so an Asset that was assigned
+/// locally and has no authoritative row at all is *also* a change to nothing. Both sides
+/// are read as the same complete view, which is what makes absence, unassignment and
+/// re-assignment all fall out of one comparison.
+fn enqueue_changed_assignments(
+    transaction: &Transaction<'_>,
+    before: &AssignmentView,
+) -> Result<(), LibraryError> {
+    let after = local_assignment_view(transaction)?;
+    // An Asset present on either side may have changed; one present on neither did not.
+    let mut candidates: std::collections::BTreeSet<&String> = before.keys().collect();
+    candidates.extend(after.keys());
+    for asset_id in candidates {
+        let unchanged = before.get(asset_id) == after.get(asset_id);
+        if unchanged {
+            continue;
+        }
+        // Only a locally materialized Asset can owe Character work; the cache may also
+        // describe Assets this PC has never seen.
+        let known: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
+            [asset_id],
+            |row| row.get(0),
+        )?;
+        if !known {
+            continue;
+        }
+        crate::library::character_autotag::enqueue(
+            transaction,
+            asset_id,
+            crate::library::character_autotag::Cause::Classification,
+        )?;
+    }
+    Ok(())
+}
+
 /// Project one authoritative assignment value onto the local relation table, and queue
 /// Character reconsideration when that actually changed the Asset's assignment.
 ///
@@ -917,6 +988,16 @@ fn project_assignment(
     transaction: &Transaction<'_>,
     asset_id: &str,
     classification_id: Option<&str>,
+) -> Result<bool, LibraryError> {
+    project_assignment_impl(transaction, asset_id, classification_id, true)
+}
+
+/// The single projection body, with the Character decision optionally suppressed.
+fn project_assignment_impl(
+    transaction: &Transaction<'_>,
+    asset_id: &str,
+    classification_id: Option<&str>,
+    enqueue: bool,
 ) -> Result<bool, LibraryError> {
     let known: bool = transaction.query_row(
         "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
@@ -943,9 +1024,15 @@ fn project_assignment(
                 |row| row.get(0),
             )?;
             if !materializable {
-                // The Classification is not live locally yet, so nothing can be projected
-                // and nothing changed.
-                return Ok(false);
+                // A missing *Asset* is a legitimate deferred projection; a missing
+                // *Classification* is not. The server cannot produce a non-null
+                // assignment to a Classification that does not exist: ordinary commands
+                // validate the target, staging validates every assignment target, and a
+                // delete moves its Assets away atomically. So a locally materialized
+                // Asset pointing at an absent Classification means this replica is
+                // corrupt, and caching-and-advancing would hide that behind a relation
+                // that silently never appears.
+                return Err(LibraryError::InvalidCloudResponse);
             }
             // Assignment is single-valued, so the new relation replaces any other.
             transaction.execute(
@@ -962,6 +1049,9 @@ fn project_assignment(
     if before == after {
         // An idempotent projection is not a change, so it must not create derived work.
         return Ok(false);
+    }
+    if !enqueue {
+        return Ok(true);
     }
     crate::library::character_autotag::enqueue(
         transaction,
