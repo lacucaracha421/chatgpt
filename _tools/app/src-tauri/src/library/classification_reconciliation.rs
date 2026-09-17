@@ -35,7 +35,7 @@
 //!    a page's changes and moves the cursor, so an interruption re-applies the page
 //!    instead of skipping past it.
 
-use rusqlite::{params, Transaction};
+use rusqlite::{params, Connection, Transaction};
 
 use crate::cloud::client::{
     ClassificationAssignmentProjection, ClassificationAssignmentTransition, ClassificationChange,
@@ -59,6 +59,13 @@ const MAX_PAGES: usize = 100_000;
 
 /// Attempts at one frozen baseline walk before deferring to the poll loop.
 const BASELINE_ATTEMPTS: u32 = 3;
+
+/// The local materialized assignment view: every Asset's current Classification set.
+///
+/// Assignment is single-valued on the server, but the local table's key is
+/// `(asset_id, classification_id)`, so a set per Asset is what makes a comparison
+/// correct rather than merely usually correct.
+type AssignmentView = std::collections::BTreeMap<String, std::collections::BTreeSet<String>>;
 
 /// The complete Classification state a baseline describes, accumulated across pages.
 #[derive(Default)]
@@ -189,15 +196,7 @@ impl Library {
                 Err(error) => return Err(error),
             }
         };
-        if !replace_existing {
-            // First adoption on the main PC: the authority was activated from this PC's
-            // own staged snapshot, so the server baseline must describe exactly the
-            // Classification state already here. A difference means activation raced
-            // this PC or something changed underneath, and overwriting local state
-            // would destroy user data rather than converge it.
-            self.require_classification_first_adoption_match(&baseline)?;
-        }
-        let local_cursor = self.install_classification_baseline(&baseline, remote)?;
+        let local_cursor = self.commit_classification_baseline(&baseline, remote, replace_existing)?;
         Ok(ClassificationReconciliation {
             adopted: true,
             adopted_baseline: true,
@@ -293,114 +292,71 @@ impl Library {
         Err(LibraryError::ClassificationBaselineChanged)
     }
 
-    /// Refuse a first adoption whose baseline differs from the local state.
+    /// Commit a fully walked baseline, choosing the correct install for its situation.
     ///
-    /// Compares canonical state only — structure, effective assignment and the
-    /// immutable role — never display metadata such as a computed asset count, which is
-    /// presentation rather than authority.
-    fn require_classification_first_adoption_match(&self, baseline: &Baseline) -> Result<(), LibraryError> {
-        let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT id, kind, name, parent_id, icon_key, color_key
-             FROM classification_entries ORDER BY id",
-        )?;
-        let local_classifications = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    (
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                    ),
-                ))
-            })?
-            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
-        let remote_classifications = baseline
-            .classifications
-            .iter()
-            .filter(|classification| !classification.deleted)
-            .map(|classification| {
-                (
-                    classification.id.clone(),
-                    (
-                        classification.kind.clone(),
-                        classification.name.trim().to_owned(),
-                        classification.parent_id.clone(),
-                        classification.icon_key.clone(),
-                        classification.color_key.clone(),
-                    ),
-                )
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if local_classifications != remote_classifications {
-            return Err(LibraryError::ClassificationFirstAdoptionMismatch);
+    /// This is the one place that decides *how* a completed baseline is committed, shared
+    /// by the production path and the test seam so the decision itself is exercised:
+    ///
+    /// * a **first** adoption compares and installs in one transaction, so no local
+    ///   Classification mutation can slip between the safety check and the adoption, and
+    ///   writes only the durable authority metadata because the product tables already
+    ///   hold the state the baseline describes;
+    /// * an **already-adopted** replica takes the rebase installer, because there the
+    ///   server replaced local state rather than matching it.
+    fn commit_classification_baseline(
+        &self,
+        baseline: &Baseline,
+        remote: &crate::cloud::client::SyncAuthorityDomain,
+        replace_existing: bool,
+    ) -> Result<i64, LibraryError> {
+        if replace_existing {
+            self.install_classification_baseline(baseline, remote)
+        } else {
+            self.adopt_first_classification_baseline(baseline, remote)
         }
-        // Assignment is compared against the local table directly, with no Asset-status
-        // predicate: a Classification assignment deliberately survives local trash, so
-        // filtering by `status = 'normal'` would report a false mismatch for every
-        // trashed Asset that still holds its assignment.
-        let mut statement = connection.prepare(
-            "SELECT asset_id, classification_id FROM asset_classifications
-             ORDER BY asset_id, classification_id",
-        )?;
-        let local: Vec<(String, String)> = statement
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        // The authority's live set is compared for the Assets this PC actually holds.
-        // An assignment naming an Asset this PC cannot materialize is not local state
-        // being overwritten — it is authority state that is simply not projectable yet,
-        // and the deferred step completes it once the Asset appears. Restricting the
-        // comparison to locally known Assets keeps the direction that matters: a local
-        // assignment the authority does not carry is still a mismatch.
-        let mut expected: Vec<(String, String)> = baseline
-            .assignments
-            .iter()
-            .filter_map(|assignment| {
-                assignment.classification_id.as_ref().map(|classification_id| {
-                    (assignment.asset_id.clone(), classification_id.clone())
-                })
-            })
-            .collect();
-        expected.sort();
-        expected.dedup();
-        let known: std::collections::BTreeSet<String> = {
-            let mut statement = connection.prepare("SELECT id FROM assets")?;
-            let ids = statement
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
-            ids
+    }
+
+    /// Adopt a first baseline: compare **and** install, in one transaction.
+    ///
+    /// A first adoption is the one write that must never "fix" the PC. The authority was
+    /// activated from this PC's own staged snapshot, so the server baseline has to
+    /// describe exactly the Classification state already here; a difference means
+    /// activation raced this PC or something changed underneath, and overwriting local
+    /// state would destroy user data rather than converge it.
+    ///
+    /// The comparison and the metadata write deliberately share one transaction. Done
+    /// separately — compare on one connection, then open a transaction to install — a
+    /// local Classification mutation could commit in between, so the check would approve
+    /// a state that is no longer the state being adopted. Holding one transaction means
+    /// no such window exists: either the local state still matches the baseline and the
+    /// adoption row lands with it, or the whole thing rolls back.
+    ///
+    /// An exact first adoption writes **only** the three durable authority tables. The
+    /// product tables already hold the state the baseline describes, so rewriting them
+    /// would be pure risk — it could trip a sibling-name conflict, cascade Character
+    /// state or churn the legacy publication generation — for no information gain. The
+    /// rebase installer exists for the opposite situation (an already-adopted replica
+    /// that must be replaced), and is not reused here merely because its final values
+    /// would happen to be identical.
+    fn adopt_first_classification_baseline(
+        &self,
+        baseline: &Baseline,
+        remote: &crate::cloud::client::SyncAuthorityDomain,
+    ) -> Result<i64, LibraryError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        require_first_adoption_match(&transaction, baseline)?;
+        let authority = ClassificationAuthority {
+            library_id: remote.library_id.clone(),
+            epoch: remote.epoch,
+            contract_version: remote.contract_version,
+            cursor: baseline.cursor,
         };
-        let expected_set: std::collections::BTreeSet<(String, String)> = expected
-            .into_iter()
-            .filter(|(asset_id, _)| known.contains(asset_id))
-            .collect();
-        let local_set: std::collections::BTreeSet<(String, String)> =
-            local.into_iter().collect();
-        if local_set != expected_set {
-            return Err(LibraryError::ClassificationFirstAdoptionMismatch);
-        }
-        // The role binding is authority state with no command behind it, so a
-        // difference here could only be a different activation.
-        let mut statement =
-            connection.prepare("SELECT role, classification_id FROM classification_roles ORDER BY role")?;
-        let local_roles: Vec<(String, String)> = statement
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut expected_roles: Vec<(String, String)> = baseline
-            .roles
-            .iter()
-            .map(|role| (role.role.clone(), role.classification_id.clone()))
-            .collect();
-        expected_roles.sort();
-        expected_roles.dedup();
-        if local_roles != expected_roles {
-            return Err(LibraryError::ClassificationFirstAdoptionMismatch);
-        }
-        Ok(())
+        write_authority(&transaction, &authority, &now)?;
+        write_baseline_revision_caches(&transaction, baseline, &now)?;
+        transaction.commit()?;
+        Ok(baseline.cursor)
     }
 
     /// Replace the local replica and the caches, then record the adoption.
@@ -478,29 +434,8 @@ impl Library {
         }
         // The revision caches are replaced with exactly the baseline state: a row the
         // authority no longer lists has no revision this PC can justify presenting.
-        transaction.execute("DELETE FROM classification_authority_revisions", [])?;
-        transaction.execute("DELETE FROM classification_authority_assignment_revisions", [])?;
-        for classification in &baseline.classifications {
-            write_classification_revision(
-                &transaction,
-                &classification.id,
-                classification.entity_revision,
-                classification.deleted,
-                &now,
-            )?;
-        }
+        write_baseline_revision_caches(&transaction, baseline, &now)?;
         for assignment in &baseline.assignments {
-            // Every row is cached, including `classification_id = NULL` (an
-            // authoritative unassigned state at a real revision) and rows naming Assets
-            // this PC has not materialized: both are revision state a later command
-            // needs, and neither can be reconstructed from `asset_classifications`.
-            write_assignment_revision(
-                &transaction,
-                &assignment.asset_id,
-                assignment.classification_id.as_deref(),
-                assignment.entity_revision,
-                &now,
-            )?;
             materialize_assignment(
                 &transaction,
                 &assignment.asset_id,
@@ -639,39 +574,191 @@ impl Library {
     ///
     /// This creates no server command, changes no authority revision, advances no
     /// cursor and writes no outbox row: the authority's state is already known and
-    /// unchanged, and only the local projection of it is being completed.
+    /// unchanged, and only the local projection of it is being completed. It is a local
+    /// derived-work step, so it may queue Character reconsideration for the Assets whose
+    /// effective assignment it actually changed.
+    ///
+    /// The whole projection is one transaction. Assignment is single-valued, so a
+    /// per-Asset reconcile that cleared and re-inserted outside one transaction could
+    /// expose — or persist on failure — an Asset holding both its old Classification and
+    /// the authoritative one. Committing together makes the intermediate state
+    /// unobservable and makes a failure a rollback to the previous projection.
     pub(crate) fn materialize_deferred_classification_assignments(
         &self,
     ) -> Result<u32, LibraryError> {
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
         // Only lineages the authority has actually described are touched. An Asset with
         // no cache row was never mentioned by the authority, so its local relations are
         // pre-adoption state and removing them would destroy user data.
-        let inserted = connection.execute(
-            "INSERT OR IGNORE INTO asset_classifications (asset_id, classification_id)
-             SELECT revision.asset_id, revision.classification_id
-             FROM classification_authority_assignment_revisions revision
-             JOIN assets asset ON asset.id = revision.asset_id
-             JOIN classification_entries entry ON entry.id = revision.classification_id
-             WHERE revision.classification_id IS NOT NULL",
-            [],
-        )?;
-        // An authoritative *unassigned* row must also clear a projection that is
-        // currently wrong: the confirmed value is "no assignment", so any relation for
-        // that Asset is stale. Relations for a different Classification are removed
-        // too, because assignment is single-valued.
-        let removed = connection.execute(
-            "DELETE FROM asset_classifications
-             WHERE EXISTS (
-                 SELECT 1 FROM classification_authority_assignment_revisions revision
-                 WHERE revision.asset_id = asset_classifications.asset_id
-                   AND (revision.classification_id IS NULL
-                        OR revision.classification_id <> asset_classifications.classification_id)
-             )",
-            [],
-        )?;
-        Ok(u32::try_from(inserted + removed).unwrap_or(u32::MAX))
+        let confirmed: Vec<(String, Option<String>)> = {
+            let mut statement = transaction.prepare(
+                "SELECT asset_id, classification_id
+                 FROM classification_authority_assignment_revisions ORDER BY asset_id",
+            )?;
+            let rows = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut changed = 0u32;
+        for (asset_id, classification_id) in &confirmed {
+            // `project_assignment` only touches Assets that exist locally, and it
+            // replaces rather than merges, so each known Asset ends holding exactly the
+            // authoritative value or nothing at all.
+            if project_assignment(&transaction, asset_id, classification_id.as_deref())? {
+                changed += 1;
+            }
+        }
+        transaction.commit()?;
+        Ok(changed)
     }
+}
+
+/// Refuse a first adoption whose baseline differs from the local canonical state.
+///
+/// Compares canonical state only — structure, effective assignment and the immutable
+/// role — never display metadata such as a computed asset count, which is presentation
+/// rather than authority. Runs on the caller's transaction so the comparison cannot be
+/// separated from the adoption it authorizes.
+fn require_first_adoption_match(
+    transaction: &Transaction<'_>,
+    baseline: &Baseline,
+) -> Result<(), LibraryError> {
+    let mut statement = transaction.prepare(
+        "SELECT id, kind, name, parent_id, icon_key, color_key
+         FROM classification_entries ORDER BY id",
+    )?;
+    let local_classifications = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                (
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ),
+            ))
+        })?
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let remote_classifications = baseline
+        .classifications
+        .iter()
+        .filter(|classification| !classification.deleted)
+        .map(|classification| {
+            (
+                classification.id.clone(),
+                (
+                    classification.kind.clone(),
+                    classification.name.trim().to_owned(),
+                    classification.parent_id.clone(),
+                    classification.icon_key.clone(),
+                    classification.color_key.clone(),
+                ),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if local_classifications != remote_classifications {
+        return Err(LibraryError::ClassificationFirstAdoptionMismatch);
+    }
+    // Assignment is compared exactly, with no relaxation on either side. In particular
+    // the server side is *not* narrowed to the Assets this PC currently holds: the
+    // authority was activated from this PC's own staged snapshot, so a baseline
+    // assignment naming an Asset that is now absent locally means local canonical state
+    // changed after staging. Skipping it would let that divergence be adopted silently,
+    // and the same reasoning applies to `status`, because assignment deliberately
+    // survives local trash — filtering by `status = 'normal'` would report a false
+    // mismatch for every trashed Asset that still holds its assignment.
+    let local = local_assignment_view(transaction)?;
+    let expected = effective_assignment_view(baseline);
+    if local != expected {
+        return Err(LibraryError::ClassificationFirstAdoptionMismatch);
+    }
+    // The role binding is authority state with no command behind it, so a difference
+    // here could only be a different activation.
+    let mut statement =
+        transaction.prepare("SELECT role, classification_id FROM classification_roles ORDER BY role")?;
+    let local_roles: Vec<(String, String)> = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut expected_roles: Vec<(String, String)> = baseline
+        .roles
+        .iter()
+        .map(|role| (role.role.clone(), role.classification_id.clone()))
+        .collect();
+    expected_roles.sort();
+    expected_roles.dedup();
+    if local_roles != expected_roles {
+        return Err(LibraryError::ClassificationFirstAdoptionMismatch);
+    }
+    Ok(())
+}
+
+/// Every materialized Classification relation, grouped by Asset.
+fn local_assignment_view(connection: &Connection) -> Result<AssignmentView, LibraryError> {
+    let mut statement = connection
+        .prepare("SELECT asset_id, classification_id FROM asset_classifications ORDER BY asset_id")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut view = AssignmentView::new();
+    for row in rows {
+        let (asset_id, classification_id) = row?;
+        view.entry(asset_id).or_default().insert(classification_id);
+    }
+    Ok(view)
+}
+
+/// The baseline's *effective* assignment view: only non-null values materialize.
+///
+/// An explicit `classificationId = null` row is authoritative unassigned state at a real
+/// revision, so it is deliberately absent here rather than represented as an empty set:
+/// it corresponds to no `asset_classifications` row.
+fn effective_assignment_view(baseline: &Baseline) -> AssignmentView {
+    let mut view = AssignmentView::new();
+    for assignment in &baseline.assignments {
+        if let Some(classification_id) = assignment.classification_id.as_ref() {
+            view.entry(assignment.asset_id.clone())
+                .or_default()
+                .insert(classification_id.clone());
+        }
+    }
+    view
+}
+
+/// Write exactly the baseline's revision caches, replacing whatever was cached.
+///
+/// Every row is cached, including `classification_id = NULL` (an authoritative
+/// unassigned state at a real revision) and rows naming Assets this PC has not
+/// materialized: both are revision state a later command needs, and neither can be
+/// reconstructed from `asset_classifications`.
+fn write_baseline_revision_caches(
+    transaction: &Transaction<'_>,
+    baseline: &Baseline,
+    now: &str,
+) -> Result<(), LibraryError> {
+    transaction.execute("DELETE FROM classification_authority_revisions", [])?;
+    transaction.execute("DELETE FROM classification_authority_assignment_revisions", [])?;
+    for classification in &baseline.classifications {
+        write_classification_revision(
+            transaction,
+            &classification.id,
+            classification.entity_revision,
+            classification.deleted,
+            now,
+        )?;
+    }
+    for assignment in &baseline.assignments {
+        write_assignment_revision(
+            transaction,
+            &assignment.asset_id,
+            assignment.classification_id.as_deref(),
+            assignment.entity_revision,
+            now,
+        )?;
+    }
+    Ok(())
 }
 
 /// Park every live Classification name behind a per-id prefix.
@@ -807,14 +894,39 @@ fn materialize_assignment(
     asset_id: &str,
     classification_id: Option<&str>,
 ) -> Result<(), LibraryError> {
+    project_assignment(transaction, asset_id, classification_id)?;
+    Ok(())
+}
+
+/// Project one authoritative assignment value onto the local relation table, and queue
+/// Character reconsideration when that actually changed the Asset's assignment.
+///
+/// The authority can legitimately describe an assignment for an Asset this PC has not
+/// materialized yet, and for a Classification the local table cannot reference. Treating
+/// either as an error would stop the cursor forever on state that is correct: the
+/// confirmed revision is always recorded by the caller, and only the *visible* row is
+/// conditional here. [`Library::materialize_deferred_classification_assignments`]
+/// completes the withheld projection on a later pass.
+///
+/// The enqueue is what keeps received assignment semantically equivalent to a local one:
+/// every local Classification mutation queues Character reconsideration for the Asset it
+/// changed, so a replica that applied the same change without it would leave recognition
+/// inputs stale. It is a *local derived-work* enqueue only — no Classification command,
+/// no outbox row and no legacy relation replication intent is created here.
+fn project_assignment(
+    transaction: &Transaction<'_>,
+    asset_id: &str,
+    classification_id: Option<&str>,
+) -> Result<bool, LibraryError> {
     let known: bool = transaction.query_row(
         "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
         [asset_id],
         |row| row.get(0),
     )?;
     if !known {
-        return Ok(());
+        return Ok(false);
     }
+    let before = local_assignment_state(transaction, asset_id)?;
     match classification_id {
         None => {
             // Absent is absent: the authority says this Asset holds no Classification,
@@ -831,7 +943,9 @@ fn materialize_assignment(
                 |row| row.get(0),
             )?;
             if !materializable {
-                return Ok(());
+                // The Classification is not live locally yet, so nothing can be projected
+                // and nothing changed.
+                return Ok(false);
             }
             // Assignment is single-valued, so the new relation replaces any other.
             transaction.execute(
@@ -844,24 +958,88 @@ fn materialize_assignment(
             )?;
         }
     }
-    Ok(())
+    let after = local_assignment_state(transaction, asset_id)?;
+    if before == after {
+        // An idempotent projection is not a change, so it must not create derived work.
+        return Ok(false);
+    }
+    crate::library::character_autotag::enqueue(
+        transaction,
+        asset_id,
+        crate::library::character_autotag::Cause::Classification,
+    )?;
+    Ok(true)
+}
+
+/// The Asset's current Classification set, ordered so comparison is exact.
+fn local_assignment_state(
+    transaction: &Transaction<'_>,
+    asset_id: &str,
+) -> Result<Vec<String>, LibraryError> {
+    let mut statement = transaction.prepare(
+        "SELECT classification_id FROM asset_classifications WHERE asset_id = ?1
+         ORDER BY classification_id",
+    )?;
+    let rows = statement.query_map([asset_id], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 #[cfg(test)]
 impl Library {
-    /// Test seam: run the first-adoption comparison against a candidate baseline.
-    pub(crate) fn require_classification_first_adoption_match_for_test(
+    /// Test seam: commit a baseline through the production decision point.
+    ///
+    /// It routes through `commit_classification_baseline`, so a test can exercise the
+    /// first-adoption-versus-rebase choice rather than a hand-picked installer.
+    pub(crate) fn adopt_first_classification_baseline_for_test(
         &self,
         classifications: &[ClassificationProjection],
         assignments: &[ClassificationAssignmentProjection],
         roles: &[ClassificationRoleProjection],
+        library_id: &str,
+        epoch: i64,
+        contract_version: i64,
+        cursor: i64,
     ) -> Result<(), LibraryError> {
-        self.require_classification_first_adoption_match(&Baseline {
+        self.commit_classification_baseline_for_test(
+            classifications,
+            assignments,
+            roles,
+            library_id,
+            epoch,
+            contract_version,
+            cursor,
+            false,
+        )
+    }
+
+    /// Test seam: commit a baseline, optionally as an already-adopted rebase.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn commit_classification_baseline_for_test(
+        &self,
+        classifications: &[ClassificationProjection],
+        assignments: &[ClassificationAssignmentProjection],
+        roles: &[ClassificationRoleProjection],
+        library_id: &str,
+        epoch: i64,
+        contract_version: i64,
+        cursor: i64,
+        replace_existing: bool,
+    ) -> Result<(), LibraryError> {
+        let baseline = Baseline {
             classifications: classifications.to_vec(),
             assignments: assignments.to_vec(),
             roles: roles.to_vec(),
-            cursor: 0,
-        })
+            cursor,
+        };
+        let remote = crate::cloud::client::SyncAuthorityDomain {
+            domain: CLASSIFICATION_DOMAIN.to_owned(),
+            library_id: library_id.to_owned(),
+            epoch,
+            contract_version,
+            cursor,
+        };
+        self.commit_classification_baseline(&baseline, &remote, replace_existing)
+            .map(|_| ())
     }
 
     /// Test seam: install a baseline through the production install path.
