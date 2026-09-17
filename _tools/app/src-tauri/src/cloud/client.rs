@@ -416,6 +416,13 @@ pub(crate) const CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION: &str = "assignment
 /// rejecting a legal page.
 const MAX_CLASSIFICATION_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
+/// Maximum encoded Classification command accepted for sending.
+///
+/// The server bounds this route's request body at 16 KiB, so a body this client would
+/// not be allowed to deliver is refused before the request rather than reported as a
+/// transport failure.
+const MAX_CLASSIFICATION_COMMAND_BYTES: usize = 16 * 1024;
+
 /// One Classification projection carried by a baseline page or a change row.
 ///
 /// `deleted` is present on live rows too (always false) so one type describes both
@@ -689,6 +696,145 @@ impl ClassificationChanges {
                     return Err(LibraryError::InvalidCloudResponse);
                 }
             }
+        }
+        Ok(())
+    }
+}
+
+/// The accepted result of one Classification command, exactly as the server encodes it.
+///
+/// The identity fields are carried so the caller can prove a 200 is an acceptance of
+/// *its* intent before retiring a durable queue row. `assignmentTransition` is present
+/// only on a delete, where it describes the whole aggregate reassignment the server
+/// performed in one change.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClassificationCommandResult {
+    pub library_id: String,
+    pub epoch: i64,
+    pub contract_version: i64,
+    pub command_type: String,
+    pub operation_id: String,
+    pub changed: bool,
+    pub change_sequence: Option<i64>,
+    pub authority_cursor: i64,
+    #[serde(default)]
+    pub classification: Option<ClassificationProjection>,
+    #[serde(default)]
+    pub assignments: Vec<ClassificationAssignmentProjection>,
+    #[serde(default)]
+    pub assignment_transition: Option<ClassificationAssignmentTransition>,
+    pub updated_at: String,
+}
+
+/// A coded rejection the caller must treat as a structural conflict, not a retry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClassificationConflict {
+    /// The server's coded reason (for example `revisionConflict`).
+    pub code: String,
+    /// The current authoritative state the server reported, as raw JSON.
+    pub detail: serde_json::Value,
+}
+
+/// The outcome of sending one Classification command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ClassificationCommandOutcome {
+    /// The authority accepted the command; the result is durable and replayable.
+    Accepted(Box<ClassificationCommandResult>),
+    /// The authority rejected the command. The intent is preserved: a structural
+    /// rejection becomes a durable blocked row, and an assignment `revisionConflict` is
+    /// rebased onto the authority's current revision.
+    Conflict(ClassificationConflict),
+}
+
+impl ClassificationCommandResult {
+    /// Prove this accepted result describes the command that was sent.
+    ///
+    /// The caller retires the queue row keyed by the *stored* operation id and writes the
+    /// returned revision into the confirmed caches. An echo that names another operation,
+    /// entity, epoch or contract would therefore retire the wrong intent and record state
+    /// belonging to something else — corrupting confirmation rather than merely losing a
+    /// response. Every identity field must agree exactly, and the projections must be
+    /// exactly the shape the declared command produces.
+    pub(crate) fn validate_against(&self, command: &serde_json::Value) -> Result<(), LibraryError> {
+        let field = |key: &str| command.get(key).and_then(|value| value.as_str());
+        let number = |key: &str| command.get(key).and_then(|value| value.as_i64());
+        if field("libraryId") != Some(self.library_id.as_str())
+            || field("operationId") != Some(self.operation_id.as_str())
+            || field("commandType") != Some(self.command_type.as_str())
+            || number("epoch") != Some(self.epoch)
+            || number("contractVersion") != Some(self.contract_version)
+            || self.contract_version != CLASSIFICATION_CONTRACT_VERSION
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // The cursor the authority reports after acceptance can never regress past the
+        // sequence this change occupies, and a changed command occupies exactly one.
+        if self.authority_cursor < 0 {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        match self.command_type.as_str() {
+            // A structural create/rename/move/appearance answers with exactly one live
+            // Classification projection of its own target, and no assignment state: it
+            // touched the Classification's own revision lineage, not any Asset's.
+            CLASSIFICATION_CREATE | CLASSIFICATION_RENAME | CLASSIFICATION_MOVE
+            | CLASSIFICATION_APPEARANCE => {
+                let target = field("classificationId").ok_or(LibraryError::InvalidCloudResponse)?;
+                let classification = self
+                    .classification
+                    .as_ref()
+                    .ok_or(LibraryError::InvalidCloudResponse)?;
+                if classification.deleted
+                    || classification.id != target
+                    || !self.assignments.is_empty()
+                    || self.assignment_transition.is_some()
+                {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+            }
+            CLASSIFICATION_DELETE => {
+                let target = field("classificationId").ok_or(LibraryError::InvalidCloudResponse)?;
+                let classification = self
+                    .classification
+                    .as_ref()
+                    .ok_or(LibraryError::InvalidCloudResponse)?;
+                let transition = self
+                    .assignment_transition
+                    .as_ref()
+                    .ok_or(LibraryError::InvalidCloudResponse)?;
+                // A delete is one atomic change describing a tombstone *and* the
+                // aggregate reassignment it performed. An ordinary assignment list here
+                // would be fake transition state: it could not describe Assets this PC
+                // has never materialized, and the delete response carries only the
+                // aggregate count, never each lineage's new revision.
+                if !classification.deleted
+                    || classification.id != target
+                    || transition.from_classification_id != target
+                    || transition.affects_assignments < 0
+                    || !self.assignments.is_empty()
+                {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+            }
+            CLASSIFICATION_ASSIGNMENT => {
+                let asset_id = field("assetId").ok_or(LibraryError::InvalidCloudResponse)?;
+                let desired = command
+                    .get("classificationId")
+                    .ok_or(LibraryError::InvalidCloudResponse)?;
+                if self.classification.is_some()
+                    || self.assignments.len() != 1
+                    || self.assignment_transition.is_some()
+                {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+                let assignment = &self.assignments[0];
+                if assignment.asset_id != asset_id
+                    || assignment.classification_id.as_deref() != desired.as_str()
+                {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+            }
+            _ => return Err(LibraryError::InvalidCloudResponse),
         }
         Ok(())
     }
@@ -1114,6 +1260,82 @@ impl CloudClient {
             AlbumRejection::Retryable => match status {
                 401 | 403 => Err(LibraryError::CloudUnauthorized),
                 _ => Err(LibraryError::AlbumCommandOutcomeUnknown),
+            },
+        }
+    }
+
+    /// Send one Classification command.
+    ///
+    /// The caller retries with the *same* encoded payload and operation id, so the
+    /// server's receipt resolves a lost response instead of applying the intent twice.
+    /// A rejection is returned as a coded conflict rather than an error, because it is
+    /// state the caller must preserve, not retry away.
+    ///
+    /// The credential is supplied by the caller rather than chosen here: the server
+    /// authorizes structural commands and assignments with different roles, and this
+    /// client must not be the place that decides which one an intent needs.
+    pub(crate) fn classification_command(
+        &self,
+        body: &serde_json::Value,
+        token: &str,
+    ) -> Result<ClassificationCommandOutcome, LibraryError> {
+        let bytes = serde_json::to_vec(body).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        // The server bounds the route body at 16 KiB; refusing here keeps a local
+        // representation error from being reported as a transport failure.
+        if bytes.len() > MAX_CLASSIFICATION_COMMAND_BYTES {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        // `http_status_as_error` is disabled for this request so the coded rejection body
+        // survives: the route uses one status for an authority identity failure, a
+        // compare-and-set conflict and a semantic structural rejection, and those demand
+        // different handling. Collapsing them would make an automatic rebase impossible.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut response = agent
+            .put(self.endpoint("/v1/classifications/authority/commands")?)
+            .header("Authorization", bearer(token)?)
+            .content_type("application/json")
+            .send(&bytes)
+            .map_err(|_| LibraryError::ClassificationCommandOutcomeUnknown)?;
+        let status = response.status().as_u16();
+        if status == 200 {
+            let result = read_json_bounded::<ClassificationCommandResult>(
+                &mut response,
+                MAX_CLASSIFICATION_RESPONSE_BYTES,
+            )?;
+            result.validate_against(body)?;
+            return Ok(ClassificationCommandOutcome::Accepted(Box::new(result)));
+        }
+        // Coded rejections are read from a bounded structured body and mapped by code,
+        // never by status alone.
+        let detail = read_json::<AlbumCodedConflict>(&mut response)
+            .map(|body| body.detail)
+            .unwrap_or(serde_json::Value::Null);
+        let code = detail
+            .get("code")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        match classify_classification_rejection(code) {
+            ClassificationRejection::Authority(error) => Err(error),
+            ClassificationRejection::Structural(rejected) => {
+                Ok(ClassificationCommandOutcome::Conflict(ClassificationConflict {
+                    code: rejected.to_owned(),
+                    detail,
+                }))
+            }
+            // An unrecognized code keeps the intent and retries with the identical
+            // operation id and payload. It must **not** fall through to a status-based
+            // mapping: doing so would report an uncoded semantic 422 as a contract
+            // upgrade and strand a deliverable intent behind a version skew that does
+            // not exist. Credentials stay typed because they are actionable and are not
+            // evidence about the intent.
+            ClassificationRejection::Retryable => match status {
+                401 | 403 => Err(LibraryError::CloudUnauthorized),
+                _ => Err(LibraryError::ClassificationCommandOutcomeUnknown),
             },
         }
     }
@@ -2264,6 +2486,96 @@ fn classify_album_rejection(code: &str) -> AlbumRejection {
             AlbumRejection::Retryable
         }
         _ => AlbumRejection::Retryable,
+    }
+}
+
+/// What a coded Classification rejection means for the intent that produced it.
+///
+/// The distinction is the whole point of reading the code: an authority or protocol
+/// state is not a user conflict, a semantic structural rejection is not a contract
+/// upgrade, and only a desired-state revision conflict may be rebased.
+enum ClassificationRejection {
+    /// The stored library/epoch/contract no longer describes the live authority, or the
+    /// server speaks a protocol this build cannot. Neither is recoverable by retrying
+    /// the same intent, and neither is something the user resolved.
+    Authority(LibraryError),
+    /// The authority understood the command and refused its content. The intent is
+    /// durable and the user must decide, so it becomes a blocked queue row — except for
+    /// an assignment `revisionConflict`, which the caller rebases.
+    Structural(&'static str),
+    /// No usable coded meaning, or a transient cross-domain state: the intent stays
+    /// pending and retries with the identical operation id and payload.
+    Retryable,
+}
+
+/// Map a coded Classification rejection onto its handling.
+///
+/// The codes are the ones `server/lakomics-api/classification_authority.py` actually
+/// returns. `operationConflict` is deliberately an integrity failure rather than a user
+/// conflict: it means one operation id was reused with different content, which is a
+/// client bug, and reporting it as "another device changed this" would be a lie.
+fn classify_classification_rejection(code: &str) -> ClassificationRejection {
+    match code {
+        // Authority identity and contract skew.
+        "authorityInactive" => {
+            ClassificationRejection::Authority(LibraryError::ClassificationAuthorityInactive)
+        }
+        "authorityLibraryMismatch" | "authorityAmbiguous" => {
+            ClassificationRejection::Authority(LibraryError::ClassificationAuthorityMismatch)
+        }
+        "authorityContractUnsupported" | "unsupportedClassificationCommand" => {
+            ClassificationRejection::Authority(LibraryError::ClassificationContractUnsupported)
+        }
+        // The server understood the transport but rejected the command's shape. Calling
+        // this a contract *upgrade* would be false — this build speaks the negotiated
+        // contract — so it gets its own error carrying the server's code, and the intent
+        // stays deliverable rather than being discarded or blocked as the user's fault.
+        "invalidClassificationCommand" | "invalidClassificationRevision"
+        | "invalidClassificationKind" | "invalidClassificationAppearance"
+        | "invalidClassificationBaseline" => ClassificationRejection::Authority(
+            LibraryError::ClassificationCommandRejected {
+                code: code.to_owned(),
+            },
+        ),
+        "operationConflict" => {
+            ClassificationRejection::Authority(LibraryError::ClassificationOperationConflict)
+        }
+        // Meaningful entity/structure rejections: the user's intent is real, the content
+        // was refused, and the intent must be preserved for a decision. `revisionConflict`
+        // reaches here for structural commands; the assignment lineage rebases it instead.
+        "revisionConflict" => ClassificationRejection::Structural("revisionConflict"),
+        "duplicateClassificationName" => {
+            ClassificationRejection::Structural("duplicateClassificationName")
+        }
+        "classificationCycle" => ClassificationRejection::Structural("classificationCycle"),
+        "classificationHasChildren" => {
+            ClassificationRejection::Structural("classificationHasChildren")
+        }
+        "classificationExists" => ClassificationRejection::Structural("classificationExists"),
+        "classificationNotFound" => ClassificationRejection::Structural("classificationNotFound"),
+        "invalidClassificationParent" => {
+            ClassificationRejection::Structural("invalidClassificationParent")
+        }
+        "protectedClassification" => {
+            ClassificationRejection::Structural("protectedClassification")
+        }
+        // Name refusals the user resolves by editing the name, so they block on the user
+        // rather than retrying forever. The server's own code is what is stored, so the
+        // conflict surface can report which rule was broken.
+        "emptyClassificationName" => {
+            ClassificationRejection::Structural("emptyClassificationName")
+        }
+        "classificationNameTooLong" => {
+            ClassificationRejection::Structural("classificationNameTooLong")
+        }
+        // Everything else — `invalidClassificationAssignment` (a transient cross-domain
+        // ordering state: the Asset exists locally and this intent is queued, but Asset
+        // replication has not reached the server yet), the activation-only codes, and any
+        // code this build does not recognize — stays pending and retries with the
+        // identical operation id and payload. Blocking `invalidClassificationAssignment`
+        // would permanently refuse a legitimate user intent on a condition that resolves
+        // itself once Asset replication catches up.
+        _ => ClassificationRejection::Retryable,
     }
 }
 

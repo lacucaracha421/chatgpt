@@ -88,6 +88,8 @@ import type {
   BookmarkOutboxFlushResult,
   AlbumReconciliationResult,
   ClassificationReconciliationResult,
+  ClassificationOutboxFlushResult,
+  ClassificationSyncStatus,
   AlbumOutboxFlushResult,
   AlbumSyncStatus,
   CloudCollectionsPublishResult,
@@ -120,6 +122,23 @@ import type {
 async function albumMutation<T>(run: () => Promise<T>): Promise<T> {
   const result = await run();
   try { await invoke("flush_album_outbox"); } catch { /* durable outbox retries in background */ }
+  return result;
+}
+
+/**
+ * Run a local Classification mutation and immediately try to deliver it.
+ *
+ * The same contract as `albumMutation`, and deliberately after the mutation rather
+ * than around it: the optimistic local write and its durable intent are already
+ * committed by the time this returns, so a failed send must never fail the user's
+ * edit. The background loop retries the identical operation id.
+ *
+ * Every path that can create a Classification authority intent goes through this, so
+ * a mutation cannot be added later that queues work nothing attempts to deliver.
+ */
+async function classificationMutation<T>(run: () => Promise<T>): Promise<T> {
+  const result = await run();
+  try { await invoke("flush_classification_outbox"); } catch { /* durable outbox retries in background */ }
   return result;
 }
 
@@ -175,9 +194,14 @@ export const libraryGateway: LibraryGateway = {
     invoke<BookmarkOutboxFlushResult>("flush_catalog_bookmark_outbox"),
   reconcileAlbumAuthority: () =>
     invoke<AlbumReconciliationResult>("reconcile_album_authority"),
-  // Receive-only for 2B: there is deliberately no Classification flush command yet.
+  // Flush-first, like Album: a pending Classification intent must be delivered, or
+  // explicitly deferred, before a received page may touch the same state.
   reconcileClassificationAuthority: () =>
     invoke<ClassificationReconciliationResult>("reconcile_classification_authority"),
+  flushClassificationOutbox: () =>
+    invoke<ClassificationOutboxFlushResult>("flush_classification_outbox"),
+  classificationSyncStatus: () =>
+    invoke<ClassificationSyncStatus>("classification_sync_status"),
   flushAlbumOutbox: () => invoke<AlbumOutboxFlushResult>("flush_album_outbox"),
   albumSyncStatus: () => invoke<AlbumSyncStatus>("album_sync_status"),
   updateOnlineCatalog: (language, maxPages) =>
@@ -253,14 +277,14 @@ export const libraryGateway: LibraryGateway = {
   listClassifications: () =>
     invoke<ClassificationEntry[]>("list_classifications"),
   createClassification: (request: CreateClassification) =>
-    invoke<ClassificationEntry>("create_classification", { request }),
+    classificationMutation(() => invoke<ClassificationEntry>("create_classification", { request })),
   renameClassification: (id, name) =>
-    invoke("rename_classification", { id, name }),
+    classificationMutation(() => invoke("rename_classification", { id, name })),
   moveClassification: (id, parentId) =>
-    invoke("move_classification", { id, parentId }),
+    classificationMutation(() => invoke("move_classification", { id, parentId })),
   updateClassificationAppearance: (id, iconKey, colorKey) =>
-    invoke("update_classification_appearance", { id, iconKey, colorKey }),
-  deleteClassification: (id) => invoke("delete_classification", { id }),
+    classificationMutation(() => invoke("update_classification_appearance", { id, iconKey, colorKey })),
+  deleteClassification: (id) => classificationMutation(() => invoke("delete_classification", { id })),
   listAlbums: () => invoke<AlbumEntry[]>("list_albums"),
   createAlbum: (request: CreateAlbum) =>
     albumMutation(() => invoke<AlbumEntry>("create_album", { request })),
@@ -319,7 +343,7 @@ export const libraryGateway: LibraryGateway = {
   getAssetClassifications: (assetId) =>
     invoke<string[]>("get_asset_classifications", { assetId }),
   setAssetClassification: (request) =>
-    invoke("set_asset_classification", { request }),
+    classificationMutation(() => invoke("set_asset_classification", { request })),
   patchAssetAlbums: (patch: AssetAlbumPatch) =>
     albumMutation(() => invoke("patch_asset_albums", { patch })),
   getAssetAlbums: (assetId) => invoke<string[]>("get_asset_albums", { assetId }),

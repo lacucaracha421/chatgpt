@@ -238,6 +238,36 @@ mod tests {
         assert_eq!(adopted_domains(&connection).unwrap(), ["classifications"]);
     }
 
+    /// A pending Classification outbox does not need a second restore guard.
+    ///
+    /// The adopted sync row already makes the domain participate in restore refusal, and
+    /// the outbox lives in the same database a swap would replace. What matters is that
+    /// the pre-existing marker keeps working while intent is queued, so a user with
+    /// undelivered edits cannot silently lose them to an old whole-database snapshot.
+    #[test]
+    fn an_adopted_classification_with_pending_intent_still_blocks_a_restore() {
+        let (_temp, library) = open();
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO classification_authority_sync
+                    (singleton, library_id, epoch, contract_version, cursor, updated_at)
+                 VALUES (1, ?1, 1, 1, 9, '2026-09-17T00:00:00Z')",
+                ["a1b2c3d4e5f60718293a4b5c6d7e8f90"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO classification_authority_outbox
+                    (operation_id, command_type, classification_id, epoch, payload, state, created_at)
+                 VALUES ('00000000-0000-4000-8000-0000000000aa', 'renameClassification',
+                         'c1', 1, '{\"libraryId\":\"x\"}', 'pending', '2026-09-17T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(adopted_domains(&connection).unwrap(), ["classifications"]);
+    }
+
     #[test]
     fn classification_probe_is_absent_on_a_library_that_never_adopted_it() {
         let (_temp, library) = open();

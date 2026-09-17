@@ -221,6 +221,11 @@ impl From<LibraryError> for CommandError {
                 "classification_first_adoption_mismatch"
             }
             LibraryError::ClassificationSyncRejected(_) => "classification_sync_rejected",
+            LibraryError::ClassificationOperationConflict => "classification_operation_conflict",
+            LibraryError::ClassificationCommandRejected { .. } => "classification_command_rejected",
+            LibraryError::ClassificationCommandOutcomeUnknown => {
+                "classification_command_outcome_unknown"
+            }
             LibraryError::AlbumAuthorityInactive => "album_authority_inactive",
             LibraryError::AlbumAuthorityMismatch => "album_authority_mismatch",
             LibraryError::AlbumContractUnsupported => "album_contract_unsupported",
@@ -2411,10 +2416,10 @@ pub async fn reconcile_album_authority(
 
 /// Adopt or catch up with the server Classification authority.
 ///
-/// Receive-only: this batch teaches the PC to apply server Classification state, and
-/// there is deliberately no Classification outbox or flush command yet. The send half
-/// (2B.1) adds the queue, the operation ids and the local mutation rewiring that would
-/// give that queue work to do.
+/// Refuses to receive while any local Classification intent is unresolved, reported as
+/// `deferredToOutbox`: the user's structural edit takes precedence over an unrelated
+/// remote page that would otherwise overwrite it. A blocked intent defers receive until
+/// a later conflict-resolution batch or user action clears it.
 #[tauri::command]
 pub async fn reconcile_classification_authority(
     state: State<'_, AppState>,
@@ -2426,6 +2431,34 @@ pub async fn reconcile_classification_authority(
     tauri::async_runtime::spawn_blocking(move || library.reconcile_classifications())
         .await
         .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Send pending local Classification intents to the authority.
+///
+/// Every intent carries the operation id minted with its local mutation, so a repeated
+/// call — including after a restart — cannot duplicate a logical write.
+#[tauri::command]
+pub async fn flush_classification_outbox(
+    state: State<'_, AppState>,
+) -> Result<
+    crate::library::classification_authority::ClassificationOutboxFlush,
+    CommandError,
+> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.flush_classification_outbox())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Local-only Classification delivery status, without a network round trip.
+#[tauri::command]
+pub fn classification_sync_status(
+    state: State<'_, AppState>,
+) -> Result<crate::library::classification_authority::ClassificationSyncStatus, CommandError> {
+    current_required(state)?
+        .classification_sync_status()
         .map_err(CommandError::from)
 }
 

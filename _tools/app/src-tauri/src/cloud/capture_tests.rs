@@ -1547,6 +1547,229 @@ fn post_adoption_remote_apply_dirtied_generation_is_consumed_quietly() {
     assert!(activity[1].metadata_last_error.is_none());
 }
 
+/// Adopting Classification authority makes a local Classification change consume the
+/// legacy generation locally instead of publishing a fenced snapshot.
+///
+/// Migration 0076's dirty triggers keep firing — the authority's own change replay writes
+/// `classification_entries` and `asset_classifications` too — so the generation must be
+/// acknowledged without a request. Otherwise the old publisher would retry the fenced
+/// endpoint forever and report a permanent sync failure.
+#[test]
+fn post_adoption_classification_generations_are_consumed_without_a_legacy_request() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        // Two full cycles: the second must send no snapshot request for the change the
+        // first cycle consumed.
+        for _ in 0..4 {
+            let mut request = server
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .expect("expected capture or metadata request");
+            let url = request.url().to_string();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/saved-x-media" | "/v1/library/album-snapshot" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        assert!(server
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .unwrap()
+            .is_none());
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    library
+        .adopt_classification_authority_for_test("a1b2c3d4e5f60718293a4b5c6d7e8f90", 1, 1, 0)
+        .unwrap();
+    // A local Classification mutation dirties the legacy generation as usual.
+    library
+        .create_classification(crate::library::models::CreateClassification {
+            kind: crate::library::models::ClassificationKind::Root,
+            name: "After".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+    library
+        .create_classification(crate::library::models::CreateClassification {
+            kind: crate::library::models::ClassificationKind::Root,
+            name: "After2".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    let urls = handle.join().unwrap();
+    assert!(
+        !urls.iter().any(|url| url == "/v1/classifications"),
+        "the fenced legacy lane must not be contacted: {urls:?}"
+    );
+    // The other lanes are untouched.
+    assert!(urls.iter().any(|url| url == "/v1/saved-x-media"));
+    // No publication failure is reported, because nothing failed.
+    let activity = super::activity::read_activity(&library.connection().unwrap()).unwrap();
+    assert!(
+        activity[1].metadata_last_error.is_none(),
+        "consuming a legacy generation is not a failure: {:?}",
+        activity[1].metadata_last_error
+    );
+}
+
+/// Pre-adoption Classification publication remains exactly as before.
+#[test]
+fn pre_adoption_classification_dirty_state_still_publishes_the_legacy_snapshot() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        for index in 0..4 {
+            let mut request = server
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .unwrap_or_else(|| panic!("expected a request, saw {urls:?} before #{index}"));
+            let url = request.url().to_string();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/classifications" | "/v1/saved-x-media" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                "/v1/library/album-snapshot" => request
+                    .respond(json_response(json!({ "ok": true })))
+                    .unwrap(),
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    // An unadopted library's Classification change still publishes, verbatim.
+    library
+        .create_classification(crate::library::models::CreateClassification {
+            kind: crate::library::models::ClassificationKind::Root,
+            name: "Legacy".into(),
+            parent_id: None,
+        })
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    let urls = handle.join().unwrap();
+    assert!(
+        urls.iter().any(|url| url == "/v1/classifications"),
+        "pre-adoption behavior must be unchanged: {urls:?}"
+    );
+}
+
+/// A remote apply's Classification writes are consumed, not republished.
+///
+/// The authority itself writes `classification_entries` and `asset_classifications`
+/// during replay, so the dirty generation is an expected consequence of receiving rather
+/// than evidence of a local edit awaiting publication.
+#[test]
+fn post_adoption_remote_apply_dirtied_classification_generation_is_consumed_quietly() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", server.server_addr());
+    let handle = thread::spawn(move || {
+        let mut urls = Vec::new();
+        for _ in 0..3 {
+            let mut request = server
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap()
+                .expect("expected capture or metadata request");
+            let url = request.url().to_string();
+            urls.push(url.clone());
+            match url.as_str() {
+                "/v1/captures/pending" => request
+                    .respond(json_response(json!({ "captures": [] })))
+                    .unwrap(),
+                "/v1/saved-x-media" | "/v1/library/album-snapshot" => {
+                    request.respond(Response::empty(200)).unwrap()
+                }
+                _ => panic!("unexpected request: {url}"),
+            }
+        }
+        assert!(server
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .unwrap()
+            .is_none());
+        urls
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(base_url.clone()),
+            },
+            true,
+        )
+        .unwrap();
+    library
+        .adopt_classification_authority_for_test("a1b2c3d4e5f60718293a4b5c6d7e8f90", 1, 1, 0)
+        .unwrap();
+    // A remote apply writes the replica directly, firing the dirty triggers.
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
+             VALUES ('remote', 'root', '원격', NULL, '2026-09-17T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    let client = CloudClient::new(&base_url).unwrap();
+    library
+        .sync_next_cloud_capture_cycle_with(&client, "test-token")
+        .unwrap();
+
+    let urls = handle.join().unwrap();
+    assert!(!urls.iter().any(|url| url == "/v1/classifications"));
+    let activity = super::activity::read_activity(&library.connection().unwrap()).unwrap();
+    assert!(activity[1].metadata_last_error.is_none());
+}
+
 #[test]
 fn album_change_republishes_only_album_metadata() {
     let server = Server::http("127.0.0.1:0").unwrap();

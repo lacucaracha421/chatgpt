@@ -134,6 +134,71 @@ describe("libraryGateway album contract", () => {
     expect(invoke).toHaveBeenNthCalledWith(5, "set_asset_classification", {
       request: { assetIds: ["asset-1"], classificationId: "folder-1" },
     });
+    // The Classification mutation flushes too, now that it owns a durable outbox.
+    expect(invoke).toHaveBeenNthCalledWith(6, "flush_classification_outbox");
+  });
+});
+
+describe("libraryGateway classification contract", () => {
+  beforeEach(() => invoke.mockClear());
+
+  it("flushes the Classification outbox after every mutation that can queue one", async () => {
+    await libraryGateway.createClassification({ kind: "root", name: "게임", parentId: null });
+    await libraryGateway.renameClassification("folder-1", "게임2");
+    await libraryGateway.moveClassification("folder-1", null);
+    await libraryGateway.updateClassificationAppearance("folder-1", "folder", "blue");
+    await libraryGateway.deleteClassification("folder-1");
+    await libraryGateway.setAssetClassification({
+      assetIds: ["asset-1"],
+      classificationId: "folder-1",
+    });
+
+    expect(invoke.mock.calls.map((call) => call[0])).toEqual([
+      "create_classification",
+      "flush_classification_outbox",
+      "rename_classification",
+      "flush_classification_outbox",
+      "move_classification",
+      "flush_classification_outbox",
+      "update_classification_appearance",
+      "flush_classification_outbox",
+      "delete_classification",
+      "flush_classification_outbox",
+      "set_asset_classification",
+      "flush_classification_outbox",
+    ]);
+    expect(invoke).toHaveBeenNthCalledWith(1, "create_classification", {
+      request: { kind: "root", name: "게임", parentId: null },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(11, "set_asset_classification", {
+      request: { assetIds: ["asset-1"], classificationId: "folder-1" },
+    });
+  });
+
+  it("resolves the local mutation even when the immediate flush fails", async () => {
+    // The durable intent committed with the mutation, so a failed send is not a lost
+    // edit. The background loop retries the identical operation id.
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "flush_classification_outbox") throw new Error("offline");
+      return undefined;
+    });
+    await expect(
+      libraryGateway.renameClassification("folder-1", "게임2"),
+    ).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith("rename_classification", {
+      id: "folder-1",
+      name: "게임2",
+    });
+    invoke.mockReset();
+  });
+
+  it("exposes flush-first sync surfaces for Classification", async () => {
+    await libraryGateway.reconcileClassificationAuthority!();
+    await libraryGateway.flushClassificationOutbox!();
+    await libraryGateway.classificationSyncStatus!();
+    expect(invoke).toHaveBeenNthCalledWith(1, "reconcile_classification_authority");
+    expect(invoke).toHaveBeenNthCalledWith(2, "flush_classification_outbox");
+    expect(invoke).toHaveBeenNthCalledWith(3, "classification_sync_status");
   });
 });
 

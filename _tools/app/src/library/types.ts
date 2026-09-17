@@ -148,6 +148,16 @@ export type ClassificationReconciliationResult = {
   serverCursor: number | null; localCursor: number | null; behindBy: number;
   /** Confirmed assignments projected into `asset_classifications` by this pass. */
   rematerializedAssignments: number;
+  /** True when unresolved local intents deferred the receive for this pass. */
+  deferredToOutbox: boolean;
+};
+export type ClassificationOutboxFlushResult = {
+  sent: number; noOp: number; rebased: number; blocked: number; pending: number; stopped: boolean;
+};
+export type ClassificationSyncStatus = {
+  adopted: boolean; libraryId: string | null; epoch: number | null; contractVersion: number | null;
+  cursor: number | null; pendingCount: number; blockedCount: number;
+  oldestPendingOperationId: string | null;
 };
 export type AlbumOutboxFlushResult = {
   sent: number; noOp: number; blocked: number; pending: number; stopped: boolean;
@@ -1091,6 +1101,8 @@ export interface LibraryGateway {
   flushCatalogBookmarkOutbox?(): Promise<BookmarkOutboxFlushResult>;
   reconcileAlbumAuthority?(): Promise<AlbumReconciliationResult>;
   reconcileClassificationAuthority?(): Promise<ClassificationReconciliationResult>;
+  flushClassificationOutbox?(): Promise<ClassificationOutboxFlushResult>;
+  classificationSyncStatus?(): Promise<ClassificationSyncStatus>;
   flushAlbumOutbox?(): Promise<AlbumOutboxFlushResult>;
   albumSyncStatus?(): Promise<AlbumSyncStatus>;
   updateOnlineCatalog(language?: CatalogLanguage, maxPages?: number): Promise<CatalogUpdateResult>;

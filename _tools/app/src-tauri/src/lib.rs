@@ -347,6 +347,8 @@ pub fn run() {
             commands::catalog_bookmark_delivery_state,
             commands::reconcile_album_authority,
             commands::reconcile_classification_authority,
+            commands::flush_classification_outbox,
+            commands::classification_sync_status,
             commands::flush_album_outbox,
             commands::album_sync_status,
             commands::push_cloud_characters,

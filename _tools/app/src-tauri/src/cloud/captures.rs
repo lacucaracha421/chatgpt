@@ -140,8 +140,24 @@ impl Library {
                 continue;
             };
             let publish = match kind {
+                // After Classification authority adoption the legacy snapshot lane is
+                // fenced server-side (`PUT /v1/classifications` calls the shared
+                // `fence_legacy_write` once the domain is active), and the Classification
+                // outbox/change protocol owns shared Classification state. The handoff is
+                // therefore to *consume* the old generation locally instead of sending a
+                // request that can only be rejected: migration 0076's dirty triggers still
+                // fire — including for a remote apply, and including for the changes the
+                // authority itself applies — and an un-consumed generation would retry the
+                // fenced endpoint forever and report a permanent publication failure.
+                //
+                // Triggers, the publication state table and the legacy server route all
+                // remain; their retirement is later work.
                 CloudMetadataKind::Classifications => {
-                    self.publish_classification_snapshot_with(client, token)
+                    if self.classification_authority_adopted()? {
+                        Ok(())
+                    } else {
+                        self.publish_classification_snapshot_with(client, token)
+                    }
                 }
                 CloudMetadataKind::SavedX => {
                     self.publish_saved_x_media_snapshot_with(client, token)

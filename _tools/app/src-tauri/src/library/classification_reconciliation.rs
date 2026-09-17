@@ -1,15 +1,24 @@
 //! Classification authority receive: baseline adoption, rebase and change replay.
 //!
-//! This is the PC side of the `classifications` domain. It is **receive only**: it
-//! never sends a command, never mints an operation id and writes no outgoing work.
-//! [`super::classification_authority`] owns the durable adopted state this module
-//! installs.
+//! This is the PC side of the `classifications` domain. It never sends a command and
+//! never mints an operation id; [`super::classification_authority`] owns the durable
+//! adopted state and the outbox this module reads to decide whether it may run.
 //!
 //! # Sync order
 //!
-//! There is no Classification outbox in this batch, so there is no flush-first step
-//! to model. 2B.1 adds the queue together with the send path; until then this pass is
-//! the whole loop.
+//! ```text
+//! flush pending intents -> only when clean, receive authority changes
+//! ```
+//!
+//! Classification is structural state, so a received page must never replace a local
+//! edit the server has not yet accepted or explicitly rejected. A local rename or
+//! hierarchy move *is* the user's current intent, and letting an unrelated remote page
+//! overwrite it would discard that intent silently. The guard lives **here**, in the
+//! native pass, not only in the UI hook: reconciliation can be driven from outside the
+//! normal loop, and the protection must hold however it was called.
+//!
+//! A blocked queue stops receive indefinitely — until a later conflict-resolution batch
+//! or user action resolves it — because a later command may depend on the blocked one.
 //!
 //! # Why Classification is not Album
 //!
@@ -43,7 +52,7 @@ use crate::cloud::client::{
     CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION, CLASSIFICATION_BASELINE_SECTIONS_SECTION,
 };
 use crate::library::classification_authority::{
-    assignments_naming, read_authority, write_assignment_revision, write_authority,
+    assignments_naming, read_authority, read_outbox, write_assignment_revision, write_authority,
     write_classification_revision, write_role, ClassificationAuthority,
     ClassificationReconciliation, CLASSIFICATION_CONTRACT_VERSION, CLASSIFICATION_DOMAIN,
     ORIGINALS_ROLE,
@@ -94,18 +103,42 @@ impl Library {
     }
 
     /// Adopt or catch up with the Classification authority.
+    ///
+    /// Refuses to receive while any local intent is unresolved: `deferred_to_outbox` is
+    /// the documented "the user's intent takes precedence this cycle" state, not an error
+    /// to retry blindly. The guard is enforced here rather than only in the UI loop,
+    /// because reconciliation can be called from anywhere and the optimistic local state
+    /// must be protected however it was reached.
     pub(crate) fn reconcile_classification_authority(
         &self,
         client: &CloudClient,
         token: &str,
     ) -> Result<ClassificationReconciliation, LibraryError> {
         // The guard is scoped to the reads it protects: holding it across the network
-        // round trip below would block every other database caller, and the helpers
-        // this function calls take the same non-reentrant lock themselves.
-        let local = {
+        // round trip below would block every other database caller, and the helpers this
+        // function calls take the same non-reentrant lock themselves.
+        let (outbox_clean, local) = {
             let connection = self.connection()?;
-            read_authority(&connection)?
+            (
+                read_outbox(&connection)?.is_empty(),
+                read_authority(&connection)?,
+            )
         };
+        if !outbox_clean {
+            // Not merely "receiving is unsafe": every write below is unsafe over an
+            // unresolved intent. A baseline rebase would replace optimistic state with
+            // confirmed state the user has already moved past, and the deferred
+            // assignment materialization would rewrite an Asset's Classification from
+            // `classification_authority_assignment_revisions` — the value that is
+            // deliberately *behind* the queue. A blocked row defers receive indefinitely
+            // until a later conflict-resolution batch or user action clears it.
+            return Ok(ClassificationReconciliation {
+                adopted: local.is_some(),
+                deferred_to_outbox: true,
+                local_cursor: local.as_ref().map(|value| value.cursor),
+                ..Default::default()
+            });
+        }
         // Complete any confirmed assignment whose Asset has since appeared locally.
         // This is a local projection step, not a synchronization step: it produces no
         // server revision and no cursor movement. It runs only after adoption, because
@@ -606,6 +639,12 @@ impl Library {
         &self,
     ) -> Result<u32, LibraryError> {
         let mut connection = self.connection()?;
+        // Confirmed state must never overwrite the user's pending edit. The caller
+        // already defers on an unresolved queue, but this is a public entry point, so it
+        // enforces the same precondition itself rather than trusting every caller.
+        if !read_outbox(&connection)?.is_empty() {
+            return Ok(0);
+        }
         let transaction = connection.transaction()?;
         // Only lineages the authority has actually described are touched. An Asset with
         // no cache row was never mentioned by the authority, so its local relations are

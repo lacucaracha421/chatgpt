@@ -1,8 +1,10 @@
 use std::collections::BTreeSet;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::{
+    character_autotag,
+    classification_authority as authority,
     error::LibraryError,
     folder_appearance,
     models::{
@@ -12,14 +14,47 @@ use super::{
     validated_asset_ids, Library,
 };
 
+/// Enqueue the authoritative intent for an accepted local structural mutation.
+///
+/// Called after the local row is written, inside the same transaction, so a crash can
+/// never leave a changed Classification with no queued intent nor an intent for a
+/// Classification that never changed. When no authority is adopted this appends nothing
+/// and the legacy PC-owned path is byte-identical to before.
+///
+/// Only a create introduces the Classification, so only a create omits the expectation;
+/// every other structural command presents the revision the queue implies.
+fn enqueue_structural(
+    transaction: &Transaction<'_>,
+    command_type: &str,
+    classification_id: &str,
+    fields: serde_json::Map<String, serde_json::Value>,
+) -> Result<(), LibraryError> {
+    let mut fields = fields;
+    if command_type != authority::CREATE {
+        let expected = authority::predicted_classification_revision(transaction, classification_id)?;
+        fields.insert("expectedRevision".into(), expected.into());
+    }
+    Library::enqueue_classification_intent(transaction, command_type, classification_id, fields)
+}
+
+/// Whether this library has adopted the Classification authority.
+///
+/// Read on the caller's connection so the decision is made inside the same transaction
+/// as the mutation it governs: consulting a second connection could observe a different
+/// adoption state than the write it authorizes.
+fn authority_adopted(connection: &Connection) -> Result<bool, LibraryError> {
+    Ok(authority::read_authority(connection)?.is_some())
+}
+
 impl Library {
     pub fn create_classification(
         &self,
         request: CreateClassification,
     ) -> Result<ClassificationEntry, LibraryError> {
         let name = normalized_name(request.name)?;
-        let connection = self.connection()?;
-        let parent = find_parent(&connection, request.parent_id.as_deref())?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let parent = find_parent(&transaction, request.parent_id.as_deref())?;
         validate_parent(&request.kind, parent.as_ref())?;
 
         let entry = ClassificationEntry {
@@ -31,7 +66,7 @@ impl Library {
             color_key: None,
             asset_count: 0,
         };
-        connection
+        transaction
             .execute(
                 "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -44,6 +79,36 @@ impl Library {
                 ],
             )
             .map_err(map_duplicate_name)?;
+        // The payload states every field the server's create contract requires, including
+        // the ones this PC leaves unset on a new Classification: the contract rejects a
+        // body whose key set disagrees with its declared command, so the values are
+        // written explicitly rather than omitted as "absent".
+        let mut fields = serde_json::Map::new();
+        fields.insert("kind".into(), kind_name(&entry.kind).into());
+        fields.insert("name".into(), entry.name.clone().into());
+        fields.insert(
+            "parentId".into(),
+            match &entry.parent_id {
+                Some(parent_id) => parent_id.clone().into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        fields.insert(
+            "iconKey".into(),
+            match &entry.icon_key {
+                Some(icon_key) => icon_key.clone().into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        fields.insert(
+            "colorKey".into(),
+            match &entry.color_key {
+                Some(color_key) => color_key.clone().into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        enqueue_structural(&transaction, authority::CREATE, &entry.id, fields)?;
+        transaction.commit()?;
         Ok(entry)
     }
 
@@ -98,17 +163,29 @@ impl Library {
                 params![kind_name(&next_kind), parent_id, id],
             )
             .map_err(map_duplicate_name)?;
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "parentId".into(),
+            match parent_id {
+                Some(parent_id) => parent_id.into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        enqueue_structural(&transaction, authority::MOVE, id, fields)?;
         transaction.commit()?;
         Ok(())
     }
 
     pub fn rename_classification(&self, id: &str, name: &str) -> Result<(), LibraryError> {
         let name = normalized_name(name.to_owned())?;
-        let connection = self.connection()?;
-        if classification_has_role(&connection, id, "originals")? {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        // The protected node is refused before anything is written, so a rejected rename
+        // leaves neither a local change nor a queued intent.
+        if classification_has_role(&transaction, id, "originals")? {
             return Err(LibraryError::ProtectedClassification);
         }
-        let changed = connection
+        let changed = transaction
             .execute(
                 "UPDATE classification_entries SET name = ?1 WHERE id = ?2",
                 params![name, id],
@@ -117,6 +194,10 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::ClassificationNotFound);
         }
+        let mut fields = serde_json::Map::new();
+        fields.insert("name".into(), name.into());
+        enqueue_structural(&transaction, authority::RENAME, id, fields)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -129,8 +210,9 @@ impl Library {
         if !folder_appearance::validate(icon_key, color_key) {
             return Err(LibraryError::InvalidClassificationAppearance);
         }
-        let connection = self.connection()?;
-        let changed = connection.execute(
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
             "UPDATE classification_entries
              SET icon_key = ?1, color_key = ?2
              WHERE id = ?3",
@@ -139,6 +221,23 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::ClassificationNotFound);
         }
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "iconKey".into(),
+            match icon_key {
+                Some(icon_key) => icon_key.into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        fields.insert(
+            "colorKey".into(),
+            match color_key {
+                Some(color_key) => color_key.into(),
+                None => serde_json::Value::Null,
+            },
+        );
+        enqueue_structural(&transaction, authority::APPEARANCE, id, fields)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -180,8 +279,21 @@ impl Library {
         )?;
         transaction.execute("DELETE FROM classification_entries WHERE id = ?1", [id])?;
         for asset_id in affected {
-            super::character_autotag::enqueue(&transaction,&asset_id,super::character_autotag::Cause::Classification)?;
+            character_autotag::enqueue(&transaction,&asset_id,character_autotag::Cause::Classification)?;
         }
+        // Exactly **one** structural intent, with no expectation fields: the server's
+        // delete command owns the whole effect atomically. It derives the transition
+        // (`fromClassificationId` -> the deleted node's parent, or unassigned for a root)
+        // and increments every affected assignment lineage itself, and it increments the
+        // Classification's own revision. One assignment intent per affected Asset would
+        // be a second, competing description of the same change, and could be split
+        // across FIFO positions the server never agreed to.
+        enqueue_structural(
+            &transaction,
+            authority::DELETE,
+            id,
+            serde_json::Map::new(),
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -212,13 +324,16 @@ impl Library {
         Self::set_asset_classification_cause_in(transaction,request,super::character_autotag::Cause::Classification)
     }
 
-    pub(super) fn set_asset_classification_cause_in(transaction: &Connection, request: &SetAssetClassification, cause: super::character_autotag::Cause) -> Result<(), LibraryError> {
+    pub(super) fn set_asset_classification_cause_in(transaction: &Connection, request: &SetAssetClassification, cause: character_autotag::Cause) -> Result<(), LibraryError> {
         let asset_ids = validated_asset_ids(&transaction, &request.asset_ids)?;
         if let Some(classification_id) = request.classification_id.as_deref() {
             if find_classification(&transaction, classification_id)?.is_none() {
                 return Err(LibraryError::ClassificationNotFound);
             }
         }
+        // Read once, inside the transaction that will use it: consulting a second
+        // connection could observe a different adoption state than the writes below.
+        let managed = authority_adopted(transaction)?;
         for asset_id in asset_ids {
             let current=transaction.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
                 .query_map([asset_id],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
@@ -234,7 +349,27 @@ impl Library {
                     params![asset_id, classification_id],
                 )?;
             }
-            super::character_autotag::enqueue(transaction,asset_id,cause)?;
+            character_autotag::enqueue(transaction,asset_id,cause)?;
+            if managed {
+                // After adoption the Classification command owns this relation, so the
+                // durable intent is the only thing queued. The legacy relation-only Asset
+                // upsert is deliberately *not* created: it exists so the old replication
+                // lane can carry `classification_ids`, and once the server owns
+                // assignment that lane no longer writes them (2A.2 stops
+                // `/v1/replication/commit` from touching `asset_classifications`). A
+                // relation-only upsert would therefore re-upload Asset metadata, advance
+                // the server's metadata revision, and converge nothing.
+                //
+                // Real Asset metadata/media replication is untouched: this branch is
+                // reached only from this Classification mutation helper, and every other
+                // Asset mutation still enqueues through its own path.
+                Self::enqueue_classification_assignment_intent(
+                    transaction,
+                    asset_id,
+                    request.classification_id.as_deref(),
+                )?;
+                continue;
+            }
             // 관계-only 변경도 복제본에 전파되어야 한다. 증분 복제는 커밋 시
             // classification_ids를 다시 읽으므로, 다음 revision을 pending으로
             // 만들면 원본 미디어 재업로드 없이 관계가 수렴한다.
@@ -269,6 +404,15 @@ impl Library {
         let connection = self.connection()?;
         classifications_for_asset(&connection, asset_id)
     }
+    /// Apply an add/remove Classification patch to many Assets.
+    ///
+    /// The patch is expressed as relation diffs, which is how the legacy PC-owned lane
+    /// addresses several Classification relations at once. The Classification authority
+    /// has no such contract: its invariant is single-valued
+    /// (`asset_id -> classification_id | null`), so once adopted this computes the final
+    /// effective value each Asset is left with and queues exactly one desired-state
+    /// command per changed Asset. Encoding add/remove commands would invent a contract
+    /// the authority does not have.
     fn change_asset_classifications(
         &self,
         asset_ids: &[String],
@@ -285,6 +429,7 @@ impl Library {
                 return Err(LibraryError::ClassificationNotFound);
             }
         }
+        let managed = authority_adopted(&transaction)?;
         for asset_id in asset_ids {
             let before=transaction.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
                 .query_map([asset_id],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
@@ -302,9 +447,29 @@ impl Library {
             }
             let after=transaction.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
                 .query_map([asset_id],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
-            if before != after {
-                super::character_autotag::enqueue(&transaction,asset_id,super::character_autotag::Cause::Classification)?;
+            if before == after {
+                continue;
             }
+            if managed {
+                // The authority cannot represent more than one Classification per Asset,
+                // so a patch that would leave several is refused *before* committing
+                // rather than queued as state the contract has no command for. This can
+                // only arise from pre-adoption N:N data or a patch that adds a second
+                // Classification to an Asset that already holds one; the first adoption
+                // comparison already refuses a divergent baseline, so reaching here means
+                // the local caller asked for something the authority cannot hold.
+                let desired = match after.as_slice() {
+                    [] => None,
+                    [single] => Some(single.as_str()),
+                    _ => return Err(LibraryError::InvalidAssetSelection),
+                };
+                Self::enqueue_classification_assignment_intent(&transaction, asset_id, desired)?;
+            }
+            // Character reconsideration is owed for every changed Asset in both eras. The
+            // receive half runs the same step for a change it applies, so skipping it here
+            // would leave recognition inputs stale for exactly the edits the user made
+            // locally — the case that most needs them fresh.
+            character_autotag::enqueue(&transaction,asset_id,character_autotag::Cause::Classification)?;
         }
         transaction.commit()?;
         Ok(())

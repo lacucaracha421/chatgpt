@@ -147,6 +147,12 @@ pub enum LibraryError {
     ClassificationFirstAdoptionMismatch,
     #[error("서버 분류 동기화 요청이 거부됐습니다: HTTP {0}")]
     ClassificationSyncRejected(u16),
+    #[error("같은 작업 ID가 다른 내용으로 이미 사용되었습니다")]
+    ClassificationOperationConflict,
+    #[error("서버가 분류 명령의 형식을 거부했습니다: {code}")]
+    ClassificationCommandRejected { code: String },
+    #[error("전송한 분류 명령에 대한 응답을 확인하지 못했습니다")]
+    ClassificationCommandOutcomeUnknown,
     #[error("서버 앨범 권위가 아직 활성화되지 않았습니다")]
     AlbumAuthorityInactive,
     #[error("서버 앨범 권위가 이 라이브러리와 일치하지 않습니다")]
