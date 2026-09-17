@@ -7,7 +7,7 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
-import { StableImage } from "../shared/ui/StableImage";
+import { ReaderSpread } from "./ReaderSpread";
 import { arrowAdvance, displayOrder, edgeAdvance, nextSpreadStart, prevSpreadStart, spreadForPage } from "./readerSpread";
 
 type PageViewerProps = {
@@ -195,6 +195,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
         <Button size="icon" variant="ghost" aria-label="망가 뷰어 닫기" aria-description="망가 뷰어 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </div>
       <div className="manga-viewer__stage">
+        <ReaderSpread key={privacyMode ? "private" : "visible"} identity={JSON.stringify([pages, pages.map(value => pageUrls[value - 1]), mode, direction, margin, gap])}>
         <div
           className={`manga-viewer__spread${spread ? " manga-viewer__spread--double" : ""}`}
           style={{ boxSizing: "border-box", padding: VIEWER_MARGIN_PX[margin], columnGap: VIEWER_GAP_PX[gap] }}
@@ -203,8 +204,9 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
             ? <span key={value} className="manga-viewer__page-error">{value}페이지를 불러오지 못했습니다<Button disabled={retryingPages.has(value)} onClick={() => void retryPage(value)}>{retryingPages.has(value) ? "재시도 중…" : "다시 시도"}</Button></span>
             : privacyMode
               ? <Skeleton key={value} className="privacy-mask manga-viewer__page" label="비공개 모드" />
-              : <StableImage key={value} className="manga-viewer__page" src={pageUrls[value - 1]} alt={`${title} ${value}페이지`} referrerPolicy="no-referrer" draggable={false} onError={() => setFailedPages((current) => new Set(current).add(value))} onPreloadError={() => setFailedPages((current) => new Set(current).add(value))} />)}
+              : <img key={value} className="manga-viewer__page" src={pageUrls[value - 1]} alt={`${title} ${value}페이지`} referrerPolicy="no-referrer" draggable={false} onError={() => setFailedPages((current) => new Set(current).add(value))} />)}
         </div>
+        </ReaderSpread>
         {!privacyMode && preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" referrerPolicy="no-referrer" aria-hidden="true" />)}
       </div>
       <div className="manga-viewer__edges" aria-hidden="true">

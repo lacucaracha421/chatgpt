@@ -3402,6 +3402,12 @@ textarea:focus-visible {
   min-height: 0;
 }
 
+.manga-viewer__buffers { position: relative; isolation: isolate; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.manga-viewer__buffer { position: absolute; inset: 0; background: var(--color-bg); }
+.manga-viewer__buffer[data-reader-buffer="active"] { z-index: 2; }
+.manga-viewer__buffer[data-reader-buffer="pending"] { z-index: 1; pointer-events: none; }
+.manga-viewer__buffer[data-reader-buffer="retiring"] { z-index: 3; pointer-events: none; }
+
 .manga-viewer__spread--double .manga-viewer__page {
   max-width: 50%;
 }
