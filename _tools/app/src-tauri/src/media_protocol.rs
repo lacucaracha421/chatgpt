@@ -140,6 +140,7 @@ pub(crate) fn media_response_with_range(
             Ok(media) => Response::builder()
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, media.mime)
+                .header(CACHE_CONTROL, "private, max-age=300")
                 .header(CONTENT_LENGTH, media.bytes.len().to_string())
                 .body(media.bytes)
                 .expect("catalog thumbnail response is valid"),
@@ -669,6 +670,32 @@ mod tests {
         ] {
             assert_eq!(parse_catalog_thumbnail_path(path), None, "{path}");
         }
+    }
+
+    #[test]
+    fn catalog_thumbnail_response_is_privately_cacheable_for_page_transitions() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let catalog_dir = library.root().join("catalogs");
+        std::fs::create_dir_all(&catalog_dir).unwrap();
+        let url = "https://ehgt.org/catalog-thumb.png";
+        let db = rusqlite::Connection::open(catalog_dir.join("kdata.db")).unwrap();
+        db.execute_batch("CREATE TABLE Works(Id INTEGER PRIMARY KEY, Thumb TEXT, Expunged INTEGER NOT NULL);").unwrap();
+        db.execute("INSERT INTO Works(Id, Thumb, Expunged) VALUES(42, ?1, 0)", [url]).unwrap();
+
+        let cache_dir = library.root().join("cache/remote-manga/catalog-thumbs/kHentai");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        let digest = "bf5e876f5b3f4cc58599abdf1003bcdd";
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::new_rgb8(1, 1).write_to(&mut encoded, ImageFormat::Png).unwrap();
+        std::fs::write(cache_dir.join(format!("42-{digest}.bin")), encoded.into_inner()).unwrap();
+
+        let response = media_response(Some(&library), &Method::GET, "/remote-catalog-thumbnail/kHentai/42");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+            Some("private, max-age=300")
+        );
     }
 
     fn collection_source_library(with_preview: bool) -> (tempfile::TempDir, Library) {

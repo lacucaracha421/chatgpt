@@ -7,6 +7,7 @@ import { CatalogThumbnail } from "./CatalogThumbnail";
 
 type OnlineCatalogCardProps = {
   work: CatalogGroupedWork;
+  onThumbnailSettled?: (ready: boolean) => void;
   onEditions: (work: CatalogGroupedWork) => void;
   opening: boolean;
   bookmarkPending: boolean;
@@ -14,7 +15,7 @@ type OnlineCatalogCardProps = {
   onBookmark: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
 };
 
-export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark, onEditions }: OnlineCatalogCardProps) {
+export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark, onEditions, onThumbnailSettled }: OnlineCatalogCardProps) {
   const byline = [...work.artists, ...work.series].join(" · ") || "작가 정보 없음";
 
   return <article className="online-catalog-card">
@@ -26,10 +27,12 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
       onClick={() => onOpen(work)}
     >
       <CatalogThumbnail
+        deferUntilNear
         className="online-catalog-card__cover"
         src={work.thumbnailUrl}
         title={work.title}
         pageCount={work.fileCount}
+        onSettled={onThumbnailSettled}
       />
       <span className="online-catalog-card__metadata">
         <strong aria-description={opening ? undefined : work.title}>{opening ? "작품을 여는 중…" : catalogDisplayTitle(work.title)}</strong>

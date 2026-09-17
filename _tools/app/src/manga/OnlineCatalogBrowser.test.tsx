@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CatalogGroupedSearchEvent, CatalogStatus, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
@@ -11,7 +11,11 @@ import { lazy, Suspense } from "react";
 import { WindowControls } from "../layout/WindowControls";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+beforeEach(() => {
+  vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+  vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(100);
+});
+afterEach(() => { document.querySelector("[data-catalog-buffer-test-styles]")?.remove(); vi.restoreAllMocks(); cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const work: CatalogWork = {
   provider: "kHentai",
@@ -54,24 +58,203 @@ describe("OnlineCatalogBrowser", () => {
       <OnlineCatalogBrowser onSwitchLocal={vi.fn()} />
     </WorkspaceChromeProvider></LibraryProvider>);
     await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
-    const grid = document.querySelector<HTMLDivElement>(".online-catalog__content")!;
+    const activeGrid = () => document.querySelector<HTMLDivElement>('[data-catalog-buffer="active"]')!;
     const sidebar = document.querySelector("aside")!;
     sidebar.scrollTop = 70;
-    grid.scrollTop = 500;
+    activeGrid().scrollTop = 500;
     await userEvent.click(screen.getByRole("button", { name: "다음 결과" }));
-    await waitFor(() => expect(grid.scrollTop).toBe(0));
-    grid.scrollTop = 400;
+    await waitFor(() => expect(screen.getByRole("button", { name: "다음 결과" })).toBeEnabled());
+    expect(activeGrid().scrollTop).toBe(0);
+    activeGrid().scrollTop = 400;
     await userEvent.click(screen.getByRole("button", { name: "이전 결과" }));
-    await waitFor(() => expect(grid.scrollTop).toBe(0));
-    grid.scrollTop = 300;
+    await waitFor(() => expect(screen.getByRole("button", { name: "다음 결과" })).toBeEnabled());
+    expect(activeGrid().scrollTop).toBe(0);
+    activeGrid().scrollTop = 300;
     await userEvent.selectOptions(screen.getByLabelText("정렬"), "views");
-    await waitFor(() => expect(grid.scrollTop).toBe(0));
+    await waitFor(() => expect(screen.getByRole("button", { name: "다음 결과" })).toBeEnabled());
+    expect(activeGrid().scrollTop).toBe(0);
     expect(sidebar.scrollTop).toBe(70);
-    grid.scrollTop = 200;
+    activeGrid().scrollTop = 200;
     await userEvent.click(screen.getByRole("button", { name: "오래된 제독 북마크" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "오래된 제독 북마크" })).toBeEnabled());
-    expect(grid.scrollTop).toBe(200);
+    expect(activeGrid().scrollTop).toBe(200);
   });
+  it("keeps retiring above the promoted grid through a paint opportunity after every viewport image settles", async () => {
+    // Load the production buffer rules: DOM presence alone does not protect the
+    // old painted page when the new active layer has a higher stacking order.
+    const { readFileSync } = await vi.importActual<{ readFileSync: (path: string, encoding: "utf8") => string }>("node:fs");
+    const catalogStyles = readFileSync("src/styles/global.css", "utf8");
+    const style = document.createElement("style");
+    style.setAttribute("data-catalog-buffer-test-styles", "");
+    style.textContent = catalogStyles.slice(catalogStyles.indexOf(".online-catalog__viewport {"), catalogStyles.indexOf(".online-catalog__grid {"));
+    expect(style.textContent).toContain('z-index: 2');
+    document.head.append(style);
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++frameId, callback); return frameId;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const frame = async () => act(async () => {
+      const callbacks = [...frames.values()]; frames.clear();
+      callbacks.forEach(callback => callback(0));
+    });
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async query => ({
+      works: query.page === 0 ? [work] : [1, 2, 3].map(id => ({ ...work,
+        providerWorkId: String(id + 10), title: `새 작품 ${id}` })),
+      totalCount: 96, page: query.page, pageSize: 48,
+    }));
+    renderBrowser(gateway);
+    const old = await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+    await userEvent.click(screen.getByRole("button", { name: "다음 결과" }));
+    const pending = document.querySelector('[data-catalog-buffer="pending"]')!;
+    expect(pending).not.toBeNull();
+    expect(pending).toHaveAttribute("aria-hidden", "true");
+    expect(pending).toHaveAttribute("inert");
+    expect(old).toBeVisible();
+    expect(old).toBeEnabled();
+    const oldScroll = old.closest<HTMLDivElement>(".online-catalog__content")!;
+    oldScroll.scrollTop = 500;
+    vi.spyOn(pending, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 400, left: 0, right: 800, height: 400 } as DOMRect);
+    pending.querySelectorAll("[data-catalog-work]").forEach((card, index) => {
+      vi.spyOn(card, "getBoundingClientRect").mockReturnValue({ top: index * 300, bottom: index * 300 + 280, left: 0, right: 160 } as DOMRect);
+    });
+    const images = pending.querySelectorAll("img");
+    const decoded = deferred<void>();
+    Object.defineProperty(images[0], "decode", { value: () => decoded.promise });
+    fireEvent.load(images[0]);
+    await frame();
+    expect(old).toBeVisible();
+    expect(oldScroll.scrollTop).toBe(500);
+    await act(async () => decoded.resolve());
+    await frame();
+    expect(old).toBeVisible();
+    fireEvent.error(images[1]);
+    await frame(); await frame();
+    expect(screen.getByRole("button", { name: "새 작품 1 상세 보기" })).toBeVisible();
+    expect(document.querySelector('[data-catalog-buffer="active"]')).toBe(pending);
+    expect(pending.querySelector("img")).toBe(images[0]);
+    expect(pending.scrollTop).toBe(0);
+    const assertRetiringCoversActive = () => {
+      expect(oldScroll).toHaveAttribute("data-catalog-buffer", "retiring");
+      expect(oldScroll).toHaveAttribute("aria-hidden", "true");
+      expect(oldScroll).toHaveAttribute("inert");
+      expect(getComputedStyle(oldScroll).pointerEvents).toBe("none");
+      expect(Number(getComputedStyle(oldScroll).zIndex)).toBeGreaterThan(Number(getComputedStyle(pending).zIndex));
+      expect(old).toBeInTheDocument();
+    };
+    assertRetiringCoversActive();
+    await frame();
+    assertRetiringCoversActive();
+    await frame();
+    expect(old).not.toBeInTheDocument();
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "이전 결과" }));
+    await frame(); await frame(); await frame(); await frame();
+    expect(screen.getByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
+    expect(document.querySelector('[data-catalog-buffer="retiring"]')).toBeNull();
+  });
+
+  it("requests only near covers in the actual pending scrollport and keeps them across promotion", async () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+    const observers = new Map<Element, { notify: IntersectionObserverCallback; root: Element | Document | null | undefined }>();
+    class Observer {
+      constructor(private callback: IntersectionObserverCallback, private options: IntersectionObserverInit) {}
+      observe(target: Element) { observers.set(target, { notify: this.callback, root: this.options.root }); }
+      disconnect() {}
+    }
+    vi.stubGlobal("IntersectionObserver", Observer);
+    const enter = (image: HTMLImageElement) => act(() => {
+      observers.get(image)!.notify([{
+        target: image, isIntersecting: true, time: 0, intersectionRatio: 1,
+        boundingClientRect: image.getBoundingClientRect(), intersectionRect: image.getBoundingClientRect(), rootBounds: null,
+      }], {} as IntersectionObserver);
+    });
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++id, callback); return id; });
+    vi.stubGlobal("cancelAnimationFrame", (key: number) => frames.delete(key));
+    const frame = async () => act(async () => {
+      const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(0));
+    });
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async query => ({
+      works: query.page === 0 ? [work] : [1, 2, 3].map(id => ({ ...work, providerWorkId: String(id + 10), title: `근처 작품 ${id}` })),
+      totalCount: 96, page: query.page, pageSize: 48,
+    }));
+    renderBrowser(gateway);
+    const old = await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+    await userEvent.click(screen.getByRole("button", { name: "다음 결과" }));
+    const pending = document.querySelector<HTMLDivElement>('[data-catalog-buffer="pending"]')!;
+    vi.spyOn(pending, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 400, left: 0, right: 800, height: 400 } as DOMRect);
+    pending.querySelectorAll("[data-catalog-work]").forEach((card, index) => {
+      vi.spyOn(card, "getBoundingClientRect").mockReturnValue({ top: index * 300, bottom: index * 300 + 280, left: 0, right: 160 } as DOMRect);
+    });
+    const images = pending.querySelectorAll("img");
+    images.forEach(image => {
+      expect(image).not.toHaveAttribute("src");
+      expect(observers.get(image)!.root).toBe(pending);
+    });
+    await frame(); await frame();
+    expect(old).toBeInTheDocument();
+    expect(pending).toHaveAttribute("data-catalog-buffer", "pending");
+    enter(images[0]); enter(images[1]);
+    expect(images[0]).toHaveAttribute("src");
+    expect(images[1]).toHaveAttribute("src");
+    expect(images[2]).not.toHaveAttribute("src");
+    const decode = deferred<void>();
+    Object.defineProperty(images[0], "decode", { value: () => decode.promise });
+    fireEvent.load(images[0]); fireEvent.error(images[1]);
+    await frame(); await frame();
+    expect(pending).toHaveAttribute("data-catalog-buffer", "pending");
+    await act(async () => decode.resolve());
+    await frame(); await frame();
+    expect(pending).toHaveAttribute("data-catalog-buffer", "active");
+    expect(pending.querySelector("img")).toBe(images[0]);
+    expect(images[2]).not.toHaveAttribute("src");
+    await frame(); await frame();
+    expect(old).not.toBeInTheDocument();
+    enter(images[2]);
+    expect(images[2]).toHaveAttribute("src");
+  });
+
+  it("rejects a stale mounted pending page after a newer search starts", async () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++id, callback); return id; });
+    vi.stubGlobal("cancelAnimationFrame", (key: number) => frames.delete(key));
+    const frame = async () => act(async () => {
+      const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(0));
+    });
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async query => ({
+      works: [{ ...work, title: query.text ? "최신 검색" : query.page ? "폐기할 페이지" : work.title,
+        thumbnailUrl: query.text ? null : work.thumbnailUrl }],
+      totalCount: 96, page: query.page, pageSize: 48,
+    }));
+    renderBrowser(gateway);
+    const old = await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+    await userEvent.click(screen.getByRole("button", { name: "다음 결과" }));
+    const stale = document.querySelector('[data-catalog-buffer="pending"]')!;
+    const image = stale.querySelector("img")!;
+    const decode = deferred<void>();
+    Object.defineProperty(image, "decode", { value: () => decode.promise });
+    fireEvent.load(image);
+    await userEvent.click(screen.getByRole("button", { name: "온라인 만화 검색" }));
+    const input = screen.getByRole("combobox", { name: "온라인 만화 검색" });
+    fireEvent.change(input, { target: { value: "new" } });
+    fireEvent.submit(input.closest("form")!);
+    await act(async () => decode.resolve());
+    expect(stale).not.toBeInTheDocument();
+    expect(old).toBeVisible();
+    await frame(); await frame(); await frame();
+    expect(screen.getByRole("button", { name: "최신 검색 상세 보기" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "폐기할 페이지 상세 보기" })).not.toBeInTheDocument();
+  });
+
   it("shows the latest completed DB update beside the title, not a later failed attempt", async () => {
     const gateway = createGateway(true);
     const status = await gateway.getOnlineCatalogStatus();
@@ -475,13 +658,17 @@ describe("OnlineCatalogBrowser", () => {
       expect.objectContaining({ scope: "bookmarked", page: 0 }),
     );
 
+    await waitFor(() => expect(screen.getByRole("button", { name: "다음 결과" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "다음 결과" }));
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ page: 1, pageSize: 48 }),
     );
 
-    fireEvent.error(cover);
-    expect(within(card).getByText("24페이지")).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("button", { name: "이전 결과" })).toBeEnabled());
+    const activeCover = screen.getByRole("img", { name: "오래된 제독 표지" });
+    const activeCard = activeCover.closest("article")!;
+    fireEvent.error(activeCover);
+    expect(within(activeCard).getByText("24페이지")).toBeVisible();
   });
 
   it("imports a missing catalog from the selected VCK folder", async () => {
@@ -536,6 +723,7 @@ describe("OnlineCatalogBrowser", () => {
       expect.objectContaining({ text: "character:teitoku" }),
     ));
     expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(expect.objectContaining({ sort: "hotDay" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "정렬" })).toBeEnabled());
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "정렬" }), "hotWeek");
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
       expect.objectContaining({ sort: "hotWeek" }),

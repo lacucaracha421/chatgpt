@@ -3140,6 +3140,12 @@ textarea:focus-visible {
   font-size: var(--text-xs);
 }
 
+.online-catalog__viewport { position: relative; overflow: hidden; isolation: isolate; }
+.online-catalog__buffer { position: absolute; inset: 0; background: var(--color-bg); }
+.online-catalog__buffer[data-catalog-buffer="active"] { z-index: 2; }
+.online-catalog__buffer[data-catalog-buffer="pending"] { z-index: 1; pointer-events: none; }
+.online-catalog__buffer[data-catalog-buffer="retiring"] { z-index: 3; pointer-events: none; }
+
 .online-catalog__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));

@@ -1,4 +1,9 @@
-use std::{io::Read, path::Path, sync::OnceLock, time::Duration};
+use std::{
+    io::Read,
+    path::Path,
+    sync::{Condvar, Mutex, OnceLock, PoisonError},
+    time::Duration,
+};
 
 use super::{
     error::LibraryError,
@@ -6,6 +11,60 @@ use super::{
 };
 
 const MAX_REMOTE_IMAGE_BYTES: usize = 100 * 1024 * 1024;
+
+// CDN cache misses have their own slots; they never occupy the local-media gate.
+const CATALOG_THUMBNAIL_MAX_CONCURRENT: usize = 4;
+static CATALOG_THUMBNAIL_SLOTS: CatalogThumbnailSlots = CatalogThumbnailSlots::new();
+
+struct CatalogThumbnailSlots {
+    active: Mutex<usize>,
+    available: Condvar,
+}
+
+impl CatalogThumbnailSlots {
+    const fn new() -> Self {
+        Self {
+            active: Mutex::new(0),
+            available: Condvar::new(),
+        }
+    }
+}
+
+struct CatalogThumbnailPermit<'a> {
+    slots: &'a CatalogThumbnailSlots,
+}
+
+impl<'a> CatalogThumbnailPermit<'a> {
+    fn acquire_from(slots: &'a CatalogThumbnailSlots) -> Self {
+        let mut active = slots.active.lock().unwrap_or_else(PoisonError::into_inner);
+        while *active >= CATALOG_THUMBNAIL_MAX_CONCURRENT {
+            active = slots
+                .available
+                .wait(active)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        *active += 1;
+        Self { slots }
+    }
+}
+
+impl CatalogThumbnailPermit<'static> {
+    fn acquire() -> Self {
+        Self::acquire_from(&CATALOG_THUMBNAIL_SLOTS)
+    }
+}
+
+impl Drop for CatalogThumbnailPermit<'_> {
+    fn drop(&mut self) {
+        let mut active = self
+            .slots
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        *active -= 1;
+        self.slots.available.notify_one();
+    }
+}
 
 pub(crate) struct RemoteMedia {
     pub(crate) bytes: Vec<u8>,
@@ -142,6 +201,26 @@ pub(crate) fn load_catalog_thumbnail(
     identity: &super::catalog_provider::CatalogWorkIdentity,
     url: &str,
 ) -> Result<RemoteMedia, LibraryError> {
+    load_catalog_thumbnail_with(
+        root,
+        identity,
+        url,
+        fetch_catalog_thumbnail,
+        CatalogThumbnailPermit::acquire,
+    )
+}
+
+fn load_catalog_thumbnail_with<F, A, P>(
+    root: &Path,
+    identity: &super::catalog_provider::CatalogWorkIdentity,
+    url: &str,
+    fetch: F,
+    acquire: A,
+) -> Result<RemoteMedia, LibraryError>
+where
+    F: FnOnce(&str) -> Result<Vec<u8>, LibraryError>,
+    A: FnOnce() -> P,
+{
     // URL은 카탈로그 DB에서 검증된 ehgt.org 값만 들어온다(online_catalog::validated_thumbnail_url).
     let digest = format!("{:x}", url_hash(url.as_bytes()));
     let cache_path = root
@@ -152,19 +231,20 @@ pub(crate) fn load_catalog_thumbnail(
         let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
         return Ok(RemoteMedia { bytes, mime });
     }
-    let mut response = image_agent().get(url).call().map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
-    let mut bytes = Vec::new();
-    response
-        .body_mut()
-        .as_reader()
-        .take((MAX_REMOTE_IMAGE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+    // Keep the slot through cache publication so queued requests can reuse it.
+    let _permit = acquire();
+    if let Ok(bytes) = std::fs::read(&cache_path) {
+        let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
+        return Ok(RemoteMedia { bytes, mime });
+    }
+    let bytes = fetch(url)?;
     if bytes.len() > MAX_REMOTE_IMAGE_BYTES {
         return Err(LibraryError::UnsupportedImage);
     }
     let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
-    let parent = cache_path.parent().expect("catalog thumb cache has a parent");
+    let parent = cache_path
+        .parent()
+        .expect("catalog thumb cache has a parent");
     std::fs::create_dir_all(parent).map_err(|source| LibraryError::WriteAsset {
         path: parent.into(),
         source,
@@ -179,6 +259,21 @@ pub(crate) fn load_catalog_thumbnail(
         source,
     })?;
     Ok(RemoteMedia { bytes, mime })
+}
+
+fn fetch_catalog_thumbnail(url: &str) -> Result<Vec<u8>, LibraryError> {
+    let mut response = image_agent()
+        .get(url)
+        .call()
+        .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+    let mut bytes = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take((MAX_REMOTE_IMAGE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| LibraryError::RemoteGalleryUnavailable)?;
+    Ok(bytes)
 }
 
 fn url_hash(bytes: &[u8]) -> u128 {
@@ -262,6 +357,119 @@ mod tests {
             .write_to(&mut png, ImageFormat::Png)
             .unwrap();
         (root, png.into_inner())
+    }
+
+    #[test]
+    fn catalog_thumbnail_cache_hits_bypass_the_download_permit() {
+        let (root, png) = fixture();
+        let identity = super::super::catalog_provider::CatalogWorkIdentity::khentai(42);
+        let url = "https://ehgt.org/cover.png";
+        let cache = root
+            .path()
+            .join("cache/remote-manga/catalog-thumbs/kHentai")
+            .join(format!("42-{:x}.bin", super::url_hash(url.as_bytes())));
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        std::fs::write(&cache, &png).unwrap();
+        let result = super::load_catalog_thumbnail_with(
+            root.path(),
+            &identity,
+            url,
+            |_| panic!("cache hit must not download"),
+            || panic!("cache hit must not wait for a download slot"),
+        );
+        assert_eq!(result.unwrap().bytes, png);
+    }
+
+    #[test]
+    fn catalog_thumbnail_cache_misses_acquire_a_download_permit() {
+        let (root, png) = fixture();
+        let identity = super::super::catalog_provider::CatalogWorkIdentity::khentai(42);
+        let acquired = Cell::new(false);
+        let result = super::load_catalog_thumbnail_with(
+            root.path(),
+            &identity,
+            "https://ehgt.org/cover.png",
+            |_| {
+                assert!(acquired.get(), "CDN fetch must be gated");
+                Ok(png.clone())
+            },
+            || acquired.set(true),
+        );
+        assert_eq!(result.unwrap().bytes, png);
+    }
+
+    #[test]
+    fn catalog_thumbnail_rechecks_cache_after_waiting_for_a_download_slot() {
+        let (root, png) = fixture();
+        let identity = super::super::catalog_provider::CatalogWorkIdentity::khentai(42);
+        let url = "https://ehgt.org/cover.png";
+        let cache = root
+            .path()
+            .join("cache/remote-manga/catalog-thumbs/kHentai")
+            .join(format!("42-{:x}.bin", super::url_hash(url.as_bytes())));
+        let result = super::load_catalog_thumbnail_with(
+            root.path(),
+            &identity,
+            url,
+            |_| panic!("another request filled the cache while this request waited"),
+            || {
+                std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+                std::fs::write(&cache, &png).unwrap();
+            },
+        );
+        assert_eq!(result.unwrap().bytes, png);
+    }
+
+    #[test]
+    fn catalog_thumbnail_fifth_download_waits_and_failed_fetch_releases_its_slot() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (root, _) = fixture();
+        let slots = super::CatalogThumbnailSlots::new();
+        let mut held: Vec<_> = (0..4)
+            .map(|_| super::CatalogThumbnailPermit::acquire_from(&slots))
+            .collect();
+        let identity = super::super::catalog_provider::CatalogWorkIdentity::khentai(42);
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let (started_tx, started_rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let request = scope.spawn(|| {
+                super::load_catalog_thumbnail_with(
+                    root.path(),
+                    &identity,
+                    "https://ehgt.org/cover.png",
+                    |_| {
+                        started_tx.send(()).unwrap();
+                        Err(super::LibraryError::RemoteGalleryUnavailable)
+                    },
+                    || {
+                        attempted_tx.send(()).unwrap();
+                        super::CatalogThumbnailPermit::acquire_from(&slots)
+                    },
+                )
+            });
+            attempted_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let before_release = started_rx.recv_timeout(Duration::from_millis(100));
+            // Release before asserting so a failing assertion cannot strand a waiter.
+            drop(held.pop());
+            let result = request.join().unwrap();
+            assert!(
+                matches!(before_release, Err(mpsc::RecvTimeoutError::Timeout)),
+                "fifth download started with all four slots occupied"
+            );
+            started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            assert!(matches!(
+                result,
+                Err(super::LibraryError::RemoteGalleryUnavailable)
+            ));
+            assert_eq!(
+                *slots.active.lock().unwrap(),
+                3,
+                "failed fetch leaked its slot"
+            );
+        });
+        drop(held);
+        assert_eq!(*slots.active.lock().unwrap(), 0);
     }
 
     #[test]

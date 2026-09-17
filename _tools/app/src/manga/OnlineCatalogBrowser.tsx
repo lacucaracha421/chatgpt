@@ -1,6 +1,7 @@
 import { ArrowDownTrayIcon, ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { SearchSurface } from "../layout/SearchSurface";
@@ -63,13 +64,42 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
   const [appliedQuery, setAppliedQuery] = useState("");
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   const [results, setResults] = useState<CatalogGroupedPage | null>(null);
+  type Buffer = { id: number; page: CatalogGroupedPage; sort: CatalogSort; request: number; resetScroll: boolean };
+  const [activeBuffer, setActiveBuffer] = useState<Buffer | null>(null);
+  const [pendingBuffer, setPendingBuffer] = useState<Buffer | null>(null);
+  const [retiringBuffer, setRetiringBuffer] = useState<Buffer | null>(null);
+  const activeBufferRef = useRef<Buffer | null>(null);
+  const pendingBufferRef = useRef<Buffer | null>(null);
+  const bufferId = useRef(0);
   const gridScroll = useRef<HTMLDivElement>(null);
-  const displayedOrder = useRef<{ page: number; sort: CatalogSort } | null>(null);
-  const resetGridScroll = useRef(false);
-  useLayoutEffect(() => {
-    if (resetGridScroll.current && gridScroll.current) gridScroll.current.scrollTop = 0;
-    resetGridScroll.current = false;
-  }, [results]);
+  useEffect(() => {
+    if (!retiringBuffer) return;
+    // Keep the old painted surface above the promoted DOM through the first
+    // frame. The nested frame allows a paint opportunity before uncovering it.
+    let removalFrame = 0;
+    const paintFrame = requestAnimationFrame(() => {
+      removalFrame = requestAnimationFrame(() => {
+        setRetiringBuffer(current => current === retiringBuffer ? null : current);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(paintFrame);
+      cancelAnimationFrame(removalFrame);
+    };
+  }, [retiringBuffer]);
+
+  function acceptBuffer(buffer: Buffer) {
+    if (!mounted.current || buffer.request !== searchRequest.current || pendingBufferRef.current !== buffer) return;
+    flushSync(() => {
+      setRetiringBuffer(activeBufferRef.current);
+      activeBufferRef.current = buffer;
+      pendingBufferRef.current = null;
+      setActiveBuffer(buffer);
+      setPendingBuffer(null);
+      setResults(buffer.page);
+      setLoading(false);
+    });
+  }
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [countError, setCountError] = useState<string | null>(null);
   const [editions, setEditions] = useState<CatalogGroupedWork | null>(null);
@@ -127,6 +157,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     setAppliedQuery(text);
     setSearchOpen(false);
     const request = ++searchRequest.current;
+    pendingBufferRef.current = null;
+    setPendingBuffer(null);
     setLoading(!quiet);
     setQuietRefresh(quiet);
     if (!quiet) setTotalCount(null);
@@ -135,6 +167,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     suggestionRequest.current += 1;
     setSuggestions([]);
     setActiveSuggestionIndex(-1);
+    let receivedPage = false;
     try {
       await gateway.searchCatalogGroups({
         provider: "kHentai",
@@ -148,10 +181,21 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
       }, (event) => {
         if (request !== searchRequest.current) return;
         if (event.type === "page") {
-          const previous = displayedOrder.current;
-          resetGridScroll.current = !quiet && (!previous || previous.page !== event.page.page || previous.sort !== nextSort);
-          displayedOrder.current = { page: event.page.page, sort: nextSort };
-          setResults(event.page); setLoading(false);
+          receivedPage = true;
+          const previous = activeBufferRef.current;
+          const resetScroll = !quiet && (!previous || previous.page.page !== event.page.page || previous.sort !== nextSort);
+          const buffer: Buffer = { id: ++bufferId.current, page: event.page, sort: nextSort, request, resetScroll };
+          // Same-page quiet updates retain card DOM and scroll (bookmark flags, counts).
+          if (!previous || (quiet && previous.page.page === event.page.page && previous.sort === nextSort)) {
+            buffer.id = previous?.id ?? buffer.id;
+            activeBufferRef.current = buffer;
+            setActiveBuffer(buffer);
+            setResults(event.page);
+            setLoading(false);
+          } else {
+            pendingBufferRef.current = buffer;
+            setPendingBuffer(buffer);
+          }
         }
         else if (event.type === "count") {
           if (nextPage > 0 && nextPage * CATALOG_PAGE_SIZE >= event.totalCount) {
@@ -165,7 +209,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     } catch (error) {
       if (request === searchRequest.current) { setMessage(commandErrorMessage(error, "온라인 카탈로그 검색에 실패했습니다")); setCountError("결과 수를 불러오지 못했습니다"); }
     } finally {
-      if (request === searchRequest.current) setLoading(false);
+      if (request === searchRequest.current && !receivedPage) setLoading(false);
     }
   }
 
@@ -298,6 +342,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     const identityKey = catalogIdentityKey(identity);
     if (bookmarkRequests.current.has(identityKey)) return false;
     searchRequest.current += 1;
+    pendingBufferRef.current = null;
+    setPendingBuffer(null);
     setCountError(null);
     bookmarkRequests.current.add(identityKey);
     setBookmarkPendingKeys(new Set(bookmarkRequests.current));
@@ -517,25 +563,27 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
         : !workspace && <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-    <div ref={gridScroll} className="manga-browser__content online-catalog__content">
+    <div className="manga-browser__content online-catalog__viewport">
       {!status ? <Skeleton className="manga-browser__skeleton" label="온라인 카탈로그를 불러오는 중" />
         : !status.installed ? <EmptyState title="온라인 카탈로그가 없습니다">
           <p>기존 VCK 폴더의 데이터를 한 번 가져오면 Lakomics에서 독립적으로 사용할 수 있습니다.</p>
           <Button onClick={() => void importCatalog()} disabled={loading}>VCK 데이터 가져오기</Button>
         </EmptyState>
-        : loading && !results ? <Skeleton className="manga-browser__skeleton" label="온라인 작품을 검색하는 중" />
-        : results?.works.length === 0 ? <EmptyState title="검색 결과가 없습니다">다른 제목이나 태그로 검색하세요.</EmptyState>
-        : <div className="online-catalog__grid">
-          {results?.works.map((work) => <OnlineCatalogCard
-            key={`${work.provider}:${work.groupId}`}
-            work={work}
-            opening={openingWorkKey === catalogIdentityKey(work)}
-            bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
+        : !activeBuffer ? <Skeleton className="manga-browser__skeleton" label="온라인 작품을 검색하는 중" />
+        : [retiringBuffer, activeBuffer, pendingBuffer].filter((buffer): buffer is Buffer => Boolean(buffer)).map(buffer =>
+          <CatalogPageBuffer
+            key={buffer.id}
+            page={buffer.page}
+            state={buffer === activeBuffer ? "active" : buffer === pendingBuffer ? "pending" : "retiring"}
+            scrollRef={gridScroll}
+            resetScroll={buffer.resetScroll}
+            onReady={() => acceptBuffer(buffer)}
+            openingWorkKey={openingWorkKey}
+            bookmarkPendingKeys={bookmarkPendingKeys}
             onEditions={setEditions}
             onOpen={(selected) => void openDetail(selected)}
             onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
           />)}
-        </div>}
     </div>
     {results && <footer className="online-catalog__pagination" aria-busy={loading || totalCount === null}>
       <span>{totalCount === null ? countError ? "결과 수를 확인하지 못했습니다" : "페이지 표시 중" : totalCount === 0 ? "0 / 0" : `${(results.page * results.pageSize + 1).toLocaleString()}–${Math.min(totalCount, (results.page + 1) * results.pageSize).toLocaleString()} / ${totalCount.toLocaleString()}`}{loading && !quietRefresh && <em className="online-catalog__pagination-loading" role="status"> · 불러오는 중…</em>}</span>
@@ -580,4 +628,84 @@ function catalogSortLabel(sort: CatalogSort): string {
 function localDateTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ko-KR");
+}
+
+// The staged scrollport has the same geometry as the active one, at its accepted
+// scroll offset. Its real card/image nodes survive promotion via the buffer key.
+function CatalogPageBuffer({ page, state, scrollRef, resetScroll, onReady, openingWorkKey, bookmarkPendingKeys, onEditions, onOpen, onBookmark }: {
+  page: CatalogGroupedPage;
+  state: "active" | "pending" | "retiring";
+  scrollRef: RefObject<HTMLDivElement | null>;
+  resetScroll: boolean;
+  onReady: () => void;
+  openingWorkKey: string | null;
+  bookmarkPendingKeys: Set<string>;
+  onEditions: (work: CatalogGroupedWork) => void;
+  onOpen: (work: CatalogWork) => void;
+  onBookmark: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
+}) {
+  const layer = useRef<HTMLDivElement>(null);
+  const settled = useRef(new Set<string>());
+  const check = useRef<() => void>(() => {});
+  const readyCallback = useRef(onReady);
+  readyCallback.current = onReady;
+  useLayoutEffect(() => {
+    if (state !== "pending") return;
+    const element = layer.current!;
+    const source = scrollRef.current;
+    element.scrollTop = resetScroll ? 0 : source?.scrollTop ?? 0;
+    let preparationFrame = 0;
+    let swapFrame = 0;
+    let disposed = false;
+    const verify = () => {
+      cancelAnimationFrame(preparationFrame);
+      cancelAnimationFrame(swapFrame);
+      preparationFrame = requestAnimationFrame(() => {
+        if (disposed) return;
+        const viewport = element.getBoundingClientRect();
+        const cards = [...element.querySelectorAll<HTMLElement>("[data-catalog-work]")];
+        const ready = cards.every(card => {
+          const rect = card.getBoundingClientRect();
+          const visible = viewport.height === 0 || (rect.top < viewport.bottom && rect.bottom > viewport.top
+            && rect.left < viewport.right && rect.right > viewport.left);
+          return !visible || settled.current.has(card.dataset.catalogWork!);
+        });
+        if (ready) swapFrame = requestAnimationFrame(() => {
+          if (!disposed) readyCallback.current();
+        });
+      });
+    };
+    const followScroll = () => { element.scrollTop = source?.scrollTop ?? 0; verify(); };
+    if (!resetScroll) source?.addEventListener("scroll", followScroll);
+    check.current = verify;
+    verify();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(verify);
+    observer?.observe(element);
+    return () => {
+      disposed = true;
+      check.current = () => {};
+      source?.removeEventListener("scroll", followScroll);
+      observer?.disconnect();
+      cancelAnimationFrame(preparationFrame);
+      cancelAnimationFrame(swapFrame);
+    };
+  }, [state, page, resetScroll, scrollRef]);
+  return <div ref={node => { layer.current = node; if (state === "active") scrollRef.current = node; }}
+    className="manga-browser__content online-catalog__content online-catalog__buffer"
+    data-catalog-buffer={state} data-catalog-page={page.page}
+    aria-hidden={state !== "active" ? true : undefined} inert={state !== "active" ? true : undefined}>
+    {page.works.length === 0 ? <EmptyState title="검색 결과가 없습니다">다른 제목이나 태그로 검색하세요.</EmptyState>
+      : <div className="online-catalog__grid">{page.works.map(work => {
+        const key = `${work.provider}:${work.groupId}`;
+        return <div key={key} data-catalog-work={key}>
+          <OnlineCatalogCard work={work} opening={openingWorkKey === catalogIdentityKey(work)}
+            bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
+            onEditions={onEditions} onOpen={onOpen} onBookmark={onBookmark}
+            onThumbnailSettled={state === "pending" ? ready => {
+              if (ready) settled.current.add(key); else settled.current.delete(key);
+              check.current();
+            } : undefined} />
+        </div>;
+      })}</div>}
+  </div>;
 }
