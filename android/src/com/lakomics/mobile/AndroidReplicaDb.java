@@ -188,6 +188,117 @@ final class AndroidReplicaDb implements ReplicaDb {
         db.execSQL(ReplicaSchema.SET_RECONCILED, new Object[]{now});
     }
 
+    // -----------------------------------------------------------------------
+    // Classification read replica
+    // -----------------------------------------------------------------------
+
+    @Override
+    public StoredAuthority classificationAuthority() {
+        try (Cursor cursor = db.rawQuery(ReplicaSchema.READ_CLASSIFICATION_AUTHORITY, null)) {
+            if (!cursor.moveToFirst()) return null;
+            return new StoredAuthority(cursor.getString(0), cursor.getString(1), cursor.getLong(2),
+                    cursor.getLong(3), cursor.getLong(4), cursor.getString(5),
+                    cursor.isNull(6) ? null : cursor.getString(6));
+        }
+    }
+
+    @Override
+    public List<ClassificationReplica.Node> classifications(boolean liveOnly) {
+        String sql = ReplicaSchema.READ_CLASSIFICATIONS
+                + (liveOnly ? " WHERE deleted=0" : "");
+        List<ClassificationReplica.Node> rows = new ArrayList<>();
+        try (Cursor cursor = db.rawQuery(sql, null)) {
+            while (cursor.moveToNext()) {
+                rows.add(new ClassificationReplica.Node(cursor.getString(0), cursor.getString(1),
+                        cursor.getString(2), cursor.isNull(3) ? null : cursor.getString(3),
+                        cursor.isNull(4) ? null : cursor.getString(4),
+                        cursor.isNull(5) ? null : cursor.getString(5),
+                        cursor.getLong(6) != 0, cursor.getLong(7)));
+            }
+        }
+        return rows;
+    }
+
+    @Override
+    public List<ClassificationReplica.Assignment> assignments() {
+        List<ClassificationReplica.Assignment> rows = new ArrayList<>();
+        try (Cursor cursor = db.rawQuery(ReplicaSchema.READ_CLASSIFICATION_ASSIGNMENTS, null)) {
+            while (cursor.moveToNext()) {
+                rows.add(new ClassificationReplica.Assignment(cursor.getString(0),
+                        cursor.isNull(1) ? null : cursor.getString(1), cursor.getLong(2)));
+            }
+        }
+        return rows;
+    }
+
+    @Override
+    public String classificationRole(String role) {
+        try (Cursor cursor = db.rawQuery(ReplicaSchema.READ_CLASSIFICATION_ROLE,
+                new String[]{role})) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    @Override
+    public void writeClassificationAuthority(StoredAuthority authority) {
+        db.execSQL(ReplicaSchema.WRITE_CLASSIFICATION_AUTHORITY, new Object[]{
+                authority.scope, authority.libraryId, authority.epoch, authority.contractVersion,
+                authority.cursor, authority.adoptedAt, authority.reconciledAt});
+    }
+
+    @Override
+    public void writeClassification(ClassificationReplica.Node node, String now) {
+        db.execSQL(ReplicaSchema.WRITE_CLASSIFICATION_NODE, new Object[]{node.id, node.kind,
+                node.name, node.parentId, node.iconKey, node.colorKey, node.deleted ? 1 : 0,
+                node.entityRevision, now});
+    }
+
+    @Override
+    public void writeAssignment(ClassificationReplica.Assignment assignment, String now) {
+        db.execSQL(ReplicaSchema.WRITE_CLASSIFICATION_ASSIGNMENT, new Object[]{assignment.assetId,
+                assignment.classificationId, assignment.entityRevision, now});
+    }
+
+    @Override
+    public void applyAssignmentTransition(String from, String to, String now) {
+        db.execSQL(ReplicaSchema.APPLY_CLASSIFICATION_TRANSITION, new Object[]{to, now, from});
+    }
+
+    @Override
+    public void writeClassificationRole(String role, String classificationId) {
+        db.execSQL(ReplicaSchema.WRITE_CLASSIFICATION_ROLE, new Object[]{role, classificationId});
+    }
+
+    @Override
+    public void clearClassifications() {
+        db.execSQL(ReplicaSchema.CLEAR_CLASSIFICATION_NODES);
+    }
+
+    @Override
+    public void clearAssignments() {
+        db.execSQL(ReplicaSchema.CLEAR_CLASSIFICATION_ASSIGNMENTS);
+    }
+
+    @Override
+    public void clearClassificationRole() {
+        db.execSQL(ReplicaSchema.CLEAR_CLASSIFICATION_ROLES);
+    }
+
+    @Override
+    public void clearClassificationAuthority() {
+        db.execSQL(ReplicaSchema.CLEAR_CLASSIFICATION_AUTHORITY);
+    }
+
+    @Override
+    public void setClassificationCursor(long cursor, String now) {
+        db.execSQL(ReplicaSchema.SET_CLASSIFICATION_CURSOR, new Object[]{cursor, now});
+    }
+
+    @Override
+    public void setClassificationReconciledAt(String now) {
+        db.execSQL(ReplicaSchema.SET_CLASSIFICATION_RECONCILED, new Object[]{now});
+    }
+
     @Override
     public void begin() {
         db.beginTransaction();

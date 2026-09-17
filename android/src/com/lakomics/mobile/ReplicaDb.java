@@ -77,6 +77,59 @@ interface ReplicaDb {
 
     void setReconciledAt(String now);
 
+    // -----------------------------------------------------------------------
+    // Classification read replica
+    // -----------------------------------------------------------------------
+
+    /**
+     * The stored Classification authority row, or null when this installation has not
+     * adopted that domain.
+     *
+     * A separate singleton from the Album row so either domain can be adopted alone.
+     */
+    StoredAuthority classificationAuthority();
+
+    /** Classification rows, including tombstones unless `liveOnly`. */
+    List<ClassificationReplica.Node> classifications(boolean liveOnly);
+
+    /** Assignment lineage rows, including authoritative unassigned ones. */
+    List<ClassificationReplica.Assignment> assignments();
+
+    /** The stored `originals` binding, or null when none was adopted. */
+    String classificationRole(String role);
+
+    void writeClassificationAuthority(StoredAuthority authority);
+
+    /** Insert or replace one Classification row, live or tombstoned. */
+    void writeClassification(ClassificationReplica.Node node, String now);
+
+    /** Insert or replace one Asset's assignment lineage row. */
+    void writeAssignment(ClassificationReplica.Assignment assignment, String now);
+
+    /**
+     * Move every assignment naming `from` to `to`, incrementing each revision by one.
+     *
+     * Removing rows instead would destroy the revision a later command must present, and
+     * inventing a different increment would disagree with the server's own transition.
+     */
+    void applyAssignmentTransition(String from, String to, String now);
+
+    void writeClassificationRole(String role, String classificationId);
+
+    /** Remove every Classification row. Used only by a baseline replace or a domain clear. */
+    void clearClassifications();
+
+    /** Remove every assignment lineage row. */
+    void clearAssignments();
+
+    void clearClassificationRole();
+
+    void clearClassificationAuthority();
+
+    void setClassificationCursor(long cursor, String now);
+
+    void setClassificationReconciledAt(String now);
+
     void begin();
 
     void commit();

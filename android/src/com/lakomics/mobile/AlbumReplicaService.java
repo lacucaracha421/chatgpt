@@ -73,11 +73,14 @@ final class AlbumReplicaService {
     private AlbumAuthoritySync sync;
     private AlbumMembershipOutbox outbox;
     private AlbumSyncPass cycle;
+    private ClassificationAuthoritySync classification;
     private long lastAttempt;
     private volatile boolean syncing;
     private volatile String code = "";
     private volatile String error = "";
     private volatile AlbumAuthoritySync.Result last;
+    private volatile ClassificationAuthoritySync.Result lastClassification;
+    private volatile String classificationCode = "";
 
     private AlbumReplicaService(Context context) {
         this.context = context.getApplicationContext();
@@ -132,7 +135,15 @@ final class AlbumReplicaService {
             code = "";
             error = "";
             last = null;
-            if (store != null) store.clear();
+            lastClassification = null;
+            classificationCode = "";
+            if (store != null) {
+                // Each domain is cleared explicitly and atomically. Clearing means nothing
+                // from the replaced connection is left behind; the stored scope is the second,
+                // independent protection for anything a race leaves in place.
+                store.clear();
+                store.clearClassifications();
+            }
         }
     }
 
@@ -226,6 +237,10 @@ final class AlbumReplicaService {
                 pass = cycle;
             }
             AlbumSyncPass.Result completed = pass.run(scope);
+            // The Classification read replica converges alongside the Album domain. It is
+            // driven after the Album pass so a slow or blocked Album write cannot starve it,
+            // and a Classification failure never changes the Album result the caller sees.
+            reconcileClassifications(scope, startedUnder);
             if (completed.flush.sent > 0 || completed.flush.noOp > 0) {
                 // External picker collections are a published snapshot, so refresh them
                 // after the server accepts a membership change. The refresh is async and
@@ -265,6 +280,54 @@ final class AlbumReplicaService {
             last = result;
             code = failureCode == null ? "" : failureCode;
             error = failureMessage == null ? "" : failureMessage;
+        }
+    }
+
+    /**
+     * Reconcile the Classification read replica, reporting its state but never failing the
+     * caller's pass.
+     *
+     * A Classification problem is recorded as a code so the status surface can show it, but
+     * it does not throw: the Album lane already succeeded or failed on its own terms, and
+     * one domain's authority state must not be reported as another's.
+     */
+    private void reconcileClassifications(String scope, int startedUnder) {
+        ClassificationAuthoritySync reader;
+        synchronized (gate) {
+            reader = classification;
+        }
+        if (reader == null) return;
+        try {
+            ClassificationAuthoritySync.Result result = reader.reconcile(scope);
+            synchronized (gate) {
+                if (startedUnder != attempt) return;
+                lastClassification = result;
+                classificationCode = result.code == null ? "" : result.code;
+            }
+        } catch (Exception unavailable) {
+            // A replica store that cannot be opened is reported, never worked around by
+            // falling back to a different database or to unsynchronized network reads.
+            synchronized (gate) {
+                if (startedUnder != attempt) return;
+                classificationCode = ClassificationReplica.CODE_STORE_UNAVAILABLE;
+            }
+        }
+    }
+
+    /**
+     * The Classification read transport.
+     *
+     * GET only, by construction: this class exposes no write operation, so no Classification
+     * mutation can be issued through the read replica even by accident.
+     */
+    private final class ClassificationTransport implements ClassificationReplica.Transport {
+        @Override
+        public String get(String path) throws Exception {
+            try {
+                return client.api(path, "GET", null, null).toString();
+            } catch (CloudClient.HttpFailure failure) {
+                throw new ClassificationReplica.HttpFailure(failure.status, failure.detail);
+            }
         }
     }
 
@@ -351,6 +414,29 @@ final class AlbumReplicaService {
             value.put("membershipTombstoneCount", counter(counters, "membershipTombstoneCount"));
             value.put("outboxPendingCount", counter(counters, "outboxPendingCount"));
             value.put("outboxBlockedCount", counter(counters, "outboxBlockedCount"));
+            // The Classification read replica is reported separately, because it is a
+            // different domain with its own adoption row and cursor. These keys are additive:
+            // nothing above changes meaning.
+            ClassificationReplica.Adopted classifications = null;
+            Map<String, Object> classificationCounters = null;
+            synchronized (gate) {
+                if (store != null) classificationCounters = store.status(scope);
+                if (classification != null) classifications = classification.adopted(scope);
+            }
+            value.put("classificationAdopted", classifications != null);
+            value.put("classificationLibraryId",
+                    classifications == null ? JSONObject.NULL : classifications.libraryId);
+            value.put("classificationEpoch",
+                    classifications == null ? JSONObject.NULL : classifications.epoch);
+            value.put("classificationCursor",
+                    classifications == null ? JSONObject.NULL : classifications.cursor);
+            value.put("classificationCode", classificationCode);
+            value.put("classificationCount", counter(classificationCounters, "classificationCount"));
+            value.put("classificationTombstoneCount",
+                    counter(classificationCounters, "classificationTombstoneCount"));
+            value.put("assignmentCount", counter(classificationCounters, "assignmentCount"));
+            value.put("assignmentTombstoneCount",
+                    counter(classificationCounters, "assignmentTombstoneCount"));
             AlbumAuthoritySync.Result result = last;
             value.put("appliedChanges", result == null ? 0 : result.appliedChanges);
             value.put("serverCursor", result == null || result.serverCursor == null
@@ -383,6 +469,11 @@ final class AlbumReplicaService {
             sync = new AlbumAuthoritySync(transport, store, clock);
             outbox = new AlbumMembershipOutbox(transport, store, clock);
             cycle = new AlbumSyncPass(outbox, sync);
+            // The Classification read replica shares this store and this transport, but it
+            // is a separate domain with its own authority row, cursor and lifecycle. It has
+            // no outbox: Android issues no Classification command in this phase.
+            classification = new ClassificationAuthoritySync(new ClassificationTransport(), store,
+                    () -> Instant.now().toString());
         }
         return sync;
     }

@@ -70,6 +70,14 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/albums/authority/activate","POST"));
  for(String path:new String[]{"/v1/albums/commands/","/v1/albums/authority/activate","/v1/albums","/v1/albums/","/v1/sync","/v1/sync/","/v1/sync/status/extra","/v1/sync/statusx","/v1/albums/baseline/extra","/v1/albums/baselinex","/v1/albums/commands/x"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline","/v1/albums/changes"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ // Classification authority is a READ replica in this phase: exactly the two read routes
+ // are reachable, and the command route is denied for every method so a Classification
+ // mobile write cannot be issued by any caller.
+ for(String path:new String[]{"/v1/classifications/authority/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/classifications/authority/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));
+ for(String path:new String[]{"/v1/classifications/authority/baseline","/v1/classifications/authority/changes"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ for(String path:new String[]{"/v1/classifications/authority/commands","/v1/classifications/authority/activate","/v1/classifications/authority","/v1/classifications/authority/","/v1/classifications/authority/baseline/extra","/v1/classifications/authority/baselinex","/v1/classifications/authority/changes/extra"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ reject(()->NetworkPolicy.api("/v1/classifications/authority/../authority/baseline","GET"));
+ reject(()->NetworkPolicy.api("/v1/classifications/authority/baseline%2f..","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/../albums/baseline","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/baseline%2f..","GET"));
  // Unrelated writes stay blocked, so widening this allowlist did not widen any other.

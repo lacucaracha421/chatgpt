@@ -31,6 +31,11 @@ final class NetworkPolicy {
   get=get || p.equals("/v1/sync/status") || p.equals("/v1/albums/baseline") || p.equals("/v1/albums/changes");
   // The authority-backed Album contents read is still GET-only.
   get=get || p.equals("/v1/albums/assets");
+  // Classification authority reads. Exactly the two read routes: this phase is a read
+  // replica, and Android Classification writes belong to a later phase. The command route
+  // `/v1/classifications/authority/commands` is deliberately absent from every allowlist
+  // below, so a write cannot be reached even by a future caller.
+  get=get || p.equals("/v1/classifications/authority/baseline") || p.equals("/v1/classifications/authority/changes");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   get=get || p.equals("/v1/collections") || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}");
   get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");

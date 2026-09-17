@@ -454,6 +454,59 @@ public final class AlbumReplicaTest {
         @Override
         public void setReconciledAt(String now) { exec(ReplicaSchema.SET_RECONCILED, now); }
 
+        // ---- Classification read replica (2C): this harness drives the Album domain, so
+        // ---- these satisfy the shared seam without exercising it. The Classification
+        // ---- domain has its own harness over the same production store.
+
+        @Override
+        public StoredAuthority classificationAuthority() { return null; }
+
+        @Override
+        public List<ClassificationReplica.Node> classifications(boolean liveOnly) {
+            return new ArrayList<>();
+        }
+
+        @Override
+        public List<ClassificationReplica.Assignment> assignments() { return new ArrayList<>(); }
+
+        @Override
+        public String classificationRole(String role) { return null; }
+
+        @Override
+        public void writeClassificationAuthority(StoredAuthority authority) { }
+
+        @Override
+        public void writeClassification(ClassificationReplica.Node node, String now) { }
+
+        @Override
+        public void writeAssignment(ClassificationReplica.Assignment assignment, String now) { }
+
+        @Override
+        public void applyAssignmentTransition(String from, String to, String now) { }
+
+        @Override
+        public void writeClassificationRole(String role, String classificationId) { }
+
+        @Override
+        public void clearClassifications() { exec(ReplicaSchema.CLEAR_CLASSIFICATION_NODES); }
+
+        @Override
+        public void clearAssignments() { exec(ReplicaSchema.CLEAR_CLASSIFICATION_ASSIGNMENTS); }
+
+        @Override
+        public void clearClassificationRole() { exec(ReplicaSchema.CLEAR_CLASSIFICATION_ROLES); }
+
+        @Override
+        public void clearClassificationAuthority() {
+            exec(ReplicaSchema.CLEAR_CLASSIFICATION_AUTHORITY);
+        }
+
+        @Override
+        public void setClassificationCursor(long cursor, String now) { }
+
+        @Override
+        public void setClassificationReconciledAt(String now) { }
+
         /**
          * One real SQL transaction.
          *
@@ -654,6 +707,55 @@ public final class AlbumReplicaTest {
             authority = new StoredAuthority(authority.scope, authority.libraryId, authority.epoch,
                     authority.contractVersion, authority.cursor, authority.adoptedAt, now);
         }
+
+        // ---- Classification read replica (2C): unused by the Album checks. ----
+
+        @Override
+        public StoredAuthority classificationAuthority() { return null; }
+
+        @Override
+        public List<ClassificationReplica.Node> classifications(boolean liveOnly) {
+            return new ArrayList<>();
+        }
+
+        @Override
+        public List<ClassificationReplica.Assignment> assignments() { return new ArrayList<>(); }
+
+        @Override
+        public String classificationRole(String role) { return null; }
+
+        @Override
+        public void writeClassificationAuthority(StoredAuthority authority) { }
+
+        @Override
+        public void writeClassification(ClassificationReplica.Node node, String now) { }
+
+        @Override
+        public void writeAssignment(ClassificationReplica.Assignment assignment, String now) { }
+
+        @Override
+        public void applyAssignmentTransition(String from, String to, String now) { }
+
+        @Override
+        public void writeClassificationRole(String role, String classificationId) { }
+
+        @Override
+        public void clearClassifications() { }
+
+        @Override
+        public void clearAssignments() { }
+
+        @Override
+        public void clearClassificationRole() { }
+
+        @Override
+        public void clearClassificationAuthority() { }
+
+        @Override
+        public void setClassificationCursor(long cursor, String now) { }
+
+        @Override
+        public void setClassificationReconciledAt(String now) { }
 
         @Override
         public void begin() {
@@ -1476,7 +1578,10 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
     }
 
     private static void v2OutboxSchemaHasAConservativeV3Upgrade() {
-        equal(3, ReplicaSchema.VERSION, "Identity-bound Android outbox is schema v3");
+        // v4 added the read-only Classification replica beside the Album domain. The v2
+        // outbox upgrade below is unchanged and still what this check pins.
+        equal(4, ReplicaSchema.VERSION,
+                "Schema v4 adds the Classification read replica to the identity-bound v3 outbox");
         String[] upgrade = ReplicaSchema.upgradeStatements(2);
         equal(2, upgrade.length, "The intermediate v2 outbox needs two identity columns");
         check(upgrade[0].contains("library_id") && upgrade[0].contains("DEFAULT ''"),
@@ -1485,6 +1590,9 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
                 "Unknown v2 contract identity is preserved as a non-sendable sentinel");
         equal(0, ReplicaSchema.upgradeStatements(1).length,
                 "Read-only v1 creates the final schema directly rather than altering a missing outbox");
+        equal(0, ReplicaSchema.upgradeStatements(3).length,
+                "The v3 Album replica gains the Classification tables from the same DDL, with"
+                        + " no outbox to alter");
     }
 
     private static void inactiveAuthorityLeavesAndroidUnadopted(Path directory) throws Exception {

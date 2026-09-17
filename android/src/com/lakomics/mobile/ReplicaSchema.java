@@ -12,12 +12,16 @@ package com.lakomics.mobile;
  * outbox, so the database is no longer disposable while local intent is pending: known
  * older schemas upgrade in place and an unknown future schema fails closed without deleting
  * the file. User media, notes and device caches are still not represented here.
+ *
+ * Version 4 adds the read-only Classification replica. Each domain keeps its own singleton
+ * authority row, so one domain can be adopted while another is not, and a domain's rows
+ * are cleared only by that domain's own reset.
  */
 final class ReplicaSchema {
-    /** Version 3 binds every durable Album command to its authority identity. */
-    static final int VERSION = 3;
+    /** Version 4 adds the Classification read replica beside the Album domain. */
+    static final int VERSION = 4;
 
-    /** v0 is fresh and v1 is the read-only Album replica; both upgrade in place. */
+    /** v0 is fresh, v1-v3 are older replicas; all upgrade in place. */
     static boolean canUpgradeFrom(int version) {
         return version >= 0 && version < VERSION;
     }
@@ -70,6 +74,34 @@ final class ReplicaSchema {
                     + "state TEXT NOT NULL CHECK(state IN ('pending','blocked')),"
                     + "conflict_code TEXT,conflict_detail TEXT,created_at TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS album_outbox_state ON album_authority_outbox(state,seq)",
+            // ---------------------------------------------------------------
+            // Classification read replica (v4). Read-only in this phase: there is
+            // deliberately no Classification outbox table, because Android issues no
+            // Classification command.
+            // ---------------------------------------------------------------
+            "CREATE TABLE IF NOT EXISTS classification_authority("
+                    + "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
+                    + "scope TEXT NOT NULL,library_id TEXT NOT NULL,epoch INTEGER NOT NULL,"
+                    + "contract_version INTEGER NOT NULL,cursor INTEGER NOT NULL,"
+                    + "adopted_at TEXT NOT NULL,reconciled_at TEXT)",
+            "CREATE TABLE IF NOT EXISTS classification_state("
+                    + "classification_id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,"
+                    + "parent_id TEXT,icon_key TEXT,color_key TEXT,deleted INTEGER NOT NULL,"
+                    + "entity_revision INTEGER NOT NULL,updated_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS classification_state_parent"
+                    + " ON classification_state(parent_id)",
+            // One row per Asset. `classification_id` nullable is the authoritative
+            // *unassigned* state at a real revision, which is not the same as "never seen";
+            // visible membership is `classification_id IS NOT NULL` only.
+            "CREATE TABLE IF NOT EXISTS classification_assignment_state("
+                    + "asset_id TEXT PRIMARY KEY,classification_id TEXT,"
+                    + "entity_revision INTEGER NOT NULL,updated_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS classification_assignment_classification"
+                    + " ON classification_assignment_state(classification_id)",
+            // The immutable role binding. No command produces it, so it is learned only
+            // from a baseline and is what makes the protected id interpretable.
+            "CREATE TABLE IF NOT EXISTS classification_role_state("
+                    + "role TEXT PRIMARY KEY,classification_id TEXT NOT NULL)",
     };
 
     /** The adoption row and its cursor. `singleton=1` is the adoption marker itself. */
@@ -94,6 +126,58 @@ final class ReplicaSchema {
     static final String RETIRE_LIVE_MEMBERS =
             "UPDATE album_membership_state SET desired_state=0,updated_at=?"
                     + " WHERE album_id=? AND desired_state=1";
+
+    /** The Classification adoption row and its cursor. Its presence is the domain marker. */
+    static final String WRITE_CLASSIFICATION_AUTHORITY =
+            "INSERT OR REPLACE INTO classification_authority(singleton,scope,library_id,epoch,"
+                    + "contract_version,cursor,adopted_at,reconciled_at) VALUES(1,?,?,?,?,?,?,?)";
+    static final String READ_CLASSIFICATION_AUTHORITY =
+            "SELECT scope,library_id,epoch,contract_version,cursor,adopted_at,reconciled_at"
+                    + " FROM classification_authority WHERE singleton=1";
+    /** One Classification row, live or tombstoned. */
+    static final String WRITE_CLASSIFICATION_NODE =
+            "INSERT OR REPLACE INTO classification_state(classification_id,kind,name,parent_id,"
+                    + "icon_key,color_key,deleted,entity_revision,updated_at) VALUES(?,?,?,?,?,?,?,?,?)";
+    static final String READ_CLASSIFICATIONS =
+            "SELECT classification_id,kind,name,parent_id,icon_key,color_key,deleted,"
+                    + "entity_revision FROM classification_state";
+    /**
+     * One Asset's assignment lineage, live or authoritatively unassigned.
+     *
+     * A cleared assignment keeps its row with a null `classification_id` and an incremented
+     * revision, exactly as the server retains it, so absence stays reserved for "the
+     * authority never mentioned this Asset".
+     */
+    static final String WRITE_CLASSIFICATION_ASSIGNMENT =
+            "INSERT OR REPLACE INTO classification_assignment_state(asset_id,classification_id,"
+                    + "entity_revision,updated_at) VALUES(?,?,?,?)";
+    static final String READ_CLASSIFICATION_ASSIGNMENTS =
+            "SELECT asset_id,classification_id,entity_revision FROM classification_assignment_state";
+    /**
+     * The deterministic assignment transition one delete performed.
+     *
+     * Every row naming the deleted Classification moves to its parent (or to unassigned for
+     * a root) and each revision increments by exactly one, which is what the server did, so
+     * the replica reproduces the same numbers rather than inventing a revision no replay of
+     * that change row could reproduce.
+     */
+    static final String APPLY_CLASSIFICATION_TRANSITION =
+            "UPDATE classification_assignment_state SET classification_id=?,updated_at=?,"
+                    + "entity_revision=entity_revision+1 WHERE classification_id=?";
+    static final String WRITE_CLASSIFICATION_ROLE =
+            "INSERT OR REPLACE INTO classification_role_state(role,classification_id)"
+                    + " VALUES(?,?)";
+    static final String READ_CLASSIFICATION_ROLE =
+            "SELECT classification_id FROM classification_role_state WHERE role=?";
+    static final String CLEAR_CLASSIFICATION_NODES = "DELETE FROM classification_state";
+    static final String CLEAR_CLASSIFICATION_ASSIGNMENTS =
+            "DELETE FROM classification_assignment_state";
+    static final String CLEAR_CLASSIFICATION_ROLES = "DELETE FROM classification_role_state";
+    static final String CLEAR_CLASSIFICATION_AUTHORITY = "DELETE FROM classification_authority";
+    static final String SET_CLASSIFICATION_CURSOR =
+            "UPDATE classification_authority SET cursor=?,reconciled_at=? WHERE singleton=1";
+    static final String SET_CLASSIFICATION_RECONCILED =
+            "UPDATE classification_authority SET reconciled_at=? WHERE singleton=1";
 
     static final String CLEAR_ALBUMS = "DELETE FROM album_state";
     static final String CLEAR_MEMBERS = "DELETE FROM album_membership_state";

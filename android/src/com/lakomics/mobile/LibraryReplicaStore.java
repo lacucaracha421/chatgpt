@@ -21,7 +21,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * All operations take one reentrant lock, because the connection is shared: a page apply
  * and its cursor advance must not be able to interleave with a baseline install.
  */
-final class LibraryReplicaStore implements AlbumReplica.State {
+final class LibraryReplicaStore implements AlbumReplica.State, ClassificationReplica.State {
     static final String MEMBERSHIP_COMMAND = "setAlbumMembership";
 
     static final class MembershipEdit {
@@ -618,6 +618,274 @@ final class LibraryReplicaStore implements AlbumReplica.State {
         try {
             ReplicaDb.StoredAuthority stored = db.authority();
             if (stored != null && stored.scope.equals(scope)) db.setReconciledAt(now);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Classification read replica
+    // -----------------------------------------------------------------------
+
+    /** The adopted Classification authority for this scope, or null. */
+    @Override
+    public ClassificationReplica.Adopted classificationAdopted(String scope) {
+        lock.lock();
+        try {
+            ReplicaDb.StoredAuthority stored = db.classificationAuthority();
+            if (stored == null || !stored.scope.equals(scope)) return null;
+            return new ClassificationReplica.Adopted(stored.scope, stored.libraryId, stored.epoch,
+                    stored.contractVersion, stored.cursor, stored.adoptedAt, stored.reconciledAt);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Classification revision state for `scope`, keyed by id.
+     *
+     * Tombsones are retained and returned unless `liveOnly`: a deleted Classification's
+     * revision is state a later command must present, so it is not absence. Rows are hidden
+     * rather than deleted for a scope that does not own the stored authority.
+     */
+    @Override
+    public Map<String, ClassificationReplica.Node> classificationNodes(String scope, boolean liveOnly) {
+        lock.lock();
+        try {
+            Map<String, ClassificationReplica.Node> result = new LinkedHashMap<>();
+            ReplicaDb.StoredAuthority stored = db.classificationAuthority();
+            if (stored == null || !stored.scope.equals(scope)) return result;
+            for (ClassificationReplica.Node node : db.classifications(liveOnly)) {
+                result.put(node.id, node);
+            }
+            return result;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Assignment lineage state for `scope`, keyed by Asset id.
+     *
+     * An entry whose `classificationId` is null is an authoritative *unassigned* state at a
+     * real revision, not a missing row. Consumers that publish visible membership must
+     * therefore test the value, not the key's presence.
+     */
+    @Override
+    public Map<String, ClassificationReplica.Assignment> classificationAssignments(String scope) {
+        lock.lock();
+        try {
+            Map<String, ClassificationReplica.Assignment> result = new LinkedHashMap<>();
+            ReplicaDb.StoredAuthority stored = db.classificationAuthority();
+            if (stored == null || !stored.scope.equals(scope)) return result;
+            for (ClassificationReplica.Assignment assignment : db.assignments()) {
+                result.put(assignment.assetId, assignment);
+            }
+            return result;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** The adopted `originals` binding for `scope`, or null when unadopted. */
+    @Override
+    public String classificationRole(String scope) {
+        lock.lock();
+        try {
+            ReplicaDb.StoredAuthority stored = db.classificationAuthority();
+            if (stored == null || !stored.scope.equals(scope)) return null;
+            return db.classificationRole(ClassificationReplica.ORIGINALS_ROLE);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Diagnostic counts for the Classification domain and scope. */
+    @Override
+    public Map<String, Object> classificationStatus(String scope) {
+        lock.lock();
+        try {
+            Map<String, Object> value = new LinkedHashMap<>();
+            ReplicaDb.StoredAuthority stored = db.classificationAuthority();
+            if (stored == null || !stored.scope.equals(scope)) {
+                value.put("classificationCount", 0L);
+                value.put("classificationTombstoneCount", 0L);
+                value.put("assignmentCount", 0L);
+                value.put("assignmentTombstoneCount", 0L);
+                return value;
+            }
+            long live = 0, tombstoned = 0;
+            for (ClassificationReplica.Node node : db.classifications(false)) {
+                if (node.deleted) tombstoned++; else live++;
+            }
+            long assigned = 0, unassigned = 0;
+            for (ClassificationReplica.Assignment assignment : db.assignments()) {
+                if (assignment.classificationId == null) unassigned++; else assigned++;
+            }
+            value.put("classificationCount", live);
+            value.put("classificationTombstoneCount", tombstoned);
+            value.put("assignmentCount", assigned);
+            value.put("assignmentTombstoneCount", unassigned);
+            return value;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Replace this domain's replica with a complete baseline, as one unit.
+     *
+     * Only Classification rows are touched: Album state, Asset metadata, media bytes and
+     * caches belong to other domains and other storage, and losing a replica must never
+     * mean losing user media. The immutable role is installed in the same transaction, so a
+     * replica can never hold Classifications without the binding that interprets them.
+     */
+    @Override
+    public void installBaseline(ClassificationReplica.Adopted authority,
+                                List<ClassificationReplica.Node> classifications,
+                                List<ClassificationReplica.Assignment> assignments,
+                                List<ClassificationReplica.Role> roles, String now) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                db.clearClassificationRole();
+                db.clearAssignments();
+                db.clearClassifications();
+                for (ClassificationReplica.Node node : classifications) {
+                    // A baseline never lists a deleted Classification, so a row arriving here
+                    // is live state and the tombstone flag stays false.
+                    if (!node.deleted) db.writeClassification(node, now);
+                }
+                for (ClassificationReplica.Assignment assignment : assignments) {
+                    db.writeAssignment(assignment, now);
+                }
+                for (ClassificationReplica.Role role : roles) {
+                    db.writeClassificationRole(role.role, role.classificationId);
+                }
+                db.writeClassificationAuthority(new ReplicaDb.StoredAuthority(authority.scope,
+                        authority.libraryId, authority.epoch, authority.contractVersion,
+                        authority.cursor, authority.adoptedAt, authority.reconciledAt));
+                db.commit();
+            } catch (RuntimeException failure) {
+                db.rollback();
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Apply one validated change page and advance the cursor together.
+     *
+     * Contiguity is re-checked here against the stored cursor inside the transaction: the
+     * check and the write must describe the same starting point, or a concurrent writer
+     * could be advanced over. A rejected page writes nothing and moves no cursor.
+     */
+    @Override
+    public void applyClassificationChanges(String scope, long cursor,
+                                          List<ClassificationReplica.Change> changes, String now)
+            throws ClassificationReplica.Failure {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority stored = db.classificationAuthority();
+                if (stored == null || !stored.scope.equals(scope) || stored.cursor != cursor) {
+                    throw ClassificationReplica.malformed();
+                }
+                ClassificationReplica.requireContiguous(changes, stored.cursor);
+                for (ClassificationReplica.Change change : changes) {
+                    // A structural change writes the tombstone too; an assignment change
+                    // writes the lineage value exactly as sent, so an authoritative unassign
+                    // is retained as a row rather than mistaken for a never-seen Asset.
+                    if (change.classification != null) {
+                        db.writeClassification(change.classification, now);
+                    }
+                    if (change.assignment != null) {
+                        db.writeAssignment(change.assignment, now);
+                    }
+                    if (change.transition != null) {
+                        // The tombstone was written above and *is* the retained revision:
+                        // this domain keeps one row per Classification with a `deleted`
+                        // flag, so a deleted node stays readable at its real revision while
+                        // `liveOnly` reads keep it out of every visible projection. The
+                        // transition is the rest of the same indivisible change, and it is
+                        // applied rather than re-derived so the replica reproduces the
+                        // server's own revision numbers.
+                        applyTransition(change.transition, now);
+                    }
+                }
+                if (!changes.isEmpty()) {
+                    db.setClassificationCursor(changes.get(changes.size() - 1).sequence, now);
+                }
+                db.commit();
+            } catch (ClassificationReplica.Failure rejected) {
+                db.rollback();
+                throw rejected;
+            } catch (RuntimeException failure) {
+                db.rollback();
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Apply a delete's assignment transition.
+     *
+     * The count is verified against this replica's retained assignment rows for that
+     * Classification. Absence from a delta page is never read as deletion, and the baseline
+     * carries every assignment row including unassigned ones, so this replica holds the
+     * complete lineage and a count that disagrees is real divergence rather than a
+     * legitimate difference in what has been materialized.
+     */
+    private void applyTransition(ClassificationReplica.Transition transition, String now)
+            throws ClassificationReplica.Failure {
+        long affected = 0;
+        for (ClassificationReplica.Assignment assignment : db.assignments()) {
+            if (transition.fromClassificationId.equals(assignment.classificationId)) affected++;
+        }
+        if (affected != transition.affectsAssignments) throw ClassificationReplica.malformed();
+        db.applyAssignmentTransition(transition.fromClassificationId, transition.toClassificationId,
+                now);
+    }
+
+    /** Record a successful pass that produced no change, so status shows freshness. */
+    @Override
+    public void touchClassification(String scope, String now) {
+        lock.lock();
+        try {
+            ReplicaDb.StoredAuthority stored = db.classificationAuthority();
+            if (stored != null && stored.scope.equals(scope)) db.setClassificationReconciledAt(now);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Discard this connection's Classification replica.
+     *
+     * Classification rows only. Album, Bookmark and user media state are separate domains
+     * with separate lifetimes, so a Classification reset cannot take them with it.
+     */
+    @Override
+    public void clearClassifications() {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                db.clearClassificationRole();
+                db.clearAssignments();
+                db.clearClassifications();
+                db.clearClassificationAuthority();
+                db.commit();
+            } catch (RuntimeException failure) {
+                db.rollback();
+                throw failure;
+            }
         } finally {
             lock.unlock();
         }
