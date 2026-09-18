@@ -14,6 +14,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::client::CloudClient;
+use super::failure::CloudFailureReason;
 use super::models::PreparedAssetUpload;
 use super::sync::{hex_digest, is_retryable_cloud_error};
 use crate::library::error::LibraryError;
@@ -490,13 +491,14 @@ impl Library {
         }
         self.begin_cloud_activity("replication")?;
         let result = self.run_configured_cloud_backfill_cycle(config);
-        let (processed, problems, error) = match &result {
+        let (processed, problems, error, reason) = match &result {
             Ok(summary) => (summary.committed, summary.retry_scheduled + summary.permanent_failures,
-                (summary.retry_scheduled + summary.permanent_failures > 0).then_some(REPLICATION_ITEM_FAILURE_MESSAGE)),
-            Err(LibraryError::CloudReplicationUpgradeRequired) => (0, 1, Some("서버 업데이트가 필요하여 동기화를 일시정지했습니다. 서버 업데이트 후 실패 항목 재시도와 계속을 선택해 주세요.")),
-            Err(_) => (0, 1, Some("복제 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요.")),
+                (summary.retry_scheduled + summary.permanent_failures > 0).then_some(REPLICATION_ITEM_FAILURE_MESSAGE), None),
+            Err(LibraryError::CloudReplicationUpgradeRequired) => (0, 1, Some("서버 업데이트가 필요하여 동기화를 일시정지했습니다. 서버 업데이트 후 실패 항목 재시도와 계속을 선택해 주세요."), None),
+            Err(error) => (0, 1, Some("복제 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요."),
+                Some(CloudFailureReason::from_error(error))),
         };
-        self.finish_cloud_activity("replication", processed, problems, error)?;
+        self.finish_cloud_activity_with("replication", processed, problems, error, reason)?;
         result
     }
 
@@ -505,6 +507,7 @@ impl Library {
             .api_base_url
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
+        let token = token.expose();
         let client = CloudClient::new(&base_url)?;
         self.run_cloud_backfill_cycle_with_client(&client, &token)
     }

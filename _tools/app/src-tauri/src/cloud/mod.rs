@@ -9,6 +9,7 @@ mod backfill_tests;
 mod capture_tests;
 pub(crate) mod captures;
 pub(crate) mod client;
+pub(crate) mod failure;
 pub(crate) mod collections;
 pub(crate) mod catalog;
 pub(crate) mod metadata_backup;

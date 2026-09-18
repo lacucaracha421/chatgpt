@@ -5,12 +5,14 @@ use uuid::Uuid;
 
 use super::{
     client::CloudClient,
+    failure::CloudFailureReason,
     models::{
         ClassificationAssignment, ClassificationRole, ClassificationSnapshotPublish,
         RemoteCapture, RemoteCaptureKind, SavedXMediaSnapshotPublish,
     },
 };
 use crate::library::{
+    credential,
     error::LibraryError,
     models::{ImportSource, IngestMediaRequest, IngestOutcome},
     Library,
@@ -84,28 +86,49 @@ impl Library {
         }
         self.begin_cloud_activity("capture")?;
         let result = self.sync_configured_cloud_capture(on_ingested);
-        let (processed, problems, error) = match &result {
+        let (processed, problems, error, reason) = match &result {
             Ok(summary) => (u64::from(summary.acknowledged), u64::from(summary.failed + summary.review_pending),
                 if summary.failed > 0 { Some("수신하지 못한 자료가 있습니다. 서버 연결을 확인한 뒤 다시 시도해 주세요.") }
-                else if summary.review_pending > 0 { Some("유사 자료 검토를 완료해 주세요.") } else { None }),
-            Err(_) => (0, 1, Some("수신 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요.")),
+                else if summary.review_pending > 0 { Some("유사 자료 검토를 완료해 주세요.") } else { None },
+                None),
+            Err(error) => (0, 1, Some("수신 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요."),
+                Some(CloudFailureReason::from_error(error))),
         };
-        self.finish_cloud_activity("capture", processed, problems, error)?;
+        self.finish_cloud_activity_with("capture", processed, problems, error, reason)?;
         result
     }
 
     fn sync_configured_cloud_capture(&self, on_ingested: &dyn Fn(&IngestOutcome)) -> Result<CloudCaptureSyncResult, LibraryError> {
+        self.sync_configured_cloud_capture_with(on_ingested, crate::library::credential_broker::broker())
+    }
+
+    /// The capture poll against a caller-supplied credential broker.
+    ///
+    /// Production always passes the process-session broker; tests pass one over a fake
+    /// backend so the keyring-lock scenario is driven deterministically instead of by
+    /// locking a real desktop keyring.
+    pub(crate) fn sync_configured_cloud_capture_with<B: credential::CredentialBackend>(
+        &self,
+        on_ingested: &dyn Fn(&IngestOutcome),
+        broker: &crate::library::credential_broker::CredentialBroker<B>,
+    ) -> Result<CloudCaptureSyncResult, LibraryError> {
         let config = self.cloud_sync_config()?;
         let base_url = config
             .api_base_url
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let result = (|| {
-            let token = crate::library::credential::read_cloud_api_token_os()?;
+            let token = broker.credential(credential::CredentialTarget::CloudApi)?;
             let client = CloudClient::new(&base_url)?;
-            self.sync_next_cloud_capture_cycle_with_progress(&client, &token, on_ingested)
+            self.sync_next_cloud_capture_cycle_with_progress(&client, token.expose(), on_ingested)
         })();
-        if config.enabled && result.is_err() {
-            self.record_cloud_metadata_activity(Some("모바일 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."))?;
+        if let Err(error) = &result {
+            broker.invalidate_on_auth_rejection(credential::CredentialTarget::CloudApi, error);
+            if config.enabled {
+                self.record_cloud_metadata_activity_with(
+                    Some("모바일 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."),
+                    Some(CloudFailureReason::from_error(error)),
+                )?;
+            }
         }
         result
     }
@@ -128,6 +151,9 @@ impl Library {
         // 수집 폴과 같은 주기로 변경된 모바일 읽기 스냅샷만 게시한다. 세대는
         // DB에 남으므로 재시작 후에도 이미 게시한 전체 스냅샷을 반복하지 않는다.
         let mut publish_failed = false;
+        // The first publication failure's reason, so the durable record names a cause
+        // rather than reporting only that something failed.
+        let mut metadata_failure: Option<CloudFailureReason> = None;
         for kind in [
             CloudMetadataKind::Classifications,
             CloudMetadataKind::SavedX,
@@ -185,11 +211,22 @@ impl Library {
                 )?,
                 Err(error) => {
                     publish_failed = true;
+                    // A refusal is definitive: drop the cached credential so the next
+                    // cycle re-reads the store instead of resending a rejected bearer.
+                    // A timeout or 5xx is not a refusal and leaves the cache alone.
+                    crate::library::credential_broker::broker()
+                        .invalidate_on_auth_rejection(credential::CredentialTarget::CloudApi, &error);
+                    if metadata_failure.is_none() {
+                        metadata_failure = Some(CloudFailureReason::from_error(&error));
+                    }
                     eprintln!("cloud {} publish: {error}", kind.as_str());
                 }
             }
         }
-        self.record_cloud_metadata_activity(publish_failed.then_some("모바일 분류·수집 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."))?;
+        self.record_cloud_metadata_activity_with(
+            publish_failed.then_some("모바일 분류·수집 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."),
+            publish_failed.then_some(metadata_failure).flatten(),
+        )?;
         Ok(result)
     }
 
@@ -241,7 +278,7 @@ impl Library {
         let config = self.cloud_sync_config()?;
         let base_url = config.api_base_url.ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
-        CloudClient::new(&base_url)?.create_extension_pairing(&token)
+        CloudClient::new(&base_url)?.create_extension_pairing(token.expose())
     }
 
     pub(crate) fn test_cloud_capture_connection(&self) -> Result<u32, LibraryError> {
@@ -249,7 +286,7 @@ impl Library {
         let base_url = config.api_base_url.ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
         let client = CloudClient::new(&base_url)?;
-        Ok(client.list_pending_captures(&token)?.len() as u32)
+        Ok(client.list_pending_captures(token.expose())?.len() as u32)
     }
 
     /// 현재 분류 상태의 authority-ready v2 스냅샷을 VPS staging에 게시한다.

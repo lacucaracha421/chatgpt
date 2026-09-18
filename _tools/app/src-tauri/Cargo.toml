@@ -36,6 +36,10 @@ ureq = { version = "3.4.0", features = ["json"] }
 url = "2"
 regex = "1"
 ring = "0.17.14"
+# Best-effort zeroing of cached bearer tokens. Already in the dependency graph through
+# rustls, so this adds no new transitive crate; `derive` is off because only the plain
+# `Zeroize` impl is used.
+zeroize = { version = "1.9.0", default-features = false }
 
 tempfile = "3.27.0"
 

@@ -444,6 +444,7 @@ impl Library {
             .api_base_url
             .ok_or(Error::Message("Cloud 서버 주소를 설정해 주세요."))?;
         let token = credential::read_cloud_api_token_os()?;
+        let token = token.expose();
         self.notes_sync_with(&key, &endpoint, &token)
     }
     fn notes_sync_with(&self, key: &[u8], endpoint: &str, token: &str) -> Result<State> {

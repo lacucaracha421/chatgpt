@@ -75,6 +75,7 @@ pub(crate) mod collection;
 pub(crate) mod collection_source;
 mod collection_volume;
 pub(crate) mod credential;
+pub(crate) mod credential_broker;
 mod db;
 pub(crate) use db::is_valid_library_id;
 mod drag_out;

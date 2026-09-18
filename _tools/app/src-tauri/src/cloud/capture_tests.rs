@@ -1943,3 +1943,258 @@ fn ack_only_failure_does_not_abort_the_next_capture() {
     assert_eq!(result.acknowledged,1);
     handle.join().unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// Process-session credential integration (Phase 9/10).
+//
+// The locked-keyring regression is an *integration* property, not a broker unit
+// property: the defect was that a background pass failed before it made an HTTP request.
+// These tests therefore drive the real capture and metadata flows over a real socket,
+// with a fake credential backend standing in for the desktop Secret Service, and assert
+// the requests that were missing in production on 2026-09-18 22:44 KST.
+// ---------------------------------------------------------------------------
+
+use crate::library::credential::test_support::CountingBackend;
+use crate::library::credential_broker::CredentialBroker;
+
+/// A capture poll with a **warm** cache must still reach the server after the keyring
+/// locks. Before the process-session broker, the lock produced no request at all - the
+/// credential read happened first and returned early, so the server side saw silence.
+#[test]
+fn a_warm_credential_cache_keeps_polling_captures_after_the_keyring_locks() {
+    let media = png_bytes();
+    let (base_url, handle) = serve_capture_flow(
+        "capture-1",
+        media.clone(),
+        PendingListMode::OneCapture,
+        AcknowledgeMode::Succeed,
+    );
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig { enabled: true, api_base_url: Some(base_url.clone()) },
+            true,
+        )
+        .unwrap();
+
+    let backend = CountingBackend::default();
+    backend.set("Lakomics/CloudApi", "test-token");
+    let broker = CredentialBroker::new(backend.clone());
+
+    // Warm the session credential while the store is readable.
+    broker
+        .credential(crate::library::credential::CredentialTarget::CloudApi)
+        .unwrap();
+    assert_eq!(backend.read_count("Lakomics/CloudApi"), 1);
+
+    // The keyring locks (or its daemon restarts) after the load.
+    backend.lock();
+
+    // The pass must still reach the server: this is the exact request sequence whose
+    // absence defined the production failure.
+    let result = library
+        .sync_configured_cloud_capture_with(&|_| {}, &broker)
+        .unwrap();
+    assert_eq!(result.acknowledged, 1, "capture poll must still complete after the lock");
+
+    let requests = handle.join().unwrap();
+    assert_eq!(
+        requests,
+        vec![
+            "/v1/captures/pending",
+            "/v1/captures/capture-1/download",
+            "/r2-download/capture-original",
+            "/v1/captures/capture-1/acknowledge",
+        ]
+    );
+    // The lock never caused another backend read: the session value carried the pass.
+    assert_eq!(backend.read_count("Lakomics/CloudApi"), 1);
+}
+
+/// The cold counterpart: a locked store with no cached value is a real, safe block. No
+/// network request is made, the durable reason names the credential store, and the next
+/// cycle is still allowed to retry.
+#[test]
+fn a_cold_locked_store_blocks_the_capture_poll_before_any_request() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}/v1", server.server_addr());
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let handle = std::thread::spawn(move || {
+        // Any request at all fails the test's premise; a timeout means "none arrived".
+        if let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_millis(1500)) {
+            tx.send(request.url().to_owned()).unwrap();
+        }
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig { enabled: true, api_base_url: Some(base_url) },
+            true,
+        )
+        .unwrap();
+
+    let backend = CountingBackend::default();
+    backend.set("Lakomics/CloudApi", "test-token");
+    backend.lock();
+    let broker = CredentialBroker::new(backend.clone());
+
+    let error = library
+        .sync_configured_cloud_capture_with(&|_| {}, &broker)
+        .unwrap_err();
+    assert!(
+        matches!(error, crate::library::error::LibraryError::CredentialStoreLocked),
+        "a cold locked store must report the credential cause, not a connectivity message: {error}"
+    );
+
+    let _ = handle.join();
+    assert!(
+        rx.try_recv().is_err(),
+        "a cold locked store must not make a network request"
+    );
+
+    // The durable record now names the cause instead of leaving it to be inferred.
+    let activity = super::activity::read_activity(&library.connection().unwrap()).unwrap();
+    let replication = activity.iter().find(|row| row.direction == "replication").unwrap();
+    assert_eq!(
+        replication.metadata_last_reason.as_deref(),
+        Some("credential_store_locked")
+    );
+}
+
+/// Metadata publication shares the credential source, so it must survive the same lock.
+///
+/// The assertion is deliberately about *requests being made* rather than about the
+/// publication succeeding: the production failure was that no request happened at all,
+/// and asserting this way keeps the test independent of each publish endpoint's response
+/// shape.
+#[test]
+fn a_warm_credential_cache_keeps_publishing_metadata_after_the_keyring_locks() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}/v1", server.server_addr());
+    let handle = std::thread::spawn(move || {
+        let mut seen = Vec::new();
+        // Serve until both requests this test asserts on have been made. A fixed idle
+        // timeout would be racy under a loaded parallel suite: library setup can outlast
+        // it and the fixture would close before the first request arrives.
+        loop {
+            let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_secs(60)) else {
+                break;
+            };
+            let url = request.url().to_owned();
+            seen.push(url.clone());
+            let response = if url.ends_with("/captures/pending") {
+                json_response(json!({ "captures": [] }))
+            } else {
+                json_response(json!({}))
+            };
+            request.respond(response).unwrap();
+            // Order-independent: whichever of the two asserted requests arrives second
+            // ends the fixture, so the test does not idle until the timeout.
+            if seen.iter().any(|seen| seen.ends_with("/captures/pending"))
+                && seen.iter().any(|seen| seen.ends_with("/classifications"))
+            {
+                break;
+            }
+        }
+        seen
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig { enabled: true, api_base_url: Some(base_url) },
+            true,
+        )
+        .unwrap();
+    // A local change dirties the mobile metadata generation, so the cycle has something
+    // to publish; without a dirty generation no metadata request would be due at all.
+    let source = temp.path().join("session.png");
+    fs::write(&source, png_bytes()).unwrap();
+    library
+        .ingest_media(crate::library::models::IngestMediaRequest {
+            source_path: source,
+            classification_id: None,
+            source_url: Some("https://x.com/example/status/123/photo/3".into()),
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: Some("example".into()),
+            creator_url: Some("https://x.com/example".into()),
+            import_source: crate::library::models::ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000004".into(),
+        })
+        .unwrap();
+
+    let backend = CountingBackend::default();
+    backend.set("Lakomics/CloudApi", "test-token");
+    let broker = CredentialBroker::new(backend.clone());
+    broker
+        .credential(crate::library::credential::CredentialTarget::CloudApi)
+        .unwrap();
+    assert_eq!(backend.read_count("Lakomics/CloudApi"), 1);
+
+    // The keyring locks after the credential was loaded.
+    backend.lock();
+
+    library.sync_configured_cloud_capture_with(&|_| {}, &broker).unwrap();
+
+    let requests = handle.join().unwrap();
+    assert!(
+        requests.iter().any(|url| url.ends_with("/captures/pending")),
+        "capture polling must still perform HTTP after the lock: {requests:?}"
+    );
+    assert!(
+        requests.iter().any(|url| url.ends_with("/classifications")),
+        "metadata publication must still perform HTTP after the lock: {requests:?}"
+    );
+    // One store read for the whole pass: the lock did not send workers back to the store.
+    assert_eq!(backend.read_count("Lakomics/CloudApi"), 1);
+}
+
+/// A definitive auth rejection must drop the cached credential so the next pass re-reads
+/// the store, while an ordinary retryable failure must leave it in place.
+#[test]
+fn a_rejected_credential_is_dropped_and_a_retryable_failure_is_not() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let backend = CountingBackend::default();
+    backend.set("Lakomics/CloudApi", "test-token");
+    let broker = CredentialBroker::new(backend.clone());
+
+    broker
+        .credential(crate::library::credential::CredentialTarget::CloudApi)
+        .unwrap();
+    assert_eq!(backend.read_count("Lakomics/CloudApi"), 1);
+
+    // Ordinary transient failures are not credential invalidity.
+    for retryable in [
+        crate::library::error::LibraryError::CloudRequestTimedOut,
+        crate::library::error::LibraryError::CloudRequestUnavailable,
+        crate::library::error::LibraryError::CloudUploadRejected(503),
+    ] {
+        assert!(!broker.invalidate_on_auth_rejection(
+            crate::library::credential::CredentialTarget::CloudApi,
+            &retryable
+        ));
+    }
+    broker
+        .credential(crate::library::credential::CredentialTarget::CloudApi)
+        .unwrap();
+    assert_eq!(backend.read_count("Lakomics/CloudApi"), 1, "retryable failures must not force a re-read");
+
+    // A definitive rejection does, so the refused bearer is not resent forever.
+    assert!(broker.invalidate_on_auth_rejection(
+        crate::library::credential::CredentialTarget::CloudApi,
+        &crate::library::error::LibraryError::CloudUnauthorized
+    ));
+    broker
+        .credential(crate::library::credential::CredentialTarget::CloudApi)
+        .unwrap();
+    assert_eq!(backend.read_count("Lakomics/CloudApi"), 2);
+}

@@ -200,7 +200,7 @@ async fn run_catalog_update(
     let vps_source = match vps_base_url.as_deref() {
         Some(base_url) => Some((
             crate::catalog_source::VpsCatalogSource::new(base_url)?,
-            crate::library::credential::read_cloud_api_token_os()?,
+            crate::library::credential::read_cloud_api_token_os()?.expose().to_owned(),
         )),
         None => None,
     };

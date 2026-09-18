@@ -93,6 +93,7 @@ impl Library {
             .api_base_url
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
+        let token = token.expose();
         let client = CloudClient::new(&base_url)?;
         self.sync_next_cloud_asset_with(&client, &token)
     }

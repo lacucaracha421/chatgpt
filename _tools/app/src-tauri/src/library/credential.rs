@@ -1,13 +1,15 @@
 use super::error::LibraryError;
 use super::models::{IgdbCredentialStatus, IgdbCredentials, TmdbCredentialStatus, TmdbCredentials};
 use serde_json;
+use std::fmt;
+use zeroize::Zeroize;
 
 #[cfg(windows)]
-use windows::WindowsCredentialBackend as OsCredentialBackend;
+pub(crate) use windows::WindowsCredentialBackend as OsCredentialBackend;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use linux::LinuxCredentialBackend as OsCredentialBackend;
+pub(crate) use linux::LinuxCredentialBackend as OsCredentialBackend;
 
 const KAKAO_TARGET: &str = "Lakomics/KakaoBooks";
 const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
@@ -19,6 +21,69 @@ const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
 const CLOUD_PUBLISHER_TARGET: &str = "Lakomics/CloudPublisher";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
+
+/// Which cloud secret a worker needs.
+///
+/// The two are separate credentials on purpose - holding the ordinary client token must
+/// never authorize a publisher operation - so they are cached and invalidated
+/// independently by the process-session broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum CredentialTarget {
+    CloudApi,
+    CloudPublisher,
+}
+
+impl CredentialTarget {
+    /// The OS credential-store key this target reads and writes.
+    pub(crate) fn store_key(self) -> &'static str {
+        match self {
+            Self::CloudApi => CLOUD_API_TARGET,
+            Self::CloudPublisher => CLOUD_PUBLISHER_TARGET,
+        }
+    }
+}
+
+/// A cloud bearer token held for the lifetime of the process session.
+///
+/// Deliberately not `Clone` and not readable through `Debug`: obtaining the bytes is an
+/// explicit [`CloudCredential::expose`] call, so every place a token reaches a network
+/// call names itself, and duplicating one is a deliberate
+/// [`CloudCredential::duplicate`] rather than an accidental `Clone` in passing. The
+/// buffer is zeroed when the value is dropped or replaced.
+pub(crate) struct CloudCredential(String);
+
+impl CloudCredential {
+    fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    /// The token bytes. Named `expose` so call sites are auditable: it should only ever be
+    /// handed to an `Authorization` header, never logged or persisted.
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+
+    /// Copy the secret. Only the process-session broker should need this, and only so it
+    /// can hand a value to a caller without holding its cache lock across network I/O.
+    pub(crate) fn duplicate(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl fmt::Debug for CloudCredential {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Never the value, its length, or any prefix/suffix of it.
+        formatter.write_str("CloudCredential(<redacted>)")
+    }
+}
+
+impl Drop for CloudCredential {
+    fn drop(&mut self) {
+        // Best-effort: a copy taken elsewhere can outlive this value, so this narrows
+        // rather than closes the window in which the token sits in freed memory.
+        self.0.zeroize();
+    }
+}
 
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn notes_key(target: &str) -> Result<Option<Vec<u8>>, LibraryError> {
@@ -36,15 +101,18 @@ pub(crate) fn delete_notes_test_key(target: &str) {
 }
 
 #[derive(Debug)]
-enum CredentialError {
+pub(crate) enum CredentialError {
     System(u32),
-    #[cfg(target_os = "linux")]
+    /// The store exists but cannot serve this request (for example a session-only
+    /// collection). Kept unconditional rather than Linux-only so the backend contract,
+    /// and the broker built on it, are identical on every platform.
     Unavailable,
-    #[cfg(target_os = "linux")]
+    /// The store is present but locked. On Linux this is the Secret Service collection
+    /// being locked, which a background reader must never try to unlock.
     Locked,
 }
 
-trait CredentialBackend {
+pub(crate) trait CredentialBackend {
     fn read(&self, target: &str) -> Result<Option<Vec<u8>>, CredentialError>;
     fn write(&self, target: &str, value: &[u8]) -> Result<(), CredentialError>;
     fn delete(&self, target: &str) -> Result<(), CredentialError>;
@@ -101,9 +169,7 @@ impl<'a, B: CredentialBackend> CredentialService<'a, B> {
 fn map_backend_error(error: CredentialError) -> LibraryError {
     match error {
         CredentialError::System(_code) => LibraryError::CredentialStoreFailed,
-        #[cfg(target_os = "linux")]
         CredentialError::Unavailable => LibraryError::CredentialStoreUnavailable,
-        #[cfg(target_os = "linux")]
         CredentialError::Locked => LibraryError::CredentialStoreLocked,
     }
 }
@@ -122,7 +188,7 @@ mod windows {
 
     use super::{CredentialBackend, CredentialError};
 
-    pub(super) struct WindowsCredentialBackend;
+    pub(crate) struct WindowsCredentialBackend;
 
     fn wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(Some(0)).collect()
@@ -213,21 +279,45 @@ pub(crate) fn cloud_api_token_status() -> Result<bool, LibraryError> {
     cloud_api_token_status_with(&OsCredentialBackend)
 }
 
+/// Replace the stored Cloud API credential and drop any cached value for it.
+///
+/// Invalidation is unconditional and happens whether or not the write succeeded, because
+/// the only safe assumption after a credential mutation is that the process no longer
+/// knows what the store holds.
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_cloud_api_token_os(token: &str) -> Result<(), LibraryError> {
-    set_cloud_api_token(&OsCredentialBackend, token)
+    let result = set_cloud_api_token(&OsCredentialBackend, token);
+    super::credential_broker::broker().invalidate(CredentialTarget::CloudApi);
+    result
 }
 
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn delete_cloud_api_token_os() -> Result<(), LibraryError> {
-    OsCredentialBackend
+    let result = OsCredentialBackend
         .delete(CLOUD_API_TARGET)
-        .map_err(map_backend_error)
+        .map_err(map_backend_error);
+    super::credential_broker::broker().invalidate(CredentialTarget::CloudApi);
+    result
 }
 
+/// The Cloud API credential from the process session, loading it from the OS store on
+/// first use.
+///
+/// This is the accessor every cloud worker uses. Reading through the process-session
+/// broker is what keeps a transient keyring lock from stopping capture polling, metadata
+/// publication and replication once the process already holds a valid credential.
 #[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
-    read_cloud_api_token(&OsCredentialBackend)
+pub(crate) fn read_cloud_api_token_os() -> Result<CloudCredential, LibraryError> {
+    super::credential_broker::broker().credential(CredentialTarget::CloudApi)
+}
+
+/// Read the Cloud API credential directly from the OS store, bypassing the session cache.
+///
+/// The broker's own loader, and nothing else's: a caller that wants a fresh value must
+/// invalidate the cache and go through [`read_cloud_api_token_os`].
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn read_cloud_api_token_from_store() -> Result<CloudCredential, LibraryError> {
+    Ok(CloudCredential::new(read_cloud_api_token(&OsCredentialBackend)?))
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -237,19 +327,31 @@ pub(crate) fn cloud_publisher_token_status() -> Result<bool, LibraryError> {
 
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_cloud_publisher_token_os(token: &str) -> Result<(), LibraryError> {
-    set_cloud_publisher_token(&OsCredentialBackend, token)
+    let result = set_cloud_publisher_token(&OsCredentialBackend, token);
+    super::credential_broker::broker().invalidate(CredentialTarget::CloudPublisher);
+    result
 }
 
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn delete_cloud_publisher_token_os() -> Result<(), LibraryError> {
-    OsCredentialBackend
+    let result = OsCredentialBackend
         .delete(CLOUD_PUBLISHER_TARGET)
-        .map_err(map_backend_error)
+        .map_err(map_backend_error);
+    super::credential_broker::broker().invalidate(CredentialTarget::CloudPublisher);
+    result
 }
 
+/// The publisher credential from the process session; see [`read_cloud_api_token_os`].
 #[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn read_cloud_publisher_token_os() -> Result<String, LibraryError> {
-    read_cloud_publisher_token(&OsCredentialBackend)
+pub(crate) fn read_cloud_publisher_token_os() -> Result<CloudCredential, LibraryError> {
+    super::credential_broker::broker().credential(CredentialTarget::CloudPublisher)
+}
+
+/// Read the publisher credential directly from the OS store; see
+/// [`read_cloud_api_token_from_store`].
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn read_cloud_publisher_token_from_store() -> Result<CloudCredential, LibraryError> {
+    Ok(CloudCredential::new(read_cloud_publisher_token(&OsCredentialBackend)?))
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -288,7 +390,12 @@ pub(crate) fn delete_cloud_api_token_os() -> Result<(), LibraryError> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn read_cloud_api_token_os() -> Result<String, LibraryError> {
+pub(crate) fn read_cloud_api_token_os() -> Result<CloudCredential, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn read_cloud_api_token_from_store() -> Result<CloudCredential, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
@@ -308,7 +415,12 @@ pub(crate) fn delete_cloud_publisher_token_os() -> Result<(), LibraryError> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn read_cloud_publisher_token_os() -> Result<String, LibraryError> {
+pub(crate) fn read_cloud_publisher_token_os() -> Result<CloudCredential, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn read_cloud_publisher_token_from_store() -> Result<CloudCredential, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
@@ -644,6 +756,18 @@ fn read_secret<B: CredentialBackend>(
     validate_cloud_api_token(&token)
 }
 
+/// Read one cloud credential from any backend, by target.
+///
+/// The broker's single load path: it is backend-generic so the production store and a
+/// test double go through exactly the same validation, error mapping and
+/// `CloudCredential` construction.
+pub(crate) fn read_secret_for<B: CredentialBackend>(
+    backend: &B,
+    target: CredentialTarget,
+) -> Result<CloudCredential, LibraryError> {
+    Ok(CloudCredential::new(read_secret(backend, target.store_key())?))
+}
+
 fn secret_status<B: CredentialBackend>(
     backend: &B,
     target: &str,
@@ -870,4 +994,100 @@ pub(crate) fn notes_key(_target: &str) -> Result<Option<Vec<u8>>, LibraryError> 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn set_notes_key(_target: &str, _value: &[u8]) -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
+}
+
+/// Test doubles for the process-session broker.
+///
+/// A counting backend rather than a mock: the broker's contract is *how many* store
+/// reads happen and which errors propagate, so the double records reads per target and
+/// can be locked or unlocked between them. It uses the production
+/// [`CredentialBackend`] contract, so the code under test is the same code that runs
+/// against the Secret Service.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::{CredentialBackend, CredentialError};
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, PoisonError};
+
+    #[derive(Default)]
+    struct Store {
+        values: HashMap<String, Vec<u8>>,
+        reads: HashMap<String, u32>,
+        locked: bool,
+    }
+
+    /// A shared, clonable credential backend that counts reads per target.
+    ///
+    /// `Clone` shares the same store, which is what lets a test keep a handle for
+    /// assertions while the broker owns another.
+    #[derive(Clone, Default)]
+    pub(crate) struct CountingBackend {
+        store: Arc<Mutex<Store>>,
+    }
+
+    impl CountingBackend {
+        pub(crate) fn set(&self, target: &str, value: &str) {
+            self.store
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .values
+                .insert(target.to_owned(), value.as_bytes().to_vec());
+        }
+
+        pub(crate) fn delete(&self, target: &str) {
+            self.store
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .values
+                .remove(target);
+        }
+
+        /// Make every subsequent read fail as a locked store.
+        pub(crate) fn lock(&self) {
+            self.store
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .locked = true;
+        }
+
+        /// How many reads this target has served.
+        pub(crate) fn read_count(&self, target: &str) -> u32 {
+            self.store
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .reads
+                .get(target)
+                .copied()
+                .unwrap_or(0)
+        }
+    }
+
+    impl CredentialBackend for CountingBackend {
+        fn read(&self, target: &str) -> Result<Option<Vec<u8>>, CredentialError> {
+            let mut store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+            *store.reads.entry(target.to_owned()).or_insert(0) += 1;
+            if store.locked {
+                return Err(CredentialError::Locked);
+            }
+            Ok(store.values.get(target).cloned())
+        }
+
+        fn write(&self, target: &str, value: &[u8]) -> Result<(), CredentialError> {
+            let mut store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+            if store.locked {
+                return Err(CredentialError::Locked);
+            }
+            store.values.insert(target.to_owned(), value.to_vec());
+            Ok(())
+        }
+
+        fn delete(&self, target: &str) -> Result<(), CredentialError> {
+            let mut store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+            if store.locked {
+                return Err(CredentialError::Locked);
+            }
+            store.values.remove(target);
+            Ok(())
+        }
+    }
 }

@@ -125,6 +125,7 @@ impl Library {
         if !due{return Ok(())}
         let client=super::client::CloudClient::new(endpoint)?;
         let token=crate::library::credential::read_cloud_api_token_os()?;
+        let token = token.expose();
         client.publish_catalog_visibility(&body,&token)?;
         self.connection()?.execute("UPDATE mobile_catalog_visibility_state SET published_digest=?2,retry_after=0 WHERE endpoint=?1",params![endpoint,digest])?;
         Ok(())

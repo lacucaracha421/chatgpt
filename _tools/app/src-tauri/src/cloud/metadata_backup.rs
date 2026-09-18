@@ -8,7 +8,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::client::{CloudClient, RestoreMediaTicket};
-use crate::library::{credential, error::LibraryError, Library};
+use crate::library::{credential, credential::CloudCredential, error::LibraryError, Library};
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,7 +40,7 @@ impl Library {
                 path: staging.clone(),
                 source,
             })?;
-            client.upload_metadata_backup(source, &token)?;
+            client.upload_metadata_backup(source, token.expose())?;
             Ok(byte_size)
         })();
         cleanup_staging(&staging);
@@ -51,7 +51,7 @@ impl Library {
         &self,
     ) -> Result<CloudLibraryRestoreReport, LibraryError> {
         let (client, token) = self.metadata_backup_client()?;
-        self.restore_cloud_library_from_server_with(&client, &token)
+        self.restore_cloud_library_from_server_with(&client, token.expose())
     }
 
     /// The restore pass against an already-built client, so tests can drive the
@@ -239,7 +239,7 @@ impl Library {
         Ok(())
     }
 
-    fn metadata_backup_client(&self) -> Result<(CloudClient, String), LibraryError> {
+    fn metadata_backup_client(&self) -> Result<(CloudClient, CloudCredential), LibraryError> {
         let config = self.cloud_sync_config()?;
         let base_url = config
             .api_base_url

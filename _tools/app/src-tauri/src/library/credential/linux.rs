@@ -6,7 +6,7 @@ use secret_service::{EncryptionType, SecretService};
 
 use super::{CredentialBackend, CredentialError};
 
-pub(super) struct LinuxCredentialBackend;
+pub(crate) struct LinuxCredentialBackend;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 const APPLICATION: &str = "com.lakomics.desktop";
 

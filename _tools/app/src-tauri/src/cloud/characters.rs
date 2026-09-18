@@ -351,6 +351,7 @@ impl Library {
                 .ok_or(LibraryError::InvalidCloudSyncConfig)?,
         )?;
         let token = credential::read_cloud_api_token_os()?;
+        let token = token.expose();
         let revision = client.character_revision(&token)?;
         let mut connection = Connection::open_with_flags(
             self.root().join("library.sqlite"),

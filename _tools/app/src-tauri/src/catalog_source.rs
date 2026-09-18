@@ -216,7 +216,7 @@ impl CatalogSource for VpsCatalogSource {
     fn fetch_gallery(&self, work_id: u64) -> Result<String, LibraryError> {
         // 작업 id만 받는다. 클라이언트가 URL을 넘길 여지가 없다(SSRF 차단).
         let token = crate::library::credential::read_cloud_api_token_os()?;
-        self.fetch_gallery_bearer(work_id, &token)
+        self.fetch_gallery_bearer(work_id, token.expose())
     }
 }
 

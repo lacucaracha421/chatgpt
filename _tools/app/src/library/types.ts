@@ -72,6 +72,13 @@ export type CloudActivity = {
   metadataLastAttemptAt?: string | null;
   metadataLastSuccessAt?: string | null;
   metadataLastError?: string | null;
+  /**
+   * Stable, non-secret cause code for the corresponding error, e.g.
+   * `credential_store_locked`, `unauthorized`, `network`. Present only while that
+   * failure is the recorded one, so it always describes the error beside it.
+   */
+  lastReason?: string | null;
+  metadataLastReason?: string | null;
   direction: "capture" | "replication";
   lastAttemptAt: string | null;
   lastSuccessAt: string | null;

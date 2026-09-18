@@ -17,6 +17,7 @@ impl Library {
         let config=self.cloud_sync_config()?;
         let client=CloudClient::new(config.api_base_url.as_deref().ok_or(LibraryError::InvalidCloudSyncConfig)?)?;
         let token=credential::read_cloud_publisher_token_os()?;
+        let token = token.expose();
         let library_id=self.library_id()?;
         let base=client.mobile_catalog_revision(&token)?;
         let snapshot=self.export_mobile_catalog_snapshot_with_progress(progress)?;

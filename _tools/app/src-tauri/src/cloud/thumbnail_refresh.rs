@@ -86,6 +86,7 @@ pub fn refresh_cloud_thumbnails(
     }
 
     let token = credential::read_cloud_api_token_os()?;
+    let token = token.expose();
     let client = CloudClient::new(&base_url)?;
     let selected =
         select_stale_candidates(&client, &token, &candidates, options.limit, &mut report)?;

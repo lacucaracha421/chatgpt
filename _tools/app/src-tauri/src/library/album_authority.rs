@@ -454,6 +454,7 @@ impl Library {
             .as_deref()
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
+        let token = token.expose();
         let client = CloudClient::new(endpoint)?;
         self.flush_album_outbox_with(&client, &token)
     }

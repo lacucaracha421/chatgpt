@@ -93,6 +93,7 @@ impl Library {
                 .ok_or(LibraryError::InvalidCloudSyncConfig)?,
         )?;
         let token = credential::read_cloud_api_token_os()?;
+        let token = token.expose();
         // Capture the remote generation before doing expensive local work. A competing
         // publisher must result in a conflict, never silently overwrite its snapshot.
         let base_revision = client.collections_revision(&token)?;
@@ -497,6 +498,7 @@ mod tests {
         let root = PathBuf::from(std::env::var("LAKOMICS_COLLECTION_SOURCE").unwrap()).canonicalize().unwrap();
         let client = CloudClient::new(&std::env::var("LAKOMICS_COLLECTION_ENDPOINT").unwrap()).unwrap();
         let token = credential::read_cloud_api_token_os().unwrap();
+        let token = token.expose();
         let revision = client.collections_revision(&token).unwrap();
         let mut connection = rusqlite::Connection::open_with_flags(root.join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let snapshot = snapshot_from_connection(&root, &mut connection, revision, &|_| {}).unwrap();

@@ -1794,6 +1794,7 @@ pub async fn refresh_manga_catalog_recovery_remote(
             message: "카탈로그 원격 조회용 VPS 주소가 설정되지 않았습니다.".into(),
         })?;
     let token = credential::read_cloud_api_token_os().map_err(CommandError::from)?;
+    let token = token.expose().to_owned();
     let source =
         crate::catalog_source::VpsCatalogSource::new(&base_url).map_err(CommandError::from)?;
     let catalog_path = library.root().join("catalogs/kdata.db");

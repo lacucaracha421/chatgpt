@@ -746,12 +746,12 @@ pub(super) struct OsCredentials;
 
 impl CredentialSource for OsCredentials {
     fn client(&self) -> Result<std::borrow::Cow<'_, str>, LibraryError> {
-        Ok(std::borrow::Cow::Owned(credential::read_cloud_api_token_os()?))
+        Ok(std::borrow::Cow::Owned(credential::read_cloud_api_token_os()?.expose().to_owned()))
     }
 
     fn publisher(&self) -> Result<std::borrow::Cow<'_, str>, LibraryError> {
         Ok(std::borrow::Cow::Owned(
-            credential::read_cloud_publisher_token_os()?,
+            credential::read_cloud_publisher_token_os()?.expose().to_owned(),
         ))
     }
 }
