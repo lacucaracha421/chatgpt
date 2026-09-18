@@ -1918,6 +1918,176 @@ class BaselineSnapshotCoherenceTests(ClassificationAuthorityFixture):
                          classificationId=TAG, expectedRevision=0).status_code, 200)
 
 
+class ChangesSnapshotCoherenceTests(ClassificationAuthorityFixture):
+    """One `/changes` response must come from one SQLite read snapshot.
+
+    The route reads four things: the authority identity, the advertised cursor, the
+    retention floor and the change rows. Read without a transaction they are four
+    separate autocommit snapshots, so a command can commit between them and the response
+    then advertises the older cursor while carrying rows from the newer one. A replica
+    cannot apply that coherently — it would be told `cursor = 1` with `nextAfter = 2`,
+    which is the exact shape this class refuses.
+
+    WAL is not a fix by itself: it gives each *statement* a snapshot, not a group of
+    statements. This mirrors `BaselineSnapshotCoherenceTests`, which pins the same
+    property for the baseline walk.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+
+    def capture_change_read(self, hook):
+        """Wrap `change_items` so a test can observe inside the rows read."""
+        real_items = classification_authority.change_items
+        calls = {"count": 0}
+
+        def wrapper(db, library_id, epoch, after, limit, ceiling=None):
+            calls["count"] += 1
+            hook(db)
+            return real_items(db, library_id, epoch, after, limit, ceiling=ceiling)
+
+        classification_authority.change_items = wrapper
+        return real_items, calls
+
+    def test_the_cursor_read_and_rows_read_share_one_transaction(self):
+        """The fix, pinned directly: the rows read happens inside an explicit transaction."""
+        observed = {}
+
+        def hook(db):
+            observed["in_transaction"] = db.in_transaction
+
+        real_items, calls = self.capture_change_read(hook)
+        try:
+            response = self.changes()
+        finally:
+            classification_authority.change_items = real_items
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(calls["count"], 1)
+        self.assertTrue(observed["in_transaction"],
+                        "the change-rows read must run inside the read transaction")
+
+    def test_a_commit_during_the_rows_read_can_never_exceed_the_advertised_cursor(self):
+        """Force a writer commit between cursor acquisition and row materialization.
+
+        The response must stay internally consistent — `nextAfter` can never exceed the
+        `cursor` it advertises, because that would name a change the same response says
+        does not exist yet.
+        """
+        self.command(classification_authority.ASSIGNMENT, R1, assetId=ASSET,
+                     classificationId=TAG, expectedRevision=0)
+        attempt = {}
+
+        def hook(_db):
+            # A genuinely separate connection and transaction: the concurrent writer.
+            writer = sqlite3.connect(self.database, timeout=0.25)
+            try:
+                writer.row_factory = sqlite3.Row
+                writer.execute("BEGIN IMMEDIATE")
+                writer.execute(
+                    "UPDATE classification_authority_state SET name=?,"
+                    "entity_revision=entity_revision+1 WHERE classification_id=?",
+                    ["동시 변경", OTHER])
+                writer.execute("UPDATE authority_domains SET change_cursor=change_cursor+1"
+                               " WHERE domain=?", [classification_authority.DOMAIN])
+                writer.execute(
+                    "INSERT INTO classification_authority_changes(library_id,epoch,sequence,"
+                    "command_type,classification_id,asset_id,entity_revision,operation_id,"
+                    "payload,changed_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    [LIBRARY, 1, 2, classification_authority.ASSIGNMENT, None, ASSET, 2, R2,
+                     json.dumps({"assetId": ASSET, "classificationId": TAG,
+                                 "entityRevision": 2}), "2026-09-16T00:00:00Z"])
+                writer.commit()
+                attempt["committed"] = True
+            except sqlite3.OperationalError as error:
+                attempt["committed"] = False
+                attempt["error"] = str(error)
+                writer.rollback()
+            finally:
+                writer.close()
+
+        real_items, calls = self.capture_change_read(hook)
+        try:
+            response = self.changes(after=0)
+        finally:
+            classification_authority.change_items = real_items
+        self.assertEqual(calls["count"], 1, "the mutation hook must have run")
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+
+        # The invariant under test. It must hold whichever way the concurrent writer
+        # resolved: refused by the reader's lock, or applied invisibly after the snapshot.
+        self.assertLessEqual(
+            body["nextAfter"], body["cursor"],
+            "a response must never advertise a cursor its own rows already exceed")
+        self.assertTrue(
+            all(item["sequence"] <= body["cursor"] for item in body["items"]),
+            "no returned row may sit beyond the advertised cursor")
+        self.assertEqual(body["hasMore"], body["nextAfter"] < body["cursor"])
+        if attempt["committed"]:
+            # The commit landed after the snapshot, so the domain moved. The response is
+            # the pre-commit state and must report itself as behind.
+            self.assertEqual(body["cursor"], 1)
+            self.assertEqual([item["sequence"] for item in body["items"]], [1])
+        else:
+            # The reader's transaction was still open, so the writer could not commit at
+            # all — the stronger form of the guarantee.
+            self.assertIn("locked", attempt["error"])
+
+    def test_a_commit_after_the_snapshot_is_delivered_by_the_next_read(self):
+        """No change may be lost or double-counted across the snapshot boundary."""
+        self.command(classification_authority.ASSIGNMENT, R1, assetId=ASSET,
+                     classificationId=TAG, expectedRevision=0)
+        first = self.changes(after=0).json()
+        self.assertEqual(first["cursor"], 1)
+        self.assertEqual([item["sequence"] for item in first["items"]], [1])
+        self.assertFalse(first["hasMore"])
+
+        # A second command advances the domain; the next read continues cleanly from the
+        # cursor the first response advertised.
+        self.assertEqual(
+            self.command(classification_authority.ASSIGNMENT, R2, assetId=ASSET2,
+                         classificationId=TAG, expectedRevision=0).status_code, 200)
+        second = self.changes(after=first["nextAfter"]).json()
+        self.assertEqual(second["cursor"], 2)
+        self.assertEqual([item["sequence"] for item in second["items"]], [2])
+        self.assertEqual(second["nextAfter"], 2)
+
+    def test_the_rows_read_is_bounded_by_the_cursor_the_response_advertises(self):
+        """The ceiling is a real bound, not a decorative argument.
+
+        The explicit read transaction already makes a row beyond the advertised cursor
+        unreachable, so this cannot be exercised through the route: it is pinned directly
+        against the helper, which is the only place the bound lives. Without it, a later
+        change that stopped reading inside the transaction would silently return rows the
+        same response says do not exist yet.
+        """
+        for operation, asset in (("11111111-1111-4111-8111-000000000001", ASSET),
+                                 ("22222222-2222-4222-8222-000000000002", ASSET2)):
+            self.assertEqual(
+                self.command(classification_authority.ASSIGNMENT, operation, assetId=asset,
+                             classificationId=TAG, expectedRevision=0).status_code, 200)
+        with self.get_db() as db:
+            unbounded = classification_authority.change_items(db, LIBRARY, 1, 0, 100)
+            ceilinged = classification_authority.change_items(db, LIBRARY, 1, 0, 100,
+                                                              ceiling=1)
+        self.assertEqual([item["sequence"] for item in unbounded], [1, 2])
+        self.assertEqual([item["sequence"] for item in ceilinged], [1],
+                         "a row beyond the advertised cursor must never be returned")
+
+    def test_the_changes_read_does_not_hold_a_write_lock(self):
+        """The read transaction must not block a concurrent command."""
+        with self.get_db() as db:
+            db.execute("BEGIN")
+            try:
+                self.changes()
+            finally:
+                db.rollback()
+        self.assertEqual(
+            self.command(classification_authority.ASSIGNMENT, R1, assetId=ASSET,
+                         classificationId=TAG, expectedRevision=0).status_code, 200)
+
+
 class BaselineBoundTests(unittest.TestCase):
     """Page sizes must keep the worst-case encoded page inside the response budget.
 

@@ -466,7 +466,11 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<AlbumOutboxFlush, LibraryError> {
-        flush_outbox(self, client, token, &chrono::Utc::now().to_rfc3339())
+        // Every Album delivery entry point funnels through here, so the domain's single-flight
+        // gate covers all of them. See [`Library::flush_outbox_single_flight`].
+        self.flush_outbox_single_flight(&self.album_flush_lock, || {
+            flush_outbox(self, client, token, &chrono::Utc::now().to_rfc3339())
+        })
     }
 }
 

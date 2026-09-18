@@ -1068,4 +1068,103 @@ mod integration {
         assert_eq!(state, "pending");
         assert_eq!(code, None);
     }
+
+    /// Concurrent Album delivery callers share one pass for the domain.
+    ///
+    /// The Album lane has the same multi-caller shape as Classification — a mutation kick, the
+    /// periodic sync hook and focus/online events — so its single-flight gate has to sit on the
+    /// domain rather than on one caller. This holds the first pass inside its HTTP response,
+    /// starts a second caller while it is held, and proves only one delivery occurred for the
+    /// one queued row.
+    #[test]
+    fn concurrent_album_delivery_callers_never_double_send_one_row() {
+        use std::sync::Barrier;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let (_temp, library) = open();
+        adopt(&library, 1, 0);
+        let album = library
+            .create_album(CreateAlbum {
+                name: "표지".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        insert_asset(&library, "asset-1");
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM album_authority_outbox", [])
+            .unwrap();
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["asset-1".into()],
+                add_album_ids: vec![album.id.clone()],
+                remove_album_ids: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(outbox(&library.connection().unwrap()).len(), 1);
+
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let deliveries = Arc::new(AtomicU32::new(0));
+        let count = Arc::clone(&deliveries);
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let handle = thread::spawn(move || loop {
+            let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_millis(600))
+            else {
+                return;
+            };
+            count.fetch_add(1, Ordering::SeqCst);
+            let body = read_body(&mut request);
+            if count.load(Ordering::SeqCst) == 1 {
+                let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+            }
+            let _ = request.respond(json_response(serde_json::json!({
+                "libraryId": LIBRARY,
+                "epoch": 1,
+                "contractVersion": 1,
+                "commandType": body["commandType"],
+                "operationId": body["operationId"],
+                "changed": true,
+                "changeSequence": 1,
+                "authorityCursor": 1,
+                "album": null,
+                "membership": {
+                    "albumId": body["albumId"],
+                    "assetId": body["assetId"],
+                    "desiredState": body["desiredState"],
+                    "entityRevision": 5
+                },
+                "updatedAt": "2026-09-17T00:00:00Z"
+            })));
+        });
+
+        let shared = Arc::new(library);
+        let client = Arc::new(CloudClient::new(&base).unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let spawn_caller = || {
+            let shared = Arc::clone(&shared);
+            let client = Arc::clone(&client);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                shared.flush_album_outbox_with(&client, "token").map(|r| r.sent)
+            })
+        };
+        let first = spawn_caller();
+        let second = spawn_caller();
+        thread::sleep(std::time::Duration::from_millis(400));
+        let _ = release_tx.send(());
+        let a = first.join().unwrap();
+        let b = second.join().unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(
+            deliveries.load(Ordering::SeqCst),
+            1,
+            "two Album callers must not each send the same queued row"
+        );
+        assert_eq!(a.unwrap_or(0) + b.unwrap_or(0), 1, "exactly one caller sends");
+        assert!(outbox(&shared.connection().unwrap()).is_empty());
+    }
 }

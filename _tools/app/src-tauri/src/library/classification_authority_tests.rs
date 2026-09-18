@@ -2404,18 +2404,29 @@ mod integration {
         // The delete the user made was delivered with its own identity.
         assert_eq!(sent[2].body["commandType"], "deleteClassification");
         assert_eq!(sent[2].body["operationId"], queued[1].0.as_str());
+        // Accepting the delete moved the confirmed lineage the same way the server did:
+        // asset-1 no longer names `doomed` and its revision incremented once. The cache
+        // must describe the authority's post-delete state, not the deleted name — a cache
+        // still naming `doomed` would make the deferred-assignment projection refuse the
+        // very change that corrects it.
         assert_eq!(
             library
                 .connection()
                 .unwrap()
                 .query_row(
-                    "SELECT entity_revision FROM classification_authority_assignment_revisions
+                    "SELECT classification_id, entity_revision
+                     FROM classification_authority_assignment_revisions
                      WHERE asset_id = 'asset-1'",
                     [],
-                    |row| row.get::<_, i64>(0)
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, i64>(1)?,
+                        ))
+                    },
                 )
                 .unwrap(),
-            1
+            (None, 2)
         );
         assert_eq!(
             library
@@ -2623,5 +2634,165 @@ mod integration {
         assert_eq!(sent[0].token, "Bearer client-token");
         assert_eq!(sent[1].body["commandType"], "renameClassification");
         assert_eq!(sent[1].token, "Bearer publisher-token");
+    }
+
+    /// Concurrent delivery callers share one pass per domain.
+    ///
+    /// Single-flight has to be a property of the *domain*, not of one caller: several
+    /// independent callers deliver the same queue — a mutation-triggered kick, the periodic
+    /// sync hook, and focus/online events — so coalescing only the kick still let it overlap a
+    /// running background pass. Two overlapping passes read the same snapshot of the queue and
+    /// both send the same row, which the server's operation-id receipt makes idempotent but
+    /// does not make free.
+    ///
+    /// This holds the first pass inside its HTTP response, starts a second caller while it is
+    /// held, and proves only one request was ever delivered for the one queued row.
+    #[test]
+    fn concurrent_delivery_callers_never_double_send_one_row() {
+        use std::sync::{Arc, Barrier};
+
+        let (_temp, library) = open();
+        adopt(&library, 1, 0);
+        let root = create_root(&library, "게임");
+        insert_asset(&library, "asset-1");
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM classification_authority_outbox", [])
+            .unwrap();
+        library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-1".into()],
+                classification_id: Some(root),
+            })
+            .unwrap();
+
+        // The server parks inside the first response until the test releases it, so the second
+        // caller provably arrives while a pass is genuinely in flight.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let deliveries = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let count = Arc::clone(&deliveries);
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || {
+            loop {
+                let Ok(Some(mut request)) =
+                    server.recv_timeout(std::time::Duration::from_millis(600))
+                else {
+                    return;
+                };
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let body = read_body(&mut request);
+                // Only the very first delivery is held; later ones answer immediately so a
+                // follow-up pass can finish.
+                if count.load(std::sync::atomic::Ordering::SeqCst) == 1 {
+                    let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+                }
+                let mut result = accepted_result(&body, 5);
+                result["libraryId"] = LIBRARY.into();
+                let _ = request.respond(json_response(result));
+            }
+        });
+
+        let shared = Arc::new(library);
+        let client = Arc::new(CloudClient::new(&base).unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let worker_a = {
+            let shared = Arc::clone(&shared);
+            let client = Arc::clone(&client);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                shared
+                    .flush_classification_outbox_with_credentials(
+                        &client,
+                        "client-token",
+                        "publisher-token",
+                    )
+                    .map(|report| report.sent)
+            })
+        };
+        let worker_b = {
+            let shared = Arc::clone(&shared);
+            let client = Arc::clone(&client);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                // Give the first pass time to reach the server and park.
+                thread::sleep(std::time::Duration::from_millis(200));
+                shared
+                    .flush_classification_outbox_with_credentials(
+                        &client,
+                        "client-token",
+                        "publisher-token",
+                    )
+                    .map(|report| report.sent)
+            })
+        };
+
+        // Release the held response once the second caller has had time to arrive.
+        thread::sleep(std::time::Duration::from_millis(400));
+        let _ = release_tx.send(());
+        let first = worker_a.join().unwrap();
+        let second = worker_b.join().unwrap();
+        handle.join().unwrap();
+
+        // Exactly one delivery reached the server for the single queued intent.
+        assert_eq!(
+            deliveries.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "two callers must not each send the same queued row"
+        );
+        // The pass that actually delivered reports the send; the other observed an empty
+        // queue afterwards, which is the coalesced outcome rather than a second delivery.
+        let sent = first.unwrap_or(0) + second.unwrap_or(0);
+        assert_eq!(sent, 1, "exactly one caller reports the delivered intent");
+        assert!(outbox(&shared.connection().unwrap()).is_empty());
+    }
+
+    /// A failed pass must not leave the domain unable to deliver later work.
+    ///
+    /// The gate is held across the whole pass, so a failure has to release it like any other
+    /// exit. If a transport error kept the gate, every later caller would block forever and the
+    /// queue would silently stop draining.
+    #[test]
+    fn a_failed_delivery_pass_does_not_suppress_later_delivery() {
+        let (_temp, library) = open();
+        adopt(&library, 1, 0);
+        let root = create_root(&library, "게임");
+        insert_asset(&library, "asset-1");
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM classification_authority_outbox", [])
+            .unwrap();
+        library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-1".into()],
+                classification_id: Some(root),
+            })
+            .unwrap();
+
+        // No server is listening, so the first pass fails on transport.
+        let dead = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+        let failed = library
+            .flush_classification_outbox_with_credentials(&dead, "client-token", "publisher-token");
+        assert!(failed.is_err(), "an unreachable authority fails the pass");
+        assert_eq!(
+            outbox(&library.connection().unwrap()).len(),
+            1,
+            "the intent stays durable across the failure"
+        );
+
+        // A later pass against a working authority must still deliver it.
+        let (base, receiver, handle) = accepting_server(LIBRARY.to_owned());
+        let client = CloudClient::new(&base).unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        handle.join().unwrap();
+        assert_eq!(report.sent, 1, "the gate was released by the failed pass");
+        assert_eq!(received(&receiver).len(), 1);
+        assert!(outbox(&library.connection().unwrap()).is_empty());
     }
 }

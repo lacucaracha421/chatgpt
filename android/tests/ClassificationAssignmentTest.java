@@ -109,6 +109,10 @@ public final class ClassificationAssignmentTest {
             payloadDisagreeingWithItsColumnsIsNeverSent(directory);
             classificationCountsComeFromTheClassificationDomain(directory);
             noStructuralWriteSurfaceExists();
+            // Independent failure boundaries between the two authority domains.
+            albumFailureDoesNotSkipTheClassificationLane();
+            classificationFailureDoesNotSuppressTheAlbumLane();
+            cancellationIsNeverConvertedIntoALaneFailure();
         } finally {
             deleteTree(directory);
         }
@@ -1157,6 +1161,114 @@ public final class ClassificationAssignmentTest {
         // the one that matters.
         check(Arrays.asList(ClassificationReplica.COMMAND_TYPES).contains("createClassification"),
                 "The read parser still understands structural change rows");
+    }
+
+    /**
+     * An Album lane failure must not skip the Classification lane for the cycle.
+     *
+     * The two domains share a transport and a store but are separate authorities with separate
+     * prerequisites. Before this they also shared one outer `try`, so a membership PUT that
+     * failed — an ordinary, recoverable, per-domain condition — meant Classification did not
+     * run at all that cycle, even though nothing about Classification was broken. Classification
+     * edits would then appear not to converge for as long as the Album write kept failing.
+     */
+    private static void albumFailureDoesNotSkipTheClassificationLane() {
+        final boolean[] classificationRan = {false};
+        final boolean[] albumRan = {false};
+
+        AuthorityPass.Outcome outcome = AuthorityPass.run(
+                () -> {
+                    albumRan[0] = true;
+                    // Exactly what a failed membership delivery surfaces as.
+                    throw new AlbumMembershipOutbox.Failure("transport", true);
+                },
+                () -> {
+                    classificationRan[0] = true;
+                    ClassificationAuthoritySync.Result result =
+                            new ClassificationAuthoritySync.Result();
+                    result.adopted = true;
+                    result.appliedChanges = 2;
+                    return new AuthorityPass.ClassificationReport(result, null);
+                });
+
+        check(albumRan[0], "The Album lane is attempted first");
+        check(classificationRan[0],
+                "A failed Album lane must not stop the Classification lane from running");
+        equal("transport", outcome.album.code, "The Album lane reports its own failure code");
+        check(outcome.album.result == null, "A failed Album lane has no receive result");
+        check(outcome.albumRan, "The Album lane is still reported as attempted");
+        equal(2, outcome.classification.result.appliedChanges,
+                "The Classification lane converges on its own terms");
+        equal(null, outcome.classification.code,
+                "and a healthy Classification lane reports no failure code");
+    }
+
+    /**
+     * A Classification lane failure must not suppress or corrupt the Album lane.
+     *
+     * The reverse direction matters just as much: the Album result is what the status surface
+     * reports as Album state, so a Classification write failure must not replace it with a
+     * Classification code or discard a converged Album result.
+     */
+    private static void classificationFailureDoesNotSuppressTheAlbumLane() {
+        final boolean[] classificationRan = {false};
+        AlbumAuthoritySync.Result albumResult = new AlbumAuthoritySync.Result();
+        albumResult.adopted = true;
+        albumResult.appliedChanges = 3;
+
+        AuthorityPass.Outcome outcome = AuthorityPass.run(
+                () -> new AuthorityPass.AlbumReport(albumResult, null),
+                () -> {
+                    classificationRan[0] = true;
+                    throw new ClassificationAssignmentOutbox.Failure("revisionConflict", false);
+                });
+
+        check(classificationRan[0], "The Classification lane is attempted");
+        equal(3, outcome.album.result.appliedChanges,
+                "The converged Album result survives a Classification failure");
+        equal(null, outcome.album.code, "and the Album lane reports no failure of its own");
+        equal("revisionConflict", outcome.classification.code,
+                "The Classification lane reports its own code");
+        equal(null, outcome.classification.result,
+                "and no Classification state is invented for the status surface");
+    }
+
+    /**
+     * A cancelled or shutting-down pass must propagate, not be reported as a merge failure.
+     *
+     * The orchestrator contains a lane's own failure, and containment is where a shutdown
+     * path can quietly go wrong: catching too broadly turns "this thread is being torn down"
+     * into "the lane failed, retry on the next tick", which is both a lie and a reason to keep
+     * running. So the checks below pin the two forms that must survive — an {@code Error} is
+     * not a {@code RuntimeException} and is not caught, and the containment never clears the
+     * thread's interrupt flag.
+     */
+    private static void cancellationIsNeverConvertedIntoALaneFailure() {
+        boolean propagated = false;
+        try {
+            AuthorityPass.run(
+                    () -> { throw new AssertionError("cancelled during the Album lane"); },
+                    () -> { throw new AssertionError("must not be reached"); });
+        } catch (AssertionError cancelled) {
+            propagated = true;
+        }
+        check(propagated,
+                "An Error from a lane must propagate rather than be reported as a lane code");
+
+        // A pass whose lane already failed must not clear the interrupt flag on the way out.
+        Thread.currentThread().interrupt();
+        try {
+            AuthorityPass.Outcome outcome = AuthorityPass.run(
+                    () -> { throw new AlbumMembershipOutbox.Failure("transport", true); },
+                    () -> new AuthorityPass.ClassificationReport(null, null));
+            equal("transport", outcome.album.code,
+                    "An ordinary lane failure is still contained and coded");
+            check(Thread.currentThread().isInterrupted(),
+                    "The interrupt flag must survive the containment");
+        } finally {
+            // Clear the flag so it cannot affect a later check in this same JVM.
+            Thread.interrupted();
+        }
     }
 
     /**

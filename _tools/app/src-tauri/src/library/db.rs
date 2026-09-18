@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 85;
+pub(crate) const SCHEMA_VERSION: i64 = 86;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -429,6 +429,11 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 84 {
             transaction.execute_batch(include_str!(
                 "../../migrations/0085_classification_legacy_trigger_retirement.sql"
+            ))?;
+        }
+        if version <= 85 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0086_classification_preapplied_deletes.sql"
             ))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
@@ -3355,6 +3360,118 @@ mod tests {
             .execute(
                 "INSERT INTO catalog_bookmark_sync (singleton, library_id, epoch, contract_version, cursor, updated_at)
                  VALUES (1,'a1b2c3d4e5f60718293a4b5c6d7e8f90',1,1,-1,'2026-09-14T00:00:00Z')",
+                [],
+            )
+            .is_err());
+    }
+
+    /// v86 adds the durable pre-applied delete-transition markers, additively.
+    ///
+    /// The table exists so a delete change can tell "this PC already applied part of this
+    /// transition when it confirmed the command" from "this replica is missing lineages the
+    /// server says it sent". It is keyed by `(operation_id, epoch)` so a marker cannot be
+    /// matched by a different delete or by a re-activated authority.
+    #[test]
+    fn v86_records_preapplied_deletes_without_disturbing_existing_state() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 85);
+        // Existing authority state that the additive migration must leave exactly as it is.
+        connection
+            .execute(
+                "INSERT INTO classification_authority_sync
+                    (singleton, library_id, epoch, contract_version, cursor, updated_at)
+                 VALUES (1, 'lib', 1, 1, 7, '2026-09-17T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO classification_authority_assignment_revisions
+                    (asset_id, classification_id, entity_revision, updated_at)
+                 VALUES ('asset-1', 'originals', 3, '2026-09-17T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 85).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        // Migrating invents no record: nothing was pre-applied before the table existed.
+        let records: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM classification_authority_preapplied_deletes",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(records, 0);
+        // The existing identity, cursor and assignment lineage survive untouched.
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT library_id, epoch, cursor FROM classification_authority_sync",
+                    [],
+                    |row| Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?
+                    )),
+                )
+                .unwrap(),
+            ("lib".to_owned(), 1, 7)
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT classification_id, entity_revision
+                     FROM classification_authority_assignment_revisions WHERE asset_id = 'asset-1'",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("originals".to_owned(), 3)
+        );
+        // The record constrains its own content, so a zero-sequence or negative-count row
+        // cannot exist.
+        assert!(connection
+            .execute(
+                "INSERT INTO classification_authority_preapplied_deletes
+                    (operation_id, epoch, change_sequence, from_classification_id,
+                     to_classification_id, affects_assignments, preapplied_moved, created_at)
+                 VALUES ('op', 1, 0, 'doomed', NULL, 0, 0, '2026-09-17T00:00:00Z')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO classification_authority_preapplied_deletes
+                    (operation_id, epoch, change_sequence, from_classification_id,
+                     to_classification_id, affects_assignments, preapplied_moved, created_at)
+                 VALUES ('op', 1, 2, 'doomed', NULL, -1, 0, '2026-09-17T00:00:00Z')",
+                [],
+            )
+            .is_err());
+        // One record per (operation id, epoch), so a replay cannot accumulate duplicates.
+        connection
+            .execute(
+                "INSERT INTO classification_authority_preapplied_deletes
+                    (operation_id, epoch, change_sequence, from_classification_id,
+                     to_classification_id, affects_assignments, preapplied_moved, created_at)
+                 VALUES ('op', 1, 2, 'doomed', 'parent', 2, 2, '2026-09-17T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO classification_authority_preapplied_deletes
+                    (operation_id, epoch, change_sequence, from_classification_id,
+                     to_classification_id, affects_assignments, preapplied_moved, created_at)
+                 VALUES ('op', 1, 2, 'doomed', 'parent', 3, 2, '2026-09-17T00:00:00Z')",
                 [],
             )
             .is_err());

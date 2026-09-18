@@ -113,32 +113,64 @@ import type {
 } from "./types";
 
 /**
- * Run a local Album mutation and immediately try to deliver it.
+ * Wake one authority domain's outbox delivery.
  *
- * The durable intent is already committed with the mutation, so a failed send is not
- * a lost edit: the background loop retries the same operation id. Sending here just
- * shortens the window where another device sees the old structure.
+ * Delivery single-flight belongs to the *native* layer, not here (see
+ * `Library::flush_outbox_single_flight`): several independent callers deliver the same
+ * domain — this kick, the periodic sync hook, and focus/online events — so a coalescer in
+ * this module could only ever serialize the kicks against each other, leaving a kick free
+ * to overlap a running background pass. The native gate covers every caller, so this is a
+ * plain fire-and-forget wake-up.
+ *
+ * Nothing here is awaited by the caller: the local mutation's optimistic write and its
+ * outbox row commit together before this runs, so a successful edit must not wait on the
+ * network. A failure is not the user's edit failing either — the durable outbox is the
+ * retry mechanism, and the background loop resends the identical operation id.
+ */
+function kickOutboxDelivery(command: string): void {
+  try {
+    // `invoke` returns a promise in production; wrapping keeps this correct even for a
+    // synchronous test double, without changing the fire-and-forget contract.
+    void Promise.resolve(invoke(command)).catch(() => {
+      // The durable outbox retries; a failed send here is not a lost edit.
+    });
+  } catch {
+    // A synchronous throw is the same non-event as a rejected send.
+  }
+}
+
+const kickAlbumOutbox = () => kickOutboxDelivery("flush_album_outbox");
+const kickClassificationOutbox = () => kickOutboxDelivery("flush_classification_outbox");
+
+/**
+ * Run a local Album mutation and kick delivery of its durable intent.
+ *
+ * The mutation's optimistic write and its outbox row are one transaction on the native
+ * side, so by the time this returns the edit is durable and offline-safe. Delivery is
+ * kicked but never awaited: waiting would make a local structural edit as slow as the
+ * network, and a failed send is not a lost edit — the background loop retries the
+ * identical operation id. Kicking only shortens the window where another device sees the
+ * old structure.
  */
 async function albumMutation<T>(run: () => Promise<T>): Promise<T> {
   const result = await run();
-  try { await invoke("flush_album_outbox"); } catch { /* durable outbox retries in background */ }
+  kickAlbumOutbox();
   return result;
 }
 
 /**
- * Run a local Classification mutation and immediately try to deliver it.
+ * Run a local Classification mutation and kick delivery of its durable intent.
  *
- * The same contract as `albumMutation`, and deliberately after the mutation rather
- * than around it: the optimistic local write and its durable intent are already
- * committed by the time this returns, so a failed send must never fail the user's
- * edit. The background loop retries the identical operation id.
+ * The same contract as `albumMutation`, and deliberately after the mutation rather than
+ * around it: the optimistic local write and its durable intent are already committed by
+ * the time this returns, so a failed send must never fail the user's edit.
  *
- * Every path that can create a Classification authority intent goes through this, so
- * a mutation cannot be added later that queues work nothing attempts to deliver.
+ * Every path that can create a Classification authority intent goes through this, so a
+ * mutation cannot be added later that queues work nothing attempts to deliver.
  */
 async function classificationMutation<T>(run: () => Promise<T>): Promise<T> {
   const result = await run();
-  try { await invoke("flush_classification_outbox"); } catch { /* durable outbox retries in background */ }
+  kickClassificationOutbox();
   return result;
 }
 

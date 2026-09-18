@@ -728,9 +728,46 @@ def _validate_list_order(value: dict[str, list[str]]) -> dict[str, list[str]]:
     return result
 
 
+def _classification_entries(items: list[dict]) -> list[dict]:
+    """The compatibility wire entries the extension bootstrap ships to unchanged readers.
+
+    The bootstrap and its pairing exchange both speak camelCase `entries`, so the shared
+    projection is mapped rather than handed over in the mobile route's snake_case field
+    names. The fields those consumers already know are unchanged — including `assetCount`,
+    which is the live authority count now that the authority owns membership — and the
+    ordering is the projection's, so display position survives the cutover.
+    """
+    return [{"id": item["id"], "kind": item["kind"], "name": item["name"],
+             "parentId": item["parent_id"], "iconKey": item["icon_key"],
+             "colorKey": item["color_key"], "assetCount": item["asset_count"]}
+            for item in items]
+
+
 def _classification_snapshot() -> dict:
     with get_db() as db:
-        row = db.execute("SELECT payload,revision FROM classification_snapshots WHERE singleton=1").fetchone()
+        # One read transaction: the entries and the authority identity they were projected
+        # under must describe the same state, or a command committing between the two reads
+        # would ship a tree labeled with another read's generation.
+        db.execute("BEGIN")
+        try:
+            row = db.execute(
+                "SELECT payload,revision FROM classification_snapshots WHERE singleton=1"
+            ).fetchone()
+            active = authority.active_domain(db, classification_authority.DOMAIN)
+            if active is not None:
+                # Same canonical projection the mobile tree serves: after cutover a
+                # structure accepted by the authority command lane must appear here too,
+                # and the frozen publication may contribute display position only. The
+                # sidecar is this route's own historical display list (`legacyEntries`,
+                # the publisher's order), so its pre-cutover order is preserved.
+                entries = _classification_entries(classification_authority.compatibility_tree(
+                    db, active,
+                    classification_snapshot.display_order(
+                        classification_snapshot.legacy_entries(row["payload"]))
+                    if row is not None else None))
+                return {"entries": entries, "revision": int(row["revision"]) if row is not None else 0}
+        finally:
+            db.rollback()
     if row is None:
         return {"entries": [], "revision": 0}
     # Entries only, for any stored version: the extension bootstrap must keep working
@@ -1609,23 +1646,49 @@ def list_mobile_classifications(
 ):
     require_auth(authorization)
     with get_db() as db:
-        snapshot = db.execute(
-            "SELECT payload FROM classification_snapshots WHERE singleton = 1"
-        ).fetchone()
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="No classification snapshot published yet")
-        counts = {
-            row["classification_id"]: row["asset_count"]
-            for row in db.execute(
-                """
-                SELECT relationship.classification_id, COUNT(*) AS asset_count
-                FROM asset_classifications AS relationship
-                JOIN assets AS asset ON asset.id = relationship.asset_id
-                WHERE asset.committed = 1
-                GROUP BY relationship.classification_id
-                """
-            ).fetchall()
-        }
+        # One read transaction, because the structural tree, the assignments its counts
+        # describe and the display order must all come from one state: a command committing
+        # between two separate reads would ship a tree from one instant with counts from
+        # another. `BEGIN` (deferred) takes the read snapshot at the first read below.
+        db.execute("BEGIN")
+        try:
+            snapshot = db.execute(
+                "SELECT payload FROM classification_snapshots WHERE singleton = 1").fetchone()
+            active = authority.active_domain(db, classification_authority.DOMAIN)
+            if active is not None:
+                # After cutover the authority command lane is the only writer of structure,
+                # so the tree itself must come from canonical state. The frozen publication
+                # still supplies display position — the user's existing order — and nothing
+                # else: its name/parent/kind/appearance/existence are pre-activation values
+                # that accepted commands have already superseded. The sidecar is read from
+                # this route's own historical display list, so its pre-cutover order holds.
+                payload = json.loads(snapshot["payload"]) if snapshot is not None else {}
+                return {
+                    "items": classification_authority.compatibility_tree(
+                        db, active,
+                        classification_snapshot.display_order(payload.get("entries", []))),
+                    "published_at": payload.get("published_at"),
+                }
+
+            # Before cutover preserve the shipped snapshot projection exactly: the published
+            # entries supply the tree and the replicated relations supply the counts.
+            if snapshot is None:
+                raise HTTPException(status_code=404,
+                                    detail="No classification snapshot published yet")
+            counts = {
+                row["classification_id"]: row["asset_count"]
+                for row in db.execute(
+                    """
+                    SELECT relationship.classification_id, COUNT(*) AS asset_count
+                    FROM asset_classifications AS relationship
+                    JOIN assets AS asset ON asset.id = relationship.asset_id
+                    WHERE asset.committed = 1
+                    GROUP BY relationship.classification_id
+                    """
+                ).fetchall()
+            }
+        finally:
+            db.rollback()
 
     payload = json.loads(snapshot["payload"])
     items = []
@@ -1701,6 +1764,22 @@ def mobile_tree_membership(classification_id: str, asset_id: str, authorization:
     return {"is_child": False}
 
 
+def _authority_memberships(db, active, rows):
+    """Canonical ``classification_ids`` for a page of Assets, or None while inactive.
+
+    After Classification cutover ``asset_classifications`` is frozen at its pre-activation
+    contents, so every compatibility read that ships or filters on membership must ask the
+    authority instead. ``active`` is the caller's own authority read, so the page it selected
+    and the memberships it projects describe one state. ``None`` means "no active
+    authority" and the caller keeps the shipped legacy behavior unchanged.
+    """
+    if active is None:
+        return None
+    memberships = classification_authority.assignment_projection_many(
+        db, active["libraryId"], {row["id"] for row in rows})
+    return {row["id"]: memberships.get(row["id"], []) for row in rows}
+
+
 @app.get("/v1/library/assets")
 def list_mobile_classification_assets(
     classification_id: str | None = None,
@@ -1718,16 +1797,6 @@ def list_mobile_classification_assets(
     direction = "DESC" if sort == "newest" else "ASC"
     params: list[object] = []
     classification_clause = ""
-    if classification_id is not None:
-        classification_clause = """
-            AND EXISTS (
-                SELECT 1
-                FROM asset_classifications AS relationship
-                WHERE relationship.asset_id = asset.id
-                  AND relationship.classification_id = ?
-            )
-        """
-        params.append(classification_id)
     cursor_clause = ""
     if cursor is not None:
         cursor_sort_at, cursor_asset_id = decode_mobile_cursor(cursor, sort)
@@ -1744,6 +1813,34 @@ def list_mobile_classification_assets(
     params.append(limit + 1)
 
     with get_db() as db:
+        # One authority read for both the filter and the projection, so a page cannot be
+        # selected from one state and projected from another.
+        active = authority.active_domain(db, classification_authority.DOMAIN)
+        if classification_id is not None:
+            if active is not None:
+                # Single-valued by contract, so this is an exact equality against the
+                # authority's canonical assignment rather than a legacy relation test.
+                classification_clause = """
+                    AND EXISTS (
+                        SELECT 1
+                        FROM classification_authority_assignments AS assignment
+                        WHERE assignment.library_id = ?
+                          AND assignment.asset_id = asset.id
+                          AND assignment.classification_id = ?
+                    )
+                """
+                params.insert(0, active["libraryId"])
+                params.insert(1, classification_id)
+            else:
+                classification_clause = """
+                    AND EXISTS (
+                        SELECT 1
+                        FROM asset_classifications AS relationship
+                        WHERE relationship.asset_id = asset.id
+                          AND relationship.classification_id = ?
+                    )
+                """
+                params.insert(0, classification_id)
         rows = db.execute(
             f"""
             SELECT asset.*,
@@ -1759,19 +1856,23 @@ def list_mobile_classification_assets(
         ).fetchall()
         has_more = len(rows) > limit
         page_rows = rows[:limit]
-        memberships: dict[str, list[str]] = {row["id"]: [] for row in page_rows}
+        memberships = {row["id"]: [] for row in page_rows}
         if page_rows:
-            placeholders = ",".join("?" for _ in page_rows)
-            for relation in db.execute(
-                f"""
-                SELECT asset_id, classification_id
-                FROM asset_classifications
-                WHERE asset_id IN ({placeholders})
-                ORDER BY asset_id, classification_id
-                """,
-                [row["id"] for row in page_rows],
-            ).fetchall():
-                memberships[relation["asset_id"]].append(relation["classification_id"])
+            canonical = _authority_memberships(db, active, page_rows)
+            if canonical is not None:
+                memberships = canonical
+            else:
+                placeholders = ",".join("?" for _ in page_rows)
+                for relation in db.execute(
+                    f"""
+                    SELECT asset_id, classification_id
+                    FROM asset_classifications
+                    WHERE asset_id IN ({placeholders})
+                    ORDER BY asset_id, classification_id
+                    """,
+                    [row["id"] for row in page_rows],
+                ).fetchall():
+                    memberships[relation["asset_id"]].append(relation["classification_id"])
 
     items = [
         {
@@ -1962,6 +2063,18 @@ def mobile_asset_item(row, classification_ids: list[str] | None = None) -> dict:
 
 
 def _mobile_memberships(db: sqlite3.Connection, rows) -> dict[str, list[str]]:
+    """Compatibility ``classification_ids`` for a set of Assets, keyed by Asset id.
+
+    Shared by every remaining projection that ships the field, including the Character
+    publication's frozen Asset payloads. After Classification cutover the authority command
+    lane is the only writer, so this must read canonical assignment state: a membership
+    frozen from the legacy table would keep an Asset attached to a Classification it was
+    moved away from, and Character publication persists those values.
+    """
+    canonical = _authority_memberships(db, authority.active_domain(
+        db, classification_authority.DOMAIN), rows)
+    if canonical is not None:
+        return canonical
     memberships: dict[str, list[str]] = {row["id"]: [] for row in rows}
     if not rows:
         return memberships
@@ -2006,7 +2119,13 @@ def list_mobile_revisit(
         for group in creator_groups:
             ids.extend(row["id"] for row in group["rows"])
         memberships: dict[str, list[str]] = {}
-        if ids:
+        # Same cutover rule as the library listing: the shipped legacy projection is only
+        # authoritative while the domain is still PC-owned.
+        active = authority.active_domain(db, classification_authority.DOMAIN)
+        if active is not None:
+            memberships = classification_authority.assignment_projection_many(
+                db, active["libraryId"], set(ids))
+        elif ids:
             placeholders = ",".join("?" for _ in ids)
             for relation in db.execute(
                 f"""

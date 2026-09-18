@@ -15,11 +15,29 @@ use crate::library::models::{AssetAlbumPatch, CreateAlbum};
 use crate::library::Library;
 
 const LIBRARY: &str = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+/// A second, unrelated library identity, for wrong-library refusals.
+const OTHER_LIBRARY: &str = "0f1e2d3c4b5a69788796a5b4c5d3e2f1";
 
 fn open() -> (tempfile::TempDir, Library) {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
     (temp, library)
+}
+
+/// Pin this library's identity so a remote authority can legitimately match it.
+///
+/// Migration 0079 mints a random identity and the reconciliation refuses a remote authority
+/// whose library id differs, so any test that drives a real `/status` response over a socket
+/// has to state the identity it is matching.
+fn pin_library_id(library: &Library) {
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE library_settings SET library_id = ?1 WHERE singleton = 1",
+            [LIBRARY],
+        )
+        .unwrap();
 }
 
 fn insert_asset(library: &Library, id: &str) {
@@ -112,6 +130,37 @@ fn outbox_len(connection: &Connection) -> i64 {
         .query_row("SELECT COUNT(*) FROM album_authority_outbox", [], |row| {
             row.get(0)
         })
+        .unwrap()
+}
+
+/// Every row of a revision cache as text, ordered, so a refusal can prove it is untouched.
+///
+/// The two caches have different key columns (`album_id`, and `album_id,asset_id`), so rows
+/// are stringified generically instead of through one fixed tuple shape. Only equality across
+/// a call is asserted, so the rendering never has to be meaningful on its own.
+fn revision_rows(connection: &Connection, table: &str) -> Vec<String> {
+    let mut statement = connection
+        .prepare(&format!("SELECT * FROM {table} ORDER BY 1, 2"))
+        .unwrap();
+    let columns = statement.column_count();
+    statement
+        .query_map([], |row| {
+            let mut parts = Vec::with_capacity(columns);
+            for index in 0..columns {
+                parts.push(match row.get_ref(index)? {
+                    rusqlite::types::ValueRef::Null => "NULL".to_owned(),
+                    rusqlite::types::ValueRef::Integer(value) => value.to_string(),
+                    rusqlite::types::ValueRef::Real(value) => value.to_string(),
+                    rusqlite::types::ValueRef::Text(value) => {
+                        String::from_utf8_lossy(value).into_owned()
+                    }
+                    rusqlite::types::ValueRef::Blob(value) => format!("blob:{}", value.len()),
+                });
+            }
+            Ok(parts.join("|"))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
         .unwrap()
 }
 
@@ -627,6 +676,7 @@ mod integration {
     use crate::cloud::client::CloudClient;
     use std::sync::{Arc, Mutex};
     use std::thread;
+    use std::time::Duration;
 
     use tiny_http::{Header, Response, Server};
 
@@ -743,6 +793,7 @@ mod integration {
     #[test]
     fn a_catch_up_longer_than_one_page_converges() {
         let (_temp, library) = open();
+        pin_library_id(&library);
         library
             .install_album_baseline_for_test(
                 &[album("album-a", "시작", None, 1)],
@@ -821,6 +872,7 @@ mod integration {
         });
 
         let (_temp, library) = open();
+        pin_library_id(&library);
         library
             .install_album_baseline_for_test(
                 &[album("album-a", "시작", None, 1)],
@@ -837,6 +889,602 @@ mod integration {
             .unwrap_err();
         handle.join().unwrap();
         assert!(matches!(error, LibraryError::InvalidCloudResponse));
+    }
+
+    /// A remote baseline for a *different* library is refused before anything is written.
+    ///
+    /// The epoch and library comparisons used to share one branch, so a wrong-library
+    /// response took the re-adoption path: this library's Albums, memberships and cached
+    /// revisions were deleted and replaced with a foreign library's. An epoch change for the
+    /// *same* library is the designed restart path and must still replace state (covered by
+    /// `re_adopting_replaces_identity_and_state_together`); a different `library_id` is an
+    /// identity problem, and the only safe answer is to refuse it and keep local state.
+    #[test]
+    fn a_wrong_library_baseline_is_refused_without_touching_local_state() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        // A real adopted replica of *this* library, with a relation, so the assertion covers
+        // memberships and their cached revisions as well as the Album rows.
+        library
+            .install_album_baseline_for_test(
+                &[album("mine", "내 앨범", None, 1)],
+                &[membership("mine", "asset-1", true, 1)],
+                LIBRARY,
+                1,
+                1,
+                5,
+            )
+            .unwrap();
+        let before = {
+            let connection = library.connection().unwrap();
+            (
+                albums(&connection),
+                memberships(&connection),
+                authority(&connection),
+                revision_rows(&connection, "album_authority_revisions"),
+                revision_rows(&connection, "album_authority_membership_revisions"),
+            )
+        };
+
+        // `/status` claims an active `albums` domain for a different library at a later
+        // cursor with a different epoch, so every re-adoption trigger is present at once.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let handle = thread::spawn(move || {
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1,
+                    "active": true,
+                    "libraryId": OTHER_LIBRARY,
+                    "domains": [{
+                        "domain": "albums",
+                        "libraryId": OTHER_LIBRARY,
+                        "epoch": 2,
+                        "contractVersion": 1,
+                        "cursor": 9
+                    }]
+                })))
+                .unwrap();
+        });
+        let client = CloudClient::new(&base).unwrap();
+        let error = library
+            .reconcile_album_authority(&client, "test-token")
+            .unwrap_err();
+        handle.join().unwrap();
+
+        assert!(
+            matches!(error, LibraryError::AlbumAuthorityMismatch),
+            "a wrong-library response is an identity refusal, got {error:?}"
+        );
+        let connection = library.connection().unwrap();
+        let after = (
+            albums(&connection),
+            memberships(&connection),
+            authority(&connection),
+            revision_rows(&connection, "album_authority_revisions"),
+            revision_rows(&connection, "album_authority_membership_revisions"),
+        );
+        assert_eq!(
+            before, after,
+            "nothing may change: rows, caches and the authority identity all stay put"
+        );
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 1, 1, 5)),
+            "the identity is still this library's at its own epoch and cursor"
+        );
+        assert!(
+            albums(&connection).iter().any(|(id, _, _)| id == "mine"),
+            "the local Album is still present rather than replaced by the foreign library's"
+        );
+    }
+
+    /// A local Album edit committed while `/changes` is in flight is never overwritten.
+    ///
+    /// The receive half reads the queue *before* it issues the request, so that read cannot
+    /// authorize a write that lands after it. The server here holds its response until a local
+    /// membership edit has been durably committed, which is exactly the window the
+    /// pre-request check cannot see. The page must be abandoned: the optimistic local state
+    /// survives, the intent stays queued, and the cursor does not advance.
+    #[test]
+    fn a_local_album_edit_during_the_request_is_never_overwritten() {
+        use std::sync::mpsc;
+
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        // A real adopted replica of this library with one live membership.
+        library
+            .install_album_baseline_for_test(
+                &[album("album-a", "여행", None, 1)],
+                &[membership("album-a", "asset-1", true, 1)],
+                LIBRARY,
+                1,
+                1,
+                4,
+            )
+            .unwrap();
+
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || {
+            // 1. `/status` advertises cursor 5.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1,
+                    "active": true,
+                    "libraryId": LIBRARY,
+                    "domains": [{
+                        "domain": "albums",
+                        "libraryId": LIBRARY,
+                        "epoch": 1,
+                        "contractVersion": 1,
+                        "cursor": 5
+                    }]
+                })))
+                .unwrap();
+            // 2. Hold `/changes` until the local edit is committed.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/changes"), "{}", request.url());
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            request
+                .respond(json_response(serde_json::json!({
+                    "libraryId": LIBRARY,
+                    "epoch": 1,
+                    "contractVersion": 1,
+                    "cursor": 5,
+                    "items": [{
+                        "sequence": 5,
+                        "authorityCursor": 5,
+                        "commandType": "setAlbumMembership",
+                        "operationId": "00000000-0000-4000-8000-000000000005",
+                        "changedAt": "2026-09-15T00:00:00Z",
+                        "membership": {
+                            "albumId": "album-a",
+                            "assetId": "asset-1",
+                            "desiredState": true,
+                            "entityRevision": 9
+                        }
+                    }],
+                    "nextAfter": 5,
+                    "hasMore": false
+                })))
+                .unwrap();
+            let _ = server.recv_timeout(Duration::from_millis(500));
+        });
+
+        let shared = std::sync::Arc::new(library);
+        let worker = std::sync::Arc::clone(&shared);
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
+            // The user removes asset-1 from album-a while the response is in flight.
+            worker
+                .patch_asset_albums(AssetAlbumPatch {
+                    asset_ids: vec!["asset-1".to_owned()],
+                    add_album_ids: Vec::new(),
+                    remove_album_ids: vec!["album-a".to_owned()],
+                })
+                .unwrap();
+            let _ = release_tx.send(());
+        });
+
+        let client = CloudClient::new(&base).unwrap();
+        let result = shared
+            .reconcile_album_authority(&client, "token")
+            .expect("a mid-flight local edit is a deferral, not an error");
+        release.join().unwrap();
+        handle.join().unwrap();
+
+        assert!(
+            result.deferred_to_outbox,
+            "the pass must report the intent as taking precedence this cycle"
+        );
+        assert_eq!(result.applied_changes, 0, "no change row was applied");
+        assert_eq!(result.local_cursor, Some(4), "the cursor did not advance");
+        let connection = shared.connection().unwrap();
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 4)));
+        assert!(
+            memberships(&connection).is_empty(),
+            "the user's removal is still the visible state"
+        );
+        assert!(outbox_len(&connection) > 0, "the intent is still queued");
+    }
+
+    /// A stored authority for a *different* library is never treated as an incremental predecessor.
+    ///
+    /// An earlier version of the wrong-library guard compared the stored identity against the
+    /// remote one and re-adopted on a difference, which was unsafe. Splitting that comparison so
+    /// only the epoch gates re-adoption left the opposite hole: a database already corrupted by
+    /// the old bug holds a foreign library at *some* epoch, and if the server's correct library
+    /// happens to report the same epoch, the dispatch sees no trigger at all and walks the
+    /// foreign identity's change log as if it were this library's continuation.
+    ///
+    /// Both identities must therefore be validated independently: the remote one against this
+    /// database's canonical library, and the *stored* one against the same canonical library.
+    #[test]
+    fn a_stored_foreign_library_authority_is_never_continued_incrementally() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        // Exactly the state the old bug could leave behind: a foreign library adopted at the
+        // same epoch the correct library now reports.
+        library
+            .install_album_baseline_for_test(
+                &[album("foreign", "남의 앨범", None, 1)],
+                &[],
+                OTHER_LIBRARY,
+                1,
+                1,
+                5,
+            )
+            .unwrap();
+
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&seen);
+        let handle = thread::spawn(move || {
+            // `/status` reports *this* library at the same epoch as the corrupted row.
+            let request = server.recv().unwrap();
+            log.lock().unwrap().push(request.url().to_owned());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1,
+                    "active": true,
+                    "libraryId": LIBRARY,
+                    "domains": [{
+                        "domain": "albums",
+                        "libraryId": LIBRARY,
+                        "epoch": 1,
+                        "contractVersion": 1,
+                        "cursor": 6
+                    }]
+                })))
+                .unwrap();
+            // Anything further is a request the corrupted identity must never have produced.
+            while let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(400)) {
+                log.lock().unwrap().push(request.url().to_owned());
+                let _ = request.respond(json_response(serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
+                    "snapshotCursor": 6, "section": "albums",
+                    "items": [], "nextAfter": null, "hasMore": false, "complete": false
+                })));
+            }
+        });
+        let client = CloudClient::new(&base).unwrap();
+        let error = library
+            .reconcile_album_authority(&client, "token")
+            .unwrap_err();
+        handle.join().unwrap();
+
+        assert!(
+            matches!(error, LibraryError::AlbumAuthorityMismatch),
+            "a stored foreign identity must be an explicit refusal, got {error:?}"
+        );
+        let paths = seen.lock().unwrap();
+        assert!(
+            !paths.iter().any(|path| path.contains("/changes")),
+            "no incremental path may be attempted against the foreign identity: {paths:?}"
+        );
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            authority(&connection),
+            Some((OTHER_LIBRARY.to_owned(), 1, 1, 5)),
+            "the refusal must not silently rewrite the stored identity"
+        );
+    }
+
+    /// A stale Album baseline install must not overwrite newer authority state.
+    ///
+    /// The shared receive precondition re-asserts the outbox *and* the authority identity
+    /// inside the installing transaction. The outbox alone is not enough: two receives can read
+    /// the same stored authority and both begin a walk from it, so B can complete and install a
+    /// newer baseline (say the epoch was re-activated) before A returns with a clean queue and
+    /// replaces B's newer state with the stale baseline it started from. The cursor would move
+    /// backwards and the replica would describe an authority identity the server no longer has.
+    #[test]
+    fn a_stale_album_baseline_install_is_refused_when_a_newer_one_landed_first() {
+        use std::sync::mpsc;
+
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        // Every receive starts from this stored authority.
+        library
+            .install_album_baseline_for_test(
+                &[album("album-a", "여행", None, 1)],
+                &[],
+                LIBRARY,
+                1,
+                1,
+                4,
+            )
+            .unwrap();
+
+        // Server A advertises epoch 2 and parks on the first baseline page.
+        let server_a = Server::http("127.0.0.1:0").unwrap();
+        let base_a = format!("http://{}/v1", server_a.server_addr());
+        let (parked_tx, parked_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle_a = thread::spawn(move || {
+            let request = server_a.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1, "active": true, "libraryId": LIBRARY,
+                    "domains": [{"domain": "albums", "libraryId": LIBRARY,
+                                 "epoch": 2, "contractVersion": 1, "cursor": 1}]
+                })))
+                .unwrap();
+            // The first baseline page is held until B has installed its newer state, so A's
+            // walk provably spans B's install rather than racing it on timing.
+            let request = server_a.recv().unwrap();
+            assert!(request.url().contains("/baseline"), "{}", request.url());
+            let _ = parked_tx.send(());
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            request
+                .respond(json_response(serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 2, "contractVersion": 1,
+                    "snapshotCursor": 1, "section": "albums",
+                    "items": [{"id": "album-a", "name": "여행", "parentId": null,
+                               "iconKey": null, "colorKey": null, "deleted": false,
+                               "entityRevision": 1}],
+                    "nextAfter": null, "hasMore": false, "complete": false
+                })))
+                .unwrap();
+            // A's remaining pages, should it ignore the refusal and keep walking.
+            while let Ok(Some(request)) = server_a.recv_timeout(Duration::from_millis(400)) {
+                let _ = request.respond(json_response(serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 2, "contractVersion": 1,
+                    "snapshotCursor": 1, "section": "memberships",
+                    "items": [], "nextAfter": null, "hasMore": false, "complete": true
+                })));
+            }
+        });
+
+        // Server B advertises epoch 3 at cursor 9 and installs that newer baseline.
+        let server_b = Server::http("127.0.0.1:0").unwrap();
+        let base_b = format!("http://{}/v1", server_b.server_addr());
+        let handle_b = thread::spawn(move || {
+            let request = server_b.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1, "active": true, "libraryId": LIBRARY,
+                    "domains": [{"domain": "albums", "libraryId": LIBRARY,
+                                 "epoch": 3, "contractVersion": 1, "cursor": 9}]
+                })))
+                .unwrap();
+            for (section, items, complete) in [
+                (
+                    "albums",
+                    serde_json::json!([{"id": "album-a", "name": "여행", "parentId": null,
+                                        "iconKey": null, "colorKey": null, "deleted": false,
+                                        "entityRevision": 1}]),
+                    false,
+                ),
+                ("memberships", serde_json::json!([]), true),
+            ] {
+                let request = server_b.recv().unwrap();
+                assert!(request.url().contains("/baseline"), "{}", request.url());
+                request
+                    .respond(json_response(serde_json::json!({
+                        "libraryId": LIBRARY, "epoch": 3, "contractVersion": 1,
+                        "snapshotCursor": 9, "section": section,
+                        "items": items, "nextAfter": null, "hasMore": false, "complete": complete
+                    })))
+                    .unwrap();
+            }
+            let _ = server_b.recv_timeout(Duration::from_millis(300));
+        });
+
+        let shared = std::sync::Arc::new(library);
+        let worker_a = std::sync::Arc::clone(&shared);
+        let client_a = CloudClient::new(&base_a).unwrap();
+        let received_a =
+            thread::spawn(move || worker_a.reconcile_album_authority(&client_a, "token"));
+
+        // Only once A is genuinely parked mid-walk does B install the newer baseline.
+        parked_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let worker_b = std::sync::Arc::clone(&shared);
+        let client_b = CloudClient::new(&base_b).unwrap();
+        let received_b =
+            thread::spawn(move || worker_b.reconcile_album_authority(&client_b, "token"));
+        let result_b = received_b.join().unwrap().expect("B adopts the newer baseline");
+        assert!(result_b.adopted && result_b.adopted_baseline);
+
+        // A's response arrives afterwards, against the state B has already replaced.
+        let _ = release_tx.send(());
+        let result_a = received_a.join().unwrap();
+        handle_a.join().unwrap();
+        handle_b.join().unwrap();
+
+        // The refusal is the same class of condition as a mid-walk local edit — the state the
+        // request was based on is gone — so it becomes the usual "nothing applied this cycle"
+        // deferral rather than an error the user sees. The next pass re-reads `/status`.
+        assert!(
+            result_a
+                .as_ref()
+                .is_ok_and(|result| result.deferred_to_outbox && !result.adopted_baseline),
+            "a stale baseline install must be refused, got {result_a:?}"
+        );
+        let connection = shared.connection().unwrap();
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 3, 1, 9)),
+            "B's newer authority state must remain installed"
+        );
+        assert_eq!(
+            albums(&connection),
+            [("album-a".to_owned(), "여행".to_owned(), None)],
+            "the newer baseline's product state must remain installed"
+        );
+    }
+
+    /// A local Album edit committed during a baseline walk is never replaced by it.
+    ///
+    /// The re-adoption path replaces every Album, membership and cached revision, so it is the
+    /// one receive that can destroy the most local state. A baseline walk is several requests,
+    /// so a user edit committed mid-download must abort the whole install rather than be
+    /// replaced by the pre-edit state the baseline describes.
+    #[test]
+    fn a_local_album_edit_during_a_baseline_walk_is_never_replaced() {
+        use std::sync::mpsc;
+
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        library
+            .install_album_baseline_for_test(
+                &[album("album-a", "여행", None, 1)],
+                &[membership("album-a", "asset-1", true, 1)],
+                LIBRARY,
+                1,
+                1,
+                4,
+            )
+            .unwrap();
+
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || {
+            // 1. `/status` advertises a new epoch, which is what makes the pass re-adopt.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1,
+                    "active": true,
+                    "libraryId": LIBRARY,
+                    "domains": [{
+                        "domain": "albums",
+                        "libraryId": LIBRARY,
+                        "epoch": 2,
+                        "contractVersion": 1,
+                        "cursor": 1
+                    }]
+                })))
+                .unwrap();
+            // 2. Hold the first baseline page until the local edit has committed.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/baseline"), "{}", request.url());
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            request
+                .respond(json_response(serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 2, "contractVersion": 1,
+                    "snapshotCursor": 1, "section": "albums",
+                    "items": [{
+                        "id": "album-b", "name": "새 앨범", "parentId": null,
+                        "iconKey": null, "colorKey": null,
+                        "deleted": false, "entityRevision": 1
+                    }],
+                    "nextAfter": null, "hasMore": false, "complete": false
+                })))
+                .unwrap();
+            // 3. The membership section, whose `complete` is the adoption point.
+            let request = server.recv().unwrap();
+            request
+                .respond(json_response(serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 2, "contractVersion": 1,
+                    "snapshotCursor": 1, "section": "memberships",
+                    "items": [], "nextAfter": null, "hasMore": false, "complete": true
+                })))
+                .unwrap();
+            let _ = server.recv_timeout(Duration::from_millis(500));
+        });
+
+        let shared = std::sync::Arc::new(library);
+        let worker = std::sync::Arc::clone(&shared);
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
+            // The user removes asset-1 from album-a while the baseline is downloading. This is
+            // a real state change, so it durably queues an intent — unlike re-adding a
+            // membership that is already there, which the store correctly treats as a no-op.
+            worker
+                .patch_asset_albums(AssetAlbumPatch {
+                    asset_ids: vec!["asset-1".to_owned()],
+                    add_album_ids: Vec::new(),
+                    remove_album_ids: vec!["album-a".to_owned()],
+                })
+                .unwrap();
+            let _ = release_tx.send(());
+        });
+
+        let client = CloudClient::new(&base).unwrap();
+        let result = shared
+            .reconcile_album_authority(&client, "token")
+            .expect("a mid-baseline local edit is a deferral, not an error");
+        release.join().unwrap();
+        handle.join().unwrap();
+
+        assert!(
+            result.deferred_to_outbox,
+            "the pass must report the intent as taking precedence this cycle"
+        );
+        let connection = shared.connection().unwrap();
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 1, 1, 4)),
+            "the refused install must not change the authority identity or cursor"
+        );
+        assert!(
+            albums(&connection).iter().any(|(id, _, _)| id == "album-a"),
+            "the local Album survives rather than being replaced by the baseline's"
+        );
+        assert!(
+            !albums(&connection).iter().any(|(id, _, _)| id == "album-b"),
+            "the baseline's Albums must not have been installed"
+        );
+        assert!(outbox_len(&connection) > 0, "the durable intent is still queued");
+    }
+
+    /// A first adoption compares and installs in one transaction.
+    ///
+    /// `install_album_baseline_for_test` deliberately skips the comparison, so the production
+    /// decision lives in `install_album_baseline`'s `compare_local` flag. This proves the two
+    /// halves cannot be separated: the install refuses a baseline that does not match local
+    /// state, which is only possible if the comparison ran inside the installing transaction.
+    #[test]
+    fn a_first_adoption_compares_and_installs_together() {
+        let (_temp, library) = open();
+        library
+            .connection()
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO albums (id, name, parent_id, created_at)
+                 VALUES ('mine', '내 앨범', NULL, '2026-09-16T00:00:00Z');",
+            )
+            .unwrap();
+        // The baseline describes a *different* Album, so a first adoption must refuse it
+        // rather than overwrite the local one.
+        let error = library
+            .adopt_album_baseline_for_test(
+                &[album("theirs", "남의 앨범", None, 1)],
+                &[],
+                LIBRARY,
+                1,
+                1,
+                1,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, LibraryError::AlbumFirstAdoptionMismatch),
+            "a mismatched first adoption must be refused, got {error:?}"
+        );
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            albums(&connection).iter().map(|(id, _, _)| id.clone()).collect::<Vec<_>>(),
+            ["mine"],
+            "the local Album is untouched by the refused adoption"
+        );
+        assert_eq!(authority(&connection), None, "nothing was adopted");
     }
 }
 

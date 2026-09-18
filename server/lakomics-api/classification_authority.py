@@ -535,19 +535,24 @@ def encode_page(library_id, epoch, contract_version, snapshot_cursor, section, i
     return payload
 
 
-def change_items(db, library_id, epoch, after, limit):
+def change_items(db, library_id, epoch, after, limit, ceiling=None):
     """Ordered, self-contained change rows.
 
     Each row carries the canonical delta a replica applies, so a client never needs a
     point-read after every change to reconstruct authority state. Every accepted
     state-changing command occupies exactly one sequence.
+
+    ``ceiling`` bounds the rows by the cursor the same response advertises. The caller
+    reads them in one snapshot, so the bound is defense in depth rather than the
+    consistency mechanism: it guarantees a row the advertised cursor does not account for
+    can never be returned, even if a later change stopped reading inside a transaction.
     """
     items = []
     for row in db.execute(
             "SELECT sequence,command_type,operation_id,payload,changed_at"
             " FROM classification_authority_changes WHERE library_id=? AND epoch=?"
-            " AND sequence>? ORDER BY sequence LIMIT ?",
-            [library_id, epoch, after, limit]):
+            " AND sequence>? AND (? IS NULL OR sequence<=?) ORDER BY sequence LIMIT ?",
+            [library_id, epoch, after, ceiling, ceiling, limit]):
         payload = json.loads(row[3])
         items.append({"sequence": row[0], "authorityCursor": row[0], "commandType": row[1],
                       "operationId": row[2], "changedAt": row[4], **payload})
@@ -1211,6 +1216,131 @@ def parse_baseline_request(params, epoch):
     return snapshot, section, after, limit
 
 
+def assignment_projection_many(db, library_id, asset_ids):
+    """Canonical ``classification_ids`` for a page of Assets, keyed by Asset id.
+
+    The mobile Asset projection carries ``classification_ids`` for compatibility, and after
+    cutover the *only* writer of an Asset's Classification is the authority command lane:
+    ``asset_classifications`` is deliberately left untouched by replication so a stale
+    commit cannot revert an accepted command. A read that still joins that table therefore
+    reports the pre-activation membership — the Asset keeps appearing under the
+    Classification it was moved away from, and a newly assigned Classification stays empty.
+
+    The projectable value is authority-backed exactly as ADR-0037 records: ``[]`` for an
+    Asset the authority has never mentioned, and ``[]`` or ``[classification_id]`` for one
+    it has. The returned map omits unmentioned Assets rather than naming them, so a caller
+    keeps its own empty default and a stale legacy row cannot leak through.
+
+    The query is bounded by the requested Assets rather than by the library. Filtering a
+    full-library read would return the same rows while walking every assignment already
+    stored (production holds ~8,936), which is the wrong shape for a per-page projection;
+    this uses the ``(library_id, asset_id)`` primary key as a seek. Callers therefore pass
+    at most one HTTP page of ids.
+    """
+    if not asset_ids:
+        return {}
+    # The id list is the page the caller already resolved, so its length is bounded by the
+    # route's own limit; SQLite's parameter ceiling is far above any page size.
+    ordered = sorted(asset_ids)
+    placeholders = ",".join("?" for _ in ordered)
+    memberships = {}
+    for row in db.execute(
+        f"""
+        SELECT asset_id, classification_id
+        FROM classification_authority_assignments
+        WHERE library_id = ?
+          AND asset_id IN ({placeholders})
+          AND classification_id IS NOT NULL
+        ORDER BY asset_id, classification_id
+        """,
+        [library_id, *ordered],
+    ).fetchall():
+        membership = memberships.setdefault(row["asset_id"], [])
+        membership.append(row["classification_id"])
+    return memberships
+
+
+def classification_counts(db, library_id):
+    """Live ``asset_count`` per Classification, computed from canonical assignment state.
+
+    The sidebar count and the membership filter must agree, so both are derived from
+    ``classification_authority_assignments``. The count is an index over that one table; the
+    classification rows it belongs to come from the published snapshot, not from here.
+    """
+    counts = {}
+    for row in db.execute(
+        """
+        SELECT classification_id, COUNT(*) AS asset_count
+        FROM classification_authority_assignments
+        WHERE library_id = ? AND classification_id IS NOT NULL
+        GROUP BY classification_id
+        """,
+        [library_id],
+    ).fetchall():
+        counts[row["classification_id"]] = row["asset_count"]
+    return counts
+
+
+def _display_key(row, order):
+    """The sort key one live Classification has in the shipped flat tree list.
+
+    ``order`` maps an id to the ``(position, parentId)`` it was displayed at in the
+    frozen publication — the *only* thing the legacy snapshot still contributes. A
+    position ranks a node inside the sibling set it was observed in, so a node that has
+    since been moved (its recorded parent no longer matches its authority parent) is an
+    arrival in its new set rather than an existing member of it, and cannot carry a
+    display slot into a set it never belonged to.
+
+    An unranked node — created after activation, or moved into this set — sorts after
+    every ranked node, and unranked nodes order among themselves by ``created_at`` and
+    then id. Both are stored authority columns and both are immutable (a rename or a
+    second move cannot reshuffle the order), so this is deterministic across requests and
+    restarts while a created node stays visible instead of needing a display slot. The id
+    breaks the tie because a bulk activation stamps one ``created_at`` on every row.
+    """
+    ranked = order.get(row["classification_id"]) if order else None
+    if ranked is not None and ranked[1] == row["parent_id"]:
+        return (0, ranked[0], "", row["classification_id"])
+    return (1, 0, row["created_at"], row["classification_id"])
+
+
+def compatibility_tree(db, active, order=None):
+    """The active Classification tree, projected for the shipped compatibility readers.
+
+    One projection for every authority-backed tree reader. The canonical structural state
+    is authority-only — existence (a deleted node is absent), id, kind, name, parent,
+    icon, color — because after cutover the authority command lane is the only writer, so
+    a tree read from the frozen publication keeps showing the pre-activation hierarchy
+    however many accepted commands have moved, renamed, created or deleted nodes since.
+    ``order`` supplies display position only and can never override those fields.
+
+    The list is flat, exactly as the shipped route is: a consumer re-parents it from
+    ``parent_id`` itself and keeps each parent's relative order, so a node's
+    ``sort_index`` is its position in the list this returns. Emitting every live row
+    guarantees the two properties an authority tree needs: a node is never dropped for
+    being unreachable (so a create stays visible) and a deleted node can never linger.
+
+    ``active`` is the caller's own authority read, so the tree it describes and the
+    authority identity it was read under are one state. Counts come from the same
+    transaction for the same reason.
+    """
+    library_id = active["libraryId"]
+    counts = classification_counts(db, library_id)
+    # No ORDER BY: the projection orders the rows itself, so a database sort would only add
+    # a temporary B-tree over the whole library. This is one indexed read of the live rows —
+    # never one query per Classification.
+    rows = db.execute(
+        "SELECT classification_id,kind,name,parent_id,icon_key,color_key,created_at"
+        " FROM classification_authority_state"
+        " WHERE library_id=? AND deleted=0",
+        [library_id]).fetchall()
+    return [{"id": row["classification_id"], "kind": row["kind"], "name": row["name"],
+             "parent_id": row["parent_id"], "icon_key": row["icon_key"],
+             "color_key": row["color_key"], "sort_index": index,
+             "asset_count": counts.get(row["classification_id"], 0)}
+            for index, row in enumerate(sorted(rows, key=lambda row: _display_key(row, order)))]
+
+
 def register_classification_authority(app, get_db, require_client, require_publisher):
     """Register the Classification authority read/command routes.
 
@@ -1363,22 +1493,41 @@ def register_classification_authority(app, get_db, require_client, require_publi
 
         def run():
             with get_db() as db:
-                row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
-                cursor = row["cursor"]
-                if after > cursor:
-                    # A cursor beyond the server is authority skew, not retention. A
-                    # fresh baseline resolves both, but the distinction matters for the
-                    # client's error surface.
-                    fail(409, "cursorAhead", "변경 커서가 권위 커서보다 앞서 있습니다.")
-                # A cursor at or below the pruned floor has a real gap behind it.
-                # Reporting "no changes" would silently drop accepted mutations.
-                if after < pruned_through(db, libraryId, epoch):
-                    raise expired_cursor(row)
-                items = change_items(db, libraryId, epoch, after, limit)
-                next_after = items[-1]["sequence"] if items else after
-                return {"libraryId": row["libraryId"], "epoch": row["epoch"],
-                        "contractVersion": row["contractVersion"], "cursor": cursor,
-                        "items": items, "nextAfter": next_after, "hasMore": next_after < cursor}
+                # The authority identity, the advertised cursor, the retention floor and
+                # the returned change rows must all describe one database snapshot. Read
+                # separately — as four autocommit statements — a concurrent command can
+                # commit between them, and the response then advertises the older cursor
+                # while carrying rows from the newer one. A replica cannot apply that
+                # coherently: it would be told `cursor = 10` with `nextAfter = 11`.
+                #
+                # WAL does not fix this on its own. It gives each *statement* a snapshot,
+                # not a group of statements, so the inconsistency is only removed by
+                # reading them inside one explicit read transaction. This mirrors the
+                # baseline endpoint, which already pins its whole multi-page walk.
+                db.execute("BEGIN")
+                try:
+                    row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                    cursor = row["cursor"]
+                    if after > cursor:
+                        # A cursor beyond the server is authority skew, not retention. A
+                        # fresh baseline resolves both, but the distinction matters for the
+                        # client's error surface.
+                        fail(409, "cursorAhead", "변경 커서가 권위 커서보다 앞서 있습니다.")
+                    # A cursor at or below the pruned floor has a real gap behind it.
+                    # Reporting "no changes" would silently drop accepted mutations.
+                    if after < pruned_through(db, libraryId, epoch):
+                        raise expired_cursor(row)
+                    # Bounded by the advertised cursor as well as by `after`, so no row can
+                    # be returned that the same response's cursor does not yet account for.
+                    # The snapshot already makes this unreachable; the explicit bound keeps
+                    # it unreachable if a later change drops the transaction.
+                    items = change_items(db, libraryId, epoch, after, limit, ceiling=cursor)
+                    next_after = items[-1]["sequence"] if items else after
+                    return {"libraryId": row["libraryId"], "epoch": row["epoch"],
+                            "contractVersion": row["contractVersion"], "cursor": cursor,
+                            "items": items, "nextAfter": next_after, "hasMore": next_after < cursor}
+                finally:
+                    db.rollback()
         return await run_in_threadpool(run)
 
     @app.put(PREFIX + "/commands")

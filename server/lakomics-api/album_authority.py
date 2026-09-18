@@ -72,6 +72,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import classification_authority
 
 DOMAIN = "albums"
 CONTRACT_VERSION = 1
@@ -596,9 +597,21 @@ def asset_classification_ids(db, rows):
     Classification is a different domain from Album; it is included only because the
     published mobile Asset projection carries it and a consumer that cached this page
     must not need a second round trip to learn it.
+
+    The membership itself must come from the Classification authority once it is active:
+    the legacy relation table is frozen by the cutover, so projecting it here would ship
+    an Album's Asset with a Classification the authority no longer holds.
     """
     memberships = {row["id"]: [] for row in rows}
     if not rows:
+        return memberships
+    active = authority.active_domain(db, classification_authority.DOMAIN)
+    if active is not None:
+        canonical = classification_authority.assignment_projection_many(
+            db, active["libraryId"], {row["id"] for row in rows})
+        for asset_id, values in canonical.items():
+            if asset_id in memberships:
+                memberships[asset_id] = values
         return memberships
     placeholders = ",".join("?" for _ in rows)
     for relation in db.execute(

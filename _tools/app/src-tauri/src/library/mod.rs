@@ -205,6 +205,24 @@ pub struct Library {
     volume_import_lock: Arc<Mutex<()>>,
     // ponytail: one database handle at a time; use a read/write lock if reads become a bottleneck.
     database_lock: Arc<Mutex<()>>,
+    // One outbox delivery pass per authority domain at a time.
+    //
+    // Single-flight belongs *here* rather than in any one caller. Several independent callers
+    // deliver the same domain — a mutation-triggered kick, the periodic React sync hook, and a
+    // focus or online event — and coalescing only the mutation-triggered ones still let a kick
+    // overlap a running background pass. Two overlapping passes read the same queue and would
+    // both send the same row; the server's operation-id receipt makes that idempotent, but it is
+    // wasted network work and it races on retiring the row.
+    //
+    // One lock per domain, deliberately not one shared lock: Album and Classification are
+    // independent authorities, and serializing them against each other would couple two
+    // unrelated sync lanes for no safety benefit. The gate is held across its own pass — that
+    // is the point, since the overlap being excluded is two concurrent passes — but the pass
+    // acquires and releases database connections *inside* it, and no caller holds the database
+    // lock while entering a flush, so the two locks are never taken in both orders.
+    // See [`Library::flush_outbox_single_flight`].
+    album_flush_lock: Arc<Mutex<()>>,
+    classification_flush_lock: Arc<Mutex<()>>,
     // Long catalog reads share this lock; only file replacement is exclusive.
     catalog_file_lock: Arc<RwLock<()>>,
     catalog_preparation: Arc<Mutex<catalog_preparation::PreparationState>>,
@@ -276,6 +294,8 @@ impl Library {
             manga_scan_lock: Arc::new(Mutex::new(())),
             volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
+            album_flush_lock: Arc::new(Mutex::new(())),
+            classification_flush_lock: Arc::new(Mutex::new(())),
             catalog_file_lock: Arc::default(),
             catalog_preparation: Arc::default(),
             catalog_lookup_cache: Arc::new(Mutex::new(None)),
@@ -312,6 +332,33 @@ impl Library {
             self.igdb_token_cache.clone(),
             self.igdb_request_limiter.clone(),
         )
+    }
+
+    /// Run one outbox delivery pass under its domain's single-flight gate.
+    ///
+    /// The gate makes "at most one active pass per domain" a property of the *domain*, not of a
+    /// caller: every entry point — a mutation kick, the periodic sync hook, a focus or online
+    /// event, or any future direct caller — goes through this, so none of them can overlap
+    /// another. Without it two passes read the same queue and both send the same row, which the
+    /// server's operation-id receipt makes idempotent but does not make free.
+    ///
+    /// The gate is held across the pass but never across the *database* lock in a way that
+    /// inverts the order: the pass acquires and releases database connections inside itself, and
+    /// no code path takes the database lock and then this one. Holding it during HTTP is
+    /// deliberate and safe — it serializes delivery, not database access — and it cannot
+    /// deadlock, because nothing under the database lock ever waits for a flush gate.
+    ///
+    /// A failure releases the gate like any other exit, so a transport error can never suppress
+    /// later retries; the pass simply returns its typed error and the next caller runs cleanly.
+    pub(crate) fn flush_outbox_single_flight<T>(
+        &self,
+        gate: &Mutex<()>,
+        pass: impl FnOnce() -> Result<T, LibraryError>,
+    ) -> Result<T, LibraryError> {
+        let _guard = gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        pass()
     }
 
     pub(crate) fn connection(&self) -> Result<LockedConnection<'_>, LibraryError> {

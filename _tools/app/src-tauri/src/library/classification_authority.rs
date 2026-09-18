@@ -680,12 +680,17 @@ impl Library {
         client: &CloudClient,
         credentials: &dyn CredentialSource,
     ) -> Result<ClassificationOutboxFlush, LibraryError> {
-        flush_outbox(
-            self,
-            client,
-            credentials,
-            &chrono::Utc::now().to_rfc3339(),
-        )
+        // Every Classification delivery entry point funnels through here, so the domain's
+        // single-flight gate covers all of them — the mutation kick, the periodic sync hook and
+        // the focus/online events alike. See [`Library::flush_outbox_single_flight`].
+        self.flush_outbox_single_flight(&self.classification_flush_lock, || {
+            flush_outbox(
+                self,
+                client,
+                credentials,
+                &chrono::Utc::now().to_rfc3339(),
+            )
+        })
     }
 
     /// The send pass against explicitly supplied credentials.
@@ -917,6 +922,44 @@ fn confirm(
             now,
         )?;
     }
+    // A delete's aggregate reassignment is part of the confirmed result, so the cache must
+    // move with it. Without this the cache keeps naming a Classification the authority has
+    // already deleted, which is the conflation this domain must not have: the row would
+    // describe neither the state at the cursor nor the state the accepted command produced.
+    // The deferred-assignment projection then reads that stale name and refuses the very
+    // change that would have corrected it, so the domain stops converging.
+    //
+    // Only the *cache* moves here. The visible projection is deliberately left alone: it may
+    // already include later optimistic operations, and receive replays the ordered log to
+    // converge it when the queue is clean.
+    //
+    // The number moved is recorded durably, because the change that carries the same
+    // transition must later be able to tell "I already did part of this" from "this replica
+    // is missing lineages". The tombstone cannot answer that: the replay writes it itself.
+    if let Some(transition) = &result.assignment_transition {
+        let moved = move_assignments_naming(
+            &transaction,
+            &transition.from_classification_id,
+            transition.to_classification_id.as_deref(),
+            now,
+        )?;
+        // Only a *changed* delete has a change sequence to replay, so only it needs a record:
+        // an accepted no-op has nothing to account for and nothing to order. A changed delete
+        // records its header even when `before` is empty — recognition of the confirmed
+        // ordering is exactly what makes an earlier assignment to the deleted node legal.
+        if let Some(change_sequence) = result.change_sequence.filter(|_| result.changed) {
+            record_preapplied_delete(
+                &transaction,
+                &entry.operation_id,
+                entry.epoch,
+                change_sequence,
+                transition,
+                transition.affects_assignments,
+                i64::try_from(moved).map_err(|_| LibraryError::InvalidCloudResponse)?,
+                now,
+            )?;
+        }
+    }
     // The intent is finished either way: an accepted no-op means the authority already
     // held the desired state, so there is nothing left to deliver.
     transaction.execute(
@@ -975,6 +1018,213 @@ fn rebase_assignment(
     )?;
     let _ = now;
     Ok(())
+}
+
+/// Record what the authority said a confirmed delete did, for its own later replay.
+///
+/// This is the durable half of the transition accounting. The change that later carries the
+/// same transition cannot infer its pre-applied work from the tombstone — the replay writes
+/// the tombstone in the same iteration — so what this PC learned when it accepted the command
+/// is remembered here instead, keyed by the operation id the change itself names.
+///
+/// The recorded count is the authority's own `affectsAssignments`, not a local recount: it is
+/// the number the authority used when it ran the transition, so a later page claiming a
+/// different number is falsifiable against durable state instead of against a value this PC
+/// could have recomputed wrongly.
+///
+/// A row is written even when the transition moved nothing locally, because replay also needs
+/// to recognise a delete this PC already confirmed at a specific sequence in order to accept an
+/// earlier assignment naming the deleted Classification. A change the authority ordered before
+/// that delete is historical, not impossible, and only this row can say so.
+fn record_preapplied_delete(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+    epoch: i64,
+    change_sequence: i64,
+    transition: &crate::cloud::client::ClassificationAssignmentTransition,
+    affects_assignments: i64,
+    preapplied_moved: i64,
+    now: &str,
+) -> Result<(), LibraryError> {
+    if change_sequence < 1 || affects_assignments < 0 || preapplied_moved < 0 {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    transaction.execute(
+        "INSERT INTO classification_authority_preapplied_deletes
+            (operation_id, epoch, change_sequence, from_classification_id,
+             to_classification_id, affects_assignments, preapplied_moved, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(operation_id, epoch) DO UPDATE SET
+             change_sequence = excluded.change_sequence,
+             from_classification_id = excluded.from_classification_id,
+             to_classification_id = excluded.to_classification_id,
+             affects_assignments = excluded.affects_assignments,
+             preapplied_moved = excluded.preapplied_moved,
+             created_at = excluded.created_at",
+        params![
+            operation_id,
+            epoch,
+            change_sequence,
+            transition.from_classification_id,
+            transition.to_classification_id,
+            affects_assignments,
+            preapplied_moved,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+/// What a confirmed delete durably recorded about itself, for its own later replay.
+///
+/// The endpoints are validated inside [`read_preapplied_delete`] against the incoming
+/// transition, so only the ordering and the authority's own count survive to the caller.
+pub(super) struct PreappliedDelete {
+    /// The sequence the authority assigned the delete, which orders it against the log.
+    pub(super) change_sequence: i64,
+    /// The `affectsAssignments` the authority reported in the accepted result.
+    pub(super) affects_assignments: i64,
+    /// How many lineages the pre-application itself moved.
+    pub(super) preapplied_moved: i64,
+}
+
+/// The durable pre-application for a delete the change log is about to replay.
+///
+/// Returns `None` when no header matches, which is the correct reading for every delete this
+/// PC did not itself confirm: nothing was applied ahead of the change, so the whole transition
+/// is still outstanding.
+///
+/// The header must describe *this* delete, so the operation id, the epoch and the transition's
+/// own endpoints all have to agree. The operation id alone is not enough: an epoch
+/// re-activation could otherwise let a row from the previous authority be matched by a new
+/// change that happened to reuse an id, and a row moved across identities would excuse a
+/// transition the replica never applied.
+pub(super) fn read_preapplied_delete(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+    epoch: i64,
+    transition: &crate::cloud::client::ClassificationAssignmentTransition,
+) -> Result<Option<PreappliedDelete>, LibraryError> {
+    let row = transaction
+        .query_row(
+            "SELECT change_sequence, from_classification_id, to_classification_id
+             FROM classification_authority_preapplied_deletes
+             WHERE operation_id = ?1 AND epoch = ?2",
+            params![operation_id, epoch],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })?;
+    let Some((change_sequence, from, to)) = row else {
+        return Ok(None);
+    };
+    if from != transition.from_classification_id || to != transition.to_classification_id {
+        // A header for a different Classification cannot describe this transition. Refusing
+        // is the fail-closed reading: treating it as "no header" would under-count the
+        // pre-applied work and then fail the count check anyway, with a less clear reason.
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    if change_sequence < 1 {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    let (affects_assignments, preapplied_moved): (i64, i64) = transaction.query_row(
+        "SELECT affects_assignments, preapplied_moved
+         FROM classification_authority_preapplied_deletes
+         WHERE operation_id = ?1 AND epoch = ?2",
+        params![operation_id, epoch],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if affects_assignments < 0 || preapplied_moved < 0 {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    Ok(Some(PreappliedDelete {
+        change_sequence,
+        affects_assignments,
+        preapplied_moved,
+    }))
+}
+
+/// Whether some confirmed delete already removed `classification_id` before `sequence`.
+///
+/// This is the evidence that makes an assignment naming a deleted Classification legitimate
+/// rather than corrupt. The server moves every naming lineage away atomically with the delete
+/// and validates every assignment target, so it can never emit an assignment to an
+/// already-deleted node *after* that delete. Only an assignment the authority ordered
+/// *earlier* — which this replica has simply not replayed yet — can legitimately name it, and
+/// a header with a greater sequence is exactly what proves that ordering.
+///
+/// A tombstone alone is deliberately not accepted as the evidence: the replay writes the
+/// tombstone itself, so trusting it would make the check unfalsifiable.
+///
+/// `sequence` is `None` for a projection that makes no ordering claim (deferred
+/// materialization, a baseline install). Any header naming the Classification then counts,
+/// which is the narrowest reading available without an ordering.
+pub(super) fn preapplied_delete_covers(
+    transaction: &Transaction<'_>,
+    epoch: i64,
+    classification_id: &str,
+    sequence: Option<i64>,
+) -> Result<bool, LibraryError> {
+    let covered: bool = transaction.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM classification_authority_preapplied_deletes
+             WHERE epoch = ?1 AND from_classification_id = ?2
+               AND (?3 IS NULL OR change_sequence > ?3))",
+        params![epoch, classification_id, sequence],
+        |row| row.get(0),
+    )?;
+    Ok(covered)
+}
+
+/// Retire a pre-application once its change has been replayed.
+///
+/// The change is now behind the cursor, so it can never be replayed again; keeping the row
+/// would only risk matching a later change that reused the id.
+pub(super) fn retire_preapplied_delete(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+    epoch: i64,
+) -> Result<(), LibraryError> {
+    transaction.execute(
+        "DELETE FROM classification_authority_preapplied_deletes
+         WHERE operation_id = ?1 AND epoch = ?2",
+        params![operation_id, epoch],
+    )?;
+    Ok(())
+}
+
+/// Move every cached assignment naming `from` to `to`, incrementing each revision by one.
+///
+/// This is the confirmed-cache counterpart of the server's own delete transition, which is
+/// exactly one `UPDATE ... SET classification_id = ?, entity_revision = entity_revision + 1
+/// WHERE classification_id = from`. Reproducing the same predicate and the same increment is
+/// what keeps the cache equal to the authority's post-delete lineage, so replaying the same
+/// change later is a no-op rather than a contradiction.
+///
+/// It is intentionally *not* a re-derivation from `asset_classifications`: the authority holds
+/// assignments for Assets this PC has not materialized, and their lineages must move too.
+pub(super) fn move_assignments_naming(
+    transaction: &Transaction<'_>,
+    from: &str,
+    to: Option<&str>,
+    now: &str,
+) -> Result<usize, LibraryError> {
+    let moved = transaction.execute(
+        "UPDATE classification_authority_assignment_revisions
+         SET classification_id = ?2, entity_revision = entity_revision + 1, updated_at = ?3
+         WHERE classification_id = ?1",
+        params![from, to, now],
+    )?;
+    Ok(moved)
 }
 
 /// Preserve an intent the authority rejected on structural grounds.

@@ -141,18 +141,81 @@ impl Library {
         if remote.contract_version != ALBUM_CONTRACT_VERSION {
             return Err(LibraryError::AlbumContractUnsupported);
         }
+        // Never adopt another library into this database, and never let a wrong-library
+        // response reach the installers below.
+        //
+        // This check is deliberately *before* the adopt/apply dispatch rather than folded
+        // into the epoch comparison beneath it. The two identities are not the same
+        // problem: an epoch change is the designed "the authority restarted" state for one
+        // library and is recovered by re-adopting, while a different `library_id` means the
+        // response describes another library entirely. Treating that as an epoch change
+        // would delete this library's Albums, memberships and cached revisions and replace
+        // them with a foreign library's — destroying local shared state instead of
+        // refusing. Matching Classification's guard keeps both domains equally protected.
+        if remote.library_id != self.library_id()? {
+            return Err(LibraryError::AlbumAuthorityMismatch);
+        }
+        // The *stored* identity is validated independently, against the same canonical library.
+        //
+        // The remote check above cannot cover this: a database already corrupted by the older
+        // guard holds a foreign library's authority row, and if that foreign library happens to
+        // have the epoch the correct one now reports, no re-adoption trigger fires and the
+        // dispatch walks the foreign identity's change log as if it continued this library's.
+        // That is not a recoverable convergence — the two logs describe different libraries, and
+        // the cursor comparison is meaningless across them.
+        //
+        // Refusing is the safe answer here rather than silently re-adopting. A re-adoption would
+        // destroy whatever the foreign baseline installed on top of this library's Albums, and
+        // the corrupted state is evidence that this database's Album replica is not trustworthy;
+        // reporting it lets a later, deliberate repair decide what to keep. Classification
+        // carries the equivalent guard, so both domains fail closed the same way.
+        if let Some(authority) = &local {
+            if authority.library_id != remote.library_id {
+                return Err(LibraryError::AlbumAuthorityMismatch);
+            }
+        }
+        // A local intent that appeared while a request was in flight — a change page or a
+        // baseline walk — is the same condition: the intent is the user's current intent, so
+        // nothing is applied, the cursor does not move, and the next pass flushes it first.
+        // Converting it here keeps one meaning for the state instead of two near-identical
+        // ones that differ only by which half of the receive produced it.
+        match self.receive_album_authority(client, token, remote, local.as_ref(), rematerialized) {
+            Err(LibraryError::AuthorityReceivePreconditionChanged { .. }) => {
+                Ok(AlbumReconciliation {
+                    adopted: true,
+                    deferred_to_outbox: true,
+                    server_cursor: Some(remote.cursor),
+                    local_cursor: local.as_ref().map(|authority| authority.cursor),
+                    behind_by: local
+                        .as_ref()
+                        .map_or(0, |authority| remote.cursor - authority.cursor),
+                    ..Default::default()
+                })
+            }
+            other => other,
+        }
+    }
+
+    /// The adopt-versus-catch-up dispatch, with the deferral condition left to the caller.
+    fn receive_album_authority(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        remote: &crate::cloud::client::SyncAuthorityDomain,
+        local: Option<&AlbumAuthority>,
+        rematerialized: u32,
+    ) -> Result<AlbumReconciliation, LibraryError> {
         match local {
-            None => self.adopt_album_baseline(client, token, remote, false),
-            Some(authority)
-                if authority.library_id != remote.library_id || authority.epoch != remote.epoch =>
-            {
-                // A different library or epoch is a new authority, so the stored cursor
-                // and caches describe something else. Re-adopting is the only correct
-                // response; there is no meaningful incremental path across identities.
-                self.adopt_album_baseline(client, token, remote, true)
+            None => self.adopt_album_baseline(client, token, remote, false, None),
+            Some(authority) if authority.epoch != remote.epoch => {
+                // A different epoch is a new authority for the *same* library, so the
+                // stored cursor and caches describe something else. Re-adopting is the
+                // only correct response; there is no meaningful incremental path across
+                // epochs.
+                self.adopt_album_baseline(client, token, remote, true, Some(authority))
             }
             Some(authority) => {
-                match self.apply_album_changes(client, token, &authority) {
+                match self.apply_album_changes(client, token, authority) {
                     Ok((applied, cursor)) => Ok(AlbumReconciliation {
                         adopted: true,
                         applied_changes: applied,
@@ -170,7 +233,7 @@ impl Library {
                         // pending intent to preserve here: this domain receives only when
                         // the outbox is empty, so the replica is already identical to what
                         // the server confirmed.
-                        self.adopt_album_baseline(client, token, remote, true)
+                        self.adopt_album_baseline(client, token, remote, true, Some(authority))
                     }
                     Err(error) => Err(error),
                 }
@@ -182,12 +245,17 @@ impl Library {
     ///
     /// Nothing local changes until the final membership page reports `complete`, so a
     /// failure or an intervening mutation leaves the existing replica untouched.
+    ///
+    /// A local intent committed while the walk was in flight is reported the same way the
+    /// incremental path reports one: the intent wins this cycle and the install is abandoned,
+    /// rather than the user seeing an error for editing during a sync.
     fn adopt_album_baseline(
         &self,
         client: &CloudClient,
         token: &str,
         remote: &crate::cloud::client::SyncAuthorityDomain,
         replace_existing: bool,
+        observed: Option<&AlbumAuthority>,
     ) -> Result<AlbumReconciliation, LibraryError> {
         // Any Album command advances the cursor, so a concurrent change during a
         // multi-page walk invalidates the frozen snapshot. Retrying inside this pass
@@ -208,9 +276,16 @@ impl Library {
             // Album state already here. A difference means the activation raced the PC
             // or something else changed underneath, and overwriting local state would
             // destroy user data rather than converge it.
-            self.require_first_adoption_match(&baseline)?;
+            //
+            // The comparison deliberately does *not* happen here. It runs inside the
+            // install's own transaction, because a comparison on a separate connection
+            // cannot authorize the write that follows it: a local Album edit could commit
+            // in between, and the check would then approve a state that is no longer the
+            // state being replaced. [`install_album_baseline`] takes the flag and holds
+            // both in one transaction, so no such window exists.
         }
-        let local_cursor = self.install_album_baseline(&baseline, remote)?;
+        let local_cursor =
+            self.install_album_baseline(&baseline, remote, !replace_existing, observed)?;
         Ok(AlbumReconciliation {
             adopted: true,
             adopted_baseline: true,
@@ -286,9 +361,16 @@ impl Library {
     }
 
     /// Refuse a first adoption whose baseline differs from the local Album state.
-    fn require_first_adoption_match(&self, baseline: &Baseline) -> Result<(), LibraryError> {
-        let connection = self.connection()?;
-        let mut statement = connection.prepare(
+    ///
+    /// Runs on the caller's transaction so the comparison cannot be separated from the install
+    /// it authorizes: a check on its own connection would approve a state a concurrent local
+    /// edit could change before the install ran.
+    fn require_first_adoption_match(
+        &self,
+        transaction: &Transaction<'_>,
+        baseline: &Baseline,
+    ) -> Result<(), LibraryError> {
+        let mut statement = transaction.prepare(
             "SELECT id, name, parent_id, icon_key, color_key FROM albums ORDER BY id",
         )?;
         let local_albums = statement
@@ -331,7 +413,7 @@ impl Library {
         // ran from this PC's own staged snapshot, so every relation it staged named an
         // Asset that existed here. A baseline relation this PC cannot materialize is
         // therefore a real divergence, not a pending download.
-        let mut statement = connection.prepare(
+        let mut statement = transaction.prepare(
             "SELECT link.album_id, link.asset_id FROM asset_albums link
              JOIN assets asset ON asset.id = link.asset_id
              ORDER BY link.album_id, link.asset_id",
@@ -357,14 +439,28 @@ impl Library {
     ///
     /// One transaction, so an interruption cannot leave a half-adopted replica whose
     /// cursor claims state it does not have.
+    ///
+    /// The transaction begins by re-asserting the receive preconditions, then — for a first
+    /// adoption — runs the local comparison. Both belong inside this transaction for the same
+    /// reason: the caller read the outbox and the authority *before* its network walk, and a
+    /// walk can span several requests. A local Album edit committed at any point during the
+    /// download would otherwise be silently replaced by the pre-edit state the baseline
+    /// describes, or (for a first adoption) the comparison would approve a state the install
+    /// then overwrote.
     fn install_album_baseline(
         &self,
         baseline: &Baseline,
         remote: &crate::cloud::client::SyncAuthorityDomain,
+        compare_local: bool,
+        observed: Option<&AlbumAuthority>,
     ) -> Result<i64, LibraryError> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        require_clean_baseline_receive(&transaction, &remote.library_id, observed)?;
+        if compare_local {
+            self.require_first_adoption_match(&transaction, baseline)?;
+        }
         // `albums.parent_id` is `ON DELETE RESTRICT` and the self-reference is
         // immediate, so a wholesale replace would trip on its own intermediate states:
         // clearing the table violates RESTRICT for every parent, and pages arrive in
@@ -442,9 +538,11 @@ impl Library {
                 token,
             )?;
             if !page.items.is_empty() {
-                // The page's changes and the cursor that describes them commit together,
-                // and the ordering check happens inside that same transaction.
-                self.apply_album_page(&page.items, page.next_after)?;
+                // The page's changes and the cursor that describes them commit together, and
+                // the ordering check happens inside that same transaction. The requested
+                // cursor is passed in so the transaction proves the page still continues the
+                // *stored* log rather than trusting the pre-request read.
+                self.apply_album_page_guarded(&page.items, page.next_after, Some(requested))?;
                 applied += page.items.len() as u32;
                 cursor = page.next_after;
             }
@@ -462,6 +560,23 @@ impl Library {
 
     /// Apply one change page and advance the cursor in the same transaction.
     fn apply_album_page(&self, items: &[AlbumChange], cursor: i64) -> Result<(), LibraryError> {
+        self.apply_album_page_guarded(items, cursor, None)
+    }
+
+    /// Apply one change page, optionally requiring the stored cursor and a clean queue.
+    ///
+    /// `expected_cursor` is the cursor the page was requested from when called from the
+    /// receive loop. The receive half reads the queue and the authority *before* its network
+    /// request, so that read cannot authorize a write that lands after the round trip: a
+    /// local Album edit can be durably committed while a response is in flight, and applying
+    /// the response then would overwrite the user's current intent. Re-checking both
+    /// preconditions inside this transaction closes that window.
+    fn apply_album_page_guarded(
+        &self,
+        items: &[AlbumChange],
+        cursor: i64,
+        expected_cursor: Option<i64>,
+    ) -> Result<(), LibraryError> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
@@ -470,9 +585,26 @@ impl Library {
         // that the log provides from being read as a referential error, while a page
         // that genuinely leaves a dangling parent is still refused at COMMIT.
         transaction.pragma_update(None, "defer_foreign_keys", "ON")?;
-        let mut current = read_authority(&transaction)?
-            .ok_or(LibraryError::AlbumAuthorityInactive)?
-            .cursor;
+        let stored = read_authority(&transaction)?
+            .ok_or(LibraryError::AlbumAuthorityInactive)?;
+        if !read_outbox(&transaction)?.is_empty() {
+            // A local edit appeared while this page was in flight. That edit is the user's
+            // current intent, so the page must not be applied over it; the caller reports
+            // the same "intent takes precedence this cycle" state the pre-request check
+            // produces. Nothing has been written and the cursor has not moved.
+            return Err(LibraryError::AuthorityReceivePreconditionChanged {
+                library_id: stored.library_id.clone(),
+                cursor: stored.cursor,
+            });
+        }
+        let mut current = stored.cursor;
+        if let Some(expected) = expected_cursor {
+            // The page was composed against the cursor the caller requested from. A
+            // different stored cursor means it no longer continues this log.
+            if current != expected {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
         for change in items {
             // Sequence order is what makes the outcome correct, so a gap or a repeated row
             // is a malformed page rather than something to apply. Checking here — rather
@@ -554,6 +686,69 @@ impl Library {
         )?;
         Ok(u32::try_from(inserted).unwrap_or(u32::MAX))
     }
+}
+
+/// Re-assert, inside the baseline install transaction, that the receive may still proceed.
+///
+/// The receive half reads the outbox *before* its network walk, so that read cannot authorize
+/// a write that lands after the round trip. A baseline walk spans several requests, which makes
+/// that window much wider than the incremental path's: a user Album edit committed at any point
+/// during the download must not be replaced by the pre-edit state the baseline describes.
+///
+/// This runs in the same transaction that installs the baseline, so either the queue is still
+/// clean and the install lands, or the whole install is abandoned with the intent intact. The
+/// caller turns the refusal into the usual "the intent takes precedence this cycle" state: the
+/// next pass flushes that intent before it receives again.
+fn require_clean_baseline_receive(
+    transaction: &Transaction<'_>,
+    library_id: &str,
+    observed: Option<&AlbumAuthority>,
+) -> Result<(), LibraryError> {
+    // The cursor a refusal reports is the one the replica stood at when the refusal was
+    // decided: nothing was written, so it still stands exactly there. Reading it first also
+    // lets the identity check below compare against the same row the install would replace.
+    let stored = read_authority(transaction)?;
+    let refused = |library_id: &str, cursor: i64| LibraryError::AuthorityReceivePreconditionChanged {
+        library_id: library_id.to_owned(),
+        cursor,
+    };
+    if !read_outbox(transaction)?.is_empty() {
+        return Err(refused(
+            library_id,
+            stored.as_ref().map(|authority| authority.cursor).unwrap_or(0),
+        ));
+    }
+    // A clean queue is not sufficient. The caller read this authority state *before* its
+    // network walk, so that read cannot authorize an install that lands after the round trip:
+    // another receive can complete in the meantime and install a newer baseline — most
+    // sharply after an epoch re-activation, where the domain legitimately has more than one
+    // in-flight walk against the same library. Installing the older baseline then would move
+    // the cursor backwards and describe an authority identity the server no longer has, so
+    // the install must prove the state it was requested against has not moved.
+    //
+    // The comparison is the whole identity the install depends on, not just the cursor: an
+    // unchanged cursor under a different epoch or contract describes a different authority,
+    // and a *newly* adopted row where the caller observed none is the same class of change.
+    // Classification carries the equivalent guard, so both domains fail closed the same way.
+    let unchanged = match (observed, &stored) {
+        (None, None) => true,
+        (Some(observed), Some(stored)) => {
+            observed.library_id == stored.library_id
+                && observed.epoch == stored.epoch
+                && observed.contract_version == stored.contract_version
+                && observed.cursor == stored.cursor
+        }
+        _ => false,
+    };
+    if !unchanged {
+        let cursor = stored.as_ref().map(|authority| authority.cursor).unwrap_or(0);
+        let library_id = stored
+            .as_ref()
+            .map(|authority| authority.library_id.clone())
+            .unwrap_or_else(|| library_id.to_owned());
+        return Err(refused(&library_id, cursor));
+    }
+    Ok(())
 }
 
 /// Insert one live Album from an authoritative projection.
@@ -687,17 +882,56 @@ impl Library {
     /// Test seam: run the first-adoption comparison against a candidate baseline.
     ///
     /// `install_album_baseline_for_test` deliberately installs without the comparison,
-    /// because re-adoption (a new epoch) must replace state rather than refuse it.
+    /// because re-adoption (a new epoch) must replace state rather than refuse it. The
+    /// comparison itself runs on a transaction because that is where production runs it, and
+    /// a seam that compared on a bare connection would not exercise the same code path.
     pub(crate) fn require_first_adoption_match_for_test(
         &self,
         albums: &[AlbumProjection],
         memberships: &[AlbumMembershipProjection],
     ) -> Result<(), LibraryError> {
-        self.require_first_adoption_match(&Baseline {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        self.require_first_adoption_match(&transaction, &Baseline {
             albums: albums.to_vec(),
             memberships: memberships.to_vec(),
             cursor: 0,
         })
+    }
+
+    /// Test seam: adopt a completed baseline through the production first-adoption decision.
+    ///
+    /// `install_album_baseline_for_test` installs *without* the local comparison, because
+    /// re-adoption must replace state rather than refuse it. This drives the other branch, so a
+    /// test can exercise the compare-and-install decision itself rather than a hand-picked
+    /// installer.
+    pub(crate) fn adopt_album_baseline_for_test(
+        &self,
+        albums: &[AlbumProjection],
+        memberships: &[AlbumMembershipProjection],
+        library_id: &str,
+        epoch: i64,
+        contract_version: i64,
+        cursor: i64,
+    ) -> Result<(), LibraryError> {
+        let baseline = Baseline {
+            albums: albums.to_vec(),
+            memberships: memberships.to_vec(),
+            cursor,
+        };
+        let remote = crate::cloud::client::SyncAuthorityDomain {
+            domain: ALBUM_DOMAIN.to_owned(),
+            library_id: library_id.to_owned(),
+            epoch,
+            contract_version,
+            cursor,
+        };
+        let observed = {
+            let connection = self.connection().unwrap();
+            read_authority(&connection).unwrap()
+        };
+        self.install_album_baseline(&baseline, &remote, true, observed.as_ref())
+            .map(|_| ())
     }
 
     /// Test seam: install a baseline through the production install path.
@@ -722,6 +956,11 @@ impl Library {
             contract_version,
             cursor,
         };
-        self.install_album_baseline(&baseline, &remote).map(|_| ())
+        let observed = {
+            let connection = self.connection().unwrap();
+            read_authority(&connection).unwrap()
+        };
+        self.install_album_baseline(&baseline, &remote, false, observed.as_ref())
+            .map(|_| ())
     }
 }

@@ -15,6 +15,7 @@ use crate::cloud::client::{
     ClassificationProjection, ClassificationRoleProjection,
 };
 use crate::library::error::LibraryError;
+use crate::library::models::SetAssetClassification;
 use crate::library::Library;
 
 const LIBRARY: &str = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
@@ -143,11 +144,26 @@ fn delete_change(
     value: ClassificationProjection,
     transition: ClassificationAssignmentTransition,
 ) -> ClassificationChange {
+    delete_change_for_operation(sequence, value, transition, &format!("op-{sequence}"))
+}
+
+/// One delete change naming a *specific* operation id.
+///
+/// A confirmed delete's durable record is keyed by the operation id the change names, so a
+/// test that wants replay to match that record has to present the same id — the default
+/// `op-{sequence}` deliberately does not, which keeps tests that are not about pre-application
+/// on the "no record" path.
+fn delete_change_for_operation(
+    sequence: i64,
+    value: ClassificationProjection,
+    transition: ClassificationAssignmentTransition,
+    operation_id: &str,
+) -> ClassificationChange {
     ClassificationChange {
         sequence,
         authority_cursor: sequence,
         command_type: "deleteClassification".to_owned(),
-        operation_id: format!("op-{sequence}"),
+        operation_id: operation_id.to_owned(),
         changed_at: "2026-09-16T00:00:00Z".to_owned(),
         classification: Some(value),
         assignment: None,
@@ -232,6 +248,21 @@ fn assignment_cache(connection: &Connection) -> Vec<(String, Option<String>, i64
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .unwrap();
     rows.map(|row| row.unwrap()).collect()
+}
+
+/// How many durable pre-applied-delete records survive.
+///
+/// A record is written when this PC confirms a delete command and retired when that delete's
+/// change is replayed, so its count says whether the pre-application accounting is live,
+/// already consumed, or restored by a page rollback.
+fn preapplied_delete_records(connection: &Connection) -> i64 {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM classification_authority_preapplied_deletes",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
 }
 
 /// Every durable Classification intent currently queued, oldest first.
@@ -941,6 +972,169 @@ fn a_deferred_assignment_materializes_when_the_asset_appears() {
         [("later".to_owned(), Some("originals".to_owned()), 1)]
     );
     assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 3)));
+}
+
+// ---------------------------------------------------------------------------
+// 24b. The idle pass keeps an unchanged replica to one statement
+// ---------------------------------------------------------------------------
+
+/// A converged replica does no per-Asset Rust-side work, however many assignments it holds.
+///
+/// The deferred-materialization step runs on every foreground pass, so its no-op path must not
+/// issue per-row point queries. Before this it swept the whole cache and ran three point queries
+/// per row — around 24k statements for 8k assignments — on every idle tick. The improvement is
+/// that the work moved into one set-based candidate query, not that the pass stopped touching
+/// the confirmed rows at all.
+#[test]
+fn a_converged_replica_visits_no_assignments() {
+    let (_temp, library) = open();
+    const COUNT: usize = 2_000;
+    for index in 0..COUNT {
+        insert_asset(&library, &format!("asset-{index:05}"));
+    }
+    // Install the authority's own view of those Assets, so the replica starts converged:
+    // the projection this baseline makes *is* the authoritative value for every row.
+    let assignments: Vec<ClassificationAssignmentProjection> = (0..COUNT)
+        .map(|index| assignment(&format!("asset-{index:05}"), Some("originals"), 1))
+        .collect();
+    library
+        .install_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            &assignments,
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            7,
+        )
+        .unwrap();
+    assert_eq!(
+        library.deferred_assignment_work_for_test().unwrap(),
+        0,
+        "a converged pass must visit nothing"
+    );
+    assert_eq!(library.materialize_deferred_classification_assignments().unwrap(), 0);
+    assert_eq!(
+        library.deferred_assignment_work_for_test().unwrap(),
+        0,
+        "the pass itself must not create work to redo"
+    );
+}
+
+/// Only the Asset whose projection is actually wrong is visited.
+///
+/// This is the property that makes the set-based selection equivalent to the per-row check
+/// it replaced: the visited set is exactly the rows that would change, plus the corrupt rows
+/// that must fail closed.
+#[test]
+fn only_the_diverged_assignment_is_visited() {
+    let (_temp, library) = open();
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("stale", "예전", Some("originals"), 1),
+            ],
+            &[
+                assignment("settled", Some("originals"), 1),
+                assignment("diverged", Some("originals"), 1),
+                assignment("cleared", None, 2),
+                assignment("deferred", Some("originals"), 1),
+            ],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            9,
+        )
+        .unwrap();
+    insert_asset(&library, "settled");
+    insert_asset(&library, "diverged");
+    insert_asset(&library, "cleared");
+    // `deferred` deliberately has no local Asset yet: withholding it *is* the deferred
+    // state, so it must not be visited even though its projection is "wrong".
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO asset_classifications (asset_id, classification_id)
+             VALUES ('settled', 'originals'), ('diverged', 'stale'), ('cleared', 'stale')",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        library.deferred_assignment_work_for_test().unwrap(),
+        2,
+        "`diverged` and `cleared` owe work; `settled` and the unmaterialized `deferred` do not"
+    );
+    assert_eq!(library.materialize_deferred_classification_assignments().unwrap(), 2);
+    {
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            projections(&connection),
+            [
+                ("diverged".to_owned(), "originals".to_owned()),
+                ("settled".to_owned(), "originals".to_owned()),
+            ],
+            "`cleared` loses its stale relation and `diverged` is rewritten to the authoritative value"
+        );
+    }
+    assert_eq!(library.deferred_assignment_work_for_test().unwrap(), 0);
+}
+
+/// A newly-arrived Asset still receives its previously-deferred authoritative assignment.
+///
+/// The set-based path must not lose the recovery the full sweep provided: the row becomes
+/// eligible exactly when the Asset appears.
+#[test]
+fn a_newly_arrived_asset_becomes_visible_work() {
+    let (_temp, library) = open();
+    library
+        .install_classification_baseline_for_test(
+            &[classification("originals", "오리지널", None, 1)],
+            &[assignment("later", Some("originals"), 1)],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            3,
+        )
+        .unwrap();
+    assert_eq!(library.deferred_assignment_work_for_test().unwrap(), 0);
+    insert_asset(&library, "later");
+    assert_eq!(library.deferred_assignment_work_for_test().unwrap(), 1);
+    assert_eq!(library.materialize_deferred_classification_assignments().unwrap(), 1);
+    let connection = library.connection().unwrap();
+    assert_eq!(projections(&connection), [("later".to_owned(), "originals".to_owned())]);
+}
+
+/// A corrupt cached assignment is still refused rather than silently skipped.
+///
+/// The selection is a superset of the writes precisely so this row is visited and
+/// `project_assignment` can fail closed on it, exactly as the per-row sweep did.
+#[test]
+fn a_corrupt_assignment_is_still_selected_and_refused() {
+    let (_temp, library) = open();
+    insert_asset(&library, "asset-1");
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO classification_authority_assignment_revisions
+                (asset_id, classification_id, entity_revision, updated_at)
+             VALUES ('asset-1', 'absent', 1, '2026-09-16T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        library.deferred_assignment_work_for_test().unwrap(),
+        1,
+        "an assignment naming an absent Classification must still be visited"
+    );
+    let error = library
+        .materialize_deferred_classification_assignments()
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::InvalidCloudResponse));
 }
 
 #[test]
@@ -3522,6 +3716,32 @@ mod integration {
         })
     }
 
+    /// One baseline page for an explicit epoch.
+    ///
+    /// A re-adoption happens because the authority's epoch changed, so a test that drives one
+    /// has to serve pages for that new epoch — the identity check refuses a page whose epoch
+    /// disagrees with the `/status` reading, which is exactly what makes a wrong-library or
+    /// wrong-epoch response impossible to adopt.
+    fn baseline_page_at_epoch(
+        epoch: i64,
+        cursor: i64,
+        section: &str,
+        items: serde_json::Value,
+        next_after: Option<&str>,
+        has_more: bool,
+        complete: bool,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "libraryId": LIBRARY, "epoch": epoch, "contractVersion": 1,
+            "snapshotCursor": cursor, "section": section,
+            "roles": roles_json(),
+            "items": items,
+            "nextAfter": next_after,
+            "hasMore": has_more,
+            "complete": complete
+        })
+    }
+
     fn classification_item(
         id: &str,
         kind: &str,
@@ -3563,6 +3783,18 @@ mod integration {
         ]
     }
 
+    /// The body of one received request, parsed as JSON.
+    ///
+    /// Reading the body is what lets a test assert the *wire* shape of a sent command — an
+    /// unchanged operation id across a rebase, for example — instead of inferring it from the
+    /// state that happened to result.
+    fn read_request_body(request: &mut tiny_http::Request) -> serde_json::Value {
+        let mut body = String::new();
+        use std::io::Read;
+        request.as_reader().read_to_string(&mut body).unwrap();
+        serde_json::from_str(&body).unwrap_or(serde_json::Value::Null)
+    }
+
     /// A scripted server: it answers requests in order until the script is exhausted.
     ///
     /// The script is only ever a *lower* bound on the requests a pass makes, and a pass
@@ -3572,6 +3804,9 @@ mod integration {
     struct Scripted {
         base: String,
         paths: Arc<Mutex<Vec<String>>>,
+        /// The exact bodies received, in order, so a test can assert what was actually sent
+        /// rather than only the state that resulted from it.
+        bodies: Arc<Mutex<Vec<serde_json::Value>>>,
         stop: Arc<AtomicBool>,
         handle: Option<thread::JoinHandle<()>>,
     }
@@ -3582,6 +3817,8 @@ mod integration {
             let base = format!("http://{}/v1", server.server_addr());
             let paths = Arc::new(Mutex::new(Vec::new()));
             let log = Arc::clone(&paths);
+            let bodies = Arc::new(Mutex::new(Vec::new()));
+            let logged_bodies = Arc::clone(&bodies);
             let stop = Arc::new(AtomicBool::new(false));
             let flag = Arc::clone(&stop);
             let handle = thread::spawn(move || {
@@ -3599,6 +3836,7 @@ mod integration {
                         return;
                     };
                     log.lock().unwrap().push(request.url().to_owned());
+                    logged_bodies.lock().unwrap().push(read_request_body(&mut request));
                     let _ = request.respond(if status == 200 {
                         json_response(body)
                     } else {
@@ -3609,6 +3847,7 @@ mod integration {
             Self {
                 base,
                 paths,
+                bodies,
                 stop,
                 handle: Some(handle),
             }
@@ -3620,6 +3859,11 @@ mod integration {
                 let _ = handle.join();
             }
             self.paths.lock().unwrap().clone()
+        }
+
+        /// The bodies received, in order, as parsed JSON.
+        fn bodies(&self) -> Vec<serde_json::Value> {
+            self.bodies.lock().unwrap().clone()
         }
     }
 
@@ -4400,6 +4644,1741 @@ fn a_clean_outbox_permits_the_receive() {
             transition.map(|value| value.affects_assignments),
             Some(1),
             "the delete transition is the server's own count"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Deleting a Classification that holds Assets converges end to end
+    // -----------------------------------------------------------------------
+
+    /// The delete command body the server would accept, keyed to a real queued intent.
+    fn delete_change_row(sequence: i64, classification_id: &str, to: Option<&str>, affects: i64,
+                         operation_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "sequence": sequence,
+            "authorityCursor": sequence,
+            "commandType": "deleteClassification",
+            "operationId": operation_id,
+            "changedAt": "2026-09-17T00:00:00Z",
+            "classification": {
+                "id": classification_id,
+                "kind": "tag",
+                "name": "삭제됨",
+                "parentId": null,
+                "iconKey": null,
+                "colorKey": null,
+                "deleted": true,
+                "entityRevision": 2
+            },
+            "assignmentTransition": {
+                "fromClassificationId": classification_id,
+                "toClassificationId": to,
+                "affectsAssignments": affects
+            }
+        })
+    }
+
+    /// One accepted delete: the tombstone, the transition, and the cursor it occupies.
+    fn accepted_delete(operation_id: &str, classification_id: &str, to: Option<&str>,
+                       affects: i64, revision: i64, sequence: i64) -> serde_json::Value {
+        serde_json::json!({
+            "libraryId": LIBRARY,
+            "epoch": 1,
+            "contractVersion": 1,
+            "commandType": "deleteClassification",
+            "operationId": operation_id,
+            "changed": true,
+            "changeSequence": sequence,
+            "authorityCursor": sequence,
+            "classification": {
+                "id": classification_id,
+                "kind": "tag",
+                "name": "삭제됨",
+                "parentId": null,
+                "iconKey": null,
+                "colorKey": null,
+                "deleted": true,
+                "entityRevision": revision
+            },
+            "assignments": [],
+            "assignmentTransition": {
+                "fromClassificationId": classification_id,
+                "toClassificationId": to,
+                "affectsAssignments": affects
+            },
+            "updatedAt": "2026-09-17T00:00:00Z"
+        })
+    }
+
+    /// Adopt a replica whose Asset is assigned to a deletable child Classification.
+    ///
+    /// `asset-1 -> doomed`, `doomed` under a live `parent`, with `asset-1` a real local Asset
+    /// so the assignment is materialized rather than deferred. The cursor is 1, so the delete
+    /// the server accepts lands at sequence 2.
+    fn adopt_asset_in_doomed(library: &Library) {
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    // The role binding is `ON DELETE RESTRICT` against this table, so the
+                    // node it names has to exist in every baseline a test installs.
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                    // The reassignment target for the second test in this pair.
+                    classification("other", "기타", None, 1),
+                ],
+                &[assignment("asset-1", Some("doomed"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                1,
+            )
+            .unwrap();
+    }
+
+    /// Deleting a Classification that holds an Asset converges through the real path.
+    ///
+    /// The local delete moves the Asset to the parent and queues exactly one structural
+    /// intent. Once the server confirms it, the assignment cache must no longer describe the
+    /// deleted Classification: the confirmed result is the authority's own post-delete
+    /// lineage, and the following receive replays the same transition. Mixing "state at the
+    /// cursor" with "state a later confirmed command produced" let the cache keep naming a
+    /// Classification the authority had already deleted, so the deferred-assignment
+    /// projection then refused the very change that would have corrected it.
+    #[test]
+    fn deleting_a_classification_holding_an_asset_converges() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        adopt_asset_in_doomed(&library);
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        assert_eq!(queued.len(), 1, "one structural intent owns the whole effect");
+
+        let (operation_id, _, _) = queued[0].clone();
+        let script = vec![
+            // 1. The delete is accepted at sequence 2.
+            (
+                accepted_delete(&operation_id, "doomed", Some("parent"), 1, 2, 2),
+                200,
+            ),
+            // 2. `/status` now advertises cursor 2.
+            (status_body(2), 200),
+            // 3. `/changes` replays the same delete as one change.
+            (
+                serde_json::json!({
+                    "libraryId": LIBRARY,
+                    "epoch": 1,
+                    "contractVersion": 1,
+                    "cursor": 2,
+                    "items": [
+                        serde_json::json!({
+                            "sequence": 2,
+                            "authorityCursor": 2,
+                            "commandType": "deleteClassification",
+                            "operationId": operation_id,
+                            "changedAt": "2026-09-16T00:00:00Z",
+                            "classification": {
+                                "id": "doomed", "kind": "tag", "name": "삭제될",
+                                "parentId": null, "iconKey": null, "colorKey": null,
+                                "deleted": true, "entityRevision": 2
+                            },
+                            "assignmentTransition": {
+                                "fromClassificationId": "doomed",
+                                "toClassificationId": "parent",
+                                "affectsAssignments": 1
+                            }
+                        })
+                    ],
+                    "nextAfter": 2,
+                    "hasMore": false
+                }),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        assert!(outbox_rows(&library.connection().unwrap()).is_empty());
+
+        let result = library
+            .reconcile_classification_authority(&client, "token");
+        let result = result.expect("a confirmed delete must converge the replica");
+        server.finish();
+        assert!(result.adopted);
+
+        let connection = library.connection().unwrap();
+        // The Asset ends in the server-authoritative destination ...
+        assert_eq!(
+            projections(&connection),
+            [("asset-1".to_owned(), "parent".to_owned())],
+            "the Asset converges to the deleted Classification's parent"
+        );
+        // ... and nothing anywhere still names the deleted Classification.
+        assert_eq!(
+            assignment_cache(&connection),
+            [("asset-1".to_owned(), Some("parent".to_owned()), 2)],
+            "the confirmed lineage names the destination, not the deleted node"
+        );
+        let stale: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM classification_authority_assignment_revisions
+                 WHERE classification_id = 'doomed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale, 0, "no cached lineage may still point at the deleted node");
+        assert!(assignment_naming_count(&connection, "doomed") == 0);
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 2)));
+    }
+
+    /// How many cached assignment lineages name a Classification.
+    fn assignment_naming_count(connection: &Connection, classification_id: &str) -> i64 {
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM classification_authority_assignment_revisions
+                 WHERE classification_id = ?1",
+                [classification_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    /// A delete change cannot prove its own transition was already applied.
+    ///
+    /// The transition is verified against the assignment cache: `affectsAssignments` counts
+    /// the assignments naming the Classification when the server deleted it, and a replica at
+    /// a valid cursor holds exactly that set. Reading the tombstone this same replay just
+    /// wrote would make the verification unfalsifiable — every delete would look "already
+    /// materialized" — so a page claiming assignments the replica never had would advance the
+    /// cursor over state it cannot reproduce.
+    #[test]
+    fn a_delete_claiming_assignments_the_replica_never_had_is_refused() {
+        let (_temp, library) = open();
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("doomed", "삭제될", Some("originals"), 1),
+                ],
+                // Nothing names `doomed`, so this replica holds none of the assignments the
+                // server says the delete moved — and nothing pre-applied the transition.
+                &[],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                3,
+            )
+            .unwrap();
+
+        let error = library
+            .apply_classification_page_for_test(
+                &[delete_change(
+                    4,
+                    tombstone("doomed", "삭제될", 2),
+                    transition("doomed", Some("originals"), 1),
+                )],
+                4,
+            )
+            .unwrap_err();
+
+        assert!(
+            matches!(error, LibraryError::InvalidCloudResponse),
+            "a transition with no matching lineage must fail closed, got {error:?}"
+        );
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 1, 1, 3)),
+            "the cursor must not advance over a page that failed"
+        );
+        assert!(
+            entries(&connection).iter().any(|(id, _, _, _)| id == "doomed"),
+            "the incoming tombstone must roll back with the refused page"
+        );
+        // The baseline recorded a *live* revision for `doomed`; the refused page must not
+        // have replaced it with the tombstone's revision.
+        assert_eq!(
+            revision_cache(&connection)
+                .into_iter()
+                .find(|(id, _, _)| id == "doomed"),
+            Some(("doomed".to_owned(), 1, 0)),
+            "the refused page must not commit its tombstone over the live revision"
+        );
+    }
+
+    /// A partially pre-applied delete converges when the unseen changes arrive later.
+    ///
+    /// A real multi-device history can make the server count assignments this PC has never
+    /// heard of: another device assigned `B -> C` at a sequence this replica has not reached,
+    /// so when the PC's own delete of `C` runs the server moves *two* lineages. The PC could
+    /// pre-apply the transition only to the one lineage it held.
+    ///
+    /// Replay must therefore account for pre-applied work explicitly instead of inferring it
+    /// from the tombstone: `pre-applied + still-naming = affectsAssignments`, and only the
+    /// still-naming remainder moves. Inferring from the tombstone would skip moving `B` while
+    /// still advancing the cursor, leaving a lineage naming a deleted Classification forever.
+    #[test]
+    fn a_partially_pre_applied_delete_converges_when_the_unseen_change_arrives() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        insert_asset(&library, "asset-2");
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                ],
+                // Only A is known to this replica; the other device's `B -> C` sits at
+                // sequence 11, which this cursor (10) has not reached.
+                &[assignment("asset-1", Some("doomed"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                10,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        assert_eq!(queued.len(), 1);
+        let (delete_op, _, _) = queued[0].clone();
+
+        let script = vec![
+            // The server accepted the delete at sequence 12 and moved both lineages.
+            (
+                accepted_delete(&delete_op, "doomed", Some("parent"), 2, 2, 12),
+                200,
+            ),
+            (status_body(12), 200),
+            (
+                serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1, "cursor": 12,
+                    "items": [
+                        // The other device's assignment, which this PC had not seen.
+                        {
+                            "sequence": 11, "authorityCursor": 11,
+                            "commandType": "setAssetClassification",
+                            "operationId": "other-device-op",
+                            "changedAt": "2026-09-16T00:00:00Z",
+                            "assignment": {
+                                "assetId": "asset-2",
+                                "classificationId": "doomed",
+                                "entityRevision": 1
+                            }
+                        },
+                        // The PC's own delete, counting both Asset lineages.
+                        {
+                            "sequence": 12, "authorityCursor": 12,
+                            "commandType": "deleteClassification",
+                            "operationId": delete_op,
+                            "changedAt": "2026-09-16T00:00:01Z",
+                            "classification": {
+                                "id": "doomed", "kind": "tag", "name": "삭제될",
+                                "parentId": null, "iconKey": null, "colorKey": null,
+                                "deleted": true, "entityRevision": 2
+                            },
+                            "assignmentTransition": {
+                                "fromClassificationId": "doomed",
+                                "toClassificationId": "parent",
+                                "affectsAssignments": 2
+                            }
+                        }
+                    ],
+                    "nextAfter": 12, "hasMore": false
+                }),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        // The pre-application moved only the lineage this replica actually held.
+        {
+            let connection = library.connection().unwrap();
+            assert_eq!(
+                assignment_cache(&connection),
+                [("asset-1".to_owned(), Some("parent".to_owned()), 2)],
+                "only the known lineage is pre-applied"
+            );
+            assert_eq!(assignment_naming_count(&connection, "doomed"), 0);
+        }
+
+        let result = library
+            .reconcile_classification_authority(&client, "token")
+            .expect("partial pre-application plus the unseen change must converge");
+        server.finish();
+        assert!(result.adopted);
+
+        let connection = library.connection().unwrap();
+        assert_eq!(result.applied_changes, 2, "both changes are replayed");
+        assert_eq!(
+            assignment_cache(&connection),
+            [
+                ("asset-1".to_owned(), Some("parent".to_owned()), 2),
+                ("asset-2".to_owned(), Some("parent".to_owned()), 2),
+            ],
+            "the unseen lineage moves too, at the revision the server's transition implies"
+        );
+        assert_eq!(
+            projections(&connection),
+            [
+                ("asset-1".to_owned(), "parent".to_owned()),
+                ("asset-2".to_owned(), "parent".to_owned()),
+            ],
+            "both Assets converge to the delete destination"
+        );
+        assert_eq!(
+            assignment_naming_count(&connection, "doomed"),
+            0,
+            "nothing may still name the deleted Classification"
+        );
+        // The marker must be consumed by the replay it accounted for, so it cannot excuse a
+        // later delete that reused the operation id.
+        let markers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM classification_authority_preapplied_deletes",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(markers, 0, "no stale pre-applied-transition marker may remain");
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 12)));
+    }
+
+    /// A delete that pre-applied zero local assignments still records its transition.
+    ///
+    /// The PC may hold no lineage naming `C` at all — another device created `B -> C` at a
+    /// sequence this replica has not reached — so confirmation moves nothing. The transition
+    /// still has to be durable: replay must know this delete is already structurally confirmed
+    /// at a specific sequence, which is what makes the earlier `B -> C` legitimate rather than
+    /// an assignment to a deleted Classification (see
+    /// `an_assignment_to_an_already_deleted_classification_is_refused`).
+    #[test]
+    fn a_delete_that_preapplied_nothing_still_records_its_transition() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-2");
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                ],
+                // Nothing names `doomed` locally, so the delete moves nothing here.
+                &[],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                10,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        let (delete_op, _, _) = queued[0].clone();
+
+        let script = vec![
+            (
+                accepted_delete(&delete_op, "doomed", Some("parent"), 1, 2, 12),
+                200,
+            ),
+            (status_body(12), 200),
+            (
+                serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1, "cursor": 12,
+                    "items": [
+                        {
+                            "sequence": 11, "authorityCursor": 11,
+                            "commandType": "setAssetClassification",
+                            "operationId": "other-device-op",
+                            "changedAt": "2026-09-16T00:00:00Z",
+                            "assignment": {
+                                "assetId": "asset-2",
+                                "classificationId": "doomed",
+                                "entityRevision": 1
+                            }
+                        },
+                        {
+                            "sequence": 12, "authorityCursor": 12,
+                            "commandType": "deleteClassification",
+                            "operationId": delete_op,
+                            "changedAt": "2026-09-16T00:00:01Z",
+                            "classification": {
+                                "id": "doomed", "kind": "tag", "name": "삭제될",
+                                "parentId": null, "iconKey": null, "colorKey": null,
+                                "deleted": true, "entityRevision": 2
+                            },
+                            "assignmentTransition": {
+                                "fromClassificationId": "doomed",
+                                "toClassificationId": "parent",
+                                "affectsAssignments": 1
+                            }
+                        }
+                    ],
+                    "nextAfter": 12, "hasMore": false
+                }),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        // The transition header must exist even though no member was pre-applied: that is what
+        // lets replay recognise seq 11 as historically earlier than this delete.
+        {
+            let connection = library.connection().unwrap();
+            let headers: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM classification_authority_preapplied_deletes",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(headers, 1, "a zero-member transition is still recorded");
+        }
+
+        let result = library
+            .reconcile_classification_authority(&client, "token")
+            .expect("zero local pre-application plus the unseen change must converge");
+        server.finish();
+        assert!(result.adopted);
+
+        let connection = library.connection().unwrap();
+        assert_eq!(result.applied_changes, 2);
+        assert_eq!(
+            assignment_cache(&connection),
+            [("asset-2".to_owned(), Some("parent".to_owned()), 2)],
+            "the unseen lineage moves to the delete destination"
+        );
+        assert_eq!(
+            assignment_naming_count(&connection, "doomed"),
+            0,
+            "nothing may still name the deleted Classification"
+        );
+        let markers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM classification_authority_preapplied_deletes",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(markers, 0, "the transition state is retired after replay");
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 12)));
+    }
+
+    /// An unseen assignment *leaving* the deleted Classification must not be counted twice.
+    ///
+    /// The opposite direction from the unseen-`B -> C` case: another device moved `A` out of
+    /// `C` at a sequence this replica has not reached, so when the PC's own delete of `C` runs
+    /// the server finds *no* assignments naming `C` and reports `affectsAssignments = 0`.
+    ///
+    /// The stale local cache still said `A -> C`, so confirmation pre-applied the transition to
+    /// `A`. A bare count cannot express that this pre-application is now void: replaying seq 11
+    /// (`A -> D`) supersedes it, so `1 + 0 != 0` would reject valid server history.
+    ///
+    /// The pre-applied work therefore has to be tracked per *lineage*, and an earlier change to
+    /// a lineage must invalidate that lineage's contribution before the delete is verified.
+    #[test]
+    fn an_unseen_assignment_leaving_the_deleted_classification_still_converges() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                    classification("elsewhere", "다른 곳", None, 1),
+                ],
+                // This PC still believes A names `doomed`; the other device already moved it.
+                &[assignment("asset-1", Some("doomed"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                10,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        assert_eq!(queued.len(), 1);
+        let (delete_op, _, _) = queued[0].clone();
+
+        let script = vec![
+            // The server's delete moved nothing: no lineage named `doomed` by then.
+            (
+                accepted_delete(&delete_op, "doomed", Some("parent"), 0, 2, 12),
+                200,
+            ),
+            (status_body(12), 200),
+            (
+                serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1, "cursor": 12,
+                    "items": [
+                        // The other device's earlier move, which this PC had not seen.
+                        {
+                            "sequence": 11, "authorityCursor": 11,
+                            "commandType": "setAssetClassification",
+                            "operationId": "other-device-op",
+                            "changedAt": "2026-09-16T00:00:00Z",
+                            "assignment": {
+                                "assetId": "asset-1",
+                                "classificationId": "elsewhere",
+                                "entityRevision": 2
+                            }
+                        },
+                        {
+                            "sequence": 12, "authorityCursor": 12,
+                            "commandType": "deleteClassification",
+                            "operationId": delete_op,
+                            "changedAt": "2026-09-16T00:00:01Z",
+                            "classification": {
+                                "id": "doomed", "kind": "tag", "name": "삭제될",
+                                "parentId": null, "iconKey": null, "colorKey": null,
+                                "deleted": true, "entityRevision": 2
+                            },
+                            "assignmentTransition": {
+                                "fromClassificationId": "doomed",
+                                "toClassificationId": "parent",
+                                "affectsAssignments": 0
+                            }
+                        }
+                    ],
+                    "nextAfter": 12, "hasMore": false
+                }),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1, "the delete is accepted at sequence 12");
+        // The stale cache made confirmation pre-apply the transition to A.
+        {
+            let connection = library.connection().unwrap();
+            assert_eq!(
+                assignment_cache(&connection),
+                [("asset-1".to_owned(), Some("parent".to_owned()), 2)],
+                "the stale lineage was pre-applied"
+            );
+        }
+
+        let result = library
+            .reconcile_classification_authority(&client, "token")
+            .expect("an unseen move out of the deleted Classification must still converge");
+        server.finish();
+        assert!(result.adopted);
+
+        let connection = library.connection().unwrap();
+        assert_eq!(result.applied_changes, 2, "both changes are replayed");
+        // seq 11 wins over the voided pre-application, and the delete adds nothing.
+        assert_eq!(
+            assignment_cache(&connection),
+            [("asset-1".to_owned(), Some("elsewhere".to_owned()), 2)],
+            "the earlier move out of C is authoritative; the delete must not re-move it"
+        );
+        assert_eq!(
+            projections(&connection),
+            [("asset-1".to_owned(), "elsewhere".to_owned())],
+            "the Asset converges to where the other device put it"
+        );
+        assert_eq!(
+            assignment_naming_count(&connection, "doomed"),
+            0,
+            "nothing may still name the deleted Classification"
+        );
+        let markers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM classification_authority_preapplied_deletes",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(markers, 0, "the transition state is fully retired");
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 12)));
+    }
+
+    /// A delete claiming work this replica cannot account for is refused.
+    ///
+    /// The authority's delete moved every lineage naming `C` at the time, and this PC's own
+    /// confirmation moved whatever *it* held — which can be fewer, because the rest are
+    /// lineages this replica has never seen. Replay can therefore only bound the remainder:
+    /// the lineages still naming `from` must not account for *less* than the delete claims
+    /// beyond what the pre-application itself moved.
+    ///
+    /// Here the delete claims five lineages, the pre-application moved two, and the cache now
+    /// holds none. Three lineages the authority moved are neither here nor accounted for, so
+    /// the replica is missing state and advancing would bury that silently.
+    #[test]
+    fn a_delete_claiming_lineages_this_replica_cannot_account_for_is_refused() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                ],
+                &[assignment("asset-1", Some("doomed"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                10,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        let (delete_op, _, _) = queued[0].clone();
+
+        // The authority reports five affected lineages; this PC held only one, so its own
+        // confirmation moves exactly one and records both numbers truthfully.
+        let script = vec![(
+            accepted_delete(&delete_op, "doomed", Some("parent"), 5, 2, 11),
+            200,
+        )];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        server.finish();
+        {
+            let connection = library.connection().unwrap();
+            let (affects, moved): (i64, i64) = connection
+                .query_row(
+                    "SELECT affects_assignments, preapplied_moved
+                     FROM classification_authority_preapplied_deletes WHERE operation_id = ?1",
+                    [&delete_op],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                (affects, moved),
+                (5, 1),
+                "both the authority's count and this PC's own work are recorded"
+            );
+        }
+
+        // The change agrees with the record, but the cache can only account for the one
+        // lineage the pre-application moved — three remain unexplained.
+        let error = library
+            .apply_classification_page_for_test(
+                &[
+                    assignment_change(11, assignment("asset-1", Some("parent"), 2)),
+                    // The change names the very operation whose record is stored, so replay
+                    // takes the pre-application-aware path rather than the no-record one.
+                    delete_change_for_operation(
+                        12,
+                        tombstone("doomed", "삭제될", 2),
+                        transition("doomed", Some("parent"), 5),
+                        &delete_op,
+                    ),
+                ],
+                12,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, LibraryError::InvalidCloudResponse),
+            "a delete claiming unaccountable lineages must be refused, got {error:?}"
+        );
+        assert_eq!(
+            authority(&library.connection().unwrap()),
+            Some((LIBRARY.to_owned(), 1, 1, 10)),
+            "the cursor must not advance over the refused page"
+        );
+    }
+
+    /// A delete whose change contradicts the count the authority reported is refused.
+    ///
+    /// The durable record and the change row are two statements about one operation. They
+    /// describe different values, the response does not belong to the command this PC
+    /// confirmed, and applying it would let a page redefine work the authority already
+    /// reported as done.
+    ///
+    /// The count alone would not catch this: with the pre-application having moved the one
+    /// lineage it held, a change claiming the delete moved *nothing* leaves a remainder of zero,
+    /// which the bound accepts. Only comparing against the authority's own recorded count
+    /// falsifies it.
+    #[test]
+    fn a_delete_that_contradicts_its_recorded_count_is_refused() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                ],
+                &[assignment("asset-1", Some("doomed"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                1,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        let (delete_op, _, _) = queued[0].clone();
+
+        // The authority reports one affected lineage, which this PC also holds.
+        let script = vec![(
+            accepted_delete(&delete_op, "doomed", Some("parent"), 1, 2, 2),
+            200,
+        )];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        server.finish();
+
+        // The change names the same operation but claims the delete moved nothing.
+        let error = library
+            .apply_classification_page_for_test(
+                &[delete_change_for_operation(
+                    2,
+                    tombstone("doomed", "삭제될", 2),
+                    transition("doomed", Some("parent"), 0),
+                    &delete_op,
+                )],
+                2,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, LibraryError::InvalidCloudResponse),
+            "a change contradicting the recorded count must be refused, got {error:?}"
+        );
+        assert_eq!(
+            authority(&library.connection().unwrap()),
+            Some((LIBRARY.to_owned(), 1, 1, 1)),
+            "the cursor must not advance over the refused change"
+        );
+    }
+
+    /// A delete replayed at a sequence its own record does not name is refused.
+    ///
+    /// The record and the change row are two statements about one operation, and the sequence
+    /// the authority assigned that operation is part of its identity. A change naming the same
+    /// operation at a different sequence is not the change this PC confirmed, so applying it
+    /// would let a page relocate a confirmed operation inside the log.
+    #[test]
+    fn a_delete_replayed_at_a_sequence_its_record_does_not_name_is_refused() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                ],
+                &[assignment("asset-1", Some("doomed"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                1,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        let (delete_op, _, _) = queued[0].clone();
+
+        // The authority confirms the delete at sequence 2.
+        let script = vec![(
+            accepted_delete(&delete_op, "doomed", Some("parent"), 1, 2, 2),
+            200,
+        )];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        server.finish();
+
+        // The page replays the same operation at sequence 3, which the record does not name.
+        let error = library
+            .apply_classification_page_for_test(
+                &[
+                    // A harmless filler so the delete lands at sequence 3.
+                    classification_change(2, classification("originals", "오리지널", None, 2)),
+                    delete_change_for_operation(
+                        3,
+                        tombstone("doomed", "삭제될", 2),
+                        transition("doomed", Some("parent"), 1),
+                        &delete_op,
+                    ),
+                ],
+                3,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, LibraryError::InvalidCloudResponse),
+            "a delete at a sequence its record does not name must be refused, got {error:?}"
+        );
+        assert_eq!(
+            authority(&library.connection().unwrap()),
+            Some((LIBRARY.to_owned(), 1, 1, 1)),
+            "the cursor must not advance over the refused page"
+        );
+    }
+
+    /// An assignment to an already-deleted Classification is refused, even with a tombstone.
+    ///
+    /// A historical assignment *before* a pre-applied delete is legitimate (see the A1 tests
+    /// above). An assignment *after* the delete is not: the server moves every naming lineage
+    /// away atomically and validates every assignment target, so it can never emit one. A
+    /// tombstone alone is therefore not evidence that such a change is historical.
+    #[test]
+    fn an_assignment_to_an_already_deleted_classification_is_refused() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        // A real confirmed delete with a zero pre-applied count, so a marker legitimately
+        // exists for it. The malformed change below must still be refused.
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("doomed", "삭제될", Some("originals"), 1),
+                ],
+                &[],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                10,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        let (delete_op, _, _) = queued[0].clone();
+
+        let script = vec![
+            (
+                accepted_delete(&delete_op, "doomed", Some("originals"), 0, 2, 11),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        server.finish();
+
+        // The delete is replayed first (legitimate), then an assignment to the deleted node.
+        // The change names the very operation whose pre-applied record exists, so the first
+        // change really does consume it — and the page's rollback is what has to restore it.
+        assert_eq!(
+            preapplied_delete_records(&library.connection().unwrap()),
+            1,
+            "the confirmed delete left a live pre-application record to consume"
+        );
+        let error = library
+            .apply_classification_page_for_test(
+                &[
+                    delete_change_for_operation(
+                        11,
+                        tombstone("doomed", "삭제될", 2),
+                        transition("doomed", Some("originals"), 0),
+                        &delete_op,
+                    ),
+                    assignment_change(12, assignment("asset-1", Some("doomed"), 1)),
+                ],
+                12,
+            )
+            .unwrap_err();
+
+        assert!(
+            matches!(error, LibraryError::InvalidCloudResponse),
+            "an assignment to an already-deleted Classification must be refused, got {error:?}"
+        );
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 1, 1, 10)),
+            "the cursor must not advance over the refused page"
+        );
+        assert!(
+            assignment_cache(&connection).is_empty(),
+            "no assignment cache row may commit for the refused change"
+        );
+        // The refused page must roll back *whole*. Its first change legitimately replayed the
+        // delete, which consumes the pre-application record — so the record surviving proves
+        // the transaction was abandoned wholesale rather than the delete alone having committed.
+        //
+        // That the record really is consumed on a successful replay is asserted separately by
+        // `a_delete_that_preapplied_nothing_still_records_its_transition` and the historical
+        // test below; here the count is only the evidence of rollback.
+        assert_eq!(
+            preapplied_delete_records(&connection),
+            1,
+            "the whole page must roll back, pre-application record included"
+        );
+    }
+
+    /// A historical assignment before the pre-applied delete remains accepted.
+    ///
+    /// The complement of the refusal above: the same ordering is legitimate when the assignment
+    /// change is *earlier* than a delete this PC has already confirmed and partially projected,
+    /// which is exactly what the pre-applied transition marker records.
+    #[test]
+    fn a_historical_assignment_before_a_preapplied_delete_is_accepted() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    classification("parent", "게임", None, 1),
+                    classification("doomed", "삭제될", Some("parent"), 1),
+                ],
+                &[assignment("asset-1", Some("doomed"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                10,
+            )
+            .unwrap();
+        library.delete_classification("doomed").unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        let (delete_op, _, _) = queued[0].clone();
+
+        let script = vec![
+            (
+                accepted_delete(&delete_op, "doomed", Some("parent"), 1, 2, 12),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+        let flush = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(flush.sent, 1);
+        server.finish();
+
+        // seq 11 names `doomed`, which the confirmed delete already removed locally, but it is
+        // *earlier* than the delete's own sequence 12 — so it is historical, not impossible.
+        // The delete names the confirmed operation, so replay matches the durable record, which
+        // is the only evidence that makes that ordering claim checkable.
+        assert_eq!(
+            preapplied_delete_records(&library.connection().unwrap()),
+            1,
+            "the confirmed delete left a live pre-application record"
+        );
+        library
+            .apply_classification_page_for_test(
+                &[
+                    assignment_change(11, assignment("asset-1", Some("doomed"), 1)),
+                    delete_change_for_operation(
+                        12,
+                        tombstone("doomed", "삭제될", 2),
+                        transition("doomed", Some("parent"), 1),
+                        &delete_op,
+                    ),
+                ],
+                12,
+            )
+            .expect("a historical pre-delete assignment must be tolerated");
+
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            assignment_cache(&connection),
+            [("asset-1".to_owned(), Some("parent".to_owned()), 2)],
+            "the delete moved the lineage and nothing still names the deleted node"
+        );
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 12)));
+        assert_eq!(
+            preapplied_delete_records(&connection),
+            0,
+            "the successful replay must fully retire the matching record"
+        );
+    }
+
+    /// Deleting then reassigning converges through the real server's revision conflict.
+    ///
+    /// The server increments an Asset's assignment revision during Classification deletion, so
+    /// a `set Asset -> X` composed before the delete presents a stale `expectedRevision` and is
+    /// **rejected**, not accepted. The client must rebase only the expectation onto the revision
+    /// the delete produced, keep the same operation id and desired value, and retry — which is
+    /// the real multi-device history, unlike an acceptance at the pre-delete revision.
+    ///
+    /// This asserts the wire bodies rather than only the end state: "the rebase preserved the
+    /// logical intent" is a claim about what was sent, and a test that only inspects the final
+    /// cache cannot tell a legal rebase from a rewritten intent.
+    #[test]
+    fn deleting_then_reassigning_converges_through_a_real_revision_conflict() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        adopt_asset_in_doomed(&library);
+        // 1. Delete `doomed`, which locally moves asset-1 to `parent`.
+        library.delete_classification("doomed").unwrap();
+        // 2. Reassign asset-1 to a different live Classification before reconciling. Its
+        //    expectation is composed from confirmed state, so it still expects revision 1.
+        library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-1".into()],
+                classification_id: Some("other".into()),
+            })
+            .unwrap();
+        let queued = outbox_rows(&library.connection().unwrap());
+        assert_eq!(
+            queued.iter().map(|(_, kind, _)| kind.as_str()).collect::<Vec<_>>(),
+            ["deleteClassification", "setAssetClassification"],
+            "strict FIFO keeps the delete ahead of the reassignment"
+        );
+        let (delete_op, _, delete_payload) = queued[0].clone();
+        let (assign_op, _, assign_payload) = queued[1].clone();
+        let queued_assign: serde_json::Value = serde_json::from_str(&assign_payload).unwrap();
+        assert_eq!(
+            queued_assign["expectedRevision"], 1,
+            "the queued intent is composed against the pre-delete revision"
+        );
+
+        let script = vec![
+            // The delete is accepted at sequence 2, moving asset-1 to `parent` and taking its
+            // lineage to revision 2.
+            (
+                accepted_delete(&delete_op, "doomed", Some("parent"), 1, 2, 2),
+                200,
+            ),
+            // The stale assignment is rejected: revision 1 no longer matches the server's 2.
+            (
+                serde_json::json!({ "detail": {
+                    "code": "revisionConflict",
+                    "authorityCursor": 2,
+                    "current": {
+                        "assetId": "asset-1",
+                        "classificationId": "parent",
+                        "entityRevision": 2
+                    }
+                }}),
+                409,
+            ),
+            // The retried intent is accepted and takes the lineage to revision 3.
+            (
+                serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
+                    "commandType": "setAssetClassification",
+                    "operationId": assign_op,
+                    "changed": true, "changeSequence": 3, "authorityCursor": 3,
+                    "classification": null,
+                    "assignments": [{
+                        "assetId": "asset-1",
+                        "classificationId": "other",
+                        "entityRevision": 3
+                    }],
+                    "assignmentTransition": null,
+                    "updatedAt": "2026-09-17T00:00:00Z"
+                }),
+                200,
+            ),
+        ];
+        let server = Scripted::start(script);
+        let client = CloudClient::new(&server.base).unwrap();
+
+        // The first pass sends the delete, whose acceptance rebases the queued assignment, and
+        // the rebase stops the pass so the retry is its own step.
+        let first = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(first.sent, 1, "the delete is delivered");
+        assert_eq!(first.rebased, 1, "the stale assignment rebased rather than blocking");
+        assert_eq!(first.blocked, 0);
+        // The rebase rewrote only the expectation; the intent is the same one.
+        let rebased = outbox_rows(&library.connection().unwrap());
+        assert_eq!(rebased.len(), 1, "no second intent was minted");
+        assert_eq!(rebased[0].0, assign_op, "the operation id is preserved");
+        let rebased_payload: serde_json::Value = serde_json::from_str(&rebased[0].2).unwrap();
+        assert_eq!(rebased_payload["expectedRevision"], 2, "rebased onto the delete's revision");
+        assert_eq!(rebased_payload["classificationId"], "other", "the desired value is unchanged");
+        assert_eq!(rebased_payload["assetId"], "asset-1");
+        assert_eq!(rebased_payload["operationId"], assign_op.as_str());
+
+        // The retry is then delivered at the rebased expectation.
+        let second = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!(second.sent, 1, "the rebased retry is accepted");
+        assert!(outbox_rows(&library.connection().unwrap()).is_empty());
+
+        // What was on the wire, in order: the delete, the rejected attempt, the retry.
+        let bodies = server.bodies();
+        assert_eq!(bodies.len(), 3, "three commands reached the server");
+        assert_eq!(bodies[0]["commandType"], "deleteClassification");
+        assert_eq!(bodies[1]["commandType"], "setAssetClassification");
+        assert_eq!(bodies[1]["operationId"], assign_op.as_str());
+        assert_eq!(bodies[1]["expectedRevision"], 1, "the stale expectation is what 409'd");
+        assert_eq!(bodies[2]["operationId"], assign_op.as_str(), "same logical intent");
+        assert_eq!(bodies[2]["expectedRevision"], 2, "retried against the delete's revision");
+        assert_eq!(bodies[2]["classificationId"], "other");
+
+        // 8. Replaying the log converges: the delete at seq 2 is fully accounted for by the
+        //    pre-applied transition, and the reassignment at seq 3 wins.
+        let replay = vec![
+            (status_body(3), 200),
+            (
+                serde_json::json!({
+                    "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1, "cursor": 3,
+                    "items": [
+                        serde_json::json!({
+                            "sequence": 2, "authorityCursor": 2,
+                            "commandType": "deleteClassification",
+                            "operationId": delete_op, "changedAt": "2026-09-16T00:00:00Z",
+                            "classification": {
+                                "id": "doomed", "kind": "tag", "name": "삭제될",
+                                "parentId": null, "iconKey": null, "colorKey": null,
+                                "deleted": true, "entityRevision": 2
+                            },
+                            "assignmentTransition": {
+                                "fromClassificationId": "doomed",
+                                "toClassificationId": "parent",
+                                "affectsAssignments": 1
+                            }
+                        }),
+                        serde_json::json!({
+                            "sequence": 3, "authorityCursor": 3,
+                            "commandType": "setAssetClassification",
+                            "operationId": assign_op, "changedAt": "2026-09-16T00:00:00Z",
+                            "assignment": {
+                                "assetId": "asset-1",
+                                "classificationId": "other",
+                                "entityRevision": 3
+                            }
+                        })
+                    ],
+                    "nextAfter": 3, "hasMore": false
+                }),
+                200,
+            ),
+        ];
+        let server = Scripted::start(replay);
+        let client = CloudClient::new(&server.base).unwrap();
+        let result = library
+            .reconcile_classification_authority(&client, "token")
+            .expect("replaying the older delete over newer confirmed state must not fail");
+        server.finish();
+        assert!(result.adopted);
+
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            projections(&connection),
+            [("asset-1".to_owned(), "other".to_owned())],
+            "the Asset converges to the reassignment"
+        );
+        assert_eq!(
+            assignment_cache(&connection),
+            [("asset-1".to_owned(), Some("other".to_owned()), 3)],
+            "the confirmed lineage is the reassignment at the revision the server reported"
+        );
+        assert_eq!(assignment_naming_count(&connection, "doomed"), 0);
+        // 9. No pre-applied marker survives the replay it accounted for.
+        let markers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM classification_authority_preapplied_deletes",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(markers, 0, "the marker is consumed by the replay");
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 3)));
+    }
+
+    /// A local edit committed while `/changes` is in flight must not be overwritten.
+    ///
+    /// The receive half reads the queue *before* it issues the request, so that read cannot
+    /// authorize a write that lands after it. Here the server deliberately blocks its
+    /// response until a local mutation has been durably committed, which is exactly the race
+    /// the pre-request check cannot see. The page must be abandoned: the optimistic local
+    /// state survives, the intent stays queued, and the cursor does not advance.
+    #[test]
+    fn a_local_edit_during_the_request_is_never_overwritten() {
+        use std::sync::mpsc;
+
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        // Adopt a real replica so the pass takes the incremental `/changes` path.
+        library
+            .install_classification_baseline_for_test(
+                &[
+                    classification("originals", "오리지널", None, 1),
+                    // A second destination, so the mid-flight local edit has a real target
+                    // and the incoming change can name a different one.
+                    classification("series", "시리즈", Some("originals"), 2),
+                ],
+                &[assignment("asset-1", Some("originals"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                4,
+            )
+            .unwrap();
+        assert_eq!(
+            projections(&library.connection().unwrap()),
+            [("asset-1".to_owned(), "originals".to_owned())]
+        );
+
+        // The change the server will send moves asset-1 to a *different* Classification, so
+        // applying it would visibly replace whatever the local edit chose.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || {
+            // 1. `/status` advertises cursor 5.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1,
+                    "active": true,
+                    "libraryId": LIBRARY,
+                    "domains": [{
+                        "domain": "classifications",
+                        "libraryId": LIBRARY,
+                        "epoch": 1,
+                        "contractVersion": 1,
+                        "cursor": 5
+                    }]
+                })))
+                .unwrap();
+            // 2. Hold `/changes` until the test has committed its local edit. The handler
+            //    signals readiness first, so the test is never guessing at timing.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/changes"), "{}", request.url());
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            request
+                .respond(json_response(serde_json::json!({
+                    "libraryId": LIBRARY,
+                    "epoch": 1,
+                    "contractVersion": 1,
+                    "cursor": 5,
+                    "items": [{
+                        "sequence": 5,
+                        "authorityCursor": 5,
+                        "commandType": "setAssetClassification",
+                        "operationId": "00000000-0000-4000-8000-000000000005",
+                        "changedAt": "2026-09-17T00:00:00Z",
+                        "assignment": {
+                            "assetId": "asset-1",
+                            "classificationId": "originals",
+                            "entityRevision": 9
+                        }
+                    }],
+                    "nextAfter": 5,
+                    "hasMore": false
+                })))
+                .unwrap();
+            // The pass must not ask for another page.
+            let _ = server.recv_timeout(Duration::from_millis(500));
+        });
+
+        let shared = std::sync::Arc::new(library);
+        let worker = std::sync::Arc::clone(&shared);
+        // Wait until the server is actually holding the response, then commit a local edit.
+        let release = thread::spawn(move || {
+            // A short sleep is enough: the request is already parked in the handler.
+            thread::sleep(Duration::from_millis(250));
+            // The user assigns asset-1 to a different Classification while the response is
+            // in flight, which durably queues an intent.
+            worker.queue_local_assignment_for_test("asset-1", "series");
+            let _ = release_tx.send(());
+        });
+
+        let client = CloudClient::new(&base).unwrap();
+        let result = shared
+            .reconcile_classification_authority(&client, "token")
+            .expect("a mid-flight local edit is a deferral, not an error");
+        release.join().unwrap();
+        handle.join().unwrap();
+
+        assert!(
+            result.deferred_to_outbox,
+            "the pass must report the intent as taking precedence this cycle"
+        );
+        assert_eq!(result.applied_changes, 0, "no change row was applied");
+        assert_eq!(result.local_cursor, Some(4), "the cursor did not advance");
+        let connection = shared.connection().unwrap();
+        assert_eq!(authority(&connection), Some((LIBRARY.to_owned(), 1, 1, 4)));
+        assert_eq!(
+            outbox_rows(&connection).len(),
+            1,
+            "the local intent is still durably queued"
+        );
+    }
+
+    /// A baseline install must not overwrite newer authority state installed meanwhile.
+    ///
+    /// The outbox-clean check alone is not a sufficient precondition. Two receives can both
+    /// read the same stored authority and begin a walk from it: B completes first and installs
+    /// a newer baseline (say the epoch was re-activated), then A returns, still finds the queue
+    /// clean, and would replace B's newer state with the stale baseline it started from. The
+    /// cursor would move *backwards* and the replica would describe an authority identity the
+    /// server no longer has.
+    ///
+    /// The install therefore has to prove, inside its own transaction, that the authority state
+    /// it was requested against has not moved. That is the same class of re-check as the
+    /// outbox guard — a precondition read before the network round trip, re-asserted where it
+    /// authorizes the write — and it fails closed the same way.
+    #[test]
+    fn a_stale_baseline_install_is_refused_when_a_newer_one_landed_first() {
+        use std::sync::mpsc;
+
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        // Every receive starts from this stored authority.
+        library
+            .install_classification_baseline_for_test(
+                &[classification("originals", "오리지널", None, 1)],
+                &[],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                4,
+            )
+            .unwrap();
+
+        // Server A advertises epoch 2 and parks on the first baseline page.
+        let server_a = Server::http("127.0.0.1:0").unwrap();
+        let base_a = format!("http://{}/v1", server_a.server_addr());
+        let (parked_tx, parked_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle_a = thread::spawn(move || {
+            let request = server_a.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1, "active": true, "libraryId": LIBRARY,
+                    "domains": [{"domain": "classifications", "libraryId": LIBRARY,
+                                 "epoch": 2, "contractVersion": 1, "cursor": 1}]
+                })))
+                .unwrap();
+            // The first baseline page is held until B has installed its newer state, so A's
+            // walk provably spans B's install rather than racing it on timing.
+            let request = server_a.recv().unwrap();
+            assert!(request.url().contains("/baseline"), "{}", request.url());
+            let _ = parked_tx.send(());
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            request
+                .respond(json_response(baseline_page_at_epoch(
+                    2, 1, "classifications",
+                    serde_json::json!([classification_item("originals", "root", "오리지널", None, 1)]),
+                    None, false, false,
+                )))
+                .unwrap();
+            // A's remaining pages, should it ignore the refusal and keep walking.
+            while let Ok(Some(request)) = server_a.recv_timeout(Duration::from_millis(400)) {
+                let _ = request.respond(json_response(baseline_page_at_epoch(
+                    2, 1, "assignments", serde_json::json!([]), None, false, true,
+                )));
+            }
+        });
+
+        // Server B advertises epoch 3 at cursor 9 and installs that newer baseline.
+        let server_b = Server::http("127.0.0.1:0").unwrap();
+        let base_b = format!("http://{}/v1", server_b.server_addr());
+        let handle_b = thread::spawn(move || {
+            // 1. `/status` reports the re-activated authority: same library, epoch 3.
+            let request = server_b.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1, "active": true, "libraryId": LIBRARY,
+                    "domains": [{"domain": "classifications", "libraryId": LIBRARY,
+                                 "epoch": 3, "contractVersion": 1, "cursor": 9}]
+                })))
+                .unwrap();
+            // 2. The structure section, then 3. the final assignment page that completes it.
+            for (section, items, complete) in [
+                (
+                    "classifications",
+                    serde_json::json!([classification_item("originals", "root", "오리지널", None, 1)]),
+                    false,
+                ),
+                ("assignments", serde_json::json!([]), true),
+            ] {
+                let request = server_b.recv().unwrap();
+                assert!(request.url().contains("/baseline"), "{}", request.url());
+                assert!(request.url().contains(section), "{}", request.url());
+                request
+                    .respond(json_response(baseline_page_at_epoch(
+                        3, 9, section, items, None, false, complete,
+                    )))
+                    .unwrap();
+            }
+            let _ = server_b.recv_timeout(Duration::from_millis(300));
+        });
+
+        let shared = std::sync::Arc::new(library);
+        let worker_a = std::sync::Arc::clone(&shared);
+        let client_a = CloudClient::new(&base_a).unwrap();
+        let received_a =
+            thread::spawn(move || worker_a.reconcile_classification_authority(&client_a, "token"));
+
+        // Only once A is genuinely parked mid-walk does B install the newer baseline.
+        parked_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let worker_b = std::sync::Arc::clone(&shared);
+        let client_b = CloudClient::new(&base_b).unwrap();
+        let received_b =
+            thread::spawn(move || worker_b.reconcile_classification_authority(&client_b, "token"));
+        let result_b = received_b.join().unwrap().expect("B adopts the newer baseline");
+        assert!(result_b.adopted && result_b.adopted_baseline);
+
+        // A's response arrives afterwards, against the state B has already replaced.
+        let _ = release_tx.send(());
+        let result_a = received_a.join().unwrap();
+        handle_a.join().unwrap();
+        handle_b.join().unwrap();
+
+        // The refusal is the same class of condition as a mid-walk local edit — the state the
+        // request was based on is gone — so it becomes the usual "nothing applied this cycle"
+        // deferral rather than an error the user sees. The next pass simply re-reads `/status`.
+        assert!(
+            result_a
+                .as_ref()
+                .is_ok_and(|result| result.deferred_to_outbox && !result.adopted_baseline),
+            "a stale baseline install must be refused, got {result_a:?}"
+        );
+        let connection = shared.connection().unwrap();
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 3, 1, 9)),
+            "B's newer authority state must remain installed"
+        );
+        assert!(
+            entries(&connection).iter().any(|(id, _, _, _)| id == "originals"),
+            "product state must not be rolled back by the stale install"
+        );
+    }
+
+    /// A stored Classification authority for a *different* library is never continued.
+    ///
+    /// The same independent validation as Album: a database corrupted by the older guard holds
+    /// a foreign authority row, and no re-adoption trigger fires when the correct library
+    /// reports the same epoch. Walking the foreign identity's change log would compare a cursor
+    /// across two different libraries, which is meaningless.
+    #[test]
+    fn a_stored_foreign_classification_authority_is_never_continued_incrementally() {
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        library
+            .install_classification_baseline_for_test(
+                &[classification("originals", "오리지널", None, 1)],
+                &[assignment("asset-1", Some("originals"), 1)],
+                &[originals("originals")],
+                OTHER_LIBRARY,
+                1,
+                1,
+                5,
+            )
+            .unwrap();
+
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&paths);
+        let handle = thread::spawn(move || {
+            // `/status` reports this library at the same epoch as the corrupted row.
+            let request = server.recv().unwrap();
+            log.lock().unwrap().push(request.url().to_owned());
+            request.respond(json_response(status_body(6))).unwrap();
+            // Anything further would be a request the foreign identity must never produce.
+            while let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(400)) {
+                log.lock().unwrap().push(request.url().to_owned());
+                let _ = request.respond(json_response(status_body(6)));
+            }
+        });
+        let client = CloudClient::new(&base).unwrap();
+        let error = library
+            .reconcile_classification_authority(&client, "token")
+            .unwrap_err();
+        handle.join().unwrap();
+
+        assert!(
+            matches!(error, LibraryError::ClassificationAuthorityMismatch),
+            "a stored foreign identity must be an explicit refusal, got {error:?}"
+        );
+        let requested = paths.lock().unwrap();
+        assert!(
+            !requested.iter().any(|path| path.contains("/changes")),
+            "no incremental path may be attempted against the foreign identity: {requested:?}"
+        );
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            authority(&connection),
+            Some((OTHER_LIBRARY.to_owned(), 1, 1, 5)),
+            "the refusal must not silently rewrite the stored identity"
+        );
+    }
+
+    /// A local edit committed during the baseline walk must not be replaced by the baseline.
+    ///
+    /// A baseline walk is several requests, so the window between "the queue was read as clean"
+    /// and "the baseline is installed" is far wider than on the incremental path. The install
+    /// must re-assert that precondition inside its own transaction: otherwise a user edit
+    /// committed mid-download is silently replaced by the pre-edit state the server described,
+    /// and the durable intent is thrown away with it.
+    #[test]
+    fn a_local_edit_during_a_baseline_walk_is_never_replaced() {
+        use std::sync::mpsc;
+
+        let (_temp, library) = open();
+        pin_library_id(&library);
+        insert_asset(&library, "asset-1");
+        // Adopt a replica at cursor 4, then force a re-adoption so the pass takes the baseline
+        // path: a different epoch is the designed "the authority restarted" state.
+        library
+            .install_classification_baseline_for_test(
+                &[classification("originals", "오리지널", None, 1)],
+                &[assignment("asset-1", Some("originals"), 1)],
+                &[originals("originals")],
+                LIBRARY,
+                1,
+                1,
+                4,
+            )
+            .unwrap();
+        {
+            let connection = library.connection().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO classification_entries (id, kind, name, parent_id, created_at)
+                     VALUES ('series', 'tag', '시리즈', 'originals', '2026-09-16T00:00:00Z')",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || {
+            // 1. `/status` advertises a *new epoch*, which is what makes the pass re-adopt.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/sync/status"), "{}", request.url());
+            request
+                .respond(json_response(serde_json::json!({
+                    "protocolVersion": 1,
+                    "active": true,
+                    "libraryId": LIBRARY,
+                    "domains": [{
+                        "domain": "classifications",
+                        "libraryId": LIBRARY,
+                        "epoch": 2,
+                        "contractVersion": 1,
+                        "cursor": 1
+                    }]
+                })))
+                .unwrap();
+            // 2. Hold the baseline's first page until the local edit has committed.
+            let request = server.recv().unwrap();
+            assert!(request.url().contains("/baseline"), "{}", request.url());
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+            request
+                .respond(json_response(baseline_page_at_epoch(
+                    2,
+                    1,
+                    "classifications",
+                    serde_json::json!([classification_item(
+                        "originals", "root", "오리지널", None, 1
+                    )]),
+                    None,
+                    false,
+                    false,
+                )))
+                .unwrap();
+            // 3. The assignment section, whose `complete` is the adoption point.
+            let request = server.recv().unwrap();
+            request
+                .respond(json_response(baseline_page_at_epoch(
+                    2,
+                    1,
+                    "assignments",
+                    serde_json::json!([]),
+                    None,
+                    false,
+                    true,
+                )))
+                .unwrap();
+            let _ = server.recv_timeout(Duration::from_millis(500));
+        });
+
+        let shared = std::sync::Arc::new(library);
+        let worker = std::sync::Arc::clone(&shared);
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
+            // The user assigns asset-1 to `series` while the baseline is still downloading.
+            worker.queue_local_assignment_for_test("asset-1", "series");
+            let _ = release_tx.send(());
+        });
+
+        let client = CloudClient::new(&base).unwrap();
+        let result = shared
+            .reconcile_classification_authority(&client, "token")
+            .expect("a mid-baseline local edit is a deferral, not an error");
+        release.join().unwrap();
+        handle.join().unwrap();
+
+        assert!(
+            result.deferred_to_outbox,
+            "the pass must report the intent as taking precedence this cycle"
+        );
+        let connection = shared.connection().unwrap();
+        assert_eq!(
+            projections(&connection),
+            [("asset-1".to_owned(), "series".to_owned())],
+            "the optimistic local edit must survive"
+        );
+        assert_eq!(
+            outbox_rows(&connection).len(),
+            1,
+            "the durable intent must survive"
+        );
+        assert_eq!(
+            authority(&connection),
+            Some((LIBRARY.to_owned(), 1, 1, 4)),
+            "the refused install must not change the authority identity or cursor"
         );
     }
 }

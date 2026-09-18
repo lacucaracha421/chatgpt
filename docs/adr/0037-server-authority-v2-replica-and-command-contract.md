@@ -1288,3 +1288,66 @@ Classification generation, which had been climbing ~357 increments/minute, was t
 for 60 s across repeated five-second sync passes while `albums` (110) and `saved_x` (252) stayed
 unchanged. Authority stayed epoch 1 / cursor 2, outbox 0, canary asset at its restored revision 3,
 and the service healthy with `NRestarts=0`.
+
+### Classification 2F — authority-backed tree projection, landed 2026-09-18
+
+The read cutover had moved membership, filtering and counts to the authority while the *tree itself*
+still came from the frozen `classification_snapshots` payload. Accepted structural commands —
+create/rename/move/delete/appearance — therefore did not appear in the tree consumers, because those
+readers re-rendered pre-activation bytes. This batch moves structural truth to authority state and
+leaves the frozen publication with one job: display order.
+
+**Ownership.** For every authority-backed tree reader:
+
+- **authority** owns existence (a tombstoned node is absent), id, kind, name, parent, icon, color and
+  the assignment count per node;
+- **the frozen publication** is a display-order sidecar only. `classification_snapshot.display_order`
+  extracts `{id: (position, observedParentId)}` from a legacy display list and nothing else, so no
+  frozen name/parent/kind/appearance/`assetCount`/existence can override canonical state;
+- **authority roles** stay in the baseline; the compatibility tree carries no role field, so none was
+  invented for consumers that never had one.
+
+**Ordering rule.** A position ranks a node only inside the sibling set it was observed in, so a node
+whose recorded parent no longer matches its authority parent (a move) is an *arrival* in its new set
+and cannot carry a stale display slot into a set it never belonged to. Ranked nodes keep their
+existing user-visible order; unranked arrivals — creations, and moves into a set — sort after every
+ranked node, ordered by `created_at` then id. Both keys are stored, immutable authority columns, so
+the order is deterministic across requests and restarts and a rename cannot reshuffle it. A create is
+therefore visible immediately rather than being hidden for want of a display slot. The list stays
+flat, exactly as the shipped route was: each consumer re-parents it from `parent_id` and keeps each
+parent's relative order, and `sort_index` is the node's position in the shipped list.
+
+**Two historical orders, deliberately preserved.** The mobile route always iterated the stored
+canonical `entries` (id-sorted for a version-2 row), while the extension bootstrap always iterated
+`legacyEntries` (the publisher's order). Each reader now extracts its sidecar from its *own* historical
+list, so its pre-activation order is unchanged.
+
+**One projection, reused.** `classification_authority.compatibility_tree` is the single canonical
+projection. `GET /v1/library/classifications`, `_classification_snapshot()` (`GET
+/v1/extension/bootstrap` and the `/v1/extension/pair` exchange) all call it, so a structural command
+cannot appear in one surface and not another.
+
+**Snapshot consistency.** The mobile route and the bootstrap each read inside one explicit read
+transaction, so the tree, the counts and the sidecar describe one state; no global lock is held across
+network IO. If the staging row is missing entirely, the authority tree is still served and only
+display order degrades to the deterministic `created_at, id` order — a lost sidecar can never hide
+canonical structure.
+
+**Deliberately left legacy**, with reason: `GET /v1/classifications` and `/v1/classifications/meta`
+remain the *staging publication* surface (its fence is what stops an old writer regaining authority,
+and staging still serves recovery); the extension's own `GET /v1/classifications` is served from the
+locally-open library (`extension_api.rs`), not from this server; `extension/` is the frozen legacy
+tree; PC/Android structural *editing* stays out of scope per 2A/2C.
+
+**Verification.** `tests/test_classification_cutover.py` gained `ClassificationTreeCutoverTests`
+(14 tests) driving real HTTP routes over real SQLite: rename, create, move (including the derived
+kind), appearance, delete (with its authority assignment semantics), role-node structure, display
+order across creations and a restart, a move not stealing a display slot, the bootstrap and pairing
+exchange, a missing sidecar, inactive compatibility, and the query shape. Six mutations were each
+applied to the real source and killed: forcing the frozen name, dropping authority-only nodes,
+using the frozen parent, letting tombstones back in, removing the deterministic fallback, and routing
+an inactive library through authority. Measured by `EXPLAIN QUERY PLAN` at 2,000 classifications and
+9,000 assignments: the tree read is one index seek
+(`classification_authority_by_parent`) and the counts read is one covering-index grouped read —
+never one query per Classification. Full server suite 744 tests / 109 subtests pass, mobile 181,
+extension-list 117; the 38 frontend failures remain the pre-existing set recorded in 2E.

@@ -233,47 +233,119 @@ final class AlbumReplicaService {
             return;
         }
         try {
-            AlbumSyncPass pass;
-            synchronized (gate) {
-                engine();
-                pass = cycle;
+            // Both authority domains are attempted through one orchestrator whose lane
+            // boundaries are independent, so an Album delivery failure can no longer skip
+            // Classification for the cycle. The lane that fails reports its own code; the
+            // healthy lane still converges.
+            AuthorityPass.Outcome outcome = AuthorityPass.run(
+                    () -> albumLane(scope),
+                    () -> classificationLane(scope));
+            if (outcome.album != null) {
+                publishAlbum(startedUnder, outcome.album.result, outcome.album.code);
             }
-            AlbumSyncPass.Result completed = pass.run(scope);
-            // The Classification read replica converges alongside the Album domain. It is
-            // driven after the Album pass so a slow or blocked Album write cannot starve it,
-            // and a Classification failure never changes the Album result the caller sees.
-            reconcileClassifications(scope, startedUnder);
-            if (completed.flush.sent > 0 || completed.flush.noOp > 0) {
-                // External picker collections are a published snapshot, so refresh them
-                // after the server accepts a membership change. The refresh is async and
-                // retains the previous snapshot if the network disappears again.
-                PickerLibrary.get(context).refresh(true);
+            if (outcome.classification != null) {
+                publishClassification(startedUnder, outcome.classification.result,
+                        outcome.classification.code);
             }
-            if (completed.receive == null) {
-                String blocked = firstBlockedCode(scope);
-                record(startedUnder, null, blocked, blocked == null ? null : message(blocked));
-                return;
-            }
-            AlbumAuthoritySync.Result result = completed.receive;
-            record(startedUnder, result, result.code,
-                    result.code == null ? null : message(result.code));
-        } catch (AlbumMembershipOutbox.Failure failure) {
-            record(startedUnder, null, failure.code, message(failure.code));
         } catch (Exception unavailable) {
-            // A replica store that cannot be opened is reported once per pass. It never
-            // falls back to another database, and never touches user media.
+            // The orchestrator already contains each lane's own failure; reaching here means
+            // the pass could not be set up at all.
             record(startedUnder, null, AlbumReplica.CODE_STORE_UNAVAILABLE,
                     "라이브러리 복제본을 열 수 없습니다.");
         }
     }
 
     /**
-     * Publish what the pass learned, unless the connection changed while it ran.
+     * The Album lane: deliver queued membership intents, then catch up.
      *
-     * A pass can be inside a network round trip when the account is replaced, and its
-     * answer then describes the account that is no longer configured. Refusing to publish
-     * it is what makes "the status describes the configured connection" true, not just
-     * "the rows belong to the configured connection".
+     * A lane body returns a report rather than throwing for "no receive happened", because
+     * an unclean queue is a legitimate outcome of this lane, not a failure of it. Only a real
+     * delivery failure leaves through {@link AlbumMembershipOutbox.Failure}.
+     */
+    private AuthorityPass.AlbumReport albumLane(String scope)
+            throws AlbumMembershipOutbox.Failure {
+        AlbumSyncPass pass;
+        synchronized (gate) {
+            engine();
+            pass = cycle;
+        }
+        AlbumSyncPass.Result completed = pass.run(scope);
+        if (completed.flush.sent > 0 || completed.flush.noOp > 0) {
+            // External picker collections are a published snapshot, so refresh them after
+            // the server accepts a membership change. The refresh is async and retains the
+            // previous snapshot if the network disappears again.
+            PickerLibrary.get(context).refresh(true);
+        }
+        if (completed.receive == null) {
+            // The queue is not clean, so no receive happened. The blocked code is the state
+            // the user has to act on; a healthy queue with no receive reports no code.
+            return new AuthorityPass.AlbumReport(null, firstBlockedCode(scope));
+        }
+        return new AuthorityPass.AlbumReport(completed.receive, completed.receive.code);
+    }
+
+    /** The Classification lane: flush assignment intents, then receive or adopt. */
+    private AuthorityPass.ClassificationReport classificationLane(String scope)
+            throws ClassificationAssignmentOutbox.Failure {
+        ClassificationSyncPass pass;
+        synchronized (gate) {
+            engine();
+            pass = classificationCycle;
+        }
+        if (pass == null) return null;
+        ClassificationSyncPass.Result completed = pass.run(scope);
+        // A durable blocked conflict outranks the receive code, because it is the state the
+        // user has to act on: the receive may then report a perfectly healthy domain that
+        // says nothing about the intent still waiting for a decision.
+        String blocked = firstClassificationBlockedCode(scope);
+        return new AuthorityPass.ClassificationReport(completed.receive,
+                blocked != null ? blocked
+                        : completed.receive == null ? null : completed.receive.code);
+    }
+
+    /**
+     * Publish what the Album lane learned, unless the connection changed while it ran.
+     *
+     * A pass can be inside a network round trip when the account is replaced, and its answer
+     * then describes the account that is no longer configured. Refusing to publish it is what
+     * makes "the status describes the configured connection" true, not just "the rows belong
+     * to the configured connection".
+     *
+     * The result is assigned unconditionally so a pass that produced no receive result clears
+     * the previous one, which is the reporting this surface already had. Classification
+     * deliberately does the opposite (see {@link #publishClassification}), and the asymmetry
+     * is pre-existing rather than an oversight.
+     */
+    private void publishAlbum(int startedUnder, AlbumAuthoritySync.Result result,
+                              String failureCode) {
+        synchronized (gate) {
+            if (startedUnder != attempt) return;
+            last = result;
+            code = failureCode == null ? "" : failureCode;
+            error = failureCode == null ? "" : message(failureCode);
+        }
+    }
+
+    /**
+     * Publish what the Classification lane learned, unless the connection changed.
+     *
+     * An explicit failure code outranks the receive's own code, so a durable conflict or a
+     * write failure is never masked by a healthy receive result. The lane reports its own
+     * code, so a healthy Classification pass still publishes over a failed Album pass.
+     */
+    private void publishClassification(int startedUnder, ClassificationAuthoritySync.Result result,
+                                       String failureCode) {
+        synchronized (gate) {
+            if (startedUnder != attempt) return;
+            if (result != null) lastClassification = result;
+            classificationCode = failureCode == null ? "" : failureCode;
+        }
+    }
+
+    /**
+     * Record the pass-level failure when neither lane could even be set up.
+     *
+     * Only used before a lane reports, so it cannot mask a lane's own result.
      */
     private void record(int startedUnder, AlbumAuthoritySync.Result result, String failureCode,
                         String failureMessage) {
@@ -285,63 +357,11 @@ final class AlbumReplicaService {
         }
     }
 
-    /**
-     * Reconcile the Classification domain: flush local assignment intents, then receive.
-     *
-     * Reported as a code but never thrown: the Album lane already succeeded or failed on its
-     * own terms, and one domain's authority state must not be reported as another's.
-     *
-     * A durable blocked conflict outranks the receive code, because it is the state the user
-     * has to act on: the receive may then report a perfectly healthy domain that says nothing
-     * about the intent still waiting for a decision.
-     */
-    private void reconcileClassifications(String scope, int startedUnder) {
-        ClassificationSyncPass cycle;
-        synchronized (gate) {
-            cycle = classificationCycle;
-        }
-        if (cycle == null) return;
-        try {
-            ClassificationSyncPass.Result completed = cycle.run(scope);
-            String blocked = firstClassificationBlockedCode(scope);
-            publishClassification(startedUnder, completed.receive,
-                    blocked == null ? null : blocked);
-        } catch (ClassificationAssignmentOutbox.Failure failure) {
-            publishClassification(startedUnder, null, failure.code);
-        } catch (Exception unavailable) {
-            // A replica store that cannot be opened is reported, never worked around by
-            // falling back to a different database or to unsynchronized network reads.
-            publishClassification(startedUnder, null, ClassificationReplica.CODE_STORE_UNAVAILABLE);
-        }
-    }
-
-    /**
-     * Publish what the Classification lane learned, unless the connection changed.
-     *
-     * An explicit failure code outranks the receive's own code, so a durable conflict or a
-     * write failure is never masked by a healthy receive result.
-     */
-    private void publishClassification(int startedUnder, ClassificationAuthoritySync.Result result,
-                                       String failureCode) {
-        synchronized (gate) {
-            if (startedUnder != attempt) return;
-            if (result != null) lastClassification = result;
-            String code = failureCode != null ? failureCode : result == null ? null : result.code;
-            classificationCode = code == null ? "" : code;
-        }
-    }
-
     /** The coded state of the oldest blocked Classification assignment intent, or null. */
     private String firstClassificationBlockedCode(String scope) {
         synchronized (gate) {
             if (store == null) return null;
-            for (ReplicaDb.ClassificationAssignment row : store.classificationOutbox(scope)) {
-                if (row.blocked()) {
-                    return row.conflictCode == null ? "classificationWriteConflict"
-                            : row.conflictCode;
-                }
-            }
-            return null;
+            return AuthorityPass.classificationBlockedCode(store.classificationOutbox(scope));
         }
     }
 

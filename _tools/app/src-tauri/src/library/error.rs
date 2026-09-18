@@ -143,8 +143,12 @@ pub enum LibraryError {
     ClassificationCursorExpired,
     #[error("기준선을 읽는 동안 서버 분류 상태가 변경되었습니다. 다시 시작해야 합니다")]
     ClassificationBaselineChanged,
-    #[error("첫 분류 기준선이 이 PC의 현재 분류 상태와 일치하지 않습니다")]
+    #[error("서버 분류 기준선이 이 PC의 현재 분류 상태와 일치하지 않습니다")]
     ClassificationFirstAdoptionMismatch,
+    #[error(
+        "수신 응답을 적용하는 동안 로컬에 새 변경이 생겨 적용하지 않았습니다(라이브러리 {library_id}, 커서 {cursor}). 다음 동기화에서 로컬 변경을 먼저 전송합니다."
+    )]
+    AuthorityReceivePreconditionChanged { library_id: String, cursor: i64 },
     #[error("서버 분류 동기화 요청이 거부됐습니다: HTTP {0}")]
     ClassificationSyncRejected(u16),
     #[error("같은 작업 ID가 다른 내용으로 이미 사용되었습니다")]

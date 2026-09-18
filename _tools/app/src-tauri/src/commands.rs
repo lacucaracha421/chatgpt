@@ -220,6 +220,9 @@ impl From<LibraryError> for CommandError {
             LibraryError::ClassificationFirstAdoptionMismatch => {
                 "classification_first_adoption_mismatch"
             }
+            LibraryError::AuthorityReceivePreconditionChanged { .. } => {
+                "authority_receive_precondition_changed"
+            }
             LibraryError::ClassificationSyncRejected(_) => "classification_sync_rejected",
             LibraryError::ClassificationOperationConflict => "classification_operation_conflict",
             LibraryError::ClassificationCommandRejected { .. } => "classification_command_rejected",

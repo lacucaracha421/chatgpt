@@ -192,6 +192,63 @@ describe("libraryGateway classification contract", () => {
     invoke.mockReset();
   });
 
+  it("resolves a mutation without waiting for a slow flush", async () => {
+    // A successful local edit must not be as slow as the network. The optimistic write
+    // and its outbox row are already committed when the mutation resolves; the kick is
+    // what shortens the window another device sees the old state, so it must not be
+    // something the user's edit waits on.
+    let releaseFlush: (() => void) | undefined;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "flush_classification_outbox") {
+        await new Promise<void>((resolve) => { releaseFlush = resolve; });
+      }
+      return undefined;
+    });
+
+    await expect(
+      libraryGateway.renameClassification("folder-1", "게임2"),
+    ).resolves.toBeUndefined();
+    // The flush is still in flight, which is exactly the point: the edit resolved first.
+    expect(releaseFlush).toBeDefined();
+    releaseFlush?.();
+    invoke.mockReset();
+  });
+
+  it("kicks delivery after the mutation instead of blocking on it", async () => {
+    invoke.mockImplementation(async () => undefined);
+    await libraryGateway.renameClassification("folder-1", "게임2");
+    // The flush is attempted (so the durable intent is delivered promptly) but the
+    // ordering is mutation-then-kick, never kick-around-mutation.
+    expect(invoke.mock.calls.map((call) => call[0])).toEqual([
+      "rename_classification",
+      "flush_classification_outbox",
+    ]);
+  });
+
+  it("never lets a rapid mutation wait on outbox delivery", async () => {
+    // Single-flight is a native property now (`Library::flush_outbox_single_flight`), because
+    // several independent callers deliver the same domain and a coalescer here could only
+    // serialize the kicks against each other. What this layer still guarantees is that a
+    // mutation never waits on delivery: every rapid edit resolves while its wake-up is held.
+    const gates: Array<() => void> = [];
+    let flushes = 0;
+    invoke.mockImplementation(async (command: string) => {
+      if (command !== "flush_classification_outbox") return undefined;
+      flushes += 1;
+      await new Promise<void>((resolve) => { gates.push(resolve); });
+    });
+
+    const edits = [1, 2, 3, 4, 5].map((index) =>
+      libraryGateway.renameClassification(`folder-${index}`, `게임${index}`),
+    );
+    // All five resolve even though every flush is still parked.
+    await expect(Promise.all(edits)).resolves.toHaveLength(5);
+    expect(flushes).toBe(5);
+    expect(gates).toHaveLength(5);
+    gates.forEach((release) => release());
+    invoke.mockReset();
+  });
+
   it("exposes flush-first sync surfaces for Classification", async () => {
     await libraryGateway.reconcileClassificationAuthority!();
     await libraryGateway.flushClassificationOutbox!();

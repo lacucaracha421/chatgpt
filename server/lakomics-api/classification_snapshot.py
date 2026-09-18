@@ -469,6 +469,41 @@ def legacy_entries(payload_text):
     return payload.get("entries", [])
 
 
+def display_order(entries):
+    """Display position per Classification id, extracted from one legacy display list.
+
+    This is the **only** thing the frozen snapshot still contributes to an
+    authority-backed tree. Only ordering metadata is read — never the entry itself — so
+    no field of the frozen projection (name, parent, kind, appearance, `assetCount`,
+    existence) can reach a reader once the domain is active and override canonical
+    authority state.
+
+    Each value is ``(position, parentId)``: the index in the display list, and the parent
+    that position was observed under. The parent rides along because a flat index is only
+    meaningful inside the sibling set it described; a node that has since moved is an
+    arrival in its new set, not an existing member of it.
+
+    ``entries`` is therefore the list each consumer historically shipped before cutover —
+    the mobile tree route iterated the stored ``entries``, the extension bootstrap iterated
+    ``legacy_entries`` — so each reader keeps the order it already had.
+
+    An id absent from the list — one created after activation — gets no position, and the
+    projection orders it after every ranked node.
+    """
+    positions = {}
+    for index, entry in enumerate(entries if isinstance(entries, list) else []):
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]:
+            # `or None` matches what every consumer already does with the field: a legacy
+            # entry may carry a missing, empty or non-string parent, and all of those mean
+            # "root" to the readers that re-parent this list. Normalizing here keeps the
+            # rank comparable with the authority's own NULL parent instead of silently
+            # demoting such a node to an arrival.
+            parent = entry.get("parentId")
+            positions.setdefault(entry["id"],
+                                 (index, parent if isinstance(parent, str) and parent else None))
+    return positions
+
+
 def stale_check(stored_published_at, stored_payload_text, incoming_published_at,
                 incoming_digest):
     """Whether an incoming publication may replace the stored one.
@@ -512,7 +547,8 @@ def entries_changed(stored_payload_text, entries):
 
 __all__ = [
     "AUTHORITY_READY_VERSION", "MAX_STAGING_BYTES", "SNAPSHOT_VERSION", "SUPPORTED_ROLES",
-    "SUPPORTED_VERSIONS", "authority_ready_state", "entries_changed", "fail", "legacy_entries", "stage",
+    "SUPPORTED_VERSIONS", "authority_ready_state", "display_order", "entries_changed", "fail",
+    "legacy_entries", "stage",
     "stale_check", "stored_digest", "validate_assignments", "validate_body",
     "validate_entries", "validate_hierarchy", "validate_roles",
 ]

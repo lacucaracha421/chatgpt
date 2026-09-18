@@ -52,8 +52,10 @@ use crate::cloud::client::{
     CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION, CLASSIFICATION_BASELINE_SECTIONS_SECTION,
 };
 use crate::library::classification_authority::{
-    assignments_naming, read_authority, read_outbox, write_assignment_revision, write_authority,
-    write_classification_revision, write_role, ClassificationAuthority,
+    assignments_naming, read_authority, read_classification_revision, read_outbox,
+    preapplied_delete_covers, read_preapplied_delete,
+    retire_preapplied_delete, write_assignment_revision, PreappliedDelete,
+    write_authority, write_classification_revision, write_role, ClassificationAuthority,
     ClassificationReconciliation, CLASSIFICATION_CONTRACT_VERSION, CLASSIFICATION_DOMAIN,
     ORIGINALS_ROLE,
 };
@@ -171,17 +173,67 @@ impl Library {
         if remote.library_id != self.library_id()? {
             return Err(LibraryError::ClassificationAuthorityMismatch);
         }
-        match local {
-            None => self.adopt_classification_baseline(client, token, remote, false),
-            Some(authority)
-                if authority.library_id != remote.library_id || authority.epoch != remote.epoch =>
-            {
-                // A different epoch is a new authority, so the stored cursor and caches
-                // describe something else. Re-adopting is the only correct response;
-                // there is no meaningful incremental path across identities.
-                self.adopt_classification_baseline(client, token, remote, true)
+        // The *stored* identity is validated independently, against the same canonical library.
+        //
+        // The remote check above cannot cover this: a database already corrupted by the older
+        // guard holds a foreign library's authority row, and if that foreign library happens to
+        // have the epoch the correct one now reports, no re-adoption trigger fires and the
+        // dispatch walks the foreign identity's change log as if it continued this library's.
+        // That is not a recoverable convergence — the two logs describe different libraries, and
+        // the cursor comparison is meaningless across them.
+        //
+        // Refusing is the safe answer rather than silently re-adopting: a re-adoption would
+        // replace this library's Classification replica with state derived from the foreign
+        // identity, and the corrupted row is evidence this database's replica is not
+        // trustworthy. Reporting it lets a later, deliberate repair decide what to keep. Album
+        // carries the equivalent guard, so both domains fail closed the same way.
+        if let Some(authority) = &local {
+            if authority.library_id != remote.library_id {
+                return Err(LibraryError::ClassificationAuthorityMismatch);
             }
-            Some(authority) => match self.apply_classification_changes(client, token, &authority) {
+        }
+        match self.receive_classification_authority(client, token, remote, local.as_ref(),
+                                                    rematerialized) {
+            // A local intent that appeared while a request was in flight — a change page or a
+            // baseline walk — is the same condition: the intent is the user's current intent,
+            // so nothing is applied, the cursor does not move, and the next pass flushes it
+            // first. Converting it here keeps one meaning for the state instead of two
+            // near-identical ones that differ only by which half of the receive produced it.
+            Err(LibraryError::AuthorityReceivePreconditionChanged { .. }) => {
+                Ok(ClassificationReconciliation {
+                    adopted: true,
+                    deferred_to_outbox: true,
+                    server_cursor: Some(remote.cursor),
+                    local_cursor: local.as_ref().map(|value| value.cursor),
+                    behind_by: local
+                        .as_ref()
+                        .map_or(0, |authority| remote.cursor - authority.cursor),
+                    ..Default::default()
+                })
+            }
+            other => other,
+        }
+    }
+
+    /// The adopt-versus-catch-up dispatch, with the deferral condition left to the caller.
+    fn receive_classification_authority(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        remote: &crate::cloud::client::SyncAuthorityDomain,
+        local: Option<&ClassificationAuthority>,
+        rematerialized: u32,
+    ) -> Result<ClassificationReconciliation, LibraryError> {
+        match local {
+            None => self.adopt_classification_baseline(client, token, remote, false, None),
+            Some(authority) if authority.epoch != remote.epoch => {
+                // A different epoch is a new authority for the *same* library (the guard
+                // above already refused a different one), so the stored cursor and caches
+                // describe something else. Re-adopting is the only correct response; there
+                // is no meaningful incremental path across epochs.
+                self.adopt_classification_baseline(client, token, remote, true, Some(authority))
+            }
+            Some(authority) => match self.apply_classification_changes(client, token, authority) {
                 Ok((applied, cursor)) => Ok(ClassificationReconciliation {
                     adopted: true,
                     applied_changes: applied,
@@ -191,12 +243,15 @@ impl Library {
                     rematerialized_assignments: rematerialized,
                     ..Default::default()
                 }),
-                Err(LibraryError::ClassificationCursorExpired | LibraryError::ClassificationCursorAhead) => {
+                Err(
+                    LibraryError::ClassificationCursorExpired
+                    | LibraryError::ClassificationCursorAhead,
+                ) => {
                     // The change log cannot be continued: expiry means retained history
                     // no longer covers this cursor, and a cursor ahead of the server
                     // means the identity is skewed. Both recover the same way — a fresh
                     // baseline replaces the confirmed replica.
-                    self.adopt_classification_baseline(client, token, remote, true)
+                    self.adopt_classification_baseline(client, token, remote, true, Some(authority))
                 }
                 Err(error) => Err(error),
             },
@@ -213,6 +268,7 @@ impl Library {
         token: &str,
         remote: &crate::cloud::client::SyncAuthorityDomain,
         replace_existing: bool,
+        observed: Option<&ClassificationAuthority>,
     ) -> Result<ClassificationReconciliation, LibraryError> {
         // Any Classification command advances this domain's cursor, so a concurrent
         // change during a multi-page walk invalidates the frozen snapshot. Retrying
@@ -229,7 +285,8 @@ impl Library {
                 Err(error) => return Err(error),
             }
         };
-        let local_cursor = self.commit_classification_baseline(&baseline, remote, replace_existing)?;
+        let local_cursor = self
+            .commit_classification_baseline(&baseline, remote, replace_existing, observed)?;
         Ok(ClassificationReconciliation {
             adopted: true,
             adopted_baseline: true,
@@ -341,11 +398,12 @@ impl Library {
         baseline: &Baseline,
         remote: &crate::cloud::client::SyncAuthorityDomain,
         replace_existing: bool,
+        observed: Option<&ClassificationAuthority>,
     ) -> Result<i64, LibraryError> {
         if replace_existing {
-            self.install_classification_baseline(baseline, remote)
+            self.install_classification_baseline(baseline, remote, observed)
         } else {
-            self.adopt_first_classification_baseline(baseline, remote)
+            self.adopt_first_classification_baseline(baseline, remote, observed)
         }
     }
 
@@ -375,10 +433,15 @@ impl Library {
         &self,
         baseline: &Baseline,
         remote: &crate::cloud::client::SyncAuthorityDomain,
+        observed: Option<&ClassificationAuthority>,
     ) -> Result<i64, LibraryError> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        // The comparison and the install share this transaction, so no local mutation can
+        // slip between them, and the baseline walk's preconditions are re-checked here for
+        // the same reason as the re-adoption path.
+        require_clean_baseline_receive(&transaction, &remote.library_id, observed)?;
         require_first_adoption_match(&transaction, baseline)?;
         let authority = ClassificationAuthority {
             library_id: remote.library_id.clone(),
@@ -396,14 +459,23 @@ impl Library {
     ///
     /// One transaction, so an interruption cannot leave a half-adopted replica whose
     /// cursor claims state it does not have.
+    ///
+    /// The transaction begins by re-asserting the receive preconditions. The caller read the
+    /// outbox and the authority *before* its network walk, so that read cannot authorize a
+    /// write that lands after the round trip: a local Classification edit can be durably
+    /// committed while the baseline pages are being downloaded. Installing then would replace
+    /// the user's current intent with the pre-edit state the server described, so the whole
+    /// install is refused and the intent survives to be delivered first.
     fn install_classification_baseline(
         &self,
         baseline: &Baseline,
         remote: &crate::cloud::client::SyncAuthorityDomain,
+        observed: Option<&ClassificationAuthority>,
     ) -> Result<i64, LibraryError> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        require_clean_baseline_receive(&transaction, &remote.library_id, observed)?;
         // `classification_entries.parent_id`, `asset_classifications.classification_id`
         // and `classification_roles.classification_id` are all `ON DELETE RESTRICT`
         // with immediate checks, and pages arrive in id order rather than
@@ -482,6 +554,10 @@ impl Library {
                 &transaction,
                 &assignment.asset_id,
                 assignment.classification_id.as_deref(),
+                ProjectionContext {
+                    epoch: remote.epoch,
+                    sequence: None,
+                },
             )?;
         }
         // Character reconsideration is owed exactly for the locally materialized Assets
@@ -529,9 +605,11 @@ impl Library {
             // with itself, is not information this replica may act on.
             page.validate(&authority.library_id, authority.epoch, requested)?;
             if !page.items.is_empty() {
-                // The page's changes and the cursor that describes them commit together,
-                // and the ordering check happens inside that same transaction.
-                self.apply_classification_page(&page.items, page.next_after)?;
+                // The page's changes and the cursor that describes them commit together, and
+                // the ordering check happens inside that same transaction. The requested
+                // cursor is passed in so the transaction can prove the page still continues
+                // the *stored* log, rather than assuming the pre-request read still holds.
+                self.apply_classification_page_guarded(&page.items, page.next_after, Some(requested))?;
                 applied += page.items.len() as u32;
                 cursor = page.next_after;
             }
@@ -548,10 +626,45 @@ impl Library {
     }
 
     /// Apply one change page and advance the cursor in the same transaction.
+    ///
+    /// # Authority states this function keeps distinct
+    ///
+    /// * **remote change cursor** — how far this replica has replayed the server's ordered
+    ///   log. It is the only thing `authority.cursor` means.
+    /// * **confirmed state at that cursor** — the revision caches, which must describe the
+    ///   authority exactly as far as the cursor claims.
+    /// * **command receipt / confirmed command result** — what `flush` recorded for an
+    ///   accepted command. A result can be *ahead* of the cursor (see below).
+    /// * **optimistic local projection** — `classification_entries` /
+    ///   `asset_classifications` as the user's own unsent edits leave them.
+    /// * **deferred authoritative assignment** — a cached assignment whose Asset is not
+    ///   local yet, so only its revision is recorded.
+    ///
+    /// # Why the preconditions are re-checked here
+    ///
+    /// The caller reads the outbox and the authority *before* its network request, so that
+    /// read cannot authorize a write that lands after the round trip: a user edit can be
+    /// durably committed while the response is in flight. The page is therefore only applied
+    /// if the same preconditions still hold inside this transaction — no intent has appeared
+    /// — and the page still continues from the cursor that is stored *now* rather than the
+    /// one the request was issued with.
     fn apply_classification_page(
         &self,
         items: &[ClassificationChange],
         cursor: i64,
+    ) -> Result<(), LibraryError> {
+        self.apply_classification_page_guarded(items, cursor, None)
+    }
+
+    /// Apply one change page, optionally requiring the stored cursor and a clean queue.
+    ///
+    /// `expected_cursor` is the cursor the page was requested from when called from the
+    /// receive loop; `None` keeps the historical behaviour of deriving it from stored state.
+    fn apply_classification_page_guarded(
+        &self,
+        items: &[ClassificationChange],
+        cursor: i64,
+        expected_cursor: Option<i64>,
     ) -> Result<(), LibraryError> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut connection = self.connection()?;
@@ -562,9 +675,25 @@ impl Library {
         // as a referential error, while a page that genuinely leaves a dangling parent
         // is still refused at COMMIT.
         transaction.pragma_update(None, "defer_foreign_keys", "ON")?;
-        let mut current = read_authority(&transaction)?
-            .ok_or(LibraryError::ClassificationAuthorityInactive)?
-            .cursor;
+        // Re-assert the receive preconditions. An intent that appeared during the request
+        // means the local state this page would overwrite is now the user's current intent.
+        let stored = read_authority(&transaction)?
+            .ok_or(LibraryError::ClassificationAuthorityInactive)?;
+        require_clean_receive(
+            &transaction,
+            |transaction| Ok(read_outbox(transaction)?.is_empty()),
+            &stored.library_id,
+            stored.cursor,
+        )?;
+        let mut current = stored.cursor;
+        // The page was composed against the cursor the caller requested from. If the stored
+        // cursor no longer matches, this page does not continue the stored log and applying
+        // it would skip or replay changes.
+        if let Some(expected) = expected_cursor {
+            if current != expected {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
         for change in items {
             // Sequence order is what makes the outcome correct, so a gap, a repeat or a
             // backwards step is a malformed page rather than something to apply.
@@ -590,12 +719,33 @@ impl Library {
                     &transaction,
                     &assignment.asset_id,
                     assignment.classification_id.as_deref(),
+                    ProjectionContext {
+                        epoch: stored.epoch,
+                        sequence: Some(change.sequence),
+                    },
                 )?;
             }
             if let Some(transition) = transition {
-                // The tombstone has already been recorded above; the transition and the
-                // removal of the local row are the rest of the same indivisible change.
-                apply_assignment_transition(&transaction, transition, &now)?;
+                // The pre-application comes from durable state keyed by this change's own
+                // operation id — never from the tombstone, which this same iteration just
+                // wrote. `None` means nothing was applied ahead of this change, so the whole
+                // transition is outstanding and the cache must account for all of it.
+                let preapplied = read_preapplied_delete(
+                    &transaction,
+                    &change.operation_id,
+                    stored.epoch,
+                    transition,
+                )?;
+                apply_assignment_transition(
+                    &transaction,
+                    transition,
+                    &now,
+                    stored.epoch,
+                    change.sequence,
+                    preapplied,
+                )?;
+                // The change is now behind the cursor, so its record has served its purpose.
+                retire_preapplied_delete(&transaction, &change.operation_id, stored.epoch)?;
                 transaction.execute(
                     "DELETE FROM classification_entries WHERE id = ?1",
                     [&transition.from_classification_id],
@@ -645,31 +795,208 @@ impl Library {
         if !read_outbox(&connection)?.is_empty() {
             return Ok(0);
         }
+        // A projection with no ordering claim still has to attribute its target check to the
+        // authority identity the cached assignments belong to: a confirmed delete records the
+        // epoch it was confirmed under, and only that epoch's records may excuse an assignment
+        // to an absent Classification.
+        //
+        // `0` is the correct attribution when no authority row exists. Records are constrained
+        // to `epoch >= 1`, so this matches none of them — which is right, because a replica
+        // with cached assignments and no adoption has no confirmed delete to appeal to, and a
+        // corrupt cache row must still be refused rather than skipped.
+        let epoch = read_authority(&connection)?
+            .map(|authority| authority.epoch)
+            .unwrap_or(0);
         let transaction = connection.transaction()?;
-        // Only lineages the authority has actually described are touched. An Asset with
-        // no cache row was never mentioned by the authority, so its local relations are
-        // pre-adoption state and removing them would destroy user data.
-        let confirmed: Vec<(String, Option<String>)> = {
-            let mut statement = transaction.prepare(
-                "SELECT asset_id, classification_id
-                 FROM classification_authority_assignment_revisions ORDER BY asset_id",
-            )?;
-            let rows = statement
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
+        // Only lineages that can actually produce a write are visited, through one set-based
+        // candidate query rather than a per-row sweep. The sweep was three point queries per
+        // cached Asset — roughly 24k statements for 8k assignments — even when nothing had
+        // changed; this avoids those Rust-side N+1 queries and keeps an unchanged pass to a
+        // single statement. The query still begins from the cache, so it can still scan the
+        // confirmed rows inside SQLite; see `deferred_assignment_candidates` for what that
+        // does and does not claim.
+        let candidates = deferred_assignment_candidates(&transaction)?;
         let mut changed = 0u32;
-        for (asset_id, classification_id) in &confirmed {
-            // `project_assignment` only touches Assets that exist locally, and it
-            // replaces rather than merges, so each known Asset ends holding exactly the
-            // authoritative value or nothing at all.
-            if project_assignment(&transaction, asset_id, classification_id.as_deref())? {
+        for (asset_id, classification_id) in &candidates {
+            // `project_assignment` re-checks and is the only writer, so the selection can
+            // stay a superset without duplicating the fail-closed corruption check or the
+            // Character enqueue in two places.
+            if project_assignment(
+                &transaction,
+                asset_id,
+                classification_id.as_deref(),
+                ProjectionContext {
+                    epoch,
+                    sequence: None,
+                },
+            )? {
                 changed += 1;
             }
         }
         transaction.commit()?;
         Ok(changed)
     }
+}
+
+/// The confirmed assignments whose visible projection is not already correct.
+///
+/// This is the whole no-op path of [`Library::materialize_deferred_classification_assignments`]:
+/// one set-based candidate query instead of a row-by-row sweep, which avoids the Rust-side N+1
+/// point queries and keeps an unchanged pass to a single SQL statement. It returns exactly the
+/// rows that [`project_assignment`] would write, plus the rows it would refuse as corruption, so
+/// selecting a row is the same decision as visiting it — only made in SQL.
+///
+/// # What this does and does not claim about cost
+///
+/// The statement still starts from the assignment revision cache, so it can still scan the
+/// confirmed rows *inside* SQLite. The improvement is that the per-row work moved out of Rust
+/// and into one query — measured at roughly 24,000 point statements and 45ms before, versus one
+/// statement and about 8ms for 8k assignments — not that the pass became proportional to
+/// outstanding work alone. A strictly proportional no-op path would need tracked deferred work,
+/// which this deliberately does not add.
+///
+/// A row qualifies in two cases, and the two must stay distinct:
+///
+/// * **The authority names a Classification this PC does not have.** A locally materialized
+///   Asset pointing at an absent Classification is replica corruption (`project_assignment`
+///   refuses it), and it is detectable *before* the visible comparison, exactly as that
+///   function checks it even when the visible value already agrees.
+/// * **The visible relation is not exactly the authoritative value.** Assignment is
+///   single-valued, so the desired visible set is either empty (`NULL`, authoritative
+///   unassigned) or one row. `asset_classifications` is nonetheless a relation table, so the
+///   comparison is exact set equality — a row carrying the desired value *and* a stale second
+///   row is a disagreement, not a match.
+///
+/// An Asset with no cache row is never returned: it was never described by the authority, so
+/// its local relations are pre-adoption state that must not be touched. An Asset the authority
+/// described but which is not materialized locally is likewise excluded — that withholding is
+/// the deferred state itself, and it is completed when the Asset appears.
+fn deferred_assignment_candidates(
+    connection: &Connection,
+) -> Result<Vec<(String, Option<String>)>, LibraryError> {
+    let mut statement = connection.prepare(
+        "SELECT r.asset_id, r.classification_id
+           FROM classification_authority_assignment_revisions r
+          WHERE EXISTS (SELECT 1 FROM assets a WHERE a.id = r.asset_id)
+            AND (
+                 (r.classification_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM classification_entries c
+                                   WHERE c.id = r.classification_id))
+              OR NOT (
+                   (SELECT COUNT(*) FROM asset_classifications ac
+                     WHERE ac.asset_id = r.asset_id) = (r.classification_id IS NOT NULL)
+                   AND NOT EXISTS (SELECT 1 FROM asset_classifications ac
+                                    WHERE ac.asset_id = r.asset_id
+                                      AND (r.classification_id IS NULL
+                                           OR ac.classification_id IS NOT r.classification_id))
+                 )
+            )
+          ORDER BY r.asset_id",
+    )?;
+    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+#[cfg(test)]
+impl Library {
+    /// Test seam: how many assignments the deferred-materialization selection would visit.
+    ///
+    /// The point of the set-based no-op path is that this scales with *outstanding* work, not
+    /// with the number of Assets the authority has ever described, so this is what a test
+    /// measures: a fully converged replica must report zero however large it is, and a single
+    /// newly-appeared or diverged Asset must report exactly one.
+    pub(crate) fn deferred_assignment_work_for_test(&self) -> Result<usize, LibraryError> {
+        let connection = self.connection()?;
+        Ok(deferred_assignment_candidates(&connection)?.len())
+    }
+}
+
+/// Re-assert, inside the baseline install transaction, that the receive may still proceed.
+///
+/// The receive half reads the outbox *before* its network walk, so that read cannot authorize
+/// a write that lands after the round trip. A baseline walk can span several requests, which
+/// makes the window much wider than the incremental path's: a user edit committed at any point
+/// during the download must not be replaced by the pre-edit state the baseline describes.
+///
+/// This runs in the same transaction that installs the baseline, so either the queue is still
+/// clean and the install lands, or the whole install is abandoned with the intent intact. The
+/// caller turns the refusal into the usual "the intent takes precedence this cycle" state: the
+/// next pass flushes that intent before it receives again.
+fn require_clean_baseline_receive(
+    transaction: &Transaction<'_>,
+    library_id: &str,
+    observed: Option<&ClassificationAuthority>,
+) -> Result<(), LibraryError> {
+    // The cursor a refusal reports is the one the replica stood at when the refusal was
+    // decided: nothing was written, so it still stands exactly there. Reading it first also
+    // lets the identity check below compare against the same row the install would replace.
+    let stored = read_authority(transaction)?;
+    let refused = |library_id: &str, cursor: i64| LibraryError::AuthorityReceivePreconditionChanged {
+        library_id: library_id.to_owned(),
+        cursor,
+    };
+    if !read_outbox(transaction)?.is_empty() {
+        return Err(refused(
+            library_id,
+            stored.as_ref().map(|authority| authority.cursor).unwrap_or(0),
+        ));
+    }
+    // A clean queue is not sufficient. The caller read this authority state *before* its
+    // network walk, so that read cannot authorize an install that lands after the round trip:
+    // another receive can complete in the meantime and install a newer baseline — most
+    // sharply after an epoch re-activation, where the domain legitimately has more than one
+    // in-flight walk against the same library. Installing the older baseline then would move
+    // the cursor backwards and describe an authority identity the server no longer has, so
+    // the install must prove the state it was requested against has not moved.
+    //
+    // The comparison is the whole identity the install depends on, not just the cursor: an
+    // unchanged cursor under a different epoch or contract describes a different authority,
+    // and a *newly* adopted row where the caller observed none is the same class of change.
+    let unchanged = match (observed, &stored) {
+        (None, None) => true,
+        (Some(observed), Some(stored)) => {
+            observed.library_id == stored.library_id
+                && observed.epoch == stored.epoch
+                && observed.contract_version == stored.contract_version
+                && observed.cursor == stored.cursor
+        }
+        _ => false,
+    };
+    if !unchanged {
+        let cursor = stored.as_ref().map(|authority| authority.cursor).unwrap_or(0);
+        let library_id = stored
+            .as_ref()
+            .map(|authority| authority.library_id.clone())
+            .unwrap_or_else(|| library_id.to_owned());
+        return Err(refused(&library_id, cursor));
+    }
+    Ok(())
+}
+
+/// Re-assert, inside the writing transaction, that a receive's preconditions still hold.
+///
+/// The receive half reads the queue *before* its network request, so that read cannot
+/// authorize a write that lands after the round trip: a local mutation can be durably
+/// committed while a response is in flight, and applying the response then would overwrite
+/// the user's current intent with state the server confirmed before that intent existed.
+///
+/// This runs in the same transaction that writes the page, so either the queue is still clean
+/// and the page lands, or the whole page is abandoned with the intent intact. The caller turns
+/// the refusal back into "the user's intent takes precedence this cycle" rather than an error
+/// the user sees, because the very next pass flushes that intent first.
+fn require_clean_receive(
+    transaction: &Transaction<'_>,
+    outbox: fn(&Transaction<'_>) -> Result<bool, LibraryError>,
+    library_id: &str,
+    cursor: i64,
+) -> Result<(), LibraryError> {
+    if !outbox(transaction)? {
+        return Err(LibraryError::AuthorityReceivePreconditionChanged {
+            library_id: library_id.to_owned(),
+            cursor,
+        });
+    }
+    Ok(())
 }
 
 /// Refuse a first adoption whose baseline differs from the local canonical state.
@@ -798,6 +1125,14 @@ fn write_baseline_revision_caches(
 ) -> Result<(), LibraryError> {
     transaction.execute("DELETE FROM classification_authority_revisions", [])?;
     transaction.execute("DELETE FROM classification_authority_assignment_revisions", [])?;
+    // A baseline replaces the very cache a pre-applied delete moved, so a record can no
+    // longer account for anything: the change it belonged to is either behind the baseline
+    // cursor or superseded by it. Keeping one would risk it matching a later delete that
+    // reused the operation id.
+    transaction.execute(
+        "DELETE FROM classification_authority_preapplied_deletes",
+        [],
+    )?;
     for classification in &baseline.classifications {
         write_classification_revision(
             transaction,
@@ -903,24 +1238,91 @@ fn apply_classification_projection(
 
 /// Apply the assignment transition a delete change carries, and verify it.
 ///
-/// Every cached lineage naming the deleted Classification moves to its parent (or to
-/// unassigned for a root), with each revision incrementing by exactly one — which is
-/// what the server did, so the replica reproduces the same numbers.
+/// Every cached lineage naming the deleted Classification moves to the transition's
+/// destination (its parent, or unassigned for a root), with each revision incrementing by
+/// exactly one — which is what the server did, so the replica reproduces the same numbers.
 ///
-/// The count is verified against the **authority assignment cache**, not against
-/// `asset_classifications`: the authority legitimately holds assignments for Assets
-/// this PC has not materialized, so a visible-row count would be smaller than the
-/// server's own `affectsAssignments` for reasons that are not divergence. A cache
-/// count that disagrees is real replica divergence or protocol corruption, and failing
-/// the page is what keeps the cursor from advancing over it.
+/// # How the transition is verified
+///
+/// The transition is checked against the **authority assignment cache**, not against
+/// `asset_classifications`: the authority legitimately holds assignments for Assets this PC
+/// has not materialized, so a visible-row count would be smaller than the server's own
+/// `affectsAssignments` for reasons that are not divergence.
+///
+/// The count cannot be verified by recomputing it locally. This replica may hold lineages the
+/// server's delete never counted — a change the server ordered *earlier* that this replica had
+/// not replayed yet can move a lineage out of the deleted Classification again, and this PC's
+/// own confirmed delete can already have moved lineages it held. Neither is reproducible from
+/// the cache at replay time, so a local recount would reject valid history.
+///
+/// What *is* falsifiable is the authority's own durable statement. When this PC confirmed the
+/// delete it recorded the `affectsAssignments` the authority reported (see
+/// [`record_preapplied_delete`]), so replay requires:
+///
+/// * the change must claim **exactly** the count the authority reported for this operation —
+///   a page disagreeing with durable state is malformed;
+/// * and no more lineages may still name the deleted Classification than that count, because
+///   a replica holding *more* than the authority's own delete accounted for is missing the
+///   history that removed them.
+///
+/// When no such row exists — every delete this PC did not itself confirm — nothing can explain
+/// a shortfall, so exactly `affectsAssignments` lineages must still be here.
+///
+/// The accounting is deliberately keyed by the change's own operation id and never inferred
+/// from the tombstone: this same replay writes the tombstone, so reading it back would make
+/// the verification unfalsifiable.
+///
+/// A record is consumed by the replay it accounts for, so it cannot excuse a later delete.
 fn apply_assignment_transition(
     transaction: &Transaction<'_>,
     transition: &ClassificationAssignmentTransition,
     now: &str,
+    epoch: i64,
+    sequence: i64,
+    preapplied: Option<PreappliedDelete>,
 ) -> Result<(), LibraryError> {
+    // Only the lineages still naming `from` are moved, and they are read *after* every earlier
+    // change in the page has run, so a superseding change has already removed its own lineage
+    // from this remainder.
     let affected = assignments_naming(transaction, &transition.from_classification_id)?;
-    if affected.len() as i64 != transition.affects_assignments {
-        return Err(LibraryError::InvalidCloudResponse);
+    let still_naming =
+        i64::try_from(affected.len()).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    match &preapplied {
+        Some(preapplied) => {
+            // A record describing a different amount of work than the change claims means the
+            // response and the durable state disagree about one operation, which the
+            // operation-id keying cannot otherwise have produced.
+            // The record and the change are two statements about one operation, so they must
+            // agree on the sequence the authority assigned it as well as the count it used.
+            // Equality — not merely "not later" — is the right check: the operation id is
+            // unique to the change the accept described, so any difference means the row and
+            // the record are not describing the same thing.
+            if preapplied.change_sequence != sequence
+                || preapplied.affects_assignments != transition.affects_assignments
+            {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+            // The authority's delete saw `affectsAssignments` lineages. Locally those are the
+            // pre-applied lineages that *survive* — a change the authority ordered earlier may
+            // have superseded some — plus the ones still naming `from`. The survivors cannot
+            // outnumber what was pre-applied, so the remainder has to land in
+            // `[0, preapplied_moved]`.
+            //
+            // Both ends catch real divergence. A negative remainder means this replica is
+            // holding lineages the authority's own delete never accounted for, and one above
+            // `preapplied_moved` means it is missing the history that moved lineages away.
+            let unexplained = transition.affects_assignments - still_naming;
+            if unexplained < 0 || unexplained > preapplied.preapplied_moved {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
+        None => {
+            if still_naming != transition.affects_assignments {
+                // Nothing was pre-applied, so nothing can explain a shortfall or a surplus:
+                // every lineage the transition claims has to still be here to move.
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
     }
     for (asset_id, revision) in &affected {
         write_assignment_revision(
@@ -934,9 +1336,32 @@ fn apply_assignment_transition(
             transaction,
             asset_id,
             transition.to_classification_id.as_deref(),
+            ProjectionContext {
+                epoch,
+                sequence: Some(sequence),
+            },
         )?;
     }
     Ok(())
+}
+
+/// Where a projection's target check is coming from.
+///
+/// A projection may only point at a Classification that is absent from
+/// `classification_entries` when this replica has evidence the absence is authoritative
+/// rather than corruption. What counts as evidence depends on the caller, so it is passed
+/// explicitly instead of inferred.
+///
+/// * `sequence: Some(n)` — the caller is replaying the change log at sequence `n`, so the
+///   evidence is a confirmed delete that removed the target *after* `n`. A change the
+///   authority ordered earlier than that delete legitimately names a node the delete has
+///   since removed, and this replica is simply replaying history.
+/// * `sequence: None` — the caller makes no ordering claim (deferred materialization, a
+///   baseline install). Any confirmed delete naming the target then counts, which is the
+///   narrowest reading available without an ordering.
+struct ProjectionContext {
+    epoch: i64,
+    sequence: Option<i64>,
 }
 
 /// Project one authoritative assignment value onto the local relation table.
@@ -951,8 +1376,9 @@ fn materialize_assignment(
     transaction: &Transaction<'_>,
     asset_id: &str,
     classification_id: Option<&str>,
+    context: ProjectionContext,
 ) -> Result<(), LibraryError> {
-    project_assignment(transaction, asset_id, classification_id)?;
+    project_assignment(transaction, asset_id, classification_id, context)?;
     Ok(())
 }
 
@@ -964,8 +1390,9 @@ fn project_without_enqueue(
     transaction: &Transaction<'_>,
     asset_id: &str,
     classification_id: Option<&str>,
+    context: ProjectionContext,
 ) -> Result<(), LibraryError> {
-    project_assignment_impl(transaction, asset_id, classification_id, false)?;
+    project_assignment_impl(transaction, asset_id, classification_id, false, context)?;
     Ok(())
 }
 
@@ -1027,8 +1454,9 @@ fn project_assignment(
     transaction: &Transaction<'_>,
     asset_id: &str,
     classification_id: Option<&str>,
+    context: ProjectionContext,
 ) -> Result<bool, LibraryError> {
-    project_assignment_impl(transaction, asset_id, classification_id, true)
+    project_assignment_impl(transaction, asset_id, classification_id, true, context)
 }
 
 /// The single projection body, with the Character decision optionally suppressed.
@@ -1037,6 +1465,7 @@ fn project_assignment_impl(
     asset_id: &str,
     classification_id: Option<&str>,
     enqueue: bool,
+    context: ProjectionContext,
 ) -> Result<bool, LibraryError> {
     let known: bool = transaction.query_row(
         "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
@@ -1055,16 +1484,45 @@ fn project_assignment_impl(
         )?;
         if !materializable {
             // A missing *Asset* is a legitimate deferred projection; a missing
-            // *Classification* is not. The server cannot produce a non-null assignment to
-            // a Classification that does not exist: ordinary commands validate the
-            // target, staging validates every assignment target, and a delete moves its
-            // Assets away atomically. So a locally materialized Asset pointing at an
-            // absent Classification means this replica is corrupt, and caching-and-
-            // advancing would hide that behind a relation that silently never appears.
+            // *Classification* is not — with one exception that is itself authoritative
+            // state rather than corruption.
             //
-            // Checked even when the local value already agrees, because the check is a
-            // read: it costs nothing and keeps replica corruption detectable.
-            return Err(LibraryError::InvalidCloudResponse);
+            // The server cannot produce a *new* assignment to a Classification that does
+            // not exist: ordinary commands validate the target, staging validates every
+            // assignment target, and a delete moves its Assets away atomically. So a
+            // locally materialized Asset pointing at an absent Classification it never
+            // deleted means this replica is corrupt, and caching-and-advancing would hide
+            // that behind a relation that silently never appears.
+            //
+            // But a replica may legitimately be *ahead* of its cursor: confirming a delete
+            // applies that delete locally, while changes the server ordered *before* it may
+            // not have been replayed yet. Such a change can name the just-deleted
+            // Classification perfectly correctly, and only its revision is recorded — the
+            // visible row is withheld, which the schema requires anyway, because
+            // `asset_classifications.classification_id` references `classification_entries`
+            // and no relation to a removed row can exist.
+            //
+            // The evidence is *durable ordering*, not the tombstone: the tombstone alone
+            // cannot distinguish a historical assignment from one the server could never
+            // have produced. The server validates every assignment target, so an assignment
+            // to an already-deleted Classification can only be one the authority ordered
+            // *before* that delete. A confirmed delete covering this projection at a later
+            // sequence says exactly that; without it the page is corruption and refusing it
+            // is what keeps the cursor from advancing over a state the authority does not
+            // describe. Trusting the tombstone instead would be circular, because this same
+            // replay writes it.
+            if !classification_is_tombstoned(transaction, classification_id)? {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+            if !preapplied_delete_covers(
+                transaction,
+                context.epoch,
+                classification_id,
+                context.sequence,
+            )? {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+            return Ok(false);
         }
     }
     // A confirmed value that already matches the local relation needs no write. Writing
@@ -1102,6 +1560,29 @@ fn project_assignment_impl(
         crate::library::character_autotag::Cause::Classification,
     )?;
     Ok(true)
+}
+
+/// Whether the confirmed revision cache records this Classification as deleted.
+///
+/// A tombstone is authority state that no command can invent: it means the server deleted
+/// the Classification. Its presence explains why a live local row is absent, so an
+/// assignment naming it is historical rather than corrupt.
+fn classification_is_tombstoned(
+    transaction: &Transaction<'_>,
+    classification_id: &str,
+) -> Result<bool, LibraryError> {
+    let deleted: Option<bool> = transaction
+        .query_row(
+            "SELECT deleted FROM classification_authority_revisions WHERE classification_id = ?1",
+            [classification_id],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })?;
+    Ok(deleted == Some(true))
 }
 
 /// The Asset's current Classification set, ordered so comparison is exact.
@@ -1171,7 +1652,11 @@ impl Library {
             contract_version,
             cursor,
         };
-        self.commit_classification_baseline(&baseline, &remote, replace_existing)
+        let observed = {
+            let connection = self.connection().unwrap();
+            read_authority(&connection).unwrap()
+        };
+        self.commit_classification_baseline(&baseline, &remote, replace_existing, observed.as_ref())
             .map(|_| ())
     }
 
@@ -1199,7 +1684,12 @@ impl Library {
             contract_version,
             cursor,
         };
-        self.install_classification_baseline(&baseline, &remote).map(|_| ())
+        let observed = {
+            let connection = self.connection().unwrap();
+            read_authority(&connection).unwrap()
+        };
+        self.install_classification_baseline(&baseline, &remote, observed.as_ref())
+            .map(|_| ())
     }
 
     /// Test seam: apply one change page through the production apply path.
@@ -1209,5 +1699,35 @@ impl Library {
         cursor: i64,
     ) -> Result<(), LibraryError> {
         self.apply_classification_page(items, cursor)
+    }
+
+    /// Test seam: queue one local assignment intent through the production mutation path.
+    ///
+    /// The mid-flight race test needs a *real* local edit — one that commits optimistic state
+    /// and a durable outbox row in one transaction, exactly as the UI does — rather than a
+    /// hand-written row, so the precondition guard is exercised against the same state a user
+    /// edit produces.
+    pub(crate) fn queue_local_assignment_for_test(&self, asset_id: &str, classification_id: &str) {
+        let mut connection = self.connection().unwrap();
+        let transaction = connection.transaction().unwrap();
+        transaction
+            .execute(
+                "DELETE FROM asset_classifications WHERE asset_id = ?1",
+                [asset_id],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "INSERT INTO asset_classifications (asset_id, classification_id) VALUES (?1, ?2)",
+                rusqlite::params![asset_id, classification_id],
+            )
+            .unwrap();
+        Self::enqueue_classification_assignment_intent(
+            &transaction,
+            asset_id,
+            Some(classification_id),
+        )
+        .unwrap();
+        transaction.commit().unwrap();
     }
 }
