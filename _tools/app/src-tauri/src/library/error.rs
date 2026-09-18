@@ -229,6 +229,20 @@ pub enum LibraryError {
     },
     #[error("지원하지 않는 라이브러리 스키마 버전입니다: {0}")]
     UnsupportedSchema(i64),
+    /// A development build refused to migrate an existing library that is not declared a
+    /// development library. See [`super::dev_guard`] for why this exists and how to opt in.
+    #[error(
+        "개발 빌드가 기존 라이브러리를 마이그레이션하려고 했습니다. 실수로 실제 라이브러리를 변경하는 것을 막기 위해 중단했습니다. \
+         의도한 것이라면 라이브러리 폴더에 {marker} 파일을 만들거나 {env}=1 을 설정한 뒤 다시 실행해 주세요. \
+         (라이브러리: {root}, 스키마 {existing_version} → {schema_version})",
+        marker = super::dev_guard::DEV_LIBRARY_MARKER,
+        env = super::dev_guard::ALLOW_ENV
+    )]
+    DevelopmentMigrationBlocked {
+        root: String,
+        existing_version: i64,
+        schema_version: i64,
+    },
     #[error("가져오기 폴더에는 지원되는 메타데이터 JSON이 정확히 하나 있어야 합니다")]
     MetadataImportManifestCount,
     #[error("지원하지 않는 메타데이터 형식 또는 버전입니다")]

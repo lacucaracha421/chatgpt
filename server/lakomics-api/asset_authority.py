@@ -1,0 +1,800 @@
+"""Server-owned Asset lifecycle authority: identity, lifecycle state, promotion.
+
+ADR-0038. This module owns the canonical *lifecycle* of an Asset — does it exist for
+ordinary reads, is it trashed, is it tombstoned — plus the promotion path that turns an
+accepted Capture into a canonical Asset without any PC involvement.
+
+# What this domain does and does not own
+
+Owned here:
+
+* canonical Asset identity for Assets the server creates, and the Capture → Asset mapping;
+* lifecycle state (`normal` → `trash` → `tombstoned`), with a per-Asset entity revision;
+* the ordered change log, operation receipts, retention floor and domain cursor.
+
+Deliberately **not** owned here:
+
+* media bytes. The log carries object keys and hashes, never content, and no lifecycle
+  command deletes an R2 object — that is deferred physical GC (ADR-0038 §7);
+* Classification assignment (its own domain) and Album membership (its own domain). Trash
+  hides an Asset without re-organizing the library, so those relations are left intact;
+* perceptual similarity, which stays PC analysis.
+
+# Promotion is idempotent by construction
+
+`promote_capture` allocates the canonical Asset ID from the Capture id itself rather than
+from a counter, then writes the mapping and the Asset state in one transaction. A retry
+therefore recomputes the same id and finds the mapping already present, so "same Capture,
+retried any number of times, exactly one canonical Asset" holds without a lock and without
+depending on which attempt won.
+
+# Activation
+
+The domain stays inactive — and every route here reports `authorityInactive` — until an
+operator activates an epoch, exactly like Classification and Album. Until then the legacy
+PC-mediated path is byte-for-byte unchanged, which is what makes this a staged rollout.
+"""
+import hashlib
+import json
+import re
+import sqlite3
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from fastapi import HTTPException
+
+import authority
+
+DOMAIN = "assets"
+CONTRACT_VERSION = 1
+
+#: History retention, in the same units and for the same reason as the other domains.
+RETENTION_DAYS = 180
+RECEIPT_RETENTION_DAYS = 180
+
+DEFAULT_ASSET_PAGE = 500
+MAX_ASSET_PAGE = 1_000
+DEFAULT_CHANGE_PAGE = 200
+MAX_CHANGE_PAGE = 500
+
+NORMAL = "normal"
+TRASH = "trash"
+TOMBSTONED = "tombstoned"
+LIFECYCLE_STATES = (NORMAL, TRASH, TOMBSTONED)
+
+TRASH_ASSET = "trashAsset"
+RESTORE_ASSET = "restoreAsset"
+TOMBSTONE_ASSET = "tombstoneAsset"
+LIFECYCLE_COMMAND_TYPES = (TRASH_ASSET, RESTORE_ASSET, TOMBSTONE_ASSET)
+
+ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
+COMMAND_KEYS = ENVELOPE_KEYS | {"assetId", "expectedEntityRevision"}
+
+LIBRARY_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+ASSET_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+CAPTURE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+#: Namespace for deterministic canonical Asset ids derived from a Capture id. Changing
+#: this would re-identify every already-promoted Capture, so it is versioned on purpose.
+PROMOTION_NAMESPACE = uuid.UUID("6f2a1d54-9c3b-4f2e-8a17-5d0c9b7e4a31")
+
+DDL = """
+-- One row per Asset the server owns the lifecycle of. The Asset id is allocated by the
+-- server (never by a client, a filename or a local row id), which is what makes a
+-- cloud-created Asset materialize on the PC under the *same* id.
+CREATE TABLE IF NOT EXISTS asset_authority_state(
+ library_id TEXT NOT NULL,
+ asset_id TEXT NOT NULL,
+ lifecycle TEXT NOT NULL CHECK(lifecycle IN ('normal','trash','tombstoned')),
+ entity_revision INTEGER NOT NULL CHECK(entity_revision >= 1),
+ -- Materialization metadata: what the PC needs to fetch and verify the bytes. Never
+ -- media itself and never a signed URL.
+ kind TEXT,
+ object_key TEXT,
+ content_type TEXT,
+ size_bytes INTEGER,
+ sha256 TEXT,
+ source_url TEXT,
+ creator_name TEXT,
+ creator_handle TEXT,
+ collected_at TEXT,
+ source_published_at TEXT,
+ import_source TEXT,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ PRIMARY KEY(library_id,asset_id));
+-- Ordinary reads filter on lifecycle; this index is what keeps that filter indexed
+-- rather than a scan over authority state.
+CREATE INDEX IF NOT EXISTS asset_authority_by_lifecycle
+ ON asset_authority_state(library_id,lifecycle,asset_id);
+-- The durable Capture → Asset mapping. Primary key on the *Capture* is what makes
+-- promotion idempotent: a retry finds this row instead of creating a second Asset.
+CREATE TABLE IF NOT EXISTS asset_authority_capture_map(
+ library_id TEXT NOT NULL,
+ capture_id TEXT NOT NULL,
+ asset_id TEXT NOT NULL,
+ promoted_at TEXT NOT NULL,
+ PRIMARY KEY(library_id,capture_id));
+CREATE INDEX IF NOT EXISTS asset_authority_capture_map_by_asset
+ ON asset_authority_capture_map(library_id,asset_id);
+CREATE TABLE IF NOT EXISTS asset_authority_receipts(
+ library_id TEXT NOT NULL,
+ epoch INTEGER NOT NULL,
+ operation_id TEXT NOT NULL,
+ payload_digest TEXT NOT NULL,
+ command_type TEXT NOT NULL,
+ asset_id TEXT,
+ result_payload TEXT NOT NULL,
+ accepted_at TEXT NOT NULL,
+ PRIMARY KEY(library_id,epoch,operation_id));
+CREATE TABLE IF NOT EXISTS asset_authority_changes(
+ library_id TEXT NOT NULL,
+ epoch INTEGER NOT NULL,
+ sequence INTEGER NOT NULL,
+ command_type TEXT NOT NULL,
+ asset_id TEXT NOT NULL,
+ entity_revision INTEGER NOT NULL,
+ operation_id TEXT NOT NULL,
+ payload TEXT NOT NULL,
+ changed_at TEXT NOT NULL,
+ PRIMARY KEY(library_id,epoch,sequence));
+CREATE INDEX IF NOT EXISTS asset_authority_changes_operation
+ ON asset_authority_changes(library_id,epoch,operation_id);
+CREATE INDEX IF NOT EXISTS asset_authority_changes_prune
+ ON asset_authority_changes(library_id,epoch,changed_at);
+CREATE TABLE IF NOT EXISTS asset_authority_retention(
+ library_id TEXT NOT NULL,
+ epoch INTEGER NOT NULL,
+ pruned_through INTEGER NOT NULL DEFAULT 0 CHECK(pruned_through >= 0),
+ pruned_at TEXT,
+ PRIMARY KEY(library_id,epoch));
+CREATE INDEX IF NOT EXISTS asset_authority_receipts_prune
+ ON asset_authority_receipts(library_id,epoch,accepted_at);
+"""
+
+
+def startup(get_db):
+    with get_db() as db:
+        db.executescript(DDL)
+        db.commit()
+
+
+def fail(status=422, code="invalidAssetCommand", message="자산 명령이 올바르지 않습니다.", **extra):
+    raise HTTPException(status, detail={"code": code, "message": message, **extra})
+
+
+def now_iso():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def payload_digest(library_id, epoch, contract_version, command_type, asset_id, revision):
+    """Stable digest of a command's *meaning*, so a reused operation id is detected."""
+    canonical = json.dumps(
+        [library_id, epoch, contract_version, command_type, asset_id, revision],
+        sort_keys=True, separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def valid_asset_id(value):
+    return isinstance(value, str) and bool(ASSET_ID_PATTERN.fullmatch(value))
+
+
+def canonical_asset_id(library_id, capture_id):
+    """The canonical Asset id for a promoted Capture.
+
+    Derived from `(library, capture)` through a fixed namespace so it is *stable*: the
+    promotion retry recomputes the same id, which is what lets the mapping row be a
+    primary-key idempotency guard rather than a race. It is deliberately not a counter —
+    a counter would need a lock and would still be unsafe across a retried transaction.
+    """
+    return str(uuid.uuid5(PROMOTION_NAMESPACE, f"{library_id}:{capture_id}"))
+
+
+# ---------------------------------------------------------------------------
+# Reads
+# ---------------------------------------------------------------------------
+
+def state_row(db, library_id, asset_id):
+    return db.execute(
+        "SELECT lifecycle,entity_revision,kind,object_key,content_type,size_bytes,sha256,"
+        "source_url,creator_name,creator_handle,collected_at,source_published_at,"
+        "import_source,created_at,updated_at"
+        " FROM asset_authority_state WHERE library_id=? AND asset_id=?",
+        [library_id, asset_id]).fetchone()
+
+
+def state_projection(row, asset_id):
+    """The canonical delta a replica applies. Never contains media or secrets."""
+    return {
+        "assetId": asset_id,
+        "lifecycle": row[0],
+        "entityRevision": row[1],
+        "kind": row[2],
+        "objectKey": row[3],
+        "contentType": row[4],
+        "sizeBytes": row[5],
+        "sha256": row[6],
+        "sourceUrl": row[7],
+        "creatorName": row[8],
+        "creatorHandle": row[9],
+        "collectedAt": row[10],
+        "sourcePublishedAt": row[11],
+        "importSource": row[12],
+        "createdAt": row[13],
+        "updatedAt": row[14],
+    }
+
+
+def authority_lifecycle(db, library_id, asset_id):
+    """The canonical lifecycle for `asset_id`, or None when this domain has no row.
+
+    Returns None while the domain is inactive, which is what lets the legacy writer treat
+    "no authority opinion" and "authority says nothing about this Asset" identically.
+    """
+    if authority.active_domain(db, DOMAIN, library_id) is None:
+        return None
+    row = db.execute(
+        "SELECT lifecycle FROM asset_authority_state WHERE library_id=? AND asset_id=?",
+        [library_id, asset_id]).fetchone()
+    return row[0] if row is not None else None
+
+
+def authority_owns_lifecycle(db, library_id, asset_id):
+    """Whether the server owns this Asset's lifecycle, so a legacy write must be fenced.
+
+    True only when the domain is active *and* this Asset has canonical state. An Asset the
+    authority has never seen is not fenced: the domain owns lifecycle for the Assets it
+    knows about, and refusing every unknown Asset would block the ordinary PC-created
+    path for no safety gain.
+    """
+    return authority_lifecycle(db, library_id, asset_id) is not None
+
+
+def visible_asset_ids(db, library_id, asset_ids):
+    """Subset of `asset_ids` an ordinary read may expose.
+
+    Returns None when the domain is inactive, which callers read as "no authority
+    opinion" and fall back to legacy visibility — the fence is on writes, not reads,
+    so an inactive domain must not change what a read returns.
+    """
+    if authority.active_domain(db, DOMAIN, library_id) is None:
+        return None
+    if not asset_ids:
+        return set()
+    placeholders = ",".join("?" for _ in asset_ids)
+    rows = db.execute(
+        f"SELECT asset_id FROM asset_authority_state WHERE library_id=?"
+        f" AND lifecycle='normal' AND asset_id IN ({placeholders})",
+        [library_id, *asset_ids]).fetchall()
+    return {row[0] for row in rows}
+
+
+def hidden_asset_ids(db, library_id, asset_ids):
+    """Subset that authority says is NOT normally visible; None while inactive."""
+    if authority.active_domain(db, DOMAIN, library_id) is None:
+        return None
+    if not asset_ids:
+        return set()
+    placeholders = ",".join("?" for _ in asset_ids)
+    rows = db.execute(
+        f"SELECT asset_id FROM asset_authority_state WHERE library_id=?"
+        f" AND lifecycle IN ('{TRASH}','{TOMBSTONED}') AND asset_id IN ({placeholders})",
+        [library_id, *asset_ids]).fetchall()
+    return {row[0] for row in rows}
+
+
+def change_items(db, library_id, epoch, after, limit, ceiling=None):
+    items = []
+    for row in db.execute(
+            "SELECT sequence,command_type,operation_id,asset_id,payload,changed_at"
+            " FROM asset_authority_changes WHERE library_id=? AND epoch=?"
+            " AND sequence>? AND (? IS NULL OR sequence<=?) ORDER BY sequence LIMIT ?",
+            [library_id, epoch, after, ceiling, ceiling, limit]):
+        payload = json.loads(row[4])
+        items.append({"sequence": row[0], "authorityCursor": row[0], "commandType": row[1],
+                      "operationId": row[2], "assetId": row[3], "changedAt": row[5], **payload})
+    return items
+
+
+def pruned_through(db, library_id, epoch):
+    row = db.execute(
+        "SELECT pruned_through FROM asset_authority_retention"
+        " WHERE library_id=? AND epoch=?", [library_id, epoch]).fetchone()
+    return row[0] if row else 0
+
+
+def expired_cursor(row):
+    return HTTPException(409, detail={"code": authority.CODE_CURSOR_EXPIRED,
+                                      "authorityCursor": row["cursor"],
+                                      "retentionDays": RETENTION_DAYS})
+
+
+def asset_page(db, library_id, after, limit):
+    """Canonical Assets for a baseline walk, ordered by Asset id.
+
+    Excludes tombstoned Assets: a baseline installs what a client should hold, and a
+    tombstone's job is to stay gone. Trashed Assets *are* included, carrying their
+    lifecycle, because a client must be able to represent "trashed" rather than
+    concluding the Asset never existed.
+    """
+    rows = db.execute(
+        "SELECT asset_id,lifecycle,entity_revision,kind,object_key,content_type,size_bytes,"
+        "sha256,source_url,creator_name,creator_handle,collected_at,source_published_at,"
+        "import_source,created_at,updated_at"
+        " FROM asset_authority_state WHERE library_id=? AND lifecycle<>'tombstoned'"
+        " AND (? IS NULL OR asset_id>?) ORDER BY asset_id LIMIT ?",
+        [library_id, after, after, limit]).fetchall()
+    return [state_projection(row[1:], row[0]) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Promotion
+# ---------------------------------------------------------------------------
+
+def promote_capture(db, *, library_id, capture_id, kind, object_key, content_type,
+                    size_bytes, sha256, source_url=None, creator_name=None,
+                    creator_handle=None, collected_at=None, source_published_at=None,
+                    import_source=None, now=None):
+    """Turn a validated Capture into a canonical Asset, exactly once.
+
+    Idempotent on `(library, capture)`: the canonical Asset id is derived from the pair,
+    and the mapping row is inserted with the Asset state in the *same* transaction. A
+    retry either finds the mapping and returns it unchanged, or finds neither and
+    completes both — so a crash between them is impossible and a second Asset is
+    unreachable.
+
+    Returns `(asset_id, created)` where `created` is False for a retry.
+    """
+    timestamp = now or now_iso()
+    existing = db.execute(
+        "SELECT asset_id FROM asset_authority_capture_map WHERE library_id=? AND capture_id=?",
+        [library_id, capture_id]).fetchone()
+    if existing is not None:
+        return existing[0], False
+
+    asset_id = canonical_asset_id(library_id, capture_id)
+    current = state_row(db, library_id, asset_id)
+    if current is None:
+        db.execute(
+            "INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision,"
+            "kind,object_key,content_type,size_bytes,sha256,source_url,creator_name,"
+            "creator_handle,collected_at,source_published_at,import_source,created_at,"
+            "updated_at) VALUES(?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [library_id, asset_id, NORMAL, kind, object_key, content_type, size_bytes,
+             sha256, source_url, creator_name, creator_handle, collected_at,
+             source_published_at, import_source, timestamp, timestamp])
+    try:
+        db.execute(
+            "INSERT INTO asset_authority_capture_map(library_id,capture_id,asset_id,promoted_at)"
+            " VALUES(?,?,?,?)", [library_id, capture_id, asset_id, timestamp])
+    except sqlite3.IntegrityError:
+        # A concurrent promotion of the same Capture won the mapping insert; its Asset
+        # is the canonical one. Re-reading keeps the two attempts in agreement instead
+        # of leaving this one believing it created a second Asset.
+        row = db.execute(
+            "SELECT asset_id FROM asset_authority_capture_map"
+            " WHERE library_id=? AND capture_id=?", [library_id, capture_id]).fetchone()
+        if row is None:
+            raise
+        return row[0], False
+
+    # Publication is an ordinary change row, so a replica receives a promoted Asset
+    # through the same `/changes` feed as a lifecycle command. Tombstone-free by
+    # construction: the state row above is `normal`.
+    row = state_row(db, library_id, asset_id)
+    _record_change(db, library_id=library_id, command_type="promoteCapture",
+                   asset_id=asset_id, revision=1, operation_id=f"promote:{capture_id}",
+                   delta={"asset": state_projection(row, asset_id)}, now=timestamp)
+    return asset_id, True
+
+
+def _record_change(db, *, library_id, command_type, asset_id, revision, operation_id, delta, now):
+    """Append one change row and advance the domain cursor.
+
+    Uses the same single-sequence-per-change rule as the other domains, so a client
+    reading `/changes` between pages can never see a half-applied lifecycle transition.
+    """
+    row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
+    cursor = row["cursor"]
+    db.execute(
+        "INSERT INTO asset_authority_changes(library_id,epoch,sequence,command_type,asset_id,"
+        "entity_revision,operation_id,payload,changed_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        [library_id, row["epoch"], cursor + 1, command_type, asset_id, revision,
+         operation_id, json.dumps(delta, sort_keys=True, ensure_ascii=False), now])
+    db.execute(
+        "UPDATE authority_domains SET change_cursor=? WHERE library_id=? AND domain=?",
+        [cursor + 1, library_id, DOMAIN])
+    return cursor + 1
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle commands
+# ---------------------------------------------------------------------------
+
+#: Legal transitions. Trash is reversible; tombstone is not, at the logical layer.
+_TRANSITIONS = {
+    (NORMAL, TRASH): True,
+    (TRASH, NORMAL): True,
+    (TRASH, TOMBSTONED): True,
+    (NORMAL, TOMBSTONED): True,
+    (TOMBSTONED, TOMBSTONED): True,   # idempotent: tombstoning a tombstone is a no-op
+    (NORMAL, NORMAL): True,           # idempotent: trashing a normal Asset twice
+    (TRASH, TRASH): True,
+}
+
+
+def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
+                  entity, now):
+    """Execute one lifecycle command inside the caller's `BEGIN IMMEDIATE`.
+
+    Receipts, canonical state, the ordered change and the domain cursor commit together
+    or not at all. Lifecycle is compare-and-set on the Asset's own entity revision, so a
+    stale client is told to rebase rather than being allowed to overwrite a newer state
+    by arriving later.
+    """
+    row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
+    if row["epoch"] != epoch:
+        fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH,
+             "자산 권위가 이 라이브러리와 일치하지 않습니다.", domain=DOMAIN)
+    if contract_version != CONTRACT_VERSION:
+        fail(409, authority.CODE_AUTHORITY_CONTRACT_UNSUPPORTED,
+             "서버가 지원하지 않는 자산 계약 버전입니다.", domain=DOMAIN)
+
+    asset_id = entity["assetId"]
+    expected = entity["expectedEntityRevision"]
+    digest = payload_digest(library_id, epoch, contract_version, command_type, asset_id, expected)
+    receipt = db.execute(
+        "SELECT payload_digest,result_payload FROM asset_authority_receipts"
+        " WHERE library_id=? AND epoch=? AND operation_id=?",
+        [library_id, epoch, operation_id]).fetchone()
+    if receipt is not None:
+        if receipt["payload_digest"] != digest:
+            fail(409, "operationConflict", "같은 작업 ID가 다른 내용으로 이미 사용되었습니다.")
+        return json.loads(receipt["result_payload"])
+
+    current = state_row(db, library_id, asset_id)
+    if current is None:
+        fail(404, "assetNotFound", "자산을 찾을 수 없습니다.", assetId=asset_id)
+    lifecycle, revision = current[0], current[1]
+    if expected != revision:
+        # Coded conflict carrying current state, so the client rebases instead of
+        # retrying the same stale command forever.
+        fail(409, "revisionConflict", "자산 상태가 변경되었습니다. 최신 상태로 다시 시도해 주세요.",
+             assetId=asset_id, expectedEntityRevision=expected,
+             currentEntityRevision=revision, lifecycle=lifecycle)
+
+    target = {TRASH_ASSET: TRASH, RESTORE_ASSET: NORMAL, TOMBSTONE_ASSET: TOMBSTONED}[command_type]
+    if not _TRANSITIONS.get((lifecycle, target), False):
+        # Tombstone is terminal at the logical layer: reviving it would resurrect an
+        # Asset whose deletion the change log already recorded.
+        fail(409, "lifecycleTransitionRefused",
+             "허용되지 않는 상태 전이입니다.", assetId=asset_id,
+             lifecycle=lifecycle, requested=target)
+    if (lifecycle, target) == (lifecycle, lifecycle):
+        # A same-state command is accepted and receipted without a change row, so the
+        # caller gets a durable answer without demanding a revision it cannot know.
+        result = {"libraryId": row["libraryId"], "epoch": row["epoch"],
+                  "contractVersion": row["contractVersion"], "commandType": command_type,
+                  "operationId": operation_id, "changed": False, "changeSequence": None,
+                  "authorityCursor": row["cursor"], "asset": None, "updatedAt": now}
+        _save_receipt(db, library_id, epoch, operation_id, digest, command_type, asset_id, result, now)
+        return result
+
+    next_revision = revision + 1
+    db.execute(
+        "UPDATE asset_authority_state SET lifecycle=?,entity_revision=?,updated_at=?"
+        " WHERE library_id=? AND asset_id=?",
+        [target, next_revision, now, library_id, asset_id])
+    updated = state_row(db, library_id, asset_id)
+    projection = state_projection(updated, asset_id)
+    sequence = _record_change(
+        db, library_id=library_id, command_type=command_type, asset_id=asset_id,
+        revision=next_revision, operation_id=operation_id,
+        delta={"asset": projection}, now=now)
+    result = {"libraryId": row["libraryId"], "epoch": row["epoch"],
+              "contractVersion": row["contractVersion"], "commandType": command_type,
+              "operationId": operation_id, "changed": True, "changeSequence": sequence,
+              "authorityCursor": sequence, "asset": projection, "updatedAt": now}
+    _save_receipt(db, library_id, epoch, operation_id, digest, command_type, asset_id, result, now)
+    return result
+
+
+def _save_receipt(db, library_id, epoch, operation_id, digest, command_type, asset_id, result, now):
+    db.execute(
+        "INSERT INTO asset_authority_receipts(library_id,epoch,operation_id,payload_digest,"
+        "command_type,asset_id,result_payload,accepted_at) VALUES(?,?,?,?,?,?,?,?)",
+        [library_id, epoch, operation_id, digest, command_type, asset_id,
+         json.dumps(result, sort_keys=True, ensure_ascii=False), now])
+
+
+def parse_command(body):
+    if not isinstance(body, dict) or set(body) != COMMAND_KEYS:
+        fail()
+    library_id = body["libraryId"]
+    epoch = body["epoch"]
+    contract_version = body["contractVersion"]
+    operation_id = body["operationId"]
+    command_type = body["commandType"]
+    if not isinstance(library_id, str) or not LIBRARY_ID_PATTERN.fullmatch(library_id):
+        fail()
+    if not isinstance(epoch, int) or epoch < 1:
+        fail()
+    if not isinstance(contract_version, int) or contract_version < 1:
+        fail()
+    if not isinstance(operation_id, str) or not UUID_PATTERN.fullmatch(operation_id):
+        fail()
+    if command_type not in LIFECYCLE_COMMAND_TYPES:
+        fail()
+    asset_id = body["assetId"]
+    if not valid_asset_id(asset_id):
+        fail()
+    revision = body["expectedEntityRevision"]
+    if not isinstance(revision, int) or revision < 1:
+        fail()
+    return library_id, epoch, contract_version, operation_id, command_type, {
+        "assetId": asset_id, "expectedEntityRevision": revision}
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+def parse_activation(body):
+    """Validate the tiny operator request that activates the domain."""
+    if not isinstance(body, dict) or set(body) != {"libraryId"}:
+        fail(422, "invalidAssetBaseline", "자산 활성화 요청이 올바르지 않습니다.")
+    library_id = body["libraryId"]
+    if not isinstance(library_id, str) or not LIBRARY_ID_PATTERN.fullmatch(library_id):
+        fail(422, "invalidAssetBaseline", "라이브러리 ID가 올바르지 않습니다.")
+    return library_id
+
+
+def activate(db, *, library_id, now):
+    """Create epoch 1 for the Asset domain, atomically.
+
+    Creating the `authority_domains` row *is* the fence: after this commits, the legacy
+    PC replication commit observes the row and can no longer overwrite canonical
+    lifecycle state. An identical retry is idempotent; a second activation is refused.
+
+    Unlike Classification and Album there is no staged snapshot to revalidate, because
+    this domain's canonical content is created by promotion and lifecycle commands rather
+    than derived from a PC publication. The safety property that matters — "never
+    activate over state this endpoint did not create" — is therefore enforced by refusing
+    to activate when authority state already exists without an authority row.
+    """
+    libraries = sorted({entry["libraryId"] for entry in authority.active_domains(db)})
+    if len(libraries) > 1:
+        fail(503, authority.CODE_AUTHORITY_AMBIGUOUS,
+             "동기화 권위 상태가 모호합니다.", domain=DOMAIN, libraries=libraries)
+    if libraries and libraries[0] != library_id:
+        fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH,
+             "기존 서버 권위와 다른 라이브러리를 활성화할 수 없습니다.",
+             domain=DOMAIN, libraryId=libraries[0])
+
+    existing = authority.active_domain(db, DOMAIN)
+    if existing is not None:
+        if existing["libraryId"] == library_id:
+            return {"domain": DOMAIN, "libraryId": library_id, "epoch": existing["epoch"],
+                    "contractVersion": existing["contractVersion"],
+                    "cursor": existing["cursor"], "activatedAt": existing["activatedAt"]}
+        fail(409, "assetAuthorityActive", "자산 권위가 이미 활성화되어 있습니다.", domain=DOMAIN)
+
+    # Typed rows without an authority row are an interrupted/manual state this endpoint
+    # did not create. Never guess whether they are disposable.
+    for table in ("asset_authority_state", "asset_authority_capture_map",
+                  "asset_authority_changes", "asset_authority_receipts",
+                  "asset_authority_retention"):
+        if db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None:
+            fail(409, "assetAuthorityStateExists",
+                 "활성화되지 않은 자산 권위 상태가 이미 존재합니다.", domain=DOMAIN)
+
+    db.execute(
+        "INSERT INTO authority_domains(library_id,domain,epoch,contract_version,change_cursor,"
+        "baseline_digest,baseline_revision,activated_at) VALUES(?,?,1,?,0,?,NULL,?)",
+        [library_id, DOMAIN, CONTRACT_VERSION,
+         hashlib.sha256(f"assets:{library_id}:{now}".encode()).hexdigest(), now])
+    return {"domain": DOMAIN, "libraryId": library_id, "epoch": 1,
+            "contractVersion": CONTRACT_VERSION, "cursor": 0, "activatedAt": now}
+
+
+PREFIX = "/v1/assets/authority"
+
+
+def register_asset_authority(app, get_db, require_client, require_publisher):
+    """Register the Asset authority read/command routes.
+
+    Lifecycle is a publisher operation: trashing an Asset is a user-visible canonical
+    change, and an ordinary read-scoped client credential must not be able to retire
+    Assets. This mirrors the Classification structural/assignment split rather than
+    inventing a third privilege level.
+    """
+    from fastapi import Header, Request
+    from fastapi.concurrency import run_in_threadpool
+
+    @app.post(PREFIX + "/activate")
+    async def activate_authority(request: Request, authorization: str | None = Header(default=None)):
+        require_publisher(authorization)
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > 64 * 1024:
+                fail(413, "invalidAssetBaseline", "자산 활성화 요청이 너무 큽니다.")
+            data.extend(chunk)
+        try:
+            body = json.loads(data)
+        except (ValueError, UnicodeError):
+            fail(422, "invalidAssetBaseline", "자산 활성화 요청을 읽을 수 없습니다.")
+        library_id = parse_activation(body)
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    state = activate(db, library_id=library_id, now=now_iso())
+                    db.commit()
+                    return state
+                except BaseException:
+                    db.rollback()
+                    raise
+        return await run_in_threadpool(run)
+
+    @app.get(PREFIX + "/status")
+    async def asset_authority_status(libraryId: str, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        if not LIBRARY_ID_PATTERN.fullmatch(libraryId):
+            fail()
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN")
+                try:
+                    row = authority.active_domain(db, DOMAIN, libraryId)
+                    if row is None:
+                        return {"active": False, "domain": DOMAIN}
+                    return {"active": True, "domain": DOMAIN, "libraryId": row["libraryId"],
+                            "epoch": row["epoch"], "contractVersion": row["contractVersion"],
+                            "cursor": row["cursor"]}
+                finally:
+                    db.rollback()
+        return await run_in_threadpool(run)
+
+    @app.get(PREFIX + "/changes")
+    async def asset_changes(request: Request, libraryId: str, epoch: int,
+                            after: int = 0, limit: int = DEFAULT_CHANGE_PAGE,
+                            authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit"}:
+            fail()
+        if not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1:
+            fail()
+        if after < 0 or not 1 <= limit <= MAX_CHANGE_PAGE:
+            fail()
+
+        def run():
+            with get_db() as db:
+                # Identity, cursor, retention floor and rows must describe one snapshot:
+                # read as separate autocommit statements a concurrent command could
+                # commit between them, and the response would advertise an older cursor
+                # while carrying newer rows - which no replica can apply coherently.
+                db.execute("BEGIN")
+                try:
+                    row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                    cursor = row["cursor"]
+                    if after > cursor:
+                        fail(409, "cursorAhead", "변경 커서가 권위 커서보다 앞서 있습니다.")
+                    if after < pruned_through(db, libraryId, epoch):
+                        raise expired_cursor(row)
+                    items = change_items(db, libraryId, epoch, after, limit, ceiling=cursor)
+                    next_after = items[-1]["sequence"] if items else after
+                    return {"libraryId": row["libraryId"], "epoch": row["epoch"],
+                            "contractVersion": row["contractVersion"], "cursor": cursor,
+                            "items": items, "nextAfter": next_after,
+                            "hasMore": next_after < cursor}
+                finally:
+                    db.rollback()
+        return await run_in_threadpool(run)
+
+    @app.get(PREFIX + "/baseline")
+    async def asset_baseline(request: Request, libraryId: str, epoch: int,
+                             after: str | None = None, limit: int = DEFAULT_ASSET_PAGE,
+                             authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit"}:
+            fail()
+        if not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1:
+            fail()
+        if not 1 <= limit <= MAX_ASSET_PAGE:
+            fail()
+        if after is not None and not valid_asset_id(after):
+            fail()
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN")
+                try:
+                    row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                    items = asset_page(db, libraryId, after, limit)
+                    # The cursor is read in the same snapshot, so a caller that installs
+                    # this page and then follows `/changes` from it cannot skip a change
+                    # that committed between the two requests.
+                    return {"libraryId": row["libraryId"], "epoch": row["epoch"],
+                            "contractVersion": row["contractVersion"],
+                            "cursor": row["cursor"], "items": items,
+                            "nextAfter": items[-1]["assetId"] if len(items) == limit else None,
+                            "hasMore": len(items) == limit}
+                finally:
+                    db.rollback()
+        return await run_in_threadpool(run)
+
+    @app.put(PREFIX + "/commands")
+    async def asset_command(request: Request, authorization: str | None = Header(default=None)):
+        # Authenticate, then decide the required role, before any envelope or field
+        # validation, so an under-privileged caller learns nothing about the contract.
+        require_client(authorization)
+        require_publisher(authorization)
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > 16 * 1024:
+                fail(413)
+            data.extend(chunk)
+        try:
+            body = json.loads(data)
+        except (ValueError, UnicodeError):
+            fail()
+        library_id, epoch, contract_version, operation_id, command_type, entity = parse_command(body)
+        now = now_iso()
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    result = apply_command(
+                        db, library_id=library_id, epoch=epoch,
+                        contract_version=contract_version, command_type=command_type,
+                        operation_id=operation_id, entity=entity, now=now)
+                    db.commit()
+                    return result
+                except BaseException:
+                    db.rollback()
+                    raise
+        return await run_in_threadpool(run)
+
+    return lambda: startup(get_db)
+
+
+def prune(get_db, days=RETENTION_DAYS, receipt_days=RECEIPT_RETENTION_DAYS, now=None):
+    """Drop history older than the retention window, keeping lifecycle state.
+
+    Asset *state* is never pruned: a tombstone must outlive its change row, because "no
+    change row" must never be read as "this Asset was deleted".
+    """
+    moment = now or datetime.now(timezone.utc)
+    change_cutoff = (moment - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    receipt_cutoff = (moment - timedelta(days=receipt_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            floored = db.execute(
+                "SELECT library_id,epoch,MAX(sequence) FROM asset_authority_changes"
+                " WHERE changed_at < ? GROUP BY library_id,epoch", [change_cutoff]).fetchall()
+            removed = db.execute(
+                "DELETE FROM asset_authority_changes WHERE changed_at < ?",
+                [change_cutoff]).rowcount
+            receipts = db.execute(
+                "DELETE FROM asset_authority_receipts WHERE accepted_at < ?",
+                [receipt_cutoff]).rowcount
+            stamp = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+            for library_id, epoch, highest in floored:
+                db.execute(
+                    "INSERT INTO asset_authority_retention(library_id,epoch,pruned_through,"
+                    "pruned_at) VALUES(?,?,?,?) ON CONFLICT(library_id,epoch) DO UPDATE SET"
+                    " pruned_through=MAX(pruned_through,excluded.pruned_through),"
+                    " pruned_at=excluded.pruned_at", [library_id, epoch, highest, stamp])
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+    return {"changes": removed, "receipts": receipts}

@@ -74,6 +74,30 @@ pub fn open_database(path: &Path) -> Result<Connection, LibraryError> {
 }
 
 pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
+    initialize_database_with_dev_policy(
+        path,
+        // A debug build, but *not* a test harness. The guard exists to stop a running
+        // development application from migrating a library nobody meant it to touch;
+        // a test binary is not that, and the suite deliberately opens libraries built at
+        // historical schema versions (which is how migrations are tested at all). Test
+        // builds therefore take the release path, and the policy itself is still covered
+        // directly by `dev_guard`'s tests through the explicit entry point below.
+        cfg!(debug_assertions) && !cfg!(test),
+        std::env::var(super::dev_guard::ALLOW_ENV).ok().as_deref(),
+    )
+}
+
+/// The migration entry point with the development policy supplied explicitly.
+///
+/// Production passes the build's own debug flag and the real environment; tests pass both,
+/// so the guard's behaviour is exercised without depending on how the test binary was
+/// built. A watcher rebuilding a debug binary and reopening a real library is precisely
+/// the case this refuses.
+pub(crate) fn initialize_database_with_dev_policy(
+    path: &Path,
+    dev_build: bool,
+    environment_value: Option<&str>,
+) -> Result<Connection, LibraryError> {
     let mut connection = open_database(path)?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
 
@@ -81,10 +105,27 @@ pub fn initialize_database(path: &Path) -> Result<Connection, LibraryError> {
     match version {
         SCHEMA_VERSION => {}
         version if (0..SCHEMA_VERSION).contains(&version) => {
+            // Refuse before touching anything: the pre-migration snapshot is *writing* to
+            // the library, and the snapshot alone does not make rewriting someone's
+            // production library an acceptable default.
+            let root = path
+                .parent()
+                .expect("database paths have a parent directory");
+            if super::dev_guard::dev_migration_decision(
+                dev_build,
+                version,
+                SCHEMA_VERSION,
+                super::dev_guard::is_declared_dev_library(root),
+                super::dev_guard::environment_opt_in(environment_value),
+            ) == super::dev_guard::DevMigrationDecision::Blocked
+            {
+                return Err(LibraryError::DevelopmentMigrationBlocked {
+                    root: root.display().to_string(),
+                    existing_version: version,
+                    schema_version: SCHEMA_VERSION,
+                });
+            }
             if version > 0 {
-                let root = path
-                    .parent()
-                    .expect("database paths have a parent directory");
                 let snapshot = backup::pre_migration_snapshot_path(root, version);
                 backup::create_verified_snapshot(&connection, &snapshot)?;
             }
@@ -3530,5 +3571,141 @@ mod tests {
                 [],
             )
             .is_err());
+    }
+}
+
+#[cfg(test)]
+mod dev_guard_enforcement_tests {
+    //! The guard's *enforcement*, complementing `dev_guard`'s policy tests.
+    //!
+    //! These drive the real migration entry point, so they would fail if the policy were
+    //! ever computed correctly but not consulted before migrating.
+    use super::*;
+
+    /// Build a library at an older schema version, as a real pre-migration library is.
+    ///
+    /// Uses the module's own `historical_schema` so the database is a genuine historical
+    /// schema rather than today's schema with a stamped-back version: stamping alone would
+    /// leave later tables present and the migration would then re-apply them.
+    fn library_at_version(root: &Path, version: i64) {
+        std::fs::create_dir_all(root).unwrap();
+        // The pre-migration snapshot is written into `backups/`, exactly as the real
+        // Library layout provides it.
+        std::fs::create_dir_all(root.join("backups")).unwrap();
+        let mut connection = open_database(&root.join("library.sqlite")).unwrap();
+        super::tests::historical_schema(&mut connection, version as usize);
+    }
+
+    fn version_of(root: &Path) -> i64 {
+        open_database(&root.join("library.sqlite"))
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap()
+    }
+
+    /// The production-damaging shape: a dev build, an existing older library, no opt-in.
+    #[test]
+    fn a_dev_build_refuses_to_migrate_an_undeclared_library_and_leaves_it_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        library_at_version(&root, SCHEMA_VERSION - 1);
+
+        let error = initialize_database_with_dev_policy(&root.join("library.sqlite"), true, None)
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                LibraryError::DevelopmentMigrationBlocked {
+                    existing_version,
+                    schema_version,
+                    ..
+                } if existing_version == SCHEMA_VERSION - 1 && schema_version == SCHEMA_VERSION
+            ),
+            "{error}"
+        );
+        // The refusal must be inert: a guard that blocks *after* migrating is worthless.
+        assert_eq!(version_of(&root), SCHEMA_VERSION - 1);
+    }
+
+    /// A release build migrates normally: the guard must not break real upgrades.
+    #[test]
+    fn a_release_build_still_migrates_an_existing_library() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        library_at_version(&root, SCHEMA_VERSION - 1);
+
+        initialize_database_with_dev_policy(&root.join("library.sqlite"), false, None).unwrap();
+        assert_eq!(version_of(&root), SCHEMA_VERSION);
+    }
+
+    /// Marking the library is the durable opt-in, and it must actually unblock.
+    #[test]
+    fn a_declared_development_library_migrates_in_a_dev_build() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        library_at_version(&root, SCHEMA_VERSION - 1);
+        std::fs::write(root.join(super::super::dev_guard::DEV_LIBRARY_MARKER), b"dev\n").unwrap();
+
+        initialize_database_with_dev_policy(&root.join("library.sqlite"), true, None).unwrap();
+        assert_eq!(version_of(&root), SCHEMA_VERSION);
+    }
+
+    /// The per-run environment opt-in must also unblock, for a one-off unmarked migration.
+    #[test]
+    fn the_environment_opt_in_migrates_in_a_dev_build() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        library_at_version(&root, SCHEMA_VERSION - 1);
+
+        initialize_database_with_dev_policy(&root.join("library.sqlite"), true, Some("1")).unwrap();
+        assert_eq!(version_of(&root), SCHEMA_VERSION);
+    }
+
+    /// Creating a library must not be blocked: dev and tests do this constantly, and no
+    /// existing data is at risk.
+    #[test]
+    fn creating_a_new_library_is_never_blocked_in_a_dev_build() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        std::fs::create_dir_all(&root).unwrap();
+
+        initialize_database_with_dev_policy(&root.join("library.sqlite"), true, None).unwrap();
+        assert_eq!(version_of(&root), SCHEMA_VERSION);
+    }
+
+    /// A database newer than this build must be a hard error, never a migration or a
+    /// write. This is the cross-branch case: a library migrated by a branch that had a
+    /// later schema must not be silently rewritten by an older build.
+    #[test]
+    fn a_newer_database_is_refused_rather_than_touched() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        library_at_version(&root, SCHEMA_VERSION - 1);
+        let path = root.join("library.sqlite");
+        {
+            let connection = open_database(&path).unwrap();
+            connection
+                .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+                .unwrap();
+        }
+        let error = initialize_database_with_dev_policy(&path, false, None).unwrap_err();
+        assert!(
+            matches!(error, LibraryError::UnsupportedSchema(version) if version == SCHEMA_VERSION + 1),
+            "{error}"
+        );
+        // The version must be untouched: a refusal that already rewrote the file would
+        // defeat the point.
+        assert_eq!(version_of(&root), SCHEMA_VERSION + 1);
+    }
+
+    /// A current library needs no decision, so a dev build opens it normally.
+    #[test]
+    fn an_already_current_library_opens_in_a_dev_build() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        library_at_version(&root, SCHEMA_VERSION);
+
+        initialize_database_with_dev_policy(&root.join("library.sqlite"), true, None).unwrap();
+        assert_eq!(version_of(&root), SCHEMA_VERSION);
     }
 }

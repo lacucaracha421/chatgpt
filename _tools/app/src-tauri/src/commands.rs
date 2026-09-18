@@ -261,6 +261,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidRemoteReadingProgress => "invalid_remote_reading_progress",
             LibraryError::OnlineCatalogImport { .. } => "online_catalog_import_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
+            LibraryError::DevelopmentMigrationBlocked { .. } => "development_migration_blocked",
             LibraryError::MetadataImportManifestCount => "metadata_import_manifest_count",
             LibraryError::UnsupportedMetadataImport => "unsupported_metadata_import",
             LibraryError::InvalidMetadataImport => "invalid_metadata_import",

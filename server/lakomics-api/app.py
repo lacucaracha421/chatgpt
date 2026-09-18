@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 import album_authority
+import asset_authority
 import authority
 import classification_authority
 import classification_snapshot
@@ -1816,6 +1817,28 @@ def list_mobile_classification_assets(
         # One authority read for both the filter and the projection, so a page cannot be
         # selected from one state and projected from another.
         active = authority.active_domain(db, classification_authority.DOMAIN)
+        # Clause parameters are collected in the order their clauses appear in the SQL
+        # below, then prepended to the cursor/limit parameters. Building them this way
+        # rather than inserting at fixed indices keeps the binding correct as clauses
+        # are added.
+        clause_params: list[object] = []
+        # Asset lifecycle (ADR-0038): trashed and tombstoned Assets are excluded from
+        # ordinary reads. Expressed as an indexed NOT EXISTS against authority state
+        # rather than a Python filter after the fact, so the LIMIT still bounds the work
+        # and a page cannot be shortened by later filtering.
+        lifecycle_clause = ""
+        asset_active = authority.active_domain(db, asset_authority.DOMAIN)
+        if asset_active is not None:
+            lifecycle_clause = """
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM asset_authority_state AS authority_state
+                    WHERE authority_state.library_id = ?
+                      AND authority_state.asset_id = asset.id
+                      AND authority_state.lifecycle <> 'normal'
+                )
+            """
+            clause_params.append(asset_active["libraryId"])
         if classification_id is not None:
             if active is not None:
                 # Single-valued by contract, so this is an exact equality against the
@@ -1829,8 +1852,8 @@ def list_mobile_classification_assets(
                           AND assignment.classification_id = ?
                     )
                 """
-                params.insert(0, active["libraryId"])
-                params.insert(1, classification_id)
+                clause_params.append(active["libraryId"])
+                clause_params.append(classification_id)
             else:
                 classification_clause = """
                     AND EXISTS (
@@ -1840,13 +1863,16 @@ def list_mobile_classification_assets(
                           AND relationship.classification_id = ?
                     )
                 """
-                params.insert(0, classification_id)
+                clause_params.append(classification_id)
+        # Clause bindings precede the cursor/limit bindings in the statement below.
+        params[:0] = clause_params
         rows = db.execute(
             f"""
             SELECT asset.*,
                    COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
             FROM assets AS asset
             WHERE asset.committed = 1
+              {lifecycle_clause}
               {classification_clause}
               {cursor_clause}
             ORDER BY mobile_sort_at {direction}, asset.id {direction}
@@ -2554,6 +2580,30 @@ def replication_commit(
                 status_code=404,
                 detail="Asset was not prepared; call /v1/replication/prepare first",
             )
+        # Asset lifecycle fence (ADR-0038). Once the domain is active the server owns
+        # lifecycle state, so a stale PC replication commit must not resurrect a trashed
+        # or tombstoned Asset by re-asserting its existence. Rejected as a whole rather
+        # than partially applied, so the client learns to reconcile instead of believing
+        # the Asset is live again.
+        #
+        # The library comes from the active domain row rather than the request: this route
+        # predates authority and carries no library id, and the product is single-library,
+        # so the domain row is the authoritative answer. Deliberately placed after the
+        # prepare check so an unprepared Asset keeps its existing 404, and a no-op while
+        # the domain is inactive — which keeps the legacy path byte-for-byte unchanged.
+        active = authority.active_domain(db, asset_authority.DOMAIN)
+        if active is not None:
+            lifecycle = asset_authority.authority_lifecycle(
+                db, active["libraryId"], request.asset_id)
+            if lifecycle is not None and lifecycle != asset_authority.NORMAL:
+                db.execute("ROLLBACK")
+                raise HTTPException(status_code=409, detail={
+                    "code": "assetLifecycleOwned",
+                    "message": "서버가 자산 상태를 관리합니다. 최신 상태로 다시 시도해 주세요.",
+                    "domain": asset_authority.DOMAIN,
+                    "assetId": request.asset_id,
+                    "lifecycle": lifecycle,
+                })
         if request.expected_revision is None:
             if row["metadata_revision"] > 0:
                 raise HTTPException(status_code=409, detail="Revision-aware client required")
@@ -2882,4 +2932,15 @@ startup_album_authority = register_album_authority(
 from classification_authority import register_classification_authority
 
 startup_classification_authority = register_classification_authority(
+    app, get_db, require_client, require_publisher)
+
+# Asset lifecycle authority (ADR-0038). Startup only creates empty tables, and the
+# domain stays inactive — every route reports `authorityInactive`, and `promote_capture`
+# refuses — until an operator activates an epoch through the activation route, which no
+# environment calls in this batch. Until then the legacy PC-mediated capture and
+# replication paths above are untouched: the fence is on writes, and an inactive domain
+# reports no visibility opinion either.
+from asset_authority import register_asset_authority
+
+startup_asset_authority = register_asset_authority(
     app, get_db, require_client, require_publisher)
