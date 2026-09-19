@@ -243,9 +243,13 @@ final class AlbumReplicaService {
                 AssetReplica asset;
                 synchronized(gate){engine();asset=store.assetReplica(new Transport());}
                 boolean changed=asset.sync(scope);
-                String generation=client.api("/v1/library/list-generation","GET",null,null).getString("generation");
+                String generation=CloudClient.listGeneration(client,null,null);
                 synchronized(gate) {
-                    if(startedUnder==attempt && (changed || !generation.equals(assetListGeneration))) {
+                    // A null generation means the deployed server has no list-generation
+                    // endpoint, so only a real local Asset change can invalidate; treating
+                    // null as "changed" would refresh the provider on every pass forever.
+                    boolean generationChanged=generation!=null&&!generation.equals(assetListGeneration);
+                    if(startedUnder==attempt && (changed || generationChanged)) {
                         assetListGeneration=generation;
                         LibraryDocumentsProvider.invalidateMetadata(context);
                         PickerLibrary.get(context).refresh(true);

@@ -3,12 +3,14 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import type {HomeProps} from './Home';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
-vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'connection failed'}));
+vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'connection failed',
+  ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onOpen,onSelect,recentFolders}:HomeProps)=><div><button onClick={()=>onSelect({tab:'library',title:'최근 저장'})}>전체 보기</button><span>{`recent-folders:${recentFolders.join(',')}`}</span>{items.slice(0,12).map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
 vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd}:{items:Asset[];onOpen(i:number):void;onNearEnd():void})=><div aria-label="자산 목록" onScroll={onNearEnd}>{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
+import {ApiError} from './transport';
 const a=[{id:'a1',kind:'image'},{id:'a2',kind:'image'}],b=[{id:'b1',kind:'image'},{id:'b2',kind:'image'}];
 beforeEach(()=>{
   vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
@@ -204,6 +206,39 @@ describe('server list generation',()=>{
     server.change(a);act(()=>window.dispatchEvent(new Event('lakomics-resume')));
     await screen.findByText('tile-a1');
     server.change([...a,...b]);act(()=>window.dispatchEvent(new Event('focus')));
+    await screen.findByText('tile-b1');
+  });
+  // A server that predates the generation endpoint answers 404. The list fetch must
+  // survive that: generation invalidation is an optimization over the canonical read,
+  // so an unsupported optimization cannot be allowed to empty the library. This was a
+  // real regression - Home rendered nothing but "동기화된 자산이 없습니다" against the
+  // deployed server whose only fault was not having the route yet.
+  it('still loads the list when the server has no list-generation endpoint',async()=>{
+    const missing=()=>new ApiError('요청한 정보를 찾을 수 없습니다.',404,null);
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path==='/v1/library/list-generation')throw missing();
+      if(path.includes('classifications'))return{items:[{id:'b',name:'분류 B',asset_count:2,parent_id:null}]};
+      if(path.includes('revisit'))return{bundles:[]}; if(path.includes('captures'))return{captures:[]};
+      return{items:a,has_more:false,next_cursor:null};
+    });
+    render(<App/>);
+    await screen.findByText('tile-a1');
+    expect(screen.queryByText(/찾을 수 없습니다/)).toBeNull();
+  });
+  it('keeps paging when the server has no list-generation endpoint',async()=>{
+    const missing=()=>new ApiError('요청한 정보를 찾을 수 없습니다.',404,null);
+    // Keyed on the cursor so concurrent Home requests cannot be mistaken for pages.
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path==='/v1/library/list-generation')throw missing();
+      if(path.includes('classifications'))return{items:[{id:'b',name:'분류 B',asset_count:2,parent_id:null}]};
+      if(path.includes('revisit'))return{bundles:[]}; if(path.includes('captures'))return{captures:[]};
+      return path.includes('cursor=c1')
+        ? {items:b,has_more:false,next_cursor:null}
+        : {items:a,has_more:true,next_cursor:'c1'};
+    });
+    render(<App/>);await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByLabelText('자산 목록');
+    fireEvent.scroll(screen.getByLabelText('자산 목록'));
     await screen.findByText('tile-b1');
   });
   it('manual refresh fetches even when generation is unchanged',async()=>{

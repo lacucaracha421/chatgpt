@@ -39,6 +39,18 @@ final class CloudClient {
   finally{try{stream.close();}catch(Exception ignored){}}
  }
  static void stripKeys(Object value) throws JSONException {if(value instanceof JSONObject){JSONObject o=(JSONObject)value;o.remove("object_key");java.util.Iterator<String> keys=o.keys();while(keys.hasNext())stripKeys(o.get(keys.next()));}else if(value instanceof JSONArray){JSONArray a=(JSONArray)value;for(int i=0;i<a.length();i++)stripKeys(a.get(i));}}
+ /**
+  * The library list generation, or null when this server predates the endpoint.
+  *
+  * Generation checks guard refreshes against a mutation that lands mid-traversal, but
+  * they are an optimization over the canonical read. A deployed server without the
+  * route answers 404, and failing the whole refresh there would strand the picker on a
+  * stale snapshot even though the library itself is fully readable.
+  */
+ static String listGeneration(CloudClient client,String token,CancellationSignal signal)throws Exception {
+  try{return client.api("/v1/library/list-generation","GET",null,signal).getString("generation");}
+  catch(HttpFailure unavailable){if(unavailable.status==404)return null;throw unavailable;}
+ }
  static void prepare(HttpURLConnection c,CancellationSignal signal){c.setConnectTimeout(12000);c.setReadTimeout(20000);c.setInstanceFollowRedirects(false);if(signal!=null){signal.throwIfCanceled();signal.setOnCancelListener(c::disconnect);}}
  static void copy(InputStream in,OutputStream out,long max,CancellationSignal signal)throws IOException {byte[] b=new byte[32768];long deadline=System.currentTimeMillis()+90000;long count=0;int n;while((n=in.read(b))!=-1){if(signal!=null)signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new SocketTimeoutException("Transfer deadline exceeded");count+=n;if(count>max)throw new IOException("Media exceeds cache limit");out.write(b,0,n);}}
  void download(String url,File file,long max,CancellationSignal signal)throws Exception {

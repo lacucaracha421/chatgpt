@@ -47,7 +47,7 @@ final class PickerLibrary {
     private void sync(long attempt,String revision,CancellationSignal signal){
         try{
             long deadline=SystemClock.elapsedRealtime()+10L*60*1000;
-            check(attempt,revision,signal);String listGeneration=client.api("/v1/library/list-generation","GET",null,signal).getString("generation");JSONArray classes=client.api("/v1/library/classifications","GET",null,signal).getJSONArray("items");
+            check(attempt,revision,signal);String listGeneration=CloudClient.listGeneration(client,null,signal);JSONArray classes=client.api("/v1/library/classifications","GET",null,signal).getJSONArray("items");
             if(classes.length()>10000)throw new IOException("Classification bound exceeded");
             Map<String,String> parents=new HashMap<>(),names=new TreeMap<>();
             for(int i=0;i<classes.length();i++){JSONObject o=classes.getJSONObject(i);String id=o.getString("id");names.put(id,o.optString("name",id));parents.put(id,o.isNull("parent_id")?null:o.optString("parent_id",null));}
@@ -67,7 +67,8 @@ final class PickerLibrary {
             // Additive: when Album authority is unadopted this contributes nothing and the
             // Classification collections published above are unchanged.
             albums.putAll(authoritative.names);
-            if(!listGeneration.equals(client.api("/v1/library/list-generation","GET",null,signal).getString("generation")))throw new IOException("Library changed during refresh");
+            String after=CloudClient.listGeneration(client,null,signal);
+            if(listGeneration!=null&&after!=null&&!listGeneration.equals(after))throw new IOException("Library changed during refresh");
             PickerSnapshot next=snapshot.merge(authoritative.merge(rows),albums,System.currentTimeMillis());byte[] encoded=encode(next,revision);
             synchronized(this){check(attempt,revision,signal);save(encoded);snapshot=next;error="";}
             notifyPicker();

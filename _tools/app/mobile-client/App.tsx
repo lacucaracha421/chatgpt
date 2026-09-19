@@ -1,4 +1,4 @@
-import {listGeneration, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
+import {fetchListGeneration, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
@@ -81,9 +81,11 @@ export function App() {
     cancelMore();
     const request = gate.current.begin(); lastIntent.current = {view,cursor,previous}; setBusy(true); setError('');
     try {
-      let generation = listGeneration(await api<unknown>('/v1/library/list-generation', request.signal));
+      // `null` means this server predates the generation endpoint, so degrade to
+      // always-fresh reads instead of failing the load that carries the actual list.
+      let generation = await fetchListGeneration(request.signal);
       if (!gate.current.current(request.id)) return;
-      if (generation !== observedGeneration.current) {viewCache.current.clear(); observedGeneration.current = generation;}
+      if (generation !== null && generation !== observedGeneration.current) {viewCache.current.clear(); observedGeneration.current = generation;}
       const candidate = fresh ? undefined : viewCache.current.get(`${viewKey(view)}:${cursor}`);
       const cached = generation && candidate?.generation === generation ? candidate : undefined;
       let response:Page = view.characters ? {items:[],has_more:false,next_cursor:null} : cached ?? normalizePage(await api<Page>(pagePath(view, cursor), request.signal));
@@ -91,8 +93,8 @@ export function App() {
         // Bind a fetched page to a stable generation; a mutation crossing the fetch must
         // not bless stale rows as current. Retry within the same navigation request.
         for (let attempt=0; attempt<3; attempt++) {
-          const after = listGeneration(await api<unknown>('/v1/library/list-generation', request.signal));
-          if (after === generation) break;
+          const after = await fetchListGeneration(request.signal);
+          if (after === null || after === generation) break;
           if (attempt === 2) throw new Error('목록이 변경되었습니다. 다시 시도해 주세요.');
           generation = after; viewCache.current.clear();
           response = normalizePage(await api<Page>(pagePath(view,cursor),request.signal));
@@ -114,10 +116,13 @@ export function App() {
       if (!active || running || document.visibilityState === 'hidden') return;
       running=true;
       try {
-        const generation=listGeneration(await api<unknown>('/v1/library/list-generation',controller.signal));
+        const generation=await fetchListGeneration(controller.signal);
         if (!active) return;
         const state=latest.current;
-        if (generation === null || generation !== observedGeneration.current) {
+        // Without the endpoint there is no cheap change signal: leave the committed
+        // view alone and let the foreground/resume refresh handle navigation.
+        if (generation === null) return;
+        if (generation !== observedGeneration.current) {
           viewCache.current.clear(); cancelMore(); clearMediaCache();
           setViewer(null);
           await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true);
@@ -145,11 +150,15 @@ export function App() {
     morePending.current = true; setLoadingMore(true); setMoreError('');
     const request = moreGate.current.begin();
     try {
-      const generation=listGeneration(await api<unknown>('/v1/library/list-generation',request.signal));
-      if (!generation || generation !== current.generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true);return;}
+      const generation=await fetchListGeneration(request.signal);
+      // A server without the endpoint keeps the pre-existing append behavior: pages are
+      // appended without a generation guard rather than blocking the load.
+      if (generation !== null && generation !== current.generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true);return;}
       const response = await nextPage(current.view,current.next_cursor);
-      const after=listGeneration(await api<unknown>('/v1/library/list-generation',request.signal));
-      if (after !== generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true);return;}
+      if (generation !== null) {
+        const after=await fetchListGeneration(request.signal);
+        if (after !== null && after !== generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true);return;}
+      }
       if (!moreGate.current.current(request.id) || latest.current.page.version !== current.version) return;
       // Do not advance forever if a broken server returns its input cursor.
       if (response.has_more && response.next_cursor === current.next_cursor) throw new Error('목록 커서가 진행되지 않습니다.');
