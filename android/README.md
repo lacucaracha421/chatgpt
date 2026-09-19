@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.6.2 (18)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate. The supporting server API update is deployed. Galaxy Tab installation is deferred because the device is unavailable.
+Current source version: **0.6.3 (19)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate.
 
 ## Current functionality and remaining gates
 
