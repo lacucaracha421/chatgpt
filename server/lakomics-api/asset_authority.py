@@ -672,9 +672,17 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
     change, and an ordinary read-scoped client credential must not be able to retire
     Assets. This mirrors the Classification structural/assignment split rather than
     inventing a third privilege level.
+
+    Startup creates the additive tables only. It never activates the domain, promotes a
+    Capture or touches existing Asset rows, so a deployment that never activates behaves
+    exactly as it did before; registration happens here, as in the Classification and
+    Album domains, because a route whose tables were never created fails at request time
+    with `no such table` instead of reporting the domain inactive.
     """
     from fastapi import Header, Request
     from fastapi.concurrency import run_in_threadpool
+
+    app.on_event("startup")(lambda _event=None: startup(get_db))
 
     @app.post(PREFIX + "/activate")
     async def activate_authority(request: Request, authorization: str | None = Header(default=None)):

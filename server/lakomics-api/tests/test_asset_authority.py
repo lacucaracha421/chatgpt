@@ -1074,6 +1074,87 @@ class RoleBoundaryTests(AssetAuthorityFixture):
                              asset_authority.TRASH)
 
 
+class StartupBootstrapTests(unittest.TestCase):
+    """Deploying the module must create its tables without touching production state.
+
+    Deliberately *not* built on AssetAuthorityFixture: that fixture calls the domain's
+    startup directly, which is exactly what hides a missing `on_event` registration. This
+    mirrors a real process - the base startups plus the registered route modules, then the
+    app's own startup handlers - so removing the registration fails here.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old_db = api_app.DB_PATH
+        self.old_token = api_app.API_TOKEN
+        api_app.DB_PATH = Path(self.temp.name) / "lakomics.sqlite3"
+        api_app.API_TOKEN = "shared-test-token"
+        api_app.startup()
+        api_app.startup_replication()
+        api_app.startup_captures()
+        api_app.startup_sync_status()
+        api_auth.startup(api_app.get_db)
+        self.client = TestClient(api_app.app)
+        self.client.__enter__()
+
+    def tearDown(self):
+        self.client.__exit__(None, None, None)
+        api_app.DB_PATH = self.old_db
+        api_app.API_TOKEN = self.old_token
+        self.temp.cleanup()
+
+    def tables(self):
+        with api_app.get_db() as db:
+            return {row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+
+    def test_the_app_startup_creates_the_asset_authority_tables(self):
+        tables = self.tables()
+        for table in ("asset_authority_state", "asset_authority_capture_map",
+                      "asset_authority_changes", "asset_authority_receipts",
+                      "asset_authority_retention"):
+            self.assertIn(table, tables, f"{table} must exist after app startup")
+
+    def test_the_registered_startup_handlers_are_what_create_them(self):
+        # Pins the mechanism, so a direct call in a fixture cannot mask a regression.
+        self.assertTrue(
+            any("asset" in repr(handler) or handler.__module__.startswith("asset_authority")
+                for handler in api_app.app.router.on_startup),
+            "the asset authority DDL must be registered as an app startup handler")
+
+    def test_startup_does_not_activate_the_domain_or_populate_lifecycle(self):
+        with api_app.get_db() as db:
+            row = db.execute(
+                "SELECT 1 FROM authority_domains WHERE domain='assets'").fetchone()
+            state = db.execute("SELECT count(*) FROM asset_authority_state").fetchone()[0]
+        self.assertIsNone(row, "startup must not create an assets authority row")
+        self.assertEqual(state, 0, "startup must not populate canonical lifecycle")
+
+    def test_startup_does_not_rewrite_existing_assets(self):
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO assets(id,kind,object_key,created_at,updated_at,committed)"
+                       " VALUES('legacy','image','fixture','2026','2026',1)")
+            db.commit()
+            before = [tuple(r) for r in db.execute("SELECT * FROM assets ORDER BY id")]
+        for handler in api_app.app.router.on_startup:
+            handler()
+        with api_app.get_db() as db:
+            after = [tuple(r) for r in db.execute("SELECT * FROM assets ORDER BY id")]
+            state = db.execute("SELECT count(*) FROM asset_authority_state").fetchone()[0]
+        self.assertEqual(after, before, "startup must not rewrite committed Asset rows")
+        self.assertEqual(state, 0)
+
+    def test_activation_succeeds_on_a_bootstrapped_process(self):
+        with api_app.get_db() as db:
+            _, publisher = api_auth.provision_token(db, "publisher", "bootstrap")
+            db.commit()
+        response = self.client.post("/v1/assets/authority/activate",
+                                    headers={"Authorization": f"Bearer {publisher}"},
+                                    json={"libraryId": LIBRARY})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["epoch"], 1)
+
+
 class ActivationSafetyTests(AssetAuthorityFixture):
     def test_existing_pc_library_requires_verified_lifecycle_baseline(self):
         with api_app.get_db() as db:
