@@ -571,6 +571,13 @@ impl Library {
         }
         if matches!(registration, Registration::Normal) {
             super::character_autotag::enqueue(&transaction,&asset.id,super::character_autotag::Cause::Ingestion)?;
+            // Same rule as the video path: a locally-created Asset's assignment intent
+            // travels in the ingest transaction, and a materialized (server-created) Asset
+            // instead applies server-owned state through `mark_materialized` below.
+            if !materialized {
+                Library::enqueue_classification_assignment_intent(
+                    &transaction, &asset.id, classification_id)?;
+            }
             if !materialized { enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?; }
         }
         if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
@@ -637,6 +644,13 @@ impl Library {
                 "INSERT INTO asset_classifications (asset_id, classification_id) VALUES (?1, ?2)",
                 params![asset.id, classification_id],
             )?;
+        }
+        // Same rule as the image path: a locally-created Asset's assignment intent travels
+        // in the ingest transaction. Materialization instead applies server-owned state via
+        // `mark_materialized`, so it must not manufacture a local command.
+        if !materialized {
+            Library::enqueue_classification_assignment_intent(
+                &transaction, &asset.id, classification_id)?;
         }
         if !materialized { enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?; }
         if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
@@ -1219,6 +1233,25 @@ mod tests {
     }
 
     impl IngestionFixture {
+    /// Ingest an Asset with a Classification so the assignment path is exercised.
+    fn ingest_with_classification(&self, classification_id: &str) -> IngestOutcome {
+        self.library
+            .ingest_media(IngestMediaRequest {
+                source_path: self.source.clone(),
+                classification_id: Some(classification_id.to_owned()),
+                source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
+            })
+            .unwrap()
+    }
+
         fn new() -> Self {
             let temp = tempfile::tempdir().unwrap();
             let source = temp.path().join("source.png");
@@ -2540,5 +2573,152 @@ mod tests {
             }
         }
         assert_eq!((added, duplicate), (1, 1));
+    }
+
+    /// Ingesting into a Classification must queue the assignment intent.
+    ///
+    /// The server learns an Asset's Classification only from the authority command line,
+    /// so an ingest that writes the local relation without queueing the intent leaves the
+    /// Asset permanently absent from the server/mobile Classification view. It must happen
+    /// in the ingest transaction, not after commit, or a crash in between loses it.
+    #[test]
+    fn ingest_with_classification_queues_the_assignment_intent() {
+        let fixture = IngestionFixture::new();
+        fixture
+            .library
+            .adopt_classification_authority_for_test("e".repeat(32).as_str(), 1, 1, 0)
+            .unwrap();
+        // Ingest validates the target Classification, so it has to exist.
+        let classification = fixture
+            .library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Ingest intent".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let outcome = fixture.ingest_with_classification(&classification.id);
+        let connection = fixture.library.connection().unwrap();
+        let asset_id = match outcome {
+            IngestOutcome::Added { asset } => asset.id,
+            other => panic!("expected a new Asset, got {other:?}"),
+        };
+        let queued: Vec<(String, String)> = connection
+            .prepare(
+                "SELECT command_type, payload FROM classification_authority_outbox
+                 WHERE state = \'pending\' AND command_type = \'setAssetClassification\'
+                 ORDER BY seq",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // Creating the Classification queues its own structural command, so this asserts
+        // on the assignment lineage specifically.
+        assert_eq!(queued.len(), 1, "exactly one assignment intent must be queued");
+        assert_eq!(queued[0].0, "setAssetClassification");
+        let payload: serde_json::Value = serde_json::from_str(&queued[0].1).unwrap();
+        assert_eq!(payload["assetId"], serde_json::json!(asset_id));
+        assert_eq!(payload["classificationId"], serde_json::json!(classification.id));
+    }
+
+    /// Without an adopted authority the ingest must stay byte-identical to legacy.
+    #[test]
+    fn ingest_with_classification_queues_nothing_while_inactive() {
+        let fixture = IngestionFixture::new();
+        let classification = fixture
+            .library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Legacy lane".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        fixture.ingest_with_classification(&classification.id);
+        let connection = fixture.library.connection().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM classification_authority_outbox", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "an inactive authority must not receive commands"
+        );
+    }
+
+    /// An ingest with no Classification still queues the explicit `null` assignment, which
+    /// is how the server learns the Asset exists unclassified rather than never learning.
+    #[test]
+    fn ingest_without_classification_queues_a_null_assignment() {
+        let fixture = IngestionFixture::new();
+        fixture
+            .library
+            .adopt_classification_authority_for_test("e".repeat(32).as_str(), 1, 1, 0)
+            .unwrap();
+        fixture.ingest();
+        let connection = fixture.library.connection().unwrap();
+        let payload: String = connection
+            .query_row(
+                "SELECT payload FROM classification_authority_outbox WHERE state = \'pending\'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["classificationId"], serde_json::Value::Null);
+    }
+
+    /// The same rule must hold for the video ingest path.
+    #[test]
+    fn video_ingest_with_classification_queues_the_assignment_intent() {
+        stub_video_probe();
+        let fixture = IngestionFixture::new();
+        fixture
+            .library
+            .adopt_classification_authority_for_test("e".repeat(32).as_str(), 1, 1, 0)
+            .unwrap();
+        let classification = fixture
+            .library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Root,
+                name: "Video intent".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let video = fixture._temp.path().join("source.mp4");
+        std::fs::copy(&fixture.source, &video).unwrap();
+        let outcome = fixture
+            .library
+            .ingest_media(IngestMediaRequest {
+                source_path: video,
+                classification_id: Some(classification.id.clone()),
+                source_url: None,
+                collected_at: None,
+                replace_duplicate_metadata: false,
+                source_published_at: None,
+                creator_name: None,
+                creator_handle: None,
+                creator_url: None,
+                import_source: ImportSource::Direct,
+                import_batch_id: "00000000-0000-4000-8000-000000000003".into(),
+            })
+            .unwrap();
+        let asset_id = match outcome {
+            IngestOutcome::Added { asset } => asset.id,
+            other => panic!("expected a new video Asset, got {other:?}"),
+        };
+        let connection = fixture.library.connection().unwrap();
+        let payload: String = connection
+            .query_row(
+                "SELECT payload FROM classification_authority_outbox
+                 WHERE state = \'pending\' AND command_type = \'setAssetClassification\'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["assetId"], serde_json::json!(asset_id));
+        assert_eq!(payload["classificationId"], serde_json::json!(classification.id));
     }
 }

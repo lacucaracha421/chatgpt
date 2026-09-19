@@ -785,9 +785,17 @@ fn ordinary_asset_replication_survives_classification_adoption() {
         1,
         "Asset replication remains its own lane"
     );
-    // ...and the ingest created no Classification intent, because it made no
-    // Classification change.
-    assert!(outbox(&connection).is_empty());
+    // ...and the ingest also declares the Asset's placement, because the server learns an
+    // Asset's Classification only from this lineage. An unclassified ingest sends the
+    // explicit `null` assignment, so the Asset is present-and-unclassified on the server
+    // rather than invisible to the mobile Classification view. The replication lane above
+    // is untouched, which is what this test exists to protect.
+    let queued = outbox(&connection);
+    assert_eq!(queued.len(), 1, "the ingest declares its placement exactly once");
+    assert_eq!(queued[0].1, "setAssetClassification");
+    let payload: serde_json::Value = serde_json::from_str(&queued[0].2).unwrap();
+    assert_eq!(payload["assetId"], serde_json::json!(asset.id));
+    assert_eq!(payload["classificationId"], serde_json::Value::Null);
 }
 
 // ---------------------------------------------------------------------------
