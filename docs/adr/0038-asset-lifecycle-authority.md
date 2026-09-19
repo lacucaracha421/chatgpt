@@ -1,6 +1,43 @@
 # ADR-0038: Asset lifecycle authority
 
-Status: **Proposed** — designed and implemented locally behind an activation gate; not activated in production.
+Status: **Accepted** — activated in production on 2026-09-19; physical R2 GC remains
+deferred.
+
+## Production activation record
+
+Activated `2026-09-19T08:50:34Z` for library `e6395585d5eeae9540ec9b8f8e96d98c`, epoch 1,
+contract version 1, initial cursor 0. The epoch was created from a staged, digest-bound
+lifecycle baseline derived from a read-only reconciliation of the committed server set
+against the canonical PC library:
+
+| Input | Value |
+| --- | --- |
+| committed server Assets | 8966 |
+| `inventoryDigest` | `11c6fc94d1f80c26bfc9257693380158c95f82fe9ffa545f2b6d79ef301f6f20` |
+| `snapshotDigest` | `8389ee5af34779291e4f06b85b2dc5f3f6e4d9af9f52ddc82bd3ca8c44bd25e0` |
+| initial lifecycle | 8934 normal, 30 trash, 2 tombstoned |
+
+The two reviewed tombstones (`8162f01d-…`, `cc4bb2bf-…`) were confirmed synthetic
+`cloud006-b36` test artifacts absent from the PC library; they stopped being visible to
+ordinary readers the moment the baseline became canonical. Twenty-one PC-only trash
+Assets stayed out of the baseline because they were never committed, and remain local
+state.
+
+Device acceptance covered a disposable canary Asset end to end: normal replication,
+PC-driven trash, Android convergence without a restart, restart durability, restore to
+the same Asset ID, a Classification move (젠레스 → 기타 게임) that invalidated the
+Android cached view without a restart, and a tombstone that no client, list, filtered
+view or media ticket exposes. Restoring a tombstoned Asset returns
+`lifecycleTransitionRefused`.
+
+Two defects were found by that acceptance and fixed before this record:
+
+* `register_asset`/`register_video_asset` wrote the local Classification relation without
+  queueing the authority assignment intent, so a locally-created Asset was permanently
+  absent from the server's Classification view (fixed in `7ca5ba9`).
+* The visibility probe had no index starting at `asset_id`, making the projection scan
+  authority state per candidate row and pushing `/v1/library/revisit` past the mobile
+  request timeout (fixed in `4b9e4c6`; measured 9.29s → 0.074s).
 
 This ADR defines Asset *lifecycle* authority. It extends the server-authority model of
 ADR-0036/0037 to the Asset itself and closes the last asymmetric path: Classification,
