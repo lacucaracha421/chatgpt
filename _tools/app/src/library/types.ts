@@ -1106,6 +1106,7 @@ export interface LibraryGateway {
   setOnlineCatalogBookmark(identity: CatalogWorkIdentity, bookmarked: boolean): Promise<void>;
   reconcileCatalogBookmarks?(): Promise<BookmarkReconciliationResult>;
   flushCatalogBookmarkOutbox?(): Promise<BookmarkOutboxFlushResult>;
+  syncAssetAuthority?(): Promise<{adopted:boolean;appliedChanges:number;materialized:number;flushed:number;stopped:boolean;materializationFailures:number}>;
   reconcileAlbumAuthority?(): Promise<AlbumReconciliationResult>;
   reconcileClassificationAuthority?(): Promise<ClassificationReconciliationResult>;
   flushClassificationOutbox?(): Promise<ClassificationOutboxFlushResult>;

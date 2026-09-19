@@ -164,6 +164,7 @@ impl Library {
                 "SELECT asset.id, asset.collected_at
                  FROM assets AS asset
                  WHERE asset.status = 'normal'
+                   AND NOT EXISTS (SELECT 1 FROM asset_authority_state canonical WHERE canonical.asset_id=asset.id AND canonical.server_created=1) -- is_server_owned, set-based
                    AND NOT EXISTS (
                      SELECT 1 FROM cloud_sync_queue AS queue
                      WHERE queue.entity_type = 'asset'
@@ -242,6 +243,7 @@ impl Library {
                 "SELECT asset.id, asset.collected_at
                  FROM assets AS asset
                  WHERE asset.status = 'normal'
+                   AND NOT EXISTS (SELECT 1 FROM asset_authority_state canonical WHERE canonical.asset_id=asset.id AND canonical.server_created=1) -- is_server_owned, set-based
                    AND NOT EXISTS (
                        SELECT 1 FROM cloud_sync_queue AS queue
                        WHERE queue.entity_type = 'asset'
@@ -314,6 +316,10 @@ impl Library {
                 )
                 .optional()?
                 .ok_or(LibraryError::AssetNotFound)?;
+            if crate::library::asset_authority::is_server_owned(&transaction, asset_id)? {
+                already_replicated+=1;
+                continue;
+            }
             transaction.execute(
                 "INSERT INTO cloud_backfill_scope (asset_id) VALUES (?1)",
                 [asset_id],

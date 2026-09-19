@@ -224,6 +224,7 @@ export const libraryGateway: LibraryGateway = {
     invoke<BookmarkReconciliationResult>("reconcile_catalog_bookmarks"),
   flushCatalogBookmarkOutbox: () =>
     invoke<BookmarkOutboxFlushResult>("flush_catalog_bookmark_outbox"),
+  syncAssetAuthority: () => invoke("sync_asset_authority"),
   reconcileAlbumAuthority: () =>
     invoke<AlbumReconciliationResult>("reconcile_album_authority"),
   // Flush-first, like Album: a pending Classification intent must be delivered, or

@@ -15,6 +15,7 @@ beforeEach(()=>{
   localStorage.clear(); mocks.api.mockReset(); mocks.native.mockReset();
   mocks.native.mockResolvedValue({configured:true,endpoint:'https://example.invalid'});
   mocks.api.mockImplementation(async(path:string)=>{
+    if(path==='/v1/library/list-generation')return {generation:'a'.repeat(64)};
     if(path.includes('classifications'))return{items:[{id:'b',name:'분류 B',asset_count:2,parent_id:null}]};
     if(path.includes('revisit'))return{bundles:[]}; if(path.includes('captures'))return{captures:[]};
     return{items:path.includes('classification_id=b')?b:a,has_more:false,next_cursor:null};
@@ -133,6 +134,7 @@ describe('committed view and browsing',()=>{
     mocks.api.mockImplementation((path:string)=>path.includes('classification_id=b')?new Promise(resolve=>{resolveB=resolve;}):original(path));
     render(<App/>); await screen.findByText('tile-a1');
     fireEvent.click(screen.getByRole('button',{name:'분류 B2'}));
+    await waitFor(()=>expect(resolveB).toBeTypeOf('function'));
     expect(screen.getByText('tile-a1')).toBeTruthy();
     fireEvent.click(screen.getByText('tile-a1'));
     await act(async()=>{resolveB({items:b,has_more:false,next_cursor:null});});
@@ -173,4 +175,41 @@ it('starts folders collapsed and provides expand, focus and collapse controls',a
   expect(screen.queryByRole('button',{name:'Other child2'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'모든 폴더 접기'}));
   expect(screen.queryByRole('button',{name:'Child2'})).toBeNull();
+});
+
+
+describe('server list generation',()=>{
+  function fixture(){
+    let revision=0;let items=a;
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path==='/v1/library/list-generation')return {generation:revision.toString(16).padStart(64,'0')};
+      if(path.startsWith('/v1/library/assets'))return {items,has_more:false,next_cursor:null};
+      return original(path);
+    });
+    return {change(next:typeof a){revision++;items=next;}};
+  }
+  it.each(['mobile assignment','remote assignment','remote trash','remote tombstone'])('%s removes an Asset from cached A on foreground',async()=>{
+    const server=fixture();render(<App/>);await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByLabelText('자산 목록');
+    server.change([]);act(()=>window.dispatchEvent(new Event('lakomics-resume')));
+    await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
+    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+    await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
+  });
+  it('remote restore returns the same ID and new canonical Assets appear without restart',async()=>{
+    const server=fixture();render(<App/>);await screen.findByText('tile-a1');
+    server.change([]);act(()=>window.dispatchEvent(new Event('focus')));
+    await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
+    server.change(a);act(()=>window.dispatchEvent(new Event('lakomics-resume')));
+    await screen.findByText('tile-a1');
+    server.change([...a,...b]);act(()=>window.dispatchEvent(new Event('focus')));
+    await screen.findByText('tile-b1');
+  });
+  it('manual refresh fetches even when generation is unchanged',async()=>{
+    fixture();render(<App/>);await screen.findByText('tile-a1');
+    const before=mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length;
+    fireEvent.click(screen.getByRole('button',{name:'새로고침',exact:true}));
+    await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length).toBe(before+1));
+  });
 });

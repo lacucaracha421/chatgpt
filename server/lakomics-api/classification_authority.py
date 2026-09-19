@@ -137,6 +137,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import asset_visibility
 
 DOMAIN = "classifications"
 CONTRACT_VERSION = 1
@@ -819,7 +820,7 @@ def _apply_assignment(db, *, row, library_id, epoch, operation_id, payload_sha, 
             # The target must exist to be assigned; a tombstone is gone, not empty.
             fail(404, "classificationNotFound", "분류를 찾을 수 없습니다.",
                  classificationId=desired)
-        if db.execute("SELECT 1 FROM assets WHERE id=? AND committed=1",
+        if db.execute("SELECT 1 FROM visible_assets WHERE id=? AND committed=1",
                       [asset_id]).fetchone() is None:
             fail(422, "invalidClassificationAssignment", "자산을 찾을 수 없습니다.",
                  assetId=asset_id)
@@ -928,6 +929,7 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
     revision. A stale writer therefore receives the current server state instead of
     overwriting a newer one, and never wins by wall-clock arrival.
     """
+    asset_visibility.install(db)
     row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
     if row["epoch"] != epoch:
         # A command composed against another epoch cannot present a meaningful
@@ -1267,12 +1269,14 @@ def classification_counts(db, library_id):
     ``classification_authority_assignments``. The count is an index over that one table; the
     classification rows it belongs to come from the published snapshot, not from here.
     """
+    asset_visibility.install(db)
     counts = {}
     for row in db.execute(
         """
         SELECT classification_id, COUNT(*) AS asset_count
-        FROM classification_authority_assignments
+        FROM classification_authority_assignments AS assignment
         WHERE library_id = ? AND classification_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM assets AS asset WHERE asset.id=assignment.asset_id AND NOT EXISTS (SELECT 1 FROM visible_assets AS visible WHERE visible.id=asset.id))
         GROUP BY classification_id
         """,
         [library_id],

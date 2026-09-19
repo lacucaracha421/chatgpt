@@ -98,6 +98,13 @@ class CaptureStoreTests(unittest.TestCase):
             result = capture_store.fetch_media_to_r2(url, key, media_type)
         return result, stream
 
+    def test_streaming_digest_matches_exact_uploaded_bytes_without_r2_read(self):
+        chunks=[b"first", b"\x00middle", b"last"]
+        result,stream=self.fetch(FakeResponse(chunks,content_type="image/png"), "https://pbs.twimg.com/media/digest.png", "fixture/digest", "image")
+        self.assertEqual(result.sha256, __import__("hashlib").sha256(b"".join(chunks)).hexdigest())
+        self.assertEqual(result[1],len(b"".join(chunks)))
+        self.assertEqual(len(stream.calls),1)
+
     def test_legacy_image_download_still_streams_to_r2(self):
         image = b"png-image"
         stream = FakeStream(FakeResponse([image], content_type="image/png"))

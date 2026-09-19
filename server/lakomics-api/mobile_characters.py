@@ -120,6 +120,22 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
     def state(db):
         return db.execute("SELECT * FROM mobile_character_state WHERE singleton=1").fetchone()
 
+    def visible_index(db, current):
+        index = json.loads(current["index_json"])
+        retired = {r[0] for r in db.execute("SELECT a.id FROM assets a WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=a.id)")}
+        if not retired:
+            return index
+        counts = {(r[0],r[1]):r[2] for r in db.execute("SELECT m.node_id,m.filter,COUNT(*) FROM mobile_character_members m JOIN assets a ON a.id=m.asset_id WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=a.id) GROUP BY m.node_id,m.filter")}
+        for node in index["nodes"]:
+            for key in ("thumbnailAssetId","heroAssetId"):
+                if node.get(key) in retired:
+                    node[key] = None
+        for scope in index["scopes"]:
+            removed = counts.get((scope["nodeId"],scope["filter"]),0)
+            scope["totalCount"] = max(0,scope["totalCount"]-removed)
+            scope["sourceCount"] = max(0,scope["sourceCount"]-removed)
+        return index
+
     def publish(snapshot):
         validate(snapshot)
         with get_db() as db:
@@ -133,7 +149,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             assets = {}
             for offset in range(0, len(ids), 500):
                 chunk = ids[offset:offset + 500]
-                rows = db.execute("SELECT * FROM assets WHERE committed=1 AND id IN (" +
+                rows = db.execute("SELECT * FROM visible_assets WHERE committed=1 AND id IN (" +
                                   ",".join("?" for _ in chunk) + ")", chunk).fetchall()
                 memberships = asset_memberships(db, rows)
                 for row in rows:
@@ -193,7 +209,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                     "capabilities": {"read": True, "write": False}, "ready": current is not None,
                     "revision": current["revision"] if current else None,
                     "publishedAt": current["published_at"] if current else None,
-                    **(json.loads(current["index_json"]) if current else {"nodes": [], "scopes": []})}
+                    **(visible_index(db, current) if current else {"nodes": [], "scopes": []})}
 
     @app.get(PREFIX + "/status")
     def publication_status(authorization: str | None = Header(default=None)):
@@ -224,13 +240,13 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             current = state(db)
             if not current or current["revision"] != revision:
                 raise HTTPException(409, "Character snapshot changed; refresh")
-            index = json.loads(current["index_json"])
+            index = visible_index(db, current)
             scope = next((s for s in index["scopes"] if s["nodeId"] == node and s["filter"] == filter), None)
             if scope is None:
                 raise HTTPException(404, "Character scope not found")
             rows = db.execute("SELECT m.position,a.payload FROM mobile_character_members m "
                               "JOIN mobile_character_assets a ON a.id=m.asset_id WHERE m.node_id=? AND m.filter=? "
-                              "AND m.position>? ORDER BY m.position LIMIT ?", (node, filter, position, limit + 1)).fetchall()
+                              "AND NOT EXISTS (SELECT 1 FROM assets raw WHERE raw.id=m.asset_id AND NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=raw.id)) AND m.position>? ORDER BY m.position LIMIT ?", (node, filter, position, limit + 1)).fetchall()
             more = len(rows) > limit
             rows = rows[:limit]
             next_cursor = base64.urlsafe_b64encode(encode([revision, node, filter, rows[-1]["position"]]).encode()).decode().rstrip("=") if more else None

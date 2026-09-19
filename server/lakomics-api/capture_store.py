@@ -1,3 +1,4 @@
+import hashlib
 import ipaddress
 import os
 import socket
@@ -74,6 +75,14 @@ def _validate_media_url(media_url: str, media_type: str, source: str) -> tuple[s
     return host, _public_addresses(host) if source == "web" else None
 
 
+class StoredMedia(tuple):
+    """Compatible two-field result plus the digest verified while streaming."""
+    def __new__(cls, content_type, size_bytes, sha256):
+        result = super().__new__(cls, (content_type, size_bytes))
+        result.sha256 = sha256
+        return result
+
+
 def fetch_media_to_r2(media_url: str, object_key: str, media_type: str, source: str = "x") -> tuple[str, int]:
     if media_type in {"image", "animated_gif"}:
         maximum_bytes = MAX_CAPTURE_IMAGE_BYTES
@@ -124,11 +133,13 @@ def fetch_media_to_r2(media_url: str, object_key: str, media_type: str, source: 
             os.close(fd)
             temp_path = Path(raw_path)
             size_bytes = 0
+            hasher = hashlib.sha256()
             with temp_path.open("wb") as output:
                 for chunk in response.iter_bytes(256 * 1024):
                     size_bytes += len(chunk)
                     if size_bytes > maximum_bytes:
                         raise CaptureValidationError(f"{media_type} is too large")
+                    hasher.update(chunk)
                     output.write(chunk)
         if size_bytes == 0:
             raise CaptureValidationError(f"Empty {media_type} response")
@@ -141,7 +152,7 @@ def fetch_media_to_r2(media_url: str, object_key: str, media_type: str, source: 
             except Exception:
                 pass
             raise CaptureDownloadError(str(exc)) from exc
-        return content_type, size_bytes
+        return StoredMedia(content_type, size_bytes, hasher.hexdigest())
     except httpx.HTTPError as exc:
         raise CaptureDownloadError(str(exc)) from exc
     finally:

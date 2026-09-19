@@ -16,7 +16,7 @@ import java.util.List;
  * about syntax, which the check harness catches because it drives the same store through
  * its own adapter over a real SQLite engine.
  */
-final class AndroidReplicaDb implements ReplicaDb {
+final class AndroidReplicaDb implements ReplicaDb, AssetReplica.Storage {
     /** The app-private database file, under no-backup storage. */
     static final String FILE_NAME = "library-replica.sqlite";
 
@@ -70,6 +70,29 @@ final class AndroidReplicaDb implements ReplicaDb {
         } finally {
             db.endTransaction();
         }
+    }
+
+    @Override public AssetReplica.Snapshot readAssets(String scope) {
+        try(Cursor c=db.rawQuery("SELECT library_id,epoch,cursor FROM asset_authority WHERE singleton=1 AND scope=?",new String[]{scope})) {
+            if(!c.moveToFirst())return null;
+            java.util.Map<String,java.util.Map<String,Object>> rows=new java.util.TreeMap<>();
+            try(Cursor assets=db.rawQuery("SELECT asset_id,projection FROM asset_state ORDER BY asset_id",null)) {
+                while(assets.moveToNext())rows.put(assets.getString(0),AssetReplica.projection(Json.parse(assets.getString(1))));
+            }
+            return new AssetReplica.Snapshot(c.getString(0),c.getLong(1),c.getLong(2),rows);
+        }
+    }
+    @Override public void replaceAssets(String scope,AssetReplica.Snapshot snapshot) {
+        db.beginTransaction();
+        try {
+            db.execSQL("DELETE FROM asset_state");
+            for(java.util.Map<String,Object> p:snapshot.rows.values()) db.execSQL("INSERT INTO asset_state VALUES(?,?,?,?)",new Object[]{p.get("assetId"),p.get("lifecycle"),p.get("entityRevision"),new org.json.JSONObject(p).toString()});
+            db.execSQL("INSERT OR REPLACE INTO asset_authority VALUES(1,?,?,?,?)",new Object[]{scope,snapshot.library,snapshot.epoch,snapshot.cursor});
+            db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
+    }
+    @Override public void clearAssets() {
+        db.beginTransaction();try{db.execSQL("DELETE FROM asset_state");db.execSQL("DELETE FROM asset_authority");db.setTransactionSuccessful();}finally{db.endTransaction();}
     }
 
     @Override

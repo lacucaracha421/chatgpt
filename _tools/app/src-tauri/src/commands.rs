@@ -261,6 +261,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidRemoteReadingProgress => "invalid_remote_reading_progress",
             LibraryError::OnlineCatalogImport { .. } => "online_catalog_import_failed",
             LibraryError::UnsupportedSchema(_) => "unsupported_schema",
+            LibraryError::AssetAuthorityRejected { .. } | LibraryError::AssetAuthorityConflict { .. } => "asset_authority_rejected",
             LibraryError::DevelopmentMigrationBlocked { .. } => "development_migration_blocked",
             LibraryError::MetadataImportManifestCount => "metadata_import_manifest_count",
             LibraryError::UnsupportedMetadataImport => "unsupported_metadata_import",
@@ -3424,4 +3425,10 @@ pub async fn run_due_mobile_publications(state: State<'_, AppState>, order_ids: 
     let library=current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.run_due_mobile_publications(order_ids))
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn sync_asset_authority(state: State<'_, AppState>) -> Result<crate::library::asset_authority::AssetSyncResult,CommandError>{
+    let library=current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move ||library.sync_asset_authority()).await.map_err(|_|background_task_error())?.map_err(CommandError::from)
 }

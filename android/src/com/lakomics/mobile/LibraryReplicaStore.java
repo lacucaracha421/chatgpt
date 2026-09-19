@@ -47,6 +47,13 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
         this.db = db;
     }
 
+    AssetReplica assetReplica(AlbumReplica.Transport transport) {
+        return new AssetReplica(transport, (AssetReplica.Storage)db, lock);
+    }
+    void clearAssets() {
+        lock.lock();try {((AssetReplica.Storage)db).clearAssets();}finally {lock.unlock();}
+    }
+
     void close() {
         lock.lock();
         try {

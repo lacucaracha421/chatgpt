@@ -373,6 +373,15 @@ impl Library {
             // 관계-only 변경도 복제본에 전파되어야 한다. 증분 복제는 커밋 시
             // classification_ids를 다시 읽으므로, 다음 revision을 pending으로
             // 만들면 원본 미디어 재업로드 없이 관계가 수렴한다.
+            //
+            // A server-owned Asset is the exception: its canonical media already exists
+            // on the server, so this lane has nothing to converge and an upsert would
+            // re-upload media the server already has. The other enqueue paths refuse a
+            // server-owned Asset too; this lane writes the queue directly, so it has to
+            // carry the same rule rather than inheriting it from `enqueue_asset_upsert`.
+            if crate::library::asset_authority::is_server_owned(transaction, asset_id)? {
+                continue;
+            }
             let next_revision: i64 = transaction
                 .query_row(
                     "SELECT COALESCE(MAX(revision), 0) + 1 FROM cloud_sync_queue

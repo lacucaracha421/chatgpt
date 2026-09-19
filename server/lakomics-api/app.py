@@ -21,6 +21,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstrai
 
 import album_authority
 import asset_authority
+import asset_visibility
 import authority
 import classification_authority
 import classification_snapshot
@@ -40,6 +41,7 @@ def now_iso() -> str:
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    asset_visibility.install(conn)
     try:
         yield conn
     finally:
@@ -168,7 +170,33 @@ def startup():
             )
             """
         )
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS asset_list_generation(singleton INTEGER PRIMARY KEY CHECK(singleton=1),generation INTEGER NOT NULL);
+            INSERT OR IGNORE INTO asset_list_generation VALUES(1,0);
+            CREATE TRIGGER IF NOT EXISTS asset_list_insert AFTER INSERT ON assets BEGIN
+              UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END;
+            CREATE TRIGGER IF NOT EXISTS asset_list_update AFTER UPDATE ON assets BEGIN
+              UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END;
+            CREATE TRIGGER IF NOT EXISTS asset_list_delete AFTER DELETE ON assets BEGIN
+              UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END;
+        """)
         db.commit()
+
+
+@app.get("/v1/library/list-generation")
+def asset_list_generation(authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    with get_db() as db:
+        db.execute("BEGIN")
+        generation = db.execute("SELECT generation FROM asset_list_generation WHERE singleton=1").fetchone()[0]
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        domains = db.execute("SELECT library_id,domain,epoch,change_cursor FROM authority_domains "
+                             "WHERE domain IN ('assets','classifications','albums') ORDER BY domain").fetchall() if 'authority_domains' in tables else []
+        characters = db.execute("SELECT revision FROM mobile_character_state WHERE singleton=1").fetchone() if 'mobile_character_state' in tables else None
+        snapshot = db.execute("SELECT revision FROM classification_snapshots WHERE singleton=1").fetchone() if 'classification_snapshots' in tables else None
+        value = [generation,[list(row) for row in domains],list(characters) if characters else None,list(snapshot) if snapshot else None]
+    import hashlib
+    return {"generation":hashlib.sha256(json.dumps(value,separators=(',',':')).encode()).hexdigest()}
 
 
 app.on_event("startup")(startup_replication)
@@ -196,7 +224,7 @@ def list_assets(
         rows = db.execute(
             """
             SELECT *
-            FROM assets
+            FROM visible_assets
             WHERE committed = 1
             ORDER BY created_at DESC
             LIMIT ?
@@ -586,6 +614,9 @@ def startup_captures():
             ON captures(status, created_at)
             """
         )
+        if "sha256" not in {row["name"] for row in db.execute("PRAGMA table_info(captures)")}:
+            db.execute("ALTER TABLE captures ADD COLUMN sha256 TEXT")
+            db.execute("ALTER TABLE captures ADD COLUMN promotion_state TEXT")
         db.commit()
 
 
@@ -1080,7 +1111,7 @@ def create_capture(
     object_key = f"{object_namespace}/inbox/{capture_id}/original"
 
     try:
-        content_type, size_bytes = fetch_media_to_r2(
+        stored = fetch_media_to_r2(
             capture.media_url,
             object_key,
             capture.media_type,
@@ -1091,6 +1122,8 @@ def create_capture(
     except CaptureDownloadError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
+    content_type, size_bytes = stored
+    digest = getattr(stored, "sha256", None)
     stored_media_type = "animated_gif" if content_type == "image/gif" else capture.media_type
     ts = now_iso()
 
@@ -1127,6 +1160,27 @@ def create_capture(
                     stored_media_type,
                 ),
             )
+            db.execute("UPDATE captures SET sha256=? WHERE id=?", [digest,capture_id])
+            active = authority.active_domain(db, asset_authority.DOMAIN)
+            promotion_state = None
+            if active is not None:
+                if digest is None:
+                    raise HTTPException(422, detail={"code": "captureDigestUnavailable"})
+                try:
+                    asset_authority.promote_capture(
+                        db, library_id=active["libraryId"], capture_id=capture_id,
+                        kind="gif" if stored_media_type == "animated_gif" else stored_media_type,
+                        object_key=object_key, content_type=content_type, size_bytes=size_bytes,
+                        sha256=digest, source_url=capture.source_url,
+                        collected_at=ts, source_published_at=capture.published_at,
+                        import_source="capture", classification_id=classification_id, now=ts)
+                    promotion_state = "promoted"
+                    db.execute("UPDATE captures SET status='imported',imported_at=? WHERE id=?",[ts,capture_id])
+                except HTTPException as exc:
+                    if not isinstance(exc.detail,dict) or exc.detail.get("code") not in ("duplicateInTrash","duplicateTombstoned"):
+                        raise
+                    promotion_state = exc.detail["code"]
+                db.execute("UPDATE captures SET promotion_state=? WHERE id=?",[promotion_state,capture_id])
             db.commit()
     except sqlite3.IntegrityError:
         try:
@@ -1166,7 +1220,9 @@ def create_capture(
             "content_type": content_type,
             "size_bytes": size_bytes,
             "published_at": capture.published_at,
-            "status": "pending",
+            "status": "imported" if promotion_state == "promoted" else "pending",
+            "sha256": digest,
+            "promotion_state": promotion_state,
             "created_at": ts,
             "imported_at": None,
             "media_type": stored_media_type,
@@ -1682,7 +1738,7 @@ def list_mobile_classifications(
                     """
                     SELECT relationship.classification_id, COUNT(*) AS asset_count
                     FROM asset_classifications AS relationship
-                    JOIN assets AS asset ON asset.id = relationship.asset_id
+                    JOIN visible_assets AS asset ON asset.id = relationship.asset_id
                     WHERE asset.committed = 1
                     GROUP BY relationship.classification_id
                     """
@@ -1722,7 +1778,7 @@ def mobile_tree_membership(classification_id: str, asset_id: str, authorization:
         if active is not None:
             # SAF tree grants are a security decision, so after cutover both the target
             # hierarchy and the Asset's one canonical assignment come from authority.
-            if db.execute("SELECT 1 FROM assets WHERE id=? AND committed=1",
+            if db.execute("SELECT 1 FROM visible_assets WHERE id=? AND committed=1",
                           [asset_id]).fetchone() is None:
                 return {"is_child": False}
             target = classification_authority.classification_row(
@@ -1753,7 +1809,7 @@ def mobile_tree_membership(classification_id: str, asset_id: str, authorization:
                    if isinstance(entry, dict) and isinstance(entry.get("id"), str)}
         if classification_id not in parents:
             return {"is_child": False}
-        memberships = db.execute("SELECT ac.classification_id FROM asset_classifications ac JOIN assets a ON a.id=ac.asset_id WHERE a.id=? AND a.committed=1", (asset_id,)).fetchall()
+        memberships = db.execute("SELECT ac.classification_id FROM asset_classifications ac JOIN visible_assets a ON a.id=ac.asset_id WHERE a.id=? AND a.committed=1", (asset_id,)).fetchall()
         for membership in memberships:
             current = membership["classification_id"]
             seen = set()
@@ -1822,23 +1878,12 @@ def list_mobile_classification_assets(
         # rather than inserting at fixed indices keeps the binding correct as clauses
         # are added.
         clause_params: list[object] = []
-        # Asset lifecycle (ADR-0038): trashed and tombstoned Assets are excluded from
-        # ordinary reads. Expressed as an indexed NOT EXISTS against authority state
-        # rather than a Python filter after the fact, so the LIMIT still bounds the work
-        # and a page cannot be shortened by later filtering.
+        # Asset lifecycle (ADR-0038) is enforced by the shared `visible_assets`
+        # projection, which this query reads, so there is deliberately no second
+        # lifecycle predicate here: one rule means a trashed Asset cannot be hidden on
+        # one route and visible on another. The projection fails closed, so an Asset
+        # whose canonical row is missing is hidden rather than exposed.
         lifecycle_clause = ""
-        asset_active = authority.active_domain(db, asset_authority.DOMAIN)
-        if asset_active is not None:
-            lifecycle_clause = """
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM asset_authority_state AS authority_state
-                    WHERE authority_state.library_id = ?
-                      AND authority_state.asset_id = asset.id
-                      AND authority_state.lifecycle <> 'normal'
-                )
-            """
-            clause_params.append(asset_active["libraryId"])
         if classification_id is not None:
             if active is not None:
                 # Single-valued by contract, so this is an exact equality against the
@@ -1870,7 +1915,7 @@ def list_mobile_classification_assets(
             f"""
             SELECT asset.*,
                    COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-            FROM assets AS asset
+            FROM visible_assets AS asset
             WHERE asset.committed = 1
               {lifecycle_clause}
               {classification_clause}
@@ -1934,7 +1979,7 @@ def _revisit_creator_exclusion_sql(alias: str = "asset") -> str:
     return f"""
           AND (
             {alias}.creator_handle IS NULL OR {alias}.creator_handle = '' OR {alias}.creator_handle NOT IN (
-              SELECT eligible.creator_handle FROM assets AS eligible
+              SELECT eligible.creator_handle FROM visible_assets AS eligible
               WHERE eligible.committed = 1 AND eligible.creator_handle IS NOT NULL AND eligible.creator_handle != ''
               GROUP BY eligible.creator_handle HAVING COUNT(*) >= 3
                 AND MIN(COALESCE(eligible.collected_at, eligible.created_at)) <= datetime('now', '-30 days')
@@ -1959,7 +2004,7 @@ def _revisit_date_bundle(db, limit: int) -> list:
     rows = db.execute(
         f"""
         SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-        FROM assets AS asset
+        FROM visible_assets AS asset
         WHERE asset.committed = 1
           AND COALESCE(asset.collected_at, asset.created_at) <= datetime('now', '-30 days')
           {creator_exclusion}
@@ -1975,7 +2020,7 @@ def _revisit_date_bundle(db, limit: int) -> list:
     month_rows = db.execute(
         f"""
         SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-        FROM assets AS asset
+        FROM visible_assets AS asset
         WHERE asset.committed = 1
           AND COALESCE(asset.collected_at, asset.created_at) <= datetime('now', '-30 days')
           {creator_exclusion}
@@ -1994,7 +2039,7 @@ def _revisit_date_bundle(db, limit: int) -> list:
     oldest_rows = db.execute(
         f"""
         SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-        FROM assets AS asset
+        FROM visible_assets AS asset
         WHERE asset.committed = 1
           AND COALESCE(asset.collected_at, asset.created_at) <= datetime('now', '-30 days')
           {creator_exclusion}
@@ -2023,15 +2068,15 @@ def _revisit_creator_groups(db, limit: int, *, day: int | None = None) -> list[d
         """
         SELECT creator_handle,
                COUNT(*) AS asset_count,
-               MIN(COALESCE(assets.collected_at, assets.created_at)) AS oldest_at,
-               MAX(COALESCE(assets.collected_at, assets.created_at)) AS newest_at
-        FROM assets
+               MIN(COALESCE(visible_assets.collected_at, visible_assets.created_at)) AS oldest_at,
+               MAX(COALESCE(visible_assets.collected_at, visible_assets.created_at)) AS newest_at
+        FROM visible_assets
         WHERE committed = 1
           AND creator_handle IS NOT NULL
           AND creator_handle != ''
         GROUP BY creator_handle
         HAVING COUNT(*) >= 3
-          AND MIN(COALESCE(assets.collected_at, assets.created_at)) <= datetime('now', '-30 days')
+          AND MIN(COALESCE(visible_assets.collected_at, visible_assets.created_at)) <= datetime('now', '-30 days')
         ORDER BY creator_handle ASC
         """
     ).fetchall()
@@ -2045,7 +2090,7 @@ def _revisit_creator_groups(db, limit: int, *, day: int | None = None) -> list[d
         rows = db.execute(
             """
             SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-            FROM assets AS asset
+            FROM visible_assets AS asset
             WHERE asset.committed = 1
               AND asset.creator_handle = ?
             ORDER BY mobile_sort_at DESC, asset.id DESC
@@ -2246,7 +2291,7 @@ def list_mobile_revisit_date(
             f"""
             WITH ranked AS (
               SELECT asset.*, {timestamp_sql} AS mobile_sort_at, {rank_sql} AS revisit_rank
-              FROM assets AS asset
+              FROM visible_assets AS asset
               WHERE asset.committed = 1
                 AND {timestamp_sql} <= datetime('now', '-30 days')
                 {creator_exclusion}
@@ -2302,7 +2347,7 @@ def list_mobile_revisit_creator_assets(
         rows = db.execute(
             f"""
             SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-            FROM assets AS asset
+            FROM visible_assets AS asset
             WHERE asset.committed = 1
               AND asset.creator_handle = ?
               {cursor_clause}
@@ -2331,7 +2376,7 @@ def create_mobile_media_ticket(
     require_auth(authorization)
     with get_db() as db:
         asset = db.execute(
-            "SELECT * FROM assets WHERE id = ? AND committed = 1",
+            "SELECT * FROM visible_assets WHERE id = ? AND committed = 1",
             (asset_id,),
         ).fetchone()
     if asset is None:
@@ -2400,7 +2445,7 @@ def create_mobile_media_tickets(
         assets_by_id = {
             row["id"]: dict(row)
             for row in db.execute(
-                f"SELECT * FROM assets WHERE committed = 1 AND id IN ({placeholders})",
+                f"SELECT * FROM visible_assets WHERE committed = 1 AND id IN ({placeholders})",
                 asset_ids,
             ).fetchall()
         }
@@ -2679,6 +2724,8 @@ def replication_commit(
                     """,
                     (request.asset_id, classification_id, ts),
                 )
+        if active is not None:
+            asset_authority.register_replication(db, active["libraryId"], request.asset_id, ts)
         if request.expected_revision is not None:
             db.execute("UPDATE assets SET metadata_revision=metadata_revision+1, metadata_commit_id=? WHERE id=?",
                        (request.commit_id, request.asset_id))
@@ -2858,7 +2905,7 @@ def read_album_replica(
         for offset in range(0, len(members), 500):
             ids = [m["id"] for m in members[offset:offset + 500]]
             placeholders = ",".join("?" for _ in ids)
-            for asset in db.execute(f"""SELECT id,content_type,size_bytes FROM assets
+            for asset in db.execute(f"""SELECT id,content_type,size_bytes FROM visible_assets
                 WHERE committed=1 AND thumbnail_key IS NOT NULL AND content_type IS NOT NULL
                 AND size_bytes > 0 AND id IN ({placeholders})""", ids):
                 ready[asset["id"]] = dict(asset)

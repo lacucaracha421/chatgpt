@@ -229,6 +229,10 @@ pub enum LibraryError {
     },
     #[error("지원하지 않는 라이브러리 스키마 버전입니다: {0}")]
     UnsupportedSchema(i64),
+    #[error("Asset authority request rejected ({status}): {code}")]
+    AssetAuthorityRejected { status: u16, code: String },
+    #[error("Asset lifecycle revision conflict")]
+    AssetAuthorityConflict { asset_id: String, current_revision: i64, lifecycle: String },
     /// A development build refused to migrate an existing library that is not declared a
     /// development library. See [`super::dev_guard`] for why this exists and how to opt in.
     #[error(

@@ -141,6 +141,12 @@ pub(crate) fn enqueue_asset_upsert(
     asset_id: &str,
     updated_at: &str,
 ) -> Result<(), LibraryError> {
+    // Cloud materialization already has a canonical original. Later local analysis must
+    // not re-upload that original through the legacy new-Asset transport. The rule lives
+    // in one place so every writer agrees on what "server-owned" means.
+    if crate::library::asset_authority::is_server_owned(transaction, asset_id)? {
+        return Ok(());
+    }
     transaction.execute(
         "INSERT INTO cloud_sync_queue (
             id, entity_type, entity_id, operation, status, revision, updated_at

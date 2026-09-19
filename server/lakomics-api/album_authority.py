@@ -72,6 +72,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import asset_visibility
 import classification_authority
 
 DOMAIN = "albums"
@@ -865,6 +866,7 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
     relation's own revision. A stale writer therefore receives the current server
     state instead of overwriting a newer one, and never wins by wall-clock arrival.
     """
+    asset_visibility.install(db)
     row = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
     if row["epoch"] != epoch:
         # A command composed against another epoch cannot present a meaningful
@@ -943,7 +945,7 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
         if current_revision != entity["expectedRevision"]:
             raise membership_conflict(row, album_id, asset_id, relation)
         if desired:
-            if db.execute("SELECT 1 FROM assets WHERE id=? AND committed=1",
+            if db.execute("SELECT 1 FROM visible_assets WHERE id=? AND committed=1",
                           [asset_id]).fetchone() is None:
                 fail(422, "invalidAlbumMembership", "자산을 찾을 수 없습니다.", assetId=asset_id)
         new_revision = current_revision + 1
@@ -1333,7 +1335,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     SELECT asset.*,
                            COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
                     FROM album_authority_members AS member
-                    JOIN assets AS asset ON asset.id = member.asset_id
+                    JOIN visible_assets AS asset ON asset.id = member.asset_id
                     WHERE member.library_id = ?
                       AND member.album_id = ?
                       AND member.desired_state = 1

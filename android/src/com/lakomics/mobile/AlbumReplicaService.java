@@ -145,6 +145,7 @@ final class AlbumReplicaService {
                 // independent protection for anything a race leaves in place.
                 store.clear();
                 store.clearClassifications();
+                store.clearAssets();
             }
         }
     }
@@ -237,6 +238,20 @@ final class AlbumReplicaService {
             // boundaries are independent, so an Album delivery failure can no longer skip
             // Classification for the cycle. The lane that fails reports its own code; the
             // healthy lane still converges.
+            // Asset reads and list generation remain independent of either write lane.
+            try {
+                AssetReplica asset;
+                synchronized(gate){engine();asset=store.assetReplica(new Transport());}
+                boolean changed=asset.sync(scope);
+                String generation=client.api("/v1/library/list-generation","GET",null,null).getString("generation");
+                synchronized(gate) {
+                    if(startedUnder==attempt && (changed || !generation.equals(assetListGeneration))) {
+                        assetListGeneration=generation;
+                        LibraryDocumentsProvider.invalidateMetadata(context);
+                        PickerLibrary.get(context).refresh(true);
+                    }
+                }
+            }catch(Exception unavailable){/* A failed read lane retries next foreground pass. */}
             AuthorityPass.Outcome outcome = AuthorityPass.run(
                     () -> albumLane(scope),
                     () -> classificationLane(scope));
@@ -539,6 +554,8 @@ final class AlbumReplicaService {
      * process serves status and Album collections from the database it already holds, and
      * it must not need a network pass to do it. Caller holds {@link #gate}.
      */
+    private String assetListGeneration="";
+
     private AlbumAuthoritySync engine() {
         if (sync == null) {
             store = new LibraryReplicaStore(AndroidReplicaDb.open(context));

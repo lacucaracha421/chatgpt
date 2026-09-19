@@ -79,6 +79,26 @@ class MobileCharactersTests(unittest.TestCase):
         self.assertTrue(self.index()["ready"])
         self.assertEqual(self.index()["nodes"], [])
 
+    def test_retirement_filters_frozen_members_counts_covers_and_restores_same_id(self):
+        import authority, asset_authority
+        body=fixture();body["nodes"][0]["heroAssetId"]="a";body["nodes"][1]["thumbnailAssetId"]="a"
+        rev=self.publish(body).json()["revision"]
+        authority.startup(api_app.get_db);asset_authority.startup(api_app.get_db)
+        with api_app.get_db() as db:
+            asset_authority.activate(db,library_id="e"*32,now="2026")
+            db.execute("UPDATE asset_authority_state SET lifecycle='trash' WHERE asset_id='a'");db.commit()
+        items=self.browse(rev).json()
+        self.assertEqual([a["id"] for a in items["items"]],["b"])
+        self.assertEqual((items["totalCount"],items["sourceCount"]),(1,2))
+        self.assertIsNone(self.index()["nodes"][0]["heroAssetId"])
+        self.assertIsNone(self.index()["nodes"][1]["thumbnailAssetId"])
+        with api_app.get_db() as db:
+            db.execute("UPDATE asset_authority_state SET lifecycle='normal' WHERE asset_id='a'");db.commit()
+        self.assertEqual([a["id"] for a in self.browse(rev).json()["items"]],["b","a"])
+        with api_app.get_db() as db:
+            db.execute("UPDATE asset_authority_state SET lifecycle='tombstoned' WHERE asset_id='a'");db.commit()
+        self.assertEqual([a["id"] for a in self.browse(rev).json()["items"]],["b"])
+
     def test_freezes_availability_order_and_counts_with_revision(self):
         with api_app.get_db() as db:
             db.execute("INSERT INTO asset_classifications(asset_id,classification_id,added_at) VALUES('b','s','2026')")

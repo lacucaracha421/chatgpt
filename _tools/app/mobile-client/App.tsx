@@ -1,3 +1,4 @@
+import {listGeneration, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
@@ -22,7 +23,7 @@ import {CharacterBrowser} from './CharacterBrowser';
 
 const HOME: View = {tab:'home', title:'최근 저장'};
 function store(key: string, value: unknown) { try {localStorage.setItem(key, JSON.stringify(value));} catch { /* Optional device preference. */ } }
-type Committed = Page & {view: View; cursor: string | null; previous: (string | null)[]; version: number; restoreScroll: number};
+type Committed = Page & {generation:string|null; view: View; cursor: string | null; previous: (string | null)[]; version: number; restoreScroll: number};
 export function App() {
   const [area,setArea] = useState<'assets'|'collections'|'catalog'|'notes'>('assets');
   const [focusedCharacter,setFocusedCharacter]=useState<string|null>(null);
@@ -38,7 +39,7 @@ export function App() {
   const albumsBack = useRef<(()=>boolean)|null>(null);
   const [status, setStatus] = useState<Status>({configured:false, endpoint:''});
   const [checking, setChecking] = useState(true), [settings, setSettings] = useState(false), [drawer, setDrawer] = useState(false);
-  const [page, setPage] = useState<Committed>({items:[], has_more:false, next_cursor:null, view:HOME, cursor:null, previous:[], version:0, restoreScroll:0});
+  const [page, setPage] = useState<Committed>({items:[], has_more:false, next_cursor:null, view:HOME, cursor:null, previous:[], version:0, restoreScroll:0, generation:null});
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [indexError, setIndexError] = useState('');
   const [characterIndex,setCharacterIndex]=useState<CharacterIndex>();
   const [indexRevision,setIndexRevision]=useState(0);
@@ -53,6 +54,7 @@ export function App() {
   const latest = useRef({page, viewer, settings, drawer, status, area}); latest.current = {page, viewer, settings, drawer, status, area};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]}>({view:HOME,cursor:null,previous:[]});
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
+  const observedGeneration = useRef<string|null>(null);
   const viewCache = useRef(new Map<string, Committed>());
   const moreGate = useRef(new RequestGate());
   const [loadingMore, setLoadingMore] = useState(false), [moreError, setMoreError] = useState('');
@@ -79,15 +81,57 @@ export function App() {
     cancelMore();
     const request = gate.current.begin(); lastIntent.current = {view,cursor,previous}; setBusy(true); setError('');
     try {
-      const cached = fresh ? undefined : viewCache.current.get(`${viewKey(view)}:${cursor}`);
-      const response = view.characters ? {items:[],has_more:false,next_cursor:null} : cached ?? normalizePage(await api<Page>(pagePath(view, cursor), request.signal));
+      let generation = listGeneration(await api<unknown>('/v1/library/list-generation', request.signal));
+      if (!gate.current.current(request.id)) return;
+      if (generation !== observedGeneration.current) {viewCache.current.clear(); observedGeneration.current = generation;}
+      const candidate = fresh ? undefined : viewCache.current.get(`${viewKey(view)}:${cursor}`);
+      const cached = generation && candidate?.generation === generation ? candidate : undefined;
+      let response:Page = view.characters ? {items:[],has_more:false,next_cursor:null} : cached ?? normalizePage(await api<Page>(pagePath(view, cursor), request.signal));
+      if (!cached && !view.characters && generation) {
+        // Bind a fetched page to a stable generation; a mutation crossing the fetch must
+        // not bless stale rows as current. Retry within the same navigation request.
+        for (let attempt=0; attempt<3; attempt++) {
+          const after = listGeneration(await api<unknown>('/v1/library/list-generation', request.signal));
+          if (after === generation) break;
+          if (attempt === 2) throw new Error('목록이 변경되었습니다. 다시 시도해 주세요.');
+          generation = after; viewCache.current.clear();
+          response = normalizePage(await api<Page>(pagePath(view,cursor),request.signal));
+        }
+      }
+      observedGeneration.current=generation;
       const items = response.items;
       if (!gate.current.current(request.id)) return;
       scroll.current = restore;
-      setPage({ ...response, items, view, cursor, previous, restoreScroll:restore, version:request.id });
+      setPage({ ...response, items, view, cursor, previous, restoreScroll:restore, generation, version:request.id });
     } catch (reason) { if (gate.current.current(request.id)) setError(errorText(reason)); }
     finally { if (gate.current.current(request.id)) setBusy(false); }
   }, [cancelMore]);
+  useEffect(() => {
+    if (!status.configured) return;
+    let running=false, active=true;
+    const controller=new AbortController();
+    const check=async () => {
+      if (!active || running || document.visibilityState === 'hidden') return;
+      running=true;
+      try {
+        const generation=listGeneration(await api<unknown>('/v1/library/list-generation',controller.signal));
+        if (!active) return;
+        const state=latest.current;
+        if (generation === null || generation !== observedGeneration.current) {
+          viewCache.current.clear(); cancelMore(); clearMediaCache();
+          setViewer(null);
+          await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true);
+          setIndexRevision(value=>value+1);
+        }
+      } catch { /* Retain last committed view on transport failure; cache reuse still validates. */ }
+      finally {running=false;}
+    };
+    const changed=()=>{observedGeneration.current=null;void check();};
+    const timer=window.setInterval(()=>void check(),5000);
+    window.addEventListener('focus',check); window.addEventListener('lakomics-resume',check); document.addEventListener('visibilitychange',check);
+    window.addEventListener(ASSET_LIST_CHANGED_EVENT,changed);
+    return()=>{active=false;controller.abort();clearInterval(timer);window.removeEventListener('focus',check);window.removeEventListener('lakomics-resume',check);document.removeEventListener('visibilitychange',check);window.removeEventListener(ASSET_LIST_CHANGED_EVENT,changed);};
+  },[status.configured,status.endpoint,load,cancelMore]);
   useEffect(() => {
     if (!page.version) return;
     const key = `${viewKey(page.view)}:${page.cursor}`;
@@ -101,7 +145,11 @@ export function App() {
     morePending.current = true; setLoadingMore(true); setMoreError('');
     const request = moreGate.current.begin();
     try {
+      const generation=listGeneration(await api<unknown>('/v1/library/list-generation',request.signal));
+      if (!generation || generation !== current.generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true);return;}
       const response = await nextPage(current.view,current.next_cursor);
+      const after=listGeneration(await api<unknown>('/v1/library/list-generation',request.signal));
+      if (after !== generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true);return;}
       if (!moreGate.current.current(request.id) || latest.current.page.version !== current.version) return;
       // Do not advance forever if a broken server returns its input cursor.
       if (response.has_more && response.next_cursor === current.next_cursor) throw new Error('목록 커서가 진행되지 않습니다.');
@@ -114,7 +162,7 @@ export function App() {
       });
     } catch (reason) {if (moreGate.current.current(request.id)) setMoreError(errorText(reason));}
     finally {if (moreGate.current.current(request.id)) {morePending.current = false; setLoadingMore(false);}}
-  }, [nextPage]);
+  }, [nextPage,load]);
   const nearEnd = useCallback(() => {if (!busy && !loadingMore && !moreError) void append();}, [busy,loadingMore,moreError,append]);
   const thumbnailReady = useCallback((asset:Asset) => {
     setPage(current => ({...current,items:current.items.map(item => item.id === asset.id ? {...item,...asset} : item)}));
@@ -178,12 +226,12 @@ export function App() {
     setViewer({items:page.items,index,source:'library'});
   };
   const updateStatus = (next: Status) => {
-    gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); clearMediaCache();
+    gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
     setViewer(null); setCharacterIndex(undefined); setClassifications([]); setCaptures([]); setRevisit({bundles:[]});
     setCollapsed(new Set()); knownFolders.current.clear(); lastLibrary.current = undefined; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
-    setPage({items:[],has_more:false,next_cursor:null,view:HOME,cursor:null,previous:[],version:0,restoreScroll:0});
+    setPage({generation:null,items:[],has_more:false,next_cursor:null,view:HOME,cursor:null,previous:[],version:0,restoreScroll:0});
     setArea('assets'); setNotesVisited(false); setCollectionsVisited(false); setCatalogVisited(false); setCharactersVisited(false);
     setStatus(next);
   };

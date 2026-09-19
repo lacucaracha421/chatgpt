@@ -52,7 +52,14 @@ fn normalize_collected_at(value: Option<&str>) -> Result<String, LibraryError> {
 impl Library {
     pub fn ingest_media(
         &self,
-        mut request: IngestMediaRequest,
+        request: IngestMediaRequest,
+    ) -> Result<IngestOutcome, LibraryError> {
+        self.ingest_media_with_identity(request, None)
+    }
+
+    pub(crate) fn ingest_media_with_identity(
+        &self, mut request: IngestMediaRequest,
+        identity: Option<&super::asset_authority::MaterializationIdentity>,
     ) -> Result<IngestOutcome, LibraryError> {
         uuid::Uuid::parse_str(&request.import_batch_id)
             .map_err(|_| LibraryError::InvalidImportBatchId)?;
@@ -113,6 +120,11 @@ impl Library {
             &mut pending,
             maximum_bytes,
         )?;
+        if let Some(identity) = identity {
+            if identity.sha256 != content_hash || identity.size_bytes != byte_size {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+        }
         run_staging_hook(&staging_path);
 
         match kind {
@@ -124,6 +136,7 @@ impl Library {
                 pending,
                 original_modified_at,
                 collected_at,
+                identity,
             ),
             IngestKind::Video(extension) => self.ingest_video(
                 request,
@@ -134,6 +147,7 @@ impl Library {
                 extension,
                 original_modified_at,
                 collected_at,
+                identity,
             ),
         }
     }
@@ -147,14 +161,26 @@ impl Library {
         mut pending: PendingFiles,
         original_modified_at: Option<String>,
         collected_at: String,
+        identity: Option<&super::asset_authority::MaterializationIdentity>,
     ) -> Result<IngestOutcome, LibraryError> {
         let (format, mut width, mut height) = inspect_image(pending.owned_file(&staging_path)?)?;
         let existing_asset_id = self.find_asset_by_hash(&content_hash)?;
         if let Some(existing_asset_id) = existing_asset_id {
+            if let Some(identity) = identity {
+                if existing_asset_id != identity.asset_id { return Err(LibraryError::InvalidCloudResponse); }
+                let path:String=self.connection()?.query_row("SELECT relative_path FROM assets WHERE id=?",[&existing_asset_id],|r|r.get(0))?;
+                let mut original=self.open_library_media(&path)?.file;
+                let mut hasher=Sha256::new();let mut buffer=[0u8;64*1024];
+                loop {let size=original.read(&mut buffer).map_err(|source|read_source_error(&self.root().join(&path),source))?;if size==0{break;}hasher.update(&buffer[..size]);}
+                if hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()!=identity.sha256 {return Err(LibraryError::DuplicateOriginalCorrupt);}
+                let mut db=self.connection()?;let tx=db.transaction()?;
+                super::asset_authority::mark_materialized(&tx, &existing_asset_id)?;tx.commit()?;
+                return Ok(IngestOutcome::ExactDuplicate {existing_asset_id,classification_changed:false,metadata_changed:false});
+            }
             return self.finish_exact_duplicate(existing_asset_id, &request);
         }
         run_after_duplicate_hook(self.root());
-        let skip_similarity = request.import_source == ImportSource::LegacyLakomics;
+        let skip_similarity = identity.is_some() || request.import_source == ImportSource::LegacyLakomics;
         let (perceptual_hash, similar) = if skip_similarity {
             (None, None)
         } else {
@@ -190,7 +216,7 @@ impl Library {
         install_staged_asset(&staging_path, &asset_path, &mut pending)?;
 
         let asset = AssetSummary {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: identity.map(|value| value.asset_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             title: None,
             original_name: original_name(&request.source_path),
             relative_path,
@@ -226,6 +252,7 @@ impl Library {
             format,
             request.classification_id.as_deref(),
             &registration,
+            identity.is_some(),
         )?;
 
         pending.commit();
@@ -287,8 +314,20 @@ impl Library {
         extension: &'static str,
         original_modified_at: Option<String>,
         collected_at: String,
+        identity: Option<&super::asset_authority::MaterializationIdentity>,
     ) -> Result<IngestOutcome, LibraryError> {
         if let Some(existing_asset_id) = self.find_asset_by_hash(&content_hash)? {
+            if let Some(identity) = identity {
+                if existing_asset_id != identity.asset_id { return Err(LibraryError::InvalidCloudResponse); }
+                let path:String=self.connection()?.query_row("SELECT relative_path FROM assets WHERE id=?",[&existing_asset_id],|r|r.get(0))?;
+                let mut original=self.open_library_media(&path)?.file;
+                let mut hasher=Sha256::new();let mut buffer=[0u8;64*1024];
+                loop {let size=original.read(&mut buffer).map_err(|source|read_source_error(&self.root().join(&path),source))?;if size==0{break;}hasher.update(&buffer[..size]);}
+                if hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()!=identity.sha256 {return Err(LibraryError::DuplicateOriginalCorrupt);}
+                let mut db=self.connection()?;let tx=db.transaction()?;
+                super::asset_authority::mark_materialized(&tx, &existing_asset_id)?;tx.commit()?;
+                return Ok(IngestOutcome::ExactDuplicate {existing_asset_id,classification_changed:false,metadata_changed:false});
+            }
             return self.finish_exact_duplicate(existing_asset_id, &request);
         }
         run_after_duplicate_hook(self.root());
@@ -300,7 +339,7 @@ impl Library {
         install_staged_asset(&staging_path, &asset_path, &mut pending)?;
 
         let asset = AssetSummary {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: identity.map(|value| value.asset_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             title: None,
             original_name: original_name(&request.source_path),
             relative_path,
@@ -329,6 +368,7 @@ impl Library {
             &content_hash,
             &probe,
             request.classification_id.as_deref(),
+            identity.is_some(),
         )?;
 
         pending.commit();
@@ -457,6 +497,7 @@ impl Library {
         format: ImageFormat,
         classification_id: Option<&str>,
         registration: &Registration,
+        materialized: bool,
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
@@ -530,8 +571,9 @@ impl Library {
         }
         if matches!(registration, Registration::Normal) {
             super::character_autotag::enqueue(&transaction,&asset.id,super::character_autotag::Cause::Ingestion)?;
-            enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?;
+            if !materialized { enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?; }
         }
+        if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
         transaction.commit()?;
         Ok(())
     }
@@ -542,6 +584,7 @@ impl Library {
         content_hash: &str,
         probe: &VideoProbe,
         classification_id: Option<&str>,
+        materialized: bool,
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
@@ -595,7 +638,8 @@ impl Library {
                 params![asset.id, classification_id],
             )?;
         }
-        enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?;
+        if !materialized { enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?; }
+        if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
         transaction.commit()?;
         Ok(())
     }

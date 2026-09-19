@@ -1,3 +1,4 @@
+import {useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
 import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
 import {ALBUM_AUTHORITY_CHANGED_EVENT, useAlbumAuthoritySync} from './useAlbumAuthoritySync';
@@ -147,6 +148,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useCloudBackfillSupervisor(gateway, libraryRoot);
   useMobilePublications(gateway, libraryRoot);
   useCatalogBookmarkSync(gateway, libraryRoot);
+  useAssetAuthoritySync(gateway, libraryRoot);
   useAlbumAuthoritySync(gateway, libraryRoot);
   useClassificationAuthoritySync(gateway, libraryRoot);
   const cloudProblems = useCloudProblems(gateway, libraryRoot);

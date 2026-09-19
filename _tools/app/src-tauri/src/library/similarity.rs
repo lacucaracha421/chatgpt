@@ -299,6 +299,7 @@ impl Library {
             "UPDATE assets SET status = 'trash', trashed_at = ?2 WHERE id = ?1 AND status = 'normal'",
             params![existing_id, chrono::Utc::now().to_rfc3339()],
         )?;
+        super::asset_authority::enqueue(&transaction, &[existing_id.to_string()], "trash")?;
         transaction.execute(
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],

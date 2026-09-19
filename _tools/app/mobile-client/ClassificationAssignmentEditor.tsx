@@ -1,3 +1,4 @@
+import {ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {ChevronDownIcon,ChevronRightIcon,FolderIcon,MagnifyingGlassIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {Dialog,DialogDescription,IconButton} from './ui';
@@ -179,6 +180,7 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
       // The write returns the durably-queued state. Closing only after it resolves is what
       // keeps the picker from ever showing a selection the native layer has not recorded.
       const next=await native<ClassificationAssignmentState>('classificationAssignmentSet',{assetId,classificationId});
+      window.dispatchEvent(new Event(ASSET_LIST_CHANGED_EVENT));
       setState(next);
       onClose();
     }catch(reason){setError(errorText(reason));}

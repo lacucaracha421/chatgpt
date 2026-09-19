@@ -6,6 +6,7 @@ mod album;
 mod album_authority_tests;
 pub(crate) mod album_authority;
 pub(crate) mod album_reconciliation;
+pub(crate) mod asset_authority;
 #[cfg(test)]
 #[path = "album_reconciliation_tests.rs"]
 mod album_reconciliation_tests;
@@ -223,6 +224,7 @@ pub struct Library {
     // acquires and releases database connections *inside* it, and no caller holds the database
     // lock while entering a flush, so the two locks are never taken in both orders.
     // See [`Library::flush_outbox_single_flight`].
+    asset_sync_lock: Arc<Mutex<()>>,
     album_flush_lock: Arc<Mutex<()>>,
     classification_flush_lock: Arc<Mutex<()>>,
     // Long catalog reads share this lock; only file replacement is exclusive.
@@ -296,6 +298,7 @@ impl Library {
             manga_scan_lock: Arc::new(Mutex::new(())),
             volume_import_lock: Arc::new(Mutex::new(())),
             database_lock: Arc::new(Mutex::new(())),
+            asset_sync_lock: Arc::new(Mutex::new(())),
             album_flush_lock: Arc::new(Mutex::new(())),
             classification_flush_lock: Arc::new(Mutex::new(())),
             catalog_file_lock: Arc::default(),

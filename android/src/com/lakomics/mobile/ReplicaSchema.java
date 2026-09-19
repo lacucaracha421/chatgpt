@@ -25,8 +25,8 @@ package com.lakomics.mobile;
  * stores exactly what that one command needs.
  */
 final class ReplicaSchema {
-    /** Version 5 adds the Classification assignment write outbox. */
-    static final int VERSION = 5;
+    /** Version 6 adds the independent, read-only Asset lifecycle replica. */
+    static final int VERSION = 6;
 
     /** v0 is fresh, v1-v3 are older replicas; all upgrade in place. */
     static boolean canUpgradeFrom(int version) {
@@ -85,6 +85,9 @@ final class ReplicaSchema {
     }
 
     static final String[] DDL = {
+            "CREATE TABLE IF NOT EXISTS asset_authority(singleton INTEGER PRIMARY KEY CHECK(singleton=1),scope TEXT NOT NULL,library_id TEXT NOT NULL,epoch INTEGER NOT NULL,cursor INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS asset_state(asset_id TEXT PRIMARY KEY,lifecycle TEXT NOT NULL,entity_revision INTEGER NOT NULL,projection TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS asset_state_lifecycle ON asset_state(lifecycle,asset_id)",
             "CREATE TABLE IF NOT EXISTS album_authority("
                     + "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
                     + "scope TEXT NOT NULL,library_id TEXT NOT NULL,epoch INTEGER NOT NULL,"

@@ -1633,7 +1633,7 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
         // v4 added the read-only Classification replica beside the Album domain, and v5 adds
         // the Classification assignment outbox. Both arrive through the same additive DDL,
         // so the v2 outbox upgrade below is unchanged and still what this check pins.
-        equal(5, ReplicaSchema.VERSION,
+        equal(6, ReplicaSchema.VERSION,
                 "Schema v5 adds the Classification assignment outbox to the identity-bound v3 outbox");
         String[] upgrade = ReplicaSchema.upgradeStatements(2);
         equal(2, upgrade.length, "The intermediate v2 outbox needs two identity columns");

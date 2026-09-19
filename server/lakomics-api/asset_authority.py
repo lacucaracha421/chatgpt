@@ -22,8 +22,9 @@ Deliberately **not** owned here:
 
 # Promotion is idempotent by construction
 
-`promote_capture` allocates the canonical Asset ID from the Capture id itself rather than
-from a counter, then writes the mapping and the Asset state in one transaction. A retry
+`promote_capture` first resolves the verified SHA-256 within the library. Existing normal
+content keeps its canonical ID; new content allocates an ID from its first Capture.
+The mapping, Asset state and Classification command commit in one transaction. A retry
 therefore recomputes the same id and finds the mapping already present, so "same Capture,
 retried any number of times, exactly one canonical Asset" holds without a lock and without
 depending on which attempt won.
@@ -44,6 +45,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 
 import authority
+import classification_authority
 
 DOMAIN = "assets"
 CONTRACT_VERSION = 1
@@ -112,6 +114,8 @@ CREATE INDEX IF NOT EXISTS asset_authority_by_lifecycle
  ON asset_authority_state(library_id,lifecycle,asset_id);
 -- The durable Capture → Asset mapping. Primary key on the *Capture* is what makes
 -- promotion idempotent: a retry finds this row instead of creating a second Asset.
+CREATE UNIQUE INDEX IF NOT EXISTS asset_authority_by_content
+ ON asset_authority_state(library_id,sha256) WHERE sha256 IS NOT NULL;
 CREATE TABLE IF NOT EXISTS asset_authority_capture_map(
  library_id TEXT NOT NULL,
  capture_id TEXT NOT NULL,
@@ -316,16 +320,14 @@ def expired_cursor(row):
 def asset_page(db, library_id, after, limit):
     """Canonical Assets for a baseline walk, ordered by Asset id.
 
-    Excludes tombstoned Assets: a baseline installs what a client should hold, and a
-    tombstone's job is to stay gone. Trashed Assets *are* included, carrying their
-    lifecycle, because a client must be able to represent "trashed" rather than
-    concluding the Asset never existed.
+    Includes tombstones so expired-history recovery cannot retain stale normal Assets.
+    Every page is pinned to one cursor and clients replace the replica atomically.
     """
     rows = db.execute(
         "SELECT asset_id,lifecycle,entity_revision,kind,object_key,content_type,size_bytes,"
         "sha256,source_url,creator_name,creator_handle,collected_at,source_published_at,"
         "import_source,created_at,updated_at"
-        " FROM asset_authority_state WHERE library_id=? AND lifecycle<>'tombstoned'"
+        " FROM asset_authority_state WHERE library_id=?"
         " AND (? IS NULL OR asset_id>?) ORDER BY asset_id LIMIT ?",
         [library_id, after, after, limit]).fetchall()
     return [state_projection(row[1:], row[0]) for row in rows]
@@ -338,7 +340,7 @@ def asset_page(db, library_id, after, limit):
 def promote_capture(db, *, library_id, capture_id, kind, object_key, content_type,
                     size_bytes, sha256, source_url=None, creator_name=None,
                     creator_handle=None, collected_at=None, source_published_at=None,
-                    import_source=None, now=None):
+                    import_source=None, classification_id=None, now=None):
     """Turn a validated Capture into a canonical Asset, exactly once.
 
     Idempotent on `(library, capture)`: the canonical Asset id is derived from the pair,
@@ -350,13 +352,21 @@ def promote_capture(db, *, library_id, capture_id, kind, object_key, content_typ
     Returns `(asset_id, created)` where `created` is False for a retry.
     """
     timestamp = now or now_iso()
+    active = authority.require_active(db, DOMAIN, library_id, CONTRACT_VERSION)
+    if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        fail(422, "captureDigestUnavailable", "검증된 콘텐츠 해시가 필요합니다.")
     existing = db.execute(
         "SELECT asset_id FROM asset_authority_capture_map WHERE library_id=? AND capture_id=?",
         [library_id, capture_id]).fetchone()
     if existing is not None:
         return existing[0], False
 
-    asset_id = canonical_asset_id(library_id, capture_id)
+    duplicate = db.execute("SELECT asset_id,lifecycle FROM asset_authority_state "
+                           "WHERE library_id=? AND sha256=?", [library_id, sha256]).fetchone()
+    if duplicate is not None and duplicate[1] != NORMAL:
+        fail(409, "duplicateInTrash" if duplicate[1] == TRASH else "duplicateTombstoned",
+             "이미 삭제된 동일한 자료입니다.", assetId=duplicate[0], lifecycle=duplicate[1])
+    asset_id = duplicate[0] if duplicate is not None else canonical_asset_id(library_id, capture_id)
     current = state_row(db, library_id, asset_id)
     if current is None:
         db.execute(
@@ -367,6 +377,28 @@ def promote_capture(db, *, library_id, capture_id, kind, object_key, content_typ
             [library_id, asset_id, NORMAL, kind, object_key, content_type, size_bytes,
              sha256, source_url, creator_name, creator_handle, collected_at,
              source_published_at, import_source, timestamp, timestamp])
+    if duplicate is None:
+        db.execute("INSERT INTO assets(id,kind,object_key,content_type,size_bytes,sha256,"
+                   "created_at,updated_at,committed,collected_at,source_url,creator_name,"
+                   "creator_handle,source_published_at,import_source) VALUES(?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)",
+                   [asset_id,kind,object_key,content_type,size_bytes,sha256,timestamp,timestamp,
+                    collected_at,source_url,creator_name,creator_handle,source_published_at,import_source])
+    classification = authority.active_domain(db, classification_authority.DOMAIN, library_id)
+    if classification is not None:
+        assignment = classification_authority.assignment_row(db, library_id, asset_id)
+        classification_authority.apply_command(
+            db, library_id=library_id, epoch=classification["epoch"],
+            contract_version=classification["contractVersion"],
+            command_type=classification_authority.ASSIGNMENT,
+            operation_id=str(uuid.uuid5(PROMOTION_NAMESPACE, f"assignment:{library_id}:{capture_id}")),
+            entity={"assetId": asset_id, "classificationId": classification_id,
+                    "expectedRevision": assignment["entity_revision"] if assignment else 0}, now=timestamp)
+    elif classification_id is not None:
+        fail(409, "classificationAuthorityRequired", "분류 권위를 먼저 활성화해야 합니다.")
+    if duplicate is not None:
+        db.execute("INSERT INTO asset_authority_capture_map VALUES(?,?,?,?)",
+                   [library_id,capture_id,asset_id,timestamp])
+        return asset_id, False
     try:
         db.execute(
             "INSERT INTO asset_authority_capture_map(library_id,capture_id,asset_id,promoted_at)"
@@ -409,6 +441,26 @@ def _record_change(db, *, library_id, command_type, asset_id, revision, operatio
         "UPDATE authority_domains SET change_cursor=? WHERE library_id=? AND domain=?",
         [cursor + 1, library_id, DOMAIN])
     return cursor + 1
+
+
+def register_replication(db, library_id, asset_id, now):
+    """Publish a verified PC commit into the same canonical replica feed atomically."""
+    asset = db.execute("SELECT * FROM assets WHERE id=? AND committed=1", [asset_id]).fetchone()
+    if asset is None or not isinstance(asset["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", asset["sha256"]):
+        fail(422, "contentDigestRequired")
+    same = db.execute("SELECT asset_id FROM asset_authority_state WHERE library_id=? AND sha256=?", [library_id, asset["sha256"]]).fetchone()
+    if same and same[0] != asset_id:
+        fail(409, "canonicalContentConflict", canonicalAssetId=same[0])
+    old = state_row(db, library_id, asset_id)
+    if old and old[6] is not None and old[6] != asset["sha256"]:
+        fail(409, "canonicalContentConflict", canonicalAssetId=asset_id)
+    fields = ("kind", "object_key", "content_type", "size_bytes", "sha256", "source_url", "creator_name", "creator_handle", "collected_at", "source_published_at", "import_source")
+    values = [asset[k] for k in fields]
+    if old and list(old[2:13]) == values:
+        return
+    revision = old[1] + 1 if old else 1
+    db.execute("INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision," + ",".join(fields) + ",created_at,updated_at) VALUES(" + ",".join("?" for _ in range(17)) + ") ON CONFLICT(library_id,asset_id) DO UPDATE SET entity_revision=excluded.entity_revision," + ",".join(k+"=excluded."+k for k in fields) + ",updated_at=excluded.updated_at", [library_id,asset_id,NORMAL,revision,*values,asset["created_at"],now])
+    _record_change(db, library_id=library_id, command_type="replicateAsset", asset_id=asset_id, revision=revision, operation_id=str(uuid.uuid4()), delta={"asset":state_projection(state_row(db,library_id,asset_id),asset_id)}, now=now)
 
 
 # ---------------------------------------------------------------------------
@@ -592,11 +644,20 @@ def activate(db, *, library_id, now):
             fail(409, "assetAuthorityStateExists",
                  "활성화되지 않은 자산 권위 상태가 이미 존재합니다.", domain=DOMAIN)
 
+    if db.execute("SELECT sha256 FROM assets WHERE committed=1 AND sha256 IS NOT NULL GROUP BY sha256 HAVING COUNT(*)>1 LIMIT 1").fetchone():
+        fail(409, "canonicalContentConflict", "기존 중복 콘텐츠를 먼저 정리해야 합니다.")
+
     db.execute(
         "INSERT INTO authority_domains(library_id,domain,epoch,contract_version,change_cursor,"
         "baseline_digest,baseline_revision,activated_at) VALUES(?,?,1,?,0,?,NULL,?)",
         [library_id, DOMAIN, CONTRACT_VERSION,
          hashlib.sha256(f"assets:{library_id}:{now}".encode()).hexdigest(), now])
+    db.execute("INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision,"
+               "kind,object_key,content_type,size_bytes,sha256,source_url,creator_name,creator_handle,"
+               "collected_at,source_published_at,import_source,created_at,updated_at) "
+               "SELECT ?,id,'normal',1,kind,object_key,content_type,size_bytes,sha256,source_url,"
+               "creator_name,creator_handle,collected_at,source_published_at,import_source,created_at,"
+               "updated_at FROM assets WHERE committed=1", [library_id])
     return {"domain": DOMAIN, "libraryId": library_id, "epoch": 1,
             "contractVersion": CONTRACT_VERSION, "cursor": 0, "activatedAt": now}
 
@@ -633,6 +694,8 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
             with get_db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 try:
+                    if authority.active_domain(db, DOMAIN) is None and db.execute("SELECT 1 FROM assets WHERE committed=1 LIMIT 1").fetchone():
+                        fail(409, "legacyLifecycleBaselineRequired", "기존 PC 휴지통 상태를 검증한 활성화 기준선이 필요합니다.")
                     state = activate(db, library_id=library_id, now=now_iso())
                     db.commit()
                     return state
@@ -683,6 +746,8 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
                 try:
                     row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
                     cursor = row["cursor"]
+                    if row["epoch"] != epoch:
+                        fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH)
                     if after > cursor:
                         fail(409, "cursorAhead", "변경 커서가 권위 커서보다 앞서 있습니다.")
                     if after < pruned_through(db, libraryId, epoch):
@@ -700,9 +765,10 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
     @app.get(PREFIX + "/baseline")
     async def asset_baseline(request: Request, libraryId: str, epoch: int,
                              after: str | None = None, limit: int = DEFAULT_ASSET_PAGE,
+                             expectedCursor: int | None = None,
                              authorization: str | None = Header(default=None)):
         require_client(authorization)
-        if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit"}:
+        if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit", "expectedCursor"}:
             fail()
         if not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1:
             fail()
@@ -716,6 +782,10 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
                 db.execute("BEGIN")
                 try:
                     row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                    if row["epoch"] != epoch:
+                        fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH)
+                    if expectedCursor is not None and expectedCursor != row["cursor"]:
+                        fail(409, "baselineChanged", "기준 상태가 변경되었습니다.")
                     items = asset_page(db, libraryId, after, limit)
                     # The cursor is read in the same snapshot, so a caller that installs
                     # this page and then follows `/changes` from it cannot skip a change

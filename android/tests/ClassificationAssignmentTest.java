@@ -1402,11 +1402,11 @@ public final class ClassificationAssignmentTest {
      * Album rows and a pending Album outbox row.
      */
     private static void v4ReplicaUpgradesInPlaceToV5(Path directory) throws Exception {
-        equal(5, ReplicaSchema.VERSION, "v5 adds the Classification assignment outbox");
+        equal(6, ReplicaSchema.VERSION, "v5 adds the Classification assignment outbox");
         equal(0, ReplicaSchema.upgradeStatements(4).length,
                 "The v4 upgrade is additive DDL alone, so it needs no ALTER statements");
         check(ReplicaSchema.canUpgradeFrom(4), "The v4 replica upgrades in place");
-        check(!ReplicaSchema.canUpgradeFrom(5), "The current schema needs no migration");
+        check(!ReplicaSchema.canUpgradeFrom(ReplicaSchema.VERSION), "The current schema needs no migration");
 
         Path file = directory.resolve("v4.sqlite");
         SqliteDb legacy = new SqliteDb(file, false);
@@ -1440,7 +1440,7 @@ public final class ClassificationAssignmentTest {
         legacy.close();
 
         SqliteDb upgraded = new SqliteDb(file, true);
-        equal(5L, upgraded.userVersion(), "The reopened replica reports the v5 schema");
+        equal(6L, upgraded.userVersion(), "The reopened replica reports the v5 schema");
         equal(1L, upgraded.countClassificationOutboxTables(),
                 "The upgrade creates the Classification assignment outbox");
         // Classification identity and cursor.

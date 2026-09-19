@@ -2812,3 +2812,32 @@ mod publication_progress_tests {
         assert_eq!(events.last().unwrap().unit, "bytes");
     }
 }
+
+impl CloudClient {
+    pub(crate) fn asset_request(&self,path:&str,body:Option<&serde_json::Value>,token:&str)->Result<serde_json::Value,LibraryError>{
+        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).timeout_global(Some(SHORT_NETWORK_TIMEOUT)).build().into();
+        let endpoint=self.endpoint(path)?;
+        let authorization=bearer(token)?;
+        let mut response=match body {
+            Some(body) if path=="/v1/assets/authority/commands"=>agent.put(endpoint).header("Authorization",authorization).send_json(body),
+            Some(body)=>agent.post(endpoint).header("Authorization",authorization).send_json(body),
+            None=>agent.get(endpoint).header("Authorization",authorization).call(),
+        }.map_err(|_|LibraryError::CloudRequestUnavailable)?;
+        let status=response.status().as_u16();
+        if status==401 || status==403 {return Err(LibraryError::CloudUnauthorized);}
+        let value:serde_json::Value=read_json_bounded(&mut response,4*1024*1024)?;
+        if status==200 {return Ok(value);}
+        if status==409 && value["detail"]["code"]=="revisionConflict" {
+            let detail=&value["detail"];
+            let id=detail["assetId"].as_str().filter(|s| !s.is_empty() && s.len()<=128 && s.bytes().all(|c|c.is_ascii_alphanumeric() || c==b'-' || c==b'_')).ok_or(LibraryError::InvalidCloudResponse)?;
+            let revision=detail["currentEntityRevision"].as_i64().filter(|v|*v>0).ok_or(LibraryError::InvalidCloudResponse)?;
+            let lifecycle=detail["lifecycle"].as_str().filter(|s|matches!(*s,"normal"|"trash"|"tombstoned")).ok_or(LibraryError::InvalidCloudResponse)?;
+            return Err(LibraryError::AssetAuthorityConflict{asset_id:id.into(),current_revision:revision,lifecycle:lifecycle.into()});
+        }
+        if matches!(status,409|404|422) {
+            let code=value["detail"]["code"].as_str().filter(|code|matches!(*code,"cursorExpired"|"cursorAhead"|"baselineChanged"|"authorityInactive"|"authorityLibraryMismatch"|"authorityContractUnsupported"|"revisionConflict"|"operationConflict"|"lifecycleTransitionRefused"|"assetNotFound" )).unwrap_or("assetAuthorityRejected");
+            return Err(LibraryError::AssetAuthorityRejected{status,code:code.into()});
+        }
+        Err(LibraryError::CloudRequestUnavailable)
+    }
+}

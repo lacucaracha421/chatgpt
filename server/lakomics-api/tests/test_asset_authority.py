@@ -50,6 +50,9 @@ class AssetAuthorityFixture(unittest.TestCase):
         api_app.startup()
         api_app.startup_replication()
         api_app.startup_captures()
+        # The extension credential table is needed to prove an extension token cannot
+        # reach a publisher-only Asset lifecycle route.
+        api_app.startup_extension_profile()
         authority.startup(api_app.get_db)
         api_auth.startup(api_app.get_db)
         api_app.startup_asset_authority()
@@ -73,6 +76,13 @@ class AssetAuthorityFixture(unittest.TestCase):
         return {"Authorization": "Bearer shared-test-token"}
 
     def activate(self, library_id=LIBRARY):
+        # Seeded fixtures explicitly attest their known normal legacy lifecycle. The
+        # production route refuses existing media until PC lifecycle staging is reviewed.
+        with api_app.get_db() as db:
+            if db.execute("SELECT 1 FROM assets WHERE committed=1 LIMIT 1").fetchone():
+                result=asset_authority.activate(db,library_id=library_id,now="2026-09-19T00:00:00Z")
+                db.commit()
+                return result
         response = self.client.post("/v1/assets/authority/activate", headers=self.publisher,
                                     json={"libraryId": library_id})
         self.assertEqual(response.status_code, 200, response.text)
@@ -97,7 +107,7 @@ class AssetAuthorityFixture(unittest.TestCase):
                     "entity_revision,kind,object_key,content_type,size_bytes,sha256,"
                     "created_at,updated_at) VALUES(?,?,?,1,'image',?,?,10,?,?,?)",
                     [library_id, f"20000000-0000-4000-8000-0000000000{index:02d}", lifecycle,
-                     f"library/x/{index}/original", "image/png", "a" * 64,
+                     f"library/x/{index}/original", "image/png", f"{index:064x}",
                      "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z"])
             db.commit()
 
@@ -266,7 +276,7 @@ class PromotionTests(AssetAuthorityFixture):
     def test_different_captures_promote_to_different_assets(self):
         self.activate()
         first, _ = self.promote(capture_id="capture-a")
-        second, _ = self.promote(capture_id="capture-b")
+        second, _ = self.promote(capture_id="capture-b", sha256="c"*64)
         self.assertNotEqual(first, second)
 
     def test_promotion_is_refused_while_the_domain_is_inactive(self):
@@ -417,12 +427,12 @@ class VisibilityTests(AssetAuthorityFixture):
         self.assertEqual(visible, {ids[0]})
         self.assertEqual(hidden, {ids[1], ids[2]})
 
-    def test_the_baseline_excludes_tombstoned_but_keeps_trashed_with_its_state(self):
+    def test_the_baseline_carries_tombstones_for_expired_client_recovery(self):
         # A baseline installs what a client should hold. A tombstone's purpose is to stay
         # gone, while a trashed Asset must be representable as trashed.
         items = self.baseline()["items"]
         lifecycles = {item["assetId"]: item["lifecycle"] for item in items}
-        self.assertEqual(len(items), 2)
+        self.assertEqual(len(items), 3)
         self.assertEqual(lifecycles[f"20000000-0000-4000-8000-000000000000"], asset_authority.NORMAL)
         self.assertEqual(lifecycles[f"20000000-0000-4000-8000-000000000001"], asset_authority.TRASH)
 
@@ -480,7 +490,7 @@ class LegacyFenceTests(AssetAuthorityFixture):
     def prepare(self, asset_id=ASSET):
         response = self.client.post("/v1/replication/prepare", headers=self.admin, json={
             "asset_id": asset_id, "kind": "image", "content_type": "image/png",
-            "size_bytes": 17, "sha256": "a" * 64, "collected_at": "2026-09-19T00:00:00Z",
+            "size_bytes": 17, "sha256": __import__("hashlib").sha256(asset_id.encode()).hexdigest(), "collected_at": "2026-09-19T00:00:00Z",
         })
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
@@ -489,7 +499,7 @@ class LegacyFenceTests(AssetAuthorityFixture):
         return self.client.post("/v1/replication/commit", headers=self.admin, json={
             "asset_id": asset_id, "kind": "image",
             "original": {"object_key": f"library/{asset_id}/original",
-                         "content_type": "image/png", "size_bytes": 17, "sha256": "a" * 64},
+                         "content_type": "image/png", "size_bytes": 17, "sha256": __import__("hashlib").sha256(asset_id.encode()).hexdigest()},
             "thumbnail": {"object_key": f"library/{asset_id}/thumbnail",
                           "content_type": "image/webp", "size_bytes": 5},
             "content_type": "image/png", "collected_at": "2026-09-19T00:00:00Z",
@@ -564,13 +574,13 @@ class LibraryVisibilityTests(AssetAuthorityFixture):
         """Commit one canonical Asset through the shipped replication path."""
         prepared = self.client.post("/v1/replication/prepare", headers=self.admin, json={
             "asset_id": asset_id, "kind": "image", "content_type": "image/png",
-            "size_bytes": 17, "sha256": "a" * 64, "collected_at": "2026-09-19T00:00:00Z",
+            "size_bytes": 17, "sha256": __import__("hashlib").sha256(asset_id.encode()).hexdigest(), "collected_at": "2026-09-19T00:00:00Z",
         })
         self.assertEqual(prepared.status_code, 200, prepared.text)
         committed = self.client.post("/v1/replication/commit", headers=self.admin, json={
             "asset_id": asset_id, "kind": "image",
             "original": {"object_key": f"library/{asset_id}/original",
-                         "content_type": "image/png", "size_bytes": 17, "sha256": "a" * 64},
+                         "content_type": "image/png", "size_bytes": 17, "sha256": __import__("hashlib").sha256(asset_id.encode()).hexdigest()},
             "thumbnail": {"object_key": f"library/{asset_id}/thumbnail",
                           "content_type": "image/webp", "size_bytes": 5},
             "content_type": "image/png", "collected_at": "2026-09-19T00:00:00Z",
@@ -661,3 +671,426 @@ class LibraryVisibilityTests(AssetAuthorityFixture):
         remaining = [item["id"] for item in second.json()["items"]]
         self.assertEqual(len(remaining), 1)
         self.assertNotIn(remaining[0], [item["id"] for item in page["items"]])
+
+
+class ContentIdentityTests(PromotionTests):
+    asset_id_for_ticket = "20000000-0000-4000-8000-0000000000tt".replace("tt", "11")
+
+    def publish(self, asset_id):
+        """Commit one canonical Asset through the shipped replication path so that a
+        media ticket has a real committed row and a real stored object to resolve."""
+        prepared = self.client.post("/v1/replication/prepare", headers=self.admin, json={
+            "asset_id": asset_id, "kind": "image", "content_type": "image/png",
+            "size_bytes": 74, "sha256": "a" * 64, "collected_at": "2026-09-19T00:00:00Z"})
+        self.assertEqual(prepared.status_code, 200, prepared.text)
+        fake_s3.put_object(Bucket="test-bucket", Key=f"library/{asset_id}/original",
+                           Body=__import__("io").BytesIO(b"x" * 74), ContentType="image/png")
+        committed = self.client.post("/v1/replication/commit", headers=self.admin, json={
+            "asset_id": asset_id, "kind": "image",
+            "original": {"object_key": f"library/{asset_id}/original",
+                         "content_type": "image/png", "size_bytes": 74, "sha256": "a" * 64},
+            "thumbnail": {"object_key": f"library/{asset_id}/thumbnail",
+                          "content_type": "image/webp", "size_bytes": 5},
+            "content_type": "image/png", "collected_at": "2026-09-19T00:00:00Z",
+            "source_published_at": None, "source_url": None, "creator_name": None,
+            "creator_handle": None, "import_source": "Direct", "classification_ids": [],
+            "expected_revision": 0, "commit_id": "ticket-fixture"})
+        self.assertEqual(committed.status_code, 200, committed.text)
+
+    def test_distinct_captures_with_same_verified_bytes_share_one_asset(self):
+        self.activate()
+        first, _ = self.promote(capture_id="capture-a")
+        second, created = self.promote(capture_id="capture-b", source_url="https://x.com/other/status/2/photo/1")
+        self.assertEqual(first,second)
+        self.assertFalse(created)
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM asset_authority_state").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT count(*) FROM asset_authority_capture_map").fetchone()[0],2)
+        self.assertEqual(self.changes()["cursor"],1)
+
+    def test_digest_is_required_and_trash_duplicate_does_not_restore(self):
+        self.activate()
+        first,_ = self.promote()
+        self.assertEqual(self.command("trashAsset",first,1).status_code,200)
+        for digest, code in (("b"*64,"duplicateInTrash"),(None,"captureDigestUnavailable")):
+            with self.assertRaises(Exception) as caught:
+                self.promote(capture_id="new-capture",sha256=digest)
+            self.assertEqual(caught.exception.detail["code"],code)
+        with api_app.get_db() as db:
+            self.assertEqual(asset_authority.state_row(db,LIBRARY,first)[0],"trash")
+            self.assertEqual(db.execute("SELECT count(*) FROM assets").fetchone()[0],1)
+        self.command("tombstoneAsset",first,2)
+        with self.assertRaises(Exception) as caught:
+            self.promote(capture_id="new-capture")
+        self.assertEqual(caught.exception.detail["code"],"duplicateTombstoned")
+        self.assertEqual(self.baseline()["items"][0]["lifecycle"],"tombstoned")
+
+    def test_byte_different_media_stays_a_separate_canonical_asset(self):
+        # Similarity is PC analysis, not server identity. Two Captures whose bytes differ
+        # must never collapse into one Asset merely because a later PC pass considers
+        # them similar - that would destroy an Asset the server already published.
+        self.activate()
+        first, _ = self.promote(capture_id="capture-a", sha256="a" * 64)
+        second, created = self.promote(capture_id="capture-b", sha256="c" * 64)
+        self.assertNotEqual(first, second)
+        self.assertTrue(created)
+        with api_app.get_db() as db:
+            self.assertEqual(
+                db.execute("SELECT count(*) FROM asset_authority_state").fetchone()[0], 2)
+
+    def test_same_bytes_in_another_classification_reuses_the_asset(self):
+        # Byte identity is global to the library, so filing the same bytes under a second
+        # Classification must resolve to the existing Asset rather than minting a twin.
+        self.activate()
+        first, _ = self.promote(capture_id="capture-a")
+        second, created = self.promote(capture_id="capture-b", source_url=None)
+        self.assertEqual(first, second)
+        self.assertFalse(created)
+        with api_app.get_db() as db:
+            # Both Captures remain durable evidence of how the Asset was saved.
+            self.assertEqual(
+                db.execute("SELECT count(*) FROM asset_authority_capture_map").fetchone()[0], 2)
+
+    def test_baseline_generation_and_epoch_are_validated(self):
+        self.activate()
+        self.promote()
+        params={"libraryId":LIBRARY,"epoch":1,"expectedCursor":0}
+        response=self.client.get("/v1/assets/authority/baseline",params=params,headers=self.publisher)
+        self.assertEqual(response.json()["detail"]["code"],"baselineChanged")
+        params={"libraryId":LIBRARY,"epoch":2}
+        for route in ("baseline","changes"):
+            response=self.client.get("/v1/assets/authority/"+route,params=params,headers=self.publisher)
+            self.assertEqual(response.status_code,409)
+
+    def test_duplicate_classification_reassignment_uses_authority_receipts(self):
+        import classification_authority as classifications
+        classifications.startup(api_app.get_db)
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO authority_domains(library_id,domain,epoch,contract_version,change_cursor,baseline_digest,activated_at) VALUES(?,'classifications',1,1,0,'fixture','2026-09-19T00:00:00Z')",[LIBRARY])
+            for id in ("a","b"):
+                db.execute("INSERT INTO classification_authority_state(library_id,classification_id,name,kind,entity_revision,deleted,created_at,updated_at) VALUES(?,?,?,'root',1,0,'2026-09-19T00:00:00Z','2026-09-19T00:00:00Z')",[LIBRARY,id,id])
+            db.commit()
+        self.activate()
+        first,_=self.promote(capture_id="capture-a",classification_id="a")
+        second,created=self.promote(capture_id="capture-b",classification_id="b")
+        self.assertEqual(first,second)
+        self.assertFalse(created)
+        with api_app.get_db() as db:
+            assignment=classifications.assignment_row(db,LIBRARY,first)
+            self.assertEqual(assignment["classification_id"],"b")
+            self.assertEqual(assignment["entity_revision"],2)
+            self.assertEqual(db.execute("SELECT count(*) FROM classification_authority_receipts").fetchone()[0],2)
+
+    def test_tickets_and_every_asset_reader_share_visibility(self):
+        self.activate()
+        asset,_=self.promote()
+        self.command("trashAsset",asset,1)
+        response=self.client.post(f"/v1/library/assets/{asset}/media-ticket",headers=self.admin,json={"variant":"original"})
+        self.assertEqual(response.status_code,404)
+        response=self.client.post("/v1/library/media-tickets",headers=self.admin,json={"items":[{"asset_id":asset,"variant":"original"}]})
+        self.assertEqual(response.json()["items"][0]["error"],"not_found")
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM visible_assets").fetchone()[0],0)
+            self.assertEqual(db.execute("SELECT count(*) FROM assets").fetchone()[0],1)
+        self.command("restoreAsset",asset,2)
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT id FROM visible_assets").fetchone()[0],asset)
+
+    def test_a_tombstoned_asset_never_yields_a_ticket_or_reappears(self):
+        # Tombstone is terminal. A ticket that still resolved would let a client fetch
+        # media for an Asset the library has retired - the concrete bypass this guards.
+        self.activate()
+        asset,_=self.promote()
+        self.command("trashAsset",asset,1)
+        self.command("tombstoneAsset",asset,2)
+        single=self.client.post(f"/v1/library/assets/{asset}/media-ticket",headers=self.admin,json={"variant":"original"})
+        self.assertEqual(single.status_code,404)
+        batch=self.client.post("/v1/library/media-tickets",headers=self.admin,json={"items":[{"asset_id":asset,"variant":"original"}]})
+        self.assertEqual(batch.json()["items"][0]["error"],"not_found")
+        # A tombstoned Asset is absent from ordinary listing and cannot be restored.
+        listed=self.client.get("/v1/library/assets",params={"limit":10},headers=self.admin).json()
+        self.assertEqual([i["id"] for i in listed["items"]],[])
+        restored=self.command("restoreAsset",asset,3)
+        self.assertEqual(restored.status_code,409)
+        self.assertEqual(restored.json()["detail"]["code"],"lifecycleTransitionRefused")
+
+    def test_a_normal_asset_still_yields_a_ticket(self):
+        # The counter-case: lifecycle filtering must not break ordinary playback. Uses
+        # the shipped replication path so the committed row and its R2 object are real.
+        self.publish(self.asset_id_for_ticket)
+        self.activate()
+        response=self.client.post(
+            f"/v1/library/assets/{self.asset_id_for_ticket}/media-ticket",
+            headers=self.admin,json={"variant":"original"})
+        self.assertEqual(response.status_code,200,response.text)
+
+class MissingAuthorityRowTests(AssetAuthorityFixture):
+    """An active domain with no canonical row must hide the Asset, not expose it.
+
+    Fail-closed is the whole point of the projection: if absence were read as permission,
+    every bug that drops or never writes a canonical row (an interrupted promotion, a
+    partially applied migration, a hand-edited database) would become a silent visibility
+    leak. These pin the direction of the failure.
+    """
+
+    def publish_without_canonical_row(self, asset_id=ASSET):
+        """A committed Asset whose canonical row is deliberately absent.
+
+        Built by hand rather than through promotion, because promotion always writes the
+        row; the state under test is the one that must never be reachable by accident.
+        """
+        with api_app.get_db() as db:
+            db.execute(
+                "INSERT INTO assets(id,kind,object_key,thumbnail_key,content_type,size_bytes,"
+                "sha256,committed,created_at,updated_at) VALUES(?,'image',?,'thumb/key',"
+                "'image/png',17,?,1,'2026-09-19T00:00:00Z','2026-09-19T00:00:00Z')",
+                [asset_id, f"library/{asset_id}/original",
+                 __import__("hashlib").sha256(asset_id.encode()).hexdigest()])
+            db.commit()
+
+    def activate_then_orphan(self, asset_id=ASSET):
+        """Active domain, then a committed Asset with no canonical row.
+
+        Activation is deliberately first: it seeds a canonical row for every Asset that
+        already exists, so the orphan has to appear *after* activation — which is exactly
+        how a real orphan arises (an interrupted promotion, a migration that skipped the
+        canonical write). Building it the other way round would test nothing, because
+        activation would author a row for it.
+        """
+        self.activate()
+        self.publish_without_canonical_row(asset_id)
+        with api_app.get_db() as db:
+            self.assertIsNone(
+                db.execute("SELECT 1 FROM asset_authority_state WHERE asset_id=?",
+                           [asset_id]).fetchone(),
+                "fixture must leave the Asset without canonical state")
+
+    def test_an_asset_with_no_canonical_row_is_hidden_by_an_active_domain(self):
+        self.activate_then_orphan()
+        listed = self.client.get("/v1/library/assets", params={"limit": 50},
+                                 headers=self.admin)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertEqual([item["id"] for item in listed.json()["items"]], [])
+
+    def test_a_classification_filtered_read_does_not_expose_it_either(self):
+        self.activate_then_orphan()
+        filtered = self.client.get(
+            "/v1/library/assets",
+            params={"limit": 50, "classification_id": "lakomics-originals"},
+            headers=self.admin)
+        self.assertEqual(filtered.status_code, 200, filtered.text)
+        self.assertEqual([item["id"] for item in filtered.json()["items"]], [])
+
+    def test_the_ticket_path_does_not_treat_it_as_normal(self):
+        self.activate_then_orphan()
+        response = self.client.post(
+            f"/v1/library/assets/{ASSET}/media-ticket",
+            headers=self.admin, json={"variant": "original"})
+        self.assertEqual(response.status_code, 404, response.text)
+
+    def test_the_same_asset_is_visible_again_when_the_domain_is_inactive(self):
+        # The counter-case: fail-closed must be a property of an *active* domain only.
+        # Without an authority row the projection must stay byte-compatible with legacy.
+        self.publish_without_canonical_row()
+        listed = self.client.get("/v1/library/assets", params={"limit": 50},
+                                 headers=self.admin)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertEqual([item["id"] for item in listed.json()["items"]], [ASSET])
+
+
+class MediaTicketLifecycleMatrixTests(AssetAuthorityFixture):
+    """normal/trash/tombstoned x single/batched tickets, through the shipped routes."""
+
+    def setUp(self):
+        super().setUp()
+        self.asset_id_for_ticket = "20000000-0000-4000-8000-0000000000tt".replace("tt", "21")
+        self.publish(self.asset_id_for_ticket)
+        self.activate()
+
+    def publish(self, asset_id):
+        """Commit through the shipped replication path so a ticket has real media."""
+        prepared = self.client.post("/v1/replication/prepare", headers=self.admin, json={
+            "asset_id": asset_id, "kind": "image", "content_type": "image/png",
+            "size_bytes": 73, "sha256": "a" * 64, "collected_at": "2026-09-19T00:00:00Z"})
+        self.assertEqual(prepared.status_code, 200, prepared.text)
+        import io
+        fake_s3.put_object(Bucket="test-bucket", Key=f"library/{asset_id}/original",
+                           Body=io.BytesIO(b"x" * 73), ContentType="image/png")
+        committed = self.client.post("/v1/replication/commit", headers=self.admin, json={
+            "asset_id": asset_id, "kind": "image",
+            "original": {"object_key": f"library/{asset_id}/original",
+                         "content_type": "image/png", "size_bytes": 73, "sha256": "a" * 64},
+            "thumbnail": {"object_key": f"library/{asset_id}/thumbnail",
+                          "content_type": "image/webp", "size_bytes": 5},
+            "content_type": "image/png", "collected_at": "2026-09-19T00:00:00Z",
+            "source_published_at": None, "source_url": None, "creator_name": None,
+            "creator_handle": None, "import_source": "Direct", "classification_ids": [],
+            "expected_revision": 0, "commit_id": "ticket-matrix"})
+        self.assertEqual(committed.status_code, 200, committed.text)
+
+    def seed_lifecycle(self, lifecycle):
+        with api_app.get_db() as db:
+            db.execute("UPDATE asset_authority_state SET lifecycle=? WHERE asset_id=?",
+                       [lifecycle, self.asset_id_for_ticket])
+            db.commit()
+
+    def single(self):
+        return self.client.post(
+            f"/v1/library/assets/{self.asset_id_for_ticket}/media-ticket",
+            headers=self.admin, json={"variant": "original"})
+
+    def batch(self):
+        return self.client.post("/v1/library/media-tickets", headers=self.admin, json={
+            "items": [{"asset_id": self.asset_id_for_ticket, "variant": "original"}]})
+
+    def test_normal_allows_both_ticket_shapes(self):
+        self.assertEqual(self.single().status_code, 200)
+        entry = self.batch().json()["items"][0]
+        self.assertTrue(entry.get("ok"), entry)
+
+    def test_trash_denies_both_ticket_shapes(self):
+        # Ordinary library tickets must never expose Trash media. A Trash UI that needs
+        # media access is a separate contract, not a loosening of this one.
+        self.seed_lifecycle(asset_authority.TRASH)
+        self.assertEqual(self.single().status_code, 404)
+        entry = self.batch().json()["items"][0]
+        self.assertFalse(entry.get("ok"))
+        self.assertEqual(entry["error"], "not_found")
+
+    def test_tombstone_denies_both_ticket_shapes(self):
+        self.seed_lifecycle(asset_authority.TOMBSTONED)
+        self.assertEqual(self.single().status_code, 404)
+        entry = self.batch().json()["items"][0]
+        self.assertFalse(entry.get("ok"))
+        self.assertEqual(entry["error"], "not_found")
+
+    def test_restore_re_allows_both_ticket_shapes(self):
+        self.seed_lifecycle(asset_authority.TRASH)
+        self.assertEqual(self.single().status_code, 404)
+        self.seed_lifecycle(asset_authority.NORMAL)
+        self.assertEqual(self.single().status_code, 200)
+        self.assertTrue(self.batch().json()["items"][0].get("ok"))
+
+
+class RoleBoundaryTests(AssetAuthorityFixture):
+    """Every Asset lifecycle mutation is publisher-only, tested through the real routes.
+
+    The `api_clients.role` column existing proves nothing on its own; what matters is the
+    authorization path each route actually calls. These submit live requests with each
+    credential class so a route that stopped calling its guard would fail here.
+    """
+
+    def extension_token(self):
+        """A real extension client credential: a different table from `api_clients`."""
+        token = "extension-fixture-token"
+        with api_app.get_db() as db:
+            db.execute("INSERT OR IGNORE INTO extension_clients"
+                       "(id,token_hash,created_at,last_seen_at,revoked_at) VALUES"
+                       "('ext-role',?,?,NULL,NULL)",
+                       [api_app._token_hash(token), "2026-09-19T00:00:00Z"])
+            db.commit()
+        return {"Authorization": f"Bearer {token}"}
+
+    def client_token(self):
+        with api_app.get_db() as db:
+            _, token = api_auth.provision_token(db, "client", "asset-role-reader")
+            db.commit()
+        return {"Authorization": f"Bearer {token}"}
+
+    def seed_asset(self):
+        with api_app.get_db() as db:
+            db.execute(
+                "INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,"
+                "entity_revision,kind,object_key,created_at,updated_at)"
+                " VALUES(?,?,'normal',1,'image',?,?,?)",
+                [LIBRARY, ASSET, "library/x/original",
+                 "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z"])
+            db.commit()
+
+    def test_an_extension_token_cannot_activate_the_authority(self):
+        response = self.client.post("/v1/assets/authority/activate",
+                                    headers=self.extension_token(),
+                                    json={"libraryId": LIBRARY})
+        self.assertIn(response.status_code, (401, 403), response.text)
+        self.assertFalse(self.status()["active"])
+
+    def test_a_client_token_cannot_activate_the_authority(self):
+        response = self.client.post("/v1/assets/authority/activate",
+                                    headers=self.client_token(),
+                                    json={"libraryId": LIBRARY})
+        self.assertIn(response.status_code, (401, 403), response.text)
+        self.assertFalse(self.status()["active"])
+
+    def test_an_extension_token_cannot_drive_lifecycle_commands(self):
+        self.activate()
+        self.seed_asset()
+        for command_type in (asset_authority.TRASH_ASSET, asset_authority.RESTORE_ASSET,
+                             asset_authority.TOMBSTONE_ASSET):
+            response = self.command(command_type, ASSET, 1,
+                                    headers=self.extension_token())
+            self.assertIn(response.status_code, (401, 403),
+                          f"{command_type}: {response.text}")
+        # Refused before any state changed, so the Asset is untouched.
+        with api_app.get_db() as db:
+            self.assertEqual(asset_authority.state_row(db, LIBRARY, ASSET)[0],
+                             asset_authority.NORMAL)
+            self.assertEqual(
+                db.execute("SELECT count(*) FROM asset_authority_changes").fetchone()[0], 0)
+
+    def test_a_client_token_cannot_drive_lifecycle_commands(self):
+        self.activate()
+        self.seed_asset()
+        for command_type in (asset_authority.TRASH_ASSET, asset_authority.TOMBSTONE_ASSET):
+            response = self.command(command_type, ASSET, 1, headers=self.client_token())
+            self.assertIn(response.status_code, (401, 403),
+                          f"{command_type}: {response.text}")
+        with api_app.get_db() as db:
+            self.assertEqual(asset_authority.state_row(db, LIBRARY, ASSET)[0],
+                             asset_authority.NORMAL)
+
+    def test_the_shared_token_cannot_activate_or_command(self):
+        # The legacy shared token is an interactive read credential. It must not satisfy
+        # a publisher-only path, or role separation would be cosmetic.
+        activation = self.client.post("/v1/assets/authority/activate",
+                                      headers=self.admin, json={"libraryId": LIBRARY})
+        self.assertIn(activation.status_code, (401, 403), activation.text)
+        self.assertFalse(self.status()["active"])
+
+    def test_read_routes_stay_available_to_a_client_token(self):
+        # Publisher-only applies to mutations. A read-scoped replica must still sync.
+        self.activate()
+        for path, params in (("status", {"libraryId": LIBRARY}), ("changes", {"libraryId": LIBRARY, "epoch": 1}),
+                             ("baseline", {"libraryId": LIBRARY, "epoch": 1})):
+            response = self.client.get(f"/v1/assets/authority/{path}",
+                                       params=params, headers=self.client_token())
+            self.assertEqual(response.status_code, 200, f"{path}: {response.text}")
+
+    def test_a_publisher_token_is_permitted_on_the_mutation_routes(self):
+        self.activate()
+        self.seed_asset()
+        self.assertEqual(self.command(asset_authority.TRASH_ASSET, ASSET, 1).status_code, 200)
+        with api_app.get_db() as db:
+            self.assertEqual(asset_authority.state_row(db, LIBRARY, ASSET)[0],
+                             asset_authority.TRASH)
+
+
+class ActivationSafetyTests(AssetAuthorityFixture):
+    def test_existing_pc_library_requires_verified_lifecycle_baseline(self):
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO assets(id,kind,object_key,created_at,updated_at,committed) VALUES('legacy','image','fixture','2026','2026',1)");db.commit()
+        response=self.client.post("/v1/assets/authority/activate",headers=self.publisher,json={"libraryId":LIBRARY})
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(response.json()["detail"]["code"],"legacyLifecycleBaselineRequired")
+        self.assertFalse(self.status()["active"])
+
+class ReplicationPublicationTests(LegacyFenceTests):
+    def test_active_pc_commit_creates_canonical_state_and_change_atomically(self):
+        self.activate();self.prepare()
+        self.assertEqual(self.commit().status_code,200)
+        with api_app.get_db() as db:
+            row=asset_authority.state_row(db,LIBRARY,ASSET)
+            self.assertEqual(row[0],"normal")
+            self.assertEqual(row[6],__import__("hashlib").sha256(ASSET.encode()).hexdigest())
+            self.assertEqual(db.execute("SELECT count(*) FROM asset_authority_changes").fetchone()[0],1)
+        self.assertEqual(self.commit().status_code,200)
+        self.assertEqual(self.status()["cursor"],1)

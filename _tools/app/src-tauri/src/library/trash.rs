@@ -221,7 +221,17 @@ impl Library {
 
     #[cfg(any(windows, target_os = "linux"))]
     fn purge_candidates(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
+        if connection.query_row("SELECT EXISTS(SELECT 1 FROM asset_authority)",[],|r|r.get::<_,bool>(0))? {
+            let tx=connection.transaction()?;
+            let ids=asset_ids.into_iter().filter_map(|id| {
+                tx.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE id=? AND status='trash')",[&id],|r|r.get::<_,bool>(0)).map(|exists|if exists{Some(id)}else{None}).transpose()
+            }).collect::<Result<Vec<_>,_>>()?;
+            super::asset_authority::enqueue(&tx,&ids,"tombstoned")?;
+            for id in &ids {tx.execute("DELETE FROM assets WHERE id=?",[id])?;}
+            tx.commit()?;
+            return Ok(PurgeSummary{deleted_count:ids.len() as u64,failed_asset_ids:Vec::new()});
+        }
         let mut deleted_count = 0;
         let mut failed_asset_ids = Vec::new();
         for asset_id in asset_ids {
@@ -306,6 +316,9 @@ pub(crate) fn update_trash_status_in_transaction(
             "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2",
             params![asset_id, from_status, to_status, trashed_at],
         )?;
+        if changed > 0 {
+            super::asset_authority::enqueue(transaction, &[asset_id.to_string()], to_status)?;
+        }
         if changed > 0 && to_status == "normal" && from_status != "normal" {
             super::character_autotag::enqueue(transaction,asset_id,super::character_autotag::Cause::Restore)?;
         }

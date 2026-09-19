@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 87;
+pub(crate) const SCHEMA_VERSION: i64 = 88;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -98,6 +98,17 @@ pub(crate) fn initialize_database_with_dev_policy(
     dev_build: bool,
     environment_value: Option<&str>,
 ) -> Result<Connection, LibraryError> {
+    // Inspect existing schema read-only before WAL pragmas, snapshots, or migrations.
+    if path.exists() {
+        let existing = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i64 = existing.pragma_query_value(None,"user_version",|row|row.get(0))?;
+        if version > SCHEMA_VERSION {return Err(LibraryError::UnsupportedSchema(version));}
+        let root=path.parent().ok_or(LibraryError::InvalidCloudResponse)?;
+        if super::dev_guard::dev_migration_decision(dev_build,version,SCHEMA_VERSION,
+            super::dev_guard::is_declared_dev_library(root),super::dev_guard::environment_opt_in(environment_value)) == super::dev_guard::DevMigrationDecision::Blocked {
+            return Err(LibraryError::DevelopmentMigrationBlocked{root:root.display().to_string(),existing_version:version,schema_version:SCHEMA_VERSION});
+        }
+    }
     let mut connection = open_database(path)?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
 
@@ -481,6 +492,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             transaction.execute_batch(include_str!(
                 "../../migrations/0087_cloud_activity_reason.sql"
             ))?;
+        }
+        if version <= 87 {
+            transaction.execute_batch(include_str!("../../migrations/0088_asset_authority.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
