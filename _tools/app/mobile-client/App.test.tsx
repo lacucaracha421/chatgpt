@@ -241,6 +241,25 @@ describe('server list generation',()=>{
     fireEvent.scroll(screen.getByLabelText('자산 목록'));
     await screen.findByText('tile-b1');
   });
+  // Without a generation the cache cannot be validated, so a revisit must refetch
+  // rather than serve a page a mutation may have invalidated. This is what keeps the
+  // stale-view bug closed on a server that predates the endpoint.
+  it('refetches a revisited classification when the server has no generation endpoint',async()=>{
+    const missing=()=>new ApiError('요청한 정보를 찾을 수 없습니다.',404,null);
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path==='/v1/library/list-generation')throw missing();
+      if(path.includes('classifications'))return{items:[{id:'b',name:'분류 B',asset_count:2,parent_id:null}]};
+      if(path.includes('revisit'))return{bundles:[]}; if(path.includes('captures'))return{captures:[]};
+      return{items:path.includes('classification_id=b')?b:a,has_more:false,next_cursor:null};
+    });
+    const fetches=()=>mocks.api.mock.calls.filter(([p])=>String(p).includes('classification_id=b')).length;
+    render(<App/>);await screen.findByText('tile-a1');
+    fireEvent.click(await screen.findByRole('button',{name:'분류 B2'}));await screen.findByText('tile-b1');
+    const first=fetches();
+    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByText('tile-a1');
+    fireEvent.click(await screen.findByRole('button',{name:'분류 B2'}));await screen.findByText('tile-b1');
+    expect(fetches()).toBeGreaterThan(first);
+  });
   it('manual refresh fetches even when generation is unchanged',async()=>{
     fixture();render(<App/>);await screen.findByText('tile-a1');
     const before=mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length;
