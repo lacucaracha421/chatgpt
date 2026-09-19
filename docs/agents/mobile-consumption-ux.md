@@ -23,11 +23,14 @@ Mobile should optimize for these activities in order:
 2. choose a classification or creator and browse it deliberately;
 3. rediscover older media without a specific destination.
 
-The primary device is Galaxy Tab S11. For the PC-to-mobile layout alignment
-requested on 2026-09-13, landscape is the reference: retain the PC's navigation
-and content hierarchy. Preserve the established portrait consumption layout,
-with focused refinements instead of a redesign. Both orientations remain supported;
-visual alignment does not itself add desktop management or server write authority.
+The primary device is Galaxy Tab S11. The 2026-09-19 user direction supersedes
+landscape-first layout work: finish portrait first because it is used much more
+often, then design the landscape experience. Reduce persistent chrome, redundant
+headings and explanatory copy; keep assets and thumbnails dominant. Consolidate
+secondary controls without removing existing actions, applied-filter visibility,
+loading/error feedback, or Android Back behavior. Preserve landscape functionality
+during this pass rather than redesigning it. Visual alignment does not itself add
+desktop management or server write authority.
 
 ## Scope
 

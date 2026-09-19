@@ -721,6 +721,170 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
     }
 }
 
+
+#[test]
+fn backfill_commit_carries_local_dimensions_and_omits_unknown_ones() {
+    // The commit body is the only place local display metadata crosses to the server. These
+    // assertions pin both directions: a known value is published, and an unknown one is
+    // omitted entirely rather than sent as 0, which the server would store as a real
+    // dimension. Duration only exists for video, so an image must not invent one.
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", server.server_addr());
+    let base_url = format!("{origin}/v1");
+    let upload_url = format!("{origin}/r2-upload");
+
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let recorded = std::sync::Arc::clone(&captured);
+    let server_thread = thread::spawn(move || {
+        // Drive the flow from the request URL rather than by position: the worker may retry
+        // an asset, which restarts the sequence from `prepare`, so a fixed request order
+        // would be asserting something the contract does not promise. Each commit is
+        // recorded and the loop ends once both assets have committed.
+        let mut pending_original: Option<String> = None;
+        while recorded.lock().expect("captured commits").len() < 2 {
+            let mut request = server.recv().unwrap();
+            let url = request.url().to_owned();
+            match url.as_str() {
+                "/v1/replication/prepare" => {
+                    let body: Value = read_json(&mut request);
+                    let asset_id = body["asset_id"].as_str().unwrap().to_owned();
+                    request
+                        .respond(json_response(json!({
+                            "asset_id": asset_id,
+                            "already_committed": false,
+                            "metadata_revision": 0,
+                            "object_keys": {
+                                "original": format!("library/{asset_id}/original"),
+                                "thumbnail": format!("library/{asset_id}/thumbnail"),
+                            }
+                        })))
+                        .unwrap();
+                }
+                "/v1/uploads/presign" => {
+                    let body: Value = read_json(&mut request);
+                    let key = body["object_key"].as_str().unwrap().to_owned();
+                    request
+                        .respond(json_response(json!({
+                            "method": "PUT",
+                            "object_key": key,
+                            "upload_url": upload_url,
+                            "expires_in": 900,
+                            "required_headers": { "Content-Type": body["content_type"] }
+                        })))
+                        .unwrap();
+                }
+                "/v1/replication/commit" => {
+                    let body: Value = read_json(&mut request);
+                    let kind = body["kind"].as_str().unwrap().to_owned();
+                    recorded
+                        .lock()
+                        .expect("captured commits")
+                        .push(serde_json::json!({ "kind": kind, "body": body }));
+                    request
+                        .respond(json_response(json!({ "ok": true, "committed": true })))
+                        .unwrap();
+                }
+                "/v1/assets" => request.respond(Response::empty(201)).unwrap(),
+                _ => {
+                    // The presigned PUT target and any asset registration.
+                    let mut sink = Vec::new();
+                    std::io::Read::read_to_end(request.as_reader(), &mut sink).unwrap();
+                    request.respond(Response::empty(200)).unwrap();
+                }
+            }
+        }
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    stub_video_probe();
+
+    let image_source = temp.path().join("sized.png");
+    fs::write(&image_source, png_bytes(21)).unwrap();
+    let image_id = ingest_png(&library, &image_source, "2026-08-29T00:00:00Z");
+    let video_id = ingest_mp4(&library, temp.path(), "2026-08-30T00:00:00Z");
+    // A video has no thumbnail until its poster is prepared, and replication refuses to
+    // commit without one. Seed the poster the way `video_prepare_upload_and_commit_flow`
+    // does so the commit under test is reached at all; production fills this after
+    // `prepare_pending_videos` and requeues the asset through the existing path.
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE assets SET thumbnail_relative_path = 'thumbnails/x/poster.webp'
+             WHERE id = ?1",
+            [&video_id],
+        )
+        .unwrap();
+    let thumb_dir = temp.path().join("thumbnails/x");
+    fs::create_dir_all(&thumb_dir).unwrap();
+    fs::write(thumb_dir.join("poster.webp"), b"poster-bytes").unwrap();
+    library.seed_cloud_backfill_queue().unwrap();
+
+    let summary = library
+        .run_cloud_backfill_cycle_with_client(&CloudClient::new(&base_url).unwrap(), "test-token")
+        .unwrap();
+    assert_eq!(summary.committed, 2);
+    assert_eq!(queue_status(&library, &image_id).as_deref(), Some("synced"));
+    if let Err(panic) = server_thread.join() {
+        let message = panic
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic>".into());
+        panic!("{message}");
+    }
+
+    let commits = captured.lock().expect("captured commits");
+    let image = commits
+        .iter()
+        .find(|entry| entry["kind"] == "image")
+        .expect("image commit");
+    // `png_bytes` builds an 8x8 PNG, so the local row is the source of truth for these.
+    assert_eq!(image["body"]["width"], 8);
+    assert_eq!(image["body"]["height"], 8);
+    // An image has no duration, so the field is absent rather than a fabricated 0.
+    assert!(image["body"].get("duration_ms").is_none());
+
+    let video = commits
+        .iter()
+        .find(|entry| entry["kind"] == "video")
+        .expect("video commit");
+    assert!(video["body"]["width"].is_u64());
+    assert!(video["body"]["height"].is_u64());
+    assert_eq!(video["body"]["duration_ms"], 1_000);
+    drop(commits);
+
+    // The stored rows must agree with what was published; a mismatch would mean the wire
+    // body and the local projection disagree about the same asset.
+    let connection = library.connection().unwrap();
+    let (width, height): (i64, i64) = connection
+        .query_row(
+            "SELECT width, height FROM assets WHERE id = ?1",
+            [&image_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((width, height), (8, 8));
+    let duration: i64 = connection
+        .query_row(
+            "SELECT duration_ms FROM video_assets WHERE asset_id = ?1",
+            [&video_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(duration, 1_000);
+}
+
 fn header_value<'a>(request: &'a tiny_http::Request, name: &str) -> Option<&'a str> {
     request
         .headers()

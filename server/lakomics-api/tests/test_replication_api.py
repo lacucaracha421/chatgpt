@@ -34,6 +34,8 @@ class ReplicationStartupTests(unittest.TestCase):
                 for handler in api_app.app.router.on_startup:
                     handler()
             finally:
+                for handler in reversed(api_app.app.router.on_shutdown):
+                    handler()
                 api_app.DB_PATH = original_database_path
 
 
@@ -266,6 +268,280 @@ class ReplicationTestCase(unittest.TestCase):
         self.assertEqual(rows[0]["n"], 1)
         relations = self.rows("SELECT COUNT(*) AS n FROM asset_classifications")
         self.assertEqual(relations[0]["n"], 2)
+
+    # --- display dimensions (optional, additive) ---------------------------
+
+    def test_commit_persists_optional_dimensions_and_duration(self):
+        self.prepare()
+        response = self.commit(width=1920, height=1080, duration_ms=65_432)
+        self.assertEqual(response.status_code, 200)
+        asset = self.rows(
+            "SELECT width, height, duration_ms FROM assets WHERE id = ?",
+            ("00000000-0000-4000-8000-000000000001",),
+        )[0]
+        self.assertEqual(asset["width"], 1920)
+        self.assertEqual(asset["height"], 1080)
+        self.assertEqual(asset["duration_ms"], 65_432)
+
+    def test_legacy_recommit_omitting_new_fields_cannot_erase_known_dimensions(self):
+        """A revision-aware recomit that omits the fields must not clear known values.
+
+        Reachable in practice: a local library restored from an older backup re-commits the
+        same Asset without the new fields. The first commit is revision 0, so the second
+        must present `expected_revision=1` -- the revision the first commit produced.
+        """
+        asset_id = "00000000-0000-4000-8000-000000000001"
+        self.prepare(asset_id)
+        # Revision 0 commit supplies the dimensions.
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=0, commit_id="with-dims",
+                        width=800, height=600, duration_ms=1_000).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.rows("SELECT metadata_revision FROM assets WHERE id = ?", (asset_id,))[0][
+                "metadata_revision"
+            ],
+            1,
+        )
+
+        # Same Asset at the next revision, omitting every new field. `commit_id` must differ
+        # because an identical commit_id is treated as a replay and short-circuits the write.
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=1, commit_id="legacy-omit",
+                        classification_ids=["class-a"]).status_code,
+            200,
+        )
+        asset = self.rows(
+            "SELECT width, height, duration_ms FROM assets WHERE id = ?", (asset_id,)
+        )[0]
+        self.assertEqual(asset["width"], 800)
+        self.assertEqual(asset["height"], 600)
+        self.assertEqual(asset["duration_ms"], 1_000)
+
+    def test_legacy_client_omitting_new_fields_at_revision_zero(self):
+        """A client that predates the fields keeps them NULL at the revision-0 commit."""
+        asset_id = "00000000-0000-4000-8000-000000000001"
+        self.prepare(asset_id)
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=0, commit_id="legacy-first").status_code,
+            200,
+        )
+        asset = self.rows(
+            "SELECT width, height, duration_ms FROM assets WHERE id = ?", (asset_id,)
+        )[0]
+        self.assertIsNone(asset["width"])
+        self.assertIsNone(asset["height"])
+        self.assertIsNone(asset["duration_ms"])
+
+    def test_dimensions_upgrade_a_null_row_and_survive_replay(self):
+        """A row committed before the fields existed is filled in by a later commit.
+
+        This is the version-aware lane: revision 0 omits the new fields, revision 1 supplies
+        them. It is distinct from a legacy client, which keeps omitting them.
+        """
+        asset_id = "00000000-0000-4000-8000-000000000001"
+        self.prepare(asset_id)
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=0, commit_id="first").status_code, 200
+        )
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=1, commit_id="with-dims",
+                        width=1200, height=1800).status_code,
+            200,
+        )
+        asset = self.rows(
+            "SELECT width, height FROM assets WHERE id = ?", (asset_id,)
+        )[0]
+        self.assertEqual(asset["width"], 1200)
+        self.assertEqual(asset["height"], 1800)
+
+        # The same commit_id replays without changing anything and without error.
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=1, commit_id="with-dims",
+                        width=1200, height=1800).status_code,
+            200,
+        )
+        replayed = self.rows(
+            "SELECT width, height FROM assets WHERE id = ?", (asset_id,)
+        )[0]
+        self.assertEqual((replayed["width"], replayed["height"]), (1200, 1800))
+
+    def test_stale_revision_after_a_dimension_commit_is_rejected(self):
+        """Guards the fixture itself: the second write must be at the revision the first made."""
+        asset_id = "00000000-0000-4000-8000-000000000001"
+        self.prepare(asset_id)
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=0, commit_id="one",
+                        width=10, height=10).status_code,
+            200,
+        )
+        # Reusing revision 0 is stale and must not be silently accepted.
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=0, commit_id="two",
+                        width=20, height=20).status_code,
+            409,
+        )
+        asset = self.rows("SELECT width FROM assets WHERE id = ?", (asset_id,))[0]
+        self.assertEqual(asset["width"], 10)
+
+    def test_zero_and_negative_dimensions_are_rejected(self):
+        """A fabricated zero must not reach storage; the contract requires positive."""
+        self.prepare()
+        self.assertEqual(self.commit(width=0).status_code, 422)
+        self.assertEqual(self.commit(width=-1).status_code, 422)
+        self.assertEqual(self.commit(height=0).status_code, 422)
+        self.assertEqual(self.commit(height=-1).status_code, 422)
+        self.assertEqual(self.commit(duration_ms=-1).status_code, 422)
+
+    def test_explicit_zero_duration_is_a_real_value(self):
+        """Duration may legitimately be 0, unlike a zero dimension."""
+        asset_id = "00000000-0000-4000-8000-000000000001"
+        self.prepare(asset_id)
+        self.assertEqual(
+            self.commit(asset_id=asset_id, expected_revision=0, commit_id="zero-duration",
+                        duration_ms=0).status_code,
+            200,
+        )
+        asset = self.rows("SELECT duration_ms FROM assets WHERE id = ?", (asset_id,))[0]
+        self.assertEqual(asset["duration_ms"], 0)
+
+    def test_non_integer_and_boolean_dimensions_are_rejected(self):
+        """A float or bool must not be coerced into a fabricated integer dimension."""
+        self.prepare()
+        self.assertEqual(self.commit(width=10.5).status_code, 422)
+        self.assertEqual(self.commit(height=10.5).status_code, 422)
+        self.assertEqual(self.commit(duration_ms=10.5).status_code, 422)
+        # `True` is an `int` subclass; strict mode must still refuse it.
+        self.assertEqual(self.commit(width=True).status_code, 422)
+        self.assertEqual(self.commit(height=True).status_code, 422)
+        self.assertEqual(self.commit(duration_ms=True).status_code, 422)
+
+    def test_pc_valid_panorama_dimensions_are_accepted(self):
+        """A PC-valid panoramic asset must not be refused by a product-limit bound.
+
+        The PC accepts up to 200M total pixels, so one axis can legitimately be very large.
+        """
+        self.prepare()
+        wide = 200_000
+        tall = 1_000
+        self.assertLessEqual(wide * tall, 200_000_000)
+        self.assertEqual(self.commit(width=wide, height=tall).status_code, 200)
+        asset = self.rows(
+            "SELECT width, height FROM assets WHERE id = ?",
+            ("00000000-0000-4000-8000-000000000001",),
+        )[0]
+        self.assertEqual((asset["width"], asset["height"]), (wide, tall))
+
+    def test_absurd_dimensions_are_rejected(self):
+        """Stored values stay inside the publisher and SQLite integer ranges."""
+        self.prepare()
+        self.assertEqual(self.commit(width=api_app.MAX_ASSET_DIMENSION + 1).status_code, 422)
+        self.assertEqual(self.commit(height=api_app.MAX_ASSET_DIMENSION + 1).status_code, 422)
+        self.assertEqual(
+            self.commit(duration_ms=api_app.MAX_ASSET_DURATION_MS + 1).status_code, 422
+        )
+        self.assertEqual(
+            self.commit(duration_ms=api_app.MAX_ASSET_DURATION_MS).status_code, 200
+        )
+
+    def test_rejected_commit_leaves_no_partial_dimension_write(self):
+        """Validation happens before the transaction, so a bad request cannot half-apply."""
+        self.prepare()
+        self.assertEqual(self.commit(width=0).status_code, 422)
+        asset = self.rows(
+            "SELECT committed, width FROM assets WHERE id = ?",
+            ("00000000-0000-4000-8000-000000000001",),
+        )[0]
+        self.assertEqual(asset["committed"], 0)
+        self.assertIsNone(asset["width"])
+
+    def test_persisted_dimensions_are_projected_to_the_mobile_listing(self):
+        """The stored values must actually reach the projection mobile reads."""
+        asset_id = "00000000-0000-4000-8000-000000000001"
+        self.prepare(asset_id)
+        self.assertEqual(
+            self.commit(asset_id=asset_id, width=1080, height=1440, duration_ms=0).status_code,
+            200,
+        )
+        with api_app.get_db() as db:
+            row = db.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+            items = [api_app.mobile_asset_item(row)]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["width"], 1080)
+        self.assertEqual(items[0]["height"], 1440)
+        # An explicit zero duration is a real value for a still image, not "unknown".
+        self.assertEqual(items[0]["duration_ms"], 0)
+
+    def test_mobile_projection_reports_unknown_dimensions_as_null(self):
+        """Without a value the projection stays null rather than sending a fabricated 0."""
+        self.prepare()
+        self.assertEqual(self.commit().status_code, 200)
+        items = self.client.get("/v1/assets", headers=self.auth).json()["items"]
+        self.assertIsNone(items[0]["width"])
+        self.assertIsNone(items[0]["height"])
+        self.assertIsNone(items[0]["duration_ms"])
+
+    def test_startup_adds_dimension_columns_to_a_predating_populated_database(self):
+        """A database created before these columns exist is extended without losing rows.
+
+        The migration is additive, and the pre-existing rows must read as unknown rather
+        than as a fabricated zero.
+        """
+        asset_id = "00000000-0000-4000-8000-0000000000aa"
+        with closing(sqlite3.connect(self.database_path)) as db:
+            db.execute("DROP TABLE assets")
+            # The pre-existing shape: no width/height/duration_ms at all.
+            db.execute(
+                """CREATE TABLE assets (
+                    id TEXT PRIMARY KEY, kind TEXT NOT NULL, object_key TEXT NOT NULL UNIQUE,
+                    thumbnail_key TEXT, content_type TEXT, size_bytes INTEGER, sha256 TEXT,
+                    collected_at TEXT, source_published_at TEXT, source_url TEXT,
+                    creator_name TEXT, creator_handle TEXT, import_source TEXT,
+                    committed INTEGER NOT NULL DEFAULT 0 CHECK (committed IN (0, 1)),
+                    committed_at TEXT, metadata_revision INTEGER NOT NULL DEFAULT 0,
+                    metadata_commit_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )"""
+            )
+            db.execute(
+                "INSERT INTO assets (id, kind, object_key, content_type, size_bytes,"
+                " collected_at, committed, committed_at, metadata_revision, created_at, updated_at)"
+                " VALUES (?, 'image', ?, 'image/png', 17, '2026-08-30T00:00:00Z', 1,"
+                " '2026-08-30T00:00:00Z', 3, '2026-08-30T00:00:00Z', '2026-08-30T00:00:00Z')",
+                (asset_id, f"library/{asset_id}/original"),
+            )
+            db.commit()
+
+        api_app.startup_replication()
+
+        columns = {row["name"] for row in self.rows("PRAGMA table_info(assets)")}
+        for column in ("width", "height", "duration_ms"):
+            self.assertIn(column, columns)
+
+        # The pre-existing row survives with NULL dimensions, and its revision is untouched.
+        asset = self.rows(
+            "SELECT width, height, duration_ms, metadata_revision, committed FROM assets WHERE id = ?",
+            (asset_id,),
+        )[0]
+        self.assertIsNone(asset["width"])
+        self.assertIsNone(asset["height"])
+        self.assertIsNone(asset["duration_ms"])
+        self.assertEqual(asset["metadata_revision"], 3)
+        self.assertEqual(asset["committed"], 1)
+
+        # The un-migrated row must project as unknown, not as 0.
+        items = self.client.get("/v1/assets", headers=self.auth).json()["items"]
+        projected = [item for item in items if item["id"] == asset_id]
+        self.assertEqual(len(projected), 1)
+        self.assertIsNone(projected[0]["width"])
+        self.assertIsNone(projected[0]["height"])
+        self.assertIsNone(projected[0]["duration_ms"])
+
+        # Re-running the additive migration must be a no-op.
+        before = self.rows("SELECT * FROM assets WHERE id = ?", (asset_id,))[0]
+        api_app.startup_replication()
+        api_app.startup_replication()
+        self.assertEqual(self.rows("SELECT * FROM assets WHERE id = ?", (asset_id,))[0], before)
 
     def test_commit_rejects_mismatched_variant_keys(self):
         self.prepare()

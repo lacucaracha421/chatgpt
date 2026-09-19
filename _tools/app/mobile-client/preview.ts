@@ -33,9 +33,16 @@ function demoBookmarkState(workId:string):{desired:boolean;revision:number}{
   return {desired:seed,revision:0};
 }
 const authors = ['bluealex1203','YanghuiyaRBQ','koragen1925','moon_archive','atelier.04'];
+/**
+ * Every fifth demo Asset is a video so the Viewer's information panel can be exercised
+ * with `duration_ms` and the 영상 heading instead of only the image shape. The duration
+ * is deliberately a real value, including a `0` case, because the panel distinguishes
+ * "no duration sent" from "a zero-length video".
+ */
 const assets: Asset[] = Array.from({length:120}, (_, i) => {
   const [w,h] = [[600,800],[900,600],[600,960],[800,800],[1200,680]][i%5];
-  return {id:`demo-${i}`,kind:'image',width:w,height:h,ratio:w/h,creator_handle:authors[i%authors.length],collected_at:`2026-09-${String(6 - Math.floor(i/25)).padStart(2,'0')}T12:00:00Z`,content_type:'image/svg+xml',size_bytes:483217,thumbnail_available:true,preview:art(i,w,h)};
+  const video = i % 5 === 4;
+  return {id:`demo-${i}`,kind:video?'video':'image',width:w,height:h,ratio:w/h,creator_handle:authors[i%authors.length],collected_at:`2026-09-${String(6 - Math.floor(i/25)).padStart(2,'0')}T12:00:00Z`,content_type:video?'video/mp4':'image/svg+xml',size_bytes:483217,thumbnail_available:true,preview:art(i,w,h),...(video?{duration_ms:i===4?0:(12+i)*1000}:{})};
 });
 const demoAlbums=[
   {id:'upload',name:'업로드용',parentId:null,iconKey:null,colorKey:null},
@@ -92,6 +99,9 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if (op === 'collectionArtwork') {const index=Number(String(payload.artworkId).match(/\d+$/)?.[0]??0);return {url:art(index,String(payload.artworkId).startsWith('hero')?1200:600,String(payload.artworkId).startsWith('hero')?600:800),expires_in:240};}
   if (op === 'cacheStatus' || op === 'clearCache') return {bytes:0,count:0,limit:1024*1024*1024};
   if (op === 'thumbnail' || op === 'media') return {url:assets.find(asset => asset.id === payload.assetId)?.preview,expires_in:240};
+  // The real bridge copies text through the platform clipboard; the preview reports the
+  // same success shape so the panel's copy feedback is exercised without a device.
+  if (op === 'copyText') return {};
   if (op === 'catalogImage') {const index=Number(payload.index??0)+(Number(payload.workId??1)%7);return {url:art(index,900,1350),expires_in:240};}
   if (op === 'pickerStatus' || op === 'pickerRefresh') return {supported:true,eligible:false,selected:false,syncing:false,scanned:120,mediaCount:120,albumCount:7,ready:true,lastSyncedAt:Date.now(),error:''};
   if (op === 'status' || op === 'configure') return {configured:true,endpoint:'https://preview.invalid'};
@@ -196,6 +206,6 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   const ranges:Record<string,[number,number]> = {game:[0,120],wuthering:[0,48],reverse:[48,100],zenless:[100,120],art:[0,36],landscape:[0,24],design:[24,36]};
   const range = ranges[url.searchParams.get('classification_id') ?? ''];
   const selected = range ? assets.slice(...range) : assets;
-  // Match current server metadata: dimensions/preview arrive through thumbnails.
-  return {items:selected.slice(offset,offset+limit).map(({preview,ratio,...asset}) => ({...asset,width:null,height:null})),has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
+  // Exercise both upgraded dimension metadata and older rows whose dimensions are unknown.
+  return {items:selected.slice(offset,offset+limit).map(({preview,ratio,...asset},i) => ({...asset,...(i%2?{width:null,height:null}:{}),...(i===0?{source_url:'https://example.invalid/artwork/123456789',source_published_at:'2026-09-01T12:34:00Z'}:{})})),has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
 }

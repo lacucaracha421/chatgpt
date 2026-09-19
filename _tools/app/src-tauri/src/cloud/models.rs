@@ -242,6 +242,15 @@ pub(crate) struct ReplicationCommitRequest {
     pub creator_handle: Option<String>,
     pub import_source: Option<String>,
     pub classification_ids: Vec<String>,
+    /// Optional display metadata. `None` is omitted from the JSON body so the server keeps
+    /// whatever it already knows; it is never sent as `0`, which would be a fabricated
+    /// dimension. Types are `u32`/`u64`, so no PC-valid panorama is refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]

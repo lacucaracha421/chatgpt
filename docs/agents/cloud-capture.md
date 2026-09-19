@@ -38,6 +38,39 @@ The server exposes pending-list, per-capture download, acknowledge/imported, and
 
 Current server limits are 50 MiB for images and 512 MiB by default for videos (video limit is environment-configurable).
 
+## Server-owned image thumbnails (2026-09-19)
+
+When Asset authority is active, a new Capture is promoted directly to a committed
+server Asset. This path is distinct from the legacy PC-mediated inbox described
+below. `image_thumbnails.py` registers a durable job in the same transaction as a
+new image Asset with `import_source='capture'`; startup never scans old Assets.
+A single lock-protected background worker downloads the original from R2, verifies
+its size/digest, and invokes `image_thumbnail_encode.py` in a separate process.
+
+- Install the additional encoder dependency from
+  `server/lakomics-api/requirements-image-thumbnails.txt` in the API virtualenv.
+- JPEG, PNG and static WebP produce a maximum-512-pixel WebP thumbnail, preserving
+  aspect ratio, EXIF orientation and transparency, without upscaling. GIF, video,
+  animated PNG/WebP and unsupported formats are not processed by this worker.
+- Bounds: 50 MiB input, 24 million pixels, 384 MiB child address space, 20-second
+  encode wall timeout, 10-second soft/15-second hard CPU limit, and 2 MiB output.
+  The child lowers its scheduling priority. Encoding fails closed on platforms
+  without the required resource limits; the deployed worker runs on Linux.
+- Transfers use a dedicated bounded-timeout R2 client and a 60-second streaming
+  download budget checked between reads. One socket read can extend that budget
+  by its read timeout. Jobs retry transient failures at most three times with
+  backoff; terminal failures remain inspectable in `image_thumbnail_jobs`.
+- Derived objects use `derived/image-thumbnails/v1/{sha256}.webp`; originals are
+  never overwritten. Publication rechecks visibility, digest and missing-thumbnail
+  state, updates `assets.thumbnail_key`, and advances the existing mobile list
+  generation. Canonical lifecycle/entity revisions are unchanged.
+- Existing missing thumbnails require a separately authorized, explicitly scoped
+  `enqueue(db, asset_id)` operation. No public repair endpoint or automatic full
+  backfill is added. Restart recovery uses persisted job leases.
+
+The thumbnail-only deployment and authorized recent-image repair are recorded in
+`MOBILE-UX-001`. Dimension synchronization changes are not included in that deployment.
+
 ## Current desktop inbound behavior
 
 The desktop Cloud Capture consumer:

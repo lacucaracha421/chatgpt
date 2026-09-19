@@ -49,6 +49,7 @@ fake_s3 = FakeS3()
 fake_r2 = types.ModuleType("r2")
 fake_r2._s3 = fake_s3  # type: ignore[attr-defined]
 fake_r2.R2_BUCKET = "test-bucket"  # type: ignore[attr-defined]
+fake_r2.thumbnail_storage_client = lambda: fake_s3  # type: ignore[attr-defined]
 fake_r2.presign_get = (  # type: ignore[attr-defined]
     lambda object_key, expires_in=600: (
         f"https://r2.example.test/{object_key}?expires={expires_in}"

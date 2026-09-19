@@ -67,3 +67,16 @@ export function dateLabel(asset: Asset) {
   const date = value ? new Date(value) : null;
   return date && Number.isFinite(date.getTime()) ? date.toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit',day:'2-digit'}) : '날짜 없음';
 }
+/**
+ * A video's playtime as `m:ss` / `h:mm:ss`, or an empty string when the server did
+ * not send a usable duration. Zero is a legal duration and is rendered as `0:00`
+ * rather than treated as missing.
+ */
+export function durationLabel(asset: Asset) {
+  const value = asset.duration_ms;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
+  const total = Math.round(value / 1000);
+  const hours = Math.floor(total / 3600), minutes = Math.floor((total % 3600) / 60), seconds = total % 60;
+  const minuteText = hours > 0 ? String(minutes).padStart(2, '0') : String(minutes);
+  return `${hours > 0 ? `${hours}:` : ''}${minuteText}:${String(seconds).padStart(2, '0')}`;
+}

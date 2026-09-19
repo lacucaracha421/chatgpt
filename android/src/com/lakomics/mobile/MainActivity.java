@@ -60,6 +60,21 @@ public final class MainActivity extends Activity {
  }
  /** Album replica status for the native/WebView bridge. */
  private JSONObject albumStatus()throws Exception{return AlbumReplicaService.get(this).status();}
+ /**
+  * Copy a bounded metadata string the user explicitly asked for.
+  *
+  * Runs on the UI thread and waits for it, so the reply reports the clipboard write
+  * itself: posting and then answering immediately would claim success before the write
+  * happened, or after it silently failed.
+  */
+ private void copyText(final String text,final CancellationSignal signal)throws Exception{
+  final String value=ClipboardPolicy.text(text),label=ClipboardPolicy.label();
+  final FutureTask<Void> write=new FutureTask<>(()->{signal.throwIfCanceled();ClipboardManager manager=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(manager==null)throw new IOException("Clipboard unavailable");manager.setPrimaryClip(ClipData.newPlainText(label,value));return null;});
+  runOnUiThread(write);
+  try{write.get(5,TimeUnit.SECONDS);}
+  catch(java.util.concurrent.ExecutionException e){Throwable cause=e.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IOException("Clipboard write failed");}
+  finally{write.cancel(false);}
+ }
  private JSONObject thumbnail(String id,CancellationSignal signal)throws Exception{return media==null?client.api("/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","thumbnail"),signal):media.browser(id,"thumbnail","image/webp",signal);}
  final class Bridge {
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
@@ -111,6 +126,7 @@ public final class MainActivity extends Activity {
       }
       break;
      case "openExternal":Uri uri=Uri.parse(p.getString("url"));if(!Arrays.asList("http","https").contains(uri.getScheme()) || uri.getHost()==null || uri.getUserInfo()!=null)throw new Exception();runOnUiThread(()->{try{startActivity(new Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE));}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
+     case "copyText":copyText(p.getString("text"),signal);data=new JSONObject();break;
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();
     }if(!signal.isCanceled())reply(id,true,data,null);

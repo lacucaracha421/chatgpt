@@ -1,119 +1,66 @@
 # Lakomics Agent Guidelines
 
-## Core workflow
+## Scope and authority
 
-- Prefer focused, minimal changes that directly address the requested task.
-- Investigate the relevant code path before making substantial changes.
-- Do not refactor, clean up, revert, or overwrite unrelated code or user changes unless explicitly requested.
-- When fixing a bug, prefer the root cause over an unnecessary workaround.
-- Git writes (including commits, pushes, merges, tags, branch/worktree creation or deletion), deployment, service provisioning, and writes to production data require explicit authorization for that action. Implementation or skill activation alone does not authorize them.
-- Ignore unrelated pre-existing warnings or failures unless they block the requested task.
-- Keep explanations concise unless detailed analysis is requested.
-- All future changes must support both Windows and Linux. Preserve cross-platform library portability and use platform-appropriate paths, media protocols, and credential backends. Verify affected behavior for both platforms where possible; explicitly report any native platform verification that is unavailable.
+- Follow host/system instructions, the current user request, and applicable repository instructions. Skills provide methods, not extra permissions or mandatory process gates.
+- Make focused changes that complete the requested behavior. Read the affected path first; fix causes rather than symptoms. Preserve unrelated code, user changes, and pre-existing failures.
+- Continue clear, authorized work through relevant verification. Ask only when a missing decision materially changes scope, risk, or authorization; do not repeatedly request design approval or stop at the first implementation draft.
+- Git writes (commits, pushes, merges, tags, branch/worktree creation or deletion), deployment, service provisioning, and production-data writes require explicit authorization for that action. Implementation, delegation, and skill activation do not authorize them.
+- Do not broaden tool access, disable sandboxing, modify managed/plugin caches, or install dependencies merely to satisfy a skill. Use a supported equivalent or work inline when a capability is unavailable.
+- Keep explanations concise and truthful. Write new or rewritten instruction and documentation text in English; follow the user's language for conversation. Do not translate unrelated existing documents incidentally.
 
-## Remote tool efficiency
+## Active checkout and compatibility
 
-- When using Remote Desktop Commander or another remote filesystem/shell bridge, minimize round trips without reducing investigation or verification quality.
-- Reuse an existing interactive shell/session for sequential commands in the same task. Start a new process only when isolation, a different runtime, or a long-running dedicated process makes it necessary.
-- Batch small, related shell checks into one interaction when their exit status and output remain clear. For two or more already-known files, prefer a multi-file read over repeated single-file reads.
-- Search first to identify relevant files, symbols, callers, and tests, then read the smallest useful set of files or ranges. Avoid serial directory walking when targeted search can establish scope.
-- Run independent searches concurrently when the tool supports it, then consume their results in batches.
-- Keep output bounded at the source with targeted tests, path-scoped diffs, filters, or concise log tails while retaining enough failure context to diagnose the root cause.
-- Reuse successful verification evidence until a later edit can invalidate it. Follow the Verification section for when to broaden checks.
-- Keep long-running dev servers and test/watch processes in dedicated sessions and poll or interact with them instead of repeatedly relaunching them.
-- Never batch commands in a way that hides failures, changes execution semantics, or makes it unclear which check failed. Correctness and debuggability take precedence over reducing tool calls.
+- Canonical checkouts: `C:\chatgpt` on Windows and `/home/laku/chatgpt` on this Linux host. Verify the actual working directory before host-specific commands.
+- Desktop package: `_tools/app/`; React: `_tools/app/src/`; Rust: `_tools/app/src-tauri/`; Android frontend: `_tools/app/mobile-client/`; Android native: `android/`; Cloud API: `server/lakomics-api/`.
+- Run npm and Cargo commands from the owning package/crate so pinned tools and configuration apply. Root `app/` is not the desktop package; root `mobile/` is not the Android frontend.
+- Active collector: `extension-list/`, including its own `AGENTS.md`. `extension/` is frozen legacy code; modify it only on an explicit legacy-extension request.
+- Inspect the current branch, staged/unstaged changes, and relevant untracked files before editing. `main` is the accepted integration baseline, not a substitute for current worktree state.
+- Support both Windows and Linux. Preserve portable paths, media protocols, filesystem behavior, and credential backends; report unavailable native verification explicitly.
+- Preserve the current framework, custom UI, and package manager. Ordinary work does not authorize Next.js, shadcn, Vercel hosting, AI SDK, new persistence, or another browser runtime. Existing Vercel AI Gateway integration is not approval to adopt that stack.
 
-## Formatting safety
+## Data, credentials, and user work
 
-- Do not run write-mode `cargo fmt` (including `--all`, `--manifest-path`, aliases such as `cargo format`, or wrappers that invoke it). Passing file paths after `cargo fmt --` does not safely restrict formatting to those files.
-- Never format the entire repository, crate, or workspace as an incidental cleanup step. Only format explicitly identified files changed for the current task; do not use directory targets or broad globs.
-- For Rust, invoke `rustfmt` directly with the owning crate's edition and `--config skip_children=true`, for example `rustfmt --edition 2021 --config skip_children=true path/to/changed.rs` for a 2021 crate. Keep `skip_children=true` even for `lib.rs`, `main.rs`, and `mod.rs` so child modules are not rewritten. If the installed formatter cannot honor this option, stop rather than falling back to broader formatting.
-- Before formatting, inspect and retain the existing diff for the target files. After formatting, inspect `git status --short`, `git diff --stat`, and the target-file diff to confirm that no unrelated files or user changes were affected. Use check-only formatting when verification alone is needed.
-- If formatting unexpectedly changes unrelated content, stop and isolate only the formatter-introduced changes. Never use blanket `git restore`, `git checkout --`, `git reset --hard`, or file deletion to recover a clean worktree; preserve all pre-existing work and ask for direction if safe recovery is uncertain.
+- The active production library is `C:\New_lakomics_assets`. Do not infer another library from old exports, fixtures, desktop folders, or modification times. Other library paths require explicit task scope.
+- Necessary read-only audits are allowed. Migration, indexing, metadata updates, file moves, and any other writes to the active library require separate explicit approval.
+- Resolve the configured library at runtime; never branch application behavior on the machine-specific production path.
+- Never rerun the completed full Cloud Library backfill or replace the catalog database merely to verify a change. Recovery operations require separate approval.
+- Never commit credentials, tokens, passwords, signing keys, or machine-specific secrets. Use the application's credential/settings mechanism or an ignored local environment file owned by the component.
+- Do not manually edit generated files unless explicitly in scope. Do not commit artifacts, caches, or machine-specific output unless that exact artifact is intentionally tracked.
+- Never use blanket restore/reset/checkout, file deletion, or destructive cleanup to remove unrelated changes. Preserve pre-existing work and ask if safe recovery is uncertain.
 
-## No subagents
+## Skills and delegation
 
-- Do not spawn, resume, reuse, or delegate work to subagents. Perform investigation, implementation, review, and verification directly in the current agent.
-- Do not create or use separate tasks/threads as a workaround for this prohibition. Skill instructions recommending parallel agents or independent subagent reviews do not authorize delegation; perform the scoped review inline and do not claim independent review evidence.
-
-## Canonical checkout
-
-- On Windows, use `C:\chatgpt` as the canonical local repository. On the current Linux host, the checkout is `/home/laku/chatgpt`. Verify the actual working directory before using host-specific commands.
-- The active desktop package is `_tools/app/`, with React sources in `_tools/app/src/` and the Rust crate in `_tools/app/src-tauri/`. The repository-root `app/` directory is not the package entry point. Run npm and Cargo commands from the owning package/crate so the pinned toolchain is selected.
-- `main` is the accepted integration baseline for the Lakomics app and the active `extension-list/` extension. `extension/` is a legacy frozen implementation: do not modify it unless the user explicitly asks for legacy-extension work. For ongoing work, inspect the current branch, staged/unstaged changes, and relevant untracked files; do not treat an older `main` snapshot as the current task state.
-
-## Instruction and skill applicability
-
-- Subject to host/system instructions, the current user request and applicable repository instructions govern scope, authorization, and verification. Skills supply methods, not additional authority or mandatory process gates.
-- Continue clear, authorized implementation without repeating design approval. Ask only when an unresolved decision materially changes scope, risk, or authorization; continue independent unblocked work.
-- For implementation requests, continue through the requested behavior, relevant verification, and fixes for failures introduced by the change. Stop at the requested outcome or a concrete external blocker; a first implementation is not automatically a review checkpoint. Reuse valid verification evidence unless later changes invalidate it.
-- Use skills for an explicit request or a concrete task need. Before a platform/runtime recipe, verify the actual package, owning directory, callable tools, and permissions. A cached skill is not proof of an available capability.
-- Ordinary Lakomics work does not authorize adopting Vercel hosting, Next.js, shadcn, AI SDK, new persistence, or another browser runtime. Existing direct Vercel AI Gateway integration is not consent to adopt that stack. Preserve the current framework, custom UI, and package manager.
-- Do not edit managed/plugin caches, broaden tool access, disable sandboxing, or install dependencies merely to activate a skill. If a named skill is unavailable, use a supported equivalent or perform the scoped method inline; disclose any missing independent/native evidence. Subagent use remains prohibited.
-- Current repository sources outrank stale remembered workflow facts. Do not recreate retired backlog/plan files referenced by memory.
-
-## Repository docs
-
-Use `docs/README.md` to locate references when the task needs project context. Read the documents relevant to the affected behavior; a typo, isolated formatting correction, or already-understood local change does not require reading the whole map or unrelated references.
-
-- Product language and domain boundaries: `CONTEXT.md`
-- Visual/UI rules: `DESIGN.md`; detailed current PC reference: `docs/agents/pc-design-reference.md`
-- Architecture decisions: `docs/adr/README.md` and relevant Accepted ADRs
-- Implementation rules, review scope, and verification evidence: `docs/agents/implementation.md`
-- Living bugs, priorities, and future work: `docs/roadmap/lakomics-backlog.md`
-- Cloud Capture work: `docs/agents/cloud-capture.md`
-- Works / Collection work: `docs/agents/lakomics-works-handoff-v2.md`
-- X Collector behavior: `docs/edge-extension.md`; active list-extension rules: `extension-list/AGENTS.md`; legacy frozen extension rules: `extension/AGENTS.md`
-- Catalog changes, production deployment/canary safeguards: `docs/agents/catalog-troubleshooting.md`
-- Backup, recovery, and PC migration: `docs/operations/pc-migration.md`
-
-Current code, migrations, and type/contracts are authoritative for implemented behavior. The backlog describes intended work and must not be treated as already implemented.
-
-Historical dated implementation plans/specs were removed from the current tree after consolidation. Use Git history only when historical rationale is genuinely needed; do not resurrect an old plan as current instruction.
-
-## Issue and backlog tracking
-
-- Ongoing product bugs, UX tasks, architecture follow-ups, and long-term ideas belong in `docs/roadmap/lakomics-backlog.md` when the user asks to record them.
-- Use GitHub Issues for discrete tickets only when the user explicitly wants issue tracking or an existing task already lives there.
-- Do not maintain competing copies of the same backlog in multiple documents.
-
-## Branch hygiene
-
-- Treat non-`main` branches as temporary working branches.
-- After a verified merge into `main`, remove the remote branch only when that deletion is explicitly authorized; otherwise leave it in place and report its state.
-- Do not use long-lived feature, `codex/*`, `agent/*`, or backup branches to preserve old states. Use tags for meaningful snapshots that must be retained.
-
-## Credentials and generated files
-
-- Never commit API keys, access tokens, passwords, generated credentials, extension connection tokens, or other machine-specific secrets.
-- Store credentials through the application's credential/settings mechanism or an ignored local environment file appropriate to the owning Module.
-- Do not manually edit generated files unless the task explicitly targets generated output.
-- Do not commit build artifacts, temporary files, local caches, or machine-specific output unless the repository intentionally tracks that exact artifact.
-
-## Active library boundary
-
-- The active production library is `C:\New_lakomics_assets`. Do not infer the active library from similarly named directories, old exports, desktop folders, test fixtures, or recently modified paths.
-- Paths other than the active library are excluded unless the user explicitly places them in scope.
-- Read-only audits of the active library are allowed when needed to validate behavior. Any migration, indexing run, metadata update, file move, or other write to it requires separate explicit approval.
-- Application behavior must not branch on this machine-specific path. Resolve the configured library at runtime; this path exists only to guide agent operations.
+- Canonical project skills live in `.agents/skills/`; see `.agents/skills/README.md`. Matching `.claude/skills/` adapters load the same instructions. Do not maintain divergent copies of these methods.
+- Use the smallest relevant method: `ponytail` for scope, `systematic-debugging` for nontrivial failures, `verification-before-completion` for claims, and `lakomics-development` for component-specific work. `ponytail-review` is an optional read-only complexity review, not correctness approval.
+- Subagents are allowed for substantive independent investigation or implementation when they materially help. Trivial edits, a few reads, and tightly coupled changes stay inline unless explicitly delegated by the user.
+- The controller owns scope, integration, and final claims. Give each worker a bounded goal, relevant context, exact read/write scope, constraints, acceptance criteria, and evidence requirements. Workers and reviewers must not delegate further.
+- Parallel investigation is allowed; parallel implementation requires disjoint write sets and agreed interfaces. Serialize dependent or overlapping changes and preserve concurrent work.
+- Review actual changes and evidence, not just a worker's success summary. Use a separate reviewer when risk warrants it and tools support it; otherwise review inline and disclose the lack of independent review.
+- Model routing depends on the real tool and host configuration. Do not claim an Astra/DeepSeek split without verified routing; never invent a model argument. Delegation does not grant Git or operational permissions.
 
 ## Verification
 
-- Start with the single most relevant targeted check and expand only when the change has broader behavioral risk or the targeted evidence reveals a cross-module problem.
-- For visual-only CSS, spacing, typography, color, shadow, or animation changes, skip automated tests and production builds unless there is plausible compile or behavioral risk.
-- Do not rerun a successful check unless later edits could invalidate it, and do not add tests unless requested or existing coverage would miss a realistic regression introduced by the change.
-- Stop once there is sufficient evidence that the requested change works; generic planning, worktree, commit, push, PR, or completion steps are not reasons to run broader checks.
-- Distinguish static checks, browser/frontend checks, and native Tauri acceptance. Browser rendering does not prove native commands, filesystem integration, or production sync. Preserve required native/device gates and report them unverified when unavailable.
-- Never reseed/rerun the completed full Cloud Library backfill or replace the catalog database merely to verify a change; recovery/active-data writes require separate approval.
+- Begin with the most relevant targeted check and broaden only for actual behavioral risk or evidence of a cross-module problem. Use existing coverage; add tests when requested or a realistic regression would otherwise escape it.
+- Reuse inspected successful evidence unless later edits or changed inputs invalidate it. A planning, review, delegation, commit, or completion step is not itself a reason to rerun checks.
+- For purely visual CSS, spacing, typography, color, shadow, or animation changes, skip automated tests and production builds unless there is plausible compile or behavioral risk. Report whether rendering was inspected.
+- Distinguish static checks, frontend/browser checks, native Tauri acceptance, Android device checks, and production sync. Fixture or browser success does not prove native integration or live deployment behavior.
+- Report changed behavior, checks actually run and their results, and remaining gaps. Do not claim tests passed from source inspection or a native fix from compilation alone. Stop when evidence is sufficient or a concrete blocker remains.
 
-## Lakomics runtime rule
+## Formatting and runtime safety
 
-- NEVER launch `_tools/app/src-tauri/target/debug/lakomics.exe` (Windows) or `_tools/app/src-tauri/target/debug/lakomics` (Linux) directly.
-- For development/runtime verification, enter `_tools/app/` under the verified checkout, then run `npm run tauri -- dev`. Windows PowerShell: `Set-Location C:\chatgpt\_tools\app`; Linux: `cd /home/laku/chatgpt/_tools/app`.
-- Use `_tools/app/src-tauri/target/release/lakomics.exe` (Windows) or `_tools/app/src-tauri/target/release/lakomics` (Linux) only for standalone release verification.
-- A localhost/Vite failure from directly launching the debug executable is not an application regression.
-- Before claiming an already-running dev instance contains a change, verify its package directory and current Vite response or Rust build/restart evidence. Serving current frontend code does not itself prove that an open window received HMR or that native interaction passed.
+- Do not run write-mode `cargo fmt`, aliases, or wrappers, including with `--all`, `--manifest-path`, or file arguments after `--`. Do not incidentally format a repository, crate, workspace, directory, or broad glob.
+- Format only identified task-changed files. For Rust, invoke `rustfmt` directly with the owning crate's edition and `--config skip_children=true`, including for `lib.rs`, `main.rs`, and `mod.rs`. If unsupported, stop rather than formatting more broadly.
+- Before formatting, retain the target-file diff. Afterward inspect status, diff statistics, and the target diff for unintended changes. Isolate formatter-only mistakes without reverting user work; prefer check-only formatting when appropriate.
+- Never launch `_tools/app/src-tauri/target/debug/lakomics.exe` or `_tools/app/src-tauri/target/debug/lakomics` directly. For authorized development runtime checks, enter `_tools/app/` and use `npm run tauri -- dev` with host-supported process/session tools.
+- Use the corresponding `target/release/lakomics.exe` or `target/release/lakomics` only for standalone release verification. A localhost failure from a directly launched debug binary is not an app regression.
+- Before claiming a running dev instance includes changes, verify its package directory and current Vite response or Rust build/restart evidence. Current served code alone does not prove an open window received HMR or native interactions passed.
 
-## Works / Collection
+## References and records
 
-Before substantial Works/Collection changes, read `docs/agents/lakomics-works-handoff-v2.md`, `docs/agents/pc-design-reference.md`, and `docs/agents/works-viewer-design.md`. `docs/prototypes/lakomics-works-v6-reference.html` is retained historical interaction/reference material only. Do not copy prototype code directly; preserve current intent through the React structure, shared UI, and design tokens.
+- Start with `docs/README.md` and read only relevant references. Product terms: `CONTEXT.md`; UI: `DESIGN.md` and `docs/agents/pc-design-reference.md`; architecture: relevant Accepted ADRs under `docs/adr/`; implementation/review: `docs/agents/implementation.md`.
+- Before substantial Works/Collection work, read `docs/agents/lakomics-works-handoff-v2.md`, `docs/agents/pc-design-reference.md`, and `docs/agents/works-viewer-design.md`. Historical prototypes are reference material, not code to copy.
+- Current sources, migrations, and contracts establish implementation; the backlog establishes intended work. Stale memory and historical plans are not current instructions. Do not resurrect retired plans.
+- Record product bugs, priorities, and ideas in `docs/roadmap/lakomics-backlog.md` when asked. Use GitHub Issues only when explicitly requested or the task already lives there. Do not create competing backlogs.
+- Non-`main` branches are temporary. Remove remote branches only when explicitly authorized after a verified merge. Do not use long-lived feature/agent/backup branches as archives; meaningful retained snapshots use separately authorized tags.
+- Search before reading broadly, batch known related reads, and run independent checks concurrently when supported. Reuse remote sessions when available; bound output/runtime without hiding failures. Follow host limits on persistent processes.

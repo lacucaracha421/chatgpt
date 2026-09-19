@@ -1,14 +1,18 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
-const mocks=vi.hoisted(()=>({ticket:vi.fn(),decode:vi.fn()}));
+// Radix's dialog focus/escape machinery schedules work outside `fireEvent`, so the
+// environment must advertise `act` support for those updates to be flushed.
+(globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
+const mocks=vi.hoisted(()=>({ticket:vi.fn(),decode:vi.fn(),info:vi.fn()}));
 vi.mock('./media',()=>({mediaTicket:mocks.ticket,decodeImage:mocks.decode,invalidateTicket:vi.fn()}));
 vi.mock('./AlbumMembershipEditor',()=>({AlbumMembershipEditor:({open}:{open:boolean})=>open?<div>album-editor-open</div>:null}));
 vi.mock('./ClassificationAssignmentEditor',()=>({ClassificationAssignmentEditor:({open}:{open:boolean})=>open?<div>classification-editor-open</div>:null}));
+vi.mock('./ViewerInfo',()=>({ViewerInfo:(props:{asset:Asset;mediaError:string;onClose():void})=>{mocks.info(props);return <div>viewer-info-open<button aria-label="정보 닫기" onClick={props.onClose}/></div>;}}));
 import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
 afterEach(cleanup);
-beforeEach(()=>{mocks.ticket.mockReset();mocks.decode.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));});
+beforeEach(()=>{mocks.ticket.mockReset();mocks.decode.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));});
 describe('progressive viewer',()=>{
   it('cancels the native original request when leaving the viewer',async()=>{
     mocks.ticket.mockImplementation(()=>new Promise(()=>{}));
@@ -76,14 +80,18 @@ describe('progressive viewer',()=>{
   });
   // The three Viewer overlays are mutually exclusive: opening one closes the others.
   it('keeps 분류, 앨범 and 정보 mutually exclusive',()=>{
-    render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     fireEvent.click(screen.getByRole('button',{name:'분류'}));
     fireEvent.click(screen.getByRole('button',{name:'앨범'}));
     expect(screen.getByText('album-editor-open')).toBeTruthy();
     expect(screen.queryByText('classification-editor-open')).toBeNull();
+    // The information panel is a nested modal, so once it is open Radix hides the
+    // viewer chrome from the accessibility tree; `hidden:true` reads the real DOM.
     fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
     expect(screen.queryByText('album-editor-open')).toBeNull();
-    fireEvent.click(screen.getByRole('button',{name:'분류'}));
+    expect(screen.getByText('viewer-info-open')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'분류',hidden:true}));
+    expect(screen.queryByText('viewer-info-open')).toBeNull();
     expect(screen.getByText('classification-editor-open')).toBeTruthy();
     expect(screen.queryByText('album-editor-open')).toBeNull();
   });
@@ -109,5 +117,104 @@ describe('progressive viewer',()=>{
     fireEvent.pointerDown(surface,{pointerId:1,clientX:200,clientY:100}); fireEvent.pointerUp(surface,{pointerId:1,clientX:20,clientY:100});
     expect(change).not.toHaveBeenCalled();
     await waitFor(()=>expect(container.ownerDocument.querySelector('video')?.getAttribute('src')).toContain('original-v'));
+  });
+  it('opens the information panel in its own dialog with a labelled close control',()=>{
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(screen.queryByText('viewer-info-open')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    expect(screen.getByText('viewer-info-open')).toBeTruthy();
+    // The panel is presented in the shared Dialog as its own labelled modal.
+    const panel=screen.getByRole('dialog',{name:'미디어 정보'});
+    expect(panel.className).toContain('ui-dialog');
+    expect(panel.contains(screen.getByText('viewer-info-open'))).toBe(true);
+    expect(screen.getByRole('button',{name:'정보 닫기'})).toBeTruthy();
+  });
+  it('closes the information panel through its own close control',()=>{
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    const panel=screen.getByRole('dialog',{name:'미디어 정보'});
+    const close=screen.getByRole('button',{name:'정보 닫기'});
+    act(() => close.click());
+    expect(panel.contains(close)).toBe(true);
+    // The panel dialog stays mounted (its exit transition is running) but no longer
+    // contains the panel body, and the viewer is untouched.
+    expect(screen.queryByText('viewer-info-open')).toBeNull();
+    expect(screen.getByRole('dialog',{name:'미디어 감상'})).toBeTruthy();
+  });
+  it('dismisses the information panel before the viewer on Escape',()=>{
+    const close=vi.fn();
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={close}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    // Escape reaches the topmost dialog first: the panel closes and the viewer survives.
+    fireEvent.keyDown(screen.getByRole('dialog',{name:'미디어 정보'}),{key:'Escape'});
+    expect(screen.queryByText('viewer-info-open')).toBeNull();
+    expect(close).not.toHaveBeenCalled();
+  });
+  it('takes Android Back for the information panel before the viewer',async()=>{
+    // `App` owns the only `lakomics-back` listener and calls this ref before closing the
+    // viewer, mirroring `albumsBack`. The ref must consume Back exactly while the panel
+    // is open, so the viewer's own dismissal stays reachable.
+    const backRef:{current: (()=>boolean)|null} = {current:null};
+    const close=vi.fn();
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={close} backRef={backRef}/>);
+    expect(backRef.current).toBeTypeOf('function');
+    // Nothing to consume while no panel is open, so the viewer's Back still runs.
+    let consumed = true;
+    act(() => {consumed = backRef.current!();});
+    expect(consumed).toBe(false);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    expect(screen.getByText('viewer-info-open')).toBeTruthy();
+    act(() => {consumed = backRef.current!();});
+    expect(consumed).toBe(true);
+    expect(screen.queryByText('viewer-info-open')).toBeNull();
+    expect(close).not.toHaveBeenCalled();
+    // The panel is gone, so the next Back belongs to the viewer again.
+    act(() => {consumed = backRef.current!();});
+    expect(consumed).toBe(false);
+  });
+  it('stops consuming Back once the viewer unmounts',async()=>{
+    const backRef:{current: (()=>boolean)|null} = {current:null};
+    const {unmount}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}} backRef={backRef}/>);
+    expect(backRef.current).toBeTypeOf('function');
+    unmount();
+    expect(backRef.current).toBeNull();
+  });
+  it('toggles the information panel while keeping the media surface intact',()=>{
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    const surface=document.querySelector('.viewer-surface')!;
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    fireEvent.keyDown(screen.getByRole('dialog',{name:'미디어 정보'}),{key:'Escape'});
+    expect(screen.queryByText('viewer-info-open')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    expect(screen.getByText('viewer-info-open')).toBeTruthy();
+    expect(document.querySelector('.viewer-surface')).toBe(surface);
+  });
+  it('does not change the gallery sequence for arrow keys used inside the information panel',()=>{
+    const change=vi.fn();
+    render(<Viewer items={items} index={0} onIndex={change} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    fireEvent.keyDown(screen.getByText('viewer-info-open'),{key:'ArrowRight'});
+    fireEvent.keyDown(screen.getByText('viewer-info-open'),{key:'ArrowLeft'});
+    expect(change).not.toHaveBeenCalled();
+    // The panel still owns the keyboard and is still open.
+    expect(screen.getByRole('dialog').contains(screen.getByText('viewer-info-open'))).toBe(true);
+  });
+  it('still changes the gallery sequence with arrow keys when no panel is open',()=>{
+    const change=vi.fn();
+    render(<Viewer items={items} index={0} onIndex={change} onClose={()=>{}}/>);
+    fireEvent.keyDown(screen.getByRole('dialog'),{key:'ArrowRight'});
+    expect(change).toHaveBeenCalledWith(1);
+  });
+  it('keeps the media surface gesture rule unchanged while the information panel is open',()=>{
+    // The panel owns keyboard input only. A swipe that starts on the media surface
+    // (not on the panel) still runs the existing fitted-scale rule, which declines a
+    // swipe while an overlay is open — so this must not silently start navigating.
+    const change=vi.fn();
+    render(<Viewer items={items} index={0} onIndex={change} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    const surface=document.querySelector('.viewer-surface')!;
+    fireEvent.pointerDown(surface,{pointerId:1,button:0,clientX:600,clientY:300});
+    fireEvent.pointerUp(surface,{pointerId:1,clientX:200,clientY:300});
+    expect(change).not.toHaveBeenCalled();
   });
 });

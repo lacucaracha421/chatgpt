@@ -186,4 +186,84 @@ describe('mobile catalog reads',()=>{
     expect((screen.getByText('밤의 도서관').closest('button') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('밤의 도서관'));expect(screen.queryByText('상세 정보')).toBeNull();
   });
+  it('adds the category to the wire text and never as a request parameter',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const selector=screen.getByRole('combobox',{name:'카탈로그 분류'}) as HTMLSelectElement;
+    expect(selector.value).toBe('');
+    fireEvent.change(selector,{target:{value:'3'}});
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('text=category%3A3'))).toBe(true));
+    const search=mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')).at(-1)![0] as string;
+    const sent=new URL(search,'https://example.invalid').searchParams;
+    expect(sent.get('text')).toBe('category:3');
+    expect(sent.has('category')).toBe(false);
+    expect([...sent.keys()]).toEqual(['provider','language','text','sort','scope','revealBlocked','limit']);
+    expect(selector.value).toBe('3');
+  });
+  it('selects and resets the category independently of the query text',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const selector=()=>screen.getByRole('combobox',{name:'카탈로그 분류'}) as HTMLSelectElement;
+    const wire=()=>mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')).map(([path])=>new URL(path as string,'https://example.invalid').searchParams.get('text'));
+    fireEvent.change(selector(),{target:{value:'1'}});
+    await waitFor(()=>expect(wire()).toContain('category:1'));
+    fireEvent.change(selector(),{target:{value:'2'}});
+    await waitFor(()=>expect(wire()).toContain('category:2'));
+    expect(wire()).not.toContain('category:1 category:2');
+    fireEvent.change(selector(),{target:{value:''}});
+    await waitFor(()=>expect(wire()).toContain(''));
+    expect(selector().value).toBe('');
+  });
+  it('preserves a quoted, AND/OR/NOT query with outer parentheses',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
+    fireEvent.change(search,{target:{value:'artist:"a  b" AND NOT tag:y OR z'}});
+    fireEvent.click(screen.getByRole('button',{name:'검색'}));
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>{const p=path as string;return p.includes('/search?')&&new URL(p,'https://example.invalid').searchParams.get('text')==='artist:"a  b" AND NOT tag:y OR z';})).toBe(true));
+    // The expression is sent byte-for-byte when no category is selected.
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 분류'}),{target:{value:'3'}});
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>{const p=path as string;return p.includes('/search?')&&new URL(p,'https://example.invalid').searchParams.get('text')==='(artist:"a  b" AND NOT tag:y OR z) category:3';})).toBe(true));
+    // The visible box is the user's own query, not a rewritten one.
+    expect((screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('artist:"a  b" AND NOT tag:y OR z');
+  });
+  it('restores the selected category after leaving and re-entering the catalog',async()=>{
+    const backRef={current:null};const view=render(<Catalog active paused={false} backRef={backRef}/>);await screen.findByText('밤의 도서관');
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 분류'}),{target:{value:'3'}});
+    await waitFor(()=>expect((screen.getByRole('combobox',{name:'카탈로그 분류'}) as HTMLSelectElement).value).toBe('3'));
+    view.rerender(<Catalog active={false} paused={false} backRef={backRef}/>);view.rerender(<Catalog active paused={false} backRef={backRef}/>);
+    expect((screen.getByRole('combobox',{name:'카탈로그 분류'}) as HTMLSelectElement).value).toBe('3');
+    expect(screen.getByRole('textbox',{name:'카탈로그 검색'})).toBeTruthy();
+  });
+  it('resets to the first page and re-requests when the category changes',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 분류'}),{target:{value:'4'}});
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('text=category%3A4'))).toBe(true));
+    const cursorOnly=mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')&&new URL(path as string,'https://example.invalid').searchParams.has('cursor'));
+    expect(cursorOnly).toHaveLength(0);
+  });
+  it('keeps an unsent typed draft byte-for-byte and does not commit it when a category is selected',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
+    // Typed but never submitted: the selector is orthogonal, so it neither discards
+    // the draft nor quietly turns it into the active query.
+    fireEvent.change(search,{target:{value:'artist:"작가" AND tag:"밤"'}});
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 분류'}),{target:{value:'3'}});
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>{const p=path as string;return p.includes('/search?')&&new URL(p,'https://example.invalid').searchParams.get('text')==='category:3';})).toBe(true));
+    expect((screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('artist:"작가" AND tag:"밤"');
+    // Submitting the draft then combines it with the still-selected category.
+    fireEvent.click(screen.getByRole('button',{name:'검색'}));
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>{const p=path as string;return p.includes('/search?')&&new URL(p,'https://example.invalid').searchParams.get('text')==='(artist:"작가" AND tag:"밤") category:3';})).toBe(true));
+  });
+  it('keeps the chosen category when the search text is resubmitted or a tag is clicked',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 분류'}),{target:{value:'3'}});
+    await waitFor(()=>expect((screen.getByRole('combobox',{name:'카탈로그 분류'}) as HTMLSelectElement).value).toBe('3'));
+    const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
+    fireEvent.change(search,{target:{value:'artist:"작가"'}});
+    fireEvent.click(screen.getByRole('button',{name:'검색'}));
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>{const p=path as string;return p.includes('/search?')&&new URL(p,'https://example.invalid').searchParams.get('text')==='(artist:"작가") category:3';})).toBe(true));
+    // A detail tag click composes a new text but must not drop the category, like language.
+    fireEvent.click(await screen.findByText('밤의 도서관'));
+    fireEvent.click(await screen.findByRole('button',{name:'작가'}));
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>{const p=path as string;return p.includes('/search?')&&new URL(p,'https://example.invalid').searchParams.get('text')==='(artist:"작가") category:3';})).toBe(true));
+    expect((screen.getByRole('combobox',{name:'카탈로그 분류'}) as HTMLSelectElement).value).toBe('3');
+  });
 });

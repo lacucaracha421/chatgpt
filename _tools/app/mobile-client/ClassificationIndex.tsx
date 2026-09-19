@@ -1,12 +1,22 @@
-import type {CharacterIndex} from './characterModel';
+import type {CharacterIndex,CharacterNode} from './characterModel';
 import {useMemo, type Dispatch, type SetStateAction} from 'react';
-import {ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon} from '@heroicons/react/24/outline';
+import {ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon, UserGroupIcon, UserIcon} from '@heroicons/react/24/outline';
 import {ClassificationIcon, classificationColor} from '../src/classification/classificationAppearance';
 import {Button} from './ui';
 import type {Classification, View} from './types';
+
+// Group and Character folders reuse the same icon vocabulary as their cards so the
+// type is recognizable in the tree without reading the name. Series rows are ordinary
+// classifications and keep their configured icon.
+function EntryIcon({kind,iconKey,color}:{kind?:Exclude<CharacterNode['kind'],'series'>;iconKey:string|null;color:string}) {
+  if(kind==='group')return <UserGroupIcon aria-hidden="true" data-icon="character-group" style={{color}}/>;
+  if(kind==='character')return <UserIcon aria-hidden="true" data-icon="character" style={{color}}/>;
+  if(kind==='folder')return <FolderIcon aria-hidden="true" data-icon="folder" style={{color}}/>;
+  return <ClassificationIcon kind="tag" iconKey={iconKey} style={{color}}/>;
+}
 export function ClassificationIndex({items, view, onSelect, collapsed, setCollapsed,characters}: {characters?:CharacterIndex;items: Classification[]; view: View; onSelect(view: View): void; collapsed: Set<string>; setCollapsed: Dispatch<SetStateAction<Set<string>>>}) {
   const visible = useMemo(() => {
-    type Entry=Classification&{characterNode?:string};
+    type Entry=Classification&{characterNode?:string;characterKind?:Exclude<CharacterNode['kind'],'series'>};
     const nodes=characters?.ready?characters.nodes:[];
     const series=new Map(nodes.filter(n=>n.kind==='series').map(n=>[n.sourceId,n]));
     const merged:Entry[]=items.map(item=>({...item,characterNode:series.get(item.id)?.id,asset_count:series.has(item.id)?characters?.scopes.find(scope=>scope.nodeId===series.get(item.id)?.id&&scope.filter==='all')?.totalCount??item.asset_count:item.asset_count}));
@@ -15,7 +25,7 @@ export function ClassificationIndex({items, view, onSelect, collapsed, setCollap
       if(node.kind==='group'||node.kind==='character'){
         const id=node.kind==='group'?`character-group:${node.sourceId}`:node.id;
         const parent=node.parentId?.startsWith('group:')?`character-group:${node.parentId.slice(6)}`:node.seriesId;
-        merged.push({id,name:node.name,parent_id:parent,asset_count:characters?.scopes.find(s=>s.nodeId===node.id&&s.filter==='all')?.totalCount??0,characterNode:node.id});
+        merged.push({id,name:node.name,parent_id:parent,asset_count:characters?.scopes.find(s=>s.nodeId===node.id&&s.filter==='all')?.totalCount??0,characterNode:node.id,characterKind:node.kind});
       }
     }
     const order=new Map((characters?.navigationOrder??[]).map((id,i)=>[id,i]));
@@ -42,7 +52,7 @@ export function ClassificationIndex({items, view, onSelect, collapsed, setCollap
       <div className={`tree-row ${view.title==='전체'&&!view.classification&&!view.characters?'selected':''}`}><span className="tree-leaf"/><button className="tree-select" aria-current={view.title==='전체'&&!view.classification&&!view.characters?'page':undefined} onClick={()=>onSelect({tab:'library',title:'전체'})}><FolderIcon/><span>전체</span></button></div>
       {visible.map(({item, depth, children}) => <div className={`tree-row ${(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'selected' : ''}`} style={{paddingLeft:depth * 16}} key={item.id}>
         {children ? <button className="tree-expander" aria-label={`${item.name} ${collapsed.has(item.id) ? '펼치기' : '접기'}`} aria-expanded={!collapsed.has(item.id)} onClick={() => setCollapsed(old => {const next = new Set(old); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next;})}>{collapsed.has(item.id) ? <ChevronRightIcon/> : <ChevronDownIcon/>}</button> : <span className="tree-leaf"/>}
-        <button className="tree-select" aria-current={(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'page' : undefined} onClick={() => onSelect(item.characterNode?{tab:'library',characters:true,characterNode:item.characterNode,title:item.name}:{tab:'library', classification:item.id, title:item.name})}><ClassificationIcon kind="tag" iconKey={item.icon_key ?? null} style={{color:(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'currentColor' : classificationColor(item.color_key ?? null)}}/><span>{item.name}</span><span className="numeric">{item.asset_count}</span></button>
+        <button className="tree-select" aria-current={(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'page' : undefined} onClick={() => onSelect(item.characterNode?{tab:'library',characters:true,characterNode:item.characterNode,title:item.name}:{tab:'library', classification:item.id, title:item.name})}><EntryIcon kind={item.characterKind} iconKey={item.icon_key ?? null} color={(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'currentColor' : classificationColor(item.color_key ?? null)}/><span>{item.name}</span><span className="numeric">{item.asset_count}</span></button>
       </div>)}
       {!visible.length && <p className="hint">아직 게시된 분류가 없습니다.</p>}
     </nav>

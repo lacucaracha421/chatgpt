@@ -7,7 +7,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'co
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onOpen,onSelect,recentFolders}:HomeProps)=><div><button onClick={()=>onSelect({tab:'library',title:'최근 저장'})}>전체 보기</button><span>{`recent-folders:${recentFolders.join(',')}`}</span>{items.slice(0,12).map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
-vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd}:{items:Asset[];onOpen(i:number):void;onNearEnd():void})=><div aria-label="자산 목록" onScroll={onNearEnd}>{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
+vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,onScroll}:{items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 import {ApiError} from './transport';
@@ -28,19 +28,83 @@ it('opens character browsing inside Library and uses Android back for its parent
   const original=mocks.api.getMockImplementation()!;
   const revision='a'.repeat(64);
   mocks.api.mockImplementation((path:string)=>{
-    if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'Series',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2}]});
+    if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'Series',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false},{id:'group:g',sourceId:'g',seriesId:'s',kind:'group',parentId:'series:s',name:'Group',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'group:g',filter:'all',totalCount:2,sourceCount:2}]});
     if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
     return original(path);
   });
   render(<App/>);await screen.findByText('tile-a1');
   fireEvent.click(await screen.findByRole('button',{name:'Series2'}));
   await screen.findByText('tile-b1');
+  // A directly opened folder is a top-level entry, so Back returns to Library instead
+  // of consuming the press for a bare Series overview.
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
-  await screen.findByRole('button',{name:'Series · 2개'});
-  expect(screen.queryByText('tile-b1')).toBeNull();
+  await screen.findByText('tile-a1');
+  expect(screen.getByRole('heading',{name:'최근 저장'})).toBeTruthy();
+});
+
+it('returns from a directly opened character folder to the non-home folder and scroll it was opened from',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  const revision='a'.repeat(64);
+  mocks.api.mockImplementation((path:string)=>{
+    if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'Series',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2}]});
+    if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
+    return original(path);
+  });
+  render(<App/>);await screen.findByText('tile-a1');
+  // Start in a non-home Library folder and scroll it, so a Home fallback cannot pass.
+  fireEvent.click(screen.getByRole('button',{name:'분류 B2'}));
+  await screen.findByText('tile-b1');
+  expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
+  fireEvent.scroll(screen.getByLabelText('자산 목록'));
+  fireEvent.click(await screen.findByRole('button',{name:'Series2'}));
+  await screen.findByText('tile-b1');
+  expect(screen.getByRole('heading',{name:'Series'})).toBeTruthy();
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  // Back restores the folder that was actually open, not Home.
+  await waitFor(()=>expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy());
+  expect(screen.queryByText('tile-a1')).toBeNull();
+  expect(screen.getByLabelText('자산 목록').getAttribute('data-restore-scroll')).toBe('420');
+});
+
+it('keeps the original context when another character folder is selected before leaving',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  const revision='a'.repeat(64);
+  mocks.api.mockImplementation((path:string)=>{
+    if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'Series',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false},{id:'series:t',sourceId:'t',seriesId:'t',kind:'series',parentId:null,name:'Other series',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'series:t',filter:'all',totalCount:2,sourceCount:2}]});
+    if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
+    return original(path);
+  });
+  render(<App/>);await screen.findByText('tile-a1');
+  fireEvent.click(await screen.findByRole('button',{name:'Series2'}));
+  await screen.findByText('tile-b1');
+  // Selecting another folder inside the boundary must not stack a synthetic character parent.
+  fireEvent.click(await screen.findByRole('button',{name:'Other series2'}));
+  await screen.findByRole('heading',{name:'Other series'});
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  await waitFor(()=>expect(screen.getByRole('heading',{name:'최근 저장'})).toBeTruthy());
+  expect(screen.getByText('tile-a1')).toBeTruthy();
+  expect(screen.queryByRole('heading',{name:'Series'})).toBeNull();
+});
+
+it('steps up the character hierarchy while drilled down inside the browser',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  const revision='a'.repeat(64);
+  mocks.api.mockImplementation((path:string)=>{
+    if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'Series',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false},{id:'group:g',sourceId:'g',seriesId:'s',kind:'group',parentId:'series:s',name:'Group',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'group:g',filter:'all',totalCount:2,sourceCount:2}]});
+    if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
+    return original(path);
+  });
+  render(<App/>);await screen.findByText('tile-a1');
+  fireEvent.click(await screen.findByRole('button',{name:'Series2'}));
+  await screen.findByText('tile-b1');
+  fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
+  await screen.findByText('tile-b1');
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  await screen.findByRole('button',{name:'Group · 2개'});
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
   await screen.findByText('tile-a1');
 });
+
 it('keeps visited Catalog and Notes panels separate when returning Home',async()=>{
   const api=mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/mobile-catalog')?Promise.resolve({ready:true,publicationRevision:'p1',items:[],totalCount:0,countStatus:'ready',context:'c',nextCursor:null}):api(path));
@@ -161,6 +225,37 @@ describe('committed view and browsing',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
     await screen.findByText('tile-b1');
   });
+});
+
+it('uses one portrait location row and keeps folder actions in the index',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
+  render(<App/>);await screen.findByText('tile-a1');
+  const heading=screen.getByRole('heading',{name:'최근 저장'});
+  expect(heading.closest('.app-header')).not.toBeNull();
+  expect(document.querySelector('.library-main > .gallery-heading')).toBeNull();
+  expect(document.querySelector('.app-header .folder-tools')).toBeNull();
+  expect(screen.getByRole('button',{name:'모든 폴더 펼치기'}).closest('.desktop-index')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'사이드바 열기'}));
+  const drawer=screen.getByRole('dialog',{name:'분류'});
+  expect(within(drawer).getByRole('button',{name:'모든 폴더 펼치기'})).toBeTruthy();
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('opens gallery size choices without losing Library and closes only settings on Android Back',async()=>{
+  render(<App/>);await screen.findByText('tile-a1');
+  fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+  const opener=await screen.findByRole('button',{name:'갤러리 보기: 균형'});
+  opener.focus();fireEvent.click(opener);
+  const dialog=screen.getByRole('dialog',{name:'갤러리 보기'});
+  fireEvent.click(within(dialog).getByRole('button',{name:'촘촘하게'}));
+  expect(localStorage.getItem('lakomics.mobile.density')).toBe('2');
+  expect(within(dialog).getByRole('button',{name:'촘촘하게'}).getAttribute('aria-pressed')).toBe('true');
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('button',{name:'Library',exact:true}).getAttribute('aria-current')).toBe('page');
+  expect(screen.getByRole('button',{name:'갤러리 보기: 촘촘하게'})).toBe(opener);
+  await waitFor(()=>expect(document.activeElement).toBe(opener));
 });
 
 it('starts folders collapsed and provides expand, focus and collapse controls',async()=>{

@@ -564,6 +564,28 @@ def decode_asset_cursor(cursor, album_id):
     return payload[2], payload[3]
 
 
+def _optional_dimension(row, column):
+    """Read an optional dimension. Unknown is ``None``, never a fabricated ``0``.
+
+    Mirrors ``app._optional_dimension``; duplicated because ``app`` imports this module,
+    and kept minimal so there is nothing to drift beyond the two conditions.
+    """
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return None
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _optional_duration_ms(row, column="duration_ms"):
+    """Like ``_optional_dimension``, but zero is a legal duration and is kept."""
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return None
+    return value if isinstance(value, int) and value >= 0 else None
+
+
 def default_asset_item(row, classification_ids=None):
     """Fallback mobile Asset projection.
 
@@ -575,9 +597,9 @@ def default_asset_item(row, classification_ids=None):
         "kind": row["kind"],
         "content_type": row["content_type"],
         "size_bytes": row["size_bytes"],
-        "width": None,
-        "height": None,
-        "duration_ms": None,
+        "width": _optional_dimension(row, "width"),
+        "height": _optional_dimension(row, "height"),
+        "duration_ms": _optional_duration_ms(row),
         "collected_at": row["collected_at"],
         "committed_at": row["committed_at"],
         "source_published_at": row["source_published_at"],

@@ -1,14 +1,17 @@
 import {useEffect, useRef, useState} from 'react';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon, MagnifyingGlassMinusIcon, FolderIcon, TagIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, TagIcon} from '@heroicons/react/24/outline';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import type {Asset} from './types';
 import {dateLabel, imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
-import {errorText, native} from './transport';
+import {errorText} from './transport';
 import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
+import {ViewerInfo} from './ViewerInfo';
 
-export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void}) {
+import './Viewer.css';
+
+export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>}) {
   const asset = items[index];
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
   const prepared=useRef(new Map<string,string>());
@@ -17,6 +20,17 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [info, setInfo] = useState(false);
+  // Android Back has no listener inside the shared Dialog (`App` owns the only
+  // `lakomics-back` handler), so the information panel follows the same `backRef`
+  // idiom the Album browser uses: consume Back while it is open, so the viewer's own
+  // Back handling runs only once the panel is closed.
+  const infoOpen = useRef(false);
+  infoOpen.current = info;
+  useEffect(() => {
+    if (!backRef) return;
+    backRef.current = () => { if (!infoOpen.current) return false; setInfo(false); return true; };
+    return () => { backRef.current = null; };
+  }, [backRef]);
   const [albumOpen, setAlbumOpen] = useState(false);
   const [classificationOpen, setClassificationOpen] = useState(false);
   const [chrome, setChrome] = useState(true);
@@ -67,10 +81,12 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
   };
   return <Dialog open title="미디어 감상" variant="fullscreen" onClose={onClose} onKeyDown={event => {
     if (event.target instanceof HTMLVideoElement) return;
+    // Panels own their own keyboard input, so arrows inside one never change the asset.
+    if (info || albumOpen || classificationOpen) return;
     if (event.key === 'ArrowLeft') { event.preventDefault(); change(index - 1); }
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
-    <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다.</DialogDescription>
+    <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
     <div className={`viewer ${chrome ? 'chrome-visible' : ''}`}>
       <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions"><IconButton label="분류" icon={TagIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(true);setChrome(true);}}/><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setInfo(!info); setChrome(true);}}/></div></header>
       <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}`} onPointerDown={event => {
@@ -117,7 +133,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd}: {items: Asset
       <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span>{asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
-      {info && <section className="viewer-info"><div className="viewer-info-heading"><span>{asset.kind==='video'?'VIDEO':'IMAGE'}</span><h2>{asset.creator_name||asset.creator_handle||'미디어 정보'}</h2></div><dl>{(asset.creator_name||asset.creator_handle)&&<><dt>작가</dt><dd>{asset.creator_name||asset.creator_handle}</dd></>}<dt>{asset.pending ? '수집 요청' : '수집일'}</dt><dd>{dateLabel(asset)}</dd>{asset.width&&asset.height?<><dt>해상도</dt><dd>{asset.width.toLocaleString()} × {asset.height.toLocaleString()}</dd></>:null}<dt>형식</dt><dd>{asset.content_type || asset.kind}</dd>{asset.size_bytes != null && <><dt>크기</dt><dd>{(asset.size_bytes / 1048576).toFixed(1)} MB</dd></>}</dl>{asset.source_url && /^https?:\/\//.test(asset.source_url) && <Button onClick={() => { void native('openExternal', {url:asset.source_url}).catch(e => setError(errorText(e))); }}><ArrowTopRightOnSquareIcon/>출처 열기</Button>}<Button variant="ghost" onClick={() => setInfo(false)}>정보 닫기</Button></section>}
+      {info && <Dialog open title="미디어 정보" variant="wide" onClose={() => setInfo(false)}><DialogDescription className="sr-only">작가, 출처와 파일 정보를 확인하고 텍스트로 복사합니다.</DialogDescription><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></Dialog>}
     </div>
   </Dialog>;
 }

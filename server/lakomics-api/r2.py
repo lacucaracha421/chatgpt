@@ -18,6 +18,22 @@ _s3 = boto3.client(
 )
 
 
+def thumbnail_storage_client():
+    """Keep background transfers bounded without changing interactive media clients."""
+    return boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name="auto",
+        config=Config(
+            signature_version="s3v4", connect_timeout=5, read_timeout=15,
+            retries={"mode": "standard", "total_max_attempts": 2},
+            max_pool_connections=1,
+        ),
+    )
+
+
 def presign_put(object_key: str, content_type: str, expires_in: int = 600) -> str:
     return _s3.generate_presigned_url(
         "put_object",

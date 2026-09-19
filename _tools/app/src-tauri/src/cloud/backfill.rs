@@ -875,8 +875,15 @@ impl Library {
         let asset_id = prepared.queue.entity_id.as_str();
         let mut payload = connection
             .query_row(
+                // Dimensions come from the local Asset row; duration lives on the video side
+                // table, so the subquery yields NULL for images and GIFs. A non-positive value
+                // is treated as unknown rather than published as a fabricated measurement.
                 "SELECT collected_at, source_published_at, source_url,
-                        creator_name, creator_handle, import_source
+                        creator_name, creator_handle, import_source,
+                        CASE WHEN width > 0 THEN width END,
+                        CASE WHEN height > 0 THEN height END,
+                        (SELECT CASE WHEN duration_ms >= 0 THEN duration_ms END
+                           FROM video_assets WHERE video_assets.asset_id = assets.id)
                  FROM assets WHERE id = ?1",
                 [asset_id],
                 |row| {
@@ -893,6 +900,13 @@ impl Library {
                         creator_handle: row.get(4)?,
                         import_source: row.get(5)?,
                         classification_ids: Vec::new(),
+                        width: row.get(6)?,
+                        height: row.get(7)?,
+                        // SQLite stores this as a signed integer; a negative value is not a real
+                        // duration and is treated as unknown rather than converted.
+                        duration_ms: row
+                            .get::<_, Option<i64>>(8)?
+                            .and_then(|value| u64::try_from(value).ok()),
                     })
                 },
             )
@@ -993,6 +1007,9 @@ fn commit_payload_wire(payload: &BackfillCommitPayload, expected_revision: u64) 
         creator_handle: payload.creator_handle.clone(),
         import_source: payload.import_source.clone(),
         classification_ids: payload.classification_ids.clone(),
+        width: payload.width,
+        height: payload.height,
+        duration_ms: payload.duration_ms,
     }
 }
 
@@ -1010,4 +1027,9 @@ pub(crate) struct BackfillCommitPayload {
     pub creator_handle: Option<String>,
     pub import_source: Option<String>,
     pub classification_ids: Vec<String>,
+    /// `None` means "not known here" and is omitted from the wire body, so the server keeps
+    /// any value it already has.
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub duration_ms: Option<u64>,
 }

@@ -2,6 +2,10 @@ export interface Asset {
   id: string; kind: string; content_type?: string; size_bytes?: number;
   width?: number | null; height?: number | null; collected_at?: string;
   created_at?: string; source_url?: string; creator_name?: string; creator_handle?: string;
+  // Server-backed fields the mobile asset projection already sends. `duration_ms` is only
+  // meaningful for video; `source_published_at` is the post time, not the import time, and
+  // is kept distinct from `collected_at` rather than being inferred from it.
+  duration_ms?: number | null; source_published_at?: string | null;
   classification_ids?: string[]; thumbnail_available?: boolean;
   pending?: boolean; preview?: string; ratio?: number;
 }

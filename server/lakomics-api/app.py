@@ -120,6 +120,11 @@ def startup_replication():
             "import_source": "TEXT",
             "metadata_revision": "INTEGER NOT NULL DEFAULT 0",
             "metadata_commit_id": "TEXT",
+            # Additive and nullable: an existing library keeps NULL, meaning "unknown" rather
+            # than a fabricated 0. Old rows stay NULL until that Asset is re-committed.
+            "width": "INTEGER",
+            "height": "INTEGER",
+            "duration_ms": "INTEGER",
         }
         for column, definition in additions.items():
             if column not in columns:
@@ -1951,9 +1956,9 @@ def list_mobile_classification_assets(
             "kind": row["kind"],
             "content_type": row["content_type"],
             "size_bytes": row["size_bytes"],
-            "width": None,
-            "height": None,
-            "duration_ms": None,
+            "width": _optional_dimension(row, "width"),
+            "height": _optional_dimension(row, "height"),
+            "duration_ms": _optional_duration_ms(row),
             "collected_at": row["collected_at"],
             "committed_at": row["committed_at"],
             "source_published_at": row["source_published_at"],
@@ -2110,15 +2115,33 @@ def _revisit_creator_groups(db, limit: int, *, day: int | None = None) -> list[d
     return groups[:3]
 
 
+def _optional_dimension(row, column: str) -> int | None:
+    """Read an optional dimension. Unknown is ``None``, never a fabricated ``0``."""
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return None
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _optional_duration_ms(row, column: str = "duration_ms") -> int | None:
+    """Like ``_optional_dimension``, but zero is a legal duration and is kept."""
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return None
+    return value if isinstance(value, int) and value >= 0 else None
+
+
 def mobile_asset_item(row, classification_ids: list[str] | None = None) -> dict:
     return {
         "id": row["id"],
         "kind": row["kind"],
         "content_type": row["content_type"],
         "size_bytes": row["size_bytes"],
-        "width": None,
-        "height": None,
-        "duration_ms": None,
+        "width": _optional_dimension(row, "width"),
+        "height": _optional_dimension(row, "height"),
+        "duration_ms": _optional_duration_ms(row),
         "collected_at": row["collected_at"],
         "committed_at": row["committed_at"],
         "source_published_at": row["source_published_at"],
@@ -2492,6 +2515,10 @@ def create_mobile_media_tickets(
 
 ALLOWED_KINDS = ("image", "gif", "video")
 
+# Match the publisher's u32 dimensions and SQLite's signed i64 duration storage.
+MAX_ASSET_DIMENSION = 4_294_967_295
+MAX_ASSET_DURATION_MS = 9_223_372_036_854_775_807
+
 
 class ReplicationVariant(BaseModel):
     object_key: str
@@ -2524,6 +2551,11 @@ class ReplicationCommit(BaseModel):
     creator_handle: str | None = None
     import_source: str | None = None
     classification_ids: list[str] = Field(default_factory=list, max_length=200)
+    # Optional display metadata; absent leaves the stored value untouched. `strict=True` refuses
+    # a float or bool that would otherwise be coerced into a fabricated dimension.
+    width: int | None = Field(default=None, ge=1, le=MAX_ASSET_DIMENSION, strict=True)
+    height: int | None = Field(default=None, ge=1, le=MAX_ASSET_DIMENSION, strict=True)
+    duration_ms: int | None = Field(default=None, ge=0, le=MAX_ASSET_DURATION_MS, strict=True)
 
 
 def replication_variant_keys(asset_id: str) -> dict[str, str]:
@@ -2666,8 +2698,9 @@ def replication_commit(
                 id, kind, object_key, thumbnail_key, content_type,
                 size_bytes, sha256, collected_at, source_published_at,
                 source_url, creator_name, creator_handle, import_source,
+                width, height, duration_ms,
                 committed, committed_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 kind = excluded.kind,
                 object_key = excluded.object_key,
@@ -2681,6 +2714,11 @@ def replication_commit(
                 creator_name = COALESCE(excluded.creator_name, assets.creator_name),
                 creator_handle = COALESCE(excluded.creator_handle, assets.creator_handle),
                 import_source = COALESCE(excluded.import_source, assets.import_source),
+                -- Same rule as the other optional projections: omitting a value keeps what is
+                -- already known, so a legacy client cannot erase it and NULL can be filled in.
+                width = COALESCE(excluded.width, assets.width),
+                height = COALESCE(excluded.height, assets.height),
+                duration_ms = COALESCE(excluded.duration_ms, assets.duration_ms),
                 committed = 1,
                 committed_at = excluded.committed_at,
                 updated_at = excluded.updated_at
@@ -2699,6 +2737,9 @@ def replication_commit(
                 request.creator_name,
                 request.creator_handle,
                 request.import_source,
+                request.width,
+                request.height,
+                request.duration_ms,
                 ts,
                 ts,
                 ts,
@@ -2991,3 +3032,30 @@ from asset_authority import register_asset_authority
 
 startup_asset_authority = register_asset_authority(
     app, get_db, require_client, require_publisher)
+
+
+# Install after the visibility/authority schemas. No historical Assets are enqueued.
+import image_thumbnails
+
+_image_thumbnail_worker = None
+
+
+@app.on_event("startup")
+def startup_image_thumbnails():
+    global _image_thumbnail_worker
+    from r2 import thumbnail_storage_client
+
+    with get_db() as db:
+        image_thumbnails.install(db)
+        db.commit()
+    if _image_thumbnail_worker is None:
+        _image_thumbnail_worker = image_thumbnails.ImageThumbnailWorker(
+            DB_PATH, thumbnail_storage_client(), R2_BUCKET)
+    _image_thumbnail_worker.start()
+
+
+@app.on_event("shutdown")
+def shutdown_image_thumbnails():
+    global _image_thumbnail_worker
+    if _image_thumbnail_worker is not None and _image_thumbnail_worker.stop():
+        _image_thumbnail_worker = None

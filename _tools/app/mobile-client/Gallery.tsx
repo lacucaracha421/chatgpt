@@ -14,7 +14,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: As
       if (!controller.signal.aborted && ready.preview) {setPreview(ready.preview); onReady(ready);}
     }, () => {});
     return () => controller.abort();
-  }, [asset.id, asset.preview, onReady, paused]);
+  }, [asset.id, asset.preview, asset.thumbnail_available, asset.pending, onReady, paused]);
   const retry = () => {
     if (retried || asset.pending || asset.thumbnail_available === false) return;
     setRetried(true); invalidateTicket(asset, 'thumbnail');

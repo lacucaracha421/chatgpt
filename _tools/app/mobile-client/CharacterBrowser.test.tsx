@@ -14,10 +14,11 @@ const index:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capabiliti
 const page=(ids=['asset-1','asset-2'],cursor:string|null=null):CharacterPage=>({revision,items:ids.map(id=>({id,kind:'image'})),totalCount:2,sourceCount:3,has_more:!!cursor,next_cursor:cursor});
 const backRef:{current:(()=>boolean)|null}={current:null};
 const onOpen=vi.fn();
-const props={active:true,paused:false,density:1,refreshKey:1,onOpen,backRef};
+const onExit=vi.fn();
+const props={active:true,paused:false,density:1,refreshKey:1,onOpen,backRef,onExit};
 beforeEach(()=>{
   vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
-  mocks.api.mockReset();onOpen.mockReset();backRef.current=null;
+  mocks.api.mockReset();onOpen.mockReset();onExit.mockReset();backRef.current=null;
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(index):page());
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
@@ -76,6 +77,54 @@ it('refreshes a changed revision and returns to root if the selected character d
   result.rerender(<CharacterBrowser {...props} refreshKey={2}/>);
   await screen.findByText('등록된 시리즈가 없습니다');
   expect(screen.queryByText('asset-1')).toBeNull();
+});
+
+it('declines Back for a directly opened folder but steps up from drilled-down nodes',async()=>{
+  const first=render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  await screen.findByRole('heading',{name:'Series'});
+  expect(backRef.current?.()).toBe(false);
+  fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
+  await screen.findByRole('heading',{name:'Group'});
+  act(()=>{expect(backRef.current?.()).toBe(true);});
+  expect(await screen.findByRole('heading',{name:'Series'})).toBeTruthy();
+  first.unmount();
+});
+
+it('does not invent a parent after filtering a directly opened series',async()=>{
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  await screen.findByRole('heading',{name:'Series'});
+  fireEvent.click(screen.getByRole('button',{name:'미분류'}));
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('filter=unclassified'))).toBe(true));
+  expect(backRef.current?.()).toBe(false);
+});
+
+it('keeps the series overview reachable by stepping up from a series opened inside it',async()=>{
+  render(<CharacterBrowser {...props}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));
+  await screen.findByRole('heading',{name:'Series'});
+  act(()=>{expect(backRef.current?.()).toBe(true);});
+  expect(await screen.findByRole('heading',{name:'시리즈'})).toBeTruthy();
+  // The bare overview was entered from the index, so the next Back belongs to the host.
+  expect(backRef.current?.()).toBe(false);
+});
+
+it('sends the header arrow to the host on a direct entry without impersonating Back',async()=>{
+  const backEvents:Event[]=[];
+  const listener=()=>backEvents.push(new Event('lakomics-back'));
+  window.addEventListener('lakomics-back',listener);
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  await screen.findByRole('heading',{name:'Series'});
+  fireEvent.click(screen.getByRole('button',{name:'상위 보기로'}));
+  // The host owns the exit, so no global Back event is synthesised.
+  expect(onExit).toHaveBeenCalledTimes(1);
+  expect(backEvents).toHaveLength(0);
+  // Drilled down, the arrow still steps up inside the browser instead of exiting.
+  fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
+  await screen.findByRole('heading',{name:'Group'});
+  fireEvent.click(screen.getByRole('button',{name:'상위 보기로'}));
+  expect(await screen.findByRole('heading',{name:'Series'})).toBeTruthy();
+  expect(onExit).toHaveBeenCalledTimes(1);
+  window.removeEventListener('lakomics-back',listener);
 });
 
 it('distinguishes an older server from an unpublished character view',async()=>{

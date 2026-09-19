@@ -36,7 +36,7 @@ function Card({node,count,paused,onSelect,previews=[]}:{node:CharacterNode;count
   </button>;
 }
 
-export function CharacterBrowser({onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef}:{onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number):void;backRef:MutableRefObject<(()=>boolean)|null>}) {
+export function CharacterBrowser({onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -65,17 +65,36 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
     setPage(undefined);setError('');setMoreError('');setMore(false);setWhere(next);setCardsPage(0);
   },[remember]);
   const appliedInitialNode=useRef<string|undefined>(undefined);
-  useEffect(()=>{if(active&&initialNode&&appliedInitialNode.current!==initialNode){appliedInitialNode.current=initialNode;navigate({node:initialNode,filter:'all'});}},[initialNode,active,navigate]);
+  // True once the user walks down the hierarchy from within the browser. This is tracked as
+  // its own flag rather than by comparing `where.node` against the applied direct entry: the
+  // entry effect updates its ref eagerly while `where` commits later, so comparing the two
+  // reported a drill-down for a folder that had just been opened and wrongly consumed Back.
+  const drilled=useRef(false);
+  useEffect(()=>{if(active&&initialNode&&appliedInitialNode.current!==initialNode){appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:'all'});}},[initialNode,active,navigate]);
+  // Changing a filter in the entry folder does not create a parent navigation step.
+  const openInside=useCallback((next:Location)=>{if(next.node!==latest.current.where.node)drilled.current=true;navigate(next);},[navigate]);
   usePublicationCheck(active&&!paused,'/v1/library/characters/status',index?.revision,(_reply,changed)=>{if(changed)setRetry(n=>n+1);});
   useEffect(()=>{
     backRef.current=()=>{
       const s=latest.current;
       if(!s.where.node)return false;
+      // A folder opened directly from the index is a top-level entry, not an in-browser
+      // drill-down. Consuming Back there would strand the user on the bare series
+      // overview, so decline it and let the host restore the actual prior context.
+      if(!drilled.current)return false;
       const node=s.index?.nodes.find(n=>n.id===s.where.node);
-      navigate({node:node?.parentId??null,filter:'all'});return true;
+      const parent=node?.parentId??null;
+      // Stepping back up to the folder this boundary was opened with ends the drill-down, so
+      // the next Back leaves the boundary instead of walking into a synthetic series parent.
+      if(!parent||parent===appliedInitialNode.current)drilled.current=false;
+      navigate({node:parent,filter:'all'});return true;
     };
     return()=>{backRef.current=null;};
   },[backRef,navigate]);
+  // The header arrow means "leave this folder", not a global Back press: it steps up one
+  // level inside the browser, or hands the direct entry back to the host so the host can
+  // restore the prior context without closing an unrelated open surface.
+  const goUp=()=>{if(backRef.current?.())return;onExit();};
   useEffect(()=>{
     if(!active)return;
     const request=indexGate.current.begin();setBusy(true);setError('');
@@ -132,7 +151,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   const ancestors:CharacterNode[]=[];
   let parent=node?.parentId;
   while(parent&&index&&ancestors.length<3){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
-  const filterControls=node?.kind==='series'&&<div className="character-filters">{(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>navigate({node:node.id,filter})}>{labels[filter]}</Button>)}</div>;
+  const filterControls=node?.kind==='series'&&<div className="character-filters">{(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>openInside({node:node.id,filter})}>{labels[filter]}</Button>)}</div>;
   const overview=<>
     {!landscape&&filterControls}
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
@@ -140,7 +159,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
     {index&&!index.ready&&<div className="empty-state"><h3>캐릭터 보기가 아직 공유되지 않았습니다</h3><p>PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다.</p></div>}
     {landscape&&node?.kind==='series'&&node.heroAssetId&&<div className="character-hero"><Preview id={node.heroAssetId} paused={!active||paused} label={`${node.name} 대표 이미지`}/></div>}
     {!!children.length&&landscape&&node&&<h4 className="character-section-title">{node.kind==='group'?'그룹 캐릭터':'캐릭터 · 폴더'}</h4>}
-    {!!children.length&&<div className={`character-cards${pages>1?' character-cards-paged':''}`} style={{gridTemplateColumns:`repeat(${columns},minmax(0,${landscape?'180px':'1fr'}))`}}>{children.slice(cardPage*capacity,(cardPage+1)*capacity).map(child=><Card key={`${index?.revision}:${child.id}`} node={child} count={index?.scopes.find(s=>s.nodeId===child.id&&s.filter==='all')?.totalCount??0} paused={!active||paused} previews={landscape&&child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>navigate({node:child.id,filter:'all'})}/>)}</div>}
+    {!!children.length&&<div className={`character-cards${pages>1?' character-cards-paged':''}`} style={{gridTemplateColumns:`repeat(${columns},minmax(0,${landscape?'180px':'1fr'}))`}}>{children.slice(cardPage*capacity,(cardPage+1)*capacity).map(child=><Card key={`${index?.revision}:${child.id}`} node={child} count={index?.scopes.find(s=>s.nodeId===child.id&&s.filter==='all')?.totalCount??0} paused={!active||paused} previews={landscape&&child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>openInside({node:child.id,filter:'all'})}/>)}</div>}
     {pages>1&&<div className="character-card-pages"><IconButton label="이전 폴더" icon={ChevronLeftIcon} disabled={!cardPage} onClick={()=>setCardsPage(cardPage-1)}/><span>{cardPage+1} / {pages}</span><IconButton label="다음 폴더" icon={ChevronRightIcon} disabled={cardPage+1>=pages} onClick={()=>setCardsPage(cardPage+1)}/></div>}
     {node?.description&&<p className="character-description">{node.description}</p>}
     {landscape&&filterControls}
@@ -148,8 +167,8 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
     {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<div className="empty-state"><h3>{where.node?'이 보기에 자산이 없습니다':'등록된 시리즈가 없습니다'}</h3></div>}
   </>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
-    <HeaderTools active={active} target="context-location" landscapeOnly><div className="character-location">{where.node&&<IconButton label="상위 보기로" icon={ArrowLeftIcon} onClick={()=>backRef.current?.()}/>}
-      {landscape&&node&&<nav className="character-breadcrumb" aria-label="캐릭터 위치"><Button variant="ghost" onClick={()=>navigate(ROOT)}>시리즈</Button>{ancestors.map(ancestor=><span key={ancestor.id}><ChevronRightIcon/><Button variant="ghost" onClick={()=>navigate({node:ancestor.id,filter:'all'})}>{ancestor.name}</Button></span>)}<ChevronRightIcon/></nav>}
+    <HeaderTools active={active} target="context-location"><div className="character-location">{where.node&&<IconButton label="상위 보기로" icon={ArrowLeftIcon} onClick={goUp}/>}
+      {landscape&&node&&<nav className="character-breadcrumb" aria-label="캐릭터 위치"><Button variant="ghost" onClick={()=>openInside(ROOT)}>시리즈</Button>{ancestors.map(ancestor=><span key={ancestor.id}><ChevronRightIcon/><Button variant="ghost" onClick={()=>openInside({node:ancestor.id,filter:'all'})}>{ancestor.name}</Button></span>)}<ChevronRightIcon/></nav>}
       <h3>{node?.name??'시리즈'}</h3>{scope&&<span className="numeric muted">{scope.totalCount}개</span>}</div></HeaderTools>
     {!landscape&&overview}
     {(landscape||!!page?.items.length)&&<Gallery items={page?.items??[]} intro={landscape?overview:undefined} density={density} identity={`${index?.revision}:${where.node}:${where.filter}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i);}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>}

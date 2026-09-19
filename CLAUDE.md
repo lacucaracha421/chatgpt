@@ -1,12 +1,11 @@
 @AGENTS.md
 @.claude/skills/using-superpowers/SKILL.md
 
-# Claude Code workflow rules
+# Claude Code Integration
 
-- Treat `AGENTS.md` as authoritative for repository workflow and scope.
-- Use applicable skills as scoped methods under `AGENTS.md`, not as independent approval, test, documentation, Git, or deployment policies.
-- Continue until the requested outcome is complete or a real authority/input blocker remains.
-- Support claims with inspected, still-valid evidence; rerun only checks invalidated by later changes, and distinguish native acceptance from static/browser checks.
-- Use subagents for independent exploration or research when that meaningfully reduces main-context noise.
-- Do not spawn unnecessary subagents for trivial tasks. Use an available agent type (such as `general-purpose`) or perform the review/execution inline when delegation is unavailable; do not install a plugin to satisfy a workflow dependency.
-- Project memory is a hint, not authority: `docs/README.md` and `docs/roadmap/lakomics-backlog.md` replace retired feature-candidate/product-change documents. Do not recreate them from remembered instructions.
+- `AGENTS.md` owns scope, permissions, delegation, data safety, and verification policy.
+- Canonical shared methods live in `.agents/skills/`. The matching entries under `.claude/skills/` are thin adapters: read their linked canonical `SKILL.md`, not a second copy of the method.
+- Existing other Claude skills are optional, task-scoped methods. They do not mandate new approvals, worktrees, commits, deployments, tests, or a full workflow chain.
+- Use only tools and agent types actually available. Subagents follow the bounded delegation policy in `AGENTS.md`; workers must not delegate further. Model routing must be verified rather than inferred from a role name.
+- If a skill is unavailable, follow the relevant method inline and disclose limitations. Do not install a plugin or change permissions to satisfy a workflow dependency.
+- Documentation and backlog entry points are in `docs/README.md`. Do not recreate retired planning files from remembered instructions.

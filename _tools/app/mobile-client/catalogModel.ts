@@ -1,5 +1,5 @@
-export type CatalogQuery = {provider:'kHentai';language:'all'|'korean'|'japanese';text:string;sort:'latest'|'views'|'hotDay'|'hotWeek'|'hotMonth';scope:'all'|'bookmarked';revealBlocked:boolean;limit:number};
-export const DEFAULT_CATALOG_QUERY:CatalogQuery={provider:'kHentai',language:'korean',text:'',sort:'hotDay',scope:'all',revealBlocked:false,limit:40};
+export type CatalogQuery = {provider:'kHentai';language:'all'|'korean'|'japanese';text:string;category:number|null;sort:'latest'|'views'|'hotDay'|'hotWeek'|'hotMonth';scope:'all'|'bookmarked';revealBlocked:boolean;limit:number};
+export const DEFAULT_CATALOG_QUERY:CatalogQuery={provider:'kHentai',language:'korean',text:'',category:null,sort:'hotDay',scope:'all',revealBlocked:false,limit:40};
 export type CatalogWork = {provider:'kHentai';providerWorkId:string;title:string;titleJpn:string|null;thumbnailUrl:string|null;bookmarked:boolean;fileCount:number;views:number;posted:number;artists:string[];series:string[]};
 export type CatalogItem = CatalogWork & {groupId:string;versionCount:number;hasBookmarkedVersion:boolean};
 export type CatalogPage = {ready:boolean;publicationRevision:string|null;publishedAt:string|null;items:CatalogItem[];nextCursor:string|null;context:string|null;countToken:string|null;totalCount:number|null;countStatus:'pending'|'ready'|'unavailable'};
@@ -7,8 +7,22 @@ export type CatalogDetail = {provider:'kHentai';providerWorkId:string;title:stri
 export type CatalogEditions = {publicationRevision:string;groupId:string;selectedProviderWorkId:string|null;items:CatalogWork[];nextCursor:string|null;totalCount:number};
 export type CatalogReaderPage = {index:number;url:string;name:string|null;width:number|null;height:number|null;expiresAt:number|null};
 export type CatalogReaderManifest = {publicationRevision:string;provider:'kHentai';providerWorkId:string;pages:CatalogReaderPage[];manifestExpiresAt:number|null};
+/**
+ * The selector's category is an orthogonal filter, not part of the user's query
+ * text. It never appears as a URL parameter because the mobile search route
+ * rejects unknown parameters; it is folded into the `text` the server already
+ * understands, with the user's own expression parenthesised so operator
+ * precedence cannot bind across it. When no category is selected the text is
+ * sent byte-for-byte, so an advanced query the user typed is never rewritten.
+ */
+export function catalogWireText(query:Pick<CatalogQuery,'text'|'category'>){
+  if(query.category===null||query.category===undefined)return query.text;
+  return query.text.trim()?`(${query.text}) category:${query.category}`:`category:${query.category}`;
+}
 export function catalogPath(query:CatalogQuery,cursor:string|null){
-  const params=cursor?new URLSearchParams({cursor}):new URLSearchParams(Object.entries(query).map(([key,value])=>[key,String(value)]));
+  if(cursor)return `/v1/mobile-catalog/search?${new URLSearchParams({cursor})}`;
+  const params=new URLSearchParams(Object.entries(query).filter(([key])=>key!=='category').map(([key,value])=>[key,String(value)]));
+  params.set('text',catalogWireText(query));
   return `/v1/mobile-catalog/search?${params}`;
 }
 export function catalogDetailPath(item:Pick<CatalogWork,'provider'|'providerWorkId'>,context:string){return `/v1/mobile-catalog/works/${item.provider}/${encodeURIComponent(item.providerWorkId)}?${new URLSearchParams({context})}`;}

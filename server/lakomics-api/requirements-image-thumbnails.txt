@@ -1,0 +1,2 @@
+# Additional dependency for the isolated server image-thumbnail encoder.
+Pillow==12.3.0

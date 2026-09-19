@@ -4,7 +4,7 @@ import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
 import {validCharacterIndex,type CharacterIndex} from './characterModel';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
-import {ChevronDoubleUpIcon, ChevronDoubleDownIcon, ViewfinderCircleIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, ChevronRightIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {Bars3Icon, BookOpenIcon, PhotoIcon, PencilSquareIcon, Squares2X2Icon, ChevronDoubleUpIcon, ChevronDoubleDownIcon, ViewfinderCircleIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, ChevronRightIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, Dialog, DialogDescription, IconButton, Mark} from './ui';
 import {api, errorText, native} from './transport';
 import {clearMediaCache} from './media';
@@ -37,8 +37,10 @@ export function App() {
   const collectionBack = useRef<(()=>boolean)|null>(null);
   const catalogBack = useRef<(()=>boolean)|null>(null);
   const albumsBack = useRef<(()=>boolean)|null>(null);
+  const viewerBack = useRef<(()=>boolean)|null>(null);
   const [status, setStatus] = useState<Status>({configured:false, endpoint:''});
   const [checking, setChecking] = useState(true), [settings, setSettings] = useState(false), [drawer, setDrawer] = useState(false);
+  const [viewSettings, setViewSettings] = useState(false);
   const [page, setPage] = useState<Committed>({items:[], has_more:false, next_cursor:null, view:HOME, cursor:null, previous:[], version:0, restoreScroll:0, generation:null});
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [indexError, setIndexError] = useState('');
   const [characterIndex,setCharacterIndex]=useState<CharacterIndex>();
@@ -51,9 +53,11 @@ export function App() {
   const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'} | null>(null);
   const [density, setDensity] = useState(() => {try {const d = JSON.parse(localStorage.getItem('lakomics.mobile.density') ?? '1'); return [0,1,2].includes(d) ? d as number : 1;} catch {return 1;}});
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
-  const latest = useRef({page, viewer, settings, drawer, status, area}); latest.current = {page, viewer, settings, drawer, status, area};
+  const latest = useRef({page, viewer, settings, drawer, status, area, viewSettings}); latest.current = {page, viewer, settings, drawer, status, area, viewSettings};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]}>({view:HOME,cursor:null,previous:[]});
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
+  // Committed assets view left behind when a Character folder is opened from the index.
+  const beforeCharacter = useRef<SavedPosition | undefined>(undefined);
   const observedGeneration = useRef<string|null>(null);
   const viewCache = useRef(new Map<string, Committed>());
   const moreGate = useRef(new RequestGate());
@@ -203,29 +207,46 @@ export function App() {
     viewCache.current.clear();
     void load(state.page.view, state.page.cursor, state.page.previous, 0, true);
   }, [load]);
+  // Leaves the character boundary for the actual context it was opened from, falling back to
+  // Home when nothing was committed beforehand. Deliberately not routed through the global
+  // back chain, which would close an unrelated open surface first.
+  const restoreBeforeCharacter = useCallback(() => {
+    const saved = beforeCharacter.current; beforeCharacter.current = undefined;
+    setArea('assets');
+    if (saved) void load(saved.view, saved.cursor, saved.previous, saved.scroll);
+    else void load(HOME);
+  }, [load]);
   useEffect(() => {
     const visible = () => {if (document.visibilityState === 'visible' && latest.current.status.configured && latest.current.page.view.tab === 'home') void refreshSecondary();};
     const back = () => {
       const state = latest.current;
-      if (state.settings) setSettings(false);
+      if (state.viewSettings) setViewSettings(false);
+      else if (state.settings) setSettings(false);
+      else if (state.viewer && viewerBack.current?.()) { /* Viewer overlay consumed back. */ }
       else if (state.viewer) setViewer(null);
       else if (state.drawer) setDrawer(false);
       else if (state.area === 'collections') {if (!collectionBack.current?.()) setArea('assets');}
       else if (state.area === 'notes') {if (!notesBack.current?.()) setArea('assets');}
       else if (state.area === 'catalog') {if (!catalogBack.current?.()) setArea('assets');}
-      else if (state.page.view.characters && characterBack.current?.()) { /* Character parent navigation consumed back. */ }
-      else if (albumsBack.current?.()) { /* Album dialog consumed back. */ }
+      else if (state.page.view.characters && characterBack.current?.()) {  }
+      else if (albumsBack.current?.()) {  }
+      else if (state.page.view.characters) {restoreBeforeCharacter();}
       else if (state.page.view.tab !== 'home' || state.page.cursor) void load(HOME);
       else void native('finish').catch(() => {});
     };
     window.addEventListener('lakomics-resume', visible); document.addEventListener('visibilitychange', visible); window.addEventListener('lakomics-back', back);
     return () => {window.removeEventListener('lakomics-resume', visible); document.removeEventListener('visibilitychange', visible); window.removeEventListener('lakomics-back', back);};
-  }, [refreshSecondary, load]);
+  }, [refreshSecondary, load, restoreBeforeCharacter]);
   useEffect(() => {
     if (!page.version || !page.view.classification) return;
     setRecentFolders(previous => {const ids = rememberFolder(previous,page.view.classification!); store(RECENT_FOLDERS_KEY,{scope:status.endpoint,ids}); return ids;});
   },[page.version,page.view.classification,status.endpoint]);
   const select = (view: View) => {
+    // Remember the real browsing context only when entering the character boundary, and only
+    // from a non-character view. Re-selecting another folder inside it keeps the original
+    // context instead of stacking a synthetic character parent.
+    if(view.characters && !latest.current.page.view.characters && latest.current.page.version)
+      beforeCharacter.current = {view:latest.current.page.view,cursor:latest.current.page.cursor,previous:latest.current.page.previous,scroll:scroll.current};
     setArea('assets'); setDrawer(false); if(view.characters)setCharactersVisited(true); void load(view);
   };
   const openCurrent = (index: number) => {
@@ -236,8 +257,8 @@ export function App() {
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
-    setViewer(null); setCharacterIndex(undefined); setClassifications([]); setCaptures([]); setRevisit({bundles:[]});
-    setCollapsed(new Set()); knownFolders.current.clear(); lastLibrary.current = undefined; setRecentFolders([]);
+    setViewer(null); setViewSettings(false); setCharacterIndex(undefined); setClassifications([]); setCaptures([]); setRevisit({bundles:[]});
+    setCollapsed(new Set()); knownFolders.current.clear(); lastLibrary.current = undefined; beforeCharacter.current = undefined; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
     setPage({generation:null,items:[],has_more:false,next_cursor:null,view:HOME,cursor:null,previous:[],version:0,restoreScroll:0});
@@ -263,28 +284,30 @@ export function App() {
   },[classifications,characterIndex]);
   const foldAll=()=>setCollapsed(new Set(folderParents.keys()));
   const focusFolder=()=>{const next=new Set(folderParents.keys());let id=page.view.characters?(focusedCharacter?treeId(focusedCharacter):null):page.view.classification??null;const seen=new Set<string>();while(id&&!seen.has(id)){seen.add(id);next.delete(id);id=folderParents.get(id)??null;}setCollapsed(next);};
+  const folderTools = <div className="folder-tools" role="group" aria-label="폴더 보기"><IconButton label="모든 폴더 접기" icon={ChevronDoubleUpIcon} onClick={foldAll}/><IconButton label="모든 폴더 펼치기" icon={ChevronDoubleDownIcon} onClick={()=>setCollapsed(new Set())}/><IconButton label="현재 위치만 펼치기" icon={ViewfinderCircleIcon} disabled={!(page.view.characters?focusedCharacter:page.view.classification)} onClick={focusFolder}/></div>;
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
   return <div className="mobile-app">
-    <header className="app-header"><button className="brand" aria-label="사이드바 열기" disabled={!status.configured} onClick={()=>{if(area==='assets'){if(window.matchMedia('(orientation:landscape) and (min-width:900px)').matches)setIndexHidden(v=>!v);else setDrawer(v=>!v);}else window.dispatchEvent(new Event('lakomics-sidebar'));}}><Mark/><span>LAKOMICS</span><span className="brand-divider"/><span className="section-name">{area === 'notes' ? 'Notes' : area === 'catalog' ? 'Catalog' : area === 'collections' ? 'Collections' : page.view.tab === 'home' ? 'Home' : 'Library'}</span></button><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{area==='assets'&&page.view.tab==='library'&&<div className="folder-tools"><IconButton label="모든 폴더 접기" icon={ChevronDoubleUpIcon} onClick={foldAll}/><IconButton label="모든 폴더 펼치기" icon={ChevronDoubleDownIcon} onClick={()=>setCollapsed(new Set())}/><IconButton label="현재 위치만 펼치기" icon={ViewfinderCircleIcon} disabled={!(page.view.characters?focusedCharacter:page.view.classification)} onClick={focusFolder}/></div>}{demo && <span className="demo-label">디자인 미리보기</span>}<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={() => setSettings(true)}/></div></header>
+    <header className="app-header"><button className="brand" aria-label="사이드바 열기" disabled={!status.configured} onClick={()=>{if(area==='assets'){if(window.matchMedia?.('(orientation:landscape) and (min-width:1000px)').matches)setIndexHidden(v=>!v);else setDrawer(v=>!v);}else window.dispatchEvent(new Event('lakomics-sidebar'));}}><Bars3Icon className="navigation-icon" aria-hidden="true"/><Mark/><span>LAKOMICS</span><span className="brand-divider"/><span className="section-name">{area === 'notes' ? 'Notes' : area === 'catalog' ? 'Catalog' : area === 'collections' ? 'Collections' : page.view.tab === 'home' ? 'Home' : 'Library'}</span></button><div id="context-location">{(area==='catalog'||area==='notes')&&<h2 className="header-area">{area==='catalog'?'Catalog':'Notes'}</h2>}</div><div className="header-actions"><div id="context-tools"/>{demo && <span className="demo-label">디자인 미리보기</span>}<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={() => setSettings(true)}/></div></header>
     {status.configured ? <div className="app-body">
-      <aside className="desktop-index" style={{display:area!=='assets'||indexHidden?'none':undefined}}><div className="index-title"><span>라이브러리</span><RectangleStackIcon/></div>{indexError && <p className="error-message">{indexError}</p>}<ClassificationIndex items={classifications} characters={characterIndex} view={page.view} onSelect={select} collapsed={collapsed} setCollapsed={setCollapsed}/><Albums active={area==='assets'&&!settings&&!viewer} paused={settings||!!viewer||drawer} onOpen={(items,index)=>setViewer({items,index})} backRef={albumsBack}/></aside>
+      <aside className="desktop-index" style={{display:area!=='assets'||indexHidden?'none':undefined}}><div className="index-title"><span>라이브러리</span><RectangleStackIcon/></div>{folderTools}{indexError && <p className="error-message">{indexError}</p>}<ClassificationIndex items={classifications} characters={characterIndex} view={page.view} onSelect={select} collapsed={collapsed} setCollapsed={setCollapsed}/><Albums active={area==='assets'&&!settings&&!viewer} paused={settings||!!viewer||drawer} onOpen={(items,index)=>setViewer({items,index})} backRef={albumsBack}/></aside>
       <main className="library-main" style={{display:area!=='assets'?'none':undefined}}>
-        <HeaderTools active={area==='assets'} target="context-location" landscapeOnly><div className={`gallery-heading ${page.view.characters?'is-character':''}`}><div className="location"><span className="location-square"/><h2>{page.view.title}</h2><span className="numeric muted">{page.items.length ? `${page.items.length}개${page.has_more ? '+' : ''}` : ''}</span></div><div className="heading-actions">{page.view.tab === 'library' && <Button variant="ghost" className="density-button" aria-label={`갤러리 밀도: ${DENSITIES[density]}`} onClick={() => setDensity(value => {const next = (value + 1) % 3; store('lakomics.mobile.density',next); return next;})}><span className={`density-symbol density-${density}`} aria-hidden="true">▥</span>{DENSITIES[density]}</Button>}<IconButton label="새로고침" icon={ArrowPathIcon} disabled={busy} onClick={refresh}/></div></div></HeaderTools>
+        <HeaderTools active={area==='assets'} target="context-location"><div className={`gallery-heading ${page.view.characters?'is-character':''}`}><div className="location"><span className="location-square"/><h2>{page.view.title}</h2><span className="numeric muted">{page.view.tab==='library' && page.items.length ? `${page.items.length}개${page.has_more ? '+' : ''}` : ''}</span></div><div className="heading-actions">{page.view.tab === 'library' && <IconButton label={`갤러리 보기: ${DENSITIES[density]}`} icon={Squares2X2Icon} onClick={()=>setViewSettings(true)}/>}<IconButton label="새로고침" icon={ArrowPathIcon} disabled={busy} onClick={refresh}/></div></div></HeaderTools>
         {busy && <div className="loading-line" role="status" aria-label="목록 불러오는 중"/>}
         {error && <div className="inline-error" role="alert"><span>{error}</span><Button onClick={() => {const intent = lastIntent.current; void load(intent.view,intent.cursor,intent.previous);}}>다시 시도</Button></div>}
         {page.view.characters ? null : page.view.tab === 'home' ? <Home items={page.items} classifications={classifications} recentFolders={recentFolders} revisit={revisit} captures={captures} busy={busy} paused={area !== 'assets' || settings || !!viewer} secondaryError={secondaryError} revision={page.version} onSelect={select} onOpen={openCurrent} onPending={() => setViewer({items:captures,index:0,pending:true})}/> : <>
         {page.items.length > 0 ? <Gallery items={page.items} density={density} identity={`${viewKey(page.view)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top => {scroll.current = top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={area !== 'assets' || settings || !!viewer}/> : <div className="empty-state"><RectangleStackIcon/><h2>{busy ? '라이브러리를 불러오고 있습니다' : '아직 자산이 없습니다'}</h2><p>{busy ? '잠시만 기다려 주세요.' : 'PC에서 보관한 자산이 클라우드에 동기화되면 여기에 나타납니다.'}</p></div>}
         {loadingMore && <div className="loading-line" role="status" aria-label="다음 자산을 불러오는 중"/>}{moreError && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </>}
-        {charactersVisited && <CharacterBrowser onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||drawer} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index)=>setViewer({items,index})} backRef={characterBack}/>}
+        {charactersVisited && <CharacterBrowser onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||drawer} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index)=>setViewer({items,index})} backRef={characterBack} onExit={restoreBeforeCharacter}/>}
       </main>
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer || drawer} backRef={collectionBack}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer || drawer} backRef={catalogBack}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
-    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={() => select(HOME)}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={() => {setArea('assets');if(page.view.tab === 'library') return; const saved=lastLibrary.current; if(saved) {void load(saved.view,saved.cursor,saved.previous,saved.scroll);} else select({tab:'library',title:'최근 저장'});}}><RectangleStackIcon/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setDrawer(false);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setDrawer(false);setCatalogVisited(true);setArea('catalog');}}><RectangleStackIcon/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setDrawer(false);setNotesVisited(true);setArea('notes');}}><RectangleStackIcon/><span>Notes</span></button></nav>}
-    {drawer && <Dialog open title="분류" onClose={() => setDrawer(false)}><DialogDescription className="sr-only">분류를 선택하면 해당 자산 목록을 엽니다.</DialogDescription><div className="dialog-header"><span>라이브러리</span><IconButton label="분류 닫기" icon={XMarkIcon} onClick={() => setDrawer(false)}/></div>{indexError && <p className="error-message">{indexError}</p>}<ClassificationIndex items={classifications} characters={characterIndex} view={page.view} onSelect={select} collapsed={collapsed} setCollapsed={setCollapsed}/><Albums active={area==='assets'&&!settings&&!viewer} paused={settings||!!viewer} onOpen={(items,index)=>setViewer({items,index})} backRef={albumsBack}/></Dialog>}
+    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={() => select(HOME)}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={() => {setArea('assets');if(page.view.tab === 'library') return; const saved=lastLibrary.current; if(saved) {void load(saved.view,saved.cursor,saved.previous,saved.scroll);} else select({tab:'library',title:'최근 저장'});}}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setDrawer(false);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setDrawer(false);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setDrawer(false);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}
+    {drawer && <Dialog open title="분류" onClose={() => setDrawer(false)}><DialogDescription className="sr-only">분류를 선택하면 해당 자산 목록을 엽니다.</DialogDescription><div className="dialog-header library-drawer-heading"><span className="sr-only">라이브러리</span><IconButton label="분류 닫기" icon={XMarkIcon} onClick={() => setDrawer(false)}/></div>{folderTools}{indexError && <p className="error-message">{indexError}</p>}<ClassificationIndex items={classifications} characters={characterIndex} view={page.view} onSelect={select} collapsed={collapsed} setCollapsed={setCollapsed}/><Albums active={area==='assets'&&!settings&&!viewer} paused={settings||!!viewer} onOpen={(items,index)=>setViewer({items,index})} backRef={albumsBack}/></Dialog>}
+    {viewSettings && <Dialog open title="갤러리 보기" onClose={()=>setViewSettings(false)}><DialogDescription className="sr-only">썸네일 크기를 선택합니다. 설정은 이 기기에 저장됩니다.</DialogDescription><div className="view-density" role="group" aria-label="썸네일 크기">{DENSITIES.map((label,value)=><Button key={label} variant="ghost" aria-pressed={density===value} onClick={()=>{setDensity(value);store('lakomics.mobile.density',value);}}>{label}</Button>)}</div><div className="view-settings-footer"><Button variant="ghost" onClick={()=>setViewSettings(false)}>닫기</Button></div></Dialog>}
     {settings && <Settings onCacheCleared={() => {clearMediaCache(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
-    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)}/>}
+    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)}/>}
   </div>;
 }
