@@ -221,17 +221,96 @@ impl Library {
 
     #[cfg(any(windows, target_os = "linux"))]
     fn purge_candidates(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
-        let mut connection = self.connection()?;
-        if connection.query_row("SELECT EXISTS(SELECT 1 FROM asset_authority)",[],|r|r.get::<_,bool>(0))? {
-            let tx=connection.transaction()?;
-            let ids=asset_ids.into_iter().filter_map(|id| {
-                tx.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE id=? AND status='trash')",[&id],|r|r.get::<_,bool>(0)).map(|exists|if exists{Some(id)}else{None}).transpose()
-            }).collect::<Result<Vec<_>,_>>()?;
-            super::asset_authority::enqueue(&tx,&ids,"tombstoned")?;
-            for id in &ids {tx.execute("DELETE FROM assets WHERE id=?",[id])?;}
-            tx.commit()?;
-            return Ok(PurgeSummary{deleted_count:ids.len() as u64,failed_asset_ids:Vec::new()});
+        // The library connection lock is not reentrant, so the legacy branch must be
+        // decided without holding a second handle to it.
+        let authority_adopted = {
+            let connection = self.connection()?;
+            connection.query_row("SELECT EXISTS(SELECT 1 FROM asset_authority)",[],|r|r.get::<_,bool>(0))?
+        };
+        if !authority_adopted {
+            return self.purge_candidates_legacy(asset_ids);
         }
+        let mut connection = self.connection()?;
+        // Partition by explicit canonical ownership. A trashed Asset the server has never
+        // committed has no tombstone to send: the server cannot resolve a lifecycle
+        // command for an Asset it does not own, and its managed file has no server-side GC
+        // that would ever reclaim it, so purge must remove the bytes locally. A
+        // server-owned Asset keeps its bytes because physical deletion belongs to the
+        // server's own GC, exactly as before.
+        let mut server_known: Vec<String> = Vec::new();
+        let mut local_only_paths: Vec<(String, ManagedAssetPaths)> = Vec::new();
+        {
+            let tx = connection.transaction()?;
+            for id in asset_ids {
+                let row = tx
+                    .query_row(
+                        "SELECT relative_path, thumbnail_relative_path, media_kind
+                         FROM assets WHERE id = ?1 AND status = 'trash'",
+                        [&id],
+                        |row| {
+                            let media_kind = row.get::<_, String>(2)?;
+                            Ok(ManagedAssetPaths {
+                                original: row.get(0)?,
+                                thumbnail: row.get(1)?,
+                                video_directory: (media_kind == "video")
+                                    .then(|| format!("video-media/{id}")),
+                            })
+                        },
+                    )
+                    .optional()?;
+                let Some(paths) = row else { continue };
+                let owned = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM asset_authority_state WHERE asset_id=?)",
+                    [&id],
+                    |r| r.get::<_, bool>(0))?;
+                if owned {
+                    server_known.push(id);
+                } else {
+                    local_only_paths.push((id, paths));
+                }
+            }
+            tx.commit()?;
+        }
+
+        // File removal happens outside the transaction, as in the legacy path.
+        let mut failed_asset_ids = Vec::new();
+        let mut purged_local: Vec<String> = Vec::new();
+        for (id, paths) in local_only_paths {
+            if self.remove_managed_paths(&paths).is_ok() {
+                purged_local.push(id);
+            } else {
+                failed_asset_ids.push(id);
+            }
+        }
+
+        let tx = connection.transaction()?;
+        // `enqueue` selects by canonical state, so the server-owned subset is exactly the
+        // set that receives a tombstone command.
+        super::asset_authority::enqueue(&tx, &server_known, "tombstoned")?;
+        let mut deleted_count = server_known.len() as u64;
+        for id in server_known.iter().chain(purged_local.iter()) {
+            // A purged Asset must never be published afterwards, so any queued legacy
+            // upload work and any non-tombstone lifecycle desire for it is cancelled.
+            tx.execute("DELETE FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=?", [id])?;
+            tx.execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=? AND desired<>'tombstoned'", [id])?;
+            // Canonical state is deliberately left in place, as `local_projection` leaves
+            // it for a logical delete: a tombstone must outlive the local row so an
+            // expired history cannot be read as "this Asset was never retired".
+            tx.execute("DELETE FROM assets WHERE id=?", [id])?;
+        }
+        deleted_count += purged_local.len() as u64;
+        tx.commit()?;
+        Ok(PurgeSummary { deleted_count, failed_asset_ids })
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    fn purge_candidates_legacy(&self, _asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
+        Err(LibraryError::UnsupportedManagedFileDeletion)
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    fn purge_candidates_legacy(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
+        let connection = self.connection()?;
         let mut deleted_count = 0;
         let mut failed_asset_ids = Vec::new();
         for asset_id in asset_ids {

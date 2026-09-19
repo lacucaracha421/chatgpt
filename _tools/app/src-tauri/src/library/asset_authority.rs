@@ -143,7 +143,8 @@ pub(crate) fn mark_materialized(db: &Connection, id: &str) -> Result<(), Library
 }
 fn apply(db: &Connection, p: &AssetProjection) -> Result<(), LibraryError> {
     p.validate()?;
-    if let Some(old) = projection(db, &p.asset_id)? {
+    let prior = projection(db, &p.asset_id)?;
+    if let Some(old) = &prior {
         if old.entity_revision > p.entity_revision {
             return Ok(());
         }
@@ -173,25 +174,87 @@ fn apply(db: &Connection, p: &AssetProjection) -> Result<(), LibraryError> {
         "pending"
     };
     db.execute("INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,sha256,size_bytes,projection,materialization) VALUES(?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET lifecycle=excluded.lifecycle,entity_revision=excluded.entity_revision,sha256=excluded.sha256,size_bytes=excluded.size_bytes,projection=excluded.projection",params![p.asset_id,p.lifecycle,p.entity_revision,p.sha256,p.size_bytes.map(|size|size as i64),serde_json::to_string(p).map_err(|_|LibraryError::InvalidCloudResponse)?,status])?;
+    // The local status is read before `local_projection` adopts the incoming lifecycle,
+    // because adopting it is what rewrites `assets.status`.
+    let local_status: Option<String> = db
+        .query_row("SELECT status FROM assets WHERE id=?", [&p.asset_id], |r| r.get(0))
+        .optional()?;
+    if let Some(local_status) = local_status {
+        reconcile_unsent_local_trash(db, &p.asset_id, &local_status, &p.lifecycle,
+                                     prior.is_some())?;
+    }
     local_projection(db, &p.asset_id)
 }
 /// Called by the local lifecycle mutation in the SAME transaction as optimistic state.
+/// Queue a lifecycle command for the Assets whose lifecycle the *server* owns.
+///
+/// An Asset the server has never seen has no canonical projection and no entity
+/// revision, so there is nothing to compare-and-set against and no command to send: its
+/// lifecycle is simply local state until replication commits it. Skipping such an Asset
+/// is therefore correct, not a failure - including it would either fabricate a revision
+/// or abort the whole call, which is how a batch containing one unregistered Asset used
+/// to fail entirely.
+///
+/// Selection is explicit: it keys on the presence of canonical authority state, never on
+/// an id shape, a file existing, or the queue being empty.
 pub(crate) fn enqueue(
-    tx: &Transaction<'_>,
+    db: &Connection,
     ids: &[String],
     desired: &str,
 ) -> Result<(), LibraryError> {
-    let Some(a) = authority(tx)? else {
+    let Some(a) = authority(db)? else {
         return Ok(());
     };
     for id in ids {
-        let p = projection(tx, id)?.ok_or(LibraryError::InvalidCloudResponse)?;
+        let Some(p) = projection(db, id)? else {
+            continue;
+        };
         if p.lifecycle == "tombstoned" {
             return invalid();
         }
-        tx.execute("INSERT INTO asset_lifecycle_outbox(operation_id,library_id,epoch,contract_version,asset_id,desired,expected_revision,created_at) VALUES(?,?,?,?,?,?,?,?)",params![uuid::Uuid::new_v4().to_string(),a.library,a.epoch,a.contract,id,desired,p.entity_revision,chrono::Utc::now().to_rfc3339()])?;
+        db.execute("INSERT INTO asset_lifecycle_outbox(operation_id,library_id,epoch,contract_version,asset_id,desired,expected_revision,created_at) VALUES(?,?,?,?,?,?,?,?)",params![uuid::Uuid::new_v4().to_string(),a.library,a.epoch,a.contract,id,desired,p.entity_revision,chrono::Utc::now().to_rfc3339()])?;
     }
     Ok(())
+}
+
+/// Preserve a local trash the server never learned about.
+///
+/// A local-only Asset can be trashed while its own upload is in flight. The server then
+/// commits it as `normal`, and the canonical projection arrives with no command ever
+/// sent - so the local trash would be silently overwritten. Recording it is the only
+/// outcome consistent with the user's action.
+///
+/// The discriminator is whether canonical state *already existed* before this projection:
+///
+/// * no prior canonical row -> the Asset had no server-visible lifecycle at all, so a
+///   local `trash` against an arriving `normal` is strictly unsent intent; re-queue it.
+/// * a prior canonical row -> the local status was previously confirmed by the server
+///   (or the server has since changed it), so the arriving value is authoritative and is
+///   adopted untouched. This is what keeps a restore from another client from being
+///   fought by a stale local trash.
+///
+/// Only `trash` against an arriving `normal` is reconciled: a local `normal` against an
+/// arriving `trash` is a server-side retirement, and adopting it is the whole point of a
+/// replica. A queued command suppresses the rewrite so an accepted transition is never
+/// re-sent.
+fn reconcile_unsent_local_trash(
+    db: &Connection,
+    asset_id: &str,
+    local_status: &str,
+    incoming_lifecycle: &str,
+    had_canonical: bool,
+) -> Result<(), LibraryError> {
+    if had_canonical || local_status != "trash" || incoming_lifecycle != "normal" {
+        return Ok(());
+    }
+    let queued: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM asset_lifecycle_outbox WHERE asset_id=?)",
+        [asset_id],
+        |r| r.get(0))?;
+    if queued {
+        return Ok(());
+    }
+    enqueue(db, &[asset_id.to_string()], "trash")
 }
 fn verify_envelope(value: &Value, a: &Authority) -> Result<(), LibraryError> {
     if value["libraryId"].as_str() != Some(&a.library)
@@ -910,7 +973,11 @@ mod tests {
         assert!(projection(&db, ID).unwrap().is_some());
     }
     #[test]
-    fn lifecycle_failure_rolls_back_optimistic_state_in_same_transaction() {
+    fn a_local_only_asset_trashes_without_authority_state_and_queues_no_command() {
+        // The cutover case: authority is adopted but this Asset was never committed, so
+        // it has no canonical projection. Trashing it is legitimate local intent, not an
+        // error, and it must not fabricate a lifecycle command for a server that cannot
+        // resolve the Asset.
         let (_temp, library, p) = setup();
         ingest(&library, &p, &media()).unwrap();
         library
@@ -918,19 +985,398 @@ mod tests {
             .unwrap()
             .execute("DELETE FROM asset_authority_state", [])
             .unwrap();
-        assert!(library.trash_assets(&[ID.into()]).is_err());
+        library.trash_assets(&[ID.into()]).unwrap();
         let db = library.connection().unwrap();
         assert_eq!(
             db.query_row("SELECT status FROM assets", [], |r| r.get::<_, String>(0))
                 .unwrap(),
-            "normal"
+            "trash"
         );
         assert_eq!(
             db.query_row("SELECT count(*) FROM asset_lifecycle_outbox", [], |r| r
                 .get::<_, i64>(0))
                 .unwrap(),
+            0,
+            "a server-unknown Asset must not emit a lifecycle command"
+        );
+    }
+
+    /// A local-only Asset that never reached the server, as the production cutover has.
+    fn insert_local_only(library: &Library, id: &str, status: &str, hash: char) {
+        insert_local_only_from(library, id, status, hash, ID);
+    }
+
+    /// Clone a specific source row so the copy's unique identity columns differ.
+    fn insert_local_only_from(library: &Library, id: &str, status: &str, hash: char, source_id: &str) {
+        let db = library.connection().unwrap();
+        let cols: Vec<String> = db
+            .prepare("PRAGMA table_info(assets)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let select: Vec<String> = cols
+            .iter()
+            .map(|c| match c.as_str() {
+                "id" => "? AS id".to_string(),
+                "content_hash" => "? AS content_hash".to_string(),
+                "relative_path" => "? AS relative_path".to_string(),
+                "thumbnail_relative_path" => "? AS thumbnail_relative_path".to_string(),
+                "status" => "? AS status".to_string(),
+                _ => c.clone(),
+            })
+            .collect();
+        db.execute(
+            &format!(
+                "INSERT INTO assets SELECT {} FROM assets WHERE id=?",
+                select.join(",")
+            ),
+            params![id, hash.to_string().repeat(64), format!("assets/ff/{id}"),
+                    format!("assets/ff/{id}-thumb"), status, source_id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_local_only_trash_asset_restores_without_an_authority_command() {
+        // Required case 1: restore must succeed locally and must not fail because the
+        // server has no canonical row for the Asset.
+        let (_temp, library, _) = setup();
+        let id = "80000000-0000-4000-8000-0000000000cc";
+        ingest(&library, &asset(&media()), &media()).unwrap();
+        insert_local_only(&library, id, "trash", 'a');
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM asset_authority_state WHERE asset_id<>?", [ID])
+            .unwrap();
+        library.restore_assets(&[id.into()]).unwrap();
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT status FROM assets WHERE id=?", [id], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "normal"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM asset_lifecycle_outbox WHERE asset_id=?", [id], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "no command may be sent for an Asset the server does not own"
+        );
+    }
+
+    #[test]
+    fn a_restored_local_only_asset_is_eligible_for_normal_replication() {
+        // Required case 2: after restore it is an ordinary PC-created Asset again, so the
+        // legacy upload lane must pick it up exactly as it would a fresh ingest.
+        let (_temp, library, _) = setup();
+        let id = "80000000-0000-4000-8000-0000000000dd";
+        ingest(&library, &asset(&media()), &media()).unwrap();
+        insert_local_only(&library, id, "trash", 'b');
+        library.restore_assets(&[id.into()]).unwrap();
+        assert!(library.seed_cloud_backfill_queue().unwrap().seeded >= 1);
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT status FROM cloud_sync_queue WHERE entity_id=? AND operation='upsert'",
+                [id], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "pending"
+        );
+        assert!(!super::is_server_owned(&db, id).unwrap(),
+                "the Asset is still locally owned until the server commits it");
+    }
+
+    #[test]
+    fn a_local_only_trash_asset_purges_without_a_tombstone_command() {
+        // Required cases 3 and 4: purge succeeds locally, and the queued upload work is
+        // cancelled so the purged Asset cannot be published afterwards.
+        let (_temp, library, _) = setup();
+        let id = "80000000-0000-4000-8000-0000000000ee";
+        ingest(&library, &asset(&media()), &media()).unwrap();
+        insert_local_only(&library, id, "trash", 'c');
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at) VALUES('q1','asset',?,'upsert','pending',1,'2026')",
+                [id],
+            )
+            .unwrap();
+        let purged = library.empty_trash().unwrap();
+        assert!(purged.deleted_count >= 1);
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM assets WHERE id=?", [id], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
             0
         );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM cloud_sync_queue WHERE entity_id=?", [id], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "queued upload work must be cancelled so purge cannot be undone"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM asset_lifecycle_outbox WHERE asset_id=?", [id], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_trashed_asset_racing_its_own_upload_keeps_the_trash_intent() {
+        // Required case 5/6: the Asset is trashed locally while its upload is in flight,
+        // and canonical `normal` arrives with no command ever sent. Adopting `normal`
+        // would silently resurrect the user's trash.
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        {
+            let db = library.connection().unwrap();
+            db.execute("DELETE FROM asset_authority_state", []).unwrap();
+        }
+        library.trash_assets(&[ID.into()]).unwrap();
+        {
+            let mut db = library.connection().unwrap();
+            let tx = db.transaction().unwrap();
+            apply(&tx, &p).unwrap();
+            tx.commit().unwrap();
+        }
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM asset_lifecycle_outbox WHERE asset_id=? AND desired='trash'", [ID], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1,
+            "the local trash must survive the server committing the Asset as normal"
+        );
+    }
+
+    #[test]
+    fn a_server_side_trash_is_adopted_even_after_a_local_trash() {
+        // The mirror case: the local row already had canonical state, so an arriving
+        // `trash` is the server's decision and must be adopted without fighting it.
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        {
+            let mut db = library.connection().unwrap();
+            let mut trashed = p.clone();
+            trashed.lifecycle = "trash".into();
+            trashed.entity_revision = p.entity_revision + 1;
+            let tx = db.transaction().unwrap();
+            apply(&tx, &trashed).unwrap();
+            tx.commit().unwrap();
+        }
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT status FROM assets", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "trash"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM asset_lifecycle_outbox", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "the server's own trash needs no command back"
+        );
+    }
+
+    #[test]
+    fn an_already_queued_command_is_not_duplicated_when_canonical_state_arrives() {
+        // Response-loss shape: the command was accepted server-side but its reply was
+        // lost, then canonical state arrives. The queued intent must not be rewritten
+        // into a second command.
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        library.trash_assets(&[ID.into()]).unwrap();
+        let before: i64 = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT count(*) FROM asset_lifecycle_outbox", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, 1);
+        {
+            let mut db = library.connection().unwrap();
+            let mut normal = p.clone();
+            normal.entity_revision = p.entity_revision + 5;
+            let tx = db.transaction().unwrap();
+            apply(&tx, &normal).unwrap();
+            tx.commit().unwrap();
+        }
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM asset_lifecycle_outbox", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            before,
+            "a queued command already carries the intent; do not re-send it"
+        );
+    }
+
+    #[test]
+    fn the_production_cutover_shape_restores_purges_and_mixes_safely() {
+        // Mirrors the real production cutover: authority adopted locally, 21 local trash
+        // Assets with no canonical row, plus server-known trash Assets in the same
+        // library. Every operation must work, and a mixed batch must not half-apply.
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        library.trash_assets(&[ID.into()]).unwrap();
+        let local_only: Vec<String> = (0..21)
+            .map(|i| format!("90000000-0000-4000-8000-0000000000{i:02x}"))
+            .collect();
+        for (i, id) in local_only.iter().enumerate() {
+            // `content_hash` is UNIQUE, so each cloned row needs its own digest.
+            insert_local_only(&library, id, "trash", char::from(b'a' + i as u8));
+        }
+        {
+            let db = library.connection().unwrap();
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM asset_authority_state", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1,
+                "only the server-known Asset has canonical state, as in production"
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM assets WHERE status='trash'", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                22
+            );
+        }
+
+        // A mixed batch: server-known Asset first, then a local-only one.
+        library
+            .restore_assets(&[ID.into(), local_only[0].clone()])
+            .unwrap();
+        {
+            let db = library.connection().unwrap();
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM assets WHERE status='normal'", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                2,
+                "the batch must apply to both Assets without aborting"
+            );
+            // No command may name a local-only Asset, at any revision.
+            let queued: Vec<String> = db
+                .prepare("SELECT DISTINCT asset_id FROM asset_lifecycle_outbox")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(queued, vec![ID.to_string()],
+                       "only the server-known Asset may be named in a lifecycle command");
+        }
+
+        // Purge the remaining local-only trashes in one call. Their managed bytes must
+        // actually go: the server will never run GC for an Asset it never committed, so
+        // leaving the file behind would orphan it on disk permanently.
+        let root = library.root().to_path_buf();
+        let probe = root.join(format!("assets/ff/{}", local_only[1]));
+        fs::create_dir_all(probe.parent().unwrap()).unwrap();
+        fs::write(&probe, b"local-only-bytes").unwrap();
+        let purged = library.empty_trash().unwrap();
+        assert_eq!(purged.deleted_count, 20);
+        assert!(purged.failed_asset_ids.is_empty());
+        assert!(!probe.exists(),
+                "a purged local-only Asset must not leave its bytes behind");
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM cloud_sync_queue WHERE operation='upsert' AND status<>'synced'", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "purged local-only Assets leave no upload work behind"
+        );
+    }
+
+    #[test]
+    fn a_server_owned_trash_asset_purge_keeps_sending_its_tombstone() {
+        // The behaviour the mixed batch above must not regress: a server-known Asset
+        // still retires through the authority outbox when purged.
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        library.trash_assets(&[ID.into()]).unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM asset_lifecycle_outbox", [])
+            .unwrap();
+        let purged = library.empty_trash().unwrap();
+        assert_eq!(purged.deleted_count, 1);
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT desired FROM asset_lifecycle_outbox ORDER BY sequence DESC LIMIT 1", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "tombstoned"
+        );
+    }
+
+    #[test]
+    fn a_mixed_batch_trashes_both_and_commands_only_the_server_known_asset() {
+        // A batch that mixes a server-known Asset with a local-only one must not abort:
+        // the old code failed the whole call on whichever Asset lacked a projection.
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let local_only = "80000000-0000-4000-8000-0000000000bb";
+        {
+            let db = library.connection().unwrap();
+            // Clone the ingested row, overriding only identity columns, so every other NOT
+            // NULL column comes from the real schema instead of a hand-written list that
+            // silently rots as the table grows.
+            let cols: Vec<String> = db
+                .prepare("PRAGMA table_info(assets)")
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let select: Vec<String> = cols
+                .iter()
+                .map(|c| match c.as_str() {
+                    "id" => "? AS id".to_string(),
+                    "content_hash" => "? AS content_hash".to_string(),
+                    // The unique identity columns must differ from the source row.
+                    "relative_path" => "? AS relative_path".to_string(),
+                    "thumbnail_relative_path" => "? AS thumbnail_relative_path".to_string(),
+                    _ => c.clone(),
+                })
+                .collect();
+            db.execute(
+                &format!("INSERT INTO assets SELECT {} FROM assets WHERE id=?", select.join(",")),
+                params![local_only, "f".repeat(64),
+                        format!("assets/ff/{local_only}"), format!("assets/ff/{local_only}-thumb"),
+                        ID],
+            )
+            .unwrap();
+        }
+        library.trash_assets(&[ID.into(), local_only.into()]).unwrap();
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM assets WHERE status='trash'", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        let queued: Vec<String> = db
+            .prepare("SELECT asset_id FROM asset_lifecycle_outbox ORDER BY asset_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(queued, vec![ID.to_string()],
+                   "only the server-known Asset gets a command");
     }
     /// Every enqueue path must respect server ownership, not just the observed one.
     ///
