@@ -85,7 +85,18 @@ class MobileCharactersTests(unittest.TestCase):
         rev=self.publish(body).json()["revision"]
         authority.startup(api_app.get_db);asset_authority.startup(api_app.get_db)
         with api_app.get_db() as db:
-            asset_authority.activate(db,library_id="e"*32,now="2026")
+            # Activation is digest-bound: stage the reviewed baseline first. No committed
+            # server Assets exist in this fixture, so the reviewed baseline is empty and
+            # the lifecycle rows below are seeded directly, as promotion would.
+            library="e"*32
+            identity, inventory = asset_authority.current_inventory(db)
+            staged = asset_authority.stage_baseline(
+                db, library_id=library, expected_inventory=inventory,
+                rows=[{"assetId": asset_id, "lifecycle": asset_authority.NORMAL,
+                       "sha256": sha} for asset_id, sha in identity],
+                now="2026")
+            asset_authority.activate(db, library_id=library,
+                                     expected_snapshot=staged["snapshotDigest"], now="2026")
             db.execute("UPDATE asset_authority_state SET lifecycle='trash' WHERE asset_id='a'");db.commit()
         items=self.browse(rev).json()
         self.assertEqual([a["id"] for a in items["items"]],["b"])

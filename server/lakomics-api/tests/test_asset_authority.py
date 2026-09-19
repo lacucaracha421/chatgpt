@@ -7,6 +7,7 @@ helper's idea of it. ADR-0038 defines the invariants these assert.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import sys
 import tempfile
@@ -30,6 +31,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 LIBRARY = "e" * 32
 OTHER_LIBRARY = "f" * 32
 ASSET = "20000000-0000-4000-8000-0000000000aa"
+#: The digest-bound activation route, named once so a rename cannot silently desync tests.
+PREFIX_ACTIVATE = "/v1/assets/authority/activate"
 CAPTURE = "30000000-0000-4000-8000-0000000000bb"
 
 
@@ -75,18 +78,47 @@ class AssetAuthorityFixture(unittest.TestCase):
     def admin(self):
         return {"Authorization": "Bearer shared-test-token"}
 
-    def activate(self, library_id=LIBRARY):
-        # Seeded fixtures explicitly attest their known normal legacy lifecycle. The
-        # production route refuses existing media until PC lifecycle staging is reviewed.
-        with api_app.get_db() as db:
-            if db.execute("SELECT 1 FROM assets WHERE committed=1 LIMIT 1").fetchone():
-                result=asset_authority.activate(db,library_id=library_id,now="2026-09-19T00:00:00Z")
-                db.commit()
-                return result
-        response = self.client.post("/v1/assets/authority/activate", headers=self.publisher,
-                                    json={"libraryId": library_id})
+    def stage(self, lifecycles=None, library_id=LIBRARY, headers=None):
+        """Stage a reviewed lifecycle baseline covering every committed server Asset.
+
+        Defaults to `normal` for the test Assets that have no PC-side counterpart; the
+        production baseline is derived from the real PC library instead.
+        """
+        inventory = self.inventory(headers=headers, library_id=library_id)
+        items = [{"assetId": row["assetId"],
+                  "lifecycle": (lifecycles or {}).get(row["assetId"], asset_authority.NORMAL),
+                  "sha256": row["sha256"]} for row in inventory["items"]]
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline",
+            headers=headers or self.publisher,
+            json={"libraryId": library_id,
+                  "inventoryDigest": inventory["inventoryDigest"], "items": items})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
+
+    def inventory(self, library_id=LIBRARY, headers=None):
+        response = self.client.get(
+            "/v1/assets/authority/activation-inventory",
+            params={"libraryId": library_id, "limit": 1000},
+            headers=headers or self.publisher)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def activate(self, library_id=LIBRARY, snapshot_digest=None):
+        """Stage a baseline if needed, then activate it by digest.
+
+        Seeded fixtures attest their known legacy lifecycle as `normal`, which is the
+        honest answer when a test never modelled a PC-side trash. Tests that care about
+        Case A-C stage explicitly instead.
+        """
+        if snapshot_digest is None:
+            snapshot_digest = self.stage(library_id=library_id)["snapshotDigest"]
+        response = self.client.post(PREFIX_ACTIVATE, headers=self.publisher,
+                                    json={"libraryId": library_id,
+                                          "expectedSnapshotDigest": snapshot_digest})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
 
     def status(self, library_id=LIBRARY):
         response = self.client.get("/v1/assets/authority/status",
@@ -139,11 +171,16 @@ class ActivationTests(AssetAuthorityFixture):
         self.assertEqual(self.status(), {"active": False, "domain": "assets"})
 
     def test_activation_creates_epoch_one_and_is_idempotent(self):
-        first = self.activate()
+        staged = self.stage()
+        first = self.activate(snapshot_digest=staged["snapshotDigest"])
         self.assertEqual((first["epoch"], first["contractVersion"], first["cursor"]), (1, 1, 0))
-        # A retry is the same activation, not a second epoch.
-        second = self.activate()
+        # A retry presents the same staged digest and is the same activation, not a
+        # second epoch, and must not rebuild or duplicate canonical state.
+        second = self.activate(snapshot_digest=staged["snapshotDigest"])
         self.assertEqual(second["epoch"], 1)
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM authority_domains WHERE domain='assets'").fetchone()[0], 1)
 
     def test_reads_and_commands_are_refused_while_the_domain_is_inactive(self):
         # Nothing is activated here: the whole surface must report the coded inactive
@@ -167,10 +204,13 @@ class ActivationTests(AssetAuthorityFixture):
                 "entity_revision,created_at,updated_at) VALUES(?,?,'normal',1,?,?)",
                 [LIBRARY, ASSET, "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z"])
             db.commit()
-        response = self.client.post("/v1/assets/authority/activate", headers=self.publisher,
-                                    json={"libraryId": LIBRARY})
-        self.assertEqual(response.status_code, 409, response.text)
-        self.assertEqual(response.json()["detail"]["code"], "assetAuthorityStateExists")
+        # Staging a baseline is also refused: adopting unowned state is not stageable.
+        staged = self.client.put("/v1/assets/authority/activation-baseline",
+                                 headers=self.publisher,
+                                 json={"libraryId": LIBRARY, "inventoryDigest": "0" * 64,
+                                       "items": []})
+        self.assertEqual(staged.status_code, 409, staged.text)
+        self.assertFalse(self.status()["active"])
 
     def test_activation_requires_the_publisher_role(self):
         with api_app.get_db() as db:
@@ -1148,21 +1188,402 @@ class StartupBootstrapTests(unittest.TestCase):
         with api_app.get_db() as db:
             _, publisher = api_auth.provision_token(db, "publisher", "bootstrap")
             db.commit()
-        response = self.client.post("/v1/assets/authority/activate",
-                                    headers={"Authorization": f"Bearer {publisher}"},
-                                    json={"libraryId": LIBRARY})
+        headers = {"Authorization": f"Bearer {publisher}"}
+        # No committed Assets here, so the reviewed baseline is legitimately empty.
+        inventory = self.client.get("/v1/assets/authority/activation-inventory",
+                                    params={"libraryId": LIBRARY}, headers=headers).json()
+        staged = self.client.put("/v1/assets/authority/activation-baseline", headers=headers,
+                                 json={"libraryId": LIBRARY,
+                                       "inventoryDigest": inventory["inventoryDigest"],
+                                       "items": []})
+        self.assertEqual(staged.status_code, 200, staged.text)
+        response = self.client.post("/v1/assets/authority/activate", headers=headers,
+                                    json={"libraryId": LIBRARY,
+                                          "expectedSnapshotDigest": staged.json()["snapshotDigest"]})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["epoch"], 1)
 
 
-class ActivationSafetyTests(AssetAuthorityFixture):
-    def test_existing_pc_library_requires_verified_lifecycle_baseline(self):
+class LifecycleBaselineTests(AssetAuthorityFixture):
+    """Case A-E reconciliation and the staged, digest-bound activation contract.
+
+    Every case drives the real HTTP routes, because the contract under review is what the
+    operator's reconciliation tooling will call. The recurring hazard is a lifecycle that
+    defaults to `normal`, which silently resurrects an Asset the user already retired.
+    """
+
+    def publish(self, asset_id, sha=None, content_type="image/png"):
+        """Commit one canonical Asset through the shipped replication path."""
+        digest = sha or __import__("hashlib").sha256(asset_id.encode()).hexdigest()
+        prepared = self.client.post("/v1/replication/prepare", headers=self.admin, json={
+            "asset_id": asset_id, "kind": "image", "content_type": content_type,
+            "size_bytes": 17, "sha256": digest, "collected_at": "2026-09-19T00:00:00Z"})
+        self.assertEqual(prepared.status_code, 200, prepared.text)
+        committed = self.client.post("/v1/replication/commit", headers=self.admin, json={
+            "asset_id": asset_id, "kind": "image",
+            "original": {"object_key": f"library/{asset_id}/original",
+                         "content_type": content_type, "size_bytes": 17, "sha256": digest},
+            "thumbnail": {"object_key": f"library/{asset_id}/thumbnail",
+                          "content_type": "image/webp", "size_bytes": 5},
+            "content_type": content_type, "collected_at": "2026-09-19T00:00:00Z",
+            "source_published_at": None, "source_url": None, "creator_name": None,
+            "creator_handle": None, "import_source": "Direct", "classification_ids": [],
+            "expected_revision": 0, "commit_id": f"commit-{asset_id[:8]}"})
+        self.assertEqual(committed.status_code, 200, committed.text)
+        return digest
+
+    def lifecycles(self):
         with api_app.get_db() as db:
-            db.execute("INSERT INTO assets(id,kind,object_key,created_at,updated_at,committed) VALUES('legacy','image','fixture','2026','2026',1)");db.commit()
-        response=self.client.post("/v1/assets/authority/activate",headers=self.publisher,json={"libraryId":LIBRARY})
-        self.assertEqual(response.status_code,409)
-        self.assertEqual(response.json()["detail"]["code"],"legacyLifecycleBaselineRequired")
+            return {row[0]: row[1] for row in db.execute(
+                "SELECT asset_id,lifecycle FROM asset_authority_state")}
+
+    # --- Case A / B / C -------------------------------------------------
+
+    def test_case_abc_imports_normal_trash_and_reviewed_tombstone_exactly(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        b = "20000000-0000-4000-8000-00000000000b"
+        c = "20000000-0000-4000-8000-00000000000c"
+        for asset_id in (a, b, c):
+            self.publish(asset_id)
+        staged = self.stage(lifecycles={a: asset_authority.NORMAL,
+                                        b: asset_authority.TRASH,
+                                        c: asset_authority.TOMBSTONED})
+        self.assertEqual(staged["counts"]["total"], 3)
+        self.activate(snapshot_digest=staged["snapshotDigest"])
+        # A trashed PC Asset must stay trashed, and a reviewed hard-delete must stay gone.
+        self.assertEqual(self.lifecycles(),
+                         {a: asset_authority.NORMAL, b: asset_authority.TRASH,
+                          c: asset_authority.TOMBSTONED})
+        with api_app.get_db() as db:
+            revisions = {row[0] for row in db.execute(
+                "SELECT entity_revision FROM asset_authority_state")}
+            changes = db.execute("SELECT count(*) FROM asset_authority_changes").fetchone()[0]
+        self.assertEqual(revisions, {1}, "initial lifecycle rows start at revision 1")
+        self.assertEqual(changes, 0, "the baseline is epoch-1 state, not a change sequence")
+
+    def test_case_b_trashed_asset_stays_hidden_from_ordinary_reads(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        b = "20000000-0000-4000-8000-00000000000b"
+        self.publish(a)
+        self.publish(b)
+        self.activate(snapshot_digest=self.stage(
+            lifecycles={a: asset_authority.TRASH, b: asset_authority.NORMAL})["snapshotDigest"])
+        listed = self.client.get("/v1/library/assets", params={"limit": 50},
+                                 headers=self.admin)
+        self.assertEqual([item["id"] for item in listed.json()["items"]], [b])
+
+    def test_case_c_server_only_asset_is_not_tombstoned_without_review(self):
+        # Without an explicit reviewed lifecycle the Asset is still `normal` by default,
+        # but the operator sees it as a reviewed decision rather than an assumption.
+        a = "20000000-0000-4000-8000-00000000000a"
+        self.publish(a)
+        inventory = self.inventory()
+        self.assertEqual([row["assetId"] for row in inventory["items"]], [a])
+        # The inventory must carry the identity evidence an operator reviews.
+        self.assertEqual(inventory["items"][0]["sha256"],
+                         __import__("hashlib").sha256(a.encode()).hexdigest())
+
+    # --- Case D / E -----------------------------------------------------
+
+    def test_case_d_hash_mismatch_is_refused(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        server_sha = self.publish(a)
+        inventory = self.inventory()
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": inventory["inventoryDigest"],
+                  "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL,
+                             "sha256": "b" * 64}]})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "assetHashMismatch")
+        self.assertNotEqual(server_sha, "b" * 64)
         self.assertFalse(self.status()["active"])
+
+    def test_case_e_duplicate_content_conflict_blocks_staging(self):
+        # Two committed Assets sharing bytes means no single canonical identity exists;
+        # staging must refuse rather than merge them silently.
+        a = "20000000-0000-4000-8000-00000000000a"
+        b = "20000000-0000-4000-8000-00000000000b"
+        shared = "c" * 64
+        self.publish(a, sha=shared)
+        self.publish(b, sha=shared)
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": self.inventory()["inventoryDigest"],
+                  "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL, "sha256": shared},
+                            {"assetId": b, "lifecycle": asset_authority.NORMAL, "sha256": shared}]})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "canonicalContentConflict")
+
+    # --- Staging validation ---------------------------------------------
+
+    def test_missing_server_asset_in_the_baseline_is_refused(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        self.publish(a)
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": self.inventory()["inventoryDigest"],
+                  "items": []})
+        self.assertEqual(response.json()["detail"]["code"], "incompleteBaseline")
+
+    def test_unknown_server_id_in_the_baseline_is_refused(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        self.publish(a)
+        inventory = self.inventory()
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": inventory["inventoryDigest"],
+                  "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL,
+                             "sha256": inventory["items"][0]["sha256"]},
+                            {"assetId": "unknown-asset", "lifecycle": asset_authority.NORMAL,
+                             "sha256": "d" * 64}]})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "unknownBaselineAsset")
+
+    def test_duplicate_ids_in_the_baseline_are_refused(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        sha = self.publish(a)
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": self.inventory()["inventoryDigest"],
+                  "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL, "sha256": sha},
+                            {"assetId": a, "lifecycle": asset_authority.TRASH, "sha256": sha}]})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "duplicateBaselineAsset")
+
+    def test_an_invalid_lifecycle_value_is_refused(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        sha = self.publish(a)
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": self.inventory()["inventoryDigest"],
+                  "items": [{"assetId": a, "lifecycle": "deleted", "sha256": sha}]})
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_an_invented_tombstone_outside_the_server_set_is_refused(self):
+        # A tombstone for an Asset the server does not have is not in the reviewed set.
+        a = "20000000-0000-4000-8000-00000000000a"
+        sha = self.publish(a)
+        response = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": self.inventory()["inventoryDigest"],
+                  "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL, "sha256": sha},
+                            {"assetId": "ghost", "lifecycle": asset_authority.TOMBSTONED,
+                             "sha256": "e" * 64}]})
+        self.assertEqual(response.json()["detail"]["code"], "unknownBaselineAsset")
+
+    def test_wrong_library_is_refused(self):
+        # Production already runs Classification/Album/Bookmark for one library, and the
+        # product is single-library, so a second library must never activate this domain.
+        # The sibling row is what makes that check meaningful.
+        with api_app.get_db() as db:
+            db.execute(
+                "INSERT INTO authority_domains(library_id,domain,epoch,contract_version,"
+                "change_cursor,baseline_digest,activated_at)"
+                " VALUES(?,'classifications',1,1,0,'fixture','2026-09-19T00:00:00Z')",
+                [LIBRARY])
+            db.commit()
+        a = "20000000-0000-4000-8000-00000000000a"
+        sha = self.publish(a)
+        staged = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": OTHER_LIBRARY,
+                  "inventoryDigest": self.inventory()["inventoryDigest"],
+                  "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL, "sha256": sha}]})
+        self.assertEqual(staged.status_code, 200, staged.text)
+        activated = self.client.post(
+            PREFIX_ACTIVATE, headers=self.publisher,
+            json={"libraryId": OTHER_LIBRARY,
+                  "expectedSnapshotDigest": staged.json()["snapshotDigest"]})
+        self.assertEqual(activated.status_code, 409, activated.text)
+        self.assertEqual(activated.json()["detail"]["code"],
+                         authority.CODE_AUTHORITY_LIBRARY_MISMATCH)
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM authority_domains WHERE domain='assets'").fetchone()[0], 0)
+
+    def test_underprivileged_tokens_cannot_stage_or_activate(self):
+        with api_app.get_db() as db:
+            _, client_token = api_auth.provision_token(db, "client", "baseline-reader")
+            db.commit()
+        headers = {"Authorization": f"Bearer {client_token}"}
+        staged = self.client.put("/v1/assets/authority/activation-baseline", headers=headers,
+                                 json={"libraryId": LIBRARY, "inventoryDigest": "a" * 64,
+                                       "items": []})
+        self.assertIn(staged.status_code, (401, 403), staged.text)
+        activated = self.client.post(PREFIX_ACTIVATE, headers=headers,
+                                     json={"libraryId": LIBRARY,
+                                           "expectedSnapshotDigest": "a" * 64})
+        self.assertIn(activated.status_code, (401, 403), activated.text)
+        self.assertFalse(self.status()["active"])
+
+    # --- Digest binding -------------------------------------------------
+
+    def test_staging_is_idempotent_for_an_identical_baseline(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        sha = self.publish(a)
+        digest = self.inventory()["inventoryDigest"]
+        body = {"libraryId": LIBRARY, "inventoryDigest": digest,
+                "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL, "sha256": sha}]}
+        first = self.client.put("/v1/assets/authority/activation-baseline",
+                                headers=self.publisher, json=body)
+        second = self.client.put("/v1/assets/authority/activation-baseline",
+                                 headers=self.publisher, json=body)
+        self.assertEqual(first.json()["snapshotDigest"], second.json()["snapshotDigest"])
+
+    def test_a_different_reviewed_lifecycle_produces_a_different_snapshot_digest(self):
+        # The digest binds the reviewed *state*, not merely the inventory: two reviews
+        # that disagree must not be interchangeable.
+        a = "20000000-0000-4000-8000-00000000000a"
+        sha = self.publish(a)
+        digest = self.inventory()["inventoryDigest"]
+        normal = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": digest,
+                  "items": [{"assetId": a, "lifecycle": asset_authority.NORMAL, "sha256": sha}]})
+        trashed = self.client.put(
+            "/v1/assets/authority/activation-baseline", headers=self.publisher,
+            json={"libraryId": LIBRARY, "inventoryDigest": digest,
+                  "items": [{"assetId": a, "lifecycle": asset_authority.TRASH, "sha256": sha}]})
+        self.assertNotEqual(normal.json()["snapshotDigest"], trashed.json()["snapshotDigest"])
+
+    def test_inventory_change_after_staging_refuses_activation(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        self.publish(a)
+        staged = self.stage()
+        # A legacy replication commit lands between review and activation.
+        self.publish("20000000-0000-4000-8000-00000000000b")
+        response = self.client.post(PREFIX_ACTIVATE, headers=self.publisher,
+                                    json={"libraryId": LIBRARY,
+                                          "expectedSnapshotDigest": staged["snapshotDigest"]})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "assetBaselineChanged")
+        self.assertFalse(self.status()["active"])
+
+    def tamper_staged_payload(self, mutate):
+        """Rewrite the durable staged payload, as a corrupted or hand-edited row would.
+
+        Staging validates on the way in, so only tampering with the stored row exercises
+        activation's own revalidation. Without those rechecks a tampered baseline would be
+        committed verbatim.
+        """
+        with api_app.get_db() as db:
+            stored = db.execute(
+                "SELECT payload FROM asset_authority_baseline WHERE singleton=1").fetchone()
+            payload = json.loads(stored[0])
+            mutate(payload)
+            digest = asset_authority.baseline_snapshot_digest(
+                payload["libraryId"], asset_authority.current_inventory(db)[0],
+                asset_authority.current_inventory(db)[1], payload["items"])
+            db.execute("UPDATE asset_authority_baseline SET payload=?, snapshot_digest=?"
+                       " WHERE singleton=1",
+                       [json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                                   ensure_ascii=False), digest])
+            db.commit()
+            return digest
+
+    def test_a_tampered_baseline_that_drops_an_asset_is_refused_at_activation(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        self.publish(a)
+        self.stage()
+        digest = self.tamper_staged_payload(lambda payload: payload.__setitem__("items", []))
+        response = self.client.post(PREFIX_ACTIVATE, headers=self.publisher,
+                                    json={"libraryId": LIBRARY, "expectedSnapshotDigest": digest})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "incompleteBaseline")
+        self.assertFalse(self.status()["active"])
+
+    def test_a_tampered_baseline_with_a_wrong_hash_is_refused_at_activation(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        self.publish(a)
+        self.stage()
+
+        def rewrite(payload):
+            payload["items"][0]["sha256"] = "9" * 64
+
+        digest = self.tamper_staged_payload(rewrite)
+        response = self.client.post(PREFIX_ACTIVATE, headers=self.publisher,
+                                    json={"libraryId": LIBRARY, "expectedSnapshotDigest": digest})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "assetHashMismatch")
+        self.assertFalse(self.status()["active"])
+
+    def test_wrong_digest_is_refused(self):
+        self.publish("20000000-0000-4000-8000-00000000000a")
+        self.stage()
+        response = self.client.post(PREFIX_ACTIVATE, headers=self.publisher,
+                                    json={"libraryId": LIBRARY,
+                                          "expectedSnapshotDigest": "f" * 64})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "assetBaselineChanged")
+
+    def test_activation_requires_a_staged_baseline(self):
+        response = self.client.post(PREFIX_ACTIVATE, headers=self.publisher,
+                                    json={"libraryId": LIBRARY,
+                                          "expectedSnapshotDigest": "0" * 64})
+        self.assertEqual(response.json()["detail"]["code"], "assetBaselineMissing")
+
+    def test_staging_does_not_populate_lifecycle_or_activate(self):
+        a = "20000000-0000-4000-8000-00000000000a"
+        self.publish(a)
+        self.stage()
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM asset_authority_state").fetchone()[0], 0)
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM authority_domains WHERE domain='assets'").fetchone()[0], 0)
+        self.assertFalse(self.status()["active"])
+        # And the staged Asset is still visible: staging is inert for ordinary reads.
+        listed = self.client.get("/v1/library/assets", params={"limit": 50}, headers=self.admin)
+        self.assertEqual([item["id"] for item in listed.json()["items"]], [a])
+
+    def test_the_inventory_is_snapshot_consistent(self):
+        for index in range(3):
+            self.publish(f"20000000-0000-4000-8000-00000000000{index}")
+        inventory = self.inventory()
+        self.assertEqual(inventory["total"], 3)
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", inventory["inventoryDigest"]))
+        with api_app.get_db() as db:
+            identity, digest = asset_authority.current_inventory(db)
+        self.assertEqual(digest, inventory["inventoryDigest"])
+        self.assertEqual(len(identity), inventory["total"])
+
+
+class ActivationSafetyTests(AssetAuthorityFixture):
+    def test_committed_legacy_assets_cannot_be_activated_without_a_reviewed_baseline(self):
+        # The invariant this workflow exists to satisfy, not to weaken: activation is
+        # digest-bound, so an unreviewed library cannot be activated at all and no Asset
+        # may be assumed `normal`.
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO assets(id,kind,object_key,created_at,updated_at,committed)"
+                       " VALUES('legacy','image','fixture','2026','2026',1)")
+            db.commit()
+        response = self.client.post("/v1/assets/authority/activate", headers=self.publisher,
+                                    json={"libraryId": LIBRARY,
+                                          "expectedSnapshotDigest": "0" * 64})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "assetBaselineMissing")
+        self.assertFalse(self.status()["active"])
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM authority_domains WHERE domain='assets'").fetchone()[0], 0)
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM asset_authority_state").fetchone()[0], 0)
+
+    def test_a_baseline_that_omits_a_committed_asset_is_refused(self):
+        # Case C without review: leaving an Asset out would let activation invent its
+        # lifecycle, which is how a trashed Asset becomes visible again.
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO assets(id,kind,object_key,sha256,created_at,updated_at,committed)"
+                       " VALUES('legacy','image','f','" + "a" * 64 + "','2026','2026',1)")
+            db.commit()
+        response = self.client.put("/v1/assets/authority/activation-baseline",
+                                   headers=self.publisher,
+                                   json={"libraryId": LIBRARY,
+                                         "inventoryDigest": self.inventory()["inventoryDigest"],
+                                         "items": []})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "incompleteBaseline")
 
 class ReplicationPublicationTests(LegacyFenceTests):
     def test_active_pc_commit_creates_canonical_state_and_change_atomically(self):

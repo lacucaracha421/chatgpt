@@ -157,6 +157,19 @@ CREATE TABLE IF NOT EXISTS asset_authority_retention(
  PRIMARY KEY(library_id,epoch));
 CREATE INDEX IF NOT EXISTS asset_authority_receipts_prune
  ON asset_authority_receipts(library_id,epoch,accepted_at);
+-- The reviewed pre-activation lifecycle baseline, staged before the domain exists.
+-- Deliberately outside `asset_authority_state`: nothing in this table is read by the
+-- visibility projection, which consults canonical state only for an *active* domain, so
+-- staging a baseline can never make an Asset visible or hidden on its own.
+CREATE TABLE IF NOT EXISTS asset_authority_baseline(
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+ library_id TEXT NOT NULL,
+ -- Digest of the committed server identity set staging was computed against.
+ inventory_digest TEXT NOT NULL,
+ -- Digest of the exact reviewed lifecycle assignment, which activation must present.
+ snapshot_digest TEXT NOT NULL,
+ payload TEXT NOT NULL,
+ staged_at TEXT NOT NULL);
 """
 
 
@@ -595,28 +608,218 @@ def parse_command(body):
 # Routes
 # ---------------------------------------------------------------------------
 
-def parse_activation(body):
-    """Validate the tiny operator request that activates the domain."""
-    if not isinstance(body, dict) or set(body) != {"libraryId"}:
+def parse_staged_activation(body):
+    """Validate a digest-bound activation request."""
+    if not isinstance(body, dict) or set(body) != {"libraryId", "expectedSnapshotDigest"}:
         fail(422, "invalidAssetBaseline", "자산 활성화 요청이 올바르지 않습니다.")
     library_id = body["libraryId"]
     if not isinstance(library_id, str) or not LIBRARY_ID_PATTERN.fullmatch(library_id):
         fail(422, "invalidAssetBaseline", "라이브러리 ID가 올바르지 않습니다.")
-    return library_id
+    digest = body["expectedSnapshotDigest"]
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        fail(422, "invalidAssetBaseline", "기준선 다이제스트가 올바르지 않습니다.")
+    return library_id, digest
 
 
-def activate(db, *, library_id, now):
-    """Create epoch 1 for the Asset domain, atomically.
+def _staged_summary(db):
+    """Whether a baseline is staged and what it covers. Read-only; no payload echoed."""
+    stored = staged_baseline(db)
+    if stored is None:
+        return None
+    counts = _baseline_counts(json.loads(stored["payload"])["items"])
+    return {"libraryId": stored["library_id"], "inventoryDigest": stored["inventory_digest"],
+            "snapshotDigest": stored["snapshot_digest"], "counts": counts,
+            "stagedAt": stored["staged_at"]}
 
-    Creating the `authority_domains` row *is* the fence: after this commits, the legacy
-    PC replication commit observes the row and can no longer overwrite canonical
-    lifecycle state. An identical retry is idempotent; a second activation is refused.
 
-    Unlike Classification and Album there is no staged snapshot to revalidate, because
-    this domain's canonical content is created by promotion and lifecycle commands rather
-    than derived from a PC publication. The safety property that matters — "never
-    activate over state this endpoint did not create" — is therefore enforced by refusing
-    to activate when authority state already exists without an authority row.
+# ---------------------------------------------------------------------------
+# Pre-activation lifecycle baseline
+# ---------------------------------------------------------------------------
+
+def _committed_identity(db):
+    """The committed server identity set: (asset id, sha256) pairs, ordered by id."""
+    return [(row[0], row[1]) for row in db.execute(
+        "SELECT id,sha256 FROM assets WHERE committed=1 ORDER BY id")]
+
+
+def inventory_digest(identity):
+    """Digest over the exact identity set staging and activation both bind to.
+
+    Covers the id set *and* every sha256, so it moves when an Asset is added, removed,
+    or re-committed with different bytes. Lifecycle state is deliberately excluded: the
+    baseline is what introduces lifecycle, so it cannot be part of the pre-existing
+    server identity being digested.
+    """
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def baseline_snapshot_digest(library_id, inventory, inventory_digest_value, rows):
+    """Digest of the exact reviewed assignment, so activation binds to what was reviewed.
+
+    Two operators staging against the same inventory must produce different digests if
+    they disagree about any Asset's lifecycle, which is what makes the reviewed state -
+    not merely the inventory - the thing activation commits to.
+    """
+    canonical = json.dumps(
+        [library_id, inventory_digest_value,
+         [[row["assetId"], row["lifecycle"], row["sha256"]] for row in rows]],
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def current_inventory(db):
+    """The committed server inventory a preflight or activation must agree on."""
+    identity = _committed_identity(db)
+    return identity, inventory_digest(identity)
+
+
+def content_conflict(db):
+    """A duplicate canonical sha256 across committed Assets, or None.
+
+    Two committed Assets sharing bytes means the domain has no single canonical identity
+    for that content. Staging refuses rather than picking one, because choosing would
+    silently retire an Asset the operator did not review.
+    """
+    row = db.execute(
+        "SELECT sha256 FROM assets WHERE committed=1 AND sha256 IS NOT NULL"
+        " GROUP BY sha256 HAVING COUNT(*)>1 ORDER BY sha256 LIMIT 1").fetchone()
+    return row[0] if row else None
+
+
+def parse_baseline(body):
+    """Validate the submitted lifecycle baseline envelope and its per-row shape."""
+    if not isinstance(body, dict) or set(body) != {
+            "libraryId", "inventoryDigest", "items"}:
+        fail(422, "invalidAssetBaseline", "자산 기준선 요청이 올바르지 않습니다.")
+    library_id = body["libraryId"]
+    if not isinstance(library_id, str) or not LIBRARY_ID_PATTERN.fullmatch(library_id):
+        fail(422, "invalidAssetBaseline", "라이브러리 ID가 올바르지 않습니다.")
+    digest = body["inventoryDigest"]
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        fail(422, "invalidAssetBaseline", "재고 다이제스트가 올바르지 않습니다.")
+    items = body["items"]
+    if not isinstance(items, list):
+        fail(422, "invalidAssetBaseline", "기준선 항목이 올바르지 않습니다.")
+    rows = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {"assetId", "lifecycle", "sha256"}:
+            fail(422, "invalidAssetBaseline", "기준선 항목이 올바르지 않습니다.")
+        asset_id, lifecycle, sha = item["assetId"], item["lifecycle"], item["sha256"]
+        if not valid_asset_id(asset_id):
+            fail(422, "invalidAssetBaseline", "자산 ID가 올바르지 않습니다.")
+        if lifecycle not in LIFECYCLE_STATES:
+            fail(422, "invalidAssetBaseline", "수명주기 값이 올바르지 않습니다.")
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+            fail(422, "invalidAssetBaseline", "콘텐츠 해시가 올바르지 않습니다.")
+        if asset_id in seen:
+            fail(409, "duplicateBaselineAsset",
+                 "기준선에 같은 자산이 두 번 있습니다.", assetId=asset_id)
+        seen.add(asset_id)
+        rows.append({"assetId": asset_id, "lifecycle": lifecycle, "sha256": sha})
+    rows.sort(key=lambda row: row["assetId"])
+    return library_id, digest, rows
+
+
+def stage_baseline(db, *, library_id, expected_inventory, rows, now):
+    """Validate and durably stage the reviewed lifecycle baseline. Writes baseline only.
+
+    Refuses anything that would make activation guess: an incomplete coverage set, an
+    unknown Asset, a hash that disagrees with the server's committed bytes, or a
+    duplicate-content conflict. Nothing here touches `asset_authority_state`, so staging
+    cannot change what any read returns.
+    """
+    if authority.active_domain(db, DOMAIN) is not None:
+        fail(409, "assetAuthorityActive", "자산 권위가 이미 활성화되어 있습니다.", domain=DOMAIN)
+
+    identity, actual_inventory = current_inventory(db)
+    if actual_inventory != expected_inventory:
+        fail(409, "assetBaselineChanged",
+             "서버 자산 재고가 준비 시점과 다릅니다. 다시 준비해 주세요.",
+             currentInventoryDigest=actual_inventory)
+
+    conflict = content_conflict(db)
+    if conflict is not None:
+        fail(409, "canonicalContentConflict",
+             "기존 중복 콘텐츠를 먼저 정리해야 합니다.", sha256=conflict)
+
+    server = dict(identity)
+    staged = {row["assetId"]: row for row in rows}
+
+    unknown = sorted(set(staged) - set(server))
+    if unknown:
+        fail(409, "unknownBaselineAsset",
+             "서버에 없는 자산이 기준선에 포함되어 있습니다.", assetIds=unknown[:20],
+             count=len(unknown))
+    missing = sorted(set(server) - set(staged))
+    if missing:
+        # Leaving an Asset out would let activation invent a lifecycle for it, which is
+        # precisely how a trashed Asset becomes visible again.
+        fail(409, "incompleteBaseline",
+             "기준선에 모든 커밋 자산이 포함되어야 합니다.", assetIds=missing[:20],
+             count=len(missing))
+    mismatch = sorted(asset_id for asset_id, sha in server.items()
+                      if staged[asset_id]["sha256"] != sha)
+    if mismatch:
+        fail(409, "assetHashMismatch",
+             "서버와 기준선의 콘텐츠 해시가 다릅니다.", assetIds=mismatch[:20],
+             count=len(mismatch))
+
+    snapshot = baseline_snapshot_digest(library_id, identity, actual_inventory, rows)
+    payload = json.dumps({"libraryId": library_id, "items": rows},
+                         sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    db.execute(
+        "INSERT INTO asset_authority_baseline(singleton,library_id,inventory_digest,"
+        "snapshot_digest,payload,staged_at) VALUES(1,?,?,?,?,?)"
+        " ON CONFLICT(singleton) DO UPDATE SET library_id=excluded.library_id,"
+        " inventory_digest=excluded.inventory_digest, snapshot_digest=excluded.snapshot_digest,"
+        " payload=excluded.payload, staged_at=excluded.staged_at",
+        [library_id, actual_inventory, snapshot, payload, now])
+    return {"libraryId": library_id, "inventoryDigest": actual_inventory,
+            "snapshotDigest": snapshot, "counts": _baseline_counts(rows),
+            "stagedAt": now}
+
+
+def _baseline_counts(rows):
+    counts = {lifecycle: 0 for lifecycle in LIFECYCLE_STATES}
+    for row in rows:
+        counts[row["lifecycle"]] += 1
+    return {"total": len(rows), **counts}
+
+
+def staged_baseline(db):
+    """The staged baseline row, or None. Read-only."""
+    return db.execute(
+        "SELECT library_id,inventory_digest,snapshot_digest,payload,staged_at"
+        " FROM asset_authority_baseline WHERE singleton=1").fetchone()
+
+
+def parse_staged_activation(body):
+    """Validate a digest-bound activation request."""
+    if not isinstance(body, dict) or set(body) != {"libraryId", "expectedSnapshotDigest"}:
+        fail(422, "invalidAssetBaseline", "자산 활성화 요청이 올바르지 않습니다.")
+    library_id = body["libraryId"]
+    if not isinstance(library_id, str) or not LIBRARY_ID_PATTERN.fullmatch(library_id):
+        fail(422, "invalidAssetBaseline", "라이브러리 ID가 올바르지 않습니다.")
+    digest = body["expectedSnapshotDigest"]
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        fail(422, "invalidAssetBaseline", "기준선 다이제스트가 올바르지 않습니다.")
+    return library_id, digest
+
+
+def activate(db, *, library_id, expected_snapshot, now):
+    """Create epoch 1 from the staged, reviewed lifecycle baseline, atomically.
+
+    The caller owns ``BEGIN IMMEDIATE``. Creating `authority_domains` *is* the fence:
+    after this commits the legacy PC replication commit observes the row and can no
+    longer overwrite canonical lifecycle state. An identical retry is idempotent; a
+    second activation is refused.
+
+    Lifecycle comes from the staged baseline rather than from `normal`, because the
+    server's own `committed` flag says nothing about an Asset the user already trashed
+    or hard-deleted on the PC. Defaulting to `normal` here is exactly the resurrection
+    this workflow exists to prevent.
     """
     libraries = sorted({entry["libraryId"] for entry in authority.active_domains(db)})
     if len(libraries) > 1:
@@ -632,7 +835,8 @@ def activate(db, *, library_id, now):
         if existing["libraryId"] == library_id:
             return {"domain": DOMAIN, "libraryId": library_id, "epoch": existing["epoch"],
                     "contractVersion": existing["contractVersion"],
-                    "cursor": existing["cursor"], "activatedAt": existing["activatedAt"]}
+                    "cursor": existing["cursor"], "activatedAt": existing["activatedAt"],
+                    "baselineDigest": existing["baselineDigest"]}
         fail(409, "assetAuthorityActive", "자산 권위가 이미 활성화되어 있습니다.", domain=DOMAIN)
 
     # Typed rows without an authority row are an interrupted/manual state this endpoint
@@ -644,22 +848,72 @@ def activate(db, *, library_id, now):
             fail(409, "assetAuthorityStateExists",
                  "활성화되지 않은 자산 권위 상태가 이미 존재합니다.", domain=DOMAIN)
 
-    if db.execute("SELECT sha256 FROM assets WHERE committed=1 AND sha256 IS NOT NULL GROUP BY sha256 HAVING COUNT(*)>1 LIMIT 1").fetchone():
-        fail(409, "canonicalContentConflict", "기존 중복 콘텐츠를 먼저 정리해야 합니다.")
+    stored = staged_baseline(db)
+    if stored is None or stored["library_id"] != library_id:
+        fail(409, "assetBaselineMissing",
+             "활성화할 자산 기준선이 없습니다. 먼저 기준선을 준비해 주세요.")
+    if stored["snapshot_digest"] != expected_snapshot:
+        fail(409, "assetBaselineChanged",
+             "자산 기준선이 변경되었습니다. 다시 준비해 주세요.",
+             snapshotDigest=stored["snapshot_digest"])
 
+    payload = json.loads(stored["payload"])
+    rows = payload["items"]
+
+    # Re-validate against the live inventory in the activation transaction: the staged
+    # digest binds the reviewed inventory, and this recheck catches a replication commit
+    # that landed between staging and activation.
+    identity, actual_inventory = current_inventory(db)
+    if actual_inventory != stored["inventory_digest"]:
+        fail(409, "assetBaselineChanged",
+             "서버 자산 재고가 준비 시점과 다릅니다. 다시 준비해 주세요.",
+             currentInventoryDigest=actual_inventory)
+    conflict = content_conflict(db)
+    if conflict is not None:
+        fail(409, "canonicalContentConflict",
+             "기존 중복 콘텐츠를 먼저 정리해야 합니다.", sha256=conflict)
+    server = dict(identity)
+    staged = {row["assetId"]: row for row in rows}
+    if set(staged) != set(server):
+        fail(409, "incompleteBaseline",
+             "기준선이 현재 커밋 자산 집합과 일치하지 않습니다.",
+             missingCount=len(set(server) - set(staged)),
+             unknownCount=len(set(staged) - set(server)))
+    mismatch = [asset_id for asset_id, sha in server.items()
+                if staged[asset_id]["sha256"] != sha]
+    if mismatch:
+        fail(409, "assetHashMismatch",
+             "서버와 기준선의 콘텐츠 해시가 다릅니다.", assetIds=mismatch[:20],
+             count=len(mismatch))
+
+    lifecycle_by_id = {row["assetId"]: row["lifecycle"] for row in rows}
     db.execute(
         "INSERT INTO authority_domains(library_id,domain,epoch,contract_version,change_cursor,"
         "baseline_digest,baseline_revision,activated_at) VALUES(?,?,1,?,0,?,NULL,?)",
-        [library_id, DOMAIN, CONTRACT_VERSION,
-         hashlib.sha256(f"assets:{library_id}:{now}".encode()).hexdigest(), now])
-    db.execute("INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision,"
-               "kind,object_key,content_type,size_bytes,sha256,source_url,creator_name,creator_handle,"
-               "collected_at,source_published_at,import_source,created_at,updated_at) "
-               "SELECT ?,id,'normal',1,kind,object_key,content_type,size_bytes,sha256,source_url,"
-               "creator_name,creator_handle,collected_at,source_published_at,import_source,created_at,"
-               "updated_at FROM assets WHERE committed=1", [library_id])
+        [library_id, DOMAIN, CONTRACT_VERSION, stored["snapshot_digest"], now])
+    # Server canonical metadata wins for everything except lifecycle, which is the one
+    # field the reviewed baseline owns. Initial revisions start at 1 and no change rows
+    # are written: the baseline *is* epoch 1's starting state, not a sequence of edits.
+    for asset_id, sha in identity:
+        row = db.execute(
+            "SELECT kind,object_key,content_type,size_bytes,sha256,source_url,creator_name,"
+            "creator_handle,collected_at,source_published_at,import_source,created_at,updated_at"
+            " FROM assets WHERE id=?", [asset_id]).fetchone()
+        db.execute(
+            "INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision,"
+            "kind,object_key,content_type,size_bytes,sha256,source_url,creator_name,"
+            "creator_handle,collected_at,source_published_at,import_source,created_at,updated_at)"
+            " VALUES(?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [library_id, asset_id, lifecycle_by_id[asset_id], row[0], row[1], row[2], row[3],
+             row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], row[12]])
+    db.execute(
+        "INSERT INTO asset_authority_retention(library_id,epoch,pruned_through,pruned_at)"
+        " VALUES(?,1,0,NULL)", [library_id])
+    db.execute("DELETE FROM asset_authority_baseline WHERE singleton=1")
     return {"domain": DOMAIN, "libraryId": library_id, "epoch": 1,
-            "contractVersion": CONTRACT_VERSION, "cursor": 0, "activatedAt": now}
+            "contractVersion": CONTRACT_VERSION, "cursor": 0, "activatedAt": now,
+            "baselineDigest": stored["snapshot_digest"],
+            "counts": _baseline_counts(rows)}
 
 
 PREFIX = "/v1/assets/authority"
@@ -696,15 +950,90 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
             body = json.loads(data)
         except (ValueError, UnicodeError):
             fail(422, "invalidAssetBaseline", "자산 활성화 요청을 읽을 수 없습니다.")
-        library_id = parse_activation(body)
+        library_id, expected_snapshot = parse_staged_activation(body)
 
         def run():
             with get_db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 try:
-                    if authority.active_domain(db, DOMAIN) is None and db.execute("SELECT 1 FROM assets WHERE committed=1 LIMIT 1").fetchone():
-                        fail(409, "legacyLifecycleBaselineRequired", "기존 PC 휴지통 상태를 검증한 활성화 기준선이 필요합니다.")
-                    state = activate(db, library_id=library_id, now=now_iso())
+                    state = activate(db, library_id=library_id,
+                                     expected_snapshot=expected_snapshot, now=now_iso())
+                    db.commit()
+                    return state
+                except BaseException:
+                    db.rollback()
+                    raise
+        return await run_in_threadpool(run)
+
+    @app.get(PREFIX + "/activation-inventory")
+    async def activation_inventory(libraryId: str, after: str | None = None,
+                                   limit: int = DEFAULT_ASSET_PAGE,
+                                   authorization: str | None = Header(default=None)):
+        """Read-only committed Assets and the digest activation will bind to.
+
+        Publisher-only because it exposes the canonical identity set an operator must
+        review before activation. Snapshot-consistent: the page and the digest are read
+        inside one transaction, so a caller cannot review a set that never existed.
+        """
+        require_publisher(authorization)
+        if not LIBRARY_ID_PATTERN.fullmatch(libraryId):
+            fail()
+        if not 1 <= limit <= MAX_ASSET_PAGE:
+            fail()
+        if after is not None and not valid_asset_id(after):
+            fail()
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN")
+                try:
+                    identity, digest = current_inventory(db)
+                    rows = [row for row in identity if after is None or row[0] > after]
+                    page = rows[:limit]
+                    items = []
+                    for asset_id, sha in page:
+                        meta = db.execute(
+                            "SELECT kind,content_type,size_bytes,collected_at,created_at,"
+                            "source_url,creator_handle,import_source FROM assets WHERE id=?",
+                            [asset_id]).fetchone()
+                        items.append({
+                            "assetId": asset_id, "sha256": sha,
+                            "kind": meta[0], "contentType": meta[1], "sizeBytes": meta[2],
+                            "collectedAt": meta[3] or meta[4], "sourceUrl": meta[5],
+                            "creatorHandle": meta[6], "importSource": meta[7]})
+                    return {"libraryId": libraryId, "inventoryDigest": digest,
+                            "total": len(identity), "items": items,
+                            "nextAfter": page[-1][0] if len(page) == limit else None,
+                            "hasMore": len(rows) > limit,
+                            "contentConflictSha256": content_conflict(db),
+                            "staged": _staged_summary(db)}
+                finally:
+                    db.rollback()
+        return await run_in_threadpool(run)
+
+    @app.put(PREFIX + "/activation-baseline")
+    async def stage_activation_baseline(request: Request,
+                                        authorization: str | None = Header(default=None)):
+        """Stage the reviewed lifecycle baseline. Inactive-only; never populates state."""
+        require_publisher(authorization)
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > 32 * 1024 * 1024:
+                fail(413, "invalidAssetBaseline", "자산 기준선 요청이 너무 큽니다.")
+            data.extend(chunk)
+        try:
+            body = json.loads(data)
+        except (ValueError, UnicodeError):
+            fail(422, "invalidAssetBaseline", "자산 기준선 요청을 읽을 수 없습니다.")
+        library_id, expected_inventory, rows = parse_baseline(body)
+
+        def run():
+            with get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    state = stage_baseline(db, library_id=library_id,
+                                           expected_inventory=expected_inventory,
+                                           rows=rows, now=now_iso())
                     db.commit()
                     return state
                 except BaseException:
