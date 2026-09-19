@@ -112,6 +112,13 @@ CREATE TABLE IF NOT EXISTS asset_authority_state(
 -- rather than a scan over authority state.
 CREATE INDEX IF NOT EXISTS asset_authority_by_lifecycle
  ON asset_authority_state(library_id,lifecycle,asset_id);
+-- The visibility projection asks "is *this* Asset normal", once per candidate row, so it
+-- needs an index that starts at `asset_id`. The lifecycle index above starts at
+-- `library_id`, so SQLite cannot use it for that probe and falls back to scanning the
+-- whole authority table per candidate - quadratic, and slow enough to exceed the mobile
+-- client's request timeout on an ordinary creator aggregation.
+CREATE INDEX IF NOT EXISTS asset_authority_live_by_asset
+ ON asset_authority_state(asset_id,lifecycle);
 -- The durable Capture → Asset mapping. Primary key on the *Capture* is what makes
 -- promotion idempotent: a retry finds this row instead of creating a second Asset.
 CREATE UNIQUE INDEX IF NOT EXISTS asset_authority_by_content

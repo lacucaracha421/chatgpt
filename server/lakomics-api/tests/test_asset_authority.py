@@ -864,6 +864,38 @@ class ContentIdentityTests(PromotionTests):
             headers=self.admin,json={"variant":"original"})
         self.assertEqual(response.status_code,200,response.text)
 
+class VisibilityProjectionPlanTests(AssetAuthorityFixture):
+    """The visibility probe must be an index seek, not a scan per candidate row.
+
+    `visible_assets` asks "is *this* asset normal" once for every row it considers. With no
+    index starting at `asset_id` SQLite scans the whole authority table each time, which is
+    quadratic: on production it made the creator aggregation behind `/v1/library/revisit`
+    take ~9s and the route ~20s, past the mobile bridge timeout. A plan assertion is the
+    right guard because the cost is invisible in result correctness.
+    """
+
+    def aggregation_plan(self):
+        with api_app.get_db() as db:
+            # The route reads the view, so this is the plan that actually ships.
+            return [row["detail"] for row in db.execute(
+                "EXPLAIN QUERY PLAN SELECT creator_handle, COUNT(*) FROM visible_assets"
+                " WHERE committed=1 GROUP BY creator_handle")]
+
+    def test_the_visibility_probe_seeks_authority_state_by_asset(self):
+        self.activate()
+        plan = self.aggregation_plan()
+        joined = " | ".join(plan)
+        self.assertIn("asset_authority_live_by_asset", joined,
+                      f"the visibility probe must seek by asset_id: {plan}")
+        self.assertNotIn("SCAN canonical", joined,
+                         f"a scan of authority state is quadratic here: {plan}")
+
+    def test_the_index_exists_in_the_shipped_schema(self):
+        # Read from the module's own DDL so the assertion cannot drift from what deploys.
+        self.assertIn("asset_authority_live_by_asset", asset_authority.DDL)
+        self.assertIn("ON asset_authority_state(asset_id,lifecycle)", asset_authority.DDL)
+
+
 class MissingAuthorityRowTests(AssetAuthorityFixture):
     """An active domain with no canonical row must hide the Asset, not expose it.
 
