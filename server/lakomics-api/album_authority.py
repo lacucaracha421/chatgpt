@@ -60,8 +60,6 @@ proceeds exactly as before, and startup only creates empty tables. There is no
 automatic activation: :func:`activate` runs solely from the publisher-only route,
 which this batch does not call in any environment.
 """
-import base64
-import binascii
 import datetime
 import hashlib
 import json
@@ -72,6 +70,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import asset_filters
 import asset_visibility
 import classification_authority
 
@@ -121,9 +120,15 @@ MAX_ALBUM_PAGE = 1_000
 # is bounded like the existing mobile Asset listing rather than like the baseline.
 DEFAULT_ALBUM_ASSET_PAGE = 50
 MAX_ALBUM_ASSET_PAGE = 100
-#: Tag inside the opaque Asset-page cursor. It exists so a cursor minted for another
-#: read cannot be replayed here and silently mis-walk a page.
+#: Tag inside the opaque Asset-page cursor. It is carried by ``asset_filters.encode_cursor``
+#: so a cursor minted for another read cannot be replayed here and silently mis-walk a page.
 ALBUM_ASSETS_SORT = "album-assets"
+
+#: The coded detail ``asset_filters.decode_cursor`` is handed so its own rejection path
+#: cannot produce a shape this route does not use. The route's ``fail`` is what actually
+#: reports, in both branches.
+_CURSOR_DETAIL = {"code": "invalidAlbumAssetsCursor",
+                  "message": "앨범 자산 커서가 올바르지 않습니다."}
 
 DEFAULT_MEMBERSHIP_PAGE = 1_000
 MAX_MEMBERSHIP_PAGE = 2_000
@@ -540,28 +545,88 @@ def split_membership_key(value):
     return album_id, asset_id
 
 
-def encode_asset_cursor(album_id, sort_at, asset_id):
-    payload = json.dumps([ALBUM_ASSETS_SORT, album_id, sort_at, asset_id],
-                         separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
+def encode_asset_cursor(album_id, after, filters):
+    """One Album Asset page cursor, bound to the Album and the filter set that minted it.
+
+    The Album id sits in the same slot the shipped cursor used, directly after the read tag
+    and in front of the ``(sort key, id)`` pair, so the payload layout is unchanged from the
+    legacy one and only the envelope wraps it.
+    """
+    return asset_filters.encode_cursor(
+        "album-assets", filters, [ALBUM_ASSETS_SORT, album_id, after[0], after[1]])
 
 
-def decode_asset_cursor(cursor, album_id):
-    """Resolve one Album Asset page cursor, or reject it.
+def resolve_asset_cursor(cursor, album_id, filters, fail):
+    """This route's Asset-page cursor, in either the legacy or the filtered form.
 
-    ``album_id`` is part of the payload, not just an argument, so a cursor cannot be
-    presented with a different Album and silently resume at an unrelated offset.
+    Two shapes are accepted, and both are held to the same scope identity:
+
+    * the shipped ``[ALBUM_ASSETS_SORT, album_id, sort_at, asset_id]`` list, which only an
+      unfiltered request may use, so a cursor minted before filtering existed keeps working
+      on the request that minted it and nowhere else;
+    * the current envelope wrapping that same layout, which additionally carries the filter
+      identity, so a filtered walk can only be resumed under the filters it was minted with.
+
+    Both are held to the same Album, and neither is accepted under a filter: a pre-filter
+    cursor cannot name the filter set it was cut in, so answering a filtered request from it
+    would resume a listing the client did not ask for.
+
+    Returns the ``(sort_at, asset_id)`` pair. Rejection is always the route's coded
+    ``invalidAlbumAssetsCursor`` shape, never a bare string, because a client distinguishes
+    this from the request-shape rejection by that code. ``asset_filters.decode_cursor`` is
+    given an ``HTTPException`` carrying the coded detail purely so its own rejection path
+    cannot leak a different shape; the route re-raises through ``fail`` regardless.
     """
     try:
-        padding = "=" * (-len(cursor) % 4)
-        payload = json.loads(base64.b64decode(cursor + padding, altchars=b"-_", validate=True))
-    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        payload = asset_filters.decode_cursor(
+            cursor, "album-assets", filters, 422, _CURSOR_DETAIL)
+    except HTTPException:
         fail(422, "invalidAlbumAssetsCursor", "앨범 자산 커서가 올바르지 않습니다.")
-    if (not isinstance(payload, list) or len(payload) != 4
-            or not all(isinstance(value, str) and value for value in payload)
-            or payload[0] != ALBUM_ASSETS_SORT or payload[1] != album_id):
+    # A legacy cursor — the shipped bare ``[sort, album, sort_at, asset_id]`` list — and the
+    # envelope that replaced it share this layout, so a payload in this shape is a full
+    # binding of the Album it was minted for whatever its outer form was. Anything else
+    # carries no Album at all and is refused, by ``decode_cursor`` for the envelope, and here
+    # for a bare list whose ``lead`` slot it could not check.
+    if (len(payload) != 4 or payload[0] != ALBUM_ASSETS_SORT or payload[1] != album_id
+            or not isinstance(payload[2], str) or not payload[2]
+            or not isinstance(payload[3], str) or not payload[3]):
         fail(422, "invalidAlbumAssetsCursor", "앨범 자산 커서가 올바르지 않습니다.")
     return payload[2], payload[3]
+
+
+def parse_asset_filters(params, fail):
+    """The three shared media filters, or a coded ``fail``.
+
+    Query strings arrive as text, so this is where an absent parameter ("everything"),
+    an unknown enum value and a non-integer, negative or out-of-i64 bound are separated
+    before any SQL exists. The vocabulary and the arithmetic themselves stay in
+    ``asset_filters`` so this route cannot drift from the ordinary library.
+    """
+    values = {}
+    for name in ("duration_ms_min", "duration_ms_max"):
+        raw = params.get(name)
+        if raw is None:
+            values[name] = None
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+        if value < 0 or value > asset_filters.BOUND_MAX:
+            fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+        values[name] = value
+    media, aspect = params.get("media_kind"), params.get("aspect_ratio")
+    if media is not None and media not in asset_filters.MEDIA_KINDS:
+        fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+    if aspect is not None and aspect not in asset_filters.ASPECT_PREDICATES:
+        fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+    if (values["duration_ms_min"] is not None and values["duration_ms_max"] is not None
+            and values["duration_ms_min"] >= values["duration_ms_max"]):
+        fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+    filters = asset_filters.Filters(media, aspect, values["duration_ms_min"],
+                                    values["duration_ms_max"])
+    clause, bindings = asset_filters.filter_clause(filters)
+    return filters, clause, bindings
 
 
 def _optional_dimension(row, column):
@@ -1315,15 +1380,21 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
         metadata is joined from the committed Asset table instead of being copied into
         the replica: Album authority owns the relation, the Asset domain owns how an
         Asset is presented.
+
+        The same three media filters the ordinary library offers are applied here, in
+        SQL and before this page is cut, through the shared ``asset_filters`` predicates.
         """
         require_client(authorization)
-        if not set(request.query_params) <= {"libraryId", "epoch", "albumId", "cursor", "limit"}:
+        if not set(request.query_params) <= {"libraryId", "epoch", "albumId", "cursor", "limit",
+                                             "media_kind", "aspect_ratio",
+                                             "duration_ms_min", "duration_ms_max"}:
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         if (not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1
                 or not ALBUM_ID_PATTERN.fullmatch(albumId)
                 or not 1 <= limit <= MAX_ALBUM_ASSET_PAGE):
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
-        after = None if cursor is None else decode_asset_cursor(cursor, albumId)
+        filters, filter_clause, filter_params = parse_asset_filters(request.query_params, fail)
+        after = None if cursor is None else resolve_asset_cursor(cursor, albumId, filters, fail)
 
         def run():
             with get_db() as db:
@@ -1336,9 +1407,11 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     # a consumer that still holds the deleted Album render it as empty
                     # rather than as gone.
                     fail(404, "albumNotFound", "앨범을 찾을 수 없습니다.", albumId=albumId)
+                clause_params = [libraryId, albumId] + filter_params
+                request_cursor = encode_asset_cursor(albumId, after, filters) if after else None
                 if after is None:
                     cursor_clause = ""
-                    params = [libraryId, albumId, limit + 1]
+                    params = clause_params + [limit + 1]
                 else:
                     # Strict inequality on the (sort key, id) pair: every page is
                     # disjoint from the previous one, so the walk cannot loop.
@@ -1351,7 +1424,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                             )
                         )
                     """
-                    params = [libraryId, albumId, after[0], after[0], after[1], limit + 1]
+                    params = clause_params + [after[0], after[0], after[1], limit + 1]
                 rows = db.execute(
                     f"""
                     SELECT asset.*,
@@ -1362,6 +1435,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                       AND member.album_id = ?
                       AND member.desired_state = 1
                       AND asset.committed = 1
+                      {filter_clause}
                       {cursor_clause}
                     ORDER BY mobile_sort_at DESC, asset.id DESC
                     LIMIT ?
@@ -1376,14 +1450,16 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                 next_cursor = None
                 if has_more and page_rows:
                     last = page_rows[-1]
-                    next_cursor = encode_asset_cursor(albumId, last["mobile_sort_at"], last["id"])
-                    if next_cursor == cursor:
+                    next_cursor = encode_asset_cursor(
+                        albumId, (last["mobile_sort_at"], last["id"]), filters)
+                    if next_cursor == request_cursor:
                         # Unreachable while the ordering is strict; if it ever happens
                         # a client would page forever, so it must be an error, not a loop.
                         fail(503, "albumAssetsCursorStalled",
                              "앨범 자산 페이지 커서가 진행하지 않았습니다.", albumId=albumId)
                 return {"libraryId": row["libraryId"], "epoch": row["epoch"],
                         "contractVersion": row["contractVersion"], "albumId": albumId,
+                        "filterVersion": asset_filters.FILTER_VERSION,
                         "items": items, "nextCursor": next_cursor, "hasMore": has_more}
 
         return await run_in_threadpool(run)

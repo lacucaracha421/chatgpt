@@ -21,6 +21,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstrai
 
 import album_authority
 import asset_authority
+import asset_filters
 import asset_visibility
 import authority
 import classification_authority
@@ -201,7 +202,11 @@ def asset_list_generation(authorization: str | None = Header(default=None)):
         snapshot = db.execute("SELECT revision FROM classification_snapshots WHERE singleton=1").fetchone() if 'classification_snapshots' in tables else None
         value = [generation,[list(row) for row in domains],list(characters) if characters else None,list(snapshot) if snapshot else None]
     import hashlib
-    return {"generation":hashlib.sha256(json.dumps(value,separators=(',',':')).encode()).hexdigest()}
+    # `filterVersion` is the same "does this server know about X" probe, carried on the
+    # call every gallery already makes before a page fetch: an older server omits the
+    # field, and the client then refuses to present an unfiltered list as a filtered one.
+    return {"generation":hashlib.sha256(json.dumps(value,separators=(',',':')).encode()).hexdigest(),
+            "filterVersion": asset_filters.FILTER_VERSION}
 
 
 app.on_event("startup")(startup_replication)
@@ -1665,6 +1670,11 @@ def encode_mobile_cursor(sort: str, sort_at: str, asset_id: str) -> str:
 
 
 def decode_mobile_cursor(cursor: str, expected_sort: str) -> tuple[str, str]:
+    """The shipped three-slot ``[sort, sort_at, asset_id]`` cursor of the Revisit listings.
+
+    These reads have no filters and no scope slot of their own, so the legacy shape still is
+    their whole cursor; ``asset_filters.decode_cursor`` is not used here.
+    """
     try:
         padding = "=" * (-len(cursor) % 4)
         payload = json.loads(base64.b64decode(cursor + padding, altchars=b"-_", validate=True))
@@ -1853,15 +1863,52 @@ def list_mobile_classification_assets(
         ge=1,
         le=MOBILE_LIBRARY_MAX_LIMIT,
     ),
+    media_kind: asset_filters.MediaKind | None = Query(default=None, pattern="^(images|videos)$"),
+    aspect_ratio: asset_filters.AspectRatio | None = Query(default=None, pattern="^(square|landscape|portrait)$"),
+    # Bounded to the non-negative i64 range SQLite stores. `strict` is deliberately absent:
+    # query parameters always arrive as text, so `0` must parse; the integer type plus the
+    # bound still refuse a float, a negative value and anything outside the column's range.
+    duration_ms_min: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
+    duration_ms_max: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
 ):
+    """The ordinary library gallery, with the shared media filters applied in SQL.
+
+    Filters are evaluated by the database, before the page is cut, so `limit` counts
+    matching Assets rather than post-filter survivors of an arbitrary page. The technical
+    fields a user filters on — `width`, `height`, `duration_ms` — are read live from the
+    canonical Asset row, and `filterVersion` is advertised even when nothing is filtered
+    so a client can tell "this server applied no filter" from "this server ignores filters".
+    """
     require_auth(authorization)
+    filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max)
     comparison = "<" if sort == "newest" else ">"
     direction = "DESC" if sort == "newest" else "ASC"
     params: list[object] = []
     classification_clause = ""
     cursor_clause = ""
     if cursor is not None:
-        cursor_sort_at, cursor_asset_id = decode_mobile_cursor(cursor, sort)
+        # The cursor carries the filter identity. A cursor minted under different filters must
+        # not be resumed here: it would silently walk a listing the client did not ask for.
+        # The sort name is bound separately below, so changing the order is refused rather
+        # than answered with a mismatched page, and an unfiltered request still accepts a
+        # pre-filter `[sort, sort_at, asset_id]` cursor for the same reason.
+        parsed = asset_filters.decode_cursor(cursor, "library-assets", filters,
+                                             400, "Invalid cursor")
+        if len(parsed) == 3:
+            # Pre-filter layout. It has no scope slots — the classification is the parameter
+            # the request arrived with — so the sort slot is all there is to bind.
+            if parsed[0] != sort:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
+            cursor_sort_at, cursor_asset_id = asset_filters.require_strings(
+                parsed[1:], 400, "Invalid cursor")
+        elif len(parsed) == 4:
+            # New cursors bind the classification as well as the sort and filters.
+            if parsed[0] != sort or parsed[1] != classification_id:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
+            cursor_sort_at, cursor_asset_id = asset_filters.require_strings(
+                parsed[2:], 400, "Invalid cursor")
+        else:
+            raise HTTPException(status_code=400, detail="Invalid cursor")
         cursor_clause = f"""
             AND (
                 COALESCE(asset.collected_at, asset.created_at) {comparison} ?
@@ -1873,6 +1920,9 @@ def list_mobile_classification_assets(
         """
         params.extend([cursor_sort_at, cursor_sort_at, cursor_asset_id])
     params.append(limit + 1)
+
+    # The filter's own bindings precede the cursor/limit ones, matching the clause order.
+    filter_clause, filter_params = asset_filters.filter_clause(filters)
 
     with get_db() as db:
         # One authority read for both the filter and the projection, so a page cannot be
@@ -1915,7 +1965,7 @@ def list_mobile_classification_assets(
                 """
                 clause_params.append(classification_id)
         # Clause bindings precede the cursor/limit bindings in the statement below.
-        params[:0] = clause_params
+        params[:0] = clause_params + filter_params
         rows = db.execute(
             f"""
             SELECT asset.*,
@@ -1924,6 +1974,7 @@ def list_mobile_classification_assets(
             WHERE asset.committed = 1
               {lifecycle_clause}
               {classification_clause}
+              {filter_clause}
               {cursor_clause}
             ORDER BY mobile_sort_at {direction}, asset.id {direction}
             LIMIT ?
@@ -1976,8 +2027,11 @@ def list_mobile_classification_assets(
     next_cursor = None
     if has_more and page_rows:
         last = page_rows[-1]
-        next_cursor = encode_mobile_cursor(sort, last["mobile_sort_at"], last["id"])
-    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+        next_cursor = asset_filters.encode_cursor(
+            "library-assets", filters,
+            [sort, classification_id, last["mobile_sort_at"], last["id"]])
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more,
+            "filterVersion": asset_filters.FILTER_VERSION}
 
 
 def _revisit_creator_exclusion_sql(alias: str = "asset") -> str:

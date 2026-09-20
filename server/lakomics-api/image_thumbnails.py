@@ -1,4 +1,4 @@
-"""Bounded server-side image thumbnail worker (durable jobs, one low-priority thread).
+"""Bounded server-side media thumbnail worker (durable jobs, one low-priority thread).
 
 Server-owned Assets created by ``asset_authority.promote_capture`` are committed with
 ``thumbnail_key IS NULL``, so mobile has no tile to fetch for them while every PC is
@@ -11,12 +11,12 @@ Shape of the contract
 ---------------------
 
 * ``install(db)`` creates the durable job table and one ``AFTER INSERT`` trigger on
-  ``assets``. The trigger enqueues **only** newly captured images — ``kind='image'``,
+  ``assets``. The trigger enqueues **only** new image/GIF/video captures —
   ``committed=1``, ``thumbnail_key IS NULL``, ``import_source='capture'`` — and never
   touches rows that already exist. A deployment therefore repairs nothing by accident;
   historical rows are enqueued deliberately through :func:`enqueue`.
 * :func:`enqueue` is the explicit, scoped-repair entry point. It refuses anything that
-  is not a visible, committed, missing-thumbnail image, and it preserves a terminal
+  is not visible, committed, missing-thumbnail media, and it preserves a terminal
   failure unless the caller passes ``retry_terminal=True`` with a reason.
 * :class:`ImageThumbnailWorker` owns one daemon thread that polls, claims one job at a
   time and never runs more than one encode concurrently. A cross-process ``fcntl``
@@ -28,11 +28,11 @@ Safety rules enforced here, in order of how they fail
 * *Nothing is decoded in the API process.* The child is the only place Pillow exists,
   and it is bounded by wall clock, CPU time, address space and priority.
 * *Originals are never replaced.* The derived key is content-addressed
-  (``derived/image-thumbnails/v1/{sha256}.webp``), so it is immutable and distinct from
+  (legacy image namespace or a kind-specific media namespace), distinct from
   legacy ``library/{asset_id}/...`` keys, and it can be shared by identical content.
 * *Publication is compare-and-set.* ``thumbnail_key`` is written only when the Asset
   still has the same ``sha256``, still has no thumbnail, and is still a visible,
-  committed image. A trash, delete or replacement during the download wins, and the
+  committed Asset with unchanged source fields. A trash, delete or replacement during the download wins, and the
   worker discards its artifact instead of publishing it.
 * *Remote objects are never deleted.* A derived key may be shared by another Asset with
   the same content, so removing it on a lost race would break a live thumbnail.
@@ -45,8 +45,10 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import logging
 import os
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -78,6 +80,9 @@ LEASE_SECONDS = 300.0
 #: Input bound, matching the capture download limit: an original larger than this is not
 #: a thumbnail candidate and must not be streamed.
 MAX_SOURCE_BYTES = 50 * 1024 * 1024
+# Video captures can be larger, but thumbnailing never downloads the full capture
+# service's 512 MiB maximum on this shared host.
+MAX_VIDEO_SOURCE_BYTES = 128 * 1024 * 1024
 
 #: Absolute wall-clock bound on one source download, measured with a monotonic clock.
 #: ``MAX_SOURCE_BYTES`` bounds how much is read but not how long it takes: a peer that
@@ -98,6 +103,10 @@ DERIVED_PREFIX = "derived/image-thumbnails/v1"
 DERIVED_CONTENT_TYPE = "image/webp"
 
 IMAGE_KIND = "image"
+MEDIA_KINDS = ("image", "gif", "video")
+MAX_METADATA_BYTES = 4096
+MAX_SOURCE_PIXELS = 24_000_000
+MAX_DURATION_MS = 9_223_372_036_854_775_807
 CAPTURE_IMPORT_SOURCE = "capture"
 
 # ---------------------------------------------------------------------------
@@ -123,6 +132,8 @@ E_TERMINAL = {
     "assetNotVisible": "assetNotVisible",
     "thumbnailAlreadyPresent": "thumbnailAlreadyPresent",
     "encodeUnsupportedPlatform": "encodeUnsupportedPlatform",
+    "encodeToolUnavailable": "encodeToolUnavailable",
+    "metadataInvalid": "metadataInvalid",
 }
 
 _DDL = f"""
@@ -141,12 +152,13 @@ CREATE INDEX IF NOT EXISTS image_thumbnail_jobs_claimable
  ON {TABLE}(state, lease_until, created_at);
 
 -- Enqueue a new capture exactly once. The primary key is the dedupe, and the guard is
--- deliberately narrow: only a committed image Asset that a Capture promoted and that
+-- deliberately narrow: only a committed media Asset that a Capture promoted and that
 -- still lacks a thumbnail qualifies. Existing rows are never scanned, so installing
 -- this cannot enqueue historical Assets.
-CREATE TRIGGER IF NOT EXISTS image_thumbnail_jobs_insert
+DROP TRIGGER IF EXISTS image_thumbnail_jobs_insert;
+CREATE TRIGGER image_thumbnail_jobs_insert
 AFTER INSERT ON assets
-WHEN NEW.kind='{IMAGE_KIND}'
+WHEN NEW.kind IN ('image','gif','video')
  AND NEW.committed=1
  AND NEW.thumbnail_key IS NULL
  AND NEW.import_source='{CAPTURE_IMPORT_SOURCE}'
@@ -158,13 +170,32 @@ END;
 
 
 def install(db) -> None:
-    """Create the job table and the new-capture trigger. Idempotent and non-invasive."""
+    """Upgrade the INSERT trigger without scanning or requeueing existing Assets."""
+    columns = {row[1] for row in db.execute("PRAGMA table_info(assets)")}
+    if not {"width", "height", "duration_ms"}.issubset(columns):
+        raise RuntimeError("Thumbnail metadata requires the application dimension migration")
     db.executescript(_DDL)
 
 
-def derived_key(sha256: str) -> str:
-    """The immutable, content-addressed derived object key for a verified digest."""
-    return f"{DERIVED_PREFIX}/{sha256}.webp"
+def derived_key(sha256: str, kind: str = IMAGE_KIND) -> str:
+    """Preserve existing image keys; separate new media recipes by decoder kind."""
+    if kind == IMAGE_KIND:
+        return f"{DERIVED_PREFIX}/{sha256}.webp"
+    version = "v2" if kind == "video" else "v1"
+    return f"derived/media-thumbnails/{version}/{kind}/{sha256}.webp"
+
+
+def encoder_kind(row):
+    """Route container bytes, including legacy image/GIF kinds, without changing identity."""
+    kind = row["kind"]
+    mime = (row["content_type"] or "").split(";", 1)[0].strip().lower()
+    if kind in ("image", "gif") and mime == "image/gif":
+        return "gif"
+    if kind in ("gif", "video") and mime in ("video/mp4", "video/webm", "video/quicktime", "video/x-matroska"):
+        return "video"
+    if kind == IMAGE_KIND and mime in ("image/jpeg", "image/png", "image/webp"):
+        return IMAGE_KIND
+    return None
 
 
 def _is_hex_digest(value) -> bool:
@@ -190,17 +221,17 @@ def visible_asset(db, asset_id):
 
 
 def is_thumbnail_candidate(row) -> bool:
-    """True when ``row`` is a committed image that still lacks a thumbnail."""
+    """True when ``row`` is committed media that still lacks a thumbnail."""
     if row is None:
         return False
-    return bool(row["committed"]) and row["kind"] == IMAGE_KIND and row["thumbnail_key"] is None
+    return bool(row["committed"]) and row["kind"] in MEDIA_KINDS and row["thumbnail_key"] is None
 
 
 def eligible(db, asset_id):
-    """The Asset row when it is a visible, committed, thumbnail-less image.
+    """The Asset row when it is visible, committed, thumbnail-less media.
 
     Used by :func:`enqueue`, so a caller cannot "repair" a trashed, hidden,
-    uncommitted, video or already-thumbnailed Asset by asking for it.
+    uncommitted or already-thumbnailed Asset by asking for it.
     """
     row = visible_asset(db, asset_id)
     return row if is_thumbnail_candidate(row) else None
@@ -326,6 +357,7 @@ class _WorkerLock:
 EXIT_UNSUPPORTED_PLATFORM = 3
 EXIT_UNSUPPORTED_INPUT = 4
 EXIT_ENCODE_FAILED = 5
+EXIT_TOOL_UNAVAILABLE = 7
 
 #: Ceiling on the encoded artifact, mirroring the encoder's own promise. The parent
 #: re-applies it when reading the child's output file.
@@ -552,29 +584,30 @@ class ImageThumbnailWorker:
         sha256 = row["sha256"]
         size_bytes = row["size_bytes"]
         object_key = row["object_key"]
-        content_type = row["content_type"]
-        if row["kind"] != IMAGE_KIND:
+        kind = encoder_kind(row)
+        if kind is None:
             raise _TerminalError(E_TERMINAL["sourceNotImage"])
+        source_limit = MAX_VIDEO_SOURCE_BYTES if kind == "video" else MAX_SOURCE_BYTES
         if not _is_hex_digest(sha256):
             raise _TerminalError(E_TERMINAL["digestUnavailable"])
         if not isinstance(object_key, str) or not object_key:
             raise _TerminalError(E_TERMINAL["sourceUnavailable"])
-        if not isinstance(content_type, str) or not content_type.startswith("image/"):
-            raise _TerminalError(E_TERMINAL["sourceNotImage"])
+
         # A missing or non-positive declared size would make the byte bound unenforceable.
         # Stream what is knowable and let the digest check fail closed otherwise.
-        if isinstance(size_bytes, int) and (size_bytes <= 0 or size_bytes > MAX_SOURCE_BYTES):
+        if isinstance(size_bytes, int) and (size_bytes <= 0 or size_bytes > source_limit):
             raise _TerminalError(E_TERMINAL["sourceTooLarge"]
-                                 if size_bytes > MAX_SOURCE_BYTES
+                                 if size_bytes > source_limit
                                  else E_TERMINAL["sourceSizeUnknown"])
 
         with tempfile.TemporaryDirectory(prefix="lakomics-thumb-") as directory:
             source = os.path.join(directory, "source")
             output = os.path.join(directory, "thumbnail.webp")
-            self._download(object_key, source, size_bytes, sha256)
-            self._encode(asset_id, source, output)
+            self._download(object_key, source, size_bytes, sha256, source_limit)
+            self._encode(asset_id, source, output, kind)
             payload = self._read_output(output)
-            self._publish(asset_id, sha256, payload)
+            metadata = self._read_metadata(output + ".json", kind)
+            self._publish(asset_id, sha256, payload, metadata, row, kind)
 
     def _eligible_row(self, asset_id):
         """The visible Asset for a claimed job, or ``None``.
@@ -589,7 +622,7 @@ class ImageThumbnailWorker:
             return None
         return row
 
-    def _download(self, object_key, path, size_bytes, sha256):
+    def _download(self, object_key, path, size_bytes, sha256, source_limit=MAX_SOURCE_BYTES):
         """Stream the original to a temp file, verifying declared size and digest.
 
         Bounded three ways: bytes read, an absolute monotonic deadline checked around
@@ -605,16 +638,16 @@ class ImageThumbnailWorker:
             if _is_missing_object(error):
                 raise _TerminalError(E_TERMINAL["sourceUnavailable"])
             raise _TransientError(E_RETRY["storageReadFailed"])
-        if time.monotonic() > deadline:
-            raise _TransientError(E_RETRY["storageReadFailed"])
         try:
+            if time.monotonic() > deadline:
+                raise _TransientError(E_RETRY["storageReadFailed"])
             with open(path, "wb") as handle:
                 while True:
                     chunk = body.read(DOWNLOAD_CHUNK_BYTES)
                     if not chunk:
                         break
                     total += len(chunk)
-                    if total > MAX_SOURCE_BYTES:
+                    if total > source_limit:
                         raise _TerminalError(E_TERMINAL["sourceTooLarge"])
                     # Checked after every read as well as before it, so a stream that
                     # makes progress slowly is still cut off at the deadline rather
@@ -637,36 +670,44 @@ class ImageThumbnailWorker:
         if hasher.hexdigest() != sha256:
             raise _TerminalError(E_TERMINAL["sourceDigestMismatch"])
 
-    def _encode(self, asset_id, source, output):
-        """Run the bounded child encoder. No decoding happens in this process.
+    def _encode(self, asset_id, source, output, kind=IMAGE_KIND):
+        """Bound the entire encoder/tool process group, including a crashed supervisor.
 
-        The child bounds itself (CPU, address space, priority) before it imports Pillow,
-        so this call passes nothing but a wall-clock timeout. ``subprocess.run`` kills
-        and reaps the direct child on timeout, and the encoder spawns no descendants, so
-        there is no process group left to clean up.
+        Resource limits are applied after exec by the child, never by a threaded
+        preexec_fn. Windows fails closed because this worker needs POSIX limits and
+        process-group cleanup; other application paths remain portable.
         """
-        command = [sys.executable, self.encoder_script, source, output]
+        if os.name != "posix":
+            raise _TerminalError(E_TERMINAL["encodeUnsupportedPlatform"])
+        command = [sys.executable, self.encoder_script, source, output, kind]
+        process = None
         try:
-            completed = subprocess.run(
-                command, timeout=ENCODE_TIMEOUT_SECONDS, check=False,
+            process = subprocess.Popen(
+                command, start_new_session=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL)
+            code = process.wait(timeout=ENCODE_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
-            # A timeout can be contention rather than a bad object, so it is worth one
-            # more attempt under a quieter host — but it is bounded like any other retry.
             raise _TransientError(E_RETRY["encodeTimedOut"])
         except (OSError, subprocess.SubprocessError):
             raise _TransientError(E_RETRY["encodeFailed"])
-        code = completed.returncode
+        finally:
+            if process is not None:
+                # The leader may have exited but left a tool behind. Always address
+                # the session's original group id, not getpgid(a now-reaped leader).
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
         if code == 0:
             return
+        if code == EXIT_TOOL_UNAVAILABLE:
+            raise _TerminalError(E_TERMINAL["encodeToolUnavailable"])
         if code == EXIT_UNSUPPORTED_PLATFORM:
             # The child could not bound its own memory. Retrying cannot change that, and
             # publishing nothing keeps the original untouched.
             raise _TerminalError(E_TERMINAL["encodeUnsupportedPlatform"])
         if code in (EXIT_UNSUPPORTED_INPUT, EXIT_ENCODE_FAILED):
-            # The object was read and rejected: a truncated, animated, oversize or
-            # unreadable image will be exactly as unreadable on the next attempt.
+            # Rejected input or failed decoding will not improve on a retry.
             raise _TerminalError(E_TERMINAL["sourceUndecodable"])
         raise _TransientError(E_RETRY["encodeFailed"])
 
@@ -687,9 +728,31 @@ class ImageThumbnailWorker:
             raise _TerminalError(E_TERMINAL["sourceUndecodable"])
         return payload
 
-    def _publish(self, asset_id, sha256, payload):
-        """Upload the derived object, then compare-and-set the thumbnail column."""
-        key = derived_key(sha256)
+    @staticmethod
+    def _read_metadata(path, kind):
+        """Validate a bounded child sidecar before any storage or database write."""
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read(MAX_METADATA_BYTES + 1)
+            if len(raw) > MAX_METADATA_BYTES:
+                raise ValueError()
+            data = json.loads(raw)
+            if not isinstance(data, dict) or set(data) != {"width", "height", "duration_ms"}:
+                raise ValueError()
+            width, height, duration = data["width"], data["height"], data["duration_ms"]
+            if type(width) is not int or type(height) is not int or width < 1 or height < 1 or width * height > MAX_SOURCE_PIXELS:
+                raise ValueError()
+            if duration is not None and (type(duration) is not int or not 0 <= duration <= MAX_DURATION_MS):
+                raise ValueError()
+            if kind != "video" and duration is not None:
+                raise ValueError()
+            return data
+        except (OSError, ValueError, TypeError):
+            raise _TerminalError(E_TERMINAL["metadataInvalid"]) from None
+
+    def _publish(self, asset_id, sha256, payload, metadata, source_row, kind):
+        """Publish thumbnail and missing display metadata in one guarded transaction."""
+        key = derived_key(sha256, kind)
         try:
             self.s3.put_object(Bucket=self.bucket, Key=key, Body=payload,
                                ContentType=DERIVED_CONTENT_TYPE)
@@ -708,7 +771,7 @@ class ImageThumbnailWorker:
             if row is None or not bool(row["committed"]):
                 connection.execute("ROLLBACK")
                 raise _TerminalError(E_TERMINAL["assetNotVisible"])
-            if row["sha256"] != sha256:
+            if row["sha256"] != sha256 or any(row[field] != source_row[field] for field in ("kind", "object_key", "content_type", "size_bytes")):
                 connection.execute("ROLLBACK")
                 raise _TerminalError(E_TERMINAL["assetChanged"])
             if row["thumbnail_key"] is not None:
@@ -716,12 +779,21 @@ class ImageThumbnailWorker:
                 raise _TerminalError(E_TERMINAL["thumbnailAlreadyPresent"])
             # The compare-and-set is one statement, so the guard and the write cannot be
             # separated: the row is updated only while it is *still* this content, still
-            # lacks a thumbnail, and is still a committed image. A concurrent replication
+            # lacks a thumbnail, and is still committed. A concurrent replication
             # commit or lifecycle command therefore wins wherever it lands.
+            # Do not combine a partial PC dimension with an incompatible decoder pair.
+            # Existing values win; a conflicting missing side stays unknown.
+            dimensions_agree = all(row[field] is None or row[field] == metadata[field]
+                                   for field in ("width", "height"))
+            width = metadata["width"] if dimensions_agree else None
+            height = metadata["height"] if dimensions_agree else None
             updated = connection.execute(
-                "UPDATE assets SET thumbnail_key=?, updated_at=? "
+                "UPDATE assets SET thumbnail_key=?, updated_at=?, "
+                "width=COALESCE(width,?), height=COALESCE(height,?), "
+                "duration_ms=COALESCE(duration_ms,?) "
                 "WHERE id=? AND sha256=? AND thumbnail_key IS NULL AND committed=1 AND kind=?",
-                [key, _now_iso(), asset_id, sha256, IMAGE_KIND]).rowcount
+                [key, _now_iso(), width, height, metadata["duration_ms"],
+                 asset_id, sha256, source_row["kind"]]).rowcount
             if not updated:
                 connection.execute("ROLLBACK")
                 raise _TerminalError(E_TERMINAL["thumbnailAlreadyPresent"])

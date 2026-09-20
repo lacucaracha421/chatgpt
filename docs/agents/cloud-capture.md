@@ -38,38 +38,84 @@ The server exposes pending-list, per-capture download, acknowledge/imported, and
 
 Current server limits are 50 MiB for images and 512 MiB by default for videos (video limit is environment-configurable).
 
-## Server-owned image thumbnails (2026-09-19)
+## Server-owned media thumbnails (source updated 2026-09-20)
 
 When Asset authority is active, a new Capture is promoted directly to a committed
 server Asset. This path is distinct from the legacy PC-mediated inbox described
 below. `image_thumbnails.py` registers a durable job in the same transaction as a
-new image Asset with `import_source='capture'`; startup never scans old Assets.
+new image/GIF/video Asset with `import_source='capture'`; startup upgrades the
+INSERT trigger but never scans old Assets or requeues terminal jobs.
 A single lock-protected background worker downloads the original from R2, verifies
 its size/digest, and invokes `image_thumbnail_encode.py` in a separate process.
 
-- Install the additional encoder dependency from
-  `server/lakomics-api/requirements-image-thumbnails.txt` in the API virtualenv.
+- Deployment prerequisites: the application's nullable `width`, `height` and
+  `duration_ms` migration must run before worker installation; Pillow is required
+  for all kinds (`server/lakomics-api/requirements-image-thumbnails.txt`). Video
+  additionally needs FFmpeg/FFprobe, defaulting to `/usr/bin/ffmpeg` and
+  `/usr/bin/ffprobe`, with optional absolute `LAKOMICS_FFMPEG` / `LAKOMICS_FFPROBE`
+  overrides. Installation/deployment requires separate operational authorization.
 - JPEG, PNG and static WebP produce a maximum-512-pixel WebP thumbnail, preserving
-  aspect ratio, EXIF orientation and transparency, without upscaling. GIF, video,
-  animated PNG/WebP and unsupported formats are not processed by this worker.
-- Bounds: 50 MiB input, 24 million pixels, 384 MiB child address space, 20-second
-  encode wall timeout, 10-second soft/15-second hard CPU limit, and 2 MiB output.
-  The child lowers its scheduling priority. Encoding fails closed on platforms
-  without the required resource limits; the deployed worker runs on Linux.
+  aspect ratio, EXIF orientation and transparency, without upscaling. GIF uses
+  Pillow's first frame without traversing the animation; its total duration stays
+  unknown. Animated PNG/WebP and unsupported formats remain rejected.
+- MP4/MOV and WebM/Matroska produce one static poster frame through bounded tools.
+  Header-based demuxer selection also works on extensionless temporary files;
+  network protocols and playlists are excluded, and MOV external data references
+  are explicitly disabled. These restrictions are not a general filesystem sandbox.
+  Canonical Asset kind is retained, including GIF-kind captures stored as MP4.
+- Bounds: 50 MiB image/GIF input, 128 MiB video input (below the Capture limit),
+  24 million source pixels, 384 MiB address space and 10-second soft/15-second
+  hard CPU limit per encoder/tool process, 20-second outer encode timeout, and
+  2 MiB thumbnail output. Resource limits are per process, not a whole-tree RAM
+  reservation. One worker encodes at a time; tool decoding/filtering/encoding uses
+  one thread and inherits lowered priority. The parent cleans up the whole process
+  group on timeout or supervisor exit. Unsupported platforms fail closed; this
+  worker requires POSIX limits and process groups.
 - Transfers use a dedicated bounded-timeout R2 client and a 60-second streaming
   download budget checked between reads. One socket read can extend that budget
   by its read timeout. Jobs retry transient failures at most three times with
   backoff; terminal failures remain inspectable in `image_thumbnail_jobs`.
-- Derived objects use `derived/image-thumbnails/v1/{sha256}.webp`; originals are
-  never overwritten. Publication rechecks visibility, digest and missing-thumbnail
-  state, updates `assets.thumbnail_key`, and advances the existing mobile list
-  generation. Canonical lifecycle/entity revisions are unchanged.
+  Missing decoder tools are terminal `encodeToolUnavailable`; the next eligible
+  job can proceed. Provisioning tools later does not retry old terminal jobs.
+- Existing image keys stay `derived/image-thumbnails/v1/{sha256}.webp`; GIF keeps
+  `derived/media-thumbnails/v1/gif/{sha256}.webp`. The later-video recipe uses
+  `derived/media-thumbnails/v2/video/{sha256}.webp`: accurate seek at 10% duration,
+  clamped to 0.5–3 seconds and capped at half-duration for short clips. Unknown
+  duration uses 0.5 seconds; only a successful decode with no frame retries at zero.
+  Decode failures/timeouts do not retry at zero. This reduces opening-black posters
+  without brightness analysis; existing poster keys are not automatically replaced.
+  Recipe v2 was deployed in the authorized 0.6.6 rollout on 2026-09-20. Originals are
+  never overwritten. Publication rechecks visibility, digest, source fields and
+  missing-thumbnail state, then atomically sets `thumbnail_key` and missing source
+  dimensions/duration from a strictly validated, maximum-4-KiB sidecar. Dimensions
+  are rotation-corrected source dimensions, never tile dimensions; video duration
+  is nonnegative signed-i64 milliseconds or null. Existing metadata wins; a partial
+  dimension is filled only if its known counterpart agrees with the decoder.
+  Ordinary Library/Album reads expose the fields and mobile list generation advances.
+  Canonical lifecycle/entity revisions are unchanged. The new Character read source
+  overlays live dimensions/duration while preserving published membership/order and
+  other display fields; this read change was deployed and live-checked in the same rollout.
 - Existing missing thumbnails require a separately authorized, explicitly scoped
   `enqueue(db, asset_id)` operation. No public repair endpoint or automatic full
   backfill is added. Restart recovery uses persisted job leases.
 
-The thumbnail-only deployment and authorized recent-image repair are recorded in
-`MOBILE-UX-001`. Dimension synchronization changes are not included in that deployment.
+The earlier image-thumbnail-only deployment and authorized recent-image repair are
+recorded in `MOBILE-UX-001`. The user-authorized 2026-09-20 rollout installed Ubuntu
+FFmpeg/FFprobe 8.0.1 and deployed the GIF/video/metadata extension, including the
+nullable dimension migration. All 216 targeted tests passed in an isolated stage
+on the deployment host, including real video decoding. Live HTTPS reads, metadata
+fields, existing thumbnail delivery and authentication were checked; both API and
+proxy finished active/running. At that rollout checkpoint no historical jobs were
+queued or metadata backfilled. The user subsequently confirmed new thumbnail rendering;
+four missing video posters were repaired separately. The later authorized metadata-only
+repair filled 8,956 visible committed Assets (including 421 video durations): 8,647
+exact PC-snapshot matches and 309 sequential bounded original extractions. Final missing
+dimension/video-duration counts were zero; other Asset columns were unchanged and
+SQLite quick-check passed. Existing thumbnails were preserved. Checked backups and
+manifests remain under `/home/linuxuser/lakomics-metadata-repair-20260920-kchr7f54/`.
+No API source deployment or APK installation occurred during that metadata repair.
+Rollback sources and the checked pre-deployment SQLite backup are retained under
+`/home/linuxuser/lakomics-media-release-20260920-uazynrio/rollback`.
 
 ## Current desktop inbound behavior
 

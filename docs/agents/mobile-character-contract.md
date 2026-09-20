@@ -39,7 +39,7 @@ The future transition is proposed in [ADR-0036](../adr/0036-staged-server-author
 | Character scope | Canonical accepted/base-reference membership with current source and exclusion rules |
 | Folder scope | Recursive ordinary folder gallery; excludes linked character and separately registered series cards from the direct-child navigation list |
 | `sourceCount` | Number of distinct PC asset IDs in the scope at export time |
-| `totalCount` | Number of those assets committed to the server at publication time |
+| `totalCount` | Index: visible published membership count. Asset page: visible published members matching the requested media/aspect/duration filters. |
 
 Each scope retains the PC's `collected_at DESC, id DESC` order. Assets shared by
 characters appear once in a group scope. Ordinary folder viewing remains distinct
@@ -67,8 +67,12 @@ That device transport rule is not a server-side credential-role separation.
 The revision is a SHA-256 digest of canonical navigation, ordered memberships and
 server-hydrated asset metadata. Asset responses retain the existing mobile asset
 shape, including classification IDs, without object keys or filesystem paths.
-Availability and display metadata are frozen with the projection so page counts
-and membership do not drift while uploads or metadata updates run.
+Membership, ordering and ordinary display metadata remain frozen with the projection.
+The 2026-09-20 source update overlays live canonical `width`, `height`, `duration_ms`
+and visibility on Asset pages, allowing metadata repair to work without PC republication.
+Filtered `totalCount` describes the entire matching scope, not the current page;
+`sourceCount` stays the exported PC count. Deployed in the authorized 0.6.6 rollout;
+live filtered Character rows were checked against canonical technical metadata.
 Media tickets still resolve through the existing live asset service; the revision
 is not an immutable copy of media bytes or a guarantee that an object remains available.
 
@@ -79,7 +83,16 @@ even if a retry carries an old base. Different content must match the current
 `baseRevision`; concurrent stale publication returns 409. A failed publication
 keeps the previous projection. There is no silent merge or partial replacement.
 
-The cursor is bound to revision, node, filter and ordered position. A stale revision
+Asset pages additionally accept `media_kind=images|videos`,
+`aspect_ratio=square|landscape|portrait`, and inclusive `duration_ms_min` / exclusive
+`duration_ms_max` bounds. GIF counts as an image; duration bounds select videos only.
+Unknown dimensions/durations do not match their corresponding filters. Responses
+advertise `filterVersion:1`; predicates run before pagination. Mobile refresh clears
+cached technical metadata even when membership revision has not changed.
+
+New cursors bind the Asset filters as well as revision, node, scope filter and
+ordered position. Shipped unfiltered legacy cursors remain accepted only with
+matching revision/node/scope slots. A stale revision
 returns 409, an invalid/cross-scope cursor returns 400, and an unknown scope returns
 404. Invalid snapshots return sanitized 422 responses; limits return 413.
 Transport failures leave the old server view available and the PC publication job

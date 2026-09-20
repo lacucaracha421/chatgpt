@@ -40,6 +40,35 @@ retention without console errors. These are reference viewports, not a measureme
 of the current S11 WebView. No server deployment, APK installation, active-library
 publication or Windows/Linux/Android native acceptance was performed.
 
+## Hourly Catalog refresh and Asset filters — 2026-09-20 source update
+
+The existing server worker now has durable per-language one-hour schedules for
+published Korean/Japanese Catalog baselines. First adoption waits one hour; a missing
+or zero-watermark language is not automatically backfilled. At most one job is active;
+manual/failed work defers its own language, and partial cursors continue next time.
+The scheduler polls once per minute while idle, so due time is not an exact wall-clock
+promise. It runs independently of PC/mobile once deployed.
+
+Provider downloads were already incremental: scan newest entries back to the saved
+watermark. No-change passes keep the current artifact; actual additions still require
+copying the immutable Catalog and preparing indexes/counts. This is not a delta-download
+protocol for every client or an update of older works' existing metadata.
+
+Mobile Library, Album and Character galleries now share media/aspect/video-duration
+filters in a contextual dialog. Images include GIF; square follows PC's inclusive
+0.8–1.25 ratio band. Duration buckets are new mobile controls: under 30 seconds,
+30 seconds–1 minute, 1–5 minutes, and 5 minutes or longer. Filtering is server-side
+before pagination and uses only known metadata. Failed filter choices keep the old
+committed page without relabelling it; old servers cannot silently ignore active filters.
+
+These scheduler/filter/Character-overlay changes were subsequently deployed in the
+authorized 0.6.6 rollout. Korean/Japanese schedules were observed armed one hour ahead;
+no production refresh was forced. APK 0.6.6 (22) was installed in place on Galaxy Tab
+S11 and portrait gallery/filter-state rendering was observed. A fresh video capture,
+first hourly provider job and exhaustive device interaction remain unverified.
+Historical metadata repair was separately authorized and applied; see `MOBILE-UX-001`
+and `android/README.md` for exact production counts, artifact and verification.
+
 ## Catalog refresh source checkpoint — 2026-09-13
 
 Android can request Korean or Japanese new-work ingestion directly on the server.

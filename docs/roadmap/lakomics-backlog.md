@@ -199,7 +199,7 @@ Global cross-device deletion remains intentionally deferred. Require tombstones,
 
 ## MOBILE-UX-001 — Portrait real-use follow-up
 
-Status: `PARTIAL` — the first portrait APK and server image thumbnails are delivered and user-confirmed. The next Catalog/sidebar/settings/Collection bundle is now deployed, with the client updated to APK 0.6.5 (21) after the icon cleanup below; live API and device startup checks are recorded below; portrait rendering/touch acceptance for this new build remains pending. Video/GIF thumbnails, dimensions rollout, duplicate-check evaluation and the separate 3D/classification-capacity investigations remain open.
+Status: `PARTIAL` — the first portrait APK and server image thumbnails are delivered and user-confirmed. Catalog/sidebar/settings/Collection cleanup is deployed. Current client is APK 0.6.6 (22), installed in place on S11 with portrait gallery/filter-state rendering observed; exhaustive touch acceptance remains pending. Video/GIF thumbnails and source dimensions are deployed after authorized tool installation and host verification; the user confirmed new thumbnail generation. Historical metadata repair is complete. The later filter/hourly-refresh/poster-v2 batch is deployed; live API checks and APK installation/startup passed, with first-hourly-job and fresh-video acceptance still open. Catalog refresh/duplicate, 3D and classification-capacity findings are recorded below; they do not authorize those feature migrations.
 
 2026-09-19 Galaxy Tab feedback after the first portrait UI pass. These are user-reported observations and requested improvements, not independently reproduced defects or confirmed root causes. Keep portrait as the priority; landscape redesign remains later.
 
@@ -214,7 +214,7 @@ Status: `PARTIAL` — the first portrait APK and server image thumbnails are del
 - **Character-folder Back destination:** after entering a Character folder and going back, the user lands in a category labeled Series, whose purpose is unclear and which the user considers unnecessary. Reproduce the entry/return path and identify whether Series is an intentional parent screen, an exposed internal grouping, or an incorrect navigation fallback. Check both in-app and Android Back because the reported Back mechanism is unspecified. Prefer returning to the actual prior browsing context without an unnecessary intermediate screen; do not remove underlying classification data based on this UI report. Cause and intended destination remain to be verified.
 - **Catalog hidden-tag controls:** place PC-style excluded-tag entry in a dedicated Catalog settings panel opened from a top-bar icon. A namespaced entry such as `female:scat` hides works carrying that tag; it is not a title substring exclusion or an ordinary search term. Trace PC matching/normalization and shared-policy ownership before adding writes, preserving namespace semantics and avoiding PC/mobile overwrite conflicts.
 - **Catalog category controls:** replace the first-pass single-category selector with a checklist in the same Catalog settings panel, using existing PC categories. The user can include several categories at once, such as Doujinshi, Manga and Artist CG; selected categories combine with OR, then intersect with the search and exclusion policy. Do not require category query syntax or leave a separate category-filter row in the gallery. Preserve the chosen settings across searches. Define all/none selection and storage/sync behavior explicitly during implementation.
-- **Catalog automatic refresh cadence (question):** confirm whether automatic refresh is enabled and its actual interval/triggers. Distinguish upstream Catalog collection/server refresh from mobile detection and display of updated results, and check PC-off and app-background behavior. Coordinate with `MOBILE-008`; do not mistake bookmark-state polling for Catalog content refresh. No interval or scheduling change has been requested or verified yet.
+- **Catalog automatic refresh cadence:** the user subsequently requested a one-hour interval. The server-side incremental scheduler is implemented and tested in the later checkpoint below; deployment remains pending. Distinguish provider ingestion from mobile publication detection and bookmark polling.
 - **Catalog duplicate checking (evaluation):** the user asks whether the PC's duplicate-check feature can be brought to mobile and suspects it may depend on a running PC. Trace the existing Catalog duplicate-check data and execution dependencies, distinguish already-known results from newly computed checks, and assess PC-off support before choosing an implementation. Neither the dependency nor mobile feasibility is confirmed; do not conflate this with general near-duplicate similarity scanning.
 
 ### 2026-09-20 next portrait pass: requested scope
@@ -264,6 +264,249 @@ This operational checkpoint supersedes the source checkpoint's pending deploymen
 ### 2026-09-20 icon cleanup delivered as 0.6.5
 
 Following device feedback, Catalog settings uses a funnel instead of the global settings sliders. The Album heading's decorative folder icon and the expand-all folder control are removed; individual expansion, collapse-all and current-path expansion remain. App/Albums/Catalog tests passed 71 cases, and Settings passed 8 cases after the version bump. TypeScript/Vite and native APK build/checks passed, including alignment and existing-signer v2/v3 verification. APK SHA-256: `eddedb3266781d6dfed7ad46fd3774dccae9e1d099732124207e7e68b357d03e`. Authorized in-place installation on Galaxy Tab S11 succeeded; installed version 0.6.5 (21) and cold startup `Status: ok` were verified without uninstall or data reset. Visual/touch acceptance remains separate. No additional server deployment or Git write occurred.
+
+### 2026-09-20 media metadata and parallel investigation checkpoint
+
+At this source checkpoint, no production deployment, dependency installation,
+historical repair, APK delivery or Git write had occurred. The authorized rollout
+below supersedes the deployment/tool-installation gap, not tablet acceptance.
+
+- **New Capture media:** `image_thumbnails.py` now queues image/GIF/video insertions.
+  Existing image key recipes remain unchanged. GIF uses Pillow's first frame without
+  FFmpeg or a full animation scan; total GIF duration remains unknown. MP4/MOV and
+  WebM/Matroska use one bounded FFmpeg poster frame, with source rotation reflected in
+  dimensions and declared video duration in milliseconds. GIF-kind MP4 retains its
+  canonical kind. Animated PNG/WebP remain unsupported.
+- **Metadata/read path:** a strict, bounded sidecar supplies source width/height, not
+  the 512 px tile size. Thumbnail publication and missing metadata update atomically
+  after rechecking visibility and source identity. Existing values win; incompatible
+  partial dimensions are not combined. Ordinary Library and Album readers already
+  expose these fields. Character publications still freeze Asset display metadata;
+  an existing snapshot needs a later PC publication to reflect updated availability
+  or dimensions. This batch does not change snapshot or lifecycle authority.
+- **Resource/operational limits:** one encode at a time, 50 MiB image/GIF or 128 MiB
+  video download, 24 MP source ceiling, 20 s outer timeout, bounded tool output and
+  per-process resource limits. Parent process-group cleanup also handles an encoder
+  that exits before its tool. These are protective bounds, not a sustained-load
+  benchmark or an aggregate memory reservation. Missing tools produce terminal
+  `encodeToolUnavailable` and do not block subsequent eligible jobs. Startup neither
+  scans historical Assets nor retries terminal jobs. Rollout must include the
+  existing application dimension migration before installing the worker and must
+  provision video tools separately; read-only host checks found no FFmpeg/FFprobe.
+- **Verification:** local `python3 -B -m unittest tests.test_image_thumbnails
+  tests.test_media_thumbnail_worker tests.test_media_thumbnail_encode -q` passed
+  **162 tests in 25.009 s**, no skips. Coverage includes real MP4/MOV/WebM/Matroska,
+  real rotation metadata, short clips, GIF without FFmpeg, pipe floods/timeouts,
+  descendant cleanup, queue upgrade without historical enqueue, publication races,
+  metadata validation and preserving existing metadata. In isolated remote stage
+  `/home/linuxuser/lakomics-media-test-20260920-uzl9_c32`, the existing venv ran
+  `tests.test_image_thumbnail_api`, `tests.test_replication_api` and
+  `tests.test_album_assets`: **54 tests passed in 2.835 s**. The copied app source,
+  fake R2 and temporary SQLite were used without loading production settings/DB;
+  encoder/worker/API-test hashes matched the local files. HTTP coverage confirms
+  promoted image/GIF dimensions and thumbnail/original tickets without PC. A
+  Starlette/httpx deprecation warning was non-failing. Video decoding was verified
+  locally, not on the server or tablet. No Windows/native Android acceptance is claimed.
+
+Investigation conclusions (source inspection, not new implementation):
+
+- **Catalog refresh:** desktop defaults to enabled with a 3600 s due interval
+  (`0018_online_catalog.sql`); `useOnlineCatalogUpdate.ts` checks immediately at
+  mount and hourly thereafter. Mobile Catalog's 5 s publication check detects
+  published changes; it does not ingest new works. `CatalogRefresh.tsx` observes
+  refresh jobs at 2 s while busy / 30 s idle / 10 s after error. Its explicit request
+  starts server-owned provider fetching (`mobile_catalog_refresh.py`), so it works
+  independently of PC; no periodic server ingestion scheduler is implemented.
+  Existing request bounds include one active job, up to 40 pages and 16 MiB staging.
+- **Catalog edition merge review (not Asset duplicate review):** candidate generation and decisions remain PC-local in
+  `catalog_review.rs`. Published groups can be browsed without PC, but groups are
+  not pending candidates: generation skips pairs already in the same group. A
+  mobile review feature needs an explicit candidate/evidence export and a decision
+  authority contract; existing group data is not sufficient to reconstruct it.
+- **Character capacity:** inference currently runs in the PC Python ONNX runtime
+  with CPU execution (6 intra-op / 1 inter-op threads); the API serves the published
+  snapshot, not inference. Collections, Characters and Catalog visibility have
+  automatic dirty/debounced publication lanes in `auto_publication.rs`, not only
+  manual publishing. The observed server has 1 vCPU and about 1.6 GiB RAM, with
+  about 950 MiB available and 811 MiB swap used at the check. This snapshot does not
+  establish active swapping or model throughput. Keep inference on PC for now;
+  moving it to the shared VPS needs a separately scoped isolated model-memory and
+  latency benchmark, not an unmeasured production trial.
+- **3D:** desktop already has a shared custom WebGL2 physical-cover renderer and
+  raster caching (`src/collections/physical/`); mobile currently uses flat artwork.
+  Reuse/adaptation is feasible in principle, with static gallery fallback and at most
+  one active interactive cover, but touch, WebView GPU behavior and battery cost need
+  device validation. The bundled page and native media cache share
+  `https://app.lakomics.local`; absent CORS headers alone are not a blocker on that
+  same-origin path. Actual GLB/glTF model viewing is a separate unimplemented feature,
+  not interchangeable with 3D book covers; no new renderer dependency is adopted.
+
+The server rollout/tool-installation gate was subsequently authorized and completed
+below. Next acceptance is new captures in the tablet Library/viewer. Historical
+metadata/thumbnail repair remains separately scoped. After that, prioritize a small
+portrait 3D-cover prototype or the duplicate-review contract rather than moving
+character inference onto the VPS without capacity evidence.
+
+### 2026-09-20 authorized media rollout
+
+- **Tools:** installed official Ubuntu FFmpeg/FFprobe `7:8.0.1-3ubuntu2` with
+  `--no-install-recommends`: 127 new packages including dependencies, no upgrades or
+  removals. Unrelated service restarts were deferred; no dependency was added to
+  the application's Python environment.
+- **Host verification:** copied current sources/tests to the isolated
+  `/home/linuxuser/lakomics-media-release-20260920-uazynrio/candidate` stage.
+  Image worker, media worker, media encoder, thumbnail API, replication API and
+  Album assets suites passed **216 tests in 111.294 s**, with no skips, using the
+  existing venv, installed video tools, temporary SQLite and fake R2. This includes
+  real MP4/MOV/WebM/Matroska and rotated-video decoding on the deployment host.
+  The existing Starlette/httpx deprecation warning was non-failing.
+- **Backup and scope:** retained original `app.py`, `album_authority.py`,
+  `image_thumbnails.py` and `image_thumbnail_encode.py`, their SHA-256 manifest and
+  a SQLite online backup under the release directory's `rollback/`; backup
+  `PRAGMA quick_check` returned `ok`. Live/candidate module comparison found exactly
+  these four differences. Guarded baseline and candidate hashes were checked before
+  replacement, and deployed hashes matched afterward. No Catalog module changed.
+- **Deployment:** stopped the API, replaced only those four modules, and started it
+  with its existing service/configuration. Startup added nullable width/height/
+  duration columns and upgraded the media INSERT trigger. The API-dependent existing
+  HTTPS proxy stopped with the API and was explicitly restarted. Both finished
+  `active/running`, `NRestarts=0`; no new service or public port was provisioned.
+- **Live acceptance:** tailnet HTTPS health, authenticated Library list/generation,
+  Catalog status and sync status returned 200. Three listed Assets carried the
+  dimension/duration response fields; Catalog display-preferences version remained 1.
+  An existing thumbnail ticket and WebP download returned 200 (24,950 bytes);
+  unauthenticated Library access returned 401. All 22 completed thumbnail jobs and
+  canonical lifecycle rows matched the pre-deployment backup. Existing metadata
+  remained unknown (zero rows with dimensions/duration), confirming no historical
+  fill or automatic repair at this checkpoint.
+- **Remaining:** no new production Capture was created for testing and no tablet
+  rendering was inspected. Verify a newly saved eligible image/GIF/video in the
+  Gallery and Viewer. Historical repair, Character snapshot refresh, APK delivery,
+  Git commit/push and sustained-load acceptance were not part of this rollout.
+
+### 2026-09-20 authorized existing-video thumbnail repair
+
+The user confirmed new thumbnail generation on the tablet, then explicitly requested
+repair of existing video thumbnails. A read-only audit found four visible, committed
+MP4 Assets with missing thumbnail keys, valid digests and sizes below the 128 MiB
+worker limit (largest 11,658,049 bytes). Only those four IDs were enqueued through
+`image_thumbnails.enqueue`; no failed job was reset and no second worker was started.
+A checked SQLite backup and target/result manifests are retained in
+`/home/linuxuser/lakomics-media-release-20260920-uazynrio/video-repair-v2icyb6u/`.
+
+All four jobs finished `done` on their first attempt with no errors. Source dimensions
+and duration were populated alongside the new thumbnails. Original object keys,
+digests, sizes, content types and canonical kinds were unchanged. The authenticated
+mobile media-ticket API returned four successful WebP tickets, and all four signed
+downloads returned 200 with valid WebP signatures. The final visible supported-video
+missing-thumbnail count was zero; the API remained active/running with `NRestarts=0`.
+This confirms server generation and delivery; tablet rendering of these four repaired
+items has not yet been separately confirmed. No APK or Git write was performed.
+
+### 2026-09-20 later posters, Asset filters and hourly refresh
+
+**Implementation checkpoint (subsequent deployment/install recorded below):**
+
+- Video poster recipe v2 uses an accurate duration-relative seek: 10% of duration,
+  clamped to 0.5–3 seconds and capped at half-duration for sub-second clips. A clean
+  no-frame result permits one first-frame fallback; tool failure/timeout does not.
+  Long black introductions can still be black: this is not brightness-based scanning.
+  Image/GIF recipes remain unchanged and existing video keys are not regenerated.
+- Shared mobile Library/Album/Character filters: images (including GIF), videos;
+  PC-compatible square ratio 0.8–1.25 inclusive, landscape and portrait; new mobile
+  duration buckets under 30 s, 30–60 s, 1–5 min, and >=5 min. Server SQL filters before
+  pagination. Cursor filter/scope binding preserves shipped unfiltered legacy layouts.
+  Strict `filterVersion:1` checks include continuation and generation-change retries.
+  Failed choices retain the previous committed gallery without relabelling it.
+- Character membership/order/revision remain published; live technical metadata and
+  visibility are overlaid at read time. Refresh invalidates technical-page caches even
+  when publication revision is unchanged. Nested Back closes filters first.
+- Durable per-language hourly scheduling reuses the existing bounded Catalog worker.
+  Initial adoption waits one hour; zero/missing baselines are not backfilled. Partial
+  checkpoints resume, failed/manual activity defers its own language, and one active
+  job does not indefinitely postpone the other language. Idle due checks run every
+  minute. Fetching already stops at each language's saved watermark; actual additions
+  still copy the immutable artifact and prepare indexes/counts. No-change passes avoid
+  artifact copies. This is not a full client delta protocol or old-work metadata refresh.
+
+**Authorized production metadata repair completed:**
+
+- Before: 8,956 visible committed Assets missing dimensions, including 421 videos
+  missing duration. Imported 8,647 normal PC-backup rows only after exact ID, SHA-256,
+  byte-size and kind matches (416 durations), then processed 309 remaining originals
+  sequentially (304 images, 5 videos). About 228 MB of originals, not the full library,
+  were needed; temporary encoded thumbnails were discarded, never uploaded/replaced.
+- Final visible totals: 8,531 images, 5 GIFs, 427 videos. Missing dimensions/video
+  durations: **zero**. Across all 8,999 stored Asset rows, exactly 8,956 changed only
+  technical metadata; all other columns, including source/thumb keys and timestamps,
+  were unchanged. `PRAGMA quick_check=ok`; API and proxy remained active. Authenticated
+  live Library read confirmed all 40 returned Assets carried dimensions.
+- Checked online backups, exact target manifests and result records are retained at
+  `/home/linuxuser/lakomics-metadata-repair-20260920-kchr7f54/`; first pre-repair backup
+  is `apply-ctl8p4ww/before.sqlite3`. The published PC metadata snapshot was read-only.
+  The helper is operator-only, not a background scheduler; no catalog backfill, media
+  re-upload, service restart, new deployment, APK install or Git write was performed.
+- Extraction was a single sequential low-priority operator process using the deployed
+  bounded encoder. The ordinary thumbnail worker stayed running, so this does not claim
+  a global single-encoder lock or sustained-load benchmark for the repair.
+
+**Verification and remaining acceptance:**
+
+- Controller-observed local encoder/worker suites passed 180 tests; metadata helper and
+  operator-fixture coverage passed 44 tests. Remote isolated scheduler/filter/thumbnail
+  API selection passed 55 tests; the final filter-only check passed 31. Adjacent Library,
+  Album, Character, replication and real-encoder selection ran 237 tests: 236 passed and
+  one lacked a copied Character fixture; copying that existing fixture made the remaining
+  test pass. Production DB/settings were not loaded by these tests.
+- Mobile changed-surface checks and TypeScript passed. Full mobile suite: 339 passed,
+  one Catalog Reader manifest-refresh timing assertion failed (expected two calls,
+  observed three). The isolated Catalog file rerun passed all 36 tests. This suggests
+  timing sensitivity, not a confirmed root cause; Catalog UI was not changed and no
+  blanket full-suite success is claimed.
+- Source review corrected an overflowing Character cursor, legacy classification cursor
+  compatibility, a generation-retry filter-contract gap and stale Character technical
+  cache reuse. At this source-test checkpoint native rendering and deployment remained
+  unverified; the subsequent authorized delivery is recorded below.
+
+**Authorized 0.6.6 delivery completed:**
+
+- Deployed only `app.py`, `album_authority.py`, `mobile_characters.py`, `asset_filters.py`,
+  `mobile_catalog_refresh.py`, `image_thumbnails.py` and `image_thumbnail_encode.py`.
+  Candidate hashes matched local sources; their parsed implementations matched the
+  previously verified isolated stage. Original modules, hash manifest and checked online
+  DB backup remain under `/home/linuxuser/lakomics-mobile-066-release-20260920-0q0724jr/rollback/`.
+  Operator metadata repair helpers were not installed into the service.
+- Live HTTPS checks passed nine filter cases (83 returned rows across initial/continuation
+  pages), disjoint pagination, mismatched-filter rejection, two actual pre-deployment
+  Library/classification cursors, authentication and Character live technical fields.
+  Korean/Japanese schedules were armed about 3,597 seconds ahead; zero jobs were active.
+  No provider refresh was forced. Assets, Asset authority, domain state, Character
+  publication and Catalog pointer fingerprints were unchanged across rollout.
+- API and its dependent HTTPS proxy were both restarted as required and finished
+  active/running with `NRestarts=0`. Deployed source hashes matched the candidate.
+- APK `android/build/lakomics-mobile-0.6.6-release.apk`: 1,250,724 bytes, SHA-256
+  `05bc479deba0d6debc7492ddbfb2f0f665bc5dbea8ca1a4a6d8841b69a0359ef`.
+  Existing-certificate v2/v3 signing, alignment, manifest version and all 12 bundled
+  asset bytes were verified. TypeScript/Vite and native release packaging completed;
+  version-specific Settings tests passed 8/8. No dependencies or signing key were added.
+- Galaxy Tab S11 accepted the in-place update to 0.6.6 (22), preserving first installation
+  at `2026-09-08 17:56:50`. Cold launch returned `Status: ok`; the process remained running.
+  A native portrait screenshot showed the gallery and active image/landscape filter state.
+  No account reset, uninstall, cache clear or provider-setting changes were made.
+- Remaining: first scheduled production refresh, fresh-video poster v2 end-to-end capture,
+  exhaustive on-device Album/Character/duration interactions and landscape acceptance.
+  Existing poster keys remain unchanged. No Git commit/push was performed.
+
+**Next UI proposal, not implemented:** use a roughly 100 ms content opacity transition
+only after new content commits, a 120–160 ms short drawer transition and a 120 ms folder
+chevron rotation. Keep the old gallery until ready, honor reduced motion, and avoid tile
+staggering, springs, sliding galleries or animated heights that disturb virtualization.
+
+**Duplicate workflows stay separate:** Asset duplicate review compares image/video
+files; Catalog edition merge review groups editions of a work. The earlier
+`catalog_review.rs` investigation covers only the latter. Neither mobile review workflow
+is implemented by this batch; do not treat published edition groups as Asset duplicates
+or as pending merge candidates.
 
 ### 2026-09-19 implementation and investigation checkpoint
 

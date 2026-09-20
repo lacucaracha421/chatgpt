@@ -15,6 +15,8 @@ from catalog_refresh_content import parse_page
 
 MAX_PAGES = 40
 LEASE_SECONDS = 180
+REFRESH_INTERVAL_SECONDS = 3600
+REFRESH_POLL_SECONDS = 60
 MAX_STAGED_BYTES = 16 * 1024 * 1024
 LOG = logging.getLogger(__name__)
 DDL = """
@@ -34,6 +36,8 @@ CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_receipts(
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_streams(
  language TEXT PRIMARY KEY, watermark INTEGER NOT NULL, cursor INTEGER,
  pending_max INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_schedule(
+ language TEXT PRIMARY KEY, next_due REAL NOT NULL);
 """
 
 
@@ -70,6 +74,23 @@ class RefreshWorker:
         with self.get_db() as db:
             row = db.execute("SELECT * FROM mobile_catalog_refresh_jobs ORDER BY created DESC,rowid DESC LIMIT 1").fetchone()
             return public_job(row)
+
+    def published_baseline(self, language):
+        """Published baseline for one language, or None when it is not schedulable.
+
+        Read through the normal publication handle so the scheduler adds no second
+        SQLite connection of its own. Returns the frozen publication revision together
+        with the highest published language work id; a zero id means this language owns
+        nothing in the published catalog yet and must not be started automatically.
+        """
+        try:
+            with replica.open_publication(self.root(), self.get_db) as (catalog, publication):
+                value = catalog.execute("SELECT COALESCE(MAX(WorkId),0) FROM catalog.Tags WHERE Namespace='language' AND Value=?", [language]).fetchone()[0]
+        except Exception:
+            return None, None
+        if not value:
+            return None, None
+        return value, publication["revision"]
 
     def request(self, operation_id, language):
         if language not in ("korean", "japanese"):
@@ -109,7 +130,67 @@ class RefreshWorker:
         self.wake.set()
         return result
 
+    def due(self, now=None, languages=("korean", "japanese")):
+        """Arm published languages, then queue at most one due incremental pass.
+
+        First adoption waits an hour. A busy worker never postpones the other
+        language's deadline; it remains due for the next idle check. Manual and
+        failed attempts defer their own language by one hour from last activity.
+        """
+        now = time.time() if now is None else now
+        for language in languages:
+            if language not in ("korean", "japanese"):
+                continue
+            with self.get_db() as db:
+                scheduled = db.execute("SELECT next_due FROM mobile_catalog_refresh_schedule WHERE language=?", [language]).fetchone()
+                stream = db.execute("SELECT * FROM mobile_catalog_refresh_streams WHERE language=?", [language]).fetchone()
+            if scheduled is not None and scheduled[0] > now:
+                continue
+            # Only adoption needs to inspect the artifact. Do not rescan the catalog
+            # on every minute tick once its independent checkpoint exists.
+            published, revision = (None, None) if stream else self.published_baseline(language)
+            if stream is None and published is None:
+                continue
+            with self.get_db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                stream = db.execute("SELECT * FROM mobile_catalog_refresh_streams WHERE language=?", [language]).fetchone()
+                if stream is None:
+                    current = replica.current(db)
+                    if not current or current["revision"] != revision:
+                        continue
+                    watermark, cursor, pending = published, None, published
+                else:
+                    watermark, cursor, pending = stream["watermark"], stream["cursor"], stream["pending_max"]
+                if not watermark or watermark <= 0:
+                    continue
+                scheduled = db.execute("SELECT next_due FROM mobile_catalog_refresh_schedule WHERE language=?", [language]).fetchone()
+                if scheduled is None:
+                    db.execute("INSERT INTO mobile_catalog_refresh_schedule VALUES(?,?)", [language, now + REFRESH_INTERVAL_SECONDS])
+                    db.commit()
+                    continue
+                if scheduled[0] > now:
+                    continue
+                if db.execute("SELECT 1 FROM mobile_catalog_refresh_jobs WHERE state IN ('queued','running')").fetchone():
+                    return []
+                last = db.execute("SELECT MAX(updated) FROM mobile_catalog_refresh_jobs WHERE language=?", [language]).fetchone()[0]
+                if last is not None and last + REFRESH_INTERVAL_SECONDS > now:
+                    db.execute("UPDATE mobile_catalog_refresh_schedule SET next_due=? WHERE language=?", [last + REFRESH_INTERVAL_SECONDS, language])
+                    db.commit()
+                    continue
+                db.execute("""INSERT INTO mobile_catalog_refresh_jobs
+                  (id,language,state,created,updated,watermark,cursor,pending_max,page_limit)
+                  VALUES(?,?,'queued',?,?,?,?,?,?)""",
+                  [str(uuid.uuid4()), language, now, now, watermark, cursor, pending, MAX_PAGES])
+                if stream is None:
+                    db.execute("INSERT INTO mobile_catalog_refresh_streams VALUES(?,?,?,?)", [language, watermark, cursor, pending])
+                db.execute("UPDATE mobile_catalog_refresh_schedule SET next_due=? WHERE language=?", [now + REFRESH_INTERVAL_SECONDS, language])
+                db.commit()
+            self.wake.set()
+            return [language]
+        return []
+
     def loop(self):
+        due_check = 0.0
         while not self.stop.is_set():
             try:
                 if self.run_once():
@@ -117,6 +198,13 @@ class RefreshWorker:
             except Exception:
                 # Do not log provider bodies, URLs, credentials or SQL parameters.
                 LOG.error("Catalog refresh worker could not acquire a job")
+            poll = time.monotonic()
+            if poll - due_check >= REFRESH_POLL_SECONDS:
+                due_check = poll
+                try:
+                    self.due()
+                except Exception:
+                    LOG.error("Catalog refresh schedule check failed")
             self.wake.wait(5)
             self.wake.clear()
 

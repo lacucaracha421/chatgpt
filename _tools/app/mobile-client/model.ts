@@ -1,15 +1,31 @@
-import type {Asset, Page, View} from './types';
+import type {Asset, AssetFiltersValue, Page, PageWire, View} from './types';
+import {EMPTY_FILTERS, filterKey, filterVersionOf, withFilters} from './assetFilters';
 export const PAGE_SIZE = 40;
 export const DENSITIES = ['크게', '균형', '촘촘하게'] as const;
 export function rowHeight(density: number, width: number) { return Math.min([290, 220, 150][density] ?? 220, width * .78); }
-export function viewKey(view: View) { return `${view.tab}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`; }
-export function pagePath(view: View, cursor: string | null) {
+/**
+ * The navigation identity of one view, including its filters.
+ *
+ * Filters belong to the committed query, not to a decoration on top of it, so two
+ * filter sets are two different views. Leaving them out of this key would let a
+ * restored position or a cached page from one filter set be reused for another.
+ */
+export function viewKey(view: View, filters: AssetFiltersValue = EMPTY_FILTERS) {
+  const base = `${view.tab}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`;
+  const key = filterKey(filters);
+  return key ? `${base}:${key}` : base;
+}
+export function pagePath(view: View, cursor: string | null, filters: AssetFiltersValue = EMPTY_FILTERS) {
   const params = new URLSearchParams({limit: String(PAGE_SIZE)});
   if (cursor) params.set('cursor', cursor);
   if (view.classification) params.set('classification_id', view.classification);
   const path = view.revisit === 'date' ? '/v1/library/revisit/date' : view.revisit
     ? `/v1/library/revisit/creator/${encodeURIComponent(view.revisit)}/assets` : '/v1/library/assets';
-  return `${path}?${params}`;
+  // Revisit views are a different question from a filtered gallery, so the controls are
+  // not offered there and the filters are not sent. Passing them anyway would silently
+  // narrow a Revisit list the user did not ask to filter.
+  const query = `${path}?${params}`;
+  return path === '/v1/library/assets' ? withFilters(query, filters) : query;
 }
 export function ratio(asset: Asset) {
   const r = asset.ratio ?? (Number(asset.width) / Number(asset.height));
@@ -40,11 +56,15 @@ export class RequestGate {
   current(id: number) { return id === this.generation && !this.controller?.signal.aborted; }
   cancel() { this.generation++; this.controller?.abort(); }
 }
-export function normalizePage(page: Page): Page {
+export function normalizePage(page: PageWire): Page {
   const seen = new Set<string>();
+  const declared = filterVersionOf(page);
   return {items: (Array.isArray(page.items) ? page.items : []).filter(item => item?.id && !seen.has(item.id) && !!seen.add(item.id)),
     has_more: !!page.has_more && typeof page.next_cursor === 'string' && !!page.next_cursor,
-    next_cursor: typeof page.next_cursor === 'string' ? page.next_cursor : null};
+    next_cursor: typeof page.next_cursor === 'string' ? page.next_cursor : null,
+    // Normalized from the single agreed wire name, and left absent when the server declared
+    // nothing so the guards can refuse it rather than treat it as satisfied.
+    ...(declared === null ? {} : {filter_version: declared})};
 }
 export async function mapBounded<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>, signal?: AbortSignal): Promise<R[]> {
   const results: R[] = new Array(items.length); let next = 0;

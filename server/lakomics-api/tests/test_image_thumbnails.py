@@ -7,6 +7,7 @@ actually verified instead of passing vacuously.
 """
 from __future__ import annotations
 
+import ast
 import io
 import os
 import sqlite3
@@ -206,6 +207,7 @@ class Fixture(unittest.TestCase):
                 CREATE TABLE assets(
                  id TEXT PRIMARY KEY, kind TEXT NOT NULL, object_key TEXT NOT NULL UNIQUE,
                  thumbnail_key TEXT, content_type TEXT, size_bytes INTEGER, sha256 TEXT,
+                 width INTEGER, height INTEGER, duration_ms INTEGER,
                  committed INTEGER NOT NULL DEFAULT 0, import_source TEXT,
                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
                 CREATE TABLE asset_list_generation(singleton INTEGER PRIMARY KEY CHECK(singleton=1),generation INTEGER NOT NULL);
@@ -318,9 +320,9 @@ class TriggerTests(Fixture):
         self.seed(ASSET_IMAGE, png_bytes())
         self.assertEqual(len(self.jobs(ASSET_IMAGE)), 1)
 
-    def test_only_new_captured_images_enter_the_queue(self):
-        self.seed(ASSET_VIDEO, b"video-bytes", kind="video")
-        self.seed(ASSET_GIF, b"gif-bytes", kind="gif")
+    def test_only_new_captured_media_enter_the_queue(self):
+        self.seed(ASSET_VIDEO, b"video-bytes", kind="video", content_type="video/mp4")
+        self.seed(ASSET_GIF, b"gif-bytes", kind="gif", content_type="image/gif")
         # Not committed yet: a replication prepare must not enqueue work for an Asset
         # that mobile cannot see.
         self.seed("10000000-0000-4000-8000-000000000010", png_bytes(), committed=0)
@@ -330,7 +332,7 @@ class TriggerTests(Fixture):
         # Already has a thumbnail.
         self.seed("10000000-0000-4000-8000-000000000012", png_bytes(), thumbnail_key="library/x/t")
         self.seed(ASSET_IMAGE, png_bytes())
-        self.assertEqual([job["asset_id"] for job in self.jobs()], [ASSET_IMAGE])
+        self.assertEqual({job["asset_id"] for job in self.jobs()}, {ASSET_IMAGE, ASSET_GIF, ASSET_VIDEO})
 
     def test_reinserting_the_same_asset_does_not_duplicate_its_job(self):
         self.seed(ASSET_IMAGE, png_bytes(), import_source="replica")
@@ -1169,10 +1171,15 @@ class GuardTests(unittest.TestCase):
         # aimed at the spawn call rather than the whole file, because the module also
         # documents why the callback is absent.
         source = Path(SERVER_DIR / "image_thumbnails.py").read_text()
-        spawn = source.split("def _encode(", 1)[1].split("def _read_output", 1)[0]
-        self.assertNotIn("preexec_fn", spawn)
-        self.assertNotIn("start_new_session", spawn)
-        self.assertNotIn("killpg", source)
+        calls = [node for node in ast.walk(ast.parse(source))
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and isinstance(node.func.value, ast.Name)
+                 and node.func.value.id == "subprocess" and node.func.attr == "Popen"]
+        self.assertEqual(len(calls), 1)
+        keywords = {item.arg: item.value for item in calls[0].keywords}
+        self.assertNotIn("preexec_fn", keywords)
+        self.assertNotIn(None, keywords, "expanded kwargs could hide a preexec callback")
+        self.assertIs(ast.literal_eval(keywords["start_new_session"]), True)
 
     def test_the_worker_bounds_the_artifact_it_reads_back(self):
         # The output file is written by a child process, so the parent re-applies the

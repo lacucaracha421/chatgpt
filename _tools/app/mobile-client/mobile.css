@@ -261,3 +261,24 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
   .character-browser:not(.character-browser-landscape) .character-card-image img { object-fit:contain; }
   .character-browser:not(.character-browser-landscape) .character-cards { max-height:44dvh; }
 }
+
+/*
+ * Asset filters. The controls live in the existing gallery/filter dialog rather than a
+ * persistent bar, so the gallery keeps its height; each row reuses the shipped
+ * `aria-pressed` button treatment so a pressed bucket reads the same everywhere.
+ */
+.asset-filters { display:flex; flex-direction:column; gap:18px; margin-top:16px; }
+.asset-filter-group { display:flex; flex-direction:column; gap:8px; }
+.asset-filter-label { font-size:13px; color:var(--color-muted); }
+.asset-filter-options { display:flex; flex-wrap:wrap; gap:6px; }
+.asset-filter-options button { min-height:var(--touch); padding:0 12px; }
+/* One selected value per group, so the pressed treatment is the same accent the density
+   control uses; an unselected bucket stays quiet. */
+.asset-filter-options button[aria-pressed=true] { background:var(--color-accent); color:var(--color-on-accent); }
+.asset-filter-note { padding:0; }
+.asset-filter-reset { border-top:1px solid var(--color-border); padding-top:12px; }
+/* Keep the applied state visible without displacing the location title. */
+.asset-filter-summary { color:var(--color-accent); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+#context-location .heading-actions button[aria-pressed=true] { color:var(--color-accent); }
+/* The Album dialog's heading carries the trigger beside its close control. */
+.album-dialog-content .dialog-header .asset-filter-summary { margin:0; }

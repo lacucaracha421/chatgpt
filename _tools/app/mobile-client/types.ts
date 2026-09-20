@@ -10,9 +10,34 @@ export interface Asset {
   pending?: boolean; preview?: string; ratio?: number;
 }
 export interface Classification { id: string; name: string; parent_id: string | null; asset_count: number; color_key?: string; icon_key?: string }
-export interface Page { items: Asset[]; has_more: boolean; next_cursor: string | null }
+/**
+ * A page as it arrives on the wire.
+ *
+ * The routes disagree on envelope case (`has_more`/`next_cursor` beside `filterVersion`),
+ * so the untranslated shape is named once here. `normalizePage` is the only reader, and it
+ * resolves the filter contract through `assetFilters.filterVersionOf`, the single agreed
+ * wire name — this type deliberately declares no alternative spelling of it.
+ */
+export interface PageWire { items: Asset[]; has_more: boolean; next_cursor: string | null; filterVersion?: unknown }
+/**
+ * A normalized page: one spelling every caller can rely on.
+ *
+ * `filter_version` is absent when the server did not declare exactly the contract this
+ * client implements. That absence is meaningful rather than defaulted: a server that cannot
+ * promise the contract cannot have applied the parameters, so a filtered request must be
+ * refused instead of presented as filtered.
+ */
+export interface Page { items: Asset[]; has_more: boolean; next_cursor: string | null; filter_version?: number }
+/**
+ * Asset filters, mirroring the PC's media/aspect vocabulary. `all` is the client-side
+ * spelling of "no filter" and is never sent on the wire.
+ */
+export type AssetMediaFilter = 'all' | 'images' | 'videos';
+export type AssetAspectFilter = 'all' | 'square' | 'landscape' | 'portrait';
+export type AssetDurationFilter = 'all' | 'under_30s' | '30s_1m' | '1m_5m' | 'over_5m';
+export interface AssetFiltersValue { media: AssetMediaFilter; aspect: AssetAspectFilter; duration: AssetDurationFilter }
 export interface View { characterNode?:string; characters?: boolean; tab: 'home' | 'library'; classification?: string; revisit?: 'date' | string; title: string }
 export interface Ticket { url: string; expires_at?: string; expires_in?: number; content_type?: string }
 export interface Status { configured: boolean; endpoint: string; allowPrivateHttp?: boolean }
 export interface Revisit { bundles: {kind: string; title: string; items?: Asset[]; groups?: {creator_key: string; creator_name: string; creator_handle: string; asset_count: number; items: Asset[]}[]}[] }
-export interface SavedPosition { view: View; cursor: string | null; previous: (string | null)[]; scroll: number; assetId?: string }
+export interface SavedPosition { view: View; cursor: string | null; previous: (string | null)[]; scroll: number; assetId?: string; filters: AssetFiltersValue }

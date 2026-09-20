@@ -1,5 +1,4 @@
 """Versioned PC character read projection. No character mutation authority."""
-import base64
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -8,6 +7,8 @@ from typing import Annotated, Literal
 from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
+
+import asset_filters
 
 PREFIX = "/v1/library/characters"
 MAX_BYTES = 24 * 1024 * 1024
@@ -219,21 +220,59 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
         return {"revision": current["revision"] if current else None}
 
     @app.get(PREFIX + "/assets")
-    def browse(node: NodeID, revision: Revision, filter: Filter = "all",
+    def browse(request: Request, node: NodeID, revision: Revision, filter: Filter = "all",
                cursor: str | None = Query(default=None, max_length=1024),
                limit: int = Query(default=40, ge=1, le=100),
+               media_kind: asset_filters.MediaKind | None = Query(default=None, pattern="^(images|videos)$"),
+               aspect_ratio: asset_filters.AspectRatio | None = Query(default=None, pattern="^(square|landscape|portrait)$"),
+               duration_ms_min: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
+               duration_ms_max: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
                authorization: str | None = Header(default=None)):
+        """One Character scope's Assets, with the shared media filters applied in SQL.
+
+        Two different things are in play, and they are deliberately not symmetric.
+
+        **Membership and order are frozen.** The filter narrows the page; it never changes
+        which Assets the scope holds or the position each holds, so `sourceCount` stays the
+        publication's own number — it counts the published scope, not this response. The
+        cursor position is still a position in that frozen order, which is why a filtered
+        walk resumes correctly across pages.
+
+        **`totalCount` counts what the filter matches, not what the page carries.** It is
+        counted in the same transaction and under the same predicates as the page, so a
+        first page and the walk it starts advertise one number. It is a response-derived
+        value, never authority state: nothing here stores it, publishes it, or lets it reach
+        the frozen projection. Counts reflect current visibility within published membership.
+
+        **Technical metadata is live too.** `width`, `height` and `duration_ms` are read
+        from the canonical visible Asset in the same statement that selects the page, so a
+        dimension repaired on the server is usable while the PC is off — including by an
+        aspect or duration filter — and a stale stored value is never preferred over the
+        live one. An Asset the current visibility path hides is absent from that join and
+        so drops out of the page without touching the frozen membership.
+        """
         require_auth(authorization)
+        # The shipped read declared its parameters explicitly, so an unknown one was ignored
+        # rather than refused. Now that this route carries a filter identity inside its
+        # cursor, a silently ignored parameter would let a client believe a page was
+        # filtered when it was not, so the parameter set is closed explicitly.
+        if request.query_params.keys() - {"node", "revision", "filter", "cursor", "limit",
+                                           "media_kind", "aspect_ratio",
+                                           "duration_ms_min", "duration_ms_max"}:
+            raise HTTPException(422, "Invalid character scope request")
+        filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max)
+        filter_clause, filter_params = asset_filters.filter_clause(filters)
         position = -1
         if cursor is not None:
-            try:
-                parsed = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
-                if not isinstance(parsed, list) or len(parsed) != 4 or parsed[:3] != [revision, node, filter]:
-                    raise ValueError()
-                position = parsed[3]
-                if type(position) is not int or position < 0 or position >= 250_000:
-                    raise ValueError()
-            except (ValueError, TypeError, UnicodeError):
+            # The scope identity is the cursor's first three slots, so a cursor from another
+            # revision, node or filter is rejected before any page is read.
+            parsed = asset_filters.decode_cursor(cursor, "character-assets", filters, 400,
+                                                 "Invalid character cursor",
+                                                 lead=[revision, node, filter])
+            if len(parsed) != 4 or parsed[:3] != [revision, node, filter]:
+                raise HTTPException(400, "Invalid character cursor")
+            position = parsed[3]
+            if type(position) is not int or not 0 <= position <= asset_filters.BOUND_MAX:
                 raise HTTPException(400, "Invalid character cursor")
         with get_db() as db:
             db.execute("BEGIN")
@@ -244,14 +283,41 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             scope = next((s for s in index["scopes"] if s["nodeId"] == node and s["filter"] == filter), None)
             if scope is None:
                 raise HTTPException(404, "Character scope not found")
-            rows = db.execute("SELECT m.position,a.payload FROM mobile_character_members m "
-                              "JOIN mobile_character_assets a ON a.id=m.asset_id WHERE m.node_id=? AND m.filter=? "
-                              "AND NOT EXISTS (SELECT 1 FROM assets raw WHERE raw.id=m.asset_id AND NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=raw.id)) AND m.position>? ORDER BY m.position LIMIT ?", (node, filter, position, limit + 1)).fetchall()
+            # One statement selects the page, hides deleted Assets and reads the live
+            # technical fields, so a page cannot show a dimension from one instant while
+            # hiding from another, and metadata repair is visible to the filter itself.
+            rows = db.execute(f"""SELECT m.position, a.payload,
+                                        asset.width, asset.height, asset.duration_ms
+                                  FROM mobile_character_members AS m
+                                  JOIN mobile_character_assets AS a ON a.id = m.asset_id
+                                  JOIN visible_assets AS asset ON asset.id = m.asset_id
+                                  WHERE m.node_id = ? AND m.filter = ? AND m.position > ?
+                                  {filter_clause}
+                                  ORDER BY m.position LIMIT ?""",
+                              [node, filter, position] + filter_params + [limit + 1]).fetchall()
             more = len(rows) > limit
             rows = rows[:limit]
-            next_cursor = base64.urlsafe_b64encode(encode([revision, node, filter, rows[-1]["position"]]).encode()).decode().rstrip("=") if more else None
-            return {"revision": revision, "items": [json.loads(r["payload"]) for r in rows],
-                    "totalCount": scope["totalCount"], "sourceCount": scope["sourceCount"],
-                    "has_more": more, "next_cursor": next_cursor}
+            # Counted under the page's own predicates, in the same read transaction, so an
+            # appended page cannot advertise a different total than the page before it.
+            # `position > ?` is deliberately left out: the total describes the scope, not
+            # the rest of the walk a cursor happens to have reached.
+            total = db.execute(f"""SELECT COUNT(*)
+                                   FROM mobile_character_members AS m
+                                   JOIN visible_assets AS asset ON asset.id = m.asset_id
+                                   WHERE m.node_id = ? AND m.filter = ?
+                                   {filter_clause}""",
+                               [node, filter] + filter_params).fetchone()[0]
+            next_cursor = asset_filters.encode_cursor(
+                "character-assets", filters,
+                [revision, node, filter, rows[-1]["position"]]) if more else None
+            items = []
+            for row in rows:
+                item = json.loads(row["payload"])
+                item.update(asset_filters.technical_fields(row))
+                items.append(item)
+            return {"revision": revision, "filterVersion": asset_filters.FILTER_VERSION,
+                    "items": items, "totalCount": total,
+                    "sourceCount": scope["sourceCount"], "has_more": more,
+                    "next_cursor": next_cursor}
 
     return startup

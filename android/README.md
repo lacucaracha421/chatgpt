@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.6.5 (21)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate and installed in place on Galaxy Tab S11; see the delivery checkpoint below.
+Current source version: **0.6.6 (22)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate and installed in place on Galaxy Tab S11; see the delivery checkpoint below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,38 @@ Current source version: **0.6.5 (21)**, declared in [AndroidManifest.xml](Androi
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.6.6 — Asset filters and hourly Catalog refresh (2026-09-20)
+
+Library, Album and Character galleries gain media, aspect and video-duration filters.
+Images include GIF; square follows PC's inclusive 0.8–1.25 band. Duration buckets are
+under 30 s, 30–60 s, 1–5 min and >=5 min. Query identity, pagination, failed changes,
+nested Back and Character technical-metadata refresh retain their scoped guards.
+
+- APK: `android/build/lakomics-mobile-0.6.6-release.apk`, 1,250,724 bytes, SHA-256
+  `05bc479deba0d6debc7492ddbfb2f0f665bc5dbea8ca1a4a6d8841b69a0359ef`.
+- Existing SDK35/JDK17 release builder completed. Controller verified version/badging,
+  ZIP alignment, all 12 bundled asset bytes and existing-certificate v2/v3 signatures.
+  The version-specific Settings check passed 8 tests; mobile TypeScript/Vite build passed.
+  Earlier feature/source tests remain applicable; the full mobile suite's isolated-pass
+  Catalog Reader timing failure is documented in `MOBILE-UX-001`, not hidden by this build.
+- Authorized in-place install on Galaxy Tab S11 (`SM-X730`) succeeded. Package reports
+  0.6.6 (22), retaining first installation at `2026-09-08 17:56:50`. Cold launch returned
+  `Status: ok` (329 ms activity launch, not network/render latency). A subsequent native
+  portrait screenshot showed the gallery and active image/landscape filter summary.
+  No uninstall, account reset, media-cache clear or provider-setting change was performed.
+- Seven server modules were deployed with guarded source hashes and a checked online DB
+  backup at `/home/linuxuser/lakomics-mobile-066-release-20260920-0q0724jr/rollback/`.
+  Live checks covered all nine filter cases, continuation/no-overlap, mismatched-filter
+  rejection, two pre-deployment cursors and Character live technical metadata. Korean
+  and Japanese hourly schedules were armed roughly one hour ahead; no refresh was forced.
+  Existing Assets, authority state, Character publication and Catalog pointer were unchanged;
+  API and proxy finished active/running with `NRestarts=0`.
+
+Video poster v2 is deployed for future eligible jobs; existing poster keys stay intact.
+A fresh production video and the first scheduled provider refresh were not triggered or
+waited for as acceptance checks. Album/Character touch flows, exhaustive duration filtering
+on-device and landscape acceptance remain separate from the observed portrait rendering.
 
 ## 0.6.5 — sidebar and Catalog icon cleanup (2026-09-20)
 

@@ -1,4 +1,5 @@
-import type {Page} from './types';
+import type {AssetFiltersValue, Page} from './types';
+import {EMPTY_FILTERS, withFilters} from './assetFilters';
 export type CharacterFilter = 'all' | 'unclassified' | 'needs_review';
 export type CharacterNode = {
   id:string; kind:'series'|'group'|'character'|'folder'; sourceId:string; seriesId:string;
@@ -12,10 +13,18 @@ export type CharacterIndex = {
   navigationOrder?:string[];ready:boolean;revision:string|null;publishedAt:string|null;nodes:CharacterNode[];scopes:CharacterScope[];
 };
 export type CharacterPage = Page & {revision:string;totalCount:number;sourceCount:number};
-export function characterPath(node:string,filter:CharacterFilter,revision:string,cursor:string|null) {
+/**
+ * One character-scope page.
+ *
+ * Membership stays frozen at publication; the requested `revision` is what pins it. Asset
+ * filters are applied by the server against the live Asset metadata for the members of
+ * that frozen scope, so a filter never needs a new publication to become meaningful —
+ * only the membership and the scope counts do.
+ */
+export function characterPath(node:string,filter:CharacterFilter,revision:string,cursor:string|null,filters:AssetFiltersValue=EMPTY_FILTERS) {
   const params=new URLSearchParams({node,filter,revision,limit:'40'});
   if(cursor)params.set('cursor',cursor);
-  return `/v1/library/characters/assets?${params}`;
+  return withFilters(`/v1/library/characters/assets?${params}`,filters);
 }
 export function characterChildren(index:CharacterIndex,node:string|null) {
   const rank={series:0,group:0,character:1,folder:2};
