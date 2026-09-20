@@ -105,29 +105,29 @@ input[type=checkbox] { accent-color:var(--color-accent); width:20px; height:20px
 .album-section { border-top:1px solid var(--color-border); margin-top:16px; padding-top:4px; }
 .album-section .index-title { padding:12px 12px 8px; }
 .album-list { list-style:none; margin:0; padding:0 0 16px; overflow:auto; max-height:40vh; }
-.album-list button { display:flex; align-items:center; gap:10px; width:100%; min-height:40px; padding:8px 12px; border:0; background:none; text-align:left; font-size:14px; color:inherit; }
-.album-list button svg { width:16px; color:var(--color-muted); }
-.album-list button.active, .album-list button:hover { background:var(--color-accent); color:var(--color-on-accent); }
+.album-list button { display:flex; align-items:center; gap:9px; width:100%; min-height:40px; padding:8px 10px; border:0; background:none; text-align:left; font-size:13.5px; color:inherit; border-radius:2px; }
+.album-list button svg { width:16px; flex:none; opacity:.75; }
+.album-list button.active, .album-list button:hover { background:var(--color-sidebar-selection); color:var(--color-on-accent); }
 .album-list button.active svg, .album-list button:hover svg { color:inherit; }
 .album-dialog-content { display:flex; flex-direction:column; min-height:0; height:min(70dvh,720px); }
 .album-dialog-content>.gallery-scroll { flex:1; min-height:0; }
 .album-footer { display:flex; justify-content:flex-end; padding-top:12px; }
 .classification-search { display:flex; align-items:center; margin:8px 0 16px; gap:8px; }.classification-search input { width:100%; background:none; border:0; border-bottom:1px solid var(--color-border); border-radius:0; }.classification-search svg { width:18px; color:var(--color-muted); }
-.index-recent { justify-content:flex-start; }
-.index-heading { display:flex; align-items:center; justify-content:space-between; padding:22px 12px 10px; color:var(--color-muted); font-size:12px; }
+.index-heading { display:flex; align-items:center; justify-content:space-between; padding:18px 10px 8px; color:var(--color-muted); font-size:12px; }
 .classification-tree { overflow:auto; min-height:100px; scrollbar-width:thin; scrollbar-color:var(--color-border) transparent; }
+/* Depth steps the row, keeping the hierarchy line and expander outside the selected button. */
 .tree-row { display:flex; align-items:center; border-radius:2px; }
-/* Paint the selection on the file row itself so it cannot cover the hierarchy line or the
-   expander glyph. The button keeps its full 44px touch target; only its fill is inset.
-   The foreground change is scoped to the button so the expander stays legible against the
-   sidebar background instead of turning into dark-on-dark. */
-.tree-row.selected .tree-select, .index-recent.selected { background:var(--color-accent); color:var(--color-on-accent); }
-.tree-row.selected .tree-select { border-radius:2px; }
-.tree-expander { display:flex; align-items:center; justify-content:center; width:44px; min-width:44px; height:44px; border:0; background:none; }
-.tree-expander svg { width:15px; height:15px; }
-.tree-leaf { width:16px; min-width:16px; height:44px; border-left:1px solid var(--color-border); margin-left:14px; }
-.tree-select { display:flex; align-items:center; flex:1; min-width:0; gap:10px; min-height:44px; padding:8px 10px 8px 0; border:0; background:none; text-align:left; font-size:14px; }
-.tree-select>svg { width:18px; height:18px; opacity:.7; }.tree-select>span:first-of-type { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; flex:1; }.tree-select>.numeric { font-size:12px; opacity:.75; }
+.tree-row.selected .tree-select { background:var(--color-sidebar-selection); color:var(--color-on-accent); border-radius:2px; }
+.tree-select:hover { background:var(--color-sidebar-hover); }
+.tree-expander { display:flex; align-items:center; justify-content:center; width:32px; min-width:32px; height:40px; border:0; background:none; }
+.tree-expander svg { width:14px; height:14px; }
+/* One continuous connector per depth, aligned with the expander column. */
+.tree-leaf { width:32px; min-width:32px; height:40px; position:relative; }
+.tree-leaf::before { content:''; position:absolute; left:15px; top:0; bottom:0; border-left:1px solid var(--color-border); }
+.tree-select { display:flex; align-items:center; flex:1; min-width:0; gap:9px; min-height:40px; padding:6px 10px 6px 8px; border:0; background:none; text-align:left; font-size:13.5px; border-radius:2px; }
+.tree-select>svg { width:16px; height:16px; opacity:.75; flex:none; }
+.tree-select>span:first-of-type { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; flex:1; }
+.tree-select>.numeric { font-size:11px; opacity:.7; }
 .ui-dialog--fullscreen { inset:0; transform:none; width:100%; height:100dvh; max-height:none; border:0; padding:0; border-radius:0; background:#111213; overflow:hidden; }
 .ui-dialog--fullscreen>.ui-dialog__title { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
 .viewer { display:grid; grid-template-rows:56px minmax(0,1fr) 56px; height:100%; padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); position:relative; }

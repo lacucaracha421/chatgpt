@@ -1,10 +1,11 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {FolderIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
 import {api, errorText, native} from './transport';
 import {normalizePage} from './model';
 import type {Asset, Page} from './types';
 import {Gallery} from './Gallery';
+import {ClassificationIcon, classificationColor} from '../src/classification/classificationAppearance';
 
 /**
  * The additive Albums section.
@@ -16,6 +17,13 @@ import {Gallery} from './Gallery';
  * all rather than an empty tree — only Album-specific surfaces are affected.
  */
 export interface NativeAlbum { id: string; name: string; parentId: string | null; iconKey: string | null; colorKey: string | null }
+/**
+ * One Album row's icon. The replica's `iconKey`/`colorKey` use the PC appearance contract
+ * (`folder_appearance.rs`).
+ */
+function AlbumIcon({album}: {album: NativeAlbum}) {
+  return <ClassificationIcon kind="tag" iconKey={album.iconKey} testId={false} style={{color: classificationColor(album.colorKey)}}/>;
+}
 export interface AlbumTree { adopted: boolean; libraryId: string | null; epoch: number | null; code: string; albums: NativeAlbum[] }
 interface AlbumAssetPage { items: Asset[]; hasMore: boolean; nextCursor: string | null }
 function albumPage(value: AlbumAssetPage): Page {
@@ -119,16 +127,16 @@ export function Albums({active, paused, onOpen, backRef}: {active: boolean; paus
   const children = open ? tree.albums.filter(album => album.parentId === open.id) : [];
 
   return <section className="album-section" aria-label="앨범">
-    <div className="index-title"><span>앨범</span><FolderIcon/></div>
+    <div className="index-title"><span>앨범</span></div>
     <ul className="album-list">{top.map(album => <li key={album.id}>
-      <button className={open?.id === album.id ? 'active' : ''} onClick={() => {setOpen(album); void load(album, null);}}><FolderIcon/><span>{album.name}</span></button>
+      <button className={open?.id === album.id ? 'active' : ''} onClick={() => {setOpen(album); void load(album, null);}}><AlbumIcon album={album}/><span>{album.name}</span></button>
     </li>)}</ul>
     {open && <Dialog open title={open.name} onClose={() => setOpen(null)}>
       <div className="album-dialog-content">
         <DialogDescription className="sr-only">{albumPath(tree.albums, open.id)}의 자산 목록입니다.</DialogDescription>
         <div className="dialog-header"><span>{albumPath(tree.albums, open.id)}</span><IconButton label="앨범 닫기" icon={XMarkIcon} onClick={() => setOpen(null)}/></div>
         {children.length > 0 && <ul className="album-list">{children.map(album => <li key={album.id}>
-          <button onClick={() => {setOpen(album); void load(album, null);}}><FolderIcon/><span>{album.name}</span></button>
+          <button onClick={() => {setOpen(album); void load(album, null);}}><AlbumIcon album={album}/><span>{album.name}</span></button>
         </li>)}</ul>}
         {busy && <div className="loading-line" role="status" aria-label="앨범 자산을 불러오는 중"/>}
         {error && <div className="inline-error" role="alert"><span>{error}</span><Button onClick={() => void load(open, null)}>다시 시도</Button></div>}

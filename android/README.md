@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.6.3 (19)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate.
+Current source version: **0.6.5 (21)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate and installed in place on Galaxy Tab S11; see the delivery checkpoint below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,21 @@ Current source version: **0.6.3 (19)**, declared in [AndroidManifest.xml](Androi
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.6.5 — sidebar and Catalog icon cleanup (2026-09-20)
+
+Catalog settings now uses a funnel icon, distinct from the global settings sliders. The decorative folder icon beside the Album heading and the expand-all folder action are removed. Individual folder expansion, collapse-all and current-path expansion remain available.
+
+APK: `android/build/lakomics-mobile-0.6.5-release.apk`, SHA-256 `eddedb3266781d6dfed7ad46fd3774dccae9e1d099732124207e7e68b357d03e`. The focused App/Albums/Catalog suite passed 71 tests; Settings passed 8 tests after the version bump. Mobile TypeScript/Vite, native release packaging and its regression checks, alignment and existing-signer v2/v3 verification passed. Galaxy Tab S11 (`SM-X730`) accepted an in-place update; package inspection confirmed 0.6.5 (21), preserving the original installation date. Cold startup returned `Status: ok` with the process running. No data reset, server deployment or Git write occurred. These checks confirm build/install/startup, not visual or touch acceptance of the revised controls.
+
+## 0.6.4 — portrait controls and delivery (2026-09-20)
+
+- Catalog has one top-bar settings entry with multi-category inclusion and exact `namespace:value` avoidance tags. Preferences are device-local and endpoint-scoped; they do not overwrite PC policy. Mobile search accepts space/underscore tag aliases while retaining advanced query grammar.
+- Library starts at All with no Recent saved sidebar entry. Folder controls and Album appearance follow PC conventions. Global Settings collapses connection editing when configured while retaining security, cache and picker recovery. Collection cards reserve two title lines and one credit line; full text remains in details. Viewer removes its redundant information heading.
+- Final server verification passed **71 tests** in an isolated stage using the existing production venv and live dependencies, without loading production configuration or data. Only `mobile_catalog.py`, `mobile_catalog_query.py` and `mobile_catalog_replica.py` were deployed. Source rollback copies and a consistent main-database backup (`quick_check=ok`) are retained at `/home/linuxuser/lakomics-catalog-release-20260920/rollback-064`. No catalog refresh, backfill, dimensions rollout or replacement of `app.py` was performed.
+- Authenticated live HTTPS checks passed for capability version 1, legacy browsing and pre-deployment cursors/contexts, empty and multiple category selection, avoidance-filter requests, counts, pagination, detail and editions. A real artist search returned identical results with spaces and underscores. Unauthenticated access returned 401 and an excluded-category detail returned 404. Publication `ba0e4c2bc7558bee67db0b386a0cfc90108ea5437c39e83510124e76629a1795`, its policy revision and publication count remained unchanged. API and existing local proxy finished active/running with `NRestarts=0`. Representative filtered pages took about 2.0–2.2 seconds and a count about 1.0 second; these are bounded server-path observations, not a load benchmark.
+- Artifact: `android/build/lakomics-mobile-0.6.4-release.apk`, 1,246,628 bytes, SHA-256 `79619ce24f82f6fceca652b96f9402a7720d507d3117ef617a0aeccc4fc53279`. Mobile TypeScript/Vite and native release packaging passed; APK alignment and v2/v3 signatures were verified with the existing signer.
+- Galaxy Tab S11 (`SM-X730`) accepted `adb install -r`; package inspection confirmed 0.6.4 (20), retaining the original installation date without uninstall/data reset. `am start -W` returned `Status: ok` and the app process remained alive. The tablet was subsequently displaying another app, so portrait rendering, real touch interaction and authenticated device browsing are **not** accepted by this startup check. Those checks remain separate from the passing browser fixtures and live API canaries. No Git commit/push was performed.
 
 ## Build
 

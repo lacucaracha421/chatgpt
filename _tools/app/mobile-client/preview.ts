@@ -160,7 +160,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     return {revision,items:selected.slice(offset,offset+limit),totalCount:selected.length,sourceCount:selected.length,has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
   }
   if(url.pathname==='/v1/collections/status')return {revision:'demo-1'};
-  if(url.pathname==='/v1/mobile-catalog/status')return {publicationRevision:'demo-catalog',authorityLibraryId:demoLibraryId,authorityEpoch:1,authorityContractVersion:1,capabilities:{providers:['kHentai'],read:true,bookmarkWrite:true,refreshRequest:true}};
+  if(url.pathname==='/v1/mobile-catalog/status')return {publicationRevision:'demo-catalog',authorityLibraryId:demoLibraryId,authorityEpoch:1,authorityContractVersion:1,capabilities:{providers:['kHentai'],read:true,bookmarkWrite:true,refreshRequest:true,displayPreferencesVersion:1}};
   if(url.pathname==='/v1/mobile-catalog/refresh'){
     if(payload.method==='POST'){
       const body=payload.body as {operationId:string;language:'korean'|'japanese'};
@@ -171,10 +171,28 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   }
   if(url.pathname.startsWith('/v1/mobile-catalog/')){
     const catalog=demoCatalog;
-    const decode=(name:string)=>JSON.parse(url.searchParams.get(name)??'{}') as {offset?:number;language?:string;text?:string;scope?:string;limit?:number};
+    type DemoCatalogQuery={offset?:number;language?:string;text?:string;scope?:string;limit?:number;categories?:number[]|null;excludedTags?:{namespace:string;value:string}[];searchMode?:string};
+    const decode=(name:string)=>JSON.parse(url.searchParams.get(name)??'{}') as DemoCatalogQuery;
     if(url.pathname.endsWith('/search')){
-      const q=url.searchParams.has('cursor')?decode('cursor'):{language:url.searchParams.get('language')??'korean',text:url.searchParams.get('text')??'',scope:url.searchParams.get('scope')??'all',limit:40};
-      const selected=catalog.filter((item,i)=>(q.language==='all'||i%2===(q.language==='japanese'?1:0))&&(!q.text||item.title.includes(q.text))&&(q.scope!=='bookmarked'||item.bookmarked));
+      const rawCategories=url.searchParams.get('categories'),rawExcluded=url.searchParams.get('excludedTags');
+      const q:DemoCatalogQuery=url.searchParams.has('cursor')?decode('cursor'):{language:url.searchParams.get('language')??'korean',text:url.searchParams.get('text')??'',scope:url.searchParams.get('scope')??'all',limit:40,categories:rawCategories===null?null:JSON.parse(rawCategories) as number[],excludedTags:rawExcluded===null?[]:JSON.parse(rawExcluded) as {namespace:string;value:string}[],searchMode:url.searchParams.get('searchMode')??undefined};
+      // A deliberately narrow preview of the server's filter contract: it shows that
+      // categories combine as an OR, an explicit empty list admits nothing, an
+      // excluded pair hides a row, and an underscore phrase matches a spaced title.
+      // This is a fixture, not a validation of the real SQL or of tag storage.
+      const demoCategory=(item:{providerWorkId:string})=>(Number(item.providerWorkId)%11)+1;
+      const demoExcluded=(item:{providerWorkId:string})=>Number(item.providerWorkId)%5===4?[{namespace:'female',value:'scat'}]:[];
+      const phrase=(value:string)=>q.searchMode==='mobile'?value.trim().replace(/[ _]+/g,'_'):value.trim();
+      const selected=catalog.filter((item,i)=>{
+        const category=demoCategory(item);
+        if(q.categories!=null&&!q.categories.includes(category))return false;
+        if(q.excludedTags?.some(tag=>demoExcluded(item).some(pair=>pair.namespace===tag.namespace&&pair.value===tag.value)))return false;
+        if(q.scope==='bookmarked'&&!demoBookmarkState(item.providerWorkId).desired)return false;
+        if(q.language!=='all'&&i%2!==(q.language==='japanese'?1:0))return false;
+        const wanted=phrase(q.text??'');if(!wanted)return true;
+        const haystack=phrase(item.title).replace(/_/g,'');
+        return haystack.includes(wanted.replace(/_/g,''));
+      });
       const offset=q.offset??0,limit=q.limit??40,context=JSON.stringify({...q,offset:0});
       return {ready:true,publicationRevision:'demo-catalog',publishedAt:'2026-09-08T00:00:00Z',items:selected.slice(offset,offset+limit),nextCursor:offset+limit<selected.length?JSON.stringify({...q,offset:offset+limit}):null,context,countToken:null,totalCount:selected.length,countStatus:'ready'};
     }

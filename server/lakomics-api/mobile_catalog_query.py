@@ -5,8 +5,33 @@ aligned with library/catalog_query.rs and catalog_group_query.rs.
 """
 from __future__ import annotations
 
+import itertools
+import re
 import time
 from urllib.parse import urlsplit
+
+
+# Additive device-specific read filters. `mobile` is the only mode that differs
+# from the historical parser; an omitted mode keeps the exact old semantics.
+SEARCH_MODES = ("mobile",)
+NAMESPACE_MAX_BYTES = 32
+TAG_VALUE_MAX_BYTES = 200
+EXCLUDED_TAG_MAX = 64
+
+
+
+def tag_value_variants(value):
+    """Exact tag values a phrase may denote, in both separator directions.
+
+    A stored value is never rewritten: the space form and the underscore form
+    are separate exact candidates, compared with `=`, never with LIKE. The byte
+    bound mirrors the excluded-tag value bound so neither path is unbounded.
+    """
+    if not 1 <= len(value.encode("utf-8")) <= TAG_VALUE_MAX_BYTES:
+        return ()
+    spaced = re.sub("[_]+", " ", value)
+    underscored = re.sub("[ ]+", "_", value)
+    return tuple(dict.fromkeys((value, spaced, underscored)))
 
 
 class QueryError(ValueError):
@@ -19,6 +44,7 @@ def parse_query(source):
     data = source.encode("utf-8")
     if len(data) > 4096:
         raise QueryError(4096, len(data))
+
     tokens, i = [], 0
     def span(n):
         return len(source[:n].encode("utf-8"))
@@ -76,7 +102,6 @@ def parse_query(source):
             raise QueryError(token[2], token[3])
         return token
     def number(token, zero=False):
-        import re
         text = token[1]
         if not re.fullmatch(r"\+?[0-9]+", text):
             raise QueryError(token[2], token[3])
@@ -103,6 +128,7 @@ def parse_query(source):
                 raise QueryError(token[2], token[3])
             return ("pages", op, number(value(), True))
         if peek() != ":":
+
             return ("title", text)
         take()
         v = value()
@@ -148,36 +174,78 @@ def parse_query(source):
     return result
 
 
+
+def tag_match(namespace, forms, any_namespace=False):
+    """Exact equality on the stored namespace and value.
+
+    `forms` only widens which exact strings count as the same value; it never
+    becomes a pattern and never rewrites stored data. A phrase matches any
+    namespace, so `any_namespace` drops the namespace equality.
+    """
+    sql = "EXISTS(SELECT 1 FROM catalog.Tags t WHERE t.WorkId=work.Id"
+    params = []
+    if not any_namespace:
+        sql += " AND t.Namespace=?"
+        params.append(namespace)
+    sql += " AND t.Value IN (" + ",".join("?" for _ in forms) + "))"
+    return sql, [*params, *forms]
+
+
+def title_match(text):
+    text = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = "%" + text + "%"
+    return "(work.Title LIKE ? ESCAPE '\\' OR COALESCE(work.TitleJpn,'') LIKE ? ESCAPE '\\')", [pattern, pattern]
+
+
 def compile_query(expr):
     params = []
     def walk(e):
         kind = e[0]
         if kind == "title":
-            pattern = "%" + e[1].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            params.extend((pattern, pattern))
-            return "(work.Title LIKE ? ESCAPE '\\' OR COALESCE(work.TitleJpn,'') LIKE ? ESCAPE '\\')"
-        if kind == "tag":
-            params.extend(e[1:])
-            return "EXISTS(SELECT 1 FROM catalog.Tags t WHERE t.WorkId=work.Id AND t.Namespace=? AND t.Value=?)"
-        if kind in ("id", "category", "uploader"):
-            params.append(e[1])
-            return {"id": "work.Id=?", "category": "COALESCE(work.Category,-1)=?", "uploader": "COALESCE(work.Uploader,'')=? COLLATE NOCASE"}[kind]
-        if kind == "pages":
-            params.append(e[2])
-            return "work.FileCount " + e[1] + " ?"
-        if kind == "not":
+            sql, values = title_match(e[1])
+        elif kind == "phrase":
+            title_sql = walk(e[1])
+            tag_sql, values = tag_match(None, e[2], any_namespace=True)
+            sql = "(" + title_sql + " OR " + tag_sql + ")"
+        elif kind == "tag":
+            sql, values = tag_match(e[1], (e[2],))
+        elif kind == "tag_variants":
+            sql, values = tag_match(e[1], e[2])
+        elif kind in ("id", "category", "uploader"):
+            sql, values = {"id": "work.Id=?", "category": "COALESCE(work.Category,-1)=?", "uploader": "COALESCE(work.Uploader,'')=? COLLATE NOCASE"}[kind], [e[1]]
+        elif kind == "pages":
+            sql, values = "work.FileCount " + e[1] + " ?", [e[2]]
+        elif kind == "not":
             return "NOT (" + walk(e[1]) + ")"
-        return "(" + walk(e[1]) + (" AND " if kind == "and" else " OR ") + walk(e[2]) + ")"
+        else:
+            return "(" + walk(e[1]) + (" AND " if kind == "and" else " OR ") + walk(e[2]) + ")"
+        params.extend(values)
+        return sql
     return (walk(expr), params) if expr else ("1", [])
 
 
+def excluded_tags(query):
+    """Device-specific excluded tags, validated and deduplicated.
+
+    These are ordinary filters, not policy: they are always enforced, including
+    with `revealBlocked`, and they never change stored visibility.
+    """
+    return query.get("excludedTags") or ()
+
+
 def eligible(query, state="state"):
+    categories = query.get("categories")
+    exclusions = excluded_tags(query)
     if query.get("preparedState"):
         clauses, params = [], []
         if query["language"] != "all":
             clauses.append(f"{state}.{query['language']}=1")
         if not query["revealBlocked"]:
             clauses.append(f"{state}.visible=1")
+        clauses.extend(category_clause(categories))
+        clauses.append(excluded_tags_clause(exclusions))
+        params.extend(categories or ())
+        params.extend(excluded_tags_params(exclusions))
         return " AND ".join(clauses) or "1", params
     clauses, params = ["likely(work.Expunged=0)" if query["sort"] == "latest" else "work.Expunged=0"], []
     if query["language"] != "all":
@@ -188,11 +256,37 @@ def eligible(query, state="state"):
             clauses.append("NOT EXISTS(SELECT 1 FROM online_catalog_hidden_categories h WHERE h.category=work.Category)")
         if query.get("hasBlocked", True):
             clauses.append("NOT EXISTS(SELECT 1 FROM catalog.Tags t JOIN online_catalog_blocked_tags b ON b.namespace=t.Namespace AND b.value=t.Value WHERE t.WorkId=work.Id)")
+    clauses.extend(category_clause(categories))
+    clauses.append(excluded_tags_clause(exclusions))
+    params.extend(categories or ())
+    params.extend(excluded_tags_params(exclusions))
     return " AND ".join(clauses), params
+
+
+def category_clause(categories):
+    """None keeps every category; an explicit empty selection admits nothing."""
+    if categories is None:
+        return []
+    if not categories:
+        return ["0"]
+    return ["work.Category IN (" + ",".join("?" for _ in categories) + ")"]
+
+
+def excluded_tags_clause(exclusions):
+    """Negated exact (namespace,value) pairs. Identity is stored text only."""
+    if not exclusions:
+        return "1"
+    pairs = " OR ".join("(t.Namespace=? AND t.Value=?)" for _ in exclusions)
+    return "NOT EXISTS(SELECT 1 FROM catalog.Tags t WHERE t.WorkId=work.Id AND (" + pairs + "))"
+
+
+def excluded_tags_params(exclusions):
+    return list(itertools.chain.from_iterable(exclusions))
 
 
 def freeze_query(db, query):
     query = dict(query)
+
     query["hasHidden"], query["hasBlocked"] = map(bool, db.execute("SELECT EXISTS(SELECT 1 FROM online_catalog_hidden_categories),EXISTS(SELECT 1 FROM online_catalog_blocked_tags)").fetchone())
     query["preparedState"] = bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mobile_catalog_work_state'").fetchone())
     # Server-owned bookmarks are detected from this connection's temp schema, never
@@ -200,6 +294,7 @@ def freeze_query(db, query):
     # work state bookmark column is stale by construction.
     query["authorityBookmarks"] = bool(db.execute(
         "SELECT 1 FROM sqlite_temp_master WHERE type='table' AND name='online_catalog_bookmarks'").fetchone())
+
     seconds = {"hotDay": 86400, "hotWeek": 604800, "hotMonth": 2592000}.get(query["sort"])
     if seconds and "hotCutoff" not in query:
         where, params = eligible(query)
@@ -212,9 +307,43 @@ def freeze_query(db, query):
     return query
 
 
+def plain_phrase(source):
+    words = source.split()
+    return bool(words) and not any(character in source for character in '()":<=>\\') and not any(
+        word.upper() in ("AND", "OR", "NOT") or word.startswith("-") for word in words)
+
+
+def mobile_query_text(source, search_mode=None):
+    # Always parse first: convenience input must obey the same size/syntax limits.
+    expr = parse_query(source)
+    if search_mode != "mobile" or expr is None:
+        return expr
+    text = source.strip()
+    if plain_phrase(text):
+        forms = tag_value_variants(" ".join(text.split()))
+        return ("phrase", expr, forms) if forms else expr
+    namespace, separator, value = text.partition(":")
+    if (separator and re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", namespace)
+            and namespace.lower() not in ("id", "pages", "uploader", "category") and plain_phrase(value)):
+        forms = tag_value_variants(" ".join(value.split()))
+        if forms:
+            return ("tag_variants", namespace.lower(), forms)
+    # Advanced expressions keep their grammar; only exact tag spellings gain an alias.
+    def tag_aliases(node):
+        if node[0] == "tag":
+            forms = tag_value_variants(node[2])
+            return ("tag_variants", node[1], forms) if forms else node
+        if node[0] in ("and", "or"):
+            return (node[0], tag_aliases(node[1]), tag_aliases(node[2]))
+        if node[0] == "not":
+            return ("not", tag_aliases(node[1]))
+        return node
+    return tag_aliases(expr)
+
+
 def cte(query):
     where, params = eligible(query)
-    sql, values = compile_query(parse_query(query["text"]))
+    sql, values = compile_query(mobile_query_text(query["text"], query.get("searchMode")))
     params.extend(values)
     if query["scope"] == "bookmarked":
         if query.get("preparedState") and not query.get("authorityBookmarks"):

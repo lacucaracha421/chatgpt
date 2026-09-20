@@ -1,17 +1,16 @@
 import type {CharacterIndex,CharacterNode} from './characterModel';
 import {useMemo, type Dispatch, type SetStateAction} from 'react';
-import {ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon, UserGroupIcon, UserIcon} from '@heroicons/react/24/outline';
+import {ChevronDownIcon, ChevronRightIcon, FolderIcon, UserGroupIcon, UserIcon} from '@heroicons/react/24/outline';
 import {ClassificationIcon, classificationColor} from '../src/classification/classificationAppearance';
-import {Button} from './ui';
 import type {Classification, View} from './types';
 
-// Group and Character folders reuse the same icon vocabulary as their cards so the
-// type is recognizable in the tree without reading the name. Series rows are ordinary
-// classifications and keep their configured icon.
+/**
+ * Group and Character folders reuse their card icons; every other row renders the icon the PC
+ * stored for it via `ClassificationIcon`.
+ */
 function EntryIcon({kind,iconKey,color}:{kind?:Exclude<CharacterNode['kind'],'series'>;iconKey:string|null;color:string}) {
   if(kind==='group')return <UserGroupIcon aria-hidden="true" data-icon="character-group" style={{color}}/>;
   if(kind==='character')return <UserIcon aria-hidden="true" data-icon="character" style={{color}}/>;
-  if(kind==='folder')return <FolderIcon aria-hidden="true" data-icon="folder" style={{color}}/>;
   return <ClassificationIcon kind="tag" iconKey={iconKey} style={{color}}/>;
 }
 export function ClassificationIndex({items, view, onSelect, collapsed, setCollapsed,characters}: {characters?:CharacterIndex;items: Classification[]; view: View; onSelect(view: View): void; collapsed: Set<string>; setCollapsed: Dispatch<SetStateAction<Set<string>>>}) {
@@ -45,16 +44,18 @@ export function ClassificationIndex({items, view, onSelect, collapsed, setCollap
     visit(null, 0); return result;
   }, [items, characters, collapsed]);
   return <div className="classification-index">
-    <Button className={`index-recent ${!view.characters && !view.classification && !view.revisit && view.title!=='전체' ? 'selected' : ''}`} variant="ghost" onClick={() => onSelect({tab:'library', title:'최근 저장'})}><ClockIcon/>최근 저장</Button>
-    {!characters?.ready&&<Button variant="ghost" aria-pressed={!!view.characters} onClick={()=>onSelect({tab:'library',title:'시리즈·캐릭터',characters:true})}>시리즈·캐릭터</Button>}
     <div className="index-heading"><span>분류</span><span className="numeric">{items.length}</span></div>
     <nav className="classification-tree" aria-label="분류">
-      <div className={`tree-row ${view.title==='전체'&&!view.classification&&!view.characters?'selected':''}`}><span className="tree-leaf"/><button className="tree-select" aria-current={view.title==='전체'&&!view.classification&&!view.characters?'page':undefined} onClick={()=>onSelect({tab:'library',title:'전체'})}><FolderIcon/><span>전체</span></button></div>
-      {visible.map(({item, depth, children}) => <div className={`tree-row ${(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'selected' : ''}`} style={{paddingLeft:depth * 16}} key={item.id}>
+      <div className={`tree-row ${isAll(view)?'selected':''}`}><span className="tree-leaf"/><button className="tree-select" aria-current={isAll(view)?'page':undefined} onClick={()=>onSelect({tab:'library',title:'전체'})}><FolderIcon/><span>전체</span></button></div>
+      {visible.map(({item, depth, children}) => <div className={`tree-row ${(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'selected' : ''}`} style={{paddingLeft:`${depth * 16}px`}} key={item.id}>
         {children ? <button className="tree-expander" aria-label={`${item.name} ${collapsed.has(item.id) ? '펼치기' : '접기'}`} aria-expanded={!collapsed.has(item.id)} onClick={() => setCollapsed(old => {const next = new Set(old); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next;})}>{collapsed.has(item.id) ? <ChevronRightIcon/> : <ChevronDownIcon/>}</button> : <span className="tree-leaf"/>}
         <button className="tree-select" aria-current={(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'page' : undefined} onClick={() => onSelect(item.characterNode?{tab:'library',characters:true,characterNode:item.characterNode,title:item.name}:{tab:'library', classification:item.id, title:item.name})}><EntryIcon kind={item.characterKind} iconKey={item.icon_key ?? null} color={(item.characterNode?view.characterNode===item.characterNode:view.classification===item.id) ? 'currentColor' : classificationColor(item.color_key ?? null)}/><span>{item.name}</span><span className="numeric">{item.asset_count}</span></button>
       </div>)}
       {!visible.length && <p className="hint">아직 게시된 분류가 없습니다.</p>}
     </nav>
   </div>;
+}
+/** `전체`: every Library asset, with no narrower classification/character/revisit scope. */
+export function isAll(view: View) {
+  return view.tab==='library' && !view.characters && !view.classification && !view.revisit && view.title==='전체';
 }

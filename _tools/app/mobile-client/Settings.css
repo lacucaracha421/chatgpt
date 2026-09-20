@@ -1,0 +1,15 @@
+/* Compact settings sections reusing the shared dialog/field primitives. */
+.settings-section { padding:16px 0; border-bottom:1px solid var(--color-border); }
+.settings-section-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.settings-section-head h3 { font-size:14px; font-weight:500; margin:0; }
+.settings-intro { font-size:13px; line-height:1.7; color:var(--color-muted); margin:10px 0 0; }
+.settings-connection { display:flex; align-items:center; gap:8px; font-size:13px; margin:0; min-width:0; }
+/* Long addresses truncate instead of pushing the status off the row. */
+.settings-connection>.numeric { margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55%; font-size:12px; }
+.settings-inline-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.settings-connection-form { margin-top:4px; }
+.settings-connection-form .field:first-child { margin-top:12px; }
+/* Advanced/recovery detail stays out of the primary surface. */
+.settings-advanced { padding:16px 0; border-bottom:1px solid var(--color-border); }
+.settings-advanced>summary { display:flex; align-items:center; min-height:var(--touch); cursor:pointer; font-size:13px; }
+.settings-advanced p { color:var(--color-muted); font-size:12px; line-height:1.7; margin:6px 0 0; }

@@ -36,10 +36,11 @@ it('opens character browsing inside Library and uses Android back for its parent
   fireEvent.click(await screen.findByRole('button',{name:'Series2'}));
   await screen.findByText('tile-b1');
   // A directly opened folder is a top-level entry, so Back returns to Library instead
-  // of consuming the press for a bare Series overview.
+  // of consuming the press for a bare Series overview. All is the Library default, so the
+  // restore target is the canonical All heading rather than the removed Recent tab.
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
   await screen.findByText('tile-a1');
-  expect(screen.getByRole('heading',{name:'최근 저장'})).toBeTruthy();
+  expect(screen.getByRole('heading',{name:'전체'})).toBeTruthy();
 });
 
 it('returns from a directly opened character folder to the non-home folder and scroll it was opened from',async()=>{
@@ -81,7 +82,7 @@ it('keeps the original context when another character folder is selected before 
   fireEvent.click(await screen.findByRole('button',{name:'Other series2'}));
   await screen.findByRole('heading',{name:'Other series'});
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
-  await waitFor(()=>expect(screen.getByRole('heading',{name:'최근 저장'})).toBeTruthy());
+  await waitFor(()=>expect(screen.getByRole('heading',{name:'전체'})).toBeTruthy());
   expect(screen.getByText('tile-a1')).toBeTruthy();
   expect(screen.queryByRole('heading',{name:'Series'})).toBeNull();
 });
@@ -150,7 +151,8 @@ describe('committed view and browsing',()=>{
       return Promise.resolve({items:Array.from({length:40},(_,i)=>({id:`n${offset+i}`,kind:'image'})),has_more:offset<80,next_cursor:offset<80?String(offset+40):null});
     });
     render(<App/>); await screen.findByText('tile-n0');
-    fireEvent.click(screen.getByRole('button',{name:'전체 보기'})); await screen.findByLabelText('자산 목록');
+    // All is the committed Library view on launch, so the gallery is already the target.
+    await screen.findByLabelText('자산 목록');
     const first=screen.getByText('tile-n0');
     expect(screen.queryByText('아래로 스크롤하면 계속 이어집니다')).toBeNull();
     expect(document.querySelector('.page-footer')).toBeNull();
@@ -170,7 +172,7 @@ describe('committed view and browsing',()=>{
       return original(path);
     });
     render(<App/>); await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'전체 보기'})); await screen.findByLabelText('자산 목록');
+    await screen.findByLabelText('자산 목록');
     fireEvent.scroll(screen.getByLabelText('자산 목록'));
     fireEvent.click(screen.getByRole('button',{name:'분류 B2'})); await screen.findByText('tile-b1');
     await act(async()=>{resolveMore({items:[{id:'late',kind:'image'}],has_more:false,next_cursor:null});});
@@ -184,7 +186,7 @@ describe('committed view and browsing',()=>{
       return original(path);
     });
     render(<App/>); await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'전체 보기'})); await screen.findByLabelText('자산 목록');
+    await screen.findByLabelText('자산 목록');
     fireEvent.scroll(screen.getByLabelText('자산 목록')); await screen.findByText('connection failed');
     expect(screen.getByText('tile-a1')).toBeTruthy(); fail=false;
     fireEvent.click(screen.getByRole('button',{name:'다시 시도'})); await screen.findByText('tile-b1');
@@ -215,29 +217,50 @@ describe('committed view and browsing',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
     await waitFor(()=>expect(screen.getByText('tile-b1')).toBeTruthy());
   });
-  it('active Library keeps its classification and native back preserves it for return',async()=>{
+  it('active Library keeps its classification and native back returns to All',async()=>{
     render(<App/>); await screen.findByText('tile-a1');
     fireEvent.click(screen.getByRole('button',{name:'분류 B2'})); await screen.findByText('tile-b1');
+    // Pressing Library while already inside a folder keeps that folder.
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
     expect(screen.getByText('tile-b1')).toBeTruthy();
+    // Back steps out of the inner folder to All, the Library default destination, instead
+    // of leaving for Home as it did when Recent was the default tab.
     await act(async()=>{window.dispatchEvent(new CustomEvent('lakomics-back'));});
     await screen.findByText('tile-a1');
+    expect(screen.getByRole('heading',{name:'전체'})).toBeTruthy();
+    // A second Back at the All root exits the app rather than loading another list.
+    await act(async()=>{window.dispatchEvent(new CustomEvent('lakomics-back'));});
+    expect(screen.getByText('tile-a1')).toBeTruthy();
+  });
+  it('leaves another area for the assets area when a Library folder is already committed',async()=>{
+    // Area and the committed view can disagree: the user is in Catalog while the last Library
+    // view is still a folder. Pressing Library must actually return to assets, not no-op.
+    const api=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/mobile-catalog')?Promise.resolve({ready:true,publicationRevision:'p1',items:[],totalCount:0,countStatus:'ready',context:'c',nextCursor:null}):api(path));
+    render(<App/>); await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'분류 B2'})); await screen.findByText('tile-b1');
+    fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));
+    await screen.findByRole('region',{name:'만화 카탈로그'});
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
-    await screen.findByText('tile-b1');
+    expect(screen.queryByRole('region',{name:'만화 카탈로그'})).toBeNull();
+    expect(screen.getByText('tile-b1')).toBeTruthy();
   });
 });
 
 it('uses one portrait location row and keeps folder actions in the index',async()=>{
   vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
   render(<App/>);await screen.findByText('tile-a1');
-  const heading=screen.getByRole('heading',{name:'최근 저장'});
+  const heading=screen.getByRole('heading',{name:'전체'});
   expect(heading.closest('.app-header')).not.toBeNull();
   expect(document.querySelector('.library-main > .gallery-heading')).toBeNull();
   expect(document.querySelector('.app-header .folder-tools')).toBeNull();
-  expect(screen.getByRole('button',{name:'모든 폴더 펼치기'}).closest('.desktop-index')).not.toBeNull();
+  expect(screen.getByRole('button',{name:'모든 폴더 접기'}).closest('.desktop-index')).not.toBeNull();
+  expect(screen.queryByRole('button',{name:'모든 폴더 펼치기'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'사이드바 열기'}));
   const drawer=screen.getByRole('dialog',{name:'분류'});
-  expect(within(drawer).getByRole('button',{name:'모든 폴더 펼치기'})).toBeTruthy();
+  expect(within(drawer).getByRole('button',{name:'모든 폴더 접기'})).toBeTruthy();
+  expect(within(drawer).getByRole('button',{name:'현재 위치만 펼치기'})).toBeTruthy();
+  expect(within(drawer).queryByRole('button',{name:'모든 폴더 펼치기'})).toBeNull();
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
   expect(screen.queryByRole('dialog')).toBeNull();
 });
@@ -258,13 +281,15 @@ it('opens gallery size choices without losing Library and closes only settings o
   await waitFor(()=>expect(document.activeElement).toBe(opener));
 });
 
-it('starts folders collapsed and provides expand, focus and collapse controls',async()=>{
+it('starts folders collapsed and preserves individual expansion, focus and collapse controls',async()=>{
   const original=mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation((path:string)=>path.includes('classifications')?Promise.resolve({items:[{id:'p',name:'Parent',asset_count:2,parent_id:null},{id:'b',name:'Child',asset_count:2,parent_id:'p'},{id:'q',name:'Other',asset_count:2,parent_id:null},{id:'x',name:'Other child',asset_count:2,parent_id:'q'}]}):original(path));
   render(<App/>);await screen.findByRole('button',{name:'Parent 펼치기'});
   expect(screen.queryByRole('button',{name:'Child2'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
-  fireEvent.click(await screen.findByRole('button',{name:'모든 폴더 펼치기'}));
+  fireEvent.click(screen.getByRole('button',{name:'Parent 펼치기'}));
+  fireEvent.click(screen.getByRole('button',{name:'Other 펼치기'}));
+  expect(screen.getByRole('button',{name:'Other child2'})).toBeTruthy();
   fireEvent.click(await screen.findByRole('button',{name:'Child2'}));
   await screen.findByText('tile-b1');
   fireEvent.click(screen.getByRole('button',{name:'현재 위치만 펼치기'}));
@@ -288,7 +313,7 @@ describe('server list generation',()=>{
   }
   it.each(['mobile assignment','remote assignment','remote trash','remote tombstone'])('%s removes an Asset from cached A on foreground',async()=>{
     const server=fixture();render(<App/>);await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByLabelText('자산 목록');
+    await screen.findByLabelText('자산 목록');
     server.change([]);act(()=>window.dispatchEvent(new Event('lakomics-resume')));
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
     fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
@@ -332,7 +357,7 @@ describe('server list generation',()=>{
         : {items:a,has_more:true,next_cursor:'c1'};
     });
     render(<App/>);await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByLabelText('자산 목록');
+    await screen.findByLabelText('자산 목록');
     fireEvent.scroll(screen.getByLabelText('자산 목록'));
     await screen.findByText('tile-b1');
   });

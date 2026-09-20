@@ -21,12 +21,13 @@ it('marks character folders, group folders and plain classifications with distin
   renderIndex([{id:'plain',name:'Plain folder',parent_id:null,asset_count:3}]);
   const iconFor=(name:string)=>screen.getByText(name).closest('button')!.querySelector('svg');
   const character=iconFor('Character'),group=iconFor('Group'),series=iconFor('Series'),plain=iconFor('Plain folder');
+  // Character and Group rows use the same User/UserGroup vocabulary as their cards.
   expect(character?.getAttribute('data-icon')).toBe('character');
   expect(group?.getAttribute('data-icon')).toBe('character-group');
-  // A series row is a character-backed folder, but not a character or group.
-  expect(series?.getAttribute('data-icon')).toBeNull();
+  // A Series row is an ordinary Classification: it renders the same PC-mapped icon as any
+  // other folder (resolving the stored icon key against the PC catalog), not a special glyph.
   expect(series?.getAttribute('data-testid')).toBe('classification-icon');
-  // A plain classification keeps the configured tag/folder icon.
+  expect(series?.getAttribute('data-icon-key')).toBe('folder');
   expect(plain?.getAttribute('data-testid')).toBe('classification-icon');
   expect(new Set([character?.outerHTML,group?.outerHTML,plain?.outerHTML]).size).toBe(3);
 });
@@ -49,4 +50,29 @@ it('keeps the hierarchy line and expander outside the selected row fill',()=>{
   // sibling hierarchy line stay uncovered by the selected fill.
   expect(row.querySelector('.tree-select')!.getAttribute('aria-current')).toBe('page');
   expect(row.querySelector('.tree-expander')).not.toBeNull();
+});
+
+it('renders the PC icon key a classification actually stores, not a type fallback',()=>{
+  // `icon_key` values come from the PC catalog (`folder_appearance.rs` / `classificationAppearance`).
+  // A Series row and a plain folder both resolve through that catalog, so a configured key is
+  // rendered verbatim and the kind fallback is only used when no key was ever chosen.
+  renderIndex([
+    {id:'plain',name:'Plain folder',parent_id:null,asset_count:3,icon_key:'sparkles'},
+    {id:'other',name:'No icon folder',parent_id:null,asset_count:1},
+  ]);
+  const iconFor=(name:string)=>screen.getByText(name).closest('button')!.querySelector('svg');
+  expect(iconFor('Plain folder')?.getAttribute('data-icon-key')).toBe('sparkles');
+  // A stored key the catalog does not know falls back instead of rendering nothing.
+  expect(iconFor('No icon folder')?.getAttribute('data-icon-key')).toBe('folder');
+});
+
+it('makes All the only Recent-free entry and marks it selected for the canonical view',()=>{
+  render(<ClassificationIndex items={[]} characters={characters} view={{tab:'library',title:'전체'}} onSelect={onSelect} collapsed={new Set()} setCollapsed={vi.fn()}/>);
+  // `최근 저장` is not a Library destination any more; All is the default listing.
+  expect(screen.queryByRole('button',{name:/최근 저장/})).toBeNull();
+  const all=screen.getByText('전체').closest('.tree-row')!;
+  expect(all.classList.contains('selected')).toBe(true);
+  expect(screen.getByText('전체').closest('button')!.getAttribute('aria-current')).toBe('page');
+  fireEvent.click(screen.getByText('전체').closest('button')!);
+  expect(onSelect).toHaveBeenCalledWith({tab:'library',title:'전체'});
 });

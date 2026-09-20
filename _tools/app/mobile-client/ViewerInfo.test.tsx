@@ -6,7 +6,7 @@ vi.mock('./transport', () => ({
   native: mocks.native,
   errorText: (reason: unknown) => reason instanceof Error ? reason.message.slice(0, 180) : '연결을 확인한 뒤 다시 시도해 주세요.',
 }));
-import {ViewerInfo, creatorText, infoFields, openableSource, sizeLabel, sourceLabel, summaryText} from './ViewerInfo';
+import {ViewerInfo, creatorText, infoFields, openableSource, sectionHasVisibleTitle, sizeLabel, sourceLabel, summaryText} from './ViewerInfo';
 
 /** A complete Asset, so a test states only the fields it is actually about. */
 const asset = (overrides: Partial<Asset> = {}): Asset => ({
@@ -94,15 +94,43 @@ describe('ViewerInfo field projection', () => {
   });
 });
 
+describe('ViewerInfo section headings', () => {
+  it('suppresses a heading that would only repeat the row beneath it', () => {
+    // With no creator, 출처 is both this section's title and its first row label.
+    const rows = infoFields({id: 'a', kind: 'image', source_url: 'https://example.com/posts/42'});
+    expect(sectionHasVisibleTitle(rows.rows.filter(row => row.section === 'source'), 'source')).toBe(false);
+    // The file section always starts with 수집일, so its heading still earns its space.
+    expect(sectionHasVisibleTitle(rows.rows.filter(row => row.section === 'file'), 'file')).toBe(true);
+  });
+  it('keeps the heading when the first row is not that title', () => {
+    // 작가 comes first here, so the 출처 heading still tells the reader what the section is.
+    const rows = infoFields(asset()).rows.filter(row => row.section === 'source');
+    expect(rows[0].label).toBe('작가');
+    expect(sectionHasVisibleTitle(rows, 'source')).toBe(true);
+  });
+  it('renders no empty heading for a section with no rows', () => {
+    expect(sectionHasVisibleTitle([], 'source')).toBe(false);
+  });
+});
+
 describe('ViewerInfo panel', () => {
   it('is media-first and compact: heading, sections, one explicit close control', () => {
     render(<ViewerInfo asset={asset()} onClose={() => {}}/>);
     expect(screen.getByRole('heading', {level: 2}).textContent).toBe('서유진');
     expect(screen.getByText('IMAGE')).toBeTruthy();
     expect(screen.getByRole('button', {name: '정보 닫기'})).toBeTruthy();
-    // Two rows are labelled 출처 by design: the section title and the 출처 value row.
+    // 작가 leads this fixture's 출처 section, so the heading stays distinct from the rows.
     expect(screen.getAllByText('출처')).toHaveLength(2);
+    expect(screen.getByText('작가')).toBeTruthy();
+    expect(screen.getByText('example.com/posts/42')).toBeTruthy();
     expect(screen.getByText('파일')).toBeTruthy();
+  });
+  it('drops the 출처 heading when it would be the section\'s first label', () => {
+    // No creator is known, so 출처 is both the section title and its first row.
+    const {container} = render(<ViewerInfo asset={{id: 'a', kind: 'image', source_url: 'https://example.com/posts/42'}} onClose={() => {}}/>);
+    const headings = [...container.querySelectorAll('.viewer-info-group-title')].map(node => node.textContent);
+    expect(headings).toEqual(['파일']);
+    expect(screen.getAllByText('출처')).toHaveLength(1);
   });
   it('closes through the labelled control', () => {
     const close = vi.fn();

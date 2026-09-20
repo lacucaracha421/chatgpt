@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
 import type {Asset} from './types';
@@ -79,6 +79,14 @@ export function infoFields(asset: Asset): {rows: (InfoField & {section: 'source'
 
 const SECTIONS: {key: 'source' | 'file'; title: string}[] = [{key: 'source', title: '출처'}, {key: 'file', title: '파일'}];
 
+/**
+ * A section heading is omitted when it would only repeat the row label directly beneath it,
+ * which is the common case for 출처. The rows keep their own labels either way.
+ */
+export function sectionHasVisibleTitle(rows: InfoField[], section: 'source' | 'file'): boolean {
+  return rows.length > 0 && rows[0].label.trim() !== SECTIONS.find(entry => entry.key === section)!.title;
+}
+
 /** `label: value` per line, covering exactly the 파일 정보 the panel shows. */
 export function summaryText(asset: Asset): string {
   return infoFields(asset).rows.filter(row => row.file).map(row => `${row.label}: ${row.value.replace(/\n/g, ' ')}`).join('\n');
@@ -114,7 +122,7 @@ export function ViewerInfo({asset, mediaError = '', onClose}: {asset: Asset; med
   const lifetime = useRef({assetId: asset.id, generation: 0});
   lifetime.current.assetId = asset.id;
   useEffect(() => () => {lifetime.current.generation++;}, []);
-  const {rows, heading} = infoFields(asset);
+  const {rows, heading} = useMemo(() => infoFields(asset), [asset]);
   const source = openableSource(asset.source_url) ? asset.source_url : undefined;
 
   useEffect(() => {setStatus(null); setCopied(''); setBusy(false);}, [asset.id]);
@@ -164,7 +172,7 @@ export function ViewerInfo({asset, mediaError = '', onClose}: {asset: Asset; med
         const sectionRows = rows.filter(row => row.section === section.key);
         if (!sectionRows.length) return null;
         return <dl key={section.key} className="viewer-info-group">
-          <dt className="viewer-info-group-title">{section.title}</dt>
+          {sectionHasVisibleTitle(sectionRows, section.key) && <dt className="viewer-info-group-title">{section.title}</dt>}
           {sectionRows.map(row => <div key={row.key} className="viewer-info-row">
             <dt>{row.label}</dt>
             <dd>{row.value}</dd>

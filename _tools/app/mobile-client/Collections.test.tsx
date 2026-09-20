@@ -204,3 +204,37 @@ it('uses production company and TV date range for movie grid captions',()=>{
 it('shows the full filtered Collection count instead of the loaded page length',async()=>{
   mocks.api.mockResolvedValue({...page,totalCount:125});render(<Collections active paused={false} backRef={{current:null}}/>);expect((await screen.findByLabelText('필터 결과 개수')).textContent).toBe('125개');
 });
+/**
+ * jsdom does not lay text out, so the caption rules are asserted on the elements that own them.
+ * A long title plus a missing creator is the case that used to change the card's height: the
+ * reserved two-line title area is what keeps every card the same size.
+ */
+it('bounds every card caption without dropping the full work value',async()=>{
+  const long={...item,id:'long',name:'아주 길고 긴 한국어 작품 제목이 두 줄을 넘어가는 경우',developer:'매우 길게 이어지는 개발사 이름 예시'};
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[long]}:{revision:'r1',item:long});
+  render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(long.name);
+  const card=screen.getByLabelText('컬렉션',{selector:'section'}).querySelector('.collection-grid .collection-tile') as HTMLElement;
+  const title=card.querySelector('.collection-title') as HTMLElement, credit=card.querySelector('.collection-credit') as HTMLElement;
+  expect(title.className).toBe('collection-title');
+  expect(credit.className).toBe('collection-credit');
+  // The full values are rendered; no tooltip substitutes for the truncated text.
+  expect(title.textContent).toBe(long.name);
+  expect(credit.textContent).toBe(long.developer);
+  expect(title.getAttribute('title')).toBeNull();
+  expect(credit.getAttribute('aria-description')).toBeNull();
+  expect(card.getAttribute('aria-label')).toBeNull();
+  // The same full-value rule holds on the detail surface the card opens.
+  fireEvent.click(screen.getByText(long.name));
+  expect((await screen.findByRole('heading',{level:1})).textContent).toBe(long.name);
+  expect(screen.getByLabelText('작품 정보',{selector:'details .collection-metadata'}).textContent).toContain(long.developer);
+});
+/** The detail identity names each type's own maker role, so the grid caption never has to. */
+it.each([['game','개발사','아주 긴 개발사 이름'],['manga','작가','아주 긴 작가 이름'],['movie','제작사','아주 긴 제작사 이름']] as const)('names the %s maker role in the detail identity',async(type,role,name)=>{
+  const fields=type==='game'?{developer:name}:type==='manga'?{author:name}:{productionCompany:name};
+  const work={...item,...fields,type};
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[work]}:{revision:'r1',item:work});
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  fireEvent.click(await screen.findByText(item.name));
+  expect(await screen.findByText(`${role} · ${name}`)).toBeTruthy();
+  expect(screen.getByText('작품 정보').closest('details')?.querySelector('.collection-metadata')?.textContent).toContain(name);
+});

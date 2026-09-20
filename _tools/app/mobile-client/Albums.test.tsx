@@ -27,6 +27,7 @@ describe('additive albums section',()=>{
     render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
     await screen.findByText('업로드용');
     expect(screen.getByText('Other')).toBeTruthy();
+    expect(screen.getByText('앨범').closest('.index-title')?.querySelector('svg')).toBeNull();
     // A nested Album is not flattened into the top level.
     expect(screen.queryByText('임시')).toBeNull();
     fireEvent.click(screen.getByText('업로드용'));
@@ -70,6 +71,25 @@ describe('additive albums section',()=>{
   it('bounds a cyclic hierarchy instead of hanging',()=>{
     const cyclic:NativeAlbum[]=[{id:'x',name:'X',parentId:'y',iconKey:null,colorKey:null},{id:'y',name:'Y',parentId:'x',iconKey:null,colorKey:null}];
     expect(albumPath(cyclic,'x')).toBe('Y / X');
+  });
+  it('renders the Album icon key through the PC mapping instead of a fixed folder glyph',async()=>{
+    // The replica stores the same keys the PC catalog validates (`folder_appearance.rs`):
+    // a configured key, `null`, or an unknown future key. All three are resolved by the PC
+    // icon component, which is what makes the Album icon match the folder icon on desktop.
+    mocks.native.mockResolvedValue({...adopted,albums:[
+      {id:'root',name:'업로드용',parentId:null,iconKey:'sparkles',colorKey:'pink'},
+      {id:'plain',name:'No icon',parentId:null,iconKey:null,colorKey:null},
+      {id:'future',name:'Future key',parentId:null,iconKey:'not-an-icon',colorKey:null},
+    ]});
+    render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
+    const iconFor=async(name:string)=>(await screen.findByText(name)).closest('button')!.querySelector('svg');
+    expect((await iconFor('업로드용'))?.getAttribute('data-icon-key')).toBe('sparkles');
+    // `colorKey` resolves through the same PC palette (`#df6fa7` = pink); the browser
+    // normalizes it to `rgb()` in the inline style, so assert the resolved color.
+    expect((await iconFor('업로드용'))?.getAttribute('style')).toContain('rgb(223, 111, 167)');
+    expect((await iconFor('No icon'))?.getAttribute('data-icon-key')).toBe('folder');
+    // An unknown persisted key falls back rather than rendering a random glyph.
+    expect((await iconFor('Future key'))?.getAttribute('data-icon-key')).toBe('folder');
   });
   it('lets back close the Album dialog before leaving the library',async()=>{
     const backRef:{current:(()=>boolean)|null}={current:null};

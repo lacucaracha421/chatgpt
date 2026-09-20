@@ -16,11 +16,17 @@ from starlette.concurrency import run_in_threadpool
 import api_auth
 import catalog_bookmarks
 import mobile_catalog_replica as replica
-from mobile_catalog_query import QueryError, parse_query, freeze_query, count_groups, search_groups, detail, editions
+from mobile_catalog_query import (QueryError, mobile_query_text, freeze_query, count_groups, search_groups, detail,
+                                  editions, SEARCH_MODES, NAMESPACE_MAX_BYTES, EXCLUDED_TAG_MAX, TAG_VALUE_MAX_BYTES)
 
 PREFIX = "/v1/mobile-catalog"
 TTL = 24 * 60 * 60
 MAX_READER_PAGES = 2000
+# Leave room for text and for both context + editions cursor in Android's 16 KiB path.
+MAX_FILTER_BYTES = 2048
+MAX_QUERY_BYTES = 4500
+NAMESPACE_PATTERN = re.compile(r"[a-z][a-z0-9_-]*")
+EXCLUDED_VALUE_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
 LIBRARY_HEADER = "X-Lakomics-Library-Id"
 LIBRARY_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 HEX_DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -74,7 +80,7 @@ def parse_reader_pages(html):
     return pages
 
 def normalize(params):
-    allowed = {"provider", "language", "text", "sort", "scope", "revealBlocked", "limit"}
+    allowed = {"provider", "language", "text", "sort", "scope", "revealBlocked", "limit", "categories", "excludedTags", "searchMode"}
     if set(params) - allowed:
         replica.fail(400, "Unsupported catalog parameter")
     q = {"provider": "kHentai", "language": "korean", "text": "", "sort": "latest", "scope": "all", "revealBlocked": "false", "limit": "40", **dict(params)}
@@ -87,11 +93,72 @@ def normalize(params):
     except (ValueError, TypeError):
         replica.fail(400)
     q["revealBlocked"] = q["revealBlocked"] == "true"
+
+    categories = parse_categories(q.pop("categories")) if "categories" in params else None
+    excluded = parse_excluded_tags(q.pop("excludedTags")) if "excludedTags" in params else []
+    if categories is None and "categories" in params or excluded is None and "excludedTags" in params:
+        replica.fail(400, "Unsupported catalog parameter")
+    q["categories"], q["excludedTags"] = categories, excluded
+    if "searchMode" in params and q["searchMode"] not in SEARCH_MODES:
+        replica.fail(400, "Unsupported catalog parameter")
+    if len(replica.encode(q).encode("utf-8")) > MAX_QUERY_BYTES:
+        replica.fail(422, "검색어나 회피 태그를 줄여 주세요.")
     try:
-        parse_query(q["text"])
+        mobile_query_text(q["text"], q.get("searchMode"))
     except QueryError as exc:
         raise HTTPException(422, {"code": "invalidQuery", "message": "검색식을 확인해 주세요.", "span": exc.span}) from exc
     return q
+
+
+def parse_json_param(raw):
+    """A bounded JSON parameter, or None when it is not a JSON array."""
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_FILTER_BYTES:
+        return None
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return None
+    return value if isinstance(value, list) else None
+
+
+def parse_categories(raw):
+    """Category ids 1..11 as a JSON array. Omitted means unrestricted.
+
+    The empty array is preserved rather than dropped: it is an explicit "no
+    categories" selection and must never widen back to unrestricted.
+    """
+    value = parse_json_param(raw)
+    if value is None or any(type(item) is not int or not 1 <= item <= 11 for item in value):
+        return None
+    return sorted(set(value))
+
+
+def parse_excluded_tags(raw):
+    """Exact excluded (namespace,value) pairs as a JSON array of objects.
+
+    Returns sorted unique pairs. Two spellings of the same exclusion are one
+    filter, and the frozen order stays stable across devices and cursor reuse.
+    """
+    value = parse_json_param(raw)
+    if value is None or len(value) > EXCLUDED_TAG_MAX:
+        return None
+    result = {}
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"namespace", "value"}:
+            return None
+        namespace, tag = item["namespace"], item["value"]
+        if not isinstance(namespace, str) or not NAMESPACE_PATTERN.fullmatch(namespace) or len(namespace.encode("utf-8")) > NAMESPACE_MAX_BYTES:
+            return None
+        if not isinstance(tag, str) or not tag or EXCLUDED_VALUE_PATTERN.search(tag):
+            return None
+        try:
+            if len(tag.encode("utf-8")) > TAG_VALUE_MAX_BYTES:
+                return None
+        except UnicodeError:
+            return None
+        result[(namespace, tag)] = None
+    return sorted(result)
+
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -177,7 +244,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         with get_db() as db:
             current = replica.current(db)
             manifest = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [current["content_digest"]]).fetchone() if current else None
-            return {"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None}}
+            return {"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None, "displayPreferencesVersion": 1}}
 
     @app.post(PREFIX + "/bookmark-authority/activate")
     async def activate(request: Request, authorization: str | None = Header(default=None)):
@@ -463,6 +530,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
                 budget(db)
                 q = freeze_query(db, payload["query"])
                 payload = {**payload, "revision": publication["revision"], "query": q}
+
                 total = replica.prepared_count(db, q)
                 prepared = replica.prepared_items(db, q, payload["offset"], q["limit"], total)
                 if prepared is not None:

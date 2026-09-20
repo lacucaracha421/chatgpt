@@ -280,8 +280,17 @@ def prepare_users(root, content, revision, users):
         if os.path.exists(temporary):
             os.unlink(temporary)
 
+def device_filters(query):
+    """True when the query carries filters the prepared projection cannot answer.
+
+    The baked counts and pages were derived from language/reveal only, so any
+    device-specific category or excluded-tag filter must take the fallback path.
+    """
+    return query.get("categories") is not None or bool(query.get("excludedTags"))
+
+
 def prepared_count(db, query):
-    if query.get("text", "").strip() or query.get("scope") != "all" or "hotCutoff" in query:
+    if query.get("text", "").strip() or query.get("scope") != "all" or "hotCutoff" in query or device_filters(query):
         return None
     try:
         row = db.execute("SELECT exact_count FROM prepared_counts WHERE language=? AND reveal=?", [query["language"], int(query["revealBlocked"])]).fetchone()
@@ -291,7 +300,7 @@ def prepared_count(db, query):
     return row[0] if row else None
 
 def prepared_items(db, query, offset, limit, total):
-    if query.get("text", "").strip() or query.get("scope") != "all" or query.get("revealBlocked") or query.get("sort") not in ("latest", "views"):
+    if query.get("text", "").strip() or query.get("scope") != "all" or query.get("revealBlocked") or query.get("sort") not in ("latest", "views") or device_filters(query):
         return None
     try:
         row = db.execute("SELECT payload FROM prepared_pages WHERE language=? AND sort=?", [query["language"], query["sort"]]).fetchone()

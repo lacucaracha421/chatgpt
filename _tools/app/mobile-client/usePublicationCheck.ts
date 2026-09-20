@@ -9,22 +9,22 @@ import {api} from './transport';
  * so callers that own a bookmark queue observe it here instead of issuing a
  * second request for the same document.
  */
-export function usePublicationCheck(active:boolean,path:string,revision:string|null|undefined,onChange:(reply:unknown,changed:boolean)=>void,intervalMs=60_000) {
-  const latest=useRef({revision,onChange});latest.current={revision,onChange};
+export function usePublicationCheck(active:boolean,path:string,revision:string|null|undefined,onChange:(reply:unknown,changed:boolean)=>void,intervalMs=60_000,options:{onError?():void;retryKey?:number}={}) {
+  const latest=useRef({revision,onChange,onError:options.onError});latest.current={revision,onChange,onError:options.onError};
   useEffect(()=>{
     if(!active)return;const controller=new AbortController();let running=false;
     const check=async()=>{if(running||document.visibilityState==='hidden')return;running=true;try{
       const value=await api<{revision?:string|null;publicationRevision?:string|null}>(path,controller.signal);
-      if(!Object.prototype.hasOwnProperty.call(value,'revision')&&!Object.prototype.hasOwnProperty.call(value,'publicationRevision'))return;
+      if(!value||(!Object.prototype.hasOwnProperty.call(value,'revision')&&!Object.prototype.hasOwnProperty.call(value,'publicationRevision'))){if(!controller.signal.aborted)latest.current.onError?.();return;}
       if(controller.signal.aborted)return;
       const next=value.revision??value.publicationRevision??null;
       // Before the caller's own load commits there is no revision to compare
       // against, so the first check is reported as unchanged.
       const changed=latest.current.revision!==undefined&&next!==latest.current.revision;
       latest.current.onChange(value,changed);
-    }catch{/* Retain current content and retry on foreground/timer tick. */}finally{running=false;}};
+    }catch{if(!controller.signal.aborted)latest.current.onError?.();}finally{running=false;}};
     void check();const timer=setInterval(()=>void check(),intervalMs);
     window.addEventListener('lakomics-resume',check);document.addEventListener('visibilitychange',check);
     return()=>{controller.abort();clearInterval(timer);window.removeEventListener('lakomics-resume',check);document.removeEventListener('visibilitychange',check);};
-  },[active,path,intervalMs]);
+  },[active,path,intervalMs,options.retryKey]);
 }
