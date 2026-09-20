@@ -27,9 +27,12 @@ it('navigates series, groups and characters, opens shared assets and returns to 
   render(<CharacterBrowser {...props}/>);
   fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));
   fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
-  fireEvent.click(await screen.findByRole('button',{name:'Character · 2개'}));
+  fireEvent.click(screen.getByRole('button',{name:'Character · 2개'}));
   fireEvent.click(await screen.findByText('asset-2'));
-  expect(onOpen).toHaveBeenCalledWith(page().items,1);
+  // The third argument is the character origin this gallery hands its viewer. This node is a
+  // character, whose published index here advertises no manual-exclusion capability, so the
+  // context is legitimately absent rather than an invented target.
+  expect(onOpen).toHaveBeenCalledWith(page().items,1,null);
   expect(screen.getByText(/아직 공유되지 않은 자산 1개/)).toBeTruthy();
   act(()=>{expect(backRef.current?.()).toBe(true);});
   expect(await screen.findByRole('heading',{name:'Group'})).toBeTruthy();

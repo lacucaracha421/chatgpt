@@ -46,6 +46,12 @@ final class NetworkPolicy {
   post=post || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}/artworks/[A-Za-z0-9_-]{1,128}/media-ticket");
   get=get || p.equals("/v1/mobile-catalog/refresh");
   post=post || p.equals("/v1/mobile-catalog/refresh");
+  // The manual character exclusion accepted for this device: one named Asset in one named
+  // character, and nothing else. Only this exact POST is added. The exclusion *log* is a
+  // publisher read of every correction in the library, and the publication and structural
+  // character routes stay publisher-only, so none of them may be reached from here: they
+  // remain absent from the allowlist and the malformed variants below are rejected.
+  post=post || p.equals("/v1/library/characters/exclusions");
   // The catalog bookmark command: one desired-state write per work identity, and
   // nothing else. The id charset excludes `/`, `.`, `%` and `?`, so the segment
   // cannot traverse or re-encode into a different entity.

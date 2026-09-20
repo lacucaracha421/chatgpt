@@ -26,7 +26,19 @@ pub enum Error {
     Stale,
     #[error("{0}")]
     Invalid(&'static str),
+    /// The inbound mobile rejection does not apply to this library any more.
+    ///
+    /// These are deliberately *typed* rather than `Invalid(&str)`: the receive pass must
+    /// tell them apart to report a useful reason, and matching on message text would break
+    /// silently the first time ordinary copy changed.
+    #[error("제외할 자산을 찾을 수 없습니다.")]
+    InboundTargetNotFound,
+    #[error("자산 내용이 바뀌어 제외를 적용할 수 없습니다.")]
+    InboundAssetChanged,
+    #[error("기준 이미지는 제외할 수 없습니다.")]
+    InboundProtectedReference,
 }
+
 
 const REFERENCE_COUNT: usize = 5;
 pub(super) const MAX_REFERENCES: usize = 25;
@@ -976,6 +988,92 @@ impl Library {
             changed += 1;
         }
         Ok(changed)
+    }
+
+    /// Record one inbound manual exclusion from the mobile server log.
+    ///
+    /// This is the shared, safety-checked write path for a server-accepted manual
+    /// rejection. It deliberately does **not** reuse `write_character_decisions`:
+    /// that function composes its own decision from `candidate_decision_media_mode`,
+    /// which refuses an asset the original series no longer contains. A mobile
+    /// exclusion must still hold for an asset that has since been *moved out* of the
+    /// series, which is exactly the case the folder-eligibility check rejects, so the
+    /// pair is validated here and the eligibility rule is then bypassed on purpose.
+    ///
+    /// Everything else keeps the existing semantics: the same `character_decisions`
+    /// row shape, the same `origin='manual'` trigger effects, the same
+    /// `refresh_character_review_state` call and the same `character_review_completions`
+    /// invalidation. Nothing here consults the target's published fingerprint, because a
+    /// correction accepted while the PC was off is composed against a projection that is
+    /// legitimately stale; the *current* target is re-read under this transaction instead.
+    ///
+    /// Fails closed on everything it cannot prove: a missing target or asset, a hash that
+    /// no longer matches the stored bytes, or an asset that is one of the target's own
+    /// base or learned references. In every one of those cases no row is written, so the
+    /// caller must not advance its cursor.
+    pub(super) fn write_inbound_character_rejection(
+        &self,
+        transaction: &Connection,
+        target_id: &str,
+        asset_id: &str,
+        asset_sha256: &str,
+    ) -> Result<bool> {
+        let target = self.read_character_target(transaction, target_id)?;
+        let hash: Option<String> = transaction
+            .query_row(
+                "SELECT content_hash FROM assets WHERE id=?1 AND status='normal'",
+                [asset_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(hash) = hash else {
+            return Err(Error::InboundTargetNotFound);
+        };
+        // Same-byte identity is the only thing that makes the server's correction
+        // applicable: an asset id can be re-ingested with different bytes, and rejecting
+        // those bytes would be a different decision than the user made.
+        if !hash.eq_ignore_ascii_case(asset_sha256) {
+            return Err(Error::InboundAssetChanged);
+        }
+        // A reference is what *defines* the character. Rejecting one would contradict the
+        // target's own evidence, so it is refused rather than silently applied.
+        let protected: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_references WHERE target_id=?1 AND asset_id=?2)
+                 OR EXISTS(SELECT 1 FROM character_learned_references WHERE target_id=?1 AND asset_id=?2)",
+            params![target_id, asset_id],
+            |row| row.get(0),
+        )?;
+        if protected {
+            return Err(Error::InboundProtectedReference);
+        }
+        // Idempotent by latest-decision, exactly like the manual path: a replay of an
+        // already-recorded rejection reports no change instead of appending a second row.
+        let previous: Option<String> = transaction
+            .query_row(
+                "SELECT decision FROM character_decisions
+                 WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
+                params![target_id, asset_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if previous.as_deref() == Some(DecisionKind::Rejected.stored()) {
+            super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
+            return Ok(false);
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let references = serde_json::to_string(&target.references)?;
+        transaction.execute(
+            "INSERT INTO character_decisions
+                (target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,created_at)
+                VALUES(?1,?2,?2,?3,'rejected',?4,NULL,?5,?6)",
+            params![target.id, asset_id, hash, target.fingerprint, references, now],
+        )?;
+        transaction.execute(
+            "DELETE FROM character_review_completions WHERE asset_id=?1",
+            [asset_id],
+        )?;
+        super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
+        Ok(true)
     }
 
     pub fn list_character_decisions(

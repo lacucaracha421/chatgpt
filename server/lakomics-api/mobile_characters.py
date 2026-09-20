@@ -1,4 +1,4 @@
-"""Versioned PC character read projection. No character mutation authority."""
+"""PC character projection with a bounded manual-exclusion correction channel."""
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from starlette.concurrency import run_in_threadpool
 
 import asset_filters
+import character_exclusions
 
 PREFIX = "/v1/library/characters"
 MAX_BYTES = 24 * 1024 * 1024
@@ -37,6 +38,7 @@ class Node(Strict):
     heroAssetId: ID | None = None
     manualOnly: bool = False
     excluded: bool = False
+    protectedAssetIds: list[ID] | None = Field(default=None, max_length=250_000)
 
 
 class Scope(Strict):
@@ -51,6 +53,9 @@ class Replica(Strict):
     navigationOrder: list[str] = Field(default_factory=list, max_length=20000)
     nodes: list[Node] = Field(max_length=10_000)
     scopes: list[Scope] = Field(max_length=30_000)
+    manualExclusionVersion: Literal[1] | None = None
+    libraryId: character_exclusions.LIBRARY | None = None
+    exclusionCursor: int | None = Field(default=None, ge=0, le=character_exclusions.MAX_CURSOR)
 
 
 def encode(value):
@@ -62,10 +67,19 @@ def invalid():
 
 
 def validate(snapshot):
+    upgraded = snapshot.manualExclusionVersion is not None
+    if upgraded != (snapshot.libraryId is not None and snapshot.exclusionCursor is not None):
+        invalid()
+    if not upgraded and (snapshot.libraryId is not None or snapshot.exclusionCursor is not None):
+        invalid()
     nodes = {n.id: n for n in snapshot.nodes}
     if len(nodes) != len(snapshot.nodes):
         invalid()
     for n in snapshot.nodes:
+        if (upgraded and n.kind == 'character') != (n.protectedAssetIds is not None):
+            invalid()
+        if n.protectedAssetIds is not None and len(set(n.protectedAssetIds)) != len(n.protectedAssetIds):
+            invalid()
         if n.heroAssetId and n.kind != "series":
             invalid()
         if n.id != f"{n.kind}:{n.sourceId}":
@@ -100,7 +114,12 @@ def validate(snapshot):
     return nodes
 
 
-def register_characters(app, get_db, require_auth, asset_item, asset_memberships):
+def register_characters(app, get_db, require_auth, asset_item, asset_memberships,
+                        require_client=None, require_publisher=None):
+    reader = require_client or require_auth
+    publisher = require_publisher or require_auth
+    character_exclusions.register(app, get_db, reader, publisher)
+
     def startup():
         with get_db() as db:
             db.executescript("""
@@ -114,6 +133,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                   asset_id TEXT NOT NULL,
                   PRIMARY KEY(node_id,filter,position), UNIQUE(node_id,filter,asset_id));
             """)
+            db.executescript(character_exclusions.DDL)
             db.commit()
 
     app.on_event("startup")(startup)
@@ -124,12 +144,17 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
     def visible_index(db, current):
         index = json.loads(current["index_json"])
         retired = {r[0] for r in db.execute("SELECT a.id FROM assets a WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=a.id)")}
-        if not retired:
+        hidden = {(r[0], r[1]) for r in db.execute("SELECT node_id,asset_id FROM mobile_character_hidden_members")}
+        if not retired and not hidden:
             return index
-        counts = {(r[0],r[1]):r[2] for r in db.execute("SELECT m.node_id,m.filter,COUNT(*) FROM mobile_character_members m JOIN assets a ON a.id=m.asset_id WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=a.id) GROUP BY m.node_id,m.filter")}
+        counts = {(r[0],r[1]):r[2] for r in db.execute(f"""
+            SELECT m.node_id,m.filter,COUNT(*) FROM mobile_character_members m
+            WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=m.asset_id)
+               OR NOT ({character_exclusions.VISIBLE_MEMBER})
+            GROUP BY m.node_id,m.filter""")}
         for node in index["nodes"]:
             for key in ("thumbnailAssetId","heroAssetId"):
-                if node.get(key) in retired:
+                if node.get(key) in retired or (node['id'], node.get(key)) in hidden:
                     node[key] = None
         for scope in index["scopes"]:
             removed = counts.get((scope["nodeId"],scope["filter"]),0)
@@ -142,6 +167,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
             previous = state(db)
+            character_exclusions.publication_guard(db, snapshot)
             # Freeze availability and display metadata with memberships. Uploads
             # completed later become visible at the next explicit publication.
             ids = sorted({id for s in snapshot.scopes for id in s.assetIds} |
@@ -158,6 +184,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             nodes = []
             for node in snapshot.nodes:
                 item = node.model_dump()
+                if node.protectedAssetIds is None:
+                    item.pop('protectedAssetIds')
                 if item["thumbnailAssetId"] not in assets:
                     item["thumbnailAssetId"] = None
                 if item["heroAssetId"] not in assets:
@@ -166,7 +194,13 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             scopes = [{"nodeId": s.nodeId, "filter": s.filter,
                        "sourceCount": len(s.assetIds),
                        "assetIds": [id for id in s.assetIds if id in assets]} for s in snapshot.scopes]
-            revision = hashlib.sha256(encode({"nodes": nodes, "scopes": scopes, "assets": assets, "navigationOrder": snapshot.navigationOrder}).encode()).hexdigest()
+            identity = {"nodes": nodes, "scopes": scopes, "assets": assets, "navigationOrder": snapshot.navigationOrder}
+            if snapshot.manualExclusionVersion is not None:
+                exclusions = character_exclusions.state(db)
+                identity.update(manualExclusionVersion=1, libraryId=snapshot.libraryId,
+                                exclusionCursor=snapshot.exclusionCursor,
+                                lastExclusionSequence=exclusions['last_sequence'] if exclusions else 0)
+            revision = hashlib.sha256(encode(identity).encode()).hexdigest()
             if previous and previous["revision"] == revision:
                 return {"revision": revision, "nodes": len(nodes)}
             if snapshot.baseRevision != (previous["revision"] if previous else None):
@@ -184,12 +218,13 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             db.execute("INSERT INTO mobile_character_state VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET "
                        "revision=excluded.revision,published_at=excluded.published_at,index_json=excluded.index_json",
                        (revision, datetime.now(timezone.utc).isoformat(), index_json))
+            character_exclusions.acknowledge_publication(db, snapshot, index)
             db.commit()
             return {"revision": revision, "nodes": len(nodes)}
 
     @app.put(PREFIX + "/replica")
     async def put(request: Request, authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         raw = bytearray()
         async for chunk in request.stream():
             raw.extend(chunk)
@@ -199,22 +234,28 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             snapshot = Replica.model_validate_json(bytes(raw))
         except (ValidationError, ValueError):
             invalid()
+        if snapshot.manualExclusionVersion is not None:
+            publisher(authorization)
+        else:
+            require_auth(authorization)
         return await run_in_threadpool(publish, snapshot)
 
     @app.get(PREFIX)
     def index(authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         with get_db() as db:
+            db.execute('BEGIN')
             current = state(db)
+            capability, exclusion_state = character_exclusions.advertisement(db)
             return {"version": 1, "authority": "pc", "authorityEpoch": 0,
-                    "capabilities": {"read": True, "write": False}, "ready": current is not None,
+                    "capabilities": {"read": True, "write": False, **capability}, **exclusion_state, "ready": current is not None,
                     "revision": current["revision"] if current else None,
                     "publishedAt": current["published_at"] if current else None,
                     **(visible_index(db, current) if current else {"nodes": [], "scopes": []})}
 
     @app.get(PREFIX + "/status")
     def publication_status(authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         with get_db() as db:
             current = state(db)
         return {"revision": current["revision"] if current else None}
@@ -251,7 +292,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
         live one. An Asset the current visibility path hides is absent from that join and
         so drops out of the page without touching the frozen membership.
         """
-        require_auth(authorization)
+        reader(authorization)
         # The shipped read declared its parameters explicitly, so an unknown one was ignored
         # rather than refused. Now that this route carries a filter identity inside its
         # cursor, a silently ignored parameter would let a client believe a page was
@@ -292,6 +333,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                                   JOIN mobile_character_assets AS a ON a.id = m.asset_id
                                   JOIN visible_assets AS asset ON asset.id = m.asset_id
                                   WHERE m.node_id = ? AND m.filter = ? AND m.position > ?
+                                  AND {character_exclusions.VISIBLE_MEMBER}
                                   {filter_clause}
                                   ORDER BY m.position LIMIT ?""",
                               [node, filter, position] + filter_params + [limit + 1]).fetchall()
@@ -305,6 +347,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                                    FROM mobile_character_members AS m
                                    JOIN visible_assets AS asset ON asset.id = m.asset_id
                                    WHERE m.node_id = ? AND m.filter = ?
+                                   AND {character_exclusions.VISIBLE_MEMBER}
                                    {filter_clause}""",
                                [node, filter] + filter_params).fetchone()[0]
             next_cursor = asset_filters.encode_cursor(

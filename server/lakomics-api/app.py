@@ -3046,7 +3046,11 @@ startup_mobile_collections = register_collections(
 
 from mobile_characters import register_characters
 
-startup_mobile_characters = register_characters(app, get_db, require_auth, mobile_asset_item, _mobile_memberships)
+startup_mobile_characters = register_characters(
+    app, get_db, require_auth, mobile_asset_item, _mobile_memberships,
+    require_client=lambda authorization: client_guard(get_db, API_TOKEN)(authorization),
+    require_publisher=require_publisher,
+)
 
 # Aggregate authority discovery. Read-only: it reports which domains already have
 # an authority row and never activates or migrates one. Registered after the domain

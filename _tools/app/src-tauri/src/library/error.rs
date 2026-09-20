@@ -131,6 +131,28 @@ pub enum LibraryError {
         current_revision: i64,
         current_desired_state: bool,
     },
+    #[error("서버 캐릭터 제외 목록을 이 PC 버전에서 지원하지 않습니다. Lakomics를 업데이트해 주세요.")]
+    CharacterExclusionContractUnsupported,
+    #[error("서버가 캐릭터 수동 제외 기능을 제공하지 않습니다.")]
+    CharacterExclusionUnsupported,
+    #[error("서버 캐릭터 제외 이력과 이 PC의 위치가 어긋납니다. 제외 이력을 다시 받아야 합니다.")]
+    CharacterExclusionCursorRejected,
+    #[error("서버 캐릭터 제외 동기화 요청이 거부됐습니다: HTTP {0}")]
+    CharacterExclusionSyncRejected(u16),
+    #[error("서버 캐릭터 제외 항목이 올바르지 않습니다.")]
+    CharacterExclusionInvalid,
+    #[error("제외 대상 자산 또는 캐릭터를 이 라이브러리에서 찾을 수 없어 제외를 적용하지 않았습니다.")]
+    CharacterExclusionTargetMissing,
+    #[error("자산 내용이 바뀌어 서버의 캐릭터 제외를 적용할 수 없습니다.")]
+    CharacterExclusionAssetChanged,
+    #[error("기준 이미지로 쓰이는 자산은 제외할 수 없습니다.")]
+    CharacterExclusionProtectedReference,
+    #[error("서버 캐릭터 게시가 거부됐습니다: HTTP {0}")]
+    CharacterPublicationRejected(u16),
+    #[error("서버의 캐릭터 게시본이 먼저 변경되었습니다. 다시 게시해 주세요.")]
+    CharacterPublicationConflict,
+    #[error("캐릭터 게시본이 서버가 받을 수 있는 크기를 넘었습니다.")]
+    CharacterPublicationTooLarge,
     #[error("서버 분류 권위가 아직 활성화되지 않았습니다")]
     ClassificationAuthorityInactive,
     #[error("서버 분류 권위가 이 라이브러리와 일치하지 않습니다")]

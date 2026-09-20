@@ -255,6 +255,9 @@ impl From<Error> for CommandError {
             Error::NotFound => "character_not_found",
             Error::Invalid(_) => "invalid_character_request",
             Error::Worker(_) => "character_runtime_failed",
+            Error::InboundTargetNotFound => "character_inbound_exclusion_target_missing",
+            Error::InboundAssetChanged => "character_inbound_exclusion_asset_changed",
+            Error::InboundProtectedReference => "character_inbound_exclusion_protected_reference",
             Error::Library(_) | Error::Db(_) | Error::Json(_) | Error::Io(_) => {
                 "character_storage_failed"
             }

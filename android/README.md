@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.6.6 (22)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate and installed in place on Galaxy Tab S11; see the delivery checkpoint below.
+Current source version: **0.6.7 (23)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate and installed in place on Galaxy Tab S11. Manual character exclusion is deployed and activated; a user-submitted Galaxy Tab correction was verified through server reflection and Linux PC acknowledgement. See the delivery checkpoint below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,52 @@ Current source version: **0.6.6 (22)**, declared in [AndroidManifest.xml](Androi
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.6.7 — Manual character exclusion, live verified (2026-09-20)
+
+Adds a named character-exclusion confirmation to the Asset viewer when opened from a
+character gallery. Folder assignment, files, albums and other character memberships
+remain separate. The action stays hidden until an upgraded PC publishes the required
+identity, acknowledgement cursor and protected-reference metadata. Automatic inference
+remains PC-owned; see [the contract](../docs/agents/mobile-character-contract.md).
+
+- APK: `android/build/lakomics-mobile-0.6.7-release.apk`, 1,250,724 bytes, SHA-256
+  `e1271af8f1d468897060bd71a20294ab49d82766ace39af5df96d7ccf2a90ec1`.
+  Version 0.6.7 (23), SDK35, existing-certificate v2/v3 signatures and ZIP alignment
+  were verified. All 12 packaged asset files match the frontend output; bundled JS
+  contains the exclusion route, capability guard and current version.
+- The build worker reported the focused Settings suite (8 tests), mobile TypeScript/Vite
+  and native release packaging successful. The controller independently checked the
+  resulting artifact, signer, version, alignment and bundled asset bytes. Earlier
+  81-test feature evidence remains valid for the unchanged feature source.
+- Authorized in-place update on Galaxy Tab S11 (`SM-X730`, `100.118.150.55:44603`)
+  succeeded. Package reports 0.6.7 (23), retaining first installation at
+  `2026-09-08 17:56:50`. Cold launch returned `Status: ok` (290 ms activity launch,
+  not network/render latency); a subsequent screenshot showed the portrait media viewer.
+  No uninstall, account reset, cache clear or provider-setting change was performed.
+- Server `app.py`, `mobile_characters.py` and `character_exclusions.py` were deployed
+  after baseline hash checks and an online SQLite backup (`quick_check=ok`). Source/DB
+  rollback copies are at `/home/linuxuser/lakomics-character-067-ri8brlhv/rollback/`.
+  Health, authenticated index and unauthorized write/log access checks passed; service
+  finished active/running with `NRestarts=0`. Assets remained 9,006 and the previous
+  character revision was unchanged at deployment, before feature activation.
+- The first PC release build hit the 240-second limit. A user-authorized 15-minute
+  retry completed in 128 seconds. The resulting `target/release/lakomics` SHA-256 is
+  `41d77f144ec0cabe7c0c31448d666b7c0409a4823c575230799b5724583278f1`.
+  After a checked local SQLite backup, finite native WebDriver sessions opened the
+  configured library, migrated schema 88 to 89 and used the existing Settings action
+  to publish 90 views. The live index then advertised `manualExclusion:true`.
+- The user, not the agent, submitted the exclusion of Asset
+  `1d8d1f34-b84c-421b-865e-733d1a3230b8` from LaLa target
+  `77d88ce4-a2b4-4b8e-9752-54cc1741b5fa`. While the PC was closed, the server recorded
+  one operation and LaLa's list changed from 22 to 21 without that Asset.
+- A subsequent native PC publication consumed sequence 1 and stored `rejected` with
+  `origin=manual`. Server `applied_cursor=last_sequence=1`; the pending overlay is
+  empty and the acknowledged projection still excludes the Asset. Canonical manga
+  assignment and its revision are unchanged; local file path and SHA-256 bytes match
+  the pre-rollout snapshot, and server original/thumbnail metadata is unchanged.
+  The finite PC verification sessions were closed. No extra exclusion, Git commit or
+  push was performed. Windows native acceptance remains unverified.
 
 ## 0.6.6 — Asset filters and hourly Catalog refresh (2026-09-20)
 

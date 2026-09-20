@@ -36,6 +36,10 @@ impl Library {
     fn publish_due_mobile_kind(&self,kind:&str,endpoint:&str)->Result<(),LibraryError> {
         let config=self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref()!=Some(endpoint){return Ok(())}
+        if kind == "characters" {
+            // Receive even when no local changes have dirtied the publication.
+            self.run_due_character_exclusions(endpoint)?;
+        }
         let generation:Option<i64>={
             use rusqlite::OptionalExtension;
             self.connection()?.query_row("SELECT generation FROM mobile_publication_state WHERE kind=?1 AND endpoint=?2 AND generation<>published_generation AND retry_after<=unixepoch() AND (last_dirty<=unixepoch()-30 OR first_dirty<=unixepoch()-300)",params![kind,endpoint],|r|r.get(0)).optional()?
@@ -114,6 +118,41 @@ mod tests {
 }
 
 impl Library {
+    /// Run the character exclusion receive poll for this endpoint, at most once a minute.
+    ///
+    /// Not gated on the publication being dirty: a correction the server accepted while this
+    /// PC was idle is exactly the case where no local change would have made the lane dirty.
+    ///
+    /// A never-adopted endpoint is bootstrapped here rather than only during publication, so a
+    /// server upgraded while this PC sat idle is discovered within the poll interval. The
+    /// throttle is durable so a restart cannot stampede the log, and network work happens
+    /// outside every database lock.
+    pub(crate) fn run_due_character_exclusions(&self, endpoint: &str) -> Result<(), LibraryError> {
+        use rusqlite::OptionalExtension;
+        let config = self.cloud_sync_config()?;
+        if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
+            return Ok(());
+        }
+        let due = {
+            let db = self.connection()?;
+            let due:bool=db.query_row("SELECT last_checked<=unixepoch()-60 FROM mobile_character_exclusion_poll WHERE endpoint=?1",[endpoint],|r|r.get(0)).optional()?.unwrap_or(true);
+            if due {
+                db.execute("INSERT INTO mobile_character_exclusion_poll(endpoint,last_checked) VALUES(?1,unixepoch()) ON CONFLICT(endpoint) DO UPDATE SET last_checked=excluded.last_checked",[endpoint])?;
+            }
+            due
+        };
+        if !due {
+            return Ok(());
+        }
+        if self.character_exclusion_adoption(endpoint)?.is_none()
+            && !self.bootstrap_character_exclusions(endpoint)?
+        {
+            return Ok(());
+        }
+        self.receive_character_exclusions(endpoint)?;
+        Ok(())
+    }
+
     fn publish_due_catalog_visibility(&self,endpoint:&str)->Result<(),LibraryError>{
         let (body,digest)={let db=self.connection()?;let body=crate::library::mobile_catalog::visibility_snapshot(&db)?;let digest=crate::library::mobile_catalog::hash_json(&body)?;(body,digest)};
         let due={let db=self.connection()?;

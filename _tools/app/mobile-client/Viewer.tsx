@@ -7,11 +7,23 @@ import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText} from './transport';
 import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
+import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
 import {ViewerInfo} from './ViewerInfo';
 
 import './Viewer.css';
 
-export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>}) {
+/**
+ * The character this viewer was opened from, when it was opened from a character node.
+ *
+ * The host supplies it only for that one origin. A series, group or ordinary folder gallery
+ * passes nothing, because a manual exclusion names one character and none of those is one;
+ * inventing a target there would exclude the asset from a character the user never chose.
+ * The exclusion is composed from this value alone, so it can never outlive the origin that
+ * carried it: an `assetId` belongs to whichever request was formed for the asset on screen.
+ */
+export type ViewerCharacterContext = {targetId:string;name:string;libraryId:string;revision:string;protectedAssetIds:string[]};
+
+export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void}) {
   const asset = items[index];
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
   const prepared=useRef(new Map<string,string>());
@@ -26,9 +38,25 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef}: {item
   // Back handling runs only once the panel is closed.
   const infoOpen = useRef(false);
   infoOpen.current = info;
+  /**
+   * The confirmation's request identity, pinned to the Asset it was composed for.
+   *
+   * A swipe drops the open confirmation, but the pending operation itself stays durable
+   * under its endpoint/library/target/asset key, so reopening the same pair resends the exact
+   * body instead of composing a new one.
+   */
+  const [exclusion,setExclusion]=useState<ExclusionRequest|null>(null);
+  const exclusionOpen = useRef(false);
+  exclusionOpen.current = exclusion !== null;
   useEffect(() => {
     if (!backRef) return;
-    backRef.current = () => { if (!infoOpen.current) return false; setInfo(false); return true; };
+    backRef.current = () => {
+      // The confirmation is the innermost overlay, so it consumes Back first: dismissing it
+      // leaves the viewer open with its media untouched, which is what "취소" means here.
+      if (exclusionOpen.current) { setExclusion(null); return true; }
+      if (infoOpen.current) { setInfo(false); return true; }
+      return false;
+    };
     return () => { backRef.current = null; };
   }, [backRef]);
   const [albumOpen, setAlbumOpen] = useState(false);
@@ -42,7 +70,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef}: {item
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
   useEffect(() => {
     const controller = new AbortController();
-    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setChrome(true);
+    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); setChrome(true);
     gesture.current.points.clear();
     const load = async () => {
       try {
@@ -67,9 +95,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef}: {item
     return () => controller.abort();
   }, [original, items, index]);
   useEffect(() => {
-    if (!chrome || info || albumOpen || classificationOpen || asset.kind === 'video') return;
+    if (!chrome || info || albumOpen || classificationOpen || exclusion || asset.kind === 'video') return;
     const timer = setTimeout(() => setChrome(false), 4000); return () => clearTimeout(timer);
-  }, [chrome, info, albumOpen, classificationOpen, asset.id, asset.kind]);
+  }, [chrome, info, albumOpen, classificationOpen, exclusion, asset.id, asset.kind]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
   const waiting = () => {clearTimeout(stallTimer.current);stallTimer.current=setTimeout(() => setError('영상 연결이 지연되고 있습니다. 계속 기다리거나 다시 시도해 주세요.'),15000);};
   const playing = () => {clearTimeout(stallTimer.current);setError('');};
@@ -79,18 +107,36 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef}: {item
     const aspect = image && image.naturalHeight ? image.naturalWidth/image.naturalHeight : 1;
     return fitTransform(scale,x,y,rect.width,rect.height,aspect);
   };
+  // A protected reference cannot be excluded, so the action is absent rather than refused
+  // after the fact.
+  const exclusionKey:ExclusionKey|null=character&&asset&&endpoint?{endpoint,libraryId:character.libraryId,targetId:character.targetId,assetId:asset.id}:null;
+  const canExclude=!!exclusionKey&&!(character?.protectedAssetIds??[]).includes(asset.id);
+  const openExclusion = () => {
+    if(!exclusionKey||!character) return;
+    setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setChrome(true);
+    setExclusion({
+      version:1,
+      libraryId:character.libraryId,
+      // Minted once per confirmation. A retry through the editor reuses the stored body, so a
+      // lost response cannot become two exclusions.
+      operationId:crypto.randomUUID(),
+      targetId:character.targetId,
+      assetId:asset.id,
+      revision:character.revision,
+    });
+  };
   return <Dialog open title="미디어 감상" variant="fullscreen" onClose={onClose} onKeyDown={event => {
     if (event.target instanceof HTMLVideoElement) return;
     // Panels own their own keyboard input, so arrows inside one never change the asset.
-    if (info || albumOpen || classificationOpen) return;
+    if (info || albumOpen || classificationOpen || exclusion) return;
     if (event.key === 'ArrowLeft') { event.preventDefault(); change(index - 1); }
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
     <div className={`viewer ${chrome ? 'chrome-visible' : ''}`}>
-      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions"><IconButton label="분류" icon={TagIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(true);setChrome(true);}}/><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setInfo(!info); setChrome(true);}}/></div></header>
+      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<IconButton label="분류" icon={TagIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/></div></header>
       <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}`} onPointerDown={event => {
-        if (event.button > 0 || info || albumOpen || classificationOpen) return;
+        if (event.button > 0 || info || albumOpen || classificationOpen || exclusion) return;
         if(asset.kind==='video'&&video.current){const rect=video.current.getBoundingClientRect();if(event.clientY>rect.bottom-64)return;}
         if(asset.kind!=='video')event.currentTarget.setPointerCapture?.(event.pointerId);
         const g = gesture.current; g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
@@ -133,6 +179,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef}: {item
       <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span>{asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
+      <CharacterExclusionEditor request={exclusion} target={exclusionKey} characterName={character?.name||'이 캐릭터'} assetLabel={asset.creator_name||asset.creator_handle||'이 자산'} onClose={()=>setExclusion(null)} onExcluded={receipt=>{setExclusion(null);onCharacterExcluded?.(receipt);}}/>
       {info && <Dialog open title="미디어 정보" variant="wide" onClose={() => setInfo(false)}><DialogDescription className="sr-only">작가, 출처와 파일 정보를 확인하고 텍스트로 복사합니다.</DialogDescription><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></Dialog>}
     </div>
   </Dialog>;

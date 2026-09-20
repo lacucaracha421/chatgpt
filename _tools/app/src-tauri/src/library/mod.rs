@@ -61,6 +61,10 @@ mod character_sources;
 pub(crate) mod character_worker;
 pub mod character_workflow;
 pub mod characters;
+pub(crate) mod character_exclusions;
+#[cfg(test)]
+#[path = "character_exclusions_tests.rs"]
+mod character_exclusions_tests;
 mod classification;
 pub(crate) use classification::list_classifications_in;
 pub(crate) mod classification_authority;

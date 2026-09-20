@@ -11,7 +11,7 @@ import {RequestGate} from './model';
 import type {Asset,AssetFiltersValue} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
 import {AssetFilters,filterSummary} from './AssetFilters';
-import {characterChildren,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
+import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import './characters.css';
 
 /**
@@ -26,6 +26,14 @@ type Location={node:string|null;filter:CharacterFilter;filters:AssetFiltersValue
 type Cached={page:CharacterPage;scroll:number};
 const ROOT:Location={node:null,filter:'all',filters:{...EMPTY_FILTERS}};
 const labels:Record<CharacterFilter,string>={all:'전체',unclassified:'미분류',needs_review:'추가 확인'};
+
+/** The character context a character gallery hands to its viewer, or null for any other scope. */
+export function viewerCharacterContext(node:CharacterNode|undefined|null,index:CharacterIndex|undefined) {
+  const target=characterExclusionTarget(node);
+  const capability=characterExclusion(index);
+  if(!target||!capability||!Array.isArray(target.protectedAssetIds)||!target.protectedAssetIds.every(id=>typeof id==='string'))return null;
+  return {targetId:target.sourceId,name:target.name,libraryId:capability.libraryId,revision:capability.revision,protectedAssetIds:target.protectedAssetIds};
+}
 
 function Preview({id,paused,label=''}:{id?:string|null;paused:boolean;label?:string}) {
   const [preview,setPreview]=useState<string>();
@@ -47,7 +55,7 @@ function Card({node,count,paused,onSelect,previews=[]}:{node:CharacterNode;count
   </button>;
 }
 
-export function CharacterBrowser({onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -247,7 +255,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
       <h3>{node?.name??'시리즈'}</h3>{scope&&<span className="numeric muted">{page?.totalCount??scope.totalCount}개</span>}
       {where.node&&<IconButton label={hasActiveFilters(where.filters)?`자산 필터: ${filterSummary(where.filters)}`:'자산 필터'} icon={FunnelIcon} active={hasActiveFilters(where.filters)} onClick={()=>setFiltersOpen(true)}/>}</div></HeaderTools>
     {!landscape&&overview}
-    {(landscape||!!page?.items.length)&&<Gallery items={page?.items??[]} intro={landscape?overview:undefined} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i);}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>}
+    {(landscape||!!page?.items.length)&&<Gallery items={page?.items??[]} intro={landscape?overview:undefined} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>}
     {more&&<div className="loading-line" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
     {/* The same filter surface every other scope uses, so the three cannot diverge. */}

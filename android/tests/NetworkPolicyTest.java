@@ -54,6 +54,17 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/notes/short","GET"));
  reject(()->NetworkPolicy.api("/v1/notes/"+vault+"/../bad","PUT"));
  pass(()->NetworkPolicy.api("/v1/library/characters/status","GET"));
+ // The manual character exclusion the device is allowed to submit: exactly this one POST.
+ pass(()->NetworkPolicy.api("/v1/library/characters/exclusions","POST"));
+ for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/characters/exclusions",method));
+ // A query string is stripped before matching, exactly as for every other route: it grants no
+ // additional target and no additional capability.
+ pass(()->NetworkPolicy.api("/v1/library/characters/exclusions?debug=1","POST"));
+ // The exclusion log is a publisher-level read of every correction in the library, so GET
+ // stays denied even though POST on the collection itself is allowed. Publication and every
+ // subpath/typo variant of the exclusion route remain denied for every method.
+ for(String path:new String[]{"/v1/library/characters/exclusions/","/v1/library/characters/exclusions/extra","/v1/library/characters/exclusion","/v1/library/characters/exclusionsx","/v1/library/characters/replica"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ reject(()->NetworkPolicy.api("/v1/library/characters/exclusions%2f..","POST"));
  pass(()->NetworkPolicy.api("/v1/collections/status","GET"));
  // Album authority replication keeps its read paths. 2C-3 adds exactly the domain's
  // one typed mutation route, PUT /v1/albums/commands, and no other Album write.

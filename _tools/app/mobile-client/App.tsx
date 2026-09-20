@@ -3,6 +3,7 @@ import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
 import {validCharacterIndex,type CharacterIndex} from './characterModel';
+import type {ViewerCharacterContext} from './Viewer';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {Bars3Icon, BookOpenIcon, PhotoIcon, PencilSquareIcon, Squares2X2Icon, ArrowsPointingInIcon, ViewfinderCircleIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, ChevronRightIcon, XMarkIcon, FunnelIcon} from '@heroicons/react/24/outline';
 
@@ -62,7 +63,7 @@ export function App() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [revisit, setRevisit] = useState<Revisit>({bundles:[]}), [captures, setCaptures] = useState<Asset[]>([]);
   const [secondaryError, setSecondaryError] = useState('');
-  const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'} | null>(null);
+  const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'; character?:ViewerCharacterContext|null} | null>(null);
   const [density, setDensity] = useState(() => {try {const d = JSON.parse(localStorage.getItem('lakomics.mobile.density') ?? '1'); return [0,1,2].includes(d) ? d as number : 1;} catch {return 1;}});
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
   const latest = useRef({page, viewer, settings, drawer, status, area, viewSettings, filtersOpen}); latest.current = {page, viewer, settings, drawer, status, area, viewSettings, filtersOpen};
@@ -227,6 +228,13 @@ export function App() {
   const thumbnailReady = useCallback((asset:Asset) => {
     setPage(current => ({...current,items:current.items.map(item => item.id === asset.id ? {...item,...asset} : item)}));
   }, []);
+  /** Apply a server-confirmed exclusion: only that character boundary is invalidated. */
+  const characterExcluded = useCallback(() => {
+    viewCache.current.clear(); cancelMore(); observedGeneration.current = null;
+    setViewer(null); setIndexRevision(value => value + 1);
+    const state = latest.current.page;
+    void load(state.view, state.cursor, state.previous, scroll.current, true, state.filters);
+  }, [load, cancelMore]);
   const refreshSecondary = useCallback(async () => {
     const request = secondaryGate.current.begin(); setSecondaryError('');
     const results = await Promise.allSettled([
@@ -402,7 +410,7 @@ export function App() {
         {page.items.length > 0 ? <Gallery items={page.items} density={density} identity={`${viewKey(page.view, page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top => {scroll.current = top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={area !== 'assets' || settings || !!viewer}/> : <div className="empty-state"><RectangleStackIcon/><h2>{busy ? '라이브러리를 불러오고 있습니다' : hasActiveFilters(page.filters) ? '조건에 맞는 자산이 없습니다' : '아직 자산이 없습니다'}</h2><p>{busy ? '잠시만 기다려 주세요.' : hasActiveFilters(page.filters) ? '필터를 해제하면 이 분류의 자산을 모두 볼 수 있습니다.' : 'PC에서 보관한 자산이 클라우드에 동기화되면 여기에 나타납니다.'}</p></div>}
         {loadingMore && <div className="loading-line" role="status" aria-label="다음 자산을 불러오는 중"/>}{moreError && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </>}
-        {charactersVisited && <CharacterBrowser onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||drawer} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index)=>setViewer({items,index})} backRef={characterBack} onExit={restoreBeforeCharacter}/>}
+        {charactersVisited && <CharacterBrowser onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||drawer} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={restoreBeforeCharacter}/>}
       </main>
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer || drawer} backRef={collectionBack}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack}/>}
@@ -413,6 +421,6 @@ export function App() {
     {viewSettings && <Dialog open title="갤러리 보기" onClose={()=>setViewSettings(false)}><DialogDescription className="sr-only">썸네일 크기를 선택합니다. 설정은 이 기기에 저장됩니다.</DialogDescription><div className="view-density" role="group" aria-label="썸네일 크기">{DENSITIES.map((label,value)=><Button key={label} variant="ghost" aria-pressed={density===value} onClick={()=>{setDensity(value);store('lakomics.mobile.density',value);}}>{label}</Button>)}</div><div className="view-settings-footer"><Button variant="ghost" onClick={()=>setViewSettings(false)}>닫기</Button></div></Dialog>}
     {filtersOpen && <Dialog open title="자산 필터" onClose={()=>setFiltersOpen(false)}><DialogDescription className="sr-only">미디어 종류, 비율과 영상 길이로 자산 목록을 좁힙니다. 선택하면 목록이 다시 불러와지고, 뒤로 가면 필터 없는 목록으로 돌아갑니다.</DialogDescription><AssetFilters value={filters} onChange={applyFilters}/><div className="view-settings-footer"><Button variant="ghost" onClick={()=>setFiltersOpen(false)}>닫기</Button></div></Dialog>}
     {settings && <Settings onCacheCleared={() => {clearMediaCache(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
-    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)}/>}
+    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)}/>}
   </div>;
 }

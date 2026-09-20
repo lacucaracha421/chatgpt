@@ -1899,13 +1899,57 @@ impl CloudClient {
     pub(crate) fn publish_characters(&self, token: &str, body: &[u8]) -> Result<super::characters::CharacterPublishResult, LibraryError> {
         let mut response=self.agent.put(self.endpoint("/v1/library/characters/replica")?)
             .header("Authorization",bearer(token)?).content_type("application/json").send(body)
-            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+            .map_err(map_character_publication_error)?;
         let bytes=response.body_mut().with_config().limit(MAX_RESPONSE_BYTES as u64).read_to_vec().map_err(|_|LibraryError::InvalidCloudResponse)?;
         serde_json::from_slice(&bytes).map_err(|_|LibraryError::InvalidCloudResponse)
     }
 
     /// 분류 스냅샷을 VPS에 게시한다. PC 라이브러리가 분류의 원본이며 VPS는
     /// 모바일 확장용 최소 스냅샷만 저장한다.
+    /// Read one page of the ordered manual-exclusion log, or report that the route is absent.
+    ///
+    /// This is the feature's only bootstrap signal and its steady-state read. The route exists
+    /// even when the server holds no exclusions and has no active binding, and it answers with
+    /// an empty page after validating the library, so a *successful* read is itself the proof
+    /// that the server supports the feature. No separate capability flag is consulted, because
+    /// a capability advertised before any feature-aware publication could not be true: the
+    /// server cannot know this PC sends protected references until it has received one.
+    ///
+    /// `after` is exclusive and the response must be contiguous from it; that contiguity is what
+    /// lets the caller advance a durable cursor without tracking holes.
+    ///
+    /// Only a definite `404` — the route not existing at all — is `Ok(None)`. An authorization
+    /// failure, a `409` cursor/library rejection or a `5xx` is a real failure returned as an
+    /// error, so a broken or misbound server is never mistaken for an older one and silently
+    /// downgraded to a legacy publication.
+    pub(crate) fn character_exclusions(
+        &self,
+        token: &str,
+        library_id: &str,
+        after: i64,
+        limit: i64,
+    ) -> Result<Option<super::characters::ExclusionPage>, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let path = format!(
+            "/v1/library/characters/exclusions?libraryId={library_id}&after={after}&limit={limit}"
+        );
+        let mut response = match self
+            .agent
+            .get(self.endpoint(&path)?)
+            .header("Authorization", bearer(token)?)
+            .call()
+        {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return Ok(None),
+            Err(error) => return Err(map_character_exclusion_read_error(error)),
+        };
+        let page = read_json::<super::characters::ExclusionPage>(&mut response)?;
+        super::characters::validate_exclusion_page(&page, library_id, after, limit)?;
+        Ok(Some(page))
+    }
+
     pub(crate) fn publish_album_replica(&self, token: &str, snapshot: &serde_json::Value) -> Result<(), LibraryError> {
         let body = serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
         self.agent.put(self.endpoint("/v1/library/album-snapshot")?)
@@ -2322,6 +2366,43 @@ fn map_album_read_error(error: ureq::Error, conflict: LibraryError) -> LibraryEr
         ureq::Error::StatusCode(422) => LibraryError::AlbumContractUnsupported,
         ureq::Error::StatusCode(401 | 403) => LibraryError::CloudUnauthorized,
         ureq::Error::StatusCode(status) => LibraryError::AlbumSyncRejected(status),
+        ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+        _ => LibraryError::CloudRequestUnavailable,
+    }
+}
+
+/// Map a Character exclusion-log read failure onto a distinguishable recovery state.
+///
+/// `409` on this route means the PC's stored cursor is ahead of the server's log or the
+/// server is bound to another library; both are identity/recovery states rather than
+/// transport failures, so they are never collapsed into a blind retry.
+fn map_character_exclusion_read_error(error: ureq::Error) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(409) => LibraryError::CharacterExclusionCursorRejected,
+        ureq::Error::StatusCode(422) => LibraryError::CharacterExclusionContractUnsupported,
+        ureq::Error::StatusCode(401 | 403) => LibraryError::CloudUnauthorized,
+        // Only a definite absence of the route is a legacy server. Any other status is a
+        // real failure and must stay visible instead of being read as "feature missing".
+        ureq::Error::StatusCode(404) => LibraryError::CharacterExclusionUnsupported,
+        ureq::Error::StatusCode(status) => LibraryError::CharacterExclusionSyncRejected(status),
+        ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+        _ => LibraryError::CloudRequestUnavailable,
+    }
+}
+
+/// Map a Character publication failure.
+///
+/// The route now requires the publisher credential. A `401`/`403` here is an authorization
+/// outcome the caller must surface as a credential problem rather than as a retryable
+/// transport fault, because retrying with the same shared token can never succeed.
+fn map_character_publication_error(error: ureq::Error) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(401 | 403) => LibraryError::CloudUnauthorized,
+        ureq::Error::StatusCode(409) => LibraryError::CharacterPublicationConflict,
+        ureq::Error::StatusCode(413) => LibraryError::CharacterPublicationTooLarge,
+        ureq::Error::StatusCode(422) => LibraryError::InvalidCloudResponse,
+        ureq::Error::StatusCode(503) => LibraryError::CloudRequestUnavailable,
+        ureq::Error::StatusCode(status) => LibraryError::CharacterPublicationRejected(status),
         ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
         _ => LibraryError::CloudRequestUnavailable,
     }

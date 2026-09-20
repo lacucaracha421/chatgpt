@@ -209,6 +209,21 @@ impl From<LibraryError> for CommandError {
             LibraryError::CatalogBookmarkRevisionConflict { .. } => {
                 "catalog_bookmark_revision_conflict"
             }
+            LibraryError::CharacterExclusionSyncRejected(_) => "character_exclusion_sync_rejected",
+            LibraryError::CharacterExclusionContractUnsupported => {
+                "character_exclusion_contract_unsupported"
+            }
+            LibraryError::CharacterExclusionUnsupported => "character_exclusion_unsupported",
+            LibraryError::CharacterExclusionCursorRejected => "character_exclusion_cursor_rejected",
+            LibraryError::CharacterExclusionInvalid => "character_exclusion_invalid",
+            LibraryError::CharacterExclusionTargetMissing => "character_exclusion_target_missing",
+            LibraryError::CharacterExclusionAssetChanged => "character_exclusion_asset_changed",
+            LibraryError::CharacterExclusionProtectedReference => {
+                "character_exclusion_protected_reference"
+            }
+            LibraryError::CharacterPublicationRejected(_) => "character_publication_rejected",
+            LibraryError::CharacterPublicationConflict => "character_publication_conflict",
+            LibraryError::CharacterPublicationTooLarge => "character_publication_too_large",
             LibraryError::ClassificationAuthorityInactive => "classification_authority_inactive",
             LibraryError::ClassificationAuthorityMismatch => "classification_authority_mismatch",
             LibraryError::ClassificationContractUnsupported => {
