@@ -139,7 +139,11 @@ pub(crate) fn mark_materialized(db: &Connection, id: &str) -> Result<(), Library
     // deferred organization without creating local assignment/membership commands.
     db.execute("INSERT OR IGNORE INTO asset_classifications(asset_id,classification_id) SELECT r.asset_id,r.classification_id FROM classification_authority_assignment_revisions r JOIN classification_entries c ON c.id=r.classification_id WHERE r.asset_id=? AND NOT EXISTS(SELECT 1 FROM classification_authority_outbox o WHERE o.asset_id=r.asset_id)", [id])?;
     db.execute("INSERT OR IGNORE INTO asset_albums(asset_id,album_id) SELECT r.asset_id,r.album_id FROM album_authority_membership_revisions r JOIN albums a ON a.id=r.album_id WHERE r.asset_id=? AND r.desired_state=1 AND NOT EXISTS(SELECT 1 FROM album_authority_outbox o WHERE o.asset_id=r.asset_id)", [id])?;
-    local_projection(db, id)
+    local_projection(db, id)?;
+    // Ingest runs before deferred assignments are visible. Enroll only after the
+    // final folder and lifecycle are projected; unchanged retries remain a no-op.
+    super::character_autotag::enqueue(db, id, super::character_autotag::Cause::Ingestion)?;
+    Ok(())
 }
 fn apply(db: &Connection, p: &AssetProjection) -> Result<(), LibraryError> {
     p.validate()?;
@@ -916,6 +920,128 @@ mod tests {
             p.sha256.unwrap()
         );
     }
+    fn defer_character_series(library: &Library, auto_classify: bool) {
+        let db = library.connection().unwrap();
+        db.execute(
+            "INSERT INTO classification_entries(id,kind,name,created_at) VALUES('series','root','Series','2026')",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO character_series(classification_id,auto_classify) VALUES('series',?)",
+            [auto_classify],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO classification_authority_assignment_revisions VALUES(?,'series',1,'2026')",
+            [ID],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn materialization_enqueues_character_work_after_deferred_assignment_without_restarting_it() {
+        let (_temp, library, p) = setup();
+        defer_character_series(&library, true);
+        ingest(&library, &p, &media()).unwrap();
+        {
+            let db = library.connection().unwrap();
+            let job: (String, String, i64, String) = db
+                .query_row(
+                    "SELECT state,cause,generation,classification_ids FROM character_autotag_jobs WHERE asset_id=?",
+                    [ID],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .expect("materialization must enqueue after projecting the series assignment");
+            assert_eq!(job.0, "pending");
+            assert_eq!(job.1, "ingestion");
+            assert_eq!(job.2, 1);
+            assert_eq!(
+                serde_json::from_str::<Vec<String>>(&job.3).unwrap(),
+                ["series"]
+            );
+            db.execute(
+                "UPDATE character_autotag_jobs SET state='completed' WHERE asset_id=?",
+                [ID],
+            )
+            .unwrap();
+        }
+        ingest(&library, &p, &media()).unwrap();
+        let db = library.connection().unwrap();
+        let job: (String, i64) = db
+            .query_row(
+                "SELECT state,generation FROM character_autotag_jobs WHERE asset_id=?",
+                [ID],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(job, ("completed".into(), 1));
+        for table in [
+            "cloud_sync_queue",
+            "classification_authority_outbox",
+            "asset_lifecycle_outbox",
+        ] {
+            assert_eq!(
+                db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0,
+                "materialization must not create outbound work in {table}"
+            );
+        }
+    }
+
+    #[test]
+    fn materialization_retry_enqueues_character_work_when_assignment_arrives_after_bytes() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row("SELECT count(*) FROM character_autotag_jobs", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        defer_character_series(&library, true);
+        ingest(&library, &p, &media()).unwrap();
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT state FROM character_autotag_jobs WHERE asset_id=?",
+                [ID],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "pending"
+        );
+    }
+
+    #[test]
+    fn materialization_character_work_respects_series_opt_out_and_projected_trash() {
+        for (auto_classify, lifecycle) in [(false, "normal"), (true, "trash")] {
+            let (_temp, library, mut p) = setup();
+            defer_character_series(&library, auto_classify);
+            p.lifecycle = lifecycle.into();
+            p.entity_revision = 2;
+            apply(&library.connection().unwrap(), &p).unwrap();
+            ingest(&library, &p, &media()).unwrap();
+            let db = library.connection().unwrap();
+            assert_eq!(
+                db.query_row("SELECT status FROM assets WHERE id=?", [ID], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                lifecycle
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM character_autotag_jobs", [], |r| r.get::<_, i64>(0)).unwrap(),
+                0,
+                "excluded images must not be queued: auto_classify={auto_classify}, lifecycle={lifecycle}"
+            );
+        }
+    }
+
     #[test]
     fn invalid_materialization_is_not_half_registered_and_retries_safely() {
         let (_temp, library, mut p) = setup();

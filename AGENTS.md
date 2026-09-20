@@ -21,7 +21,7 @@
 
 ## Data, credentials, and user work
 
-- The active production library is `C:\New_lakomics_assets`. Do not infer another library from old exports, fixtures, desktop folders, or modification times. Other library paths require explicit task scope.
+- The active production library is `C:\New_lakomics_assets` on Windows and `/home/laku/MEGA 다운로드/before-linux-backup/New_lakomics_assets` on this Linux host. The Linux path is the active library despite the `before-linux-backup` directory name. Do not infer another library from old exports, fixtures, desktop folders, or modification times. Other library paths require explicit task scope.
 - Necessary read-only audits are allowed. Migration, indexing, metadata updates, file moves, and any other writes to the active library require separate explicit approval.
 - Resolve the configured library at runtime; never branch application behavior on the machine-specific production path.
 - Never rerun the completed full Cloud Library backfill or replace the catalog database merely to verify a change. Recovery operations require separate approval.

@@ -13,9 +13,28 @@
 .character-picker .character-refs { width: 340px; max-width: 100%; }
 .character-picker__gallery { flex: 1; min-height: 0; display: flex; }
 .character-picker__gallery > .asset-gallery { flex: 1; }
-.character-registry > .ui-button:last-child { align-self: flex-end; min-width: 72px; }
+.character-registry__primary { display: flex; align-items: flex-end; gap: var(--space-2); }
+.character-registry__primary > :first-child { flex: 1; min-width: 0; }
+.character-registry__primary > .ui-button { flex-shrink: 0; min-width: 72px; }
+.character-registry__label > .character-actions { margin-left: auto; }
 .character-reference-dialog { display: flex; flex-direction: column; gap: var(--space-3); height: min(720px, 78vh); min-height: 0; }
 .character-reference-dialog > p { margin: 0; }
 .character-reference-dialog__gallery { flex: 1; min-height: 260px; display: flex; }
 .character-reference-dialog__gallery > .asset-gallery { flex: 1; min-width: 0; min-height: 0; }
 .character-reference-dialog > .character-actions { justify-content: flex-end; }
+
+/* One unresolved reference at a time: cropped choices on the image, not a wizard. */
+.character-reference-regions { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+.character-reference-regions > p { margin: 0; }
+.character-region-options { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.character-region-frame { position: relative; flex: 1 1 92px; max-width: 168px; min-width: 72px; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-tile); background-color: var(--color-surface); background-repeat: no-repeat; cursor: pointer; overflow: hidden; }
+.character-region-frame:hover:not(:disabled), .character-region-frame:focus-visible { border-color: var(--color-accent); }
+.character-region-frame:disabled { cursor: default; opacity: .6; }
+.character-region-frame__selection { position: absolute; inset: auto 0 0; padding: var(--space-1); background: var(--color-surface); color: var(--color-text); font-size: var(--text-sm); }
+.character-region-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: var(--space-2); }
+.character-region-summary > div { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.character-region-summary__preview { aspect-ratio: 4 / 3; overflow: hidden; background: var(--color-surface); border-radius: var(--radius-tile); }
+.character-region-summary__preview svg { display: block; width: 100%; height: 100%; }
+.character-region-summary__preview rect { fill: none; stroke: var(--color-accent); stroke-width: 2; }
+.character-region-summary__status { font-size: var(--text-sm); line-height: var(--line-copy); color: var(--color-muted); overflow-wrap: anywhere; }
+.character-region-summary .ui-button { margin-top: auto; }

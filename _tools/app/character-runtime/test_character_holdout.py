@@ -76,11 +76,65 @@ class RulesTests(unittest.TestCase):
 
     def test_competitor_veto_and_distinct_people(self):
         p = current_policy()
-        self.assertEqual(automatic_targets({"hero": evidence(), "rival": evidence([[0.20]*2+[0.4]*4])}, {}, digest("q"), p), set())
+        bundle = {"hero": evidence(), "rival": evidence([[0.20]*2+[0.4]*4])}
+        self.assertEqual(automatic_targets(bundle, {}, digest("q"), p), {"hero"})
+        legacy = {**p, "logic_version": 1}
+        legacy.pop("automatic_competitor_margin", None)
+        self.assertEqual(automatic_targets(bundle, {}, digest("q"), legacy), set())
         boxes = [[0,0,40,100],[60,0,100,100]]
         bundle = {"hero": evidence([[0.1]*6,[0.4]*6], boxes),
                   "rival": evidence([[0.4]*6,[0.1]*6], boxes)}
         self.assertEqual(automatic_targets(bundle, {}, digest("q"), p), {"hero", "rival"})
+
+    def test_competitor_margin_boundary_and_strong_rival_veto(self):
+        p = current_policy()
+        boundary = 0.1 + p["automatic_competitor_margin"]
+        for distance, expected in [(boundary - 0.000001, set()), (boundary, {"hero"}),
+                                   (boundary + 0.000001, {"hero"})]:
+            bundle = {"hero": evidence(), "rival": evidence([[distance]*2+[0.4]*4])}
+            self.assertEqual(automatic_targets(bundle, {}, digest("q"), p), expected)
+        # Even a wide gap cannot resolve two independently auto-strong candidates.
+        bundle = {"hero": evidence([[0.01]*6]), "rival": evidence([[0.16]*6])}
+        self.assertEqual(automatic_targets(bundle, {}, digest("q"), p), set())
+
+    def test_every_overlapping_crop_is_checked_without_mixing_people(self):
+        p = current_policy()
+        boxes = [[0,0,100,100], [10,10,90,90], [200,0,300,100]]
+        for second, expected in [([0.14]*2+[0.4]*4, set()),
+                                 ([0.16]*6, set()), ([0.2]*2+[0.4]*4, {"hero", "rival"})]:
+            bundle = {"hero": evidence([[0.1]*6, [0.4]*6, [0.4]*6], boxes),
+                      "rival": evidence([[0.2]*2+[0.4]*4, second, [0.01]*6], boxes)}
+            # The rival's distant third person is independently classifiable.
+            self.assertEqual(automatic_targets(bundle, {}, digest("q"), p), expected | {"rival"})
+
+    def test_monie_hiyuki_saved_distances_and_weak_lara_gate(self):
+        p = current_policy()
+        monie = [0.0930563360452652, 0.06063959002494812, 0.0923059955239296,
+                 0.1261855512857437, 0.062034815549850464, 0.19817233085632324,
+                 0.10088373720645905, 0.1669408231973648, 0.11253073066473009,
+                 0.06524112075567245, 0.07422041893005371, 0.2249622642993927,
+                 0.06969894468784332, 0.05852421745657921]
+        hiyuki = [0.25773942470550537, 0.30683422088623047, 0.19877029955387115,
+                  0.2447524070739746, 1.0, 0.24989449977874756, 0.18796686828136444]
+        bundle = {"monie": evidence([monie]), "hiyuki": evidence([hiyuki])}
+        self.assertEqual(automatic_targets(bundle, {}, digest("q"), p), {"monie"})
+        self.assertEqual(automatic_targets(bundle, {}, digest("q"), {**p, "logic_version": 1}), set())
+        # A weak winner is never rescued by the absence of competitors.
+        self.assertEqual(automatic_targets({"lara": evidence([[0.1]*5+[0.2531078]])}, {}, digest("q"), p), set())
+
+    def test_invalid_competitor_and_policy_cannot_release_a_winner(self):
+        p = current_policy()
+        for invalid in [None, {}, evidence([[0.4]*6])]:
+            if invalid and "evidence" in invalid:
+                invalid["evidence"][0]["referenceDistances"] = [None]*6
+            with self.assertRaises(ValueError):
+                automatic_targets({"hero": evidence(), "rival": invalid}, {}, digest("q"), p)
+        for margin in [-0.01, None, float("nan"), True]:
+            with self.assertRaises(ValueError):
+                automatic_targets({"hero": evidence()}, {}, digest("q"),
+                                  {**p, "automatic_competitor_margin": margin})
+        self.assertEqual(automatic_targets({"hero": evidence(boxes=[], fallback=True),
+                                           "rival": evidence(boxes=[], fallback=True)}, {}, digest("q"), p), set())
 
     def test_manual_decisions_and_self_reference_are_authoritative(self):
         p = current_policy()
@@ -175,7 +229,7 @@ class DatasetTests(unittest.TestCase):
     def test_unlabeled_competitors_still_block_automatic_assignment(self):
         add(self.c, "one")
         payload = {"assetId": "one", "contentHash": digest("one"), "state": "recommended",
-                   "evidence": evidence([[0.20]*2+[0.4]*4])}
+                   "evidence": evidence([[0.14]*2+[0.4]*4])}
         self.c.execute("INSERT INTO character_autotag_predictions VALUES('e-one','rival','series',?,?)", ("b"*64, json.dumps(payload)))
         report = holdout.evaluate(self.freeze())
         self.assertEqual(report["labeled_pairs"], 1)

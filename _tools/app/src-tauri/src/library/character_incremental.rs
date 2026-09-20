@@ -1,7 +1,9 @@
 //! Native queue consumer. One complete asset result is the publication unit.
 use super::{
     character_autotag::{self, Context, Job, Prediction, ReviewState},
-    character_scan::{automatic_evidence_regions, evidence_regions, same_person, ScanResult},
+    character_scan::{
+        automatic_evidence_regions, competitor_allows_automatic, same_person, ScanResult,
+    },
     character_sources::Source,
     character_worker::{RuntimeConfig, BASELINE},
     characters::{Error, Result},
@@ -590,7 +592,10 @@ impl Library {
                 .any(|decision| decision.as_str() == "accepted");
         for p in &candidates {
             let evidence = p.result.evidence.as_ref();
-            if reference_targets.contains(&p.target_id) {
+            if reference_targets.contains(&p.target_id)
+                || p.result.error.is_some()
+                || !matches!(p.result.state.as_str(), "recommended" | "unmatched")
+            {
                 continue;
             }
             let Some(regions) = automatic_evidence_regions(evidence) else {
@@ -606,12 +611,13 @@ impl Library {
                         .iter()
                         .filter(|other| other.target_id != p.target_id)
                         .all(|other| {
-                            evidence_regions(other.result.evidence.as_ref(), 2).is_some_and(
-                                |others| others.iter().all(|r| !same_person(region, r)),
-                            )
+                            other.result.error.is_none()
+                                && matches!(other.result.state.as_str(), "recommended" | "unmatched")
+                                && competitor_allows_automatic(region, other.result.evidence.as_ref())
+                                    == Some(true)
                         })
                 })
-                .copied()
+                .map(|region| region.bounds)
                 .collect::<Vec<_>>();
             if unique.is_empty() {
                 continue;

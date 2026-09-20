@@ -162,8 +162,20 @@ a query are recorded and their current content/scope is revalidated before publi
 metric in bounded groups, discards padding votes, then computes same-crop distinct-image
 consensus over the combined pool. Recommendation remains two matches. Automatic
 approval requires same-crop support from **six distinct references**, with the sixth-smallest
-reference distance at or below **0.16**, a unique character candidate, and no whole fallback
-(`AUTOMATIC_REFERENCE_SUPPORT = 6`). Characters with only the five anchors can still be
+reference distance at or below **0.16**, resolved same-person competition, and no whole
+fallback (`AUTOMATIC_REFERENCE_SUPPORT = 6`). Two automatic-strength candidates for
+an overlapping person always remain unresolved. A recommendation-only competitor
+(two or more votes) stops blocking only when its second-smallest distance is at least
+**0.05 greater** than the winner's sixth-smallest distance, on every overlapping crop.
+Missing, failed, fallback, or malformed competing evidence cannot authorize this
+relaxation. Different people are still classified independently; manual decisions
+and self-reference exclusions remain authoritative. These distances are not
+probabilities, and the margin is a conservative policy choice, not a calibrated
+accuracy guarantee. The offline evaluator records this as policy version 2 and
+retains version 1 replay for frozen datasets. No historical work is automatically
+requeued by this policy change.
+
+Characters with only the five anchors can still be
 recommended but cannot satisfy automatic approval until additional explicit supporting
 references exist. The recommendation threshold remains unchanged. The UI displays the
 actual reference count. Worker preparation accepts 5–25 images.
@@ -171,6 +183,31 @@ actual reference count. Worker preparation accepts 5–25 images.
 Manual scan buttons now apply the same automatic policy when the selected series has
 automatic classification enabled. They compare all ready characters in that series
 before applying, so a single selected-character scan cannot bypass ambiguity checks.
+
+### Common-person reference regions
+
+The product resolves reference regions before comparing queries. Existing manual
+regions take precedence; single-person detections need no confirmation. For an
+unselected multi-person image, a common person can be inferred from a matching
+triangle containing an existing manual/single-person anchor and two other source
+images. Subsequent synchronous rounds require agreement from two selected source
+images. Each image contributes at most one vote, ties abstain, and query images
+never help choose reference regions. Without an anchor, no identity is guessed.
+
+Inferred choices are transient (`state: automatic`, `automaticIndex`), not saved
+manual selections. Evidence retains the original `referenceSelections` alongside
+the resolved `referenceRegions` and `referenceStatuses`. Stale manual bindings and
+images with no detected person supply no votes. Metric calls remain bounded to
+48 vectors, and prepared views are reused across queries. Incremental comparison
+falls back to full-set preparation when an old or added reference could change
+common-person inference; stable explicit/single/no-region views retain delta reuse.
+
+Character settings inspect references quietly. A manual chooser is offered only
+when fewer than six usable references remain and an unresolved region can help;
+it opens on request and stops once reinspection reaches six. Optional correction
+remains available. Six usable references are not a classification guarantee:
+query support, the stricter automatic distance gate, and competitor arbitration
+still apply. This change does not start historical reanalysis.
 
 ### First-analysis timing (opt-in)
 

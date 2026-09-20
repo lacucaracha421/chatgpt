@@ -7,7 +7,7 @@ export type CharacterGroup = { id: string; seriesId: string; name: string; revis
 // Pair it with the same targetId to restrict candidates to that character folder.
 export type SeriesGalleryFilter = "unclassified" | "needs_review" | "all";
 export type CharacterBrowseQuery = { seriesId: string; targetId: string | null; groupId?: string | null; referenceTargetId?: string; seriesFilter?: SeriesGalleryFilter; after: string | null; limit: number; all: boolean };
-export type CharacterBrowsePage = { items: AssetSummary[]; nextCursor: string | null; totalCount: number };
+export type CharacterBrowsePage = { items: AssetSummary[]; nextCursor: string | null; totalCount: number; unavailableReferenceIds?: string[] };
 export type ManualCharacterRequest = { seriesId: string; displayName: string; assetIds: string[] };
 export type SeriesAssetExclusionRequest = { seriesId: string; assetIds: string[]; excluded: boolean };
 export type CharacterReviewCompletionRequest = { seriesId: string; assetIds: string[] };

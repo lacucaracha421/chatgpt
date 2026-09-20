@@ -785,8 +785,75 @@ fn automatic_evidence_regions_keep_only_strong_crops() {
     });
     assert_eq!(
         automatic_evidence_regions(Some(&evidence)),
-        Some(vec![[0.0, 0.0, 40.0, 100.0]])
+        Some(vec![AutomaticRegion {
+            bounds: [0.0, 0.0, 40.0, 100.0],
+            sixth_distance: 0.15,
+        }])
     );
+}
+
+#[test]
+fn automatic_competitor_margin_preserves_close_and_strong_rivals() {
+    let winner = AutomaticRegion {
+        bounds: [0., 0., 100., 100.],
+        sixth_distance: 0.1,
+    };
+    let boundary = winner.sixth_distance + AUTOMATIC_COMPETITOR_MARGIN;
+    for (distance, allowed) in [(boundary - 0.000001, false), (boundary, true), (0.20, true)] {
+        let evidence = json!({
+            "passed": true, "wholeFallback": false, "queryBoxes": [[0,0,100,100]],
+            "evidence": [{"matchedReferences": [0,1],
+                "referenceDistances": [distance, distance, 0.4, 0.4, 0.4, 0.4]}]
+        });
+        assert_eq!(competitor_allows_automatic(&winner, Some(&evidence)), Some(allowed));
+    }
+    let very_strong = AutomaticRegion { sixth_distance: 0.01, ..winner };
+    let rival = json!({
+        "passed": true, "wholeFallback": false, "queryBoxes": [[0,0,100,100]],
+        "evidence": [{"matchedReferences": [0,1,2,3,4,5], "referenceDistances": vec![0.16; 6]}]
+    });
+    assert_eq!(competitor_allows_automatic(&very_strong, Some(&rival)), Some(false));
+}
+
+#[test]
+fn automatic_competitor_checks_all_overlapping_crops_without_mixing_people() {
+    let winner = AutomaticRegion { bounds: [0.,0.,100.,100.], sixth_distance: 0.1 };
+    for (distance, allowed) in [(0.14, false), (0.2, true)] {
+        let rival = json!({
+            "passed": true, "wholeFallback": false,
+            "queryBoxes": [[0,0,100,100], [10,10,90,90], [200,0,300,100]],
+            "evidence": [
+                {"matchedReferences": [0,1], "referenceDistances": [0.2,0.2,0.4,0.4,0.4,0.4]},
+                {"matchedReferences": [0,1], "referenceDistances": [distance,distance,0.4,0.4,0.4,0.4]},
+                {"matchedReferences": [0,1,2,3,4,5], "referenceDistances": vec![0.01; 6]}
+            ]
+        });
+        assert_eq!(competitor_allows_automatic(&winner, Some(&rival)), Some(allowed));
+    }
+}
+
+#[test]
+fn automatic_competitor_missing_or_malformed_support_is_not_safe() {
+    let winner = AutomaticRegion { bounds: [0.,0.,100.,100.], sixth_distance: 0.1 };
+    assert_eq!(competitor_allows_automatic(&winner, None), None);
+    let valid = json!({
+        "passed": true, "wholeFallback": false, "queryBoxes": [[0,0,100,100]],
+        "evidence": [{"matchedReferences": [0,1], "referenceDistances": [0.2,0.2,0.4,0.4,0.4,0.4]}]
+    });
+    for (pointer, value) in [
+        ("/wholeFallback", json!(true)), ("/passed", json!(null)), ("/passed", json!(false)),
+        ("/queryBoxes", json!([])), ("/evidence", json!([])),
+        ("/queryBoxes/0", json!([0,0,0,100])),
+        ("/evidence/0/referenceDistances", json!(null)),
+        ("/evidence/0/referenceDistances", json!([0.2])),
+        ("/evidence/0/referenceDistances/0", json!("NaN")),
+        ("/evidence/0/matchedReferences", json!([0,0])),
+        ("/evidence/0/matchedReferences", json!([0,6])),
+    ] {
+        let mut malformed = valid.clone();
+        *malformed.pointer_mut(pointer).unwrap() = value;
+        assert_eq!(competitor_allows_automatic(&winner, Some(&malformed)), None, "{pointer}");
+    }
 }
 
 #[test]

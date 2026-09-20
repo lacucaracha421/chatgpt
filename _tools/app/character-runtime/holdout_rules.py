@@ -23,10 +23,11 @@ def current_policy() -> dict:
             raise ValueError(f"Cannot locate native policy constant: {name}")
         return float(match.group(1))
     return {
-        "logic_version": 1,
+        "logic_version": 2,
         "recommendation_threshold": baseline["threshold"],
         "automatic_support": int(constant("AUTOMATIC_REFERENCE_SUPPORT")),
         "automatic_max_distance": constant("AUTOMATIC_MAX_SIXTH_DISTANCE"),
+        "automatic_competitor_margin": constant("AUTOMATIC_COMPETITOR_MARGIN"),
         "baseline_fingerprint": hashlib.sha256(json.dumps(baseline, sort_keys=True).encode()).hexdigest(),
         "baseline_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
         "arbitration_source_sha256": hashlib.sha256(
@@ -97,11 +98,15 @@ def automatic_targets(bundle: dict, prior: dict, query_hash: str, policy: dict) 
     Source-byte/scope/revision fences and model extraction remain native concerns.
     The exporter validates the stored bundle's content and generation identities.
     """
-    if policy.get("logic_version") != 1:
+    version = policy.get("logic_version")
+    if version not in (1, 2):
         raise ValueError("Unsupported publication policy version")
     support, maximum = policy["automatic_support"], policy["automatic_max_distance"]
     if type(support) is not int or not 2 <= support <= 25 or not number(maximum):
         raise ValueError("Invalid automatic policy")
+    margin = policy.get("automatic_competitor_margin")
+    if version == 2 and (not number(margin) or margin <= 0):
+        raise ValueError("Invalid automatic competitor margin")
     if not bundle:
         return set()
     for e in bundle.values():
@@ -122,9 +127,21 @@ def automatic_targets(bundle: dict, prior: dict, query_hash: str, policy: dict) 
             values = row["referenceDistances"]
             if len(row["matchedReferences"]) < support or sorted(values)[support - 1] > maximum:
                 continue
+            winner_distance = sorted(values)[support - 1]
+
+            def blocks(other_row):
+                if len(other_row["matchedReferences"]) < 2:
+                    return False
+                if version == 1:
+                    return True
+                distances = sorted(other_row["referenceDistances"])
+                strong = (len(other_row["matchedReferences"]) >= support
+                          and distances[support - 1] <= maximum)
+                return strong or distances[1] < winner_distance + margin
+
             ambiguous = any(
                 other["wholeFallback"] or any(
-                    len(other_row["matchedReferences"]) >= 2 and same_person(region, other_region)
+                    same_person(region, other_region) and blocks(other_row)
                     for other_region, other_row in zip(other["queryBoxes"], other["evidence"])
                 ) for name, other in candidates.items() if name != target
             )

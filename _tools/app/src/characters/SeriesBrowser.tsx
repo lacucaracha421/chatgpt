@@ -22,12 +22,13 @@ import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { ViewToolbar } from "../layout/ViewToolbar";
-import { CharacterRegistry, characterDraft, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
+import { CharacterRegistry, characterDraft, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
+import { needsReferenceConfirmation, useReferenceRegionInspection } from "./ReferenceRegionChoices";
 import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
-import { characterApi, type CharacterApi, type CharacterTarget } from "./api";
+import { characterApi, draftReferenceRegions, type CharacterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
 import "./SeriesBrowser.css";
@@ -80,6 +81,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const pickerPages = useRef(new Map<string, CharacterBrowsePage>());
   const returnGallery = useRef<{ scope: string; page: CharacterBrowsePage } | null>(null);
   const current = targets.find(t => t.id === targetId);
+  const inspectionTarget = editor ? editor.target : current;
+  const inspectionDraft = editor?.draft ?? characterDraft(current ?? null);
+  const inspectionEnabled = Boolean((editor || current) && !inspectionTarget?.manualOnly && inspectionDraft.enabled);
+  // Only the current character is inspected, never every overview card or gallery asset.
+  const referenceInspection = useReferenceRegionInspection({
+    seriesId: series.classificationId, targetId: inspectionTarget?.id ?? null,
+    assetIds: inspectionDraft.references, draftRegions: inspectionDraft.referenceRegions,
+    api: inspectionEnabled ? api.inspectReferenceRegions : undefined,
+    revision: `${inspectionTarget?.fingerprint ?? "new"}:${reload}`,
+  });
+  const characterAttention = current && inspectionEnabled && inspectionTarget?.id === current.id
+    ? referenceInspection.error ? "인물 영역 확인 실패 · 캐릭터 정보에서 확인해 주세요."
+      : referenceInspection.inspections && needsReferenceConfirmation(referenceInspection.inspections) ? "필요한 인물 확인이 있습니다."
+      : null
+    : null;
   const currentGroup = groups.find(group => group.id === groupId && group.seriesId === series.classificationId);
   const seriesGalleryView = seriesGalleryState.seriesId === series.classificationId ? seriesGalleryState.view : "unclassified";
   const excludedOnly = seriesGalleryView === "excluded";
@@ -117,7 +133,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         ...(!picking && !targetId && !currentGroup && !excludedOnly ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter } : {}),
         all: !picking && !targetId && !currentGroup ? seriesGalleryView === "all" : all, after, limit: 100 });
       if (token === generation.current) setPage(old => {
-        const value = after ? { ...next, items: [...old.items, ...next.items.filter(a => !old.items.some(b => b.id === a.id))] } : next;
+        const value = after ? { ...next,
+          items: [...old.items, ...next.items.filter(a => !old.items.some(b => b.id === a.id))],
+          unavailableReferenceIds: [...new Set([...(old.unavailableReferenceIds ?? []), ...(next.unavailableReferenceIds ?? [])])],
+        } : next;
         if (pickerScope) pickerPages.current.set(pickerScope, value);
         return value;
       });
@@ -191,12 +210,18 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (!picking) return;
     if (accept && picking.kind === "hero") void action(() => hubApi.saveSeries({ ...series, heroAssetId: picking.ids[0] ?? null }));
     if (accept && editor && picking.kind !== "hero") setEditor({ ...editor, draft: { ...editor.draft,
-      ...(picking.kind === "thumbnail" ? { thumbnail: picking.ids[0] ?? null } : { references: picking.ids }) } });
+      ...(picking.kind === "thumbnail" ? { thumbnail: picking.ids[0] ?? null } : updateCharacterReferences(editor.draft, picking.ids)) } });
     ++generation.current; setAll(picking.previousAll); setPicking(null); setError(null);
   }
   useBackHandler(() => finishPick(false), 85, Boolean(picking));
   function choose(id: string) {
     if (!picking || busy) return;
+    if (picking.kind !== "hero" && page.unavailableReferenceIds?.includes(id) && !picking.ids.includes(id)) {
+      const asset = page.items.find(item => item.id === id);
+      setError(`「${asset?.originalName ?? "이 이미지"}」는 원본 파일이 없어 선택할 수 없습니다. 다른 이미지를 선택하거나 원본을 복구한 뒤 다시 시도해 주세요.`);
+      return;
+    }
+    setError(null);
     if (picking.kind !== "references") { setPicking({ ...picking, ids: [id] }); return; }
     if (picking.ids.includes(id)) setPicking({ ...picking, ids: picking.ids.filter(value => value !== id) });
     else if (picking.ids.length < MAX_CHARACTER_REFERENCES) setPicking({ ...picking, ids: [...picking.ids, id] });
@@ -207,10 +232,14 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     saving.current = true; setBusy(true); setEditorError(null);
     try {
       const { draft, target } = editor;
+      const referenceRegions = draftReferenceRegions(draft.referenceRegions, draft.references, characterDraft(target).referenceRegions);
       await api.saveSettings({ id: target?.id ?? null, expectedRevision: target?.revision ?? null,
         seriesClassificationId: series.classificationId, linkedClassificationId: target?.linkedClassificationId ?? null,
         displayName: draft.name.trim(), description: draft.description, thumbnailAssetId: draft.thumbnail, enabled: draft.enabled,
-        referenceIds: draft.references }, true);
+        referenceIds: draft.references,
+        // Only choices the user made here travel with the save; automatic regions
+        // stay backend-owned and the field is omitted when there is nothing to send.
+        ...(Object.keys(referenceRegions).length > 0 ? { referenceRegions } : {}) }, true);
       setEditor(null); refresh();
     } catch (e) { setEditorError(commandErrorMessage(e, "캐릭터 설정을 저장하지 못했습니다.")); onChanged(); }
     finally { saving.current = false; setBusy(false); }
@@ -228,16 +257,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     } finally { setBusy(false); }
   }
   const editorPanel = <AnchoredPanel open={Boolean(editor) && !picking} onOpenChange={open => { if (open) openEditor(current ?? null); else if (!picking && !busy) setEditor(null); }} title={editor?.target ? `${editor.target.displayName} · 캐릭터 정보` : "새 캐릭터"}
-    trigger={<Button size={current ? "icon" : "sm"} variant="ghost" aria-label={current ? "캐릭터 더보기" : "캐릭터 만들기"} aria-description={current ? "캐릭터 더보기" : undefined}>{current ? <EllipsisHorizontalIcon aria-hidden="true" /> : <><PlusIcon aria-hidden="true" />캐릭터 만들기</>}</Button>}>
-    {editor && <><CharacterRegistry draft={editor.draft} target={editor.target} privacyMode={privacyMode} busy={busy} error={editorError}
+    trigger={<Button size={current ? "icon" : "sm"} variant="ghost" className="character-info-trigger" aria-label={current ? "캐릭터 더보기" : "캐릭터 만들기"} aria-description={characterAttention ?? (current ? "캐릭터 더보기" : undefined)}>{current ? <><EllipsisHorizontalIcon aria-hidden="true" />{characterAttention && <span className="character-info-attention" aria-hidden="true">!</span>}</> : <><PlusIcon aria-hidden="true" />캐릭터 만들기</>}</Button>}>
+    {editor && <><CharacterRegistry draft={editor.draft} target={editor.target} seriesId={series.classificationId} privacyMode={privacyMode} busy={busy} error={editorError} api={api} inspection={referenceInspection}
       onOpenReference={assetId => void (async () => {
         try { const asset = await gateway.getAsset(assetId); setExternalAsset(asset); setViewer(assetId); }
         catch (error) { setEditorError(commandErrorMessage(error, "원본을 열지 못했습니다.")); }
       })()}
       onChange={draft => setEditor({ ...editor, draft })} onPick={beginPick} onSave={() => void saveEditor()}
       onRecommendReferences={editor.target ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined} />
-      {current?.ready && !current.manualOnly && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void requestHistoricalRefresh(current)}>과거 미분류 이미지 갱신</Button>}
-      {current && <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setEditor(null); setConverting(true); }}>일반 폴더로 전환</Button>}
+      {current && <details className="character-registry__section">
+        <summary><span>추가 관리</span></summary>
+        <div className="character-registry__section-body">
+          {current.ready && !current.manualOnly && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void requestHistoricalRefresh(current)}>과거 미분류 이미지 갱신</Button>}
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setEditor(null); setConverting(true); }}>일반 폴더로 전환</Button>
+        </div>
+      </details>}
     </>}
   </AnchoredPanel>;
   const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 분류 다시 켜기</Button> : null;
@@ -367,10 +401,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             <small className="series-gallery-filter-count" aria-live="polite">{page.totalCount.toLocaleString()}장</small>
           </div>
           : picking && <div className="series-gallery-heading"><h3>{picking.kind === "hero" ? "히어로 이미지 선택" : all ? "선택 가능한 전체" : "미분류"}<small>{page.totalCount}</small></h3>{picking.kind !== "hero" && <Button size="sm" variant="ghost" aria-pressed={all} onClick={() => setAll(v => !v)}>{all ? "미분류만 보기" : "전체 보기"}</Button>}</div>}
-        {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
+        {picking && picking.kind !== "hero" && Boolean(page.unavailableReferenceIds?.length) && <p className="character-message" role="status">원본이 없는 이미지는 선택할 수 없습니다. 썸네일은 남아 있을 수 있습니다.</p>}
+        {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => { pickerPages.current.clear(); setReload(v => v + 1); }}>다시 시도</Button></p>}
         {!!undo.length && <div className="character-actions"><span>휴지통으로 이동했습니다.</span><Button size="sm" onClick={() => void action(async () => { await gateway.restoreAssets(undo); setUndo([]); })}>실행 취소</Button></div>}
         {!loading && !error && !page.items.length && <p className="series-gallery__empty">{picking ? "선택할 수 있는 이미지가 없습니다." : current ? "이 캐릭터의 이미지가 없습니다." : currentGroup ? "이 그룹에 연결된 이미지가 없습니다." : seriesGalleryView === "all" ? "이 시리즈에 이미지가 없습니다." : excludedOnly ? "자동 분류에서 제외한 이미지가 없습니다." : "미분류 이미지가 없습니다."}</p>}
       </>} layout={galleryLayout} groupDates items={page.items} scopeKey={scope} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
+        captionLabel={picking && picking.kind !== "hero" ? asset => page.unavailableReferenceIds?.includes(asset.id) ? "원본 없음 · 선택 불가" : null : undefined}
         selectedAssetIds={picking ? new Set(picking.ids) : selection.ids} focusAssetId={picking ? null : selection.focusId}
         hasNextPage={Boolean(page.nextCursor) && !loading && !error} onLoadNextPage={() => void load(page.nextCursor)}
         onSelectionGesture={(a,gesture) => picking ? choose(a.id) : setSelection(old => applySelectionGesture(old, ids, a.id, gesture))}

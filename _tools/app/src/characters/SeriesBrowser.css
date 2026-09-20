@@ -3,6 +3,8 @@
 .series-hero { display: block; width: 100%; height: clamp(100px, 18vh, 210px); object-fit: cover; border-radius: var(--radius-tile); }
 .series-header-actions, .series-breadcrumb { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .series-header-actions { flex-shrink: 0; }
+.character-info-trigger { position: relative; }
+.character-info-attention { position: absolute; top: -2px; right: -2px; display: grid; place-items: center; width: 14px; height: 14px; border: 1px solid var(--color-bg); border-radius: var(--radius-sm); background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; font-weight: 700; line-height: 1; pointer-events: none; }
 .series-header-count { color: var(--color-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .series-breadcrumb > button { padding: 0; border: 0; background: none; color: var(--color-muted); font: inherit; cursor: pointer; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .series-breadcrumb > button:hover { color: var(--color-text); }
@@ -64,8 +66,8 @@
 .character-description { display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--text-sm); }
 .character-description textarea { width: 100%; resize: vertical; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-2); font: inherit; }
 .character-portrait-editor { display: flex; gap: var(--space-3); align-items: center; }
-.character-portrait-editor__preview { width: 72px; height: 96px; padding: 0; display: grid; place-items: center; background: var(--color-surface); color: var(--color-muted); border: 1px solid var(--color-border); border-radius: var(--radius-tile); cursor: pointer; }
-.character-portrait-editor__preview img { width: 100%; height: 100%; object-fit: cover; }
+.character-portrait-editor__preview { flex: 0 0 72px; width: 72px; height: 96px; padding: 0; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; overflow: hidden; background: var(--color-surface); color: var(--color-muted); border: 1px solid var(--color-border); border-radius: var(--radius-tile); cursor: pointer; }
+.character-portrait-editor__preview img { display: block; min-width: 0; min-height: 0; width: 100%; height: 100%; object-fit: cover; }
 .character-portrait-editor__preview svg { width: var(--icon-md, 20px); }
 .character-registry__label { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 .character-registry__label small { color: var(--color-muted); }

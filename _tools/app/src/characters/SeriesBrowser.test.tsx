@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SeriesBrowser } from "./SeriesBrowser";
+import { draftReferenceRegions, type ReferenceRegion, type CharacterTarget } from "./api";
 import { createCharacterFixture, fixtureAssets, fixtureClassifications } from "./characterFixtures";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway } from "../library/types";
@@ -25,9 +26,62 @@ it("can select and save a sixth reference without a separate additional-referenc
   await user.click(within(panel).getByRole("button", { name: "저장" }));
   await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ referenceIds: fixtureAssets.slice(0, 6).map(asset => asset.id) }), true));
 });
-async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string }) {
+it("blocks a missing original before reference inspection while allowing an available addition", async () => {
+  const { api, browse } = await mount("hina");
+  const save = vi.spyOn(api, "saveSettings");
+  browse.mockResolvedValue({ items: fixtureAssets.slice(5), nextCursor: null, totalCount: 13,
+    unavailableReferenceIds: [fixtureAssets[5].id] });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "레퍼런스 추가" }));
+  const missing = await screen.findByRole("option", { name: "이미지 5.webp" });
+  await user.click(missing);
+  expect(missing).toHaveAttribute("aria-selected", "false");
+  expect(screen.getByRole("alert")).toHaveTextContent("이미지 5.webp");
+  expect(screen.getByRole("alert")).toHaveTextContent("원본 파일이 없어");
+  missing.focus();
+  await user.keyboard("{Enter}");
+  expect(missing).toHaveAttribute("aria-selected", "false");
+  await user.click(screen.getByRole("option", { name: "이미지 6.webp" }));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "완료" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+    referenceIds: [...fixtureAssets.slice(0, 5).map(asset => asset.id), fixtureAssets[6].id],
+  }), true));
+});
+
+it("keeps missing-original status across picker pages and refreshes it on retry", async () => {
+  const { browse } = await mount("hina");
+  browse.mockImplementation(async query => query.after
+    ? { items: [fixtureAssets[6]], nextCursor: null, totalCount: 2 }
+    : { items: [fixtureAssets[5]], nextCursor: "next", totalCount: 2,
+      unavailableReferenceIds: [fixtureAssets[5].id] });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "레퍼런스 추가" }));
+  await screen.findByRole("option", { name: "이미지 6.webp" });
+  const missing = screen.getByRole("option", { name: "이미지 5.webp" });
+  await user.click(missing);
+  expect(missing).toHaveAttribute("aria-selected", "false");
+  expect(screen.getByRole("alert")).toHaveTextContent("원본 파일이 없어");
+
+  browse.mockResolvedValue({ items: fixtureAssets.slice(5, 7), nextCursor: null, totalCount: 2 });
+  const calls = browse.mock.calls.length;
+  await user.click(within(screen.getByRole("alert")).getByRole("button", { name: "다시 시도" }));
+  await waitFor(() => expect(browse.mock.calls.length).toBeGreaterThan(calls));
+  await waitFor(() => expect(screen.queryByText("원본이 없는 이미지는 선택할 수 없습니다. 썸네일은 남아 있을 수 있습니다.")).not.toBeInTheDocument());
+  await user.click(screen.getByRole("option", { name: "이미지 5.webp" }));
+  expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "true");
+});
+
+async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { targetOverrides?: Partial<CharacterTarget>; seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string; inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]> }) {
   const api=createCharacterFixture(), sourceTargets=await api.targets();
-  const targets = legacy?.targetEnabled === undefined ? sourceTargets : sourceTargets.map(target => target.id === (targetId ?? "hina") ? { ...target, enabled: legacy.targetEnabled!, ready: legacy.targetEnabled! && target.ready } : target);
+  const targets = sourceTargets.map(target => target.id === (targetId ?? "hina") ? {
+    ...target,
+    ...(legacy?.targetEnabled === undefined ? {} : { enabled: legacy.targetEnabled, ready: legacy.targetEnabled && target.ready }),
+    ...legacy?.targetOverrides,
+  } : target);
+  if (legacy?.inspect) api.inspectReferenceRegions = vi.fn(legacy.inspect) as unknown as typeof api.inspectReferenceRegions;
   if (pendingOnly) { api.reviewPending = vi.fn(async () => true); vi.spyOn(api, "review"); }
   const browse=vi.fn().mockResolvedValue({ items:fixtureAssets.slice(5).map(asset => ({ ...asset, sourceUrl: legacy?.sourceUrl ?? asset.sourceUrl })),nextCursor:null,totalCount:13 });
   const hubApi={folderExclusions:vi.fn().mockResolvedValue([]),seriesFolders:vi.fn().mockResolvedValue(legacy?.folders ?? []),setFolderExcluded:vi.fn().mockResolvedValue(undefined),browse,saveSeries:vi.fn(),series:vi.fn(),createManualCharacter:vi.fn(),completeReview:vi.fn().mockResolvedValue(1),setSeriesAssetExcluded:vi.fn(),excludedAssets:vi.fn().mockResolvedValue({items:[],nextCursor:null,totalCount:legacy?.excludedCount ?? 0}),
@@ -358,6 +412,10 @@ it("starts historical refresh only after explicit confirmation", async () => {
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   await user.click(await screen.findByRole("button", { name: "캐릭터 더보기" }));
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  const management = within(panel).getByText("추가 관리").closest("details");
+  expect(management).not.toHaveAttribute("open");
+  expect(within(panel).getByRole("button", { name: "과거 미분류 이미지 갱신" })).not.toBeVisible();
+  await user.click(within(panel).getByText("추가 관리"));
   const refresh = within(panel).getByRole("button", { name: "과거 미분류 이미지 갱신" });
   await user.click(refresh);
   expect(hubApi.requestReferenceRefresh).not.toHaveBeenCalled();
@@ -373,6 +431,7 @@ it("limits an existing character portrait picker to its own folder", async () =>
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "캐릭터 더보기" }));
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByText("설명·대표 이미지"));
   await user.click(within(panel).getByRole("button", { name: "대표 이미지 선택" }));
   await waitFor(() => expect(browse).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina", referenceTargetId: "hina", all: true })));
   expect(screen.getByRole("heading", { name: /히나 캐릭터 폴더/ })).toBeVisible();
@@ -383,6 +442,7 @@ it("allows reference selection from the series after opening the character folde
   const {browse}=await mount("hina"); const user=userEvent.setup();
   await user.click(await screen.findByRole("button",{name:"캐릭터 더보기"}));
   const panel=await screen.findByRole("dialog",{name:"히나 · 캐릭터 정보"});
+  await user.click(within(panel).getByText("설명·대표 이미지"));
   await user.click(within(panel).getByRole("button",{name:"대표 이미지 선택"}));
   await user.click(await screen.findByRole("button",{name:"시리즈에서 이미지 찾기"}));
   await waitFor(()=>expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({targetId:null,referenceTargetId:"hina"})));
@@ -448,4 +508,182 @@ it("copies a character asset source and reports clipboard failures without chang
   await user.click(screen.getByRole("menuitem", { name: "출처 복사" }));
   expect(await screen.findByText("출처를 복사하지 못했습니다.")).toBeVisible();
   expect(changed).not.toHaveBeenCalled();
+});
+
+// Region inspection is optional and draft-only: it never saves, and it never
+// blocks the ordinary character settings flow.
+function inspection(assetId: string, state: string, boxes: [number, number, number, number][] = [[10, 20, 110, 220]]) {
+  return { assetId, contentHash: `hash-${assetId}`, baselineFingerprint: "baseline", width: 400, height: 600, boxes,
+    selectedIndex: null, suggestedIndex: null, automaticIndex: state === "automatic" ? 0 : null, state };
+}
+
+async function openReferences(inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]>) {
+  const user = userEvent.setup();
+  const mounted = await mount(undefined, false, [], undefined, false, inspect ? { inspect } : {});
+  await user.click(await screen.findByRole("button", { name: "히나 편집" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByText("레퍼런스", { selector: "summary span" }));
+  return { ...mounted, user, panel };
+}
+
+it("marks required person confirmation before opening info, shares inspection, and restores the mark when edits are discarded", async () => {
+  const inspect = vi.fn(async (_series: string, _target: string | null, ids: string[], regions?: Record<string, unknown>) =>
+    ids.map((id, index) => index === 0 && !regions?.[id]
+      ? inspection(id, "needs_region", [[0, 0, 100, 200], [100, 0, 200, 200]]) : inspection(id, "single")));
+  await mount("hina", false, [], undefined, false, { inspect });
+  const user = userEvent.setup();
+  const info = await screen.findByRole("button", { name: "캐릭터 더보기" });
+  await waitFor(() => expect(within(info).getByText("!")).toBeInTheDocument());
+  expect(info).toHaveAttribute("aria-description", "필요한 인물 확인이 있습니다.");
+  expect(screen.queryByRole("dialog", { name: "히나 · 캐릭터 정보" })).not.toBeInTheDocument();
+  expect(inspect).toHaveBeenCalledTimes(1);
+  await user.click(info);
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  expect(inspect).toHaveBeenCalledTimes(1);
+  await user.click(within(panel).getByRole("button", { name: "인물 영역 1 선택" }));
+  await waitFor(() => expect(within(info).queryByText("!")).not.toBeInTheDocument());
+  expect(inspect).toHaveBeenCalledTimes(2);
+  await user.click(within(panel).getByRole("button", { name: "히나 · 캐릭터 정보 닫기" }));
+  await waitFor(() => expect(within(info).getByText("!")).toBeInTheDocument());
+});
+
+it("does not mark optional correction when six references are usable", async () => {
+  const references = Array.from({ length: 7 }, (_, slot) => ({ slot, assetId: `image-${slot}`, assetHash: `hash-${slot}`, status: "ready" }));
+  const inspect = vi.fn(async (_series: string, _target: string | null, ids: string[]) => ids.map((id, index) =>
+    inspection(id, index === 6 ? "needs_region" : "single")));
+  await mount("hina", false, [], undefined, false, { inspect, targetOverrides: { references } });
+  const info = await screen.findByRole("button", { name: "캐릭터 더보기" });
+  await waitFor(() => expect(inspect).toHaveBeenCalledTimes(1));
+  expect(within(info).queryByText("!")).not.toBeInTheDocument();
+  await userEvent.setup().click(info);
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  expect(within(panel).queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+  expect(inspect).toHaveBeenCalledTimes(1);
+});
+
+it("marks a failed inspection and clears it after retrying from character info", async () => {
+  const inspect = vi.fn().mockRejectedValueOnce(new Error("인물 확인 실패"))
+    .mockImplementation(async (_series: string, _target: string | null, ids: string[]) => ids.map(id => inspection(id, "single")));
+  await mount("hina", false, [], undefined, false, { inspect });
+  const info = await screen.findByRole("button", { name: "캐릭터 더보기" });
+  await waitFor(() => expect(within(info).getByText("!")).toBeInTheDocument());
+  expect(info).toHaveAttribute("aria-description", expect.stringContaining("확인 실패"));
+  const user = userEvent.setup();
+  await user.click(info);
+  await user.click(await screen.findByRole("button", { name: "인물 확인 다시 시도" }));
+  await waitFor(() => expect(within(info).queryByText("!")).not.toBeInTheDocument());
+  await waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
+});
+
+it.each([{ targetEnabled: false }, { targetOverrides: { manualOnly: true } }])("does not inspect disabled or manual-only characters for the badge: %j", async options => {
+  const inspect = vi.fn(async () => []);
+  await mount("hina", false, [], undefined, false, { ...options, inspect });
+  const info = await screen.findByRole("button", { name: "캐릭터 더보기" });
+  expect(within(info).queryByText("!")).not.toBeInTheDocument();
+  expect(inspect).not.toHaveBeenCalled();
+});
+
+it("sends only changed manual regions so unchanged settings do not require detector validation", () => {
+  const original: ReferenceRegion = { contentHash: "hash", baselineFingerprint: "baseline", bounds: [0, 0, 40, 50] };
+  const saved = { a: original };
+  expect(draftReferenceRegions({ a: { ...original, bounds: [...original.bounds] } }, ["a"], saved)).toEqual({});
+  const changed: ReferenceRegion = { ...original, bounds: [40, 0, 80, 50] };
+  expect(draftReferenceRegions({ a: changed, removed: original }, ["a"], saved)).toEqual({ a: changed });
+  expect(draftReferenceRegions({ a: { ...original, baselineFingerprint: "new" } }, ["a"], saved)).toHaveProperty("a");
+  expect(draftReferenceRegions({ a: { ...original, contentHash: "new" } }, ["a"], saved)).toHaveProperty("a");
+});
+
+it("never prompts for unambiguous references and still inspects read-only", async () => {
+  const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[]) => assetIds.map(id => inspection(id, "single")));
+  const mounted = await mount(undefined, false, [], undefined, false, { inspect });
+  const saveSettings = vi.spyOn(mounted.api, "saveSettings");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "히나 편집" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByText("레퍼런스", { selector: "summary span" }));
+  // Five single-person references leave nothing to ask, so the section stays out of the way.
+  await waitFor(() => expect(inspect).toHaveBeenCalledWith("series", "hina", expect.arrayContaining(["image-0"]), {}));
+  expect(within(panel).queryByRole("region", { name: "인물 영역 확인" })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+  expect(saveSettings).not.toHaveBeenCalled();
+  expect(mounted.changed).not.toHaveBeenCalled();
+});
+
+it("asks for one unresolved reference and stores the choice in the draft only", async () => {
+  // A multi-person image keeps its boxes after a choice, so the region stays replaceable.
+  const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[]) =>
+    assetIds.map(id => id === "image-0"
+      ? inspection(id, "needs_region", [[10, 20, 110, 220], [200, 40, 380, 520]])
+      : inspection(id, "single")));
+  const mounted = await mount(undefined, false, [], undefined, false, { inspect });
+  const saveSettings = vi.spyOn(mounted.api, "saveSettings");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "히나 편집" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByText("레퍼런스", { selector: "summary span" }));
+  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
+  // The correction list is reached only through the optional adjustment action.
+  await user.click(await within(panel).findByRole("button", { name: "인물 영역 조정" }));
+  const regions = await within(panel).findByRole("region", { name: "인물 영역 목록" });
+  expect(within(regions).getByRole("button", { name: "레퍼런스 1 인물 영역 변경" })).toBeInTheDocument();
+  // Choosing a region changes the draft only; nothing is written until save.
+  expect(saveSettings).not.toHaveBeenCalled();
+  expect(mounted.changed).not.toHaveBeenCalled();
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ referenceRegions: { "image-0": { contentHash: "hash-image-0", baselineFingerprint: "baseline", bounds: [200, 40, 380, 520] } } }), true));
+});
+
+it("keeps asking only through the quiet button until the requirement is met", async () => {
+  const calls: { regions: Record<string, unknown> }[] = [];
+  const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => {
+    calls.push({ regions: { ...regions } });
+    // Five references plus one extra: six usable references is only reached after a pick.
+    return [...assetIds, "image-extra"].map(id => regions?.[id] ? inspection(id, "selected")
+      : id === "image-0" ? inspection(id, "needs_region", [[10, 20, 110, 220], [200, 40, 380, 520]]) : inspection(id, "single"));
+  });
+  const { user, panel } = await openReferences(inspect);
+  // The chooser is closed until the user asks for it.
+  expect(within(panel).queryByRole("button", { name: /인물 영역 \d+ 선택/ })).not.toBeInTheDocument();
+  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
+  // The confirmed choice is included in the next inspection request.
+  await waitFor(() => expect(calls.some(call => call.regions["image-0"])).toBe(true));
+  // Six usable references are reached, so the requirement becomes an optional correction.
+  expect(await within(panel).findByRole("button", { name: "인물 영역 조정" })).toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
+});
+
+it("keeps a manual region choice for replacement and drops it when its reference is removed", async () => {
+  const inspect = vi.fn(async (_seriesId: string, _targetId: string | null, assetIds: string[]) =>
+    assetIds.map(id => id === "image-0" ? inspection(id, "needs_region", [[10, 20, 110, 220], [200, 40, 380, 520]]) : inspection(id, "single")));
+  const mounted = await mount(undefined, false, [], undefined, false, { inspect });
+  const saveSettings = vi.spyOn(mounted.api, "saveSettings");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "히나 편집" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByText("레퍼런스", { selector: "summary span" }));
+  await user.click(await within(panel).findByRole("button", { name: "필요한 인물만 확인" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 영역 2 선택" }));
+  await user.click(await within(panel).findByRole("button", { name: "인물 영역 조정" }));
+  const regions = await within(panel).findByRole("region", { name: "인물 영역 목록" });
+  expect(within(regions).getByRole("button", { name: "레퍼런스 1 인물 영역 변경" })).toBeInTheDocument();
+  // Removing the reference also drops the region that belonged to it.
+  await user.click(within(panel).getByRole("button", { name: "레퍼런스 1 제거" }));
+  await waitFor(() => expect(within(panel).queryByRole("region", { name: "인물 영역 목록" })).not.toBeInTheDocument());
+  await user.click(within(panel).getByRole("button", { name: "저장" }));
+  // The removed reference's region is never saved back.
+  await waitFor(() => expect(saveSettings).toHaveBeenCalled());
+  expect(saveSettings).not.toHaveBeenCalledWith(expect.objectContaining({ referenceRegions: expect.objectContaining({ "image-0": expect.anything() }) }), true);
+});
+
+it("skips region inspection entirely when the host does not expose it", async () => {
+  const mounted = await mount();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "히나 편집" }));
+  const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
+  await user.click(within(panel).getByText("레퍼런스", { selector: "summary span" }));
+  expect(within(panel).queryByRole("region", { name: "인물 영역 확인" })).not.toBeInTheDocument();
+  expect(mounted.api.inspectReferenceRegions).toBeUndefined();
 });

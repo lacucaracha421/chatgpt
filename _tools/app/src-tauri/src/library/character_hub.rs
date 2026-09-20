@@ -53,6 +53,8 @@ pub struct BrowsePage {
     pub items: Vec<AssetSummary>,
     pub next_cursor: Option<String>,
     pub total_count: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unavailable_reference_ids: Vec<String>,
 }
 
 pub(crate) const SERIES_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
@@ -351,10 +353,25 @@ impl Library {
             let connection = self.connection()?;
             asset_summaries_by_ids(&connection, &page_ids)?
         };
+        // Check only this picker page, outside the database lock. Keep unavailable
+        // thumbnails in place so counts/cursors stay stable and the UI can explain them.
+        let mut unavailable_reference_ids = Vec::new();
+        if query.reference_target_id.is_some() {
+            for item in &items {
+                match self.open_library_media(&item.relative_path) {
+                    Ok(_) => {}
+                    Err(super::error::LibraryError::MediaNotFound) => {
+                        unavailable_reference_ids.push(item.id.clone());
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
         Ok(BrowsePage {
             items,
             next_cursor,
             total_count: total as u64,
+            unavailable_reference_ids,
         })
     }
 
@@ -420,6 +437,7 @@ impl Library {
             items,
             next_cursor,
             total_count: total as u64,
+            unavailable_reference_ids: Vec::new(),
         })
     }
 }
@@ -540,6 +558,91 @@ fn candidate_media_mode_with_exclusions(
 mod tests {
     use super::*;
     use crate::library::characters::{tests::Fixture, CharacterSettingsDraft, DecisionKind, DecisionRequest, TargetDraft};
+    #[test]
+    fn reference_picker_reports_missing_originals_without_losing_pages_or_saved_links() {
+        let f = Fixture::new();
+        let target = f.ready("A");
+        std::fs::remove_file(f.temp.path().join("assets/asset-3.png")).unwrap();
+        assert!(f.temp.path().join("thumbnails/asset-3.webp").is_file());
+        let current = f.library.get_character_target(&target.id).unwrap();
+        assert_eq!(current.references[3].status, "missing_file");
+        assert!(matches!(
+            f.library
+                .replace_character_references(&target.id, current.revision, &f.refs),
+            Err(Error::Library(
+                super::super::error::LibraryError::MediaNotFound
+            ))
+        ));
+
+        let mut after = None;
+        let mut ids = Vec::new();
+        let mut unavailable = Vec::new();
+        loop {
+            let page = f
+                .library
+                .browse_character_assets(BrowseQuery {
+                    series_id: f.series.clone(),
+                    target_id: Some(target.id.clone()),
+                    group_id: None,
+                    reference_target_id: Some(target.id.clone()),
+                    after,
+                    limit: 2,
+                    all: true,
+                    series_filter: None,
+                })
+                .unwrap();
+            assert_eq!(page.total_count, 5);
+            assert!(!page.items.is_empty());
+            let json = serde_json::to_value(&page).unwrap();
+            if let Some(missing) = json["unavailableReferenceIds"].as_array() {
+                unavailable.extend(missing.iter().map(|id| id.as_str().unwrap().to_owned()));
+            }
+            ids.extend(page.items.iter().map(|item| item.id.clone()));
+            after = page.next_cursor;
+            if after.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            ids,
+            vec!["asset-4", "asset-3", "asset-2", "asset-1", "asset-0"]
+        );
+        assert_eq!(unavailable, vec!["asset-3"]);
+
+        let mut selected = current
+            .usable_references()
+            .filter_map(|reference| reference.asset_id.clone())
+            .collect::<Vec<_>>();
+        selected.push("asset-5".into());
+        let saved = f
+            .library
+            .save_character_settings(
+                CharacterSettingsDraft {
+                    target: TargetDraft {
+                        id: Some(current.id.clone()),
+                        expected_revision: Some(current.revision),
+                        series_classification_id: current.series_classification_id.clone(),
+                        linked_classification_id: current.linked_classification_id.clone(),
+                        display_name: current.display_name.clone(),
+                        description: current.description.clone(),
+                        thumbnail_asset_id: current.thumbnail_asset_id.clone(),
+                        enabled: current.enabled,
+                    },
+                    reference_ids: selected,
+                    reference_regions: Default::default(),
+                },
+                true,
+            )
+            .unwrap();
+        assert_eq!(saved.usable_references().count(), 5);
+        assert!(saved
+            .references
+            .iter()
+            .chain(&saved.learned_references)
+            .any(|reference| reference.asset_id.as_deref() == Some("asset-3")
+                && reference.status == "missing_file"));
+    }
+
     #[test]
     fn presentation_preserves_recognition_and_gallery_pages_real_relations() {
         let f = Fixture::new();

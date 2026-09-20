@@ -250,6 +250,7 @@ pub fn run() {
             commands::characters::save_character_target,
             commands::characters::save_character_settings,
             commands::characters::replace_character_references,
+            commands::characters::inspect_character_reference_regions,
             commands::characters::reference_candidates,
             commands::characters::confirm_reference_batch,
             commands::characters::request_character_reference_refresh,

@@ -754,8 +754,38 @@ mod tests;
 /// gate. This only moves uncertain pairs to review; recommendation inference is unchanged.
 pub(super) const AUTOMATIC_REFERENCE_SUPPORT: usize = 6;
 const AUTOMATIC_MAX_SIXTH_DISTANCE: f64 = 0.16;
+// Distances, not confidence probabilities. Compare the rival's recommendation-level
+// support to the winner's weakest required automatic support on the same person.
+const AUTOMATIC_COMPETITOR_MARGIN: f64 = 0.05;
 
-pub(super) fn automatic_evidence_regions(evidence: Option<&Value>) -> Option<Vec<[f64; 4]>> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AutomaticRegion {
+    pub bounds: [f64; 4],
+    pub sixth_distance: f64,
+}
+
+fn sorted_reference_distances(row: &Value) -> Option<Vec<f64>> {
+    let mut distances = row["referenceDistances"]
+        .as_array()?
+        .iter()
+        .map(Value::as_f64)
+        .collect::<Option<Vec<_>>>()?;
+    if distances.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let votes = row["matchedReferences"].as_array()?;
+    let mut seen = std::collections::BTreeSet::new();
+    for vote in votes {
+        let index = usize::try_from(vote.as_u64()?).ok()?;
+        if index >= distances.len() || !seen.insert(index) {
+            return None;
+        }
+    }
+    distances.sort_by(f64::total_cmp);
+    Some(distances)
+}
+
+pub(super) fn automatic_evidence_regions(evidence: Option<&Value>) -> Option<Vec<AutomaticRegion>> {
     let e = evidence?;
     if e["passed"] != true || e["wholeFallback"] == true {
         return None;
@@ -766,23 +796,57 @@ pub(super) fn automatic_evidence_regions(evidence: Option<&Value>) -> Option<Vec
         if row["matchedReferences"].as_array()?.len() < AUTOMATIC_REFERENCE_SUPPORT {
             continue;
         }
-        let mut distances = row["referenceDistances"]
-            .as_array()?
-            .iter()
-            .map(Value::as_f64)
-            .collect::<Option<Vec<_>>>()?;
-        if distances.len() < AUTOMATIC_REFERENCE_SUPPORT
-            || distances.iter().any(|value| !value.is_finite())
-        {
+        let distances = sorted_reference_distances(row)?;
+        if distances.len() < AUTOMATIC_REFERENCE_SUPPORT {
             return None;
         }
-        distances.sort_by(f64::total_cmp);
         if distances[AUTOMATIC_REFERENCE_SUPPORT - 1] > AUTOMATIC_MAX_SIXTH_DISTANCE {
             continue;
         }
-        regions.push(box_region(boxes.get(index)?)?);
+        regions.push(AutomaticRegion {
+            bounds: box_region(boxes.get(index)?)?,
+            sixth_distance: distances[AUTOMATIC_REFERENCE_SUPPORT - 1],
+        });
     }
     Some(regions)
+}
+
+/// Missing or malformed evidence cannot prove a competitor safely weaker.
+/// Every overlapping recommendation must clear the gap; two automatic-strength
+/// candidates always remain ambiguous, even when one has a much lower distance.
+pub(super) fn competitor_allows_automatic(
+    winner: &AutomaticRegion,
+    evidence: Option<&Value>,
+) -> Option<bool> {
+    let e = evidence?;
+    if e["wholeFallback"] != false || !e["passed"].is_boolean() {
+        return None;
+    }
+    let boxes = e["queryBoxes"].as_array()?;
+    let rows = e["evidence"].as_array()?;
+    if boxes.is_empty() || boxes.len() != rows.len() {
+        return None;
+    }
+    for (value, row) in boxes.iter().zip(rows) {
+        let region = box_region(value)?;
+        let support = row["matchedReferences"].as_array()?.len();
+        if support < 2 {
+            continue;
+        }
+        if e["passed"] != true {
+            return None;
+        }
+        let distances = sorted_reference_distances(row)?;
+        if !same_person(&winner.bounds, &region) {
+            continue;
+        }
+        let strong = support >= AUTOMATIC_REFERENCE_SUPPORT
+            && distances[AUTOMATIC_REFERENCE_SUPPORT - 1] <= AUTOMATIC_MAX_SIXTH_DISTANCE;
+        if strong || distances[1] < winner.sixth_distance + AUTOMATIC_COMPETITOR_MARGIN {
+            return Some(false);
+        }
+    }
+    Some(true)
 }
 
 // Compare geometry as well as crop indexes: duplicate/overlapping detections are one person.

@@ -998,6 +998,75 @@ fn arbitration_uses_latest_judgment_and_keeps_ambiguous_people_for_review() {
 }
 
 #[test]
+fn arbitration_releases_monie_only_when_the_rival_is_safely_weaker() {
+    let monie = vec![
+        0.0930563360452652, 0.06063959002494812, 0.0923059955239296,
+        0.1261855512857437, 0.062034815549850464, 0.19817233085632324,
+        0.10088373720645905, 0.1669408231973648, 0.11253073066473009,
+        0.06524112075567245, 0.07422041893005371, 0.2249622642993927,
+        0.06969894468784332, 0.05852421745657921,
+    ];
+    let hiyuki = vec![
+        0.25773942470550537, 0.30683422088623047, 0.19877029955387115,
+        0.2447524070739746, 1.0, 0.24989449977874756, 0.18796686828136444,
+    ];
+    for (rival_distances, invalid, expected) in [
+        (hiyuki.clone(), "", true),
+        (vec![0.12,0.12,0.4,0.4,0.4,0.4], "", false),
+        (vec![0.16; 6], "", false),
+        (hiyuki.clone(), "missing", false),
+        (hiyuki.clone(), "fallback", false),
+        (hiyuki.clone(), "error", false),
+        (hiyuki.clone(), "error_field", false),
+        (hiyuki, "stale", false),
+    ] {
+        let f = Fixture::new();
+        let a = f.ready("Monie");
+        let b = f.ready("Hiyuki");
+        add_learned_reference(&f, &a.id);
+        add_learned_reference(&f, &b.id);
+        character_autotag::enqueue(
+            &f.library.connection().unwrap(), "asset-5", character_autotag::Cause::Ingestion,
+        ).unwrap();
+        let job = f.library.claim_character_autotag().unwrap().unwrap();
+        let mut c = f.library.connection().unwrap();
+        let tx = c.transaction().unwrap();
+        let context = f.library.character_autotag_context(&tx, &job, &"a".repeat(64)).unwrap();
+        let mut predictions = [(&a, &monie), (&b, &rival_distances)].into_iter().map(|(target, distances)| {
+            let votes = distances.iter().enumerate().filter_map(|(i,d)| (*d <= 0.21323118981474148).then_some(i)).collect::<Vec<_>>();
+            Prediction {
+                target_id: target.id.clone(),
+                result: ScanResult {
+                    asset_id: job.asset_id.clone(), content_hash: job.content_hash.clone(),
+                    state: "recommended".into(), error: None,
+                    evidence: Some(json!({
+                        "passed": true, "wholeFallback": false, "queryBoxes": [[0,0,832,1216]],
+                        "evidence": [{"matchedReferences": votes, "referenceDistances": distances}]
+                    })),
+                },
+            }
+        }).collect::<Vec<_>>();
+        match invalid {
+            "missing" => {
+                predictions[1].result.evidence = None;
+                predictions[1].result.state = "error".into();
+            }
+            "fallback" => predictions[1].result.evidence.as_mut().unwrap()["wholeFallback"] = json!(true),
+            "error" | "stale" => predictions[1].result.state = invalid.into(),
+            "error_field" => predictions[1].result.error = Some("comparison failed".into()),
+            _ => {},
+        }
+        f.library.finalize_incremental(
+            &tx, &job, &context, &predictions, &BTreeSet::new(), &BTreeSet::new(),
+        ).unwrap();
+        tx.commit().unwrap();
+        drop(c);
+        let relations = f.library.character_relations_for_asset("asset-5").unwrap();
+        assert_eq!(relations, if expected { vec![a.id] } else { vec![] }, "{invalid}");
+    }
+}
+
+#[test]
 fn arbitration_keeps_weak_six_vote_companion_crop_for_review() {
     let f = Fixture::new();
     let target = f.ready("A");

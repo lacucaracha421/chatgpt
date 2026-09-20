@@ -7,7 +7,7 @@ import queue
 import sys
 import threading
 
-from reference_regions import compare_bound, compare_bound_delta, inspect_references
+from reference_regions import compare_bound, compare_bound_delta, inspect_references, resolve_references
 from reference_curation import curate_references
 from runtime import rgb
 from feature_cache import ReferenceBundles, FeatureCache, runtime_fingerprint, extraction_fingerprint, compatible_feature_caches
@@ -59,6 +59,7 @@ def main():
         instrument(engine, feature_cache, runtime, timings)
         cache.extract = timings.wrap("cache_extract_total", cache.extract)
     refs = None
+    projected = None
     selections = []
     bundles = ReferenceBundles(cache)
     resident = None
@@ -69,11 +70,14 @@ def main():
             request = json.loads(line)
             if request["type"] == "prepare":
                 refs = None
+                projected = None
                 items = request["references"]
                 if not 5 <= len(items) <= 25 or len({i["hash"] for i in items}) != len(items):
                     raise ValueError("Five anchors and at most twenty distinct approved examples required")
-                refs = bundles.prepare(items)
+                prepared = bundles.prepare(items)
                 selections = [item.get("region") for item in items]
+                projected = resolve_references(engine, prepared, selections)
+                refs = prepared
                 emit({"type": "prepared", "referenceHashes": [r.content_hash for r in refs],
                       "cacheHits": cache.hits, "extractions": cache.misses})
             elif request["type"] == "inspect_references":
@@ -118,10 +122,10 @@ def main():
                 else:
                     query = cache.extract(Path(request["path"]), request["hash"])
                 if timings is None:
-                    result = compare_bound(engine, query, refs, selections)
+                    result = compare_bound(engine, query, refs, selections, projected)
                 else:
                     with timings.measure("comparison_total"):
-                        result = compare_bound(engine, query, refs, selections)
+                        result = compare_bound(engine, query, refs, selections, projected)
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})
             else:

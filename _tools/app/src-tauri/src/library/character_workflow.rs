@@ -238,6 +238,7 @@ impl Library {
             items,
             next_cursor,
             total_count: total as u64,
+            unavailable_reference_ids: Vec::new(),
         })
     }
 }

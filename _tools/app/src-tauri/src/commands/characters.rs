@@ -1,6 +1,7 @@
 use tauri::State;
 
 use super::{current_required, AppState, CommandError};
+use crate::library::character_reference_regions::{ReferenceInspection, RegionBindings};
 use crate::library::characters::{
     CharacterSettingsDraft, Decision, DecisionRequest, Error, Target, TargetDraft,
 };
@@ -369,12 +370,69 @@ pub async fn save_character_target(
 pub async fn save_character_settings(
     request: CharacterSettingsDraft,
     strict_selection: Option<bool>,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Target, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
+        // Only an explicit region choice needs the detector. An empty map keeps the
+        // existing offline path and never clears the stored manual selections.
+        if !request.reference_regions.is_empty() {
+            crate::library::character_reference_regions::validate_region_ids(
+                &request.reference_ids,
+                &request.reference_regions,
+            )?;
+            let (script, settings) = runtime_paths(&app)?;
+            let config =
+                crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
+            let series = match (
+                request.target.series_classification_id.clone(),
+                request.target.id.as_deref(),
+            ) {
+                (Some(series), _) => Some(series),
+                (None, Some(id)) => library.get_character_target(id)?.series_classification_id,
+                (None, None) => None,
+            };
+            library.verify_reference_region_selections(
+                series.as_deref().ok_or(Error::Stale)?,
+                &request.reference_regions,
+                &config,
+            )?;
+        }
         library
             .save_character_settings(request, strict_selection.unwrap_or(false))
+            .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+/// Read-only identity inspection for one to twenty-five images. Draft `regions` override the
+/// target's stored choices for the requested images only; nothing is persisted here.
+#[tauri::command]
+pub async fn inspect_character_reference_regions(
+    series_id: String,
+    target_id: Option<String>,
+    asset_ids: Vec<String>,
+    regions: Option<RegionBindings>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<ReferenceInspection>, CommandError> {
+    // Reject an empty or oversized request before the runtime is even required.
+    crate::library::character_reference_regions::validate_inspection_ids(&asset_ids)
+        .map_err(CommandError::from)?;
+    let (script, settings) = runtime_paths(&app)?;
+    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .inspect_character_reference_regions_with_overrides(
+                &series_id,
+                target_id.as_deref(),
+                &asset_ids,
+                regions.as_ref(),
+                &config,
+            )
             .map_err(Into::into)
     })
     .await
