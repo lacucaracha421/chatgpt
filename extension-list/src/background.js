@@ -43,7 +43,7 @@ importScripts("classification-tree.js", "api-client.js", "profile-store.js", "sa
         return result;
       }
       case "collector:temporary":
-        return downloadTemporary(message.candidate);
+        return temporaryTarget(message.candidate);
       case "collector:save":
         return globalThis.LakomicsSaveClient.save(message.payload || {});
       case "saved-index:get":
@@ -53,8 +53,29 @@ importScripts("classification-tree.js", "api-client.js", "profile-store.js", "sa
     }
   }
 
+  // Temporary save downloads the selected original. An X video or GIF is a CDN MP4
+  // that needs no resolution once known; when the page has not mounted a player the
+  // player identity is resolved first, exactly like a permanent save. A poster URL
+  // is never substituted for the animation.
+  async function temporaryTarget(candidate) {
+    if (!candidate) return { ok: false, code: "media_unsupported" };
+    if (candidate.type === "image") return downloadTemporary(candidate);
+    if (candidate.type !== "video" || candidate.source !== "x") return { ok: false, code: "media_unsupported" };
+
+    async function resolvedUrl(value) {
+      const direct = globalThis.LakomicsSaveClient.xVideoMediaUrl(value);
+      if (direct) return direct;
+      const resolved = await globalThis.LakomicsSaveClient.resolveXVideoCandidate(value);
+      return globalThis.LakomicsSaveClient.xVideoMediaUrl(resolved);
+    }
+
+    const mediaUrl = await resolvedUrl(candidate);
+    if (!mediaUrl) return { ok: false, code: "media_unsupported" };
+    return downloadTemporary({ type: "video", mediaUrl });
+  }
+
   async function downloadTemporary(candidate) {
-    if (candidate?.type !== "image") return { ok: false, code: "media_unsupported" };
+    if (candidate?.type !== "image" && candidate?.type !== "video") return { ok: false, code: "media_unsupported" };
     let url;
     try { url = new URL(candidate.mediaUrl); } catch { return { ok: false, code: "invalid_url" }; }
     if (url.protocol !== "https:" || url.username || url.password || url.hash) return { ok: false, code: "invalid_url" };

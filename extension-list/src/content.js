@@ -3,6 +3,10 @@
   const OPEN_DISTANCE_PX = 12;
   const TOUCH_LONG_PRESS_MS = 500;
   const MOUSE_OPEN_DELAY_MS = 250;
+  // Fallback liveness probe for isolated-world history.pushState/replaceState.
+  // It is scheduled only while an invocation is pending or open, and never runs
+  // from an idle page, so it cannot become a permanent background timer.
+  const SESSION_WATCH_INTERVAL_MS = 400;
 
   function runtimeTimeoutMs(message) {
     if (message?.type !== "collector:save") return 15_000;
@@ -55,6 +59,7 @@
       type: candidate?.type ?? "image", mediaUrl: candidate?.mediaUrl ?? null,
       sourceUrl: candidate?.sourceUrl ?? location.href, author: candidate?.author ?? null,
       postId: candidate?.postId ?? null, mediaIndex: candidate?.mediaIndex ?? null,
+      overallMediaIndex: candidate?.overallMediaIndex ?? null,
       publishedAt: candidate?.publishedAt ?? null,
     };
   }
@@ -66,6 +71,11 @@
       if (url.protocol !== "https:" || url.username || url.password || url.hash) return null;
       return `intent://temporary?url=${encodeURIComponent(url.href)}#Intent;scheme=lakomics;package=com.lakomics.mobile;end`;
     } catch { return null; }
+  }
+
+  function temporaryAvailable(candidate, android) {
+    if (android || candidate?.type !== "video") return Boolean(temporaryIntent(candidate));
+    return candidate.source === "x";
   }
 
   function point(event) { return { x: event.clientX, y: event.clientY }; }
@@ -83,6 +93,81 @@
   function openingClickDisposition(guarded, insidePicker) {
     if (guarded) return "consume";
     return insidePicker ? "picker" : "page";
+  }
+
+  // A session spans one open list and stops on close or page departure. Closing
+  // for navigation must release ownership without claiming that a save the
+  // server already accepted was cancelled, so disposal reports nothing.
+  function createSessionState() {
+    let current = null;
+    return {
+      get current() { return current; },
+      begin() { current = {}; return current; },
+      holds(session) { return Boolean(session && session === current); },
+      end() { current = null; },
+    };
+  }
+
+  // Observe the current browser session without patching page-world history:
+  // the Navigation API when the browser exposes it, ordinary popstate/hashchange,
+  // and a bounded location.href poll for isolated-world history calls. The
+  // listener set follows the lifetime of the pending or open invocation.
+  function createSessionWatcher({ pollIntervalMs = SESSION_WATCH_INTERVAL_MS } = {}) {
+    const pollInterval = Math.max(16, Number(pollIntervalMs) || SESSION_WATCH_INTERVAL_MS);
+    let armed = false, onDeparture = null, pollTimer = null, lastHref = null, navigation = null;
+    // Every listener must be tracked here so disarm() removes exactly what watch()
+    // added; an untracked listener would outlive its session.
+    let listeners = [];
+    const navigationApi = () => {
+      const candidate = window.navigation;
+      return typeof candidate?.addEventListener === "function" && typeof candidate?.removeEventListener === "function" ? candidate : null;
+    };
+    const stopPolling = () => { if (pollTimer !== null) clearTimeout(pollTimer); pollTimer = null; };
+    const onCommit = () => { disarm(); onDeparture?.(); };
+    // pagehide must still report the departure: stop() clears onDeparture, so the
+    // callback is captured before teardown instead of being dropped.
+    const onUnload = () => { const departure = onDeparture; stop(); departure?.(); };
+    const schedulePoll = () => {
+      stopPolling();
+      pollTimer = setTimeout(() => {
+        pollTimer = null;
+        if (!armed) return;
+        const href = location.href;
+        if (href !== lastHref) { disarm(); onDeparture?.(); return; }
+        schedulePoll();
+      }, pollInterval);
+    };
+    function listen(target, type, listener) {
+      target.addEventListener(type, listener, true);
+      listeners.push({ target, type, listener });
+    }
+    function disarm() {
+      if (!armed) return;
+      armed = false; stopPolling();
+      navigation?.removeEventListener("currententrychange", onCommit); navigation = null;
+      for (const entry of listeners) entry.target.removeEventListener(entry.type, entry.listener, true);
+      listeners = [];
+    }
+    function stop() {
+      disarm();
+      onDeparture = null;
+      lastHref = null;
+    }
+    function watch(departure) {
+      disarm();
+      onDeparture = typeof departure === "function" ? departure : null;
+      armed = true;
+      lastHref = location.href;
+      navigation = navigationApi();
+      listen(window, "pagehide", onUnload);
+      if (navigation) navigation.addEventListener("currententrychange", onCommit);
+      else {
+        listen(window, "popstate", onCommit);
+        listen(window, "hashchange", onCommit);
+        schedulePoll();
+      }
+    }
+    return { watch, stop };
   }
 
   function saveResultMessage(result) {
@@ -271,13 +356,15 @@
   }
 
   if (globalThis.__LAKOMICS_TEST__) {
-    globalThis.LakomicsListContent = { createInvocationGate, temporaryIntent, plainCandidate, shouldSuppressNativeContext, openingClickDisposition, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, temporaryFailureMessage, normalizePostId, findTweetArticle, autoLikePost, favoriteTweetViaWebApi, TOUCH_LONG_PRESS_MS, MOUSE_OPEN_DELAY_MS };
+    globalThis.LakomicsListContent = { createInvocationGate, createSessionState, createSessionWatcher, temporaryIntent, temporaryAvailable, plainCandidate, shouldSuppressNativeContext, openingClickDisposition, runtimeTimeoutMs, saveResultMessage, saveFailureMessage, temporaryFailureMessage, normalizePostId, findTweetArticle, autoLikePost, favoriteTweetViaWebApi, TOUCH_LONG_PRESS_MS, MOUSE_OPEN_DELAY_MS, SESSION_WATCH_INTERVAL_MS };
     return;
   }
 
   install();
   function install() {
     const gate = createInvocationGate();
+    const sessions = createSessionState();
+    const watcher = createSessionWatcher();
     let active = null;
     let longPressTimer = null;
     let picker = null;
@@ -285,6 +372,7 @@
     let suppressNextClick = false;
     let suppressClickTimer = null;
     let toast = null, toastTimer = null;
+    let statusSequence = 0;
     let gestureTarget = null;
     let touchGuardRestore = [];
 
@@ -297,6 +385,11 @@
     document.addEventListener("dragstart", onDragStart, true);
     document.addEventListener("click", onClick, true);
     const cancelPending = () => { if (gate.phase === "armed") reset(); };
+    // A committed navigation invalidates the whole session: the pending opening,
+    // the mounted list, its ownership, its timers and any transient UI. This runs
+    // unconditionally so it works while the list is busy or input-locked, where
+    // the ordinary guarded dismissal deliberately does nothing.
+    const departSession = () => endSession();
     document.addEventListener("scroll", cancelPending, true);
     document.addEventListener("wheel", cancelPending, { passive: true });
     window.addEventListener("blur", cancelPending);
@@ -304,6 +397,8 @@
 
     function insidePicker(event) { return Boolean(picker && event.composedPath?.().includes(picker.host)); }
     function clearTimer() { if (longPressTimer !== null) clearTimeout(longPressTimer); longPressTimer = null; }
+    function clearStatus() { statusSequence += 1; if (toastTimer !== null) clearTimeout(toastTimer); toastTimer = null; toast?.remove(); toast = null; }
+    function clearClickGuard() { suppressNextClick = false; if (suppressClickTimer !== null) clearTimeout(suppressClickTimer); suppressClickTimer = null; }
     function clearTouchOwnership() {
       document.documentElement.classList.remove("lakomics-list-touch-active");
       gestureTarget?.classList?.remove("lakomics-list-gesture-target");
@@ -340,10 +435,41 @@
       if (suppressClickTimer !== null) clearTimeout(suppressClickTimer);
       suppressClickTimer = setTimeout(() => { suppressNextClick = false; suppressClickTimer = null; }, durationMs);
     }
-    function unlockPickerAfterRelease() {
-      setTimeout(() => picker?.unlockInput?.(), 0);
+    // The list is unmounted by endSession, so a late release for a different
+    // session must not unlock a list mounted after it. The lifecycle token is
+    // created in open(); matching it against the pointer record would never hold.
+    function unlockPickerAfterRelease(session) {
+      const token = session?.lifecycle ?? null;
+      setTimeout(() => { if (token && sessions.holds(token)) picker?.unlockInput?.(); }, 0);
     }
-    function reset() { clearTimer(); clearTouchOwnership(); active = null; gate.close(); }
+    // reset() clears the pending invocation so a release arriving after navigation
+    // can never settle the record that replaced it.
+    function reset() {
+      watcher.stop(); clearTimer();
+      try { if (active?.pointerCaptured) active.candidate.element?.releasePointerCapture?.(active.id); } catch {}
+      clearTouchOwnership(); active = null; gate.close();
+    }
+
+    function endSession(disposePicker = true) {
+      watcher.stop();
+      sessions.end();
+      reset();
+      const current = picker;
+      picker = null;
+      // dispose() is unconditional and reports nothing: an accepted server save
+      // is not a cancellation, only the list itself is torn down.
+      try { if (disposePicker) current?.dispose?.(); } catch {}
+      clearClickGuard();
+      clearStatus();
+    }
+
+    // A pointer id alone cannot identify an invocation: the same finger or button id
+    // is reused across presses, so a release arriving after navigation would
+    // otherwise settle whichever invocation happens to be current. A release must
+    // match the pointer id and the input kind that started it.
+    function ownsRelease(record, event, input) {
+      return Boolean(record) && record.id === event.pointerId && record.input === input && !record.released;
+    }
 
     function onDown(event) {
       if (insidePicker(event) || gate.phase !== "idle") return;
@@ -351,7 +477,8 @@
       const candidate = findCandidate(event.target); if (!candidate) return;
       if (!gate.arm(event.pointerId)) return;
       const origin = point(event);
-      active = { id: event.pointerId, input, candidate, origin, latest: origin };
+      active = { id: event.pointerId, input, candidate, origin, latest: origin, href: location.href };
+      watcher.watch(departSession);
       if (input === "touch") claimTouchOwnership(candidate.element || event.target);
       const session = active;
       longPressTimer = setTimeout(() => {
@@ -380,29 +507,33 @@
     }
 
     function onUp(event) {
-      if (!active || active.id !== event.pointerId || active.released) return;
+      const input = inputKind(event);
+      if (!ownsRelease(active, event, input)) return;
       clearTimer();
       if (gate.phase === "armed") {
-        gate.release(event.pointerId); clearTouchOwnership(); active = null; return;
+        reset(); return;
       }
       // Once opening has started, releasing the trigger pointer must not cancel
       // the asynchronous state load. The list owns the session until it closes.
+      const session = active;
       active.released = true;
       armPostOpenClickGuard();
       event.preventDefault(); event.stopImmediatePropagation();
-      try { if (active.pointerCaptured) (active.candidate.element || event.target)?.releasePointerCapture?.(event.pointerId); } catch {}
+      try { if (session.pointerCaptured) (session.candidate.element || event.target)?.releasePointerCapture?.(event.pointerId); } catch {}
       clearTouchOwnership();
-      unlockPickerAfterRelease();
+      unlockPickerAfterRelease(session);
     }
     function onCancel(event) {
-      if (!active || active.id !== event.pointerId || active.released) return;
+      const input = event.pointerType === "touch" ? "touch" : event.pointerType === "mouse" || !event.pointerType ? "mouse" : null;
+      if (!ownsRelease(active, event, input)) return;
       clearTimer();
       if (gate.phase === "armed") { reset(); return; }
+      const session = active;
       active.released = true;
       armPostOpenClickGuard();
-      try { if (active.pointerCaptured) (active.candidate.element || event.target)?.releasePointerCapture?.(event.pointerId); } catch {}
+      try { if (session.pointerCaptured) (session.candidate.element || event.target)?.releasePointerCapture?.(event.pointerId); } catch {}
       clearTouchOwnership();
-      unlockPickerAfterRelease();
+      unlockPickerAfterRelease(session);
     }
     function onClick(event) {
       if (event.isTrusted === false && event.target.closest?.('[data-testid="like"], [data-testid="unlike"]')) return;
@@ -439,18 +570,28 @@
 
     async function open(session) {
       if (!active || active !== session || !gate.opening(session.id)) return;
+      if (location.href !== session.href) { endSession(); return; }
       clearTimer();
+      const sessionState = sessions.begin();
+      // Publish the lifecycle token on the invocation record so the release
+      // handlers, which only ever see the pointer record, can validate against it.
+      session.lifecycle = sessionState;
+      watcher.watch(departSession);
       const response = await loadState();
+      if (!sessions.holds(sessionState)) return;
+      if (location.href !== session.href) { endSession(); return; }
       if (!active || active !== session || gate.phase !== "opening") return;
       if (!response?.ok || !response.state?.classifications?.entries?.length) {
         gate.release(session.id); clearTouchOwnership(); active = null;
+        watcher.stop();
         showStatus(response?.code === "unpaired" ? "연결 필요" : "연결 실패", "error");
         if (response?.code === "unpaired") void chrome.runtime.sendMessage({ type: "settings:get" }).finally(() => chrome.runtime.openOptionsPage?.());
         return;
       }
-      if (!gate.opened(session.id)) return;
+      if (!gate.opened(session.id)) { watcher.stop(); return; }
       const state = response.state;
       const candidate = plainCandidate(session.candidate);
+      const android = /Android/i.test(navigator.userAgent);
       const temporary = temporaryIntent(candidate);
       picker = globalThis.LakomicsArcCollector.mount({
         entries: state.classifications.entries,
@@ -460,40 +601,52 @@
         origin: session.origin,
         inputKind: session.input,
         inputLocked: session.input === "touch" && !session.released,
-        onTemporary: temporary ? async () => {
-          if (/Android/i.test(navigator.userAgent)) { window.location.href = temporary; return true; }
+        onTemporary: temporaryAvailable(candidate, android) ? async () => {
+          if (!sessions.holds(sessionState)) return false;
+          if (android) { window.location.href = temporary; return true; }
           const result = await runtimeMessage({ type: "collector:temporary", candidate });
+          if (!sessions.holds(sessionState)) return false;
           if (!result?.ok) { showStatus(temporaryFailureMessage(result), "error"); return false; }
-          showStatus("임시 다운로드 시작됨", "success");
-          return true;
+          return { ok: true, message: "임시 다운로드 시작됨" };
         } : null,
         onSave: async (classificationId) => {
           const model = globalThis.LakomicsClassificationTree.createModel(state.classifications.entries, state.profile);
           const classificationPath = model.path(classificationId).map((entry) => entry.name);
           const result = await runtimeMessage({ type: "collector:save", payload: { candidate, classificationId, classificationPath } });
           if (result?.ok) {
+            // The worker already accepted this exact capture. Its completed-save side
+            // effect is applied before any session check so a navigation that landed
+            // meanwhile cannot discard or resubmit it.
+            globalThis.LakomicsXGalleryRuntime?.markSaved?.(candidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
+            if (!sessions.holds(sessionState)) return null;
             let like = null;
             if (candidate.source === "x" && state.profile.preferences.autoLikeOnSave !== false && candidate.postId) like = await autoLikePost({ postId: candidate.postId });
-            globalThis.LakomicsXGalleryRuntime?.markSaved?.(candidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
+            if (!sessions.holds(sessionState)) return null;
             return { ok: true, message: saveResultMessage(result) + (like ? (like.ok ? " · 좋아요 완료" : " · 좋아요 실패") : "") };
           }
+          if (!sessions.holds(sessionState)) return null;
           const message = saveFailureMessage(result);
           showStatus(message, "error", 5200);
           return { ok: false, message };
         },
         onClose: (result) => {
-          picker = null; gate.close(); clearTouchOwnership(); active = null; suppressNextClick = false;
-          if (suppressClickTimer !== null) { clearTimeout(suppressClickTimer); suppressClickTimer = null; }
+          if (!sessions.holds(sessionState)) return;
+          // The arc owns its short success exit; release invocation ownership now.
+          endSession(!result?.ok);
           if (result?.ok) showStatus(result.message || "저장됨", "success");
         },
       });
     }
 
     function showStatus(message, kind, durationMs = 2200) {
-      toast?.remove(); if (toastTimer) clearTimeout(toastTimer);
+      clearStatus();
+      const sequence = statusSequence;
       toast = document.createElement("div"); toast.className = `lakomics-list-toast ${kind || ""}`; toast.textContent = message;
       document.documentElement.append(toast);
-      toastTimer = setTimeout(() => { toast?.remove(); toast = null; toastTimer = null; }, durationMs);
+      toastTimer = setTimeout(() => {
+        if (sequence !== statusSequence) return;
+        toast?.remove(); toast = null; toastTimer = null;
+      }, durationMs);
     }
   }
 })();

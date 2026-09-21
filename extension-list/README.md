@@ -7,18 +7,20 @@ retained.
 
 ## Edge menu
 
-Version 3.0.0.29 uses a semicircle attached to the selected screen edge. Image
+Version 3.0.0.30 uses a semicircle attached to the selected screen edge. Image
 dragging on desktop requires a held press of at least 250 ms and movement of
 12 px. Touch requires a stationary 500 ms long press. Releasing early, scrolling,
 losing window focus, or cancelling the pointer cancels the pending opening. Releasing the opening finger never selects a folder or saves an image.
-The menu uses a neutral warm-gray matte palette with restrained highlights, fine
-divisions, and layered shadows. The inner semicircle is split horizontally into
-equal upper-action and Save surfaces.
-The upper action is Temporary save on the first screen and Back inside folders.
+The menu uses the approved dark One UI-inspired treatment: graphite surfaces,
+blue selection, rounded separated sectors and a radial gap around the center.
+One continuous central panel contains a larger upper Save action and a smaller
+lower Temporary save action, which becomes Back inside folders. Actions use
+outline icons with accessible labels and distinct keyboard focus, without repeated
+destination text, selection checkmarks or branch chevrons.
 Temporary save stays disabled when unsupported and in the settings preview.
 Returning to the first screen disables it for 400 ms to guard repeated Back taps.
-Folder labels contain only their names. Folders with children use a slim charcoal outer rim that sits flush on the
-sector edge, with a subtle inner highlight for a machined finish. The live collector uses the outer ring as a
+Folder labels contain only their names. Folders with children expose a subtly
+offset rear surface within the sector's bounds. The live collector uses the outer ring as a
 bounded rotary dial: six folders stay visible while overflow folders rotate in.
 Desktop mouse-wheel/trackpad input drives the ring while the pointer is over the
 outer arc; touch and pointer drags follow the semicircle directly. Wheel input adds
@@ -52,7 +54,7 @@ surfaces never rotate and do not capture wheel scrolling.
   Double-tap the same folder within 350 ms to enter its children. Selection is
   immediate; neither tap submits media. The central Save button saves to the
   selected folder, so roots and branches are directly saveable.
-- Back, above Save, follows visited screens and restores the previous dial
+- Back, below Save, follows visited screens and restores the previous dial
   position and selection. Entering a pinned shortcut and going back returns to
   the first screen, rather than inserting that shortcut's canonical ancestors.
   Dial movement does not add history entries.
@@ -62,13 +64,29 @@ surfaces never rotate and do not capture wheel scrolling.
   transparent corners, or press Escape to dismiss it. Saving and the opening
   finger lock prevent accidental dismissal. Short windows allow the panel to
   scroll rather than shrinking targets indefinitely.
-- Temporary image saving occupies the root screen's central upper half.
-  Android uses the existing temporary album intent. PC starts a browser download
+- Temporary saving occupies the root screen's smaller lower central area.
+  Android retains the image-only temporary album intent; it does not send MP4 to
+  that image contract. PC supports images and X progressive MP4/GIF-like videos,
+  starting a browser download
   without a save dialog; choose Desktop once in the browser download settings.
   Filename collisions are renamed, and download errors keep the menu available.
   Download-start feedback is not a claim that the file has finished downloading.
   There is no additional temporary-save button below the arc. Permanent saves use the existing server capture
   flow; this change does not alter connection or ingestion behavior.
+
+Entrance fades and moves inward by 8 px over 140 ms. Folder navigation keeps the
+ring stationary: one inert, accessibility-hidden outgoing snapshot fades over
+140 ms while new controls fade in over 180 ms and work immediately. Repeated
+navigation replaces the snapshot instead of queuing transitions. Successful saves
+release menu ownership immediately and show a concurrent 100 ms icon/exit effect;
+failed or pending saves never receive success feedback. Reduced motion skips these
+effects and post-release dial coasting.
+
+Navigation tears down both pending and mounted sessions, including busy or
+opening-finger-locked menus, without claiming an accepted save was cancelled.
+Committed Navigation API changes and page departure are observed; older browsers
+use history/hash events and a session-only URL poll. Stale replies cannot reopen
+or unlock a newer menu. Idle pages do not poll.
 
 The server's classification tree and portable pins/order remain authoritative.
 Local slot positions are retained across snapshot refreshes: deleting a folder
@@ -104,6 +122,22 @@ Both methods use the existing pairing endpoint and session/profile contract;
 no server deployment, extra browser permission, or new credential type is needed.
 
 ## X saving and translation
+
+X GIF-like animations are commonly delivered as MP4. A mounted progressive
+`https://video.twimg.com/*.mp4` resource (including a video's `source` child) is
+retained without a public lookup. Otherwise the worker resolves the selected
+media through X's public syndication endpoint with a bounded request and chooses
+the highest-bitrate progressive MP4. Manifests and still posters are not downloaded
+as animations. The original MP4 bytes stay MP4 and use the existing `video` capture
+contract; this is not GIF conversion. Actual GIF image handling is unchanged.
+
+Media identity includes the selected all-media ordinal, including mixed photo/video
+posts and quoted-post boundaries. An unavailable or invalid selected variant fails
+rather than falling back to another video. Public resolution may be unavailable
+for some posts even when their logged-in page can play the media. Browser temporary
+download feedback confirms initiation, not completion. The supplied example post
+`2100596455262331116` was not publicly verifiable; this is not a claim that it is
+private or deleted, nor live download acceptance.
 
 Successful permanent X saves automatically like the saved post when the existing
 Save auto-like preference is enabled. Already-liked posts are left liked. Quote

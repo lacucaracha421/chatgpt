@@ -136,6 +136,121 @@ Risk: HIGH.
 
 Global cross-device deletion remains intentionally deferred. Require tombstones, grace period, acknowledgement/reconciliation, explicit purge, conflict handling, and recovery before activation.
 
+# Future-work notes — 2026-09-21
+
+User-requested notes for later work, not an implementation start or priority change. Related entries below retain their existing status; these notes clarify or extend the requested scope without marking anything delivered.
+
+## Mobile app
+
+- **Collection 3D model viewer:** view actual 3D models in Collection, rather than merely giving covers a 3D presentation. This clarifies the earlier `MOBILE-UX-001` 3D feasibility question; renderer and supported formats remain undecided.
+- **New-release notifications:** add notifications for new releases. Follow targets and notification delivery details remain to be defined.
+- **Faster tab switching:** improve transition animations and/or loading speed when switching tabs.
+- **Asset duplicate checking:** make duplicate checking available in the mobile Asset Library. Coordinate with `SIMILARITY-004` where relevant; keep this distinct from Catalog edition duplicates.
+- **Manga Catalog duplicate-edition checking:** check for duplicate editions in the mobile Manga Catalog. Continue the existing `MOBILE-UX-001` Catalog duplicate-check evaluation.
+- **Asset Library multi-select move:** select multiple assets and move them together. Coordinate with `MOBILE-WRITE-002`; the destination and move semantics remain to be defined.
+
+## Shared — Desktop and mobile
+
+- **Artist Revisit on Home:** surface artist rediscovery on the Home screen. Coordinate with `ARTIST-001`; this explicitly requests Home placement, not only an Artist hub.
+- **Competing character candidates in multi-person images:** improve the competing-candidate system when one image contains multiple people. Track as a bounded follow-up to the accepted character-classification pass, not a reopening of all accuracy work.
+
+## Browser extension
+
+These follow-ups apply to the active collector in `extension-list/` and relate to `EXT-011` / `EXT-012`; they are new pending requests, not completed acceptance of those entries.
+
+- **Animation polish:** refine the semicircle menu's entrance and roulette-spinning animations for a more professional presentation.
+- **Persistent semicircle after navigation (bug):** the user reports that navigating to another page while the semicircle is open leaves it permanently visible. Reproduce the navigation path and investigate overlay cleanup; the root cause is not yet verified.
+- **Selection feedback:** improve the extension menu's visual selection effects.
+- **Twitter/X GIF downloads:** support downloading GIF media from Twitter/X posts.
+
+## Suggested implementation sequence — retained for later selection
+
+Recorded at the user's request after the backlog review. This is a recommendation, not a replacement for Current priority / Current execution order, an activation of HOLD items, or authorization to implement or deploy. Existing item statuses remain unchanged.
+
+Suggested first sequence:
+
+1. **Extension reliability and polish:** reproduce and fix the persistent semicircle after navigation, then refine entrance, roulette and selection effects.
+2. **Mobile tab switching:** distinguish loading and rendering bottlenecks from animation quality; reduce waiting/flicker before adding short transitions. A new durable metadata database is not an assumed prerequisite.
+3. **Existing-library duplicate discovery (`SIMILARITY-004`):** compare already-stored assets using the existing fingerprint policy and review UI, with resumable/idempotent candidate discovery and no automatic original-file deletion. Mobile review is a separate follow-up, not an assumed part of this first slice.
+4. **Home artist Revisit (`ARTIST-001`):** start with a small Home rediscovery module, such as long-unseen or recently collected artists, rather than requiring the complete Artist hub first.
+5. **Mobile multi-select move:** define album-membership changes versus actual folder/file moves before implementation; coordinate the chosen write scope with `MOBILE-WRITE-002`.
+
+If choosing only one new feature, prefer `SIMILARITY-004`. If prioritizing everyday usability, start with extension reliability and mobile switching instead.
+
+Other follow-up candidates, without a fixed order:
+
+- **Twitter/X GIF downloads:** inspect the current extraction/save path and add the missing support.
+- **New-release notifications:** define followed artists/works and in-app versus Android notification delivery separately from Catalog refresh.
+- **Mobile Asset duplicate review:** expose candidate inspection and decisions separately from the discovery operation above.
+- **Mobile Manga Catalog edition review:** define candidate/evidence sharing and decision authority; published edition groups alone are not pending review candidates. Keep this separate from Asset duplicate review.
+- **Collection 3D model viewer:** decide supported model formats, touch interaction and device performance limits; this is not the existing physical-cover renderer.
+- **Multi-person character competition:** collect concrete mistakes and improve the affected arbitration cases without reopening the entire accepted classification pass.
+- **Film Collection polish (`WORKS-001`):** cast/director, release information and related works, without rebuilding the existing Film/TV foundation.
+- **AV metadata and cover acquisition (`LONG-001`):** fetch candidates and let the user choose artwork without silently replacing manual choices.
+- **Mirror/rotation similarity (`SIMILARITY-002B`):** extend matching after ordinary historical discovery is useful.
+
+Keep larger foundation work separately scoped: durable mobile metadata (`MOBILE-CACHE-001`), additional mobile edit domains (`MOBILE-WRITE-002`), remaining Character/Collection ownership and publication cleanup (`CLOUD-POST-001`), server-owned jobs with PC workers (`CLOUD-WORK-001`), and safe global deletion (`MOBILE-003`). This recommendation does not restart completed authority rollouts or promote deferred architecture work.
+
+Do not count implemented flows awaiting acceptance as new feature builds: PC-off Capture, early Asset visibility during classification, existing extension flows, similar-video sample validation and statistics verification. Catalog refresh retains its bounded acceptance/grouping-reconciliation scope. New extension bugs and feature requests above remain separate pending work. Optional providers, clustering/Jev experiments, large-scale similarity indexing and date-timeline exploration remain lower priority or deferred under their existing entries.
+
+### First recommended batch — extension reliability and interaction polish
+
+Planning checkpoint, 2026-09-21: source inspection only; no implementation, browser reproduction, device acceptance or deployment. This expands recommendation 1 above without changing the existing priority list or `EXT-011` / `EXT-012` verification status.
+
+Subsequent visual study: [three One UI-inspired concepts](../prototypes/collector-one-ui-concepts/index.html) and [comparison image](../prototypes/collector-one-ui-concepts/overview.png) present A — Everyday Light, B — Midnight Edge, and C — Soft Orbit. All show a separated center, spaced rounded sectors and the same selected folder. The standalone prototype only previews local selection; it performs no saves or network requests and does not implement dial motion or production lifecycle behavior. Headless Chrome rendering at 1680×1100 was inspected and JavaScript syntax checked. This is not live-extension, touch, animation or navigation-bug acceptance. The user subsequently chose B's dark appearance as the refinement base, not as production acceptance.
+
+Refined B visual prototype: [interactive root-screen study](../prototypes/collector-one-ui-concepts/b-refined.html), [ordinary selected folder](../prototypes/collector-one-ui-concepts/b-refined.png), and [selected branch folder](../prototypes/collector-one-ui-concepts/b-refined-branch.png). Save and Temporary save now share one continuous central panel; checkmarks, branch chevrons and repeated destination text are removed. At the user's subsequent request, the central text labels are replaced by coordinated outline icons: folder-with-inward-arrow for Save and download-to-tray for Temporary save, retaining accessible action names and keyboard controls. Character and Game sectors expose a second surface behind the front face. Headless Chrome renders at 560×1080 were inspected in both selection states; focused jsdom checks passed for six sectors, two layered branches, mouse/keyboard selection, selected-branch styling and preview-only actions. The original three concepts remain intact. This is still a local prototype: no actual saving, dial rotation, production extension changes or device acceptance. The following motion checkpoint adds fixture child navigation to the previously static study.
+
+Motion checkpoint, 2026-09-21: the user accepted the refined visual direction and requested entrance, save and child-navigation animation without perceived waiting. The same HTML now loads `b-refined.js`: entrance is 140 ms, child/Back transitions are 110 ms, and simulated successful-save dismissal runs for 100 ms alongside icon feedback. Selection and navigation state change synchronously; no action awaits animation completion and new input replaces in-flight effects rather than queueing. Single tap selects, double tap or ArrowRight opens fixture children, and the lower central action becomes Back inside folders. The standalone Replay control can interrupt dismissal; reduced motion skips effects while preserving actions and cleanup. Actual save success must remain receipt-driven when integrated, not inferred from an animation.
+
+Verification: `node --test docs/prototypes/collector-one-ui-concepts/b-refined.test.mjs` passed 11 tests covering immediate interaction, nested navigation/Back, icon-only actions, simulated saves, stale-completion protection, reduced motion, gap dismissal and page departure. A bounded headless Chrome check observed real Web Animations progression, immediate selection during entrance, child-transition timing, simultaneous dismissal, interrupted reopening and reduced-motion behavior with no runtime exceptions. Root and [mid-transition child](../prototypes/collector-one-ui-concepts/b-motion-child.png) renders were inspected at 560×1080. This validates the local motion prototype, not the live extension navigation bug, production saves or Galaxy Tab touch feel.
+
+Smoothing follow-up: the user found child navigation abrupt. Source inspection showed immediate removal of the old sector tree followed by a 70%-opaque incoming page over 110 ms. The prototype now keeps one non-interactive, accessibility-hidden outgoing snapshot for a 140 ms fade and crossfades the new page in over 180 ms with no ring translation. Incoming controls still activate synchronously. Rapid navigation replaces the outgoing snapshot rather than stacking pages; replay, reduced motion, save completion and page departure clean up the snapshot. Entrance and save durations remain unchanged. A new regression check failed against the previous immediate-removal implementation, then all 14 focused tests passed after the change. Bounded Chrome checks confirmed both layers at intermediate opacity, immediate selection during the crossfade, interruption cleanup and reduced motion without runtime exceptions; the 70 ms transition frame was inspected. Perceived smoothness on the user's device remains a user acceptance check.
+
+Implementation checkpoint, 2026-09-21 (`extension-list/` 3.0.0.30): the user approved the refined B motion and explicitly expanded this batch to include X GIF-like media. The active renderer now uses dark rounded/separated sectors, rear branch layers and one icon-only central panel (upper Save, lower Temporary/Back). Entrance is 140 ms; folder navigation crossfades one inert outgoing snapshot for 140 ms with immediately usable incoming controls over 180 ms; confirmed-success feedback and exit run concurrently for 100 ms. Reduced motion skips these effects and dial coasting. Existing live hierarchy, pins/order, rotary overflow, explicit-save and opening-release behavior remain intact.
+
+The controller now observes navigation for armed, pending and open invocations, with unconditional disposal even while locked or saving. Navigation API commits and page departure are handled directly, with history/hash events and a session-scoped URL poll on older browsers. Late state/save/unlock callbacks cannot take ownership of a newer menu; an accepted save is not resubmitted or reported as cancelled. The source-level cause was missing navigation teardown combined with guarded ordinary dismissal. The user's exact live X incident has not been reproduced on their device.
+
+X progressive MP4 resources exposed by a mounted player or its `source` child are retained; otherwise the worker resolves the selected media through the existing public endpoint. Mixed-media ordinals, nested players, avatars/posters and quote boundaries are covered, and unavailable selected media never falls back to a different video. X animations served as MP4 retain MP4 bytes and the existing `video` capture contract; actual GIF handling remains supported. PC temporary downloads accept these X videos; Android's image-only temporary intent remains unchanged. No new dependency, permission, backend deployment or production-library write was introduced.
+
+Verification: the combined worktree passed all **160 extension tests** with `npm test`. A bounded headless Chrome fixture loaded the actual renderer/controller and checked both edges, settings preview, rounded hit geometry and the central gutter, immediate controls, real 140/180 ms crossfade progression, interrupted navigation, receipt-gated 100 ms exit, reopening, reduced motion, real Navigation API cleanup while input-locked, and touch-release unlock. Root/left/settings/transition renders were inspected at 560×900 with no runtime exceptions in the final run. This is browser-fixture evidence, not installed-extension, live-server or Galaxy Tab/Titanium acceptance. The supplied post `2100596455262331116` remains unverified publicly; do not infer that it is private or deleted. Reload the extension and collecting tabs to activate this revision. Existing `EXT-011` / `EXT-012` device-acceptance status is unchanged.
+
+The following initial plan is retained as context; the implementation checkpoint above supersedes its prototype-only status and original GIF exclusion.
+
+**Scope and preserved behavior:** active `extension-list/` only. Keep the edge-attached semicircle, six visible folders, fixed central actions, live classification tree and portable order/pins. Preserve single-tap selection, double-tap child navigation, explicit Save, opening-finger protection and Back restoring selection/dial position. The user's subsequent design direction replaces the earlier warm-gray/NieR-like visual treatment with a Samsung One UI-inspired presentation for this extension surface only; it does not redesign Desktop or the Android app. The subsequent user request includes Twitter/X GIF support through existing capture/download contracts. Pairing changes, backend changes, new permissions/dependencies and legacy `extension/` edits remain excluded.
+
+**Inspected baseline:** `src/content.js` owns the gesture/session and asynchronous opening; its scroll/wheel/blur cancellation only resets the armed phase, and it has no collector navigation teardown. `src/arc-collector.js` has internal disposal for DOM, timers and animation frames, but exposes `close` as the guarded `cancel` action, which is blocked while busy or input-locked. This supports a navigation-lifecycle hypothesis, not a confirmed cause of the user's incident. The dial already has continuous position, bounded momentum, friction, late detent capture and stable wedge/label nodes; do not replace it with a new animation engine. The current arc CSS has no entrance/exit transition or reduced-motion branch. Use the active README and manifest as the extension baseline; the older `docs/edge-extension.md` describes legacy UI.
+
+1. **Reproduce and fix navigation cleanup first.**
+   - Exercise same-document navigation on X, browser Back/Forward, normal document navigation and page restoration. Cover pending state loading, open idle, opening-finger lock, spinning and in-flight save states; determine which reproduces the report.
+   - Select the smallest navigation detection supported by the actual extension/browser context. Do not assume that a content-script History API wrapper observes page-world calls, or that `popstate` covers `pushState` / `replaceState`.
+   - Separate ordinary guarded dismissal from unconditional session disposal on navigation. Clear overlay/backdrop, animation frames, timers, pointer ownership, input locks and click suppression; make disposal idempotent and allow the next page to open a fresh collector.
+   - Invalidate stale asynchronous opening/UI callbacks so a late result cannot recreate the old menu, close a newer session, steal focus or show stale failure UI. UI disposal must not be described as cancelling an already submitted save, nor trigger a retry/duplicate save; preserve legitimate save results and existing side-effect semantics.
+   - Acceptance: navigation leaves no stale menu or input-blocking layer, late state responses cannot reopen it, and the next collection gesture works normally. Ordinary scrolling while an idle menu is open is not navigation.
+2. **Redesign the static geometry and surfaces before tuning motion.**
+   - User direction: emphasize a polished Samsung/One UI-like system-control appearance rather than the existing NieR-like instrument treatment. This is a visual reference, not Samsung branding, affiliation or verified compliance with an official specification.
+   - Separate the central action cluster from the surrounding folder ring with a visible radial gutter. Separate adjacent folder sectors with consistent gaps and soften each sector's corners, retaining the overall semicircular arrangement rather than replacing it with a rectangular grid.
+   - Initial visual-study values, not approved device measurements: central-to-ring gutter around 8–12 CSS px and adjacent-sector gaps around 4–6 CSS px at the current tablet size. Adjust against actual label space and touch targets rather than shrinking every control to force these numbers.
+   - Refined B direction: keep Save and Temporary save together inside one continuous rounded central panel, not as a detached button below the menu. Give Save the larger primary area and Temporary save a smaller lower area, with a quiet internal gap. Use icon-only central actions: folder-with-inward-arrow for Save and download-to-tray for Temporary save. Keep accessible names and keyboard focus without adding hover tooltips or repeating destination text. Preserve explicit-save safety and the root/child action semantics when adapting this design to the live collector; the current refinement previews the root screen only.
+   - Use the selected B direction: graphite/dark-neutral surfaces, readable light labels, restrained elevation and a blue selection accent. Replace beige/olive tones, metallic gradients and heavy machined rims. Keep disabled actions visibly muted; do not add a theme-setting system in this batch.
+   - Use consistent, readable labels and preserve folder names. Indicate child folders with a second subtly offset sector surface visible behind the front face, rather than chevrons, counts or new icons. Keep the extra layer within the sector's allocated bounds so gutters remain open; distinguish it from selection through geometry rather than blue color. No Samsung logo, proprietary font acquisition or new icon dependency.
+   - The current sectors use polygon clip paths: rounded outer corners on the button alone will not round each wedge. Choose the smallest geometry change that actually produces rounded, separated sectors while retaining node reuse and matching hit areas.
+   - Gaps inside the menu envelope must not select a neighboring folder, submit media, dismiss the menu accidentally or click through to the page. Preserve deliberate outside dismissal and usable ring dragging. Check both left and right edges, long Korean/Japanese names and the settings preview.
+3. **Define selection, press and keyboard-focus feedback.**
+   - Refined B default: quiet dark-neutral sector; hover: subtle tonal change on mouse devices; press: immediate restrained feedback without moving hit targets; selected: blue surface, stronger label weight and a subtle inner edge. Remove selection checkmarks. Keep a separate visible keyboard-focus treatment, including the runtime label overlay outside the clipped sector.
+   - Keep the chosen folder obvious even after pointer release and during rotation without permanently repeating its name inside the central Save button. Before live integration, resolve destination visibility when the selected sector rotates out of view; the static prototype does not exercise this case.
+   - Distinguish selected, focused, disabled and saving states. Maintain accessible names, `aria-pressed`, contrast and opening-release protection; animation must not delay selection or trigger saving.
+4. **Add restrained entrance and dismissal motion.**
+   - Initial tuning proposal: 120–160 ms entrance with a small inward movement from the chosen edge and opacity; 80–120 ms ordinary dismissal. Aim for a smooth system panel, not a theatrical roulette reveal. No bounce, overshoot, staged folder reveal or long input delay.
+   - Keep left/right mirroring separate from the animated transform. Navigation disposal is immediate and must never wait for `animationend` / `transitionend`.
+   - Reduced motion removes positional animation and avoids delaying cleanup. Do not animate every settings-preview render.
+5. **Refine the existing roulette/dial feel.**
+   - Retain continuous direct manipulation, bounded momentum and late nearest-slot settling. Tune acceleration/deceleration from observed wheel, trackpad and touch behavior rather than merely increasing speed or adding exaggerated rotations.
+   - Keep the central buttons stationary; separated sectors and their labels travel together without popping, clipping or changing selection identity. Preserve Back restoration, short lists and overflow behavior.
+   - Stop animation work when settled or disposed. Reduced motion should retain direct manipulation but avoid prolonged post-release coasting. Verify interruption by a new drag, direction reversal and navigation; preserve no-save/no-selection behavior after a drag.
+
+**Execution and verification:** implement in the numbered order, starting with a regression reproduction for navigation and then a static visual pass before motion tuning. Expected source scope is `extension-list/src/content.js` and `extension-list/src/arc-collector.js`, plus the active README and focused tests as needed. Use `node --test tests/content-gesture.test.mjs tests/controller.test.mjs tests/arc-collector.test.mjs` from `extension-list/` for lifecycle/interaction changes; add cases for navigation during pending opening, locked/busy states, late callbacks and fresh reopening. Geometry changes also need real rendered/hit-area inspection, not just DOM assertions. Inspect default/selected/pressed/focus/disabled/saving states, left/right layouts, rotation and reduced motion. Check Desktop Chromium and Galaxy Tab/Titanium separately; fixture success cannot establish native touch or live capture acceptance. Any save acceptance that writes production data requires its own authorization. No tests or visual runtime checks have been run for this planning checkpoint.
+
 # Mobile portrait usability feedback
 
 ## MOBILE-UX-001 — Portrait real-use follow-up

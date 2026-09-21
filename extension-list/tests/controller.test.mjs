@@ -23,6 +23,15 @@ test('temporary intent accepts GIF-like images but not video', () => {
 });
 
 
+test('PC temporary X video eligibility does not widen the Android image intent', () => {
+  const candidate = { type: 'video', source: 'x', mediaUrl: null, sourceUrl: 'https://x.com/i/status/123', overallMediaIndex: 2 };
+  assert.equal(content.temporaryAvailable(candidate, false), true);
+  assert.equal(content.temporaryAvailable(candidate, true), false);
+  assert.equal(content.temporaryIntent(candidate), null);
+  assert.equal(content.temporaryAvailable({ ...candidate, source: 'web' }, false), false);
+  assert.equal(content.plainCandidate(candidate).overallMediaIndex, 2);
+});
+
 test('touch-owned long press suppresses native Android context UI', () => {
   assert.equal(content.shouldSuppressNativeContext({input:'touch'}, 'armed'), true);
   assert.equal(content.shouldSuppressNativeContext({input:'touch',longPressed:true}, 'opening'), true);
@@ -64,4 +73,124 @@ test('opening release click is consumed even when it lands inside the picker', (
   assert.equal(content.openingClickDisposition(false, false), 'page');
   assert.equal(content.TOUCH_LONG_PRESS_MS, 500);
   assert.equal(content.MOUSE_OPEN_DELAY_MS, 250);
+});
+
+
+test('a session holds only its own token, so a departed session cannot claim a new one', () => {
+  const sessions = content.createSessionState();
+  const first = sessions.begin();
+  assert.equal(sessions.holds(first), true);
+  assert.equal(sessions.holds(null), false);
+  assert.equal(sessions.holds({}), false);
+  assert.equal(sessions.holds({ id: 1 }), false);
+  const second = sessions.begin();
+  assert.equal(sessions.holds(second), true);
+  assert.equal(sessions.holds(first), false);
+  sessions.end();
+  assert.equal(sessions.holds(second), false);
+});
+
+
+// The watcher is pure wiring over the current browser session; these tests drive it
+// with a stub window so the polling fallback is exercised without a real page.
+test('the watcher reports one departure per armed session and stops cleanly', () => {
+  const originalWindow = globalThis.window;
+  const originalLocation = globalThis.location;
+  const listeners = new Map();
+  const timers = new Map();
+  let timerId = 0, now = 0, href = 'https://example.test/a';
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = (callback, delay = 0) => { const id = ++timerId; timers.set(id, { callback, at: now + delay }); return id; };
+  globalThis.clearTimeout = id => timers.delete(id);
+  // A real timer removes itself from the queue before its callback runs.
+  function runTimer(entry) { timers.delete(entry[0]); entry[1].callback(); }
+  const locationStub = { get href() { return href; } };
+  globalThis.location = locationStub;
+  globalThis.window = {
+    location: locationStub,
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    removeEventListener(type, listener) { if (listeners.get(type) === listener) listeners.delete(type); },
+  };
+  try {
+    let departures = 0;
+    const watcher = content.createSessionWatcher({ pollIntervalMs: 400 });
+    watcher.watch(() => { departures += 1; });
+    assert.deepEqual([...listeners.keys()].sort(), ['hashchange', 'pagehide', 'popstate']);
+    assert.equal(timers.size, 1, 'an armed session schedules its liveness poll');
+
+    // A popstate commit reports the departure and removes every listener it added.
+    listeners.get('popstate')();
+    assert.equal(departures, 1);
+    assert.equal(listeners.size, 0);
+    assert.equal(timers.size, 0, 'the liveness poll stops with the session');
+
+    // A stop()ed watcher must not keep reporting.
+    listeners.get('popstate')?.();
+    assert.equal(departures, 1);
+
+    // The href poll catches an isolated-world history change that emitted no event.
+    watcher.watch(() => { departures += 1; });
+    href = 'https://example.test/b';
+    assert.equal(timers.size, 1, 'a watch arms exactly one liveness poll');
+    runTimer([...timers.entries()][0]);
+    assert.equal(departures, 2);
+    assert.equal(timers.size, 0, 'a reported departure stops the poll');
+
+    // An unchanged href re-arms the poll instead of reporting.
+    watcher.watch(() => { departures += 1; });
+    assert.equal(timers.size, 1);
+    runTimer([...timers.entries()][0]);
+    assert.equal(departures, 2);
+    assert.equal(timers.size, 1, 'polling re-arms only while a session is armed');
+    watcher.stop();
+    assert.equal(timers.size, 0);
+
+    // pagehide ends the session and still reports the departure.
+    watcher.watch(() => { departures += 1; });
+    listeners.get('pagehide')();
+    assert.equal(departures, 3);
+    assert.equal(listeners.size, 0);
+    assert.equal(timers.size, 0);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.location = originalLocation;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+
+test('the watcher prefers the Navigation API and keeps pagehide as the unload signal', () => {
+  const originalWindow = globalThis.window;
+  const originalLocation = globalThis.location;
+  const listeners = new Map(), navigationListeners = new Map();
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = () => { throw new Error('the Navigation API path must not poll'); };
+  const locationStub = { href: 'https://example.test/a' };
+  globalThis.location = locationStub;
+  globalThis.window = {
+    location: locationStub,
+    navigation: {
+      addEventListener(type, listener) { navigationListeners.set(type, listener); },
+      removeEventListener(type, listener) { if (navigationListeners.get(type) === listener) navigationListeners.delete(type); },
+    },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    removeEventListener(type, listener) { if (listeners.get(type) === listener) listeners.delete(type); },
+  };
+  try {
+    let departures = 0;
+    const watcher = content.createSessionWatcher();
+    watcher.watch(() => { departures += 1; });
+    assert.deepEqual([...navigationListeners.keys()], ['currententrychange']);
+    assert.deepEqual([...listeners.keys()], ['pagehide']);
+    navigationListeners.get('currententrychange')();
+    assert.equal(departures, 1);
+    assert.equal(navigationListeners.size, 0);
+    assert.equal(listeners.size, 0);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.location = originalLocation;
+    globalThis.setTimeout = originalSetTimeout;
+  }
 });

@@ -24,9 +24,26 @@
     return /(?:^|[?&])format=gif(?:&|$)/i.test(value);
   }
 
+  // X serves an animated original as an MP4, so `animated_gif` would describe bytes
+  // that are not GIF. Animated media carries the video transport; only candidates
+  // whose bytes really are GIF are reported as `animated_gif`.
   function mediaType(candidate) {
+    if (candidate?.type === "video") return "video";
     if (gifLike(candidate)) return "animated_gif";
-    return candidate?.type === "video" ? "video" : candidate?.type === "image" || !candidate?.type ? "image" : candidate.type;
+    return candidate?.type === "image" || !candidate?.type ? "image" : candidate.type;
+  }
+
+  // New candidates carry the all-media ordinal. Older callers can still supply
+  // only their video ordinal, which must be projected onto video entries.
+  function explicitOverallMediaIndex(candidate) {
+    const value = Number(candidate?.overallMediaIndex);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+
+  // Legacy candidates without overallMediaIndex used a video-only mediaIndex.
+  function videoOrdinal(candidate) {
+    const value = Number(candidate?.mediaIndex);
+    return Number.isInteger(value) && value > 0 ? value : null;
   }
 
   function source(candidate) {
@@ -58,22 +75,61 @@
     } catch { return false; }
   }
 
+  // A direct URL may already be validated by x-source, or arrive from a caller. It is
+  // trusted only as a progressive MP4 on X's video CDN: a manifest such as the `pl/`
+  // m3u8 variant is not a downloadable original and must never be handed to the
+  // server or to a browser download.
+  function isProgressiveXVideoUrl(value) {
+    if (!isXVideoUrl(value)) return false;
+    try { return /\.mp4$/i.test(new URL(value).pathname); } catch { return false; }
+  }
+
   function bestXVideoUrl(variants) {
     return (Array.isArray(variants) ? variants : [])
-      .filter((variant) => variant?.content_type === "video/mp4" && isXVideoUrl(variant.url))
+      .filter(variant => variant?.content_type === "video/mp4" && isProgressiveXVideoUrl(variant.url))
       .map((variant) => ({ url: variant.url, bitrate: Number(variant.bitrate) || 0 }))
       .sort((left, right) => right.bitrate - left.bitrate)[0]?.url || null;
   }
 
+  // The media endpoint is the only authority for animated identity. It names the
+  // selected media `animated_gif` or `video`; nothing is inferred from a URL path.
+  function selectedMediaType(details, index) {
+    const selected = Array.isArray(details) ? details[index] : null;
+    return selected?.type === "animated_gif" ? "animated_gif" : selected?.type === "video" ? "video" : null;
+  }
+
+  // The media endpoint lists every media in one sequence. The requested ordinal
+  // addresses that sequence, so it is resolved against the full list; an ordinal
+  // beyond the returned media is invalid and yields no index at all rather than
+  // silently selecting a different media.
+  function mediaIndexAt(ordinal, length) {
+    if (ordinal === null || ordinal > length) return null;
+    return ordinal - 1;
+  }
+
+  // Include unavailable video entries in the ordinal mapping: filtering by usable
+  // URL would shift later ordinals and could capture a different video.
+  function resolveMediaIndex(candidate, details) {
+    const explicit = explicitOverallMediaIndex(candidate);
+    if (explicit !== null) return mediaIndexAt(explicit, details.length);
+    const ordinal = videoOrdinal(candidate);
+    if (ordinal === null) return null;
+    const videoPositions = details.map((media, index) => ["video", "animated_gif"].includes(media?.type) ? index : -1).filter(index => index >= 0);
+    const index = mediaIndexAt(ordinal, videoPositions.length);
+    return index === null ? null : videoPositions[index];
+  }
+
   async function resolveXVideo(candidate) {
     if (candidate?.type !== "video" || source(candidate) !== "x") return { ok: true, candidate };
-    if (isXVideoUrl(candidate.mediaUrl)) return { ok: true, candidate };
+    if (isProgressiveXVideoUrl(candidate.mediaUrl)) {
+      return { ok: true, candidate };
+    }
     const postId = xPostId(candidate);
     if (!postId) return { ok: false, code: "video_unavailable" };
     let response;
     try {
       const params = new URLSearchParams({ id: postId, token: syndicationToken(postId) });
-      response = await fetch(`${X_SYNDICATION_ENDPOINT}?${params}`, { method: "GET", credentials: "omit", cache: "no-store" });
+      response = await fetch(`${X_SYNDICATION_ENDPOINT}?${params}`, { method: "GET", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(10_000) });
     } catch { return { ok: false, code: "video_info_failed" }; }
     if (!response?.ok) {
       return { ok: false, code: [403, 404].includes(response?.status) ? "video_unavailable" : "video_info_failed" };
@@ -82,15 +138,17 @@
     try { data = await response.json(); }
     catch { return { ok: false, code: "video_info_failed" }; }
     if (!data || data.__typename === "TweetTombstone") return { ok: false, code: "video_unavailable" };
-    const videos = (Array.isArray(data.mediaDetails) ? data.mediaDetails : [])
-      .map((media) => bestXVideoUrl(media?.video_info?.variants))
-      .filter(Boolean);
-    const requestedIndex = Number(candidate.mediaIndex);
-    const index = Number.isInteger(requestedIndex) && requestedIndex > 0 ? requestedIndex - 1 : 0;
-    const mediaUrl = videos[index] || videos[0];
-    return mediaUrl
-      ? { ok: true, candidate: { ...candidate, mediaUrl, mediaIndex: index + 1 } }
-      : { ok: false, code: "video_unavailable" };
+    const details = Array.isArray(data.mediaDetails) ? data.mediaDetails : [];
+    const videos = details.map((media) => bestXVideoUrl(media?.video_info?.variants));
+    const index = resolveMediaIndex(candidate, details);
+    if (index === null) return { ok: false, code: "video_unavailable" };
+    const mediaUrl = videos[index];
+    // A known ordinal that does not resolve is a wrong-media risk, not a reason to
+    // capture whichever video came first.
+    if (!mediaUrl) return { ok: false, code: "video_unavailable" };
+    const media = selectedMediaType(details, index);
+    if (!media) return { ok: false, code: "video_unavailable" };
+    return { ok: true, candidate: { ...candidate, mediaUrl, animatedMedia: media === "animated_gif" } };
   }
 
   function safeServerDetail(value) {
@@ -131,6 +189,21 @@
     const response = await globalThis.LakomicsListApi.request(`/v1/extension/captures/confirm?${params}`, { timeoutMs: 8000 });
     if (!response.ok || !response.data?.found) return null;
     return response.data?.capture || { status: "pending" };
+  }
+
+  // Public resolution entry for callers that hold a candidate but not its media URL.
+  // Returns the original candidate unchanged when resolution is impossible, so a
+  // caller can still report the real failure code from save().
+  async function resolveXVideoCandidate(candidate) {
+    if (candidate?.type !== "video") return candidate;
+    const video = await resolveXVideo(candidate);
+    return video.ok ? video.candidate : candidate;
+  }
+
+  // Eligibility follows the media URL, not the identity, and requires a validated
+  // progressive MP4 so a manifest is never downloaded.
+  function xVideoMediaUrl(candidate) {
+    return isProgressiveXVideoUrl(candidate?.mediaUrl) ? candidate.mediaUrl : null;
   }
 
   async function save({ candidate, classificationId, classificationPath = [] }) {
@@ -183,5 +256,5 @@
     return { ok: true, savedKeys: [...new Set([...keys, ...recent])], indexSource: "server", authoritative: true };
   }
 
-  globalThis.LakomicsSaveClient = { gifLike, mediaType, safeServerDetail, save, savedIndex, xKey };
+  globalThis.LakomicsSaveClient = { gifLike, mediaType, safeServerDetail, save, savedIndex, xKey, resolveXVideoCandidate, xVideoMediaUrl };
 })();

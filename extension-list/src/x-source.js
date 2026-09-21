@@ -64,13 +64,41 @@
       type: "video",
       element: interactionElementForVideo(video),
       video,
-      mediaUrl: null,
+      // A player that already exposes a validated progressive MP4 needs no lookup,
+      // so a logged-in or restricted tweet is collectable without the public
+      // endpoint. Playback identity stays `video`; only the bytes are kept.
+      mediaUrl: progressiveVideoUrl(video),
       sourceUrl: source.sourceUrl,
       author: source.author,
       postId: source.postId,
       mediaIndex: source.mediaIndex,
+      overallMediaIndex: source.mediaIndex,
       publishedAt: publishedAtFor(video),
     };
+  }
+
+  // Accept only a progressive MP4 on X's video CDN, never a manifest, and never a URL
+  // carrying a fragment. X mounts the still poster as `poster`, which is not a video
+  // resource and is not read here. A `<source>` child is read because X uses one when
+  // the player exposes no `src` attribute.
+  function progressiveVideoUrl(element) {
+    const video = element?.closest?.("video") ?? element?.querySelector?.("video") ?? null;
+    const values = [
+      video?.currentSrc,
+      video?.src,
+      video?.getAttribute?.("src"),
+      ...[...(video?.querySelectorAll?.("source") ?? [])].map((node) => node.getAttribute?.("src")),
+      element?.getAttribute?.("src"),
+    ];
+    for (const value of values) {
+      let url;
+      try { url = new URL(String(value || ""), globalThis.location?.href ?? "https://x.com/"); } catch { continue; }
+      if (url.protocol === "https:" && !url.username && !url.password && !url.hash
+        && url.hostname === "video.twimg.com" && /\.mp4$/i.test(url.pathname)) {
+        return url.href;
+      }
+    }
+    return null;
   }
 
   function publishedAtFor(element) {
@@ -156,7 +184,7 @@
   function findPostSource(element, mediaUrl, kind) {
     const direct = findDirectStatusLink(element, kind);
     if (direct && postScope(element.closest?.('a[href*="/status/"]')) === postScope(element)) {
-      const mediaIndex = direct.mediaIndex ?? inferMediaIndex(element, mediaUrl, kind);
+      const mediaIndex = (direct.mediaKind === kind ? direct.mediaIndex : null) ?? inferMediaIndex(element, mediaUrl, kind);
       return withMediaIndex(direct, mediaIndex, kind);
     }
 
@@ -174,7 +202,9 @@
 
     const sameKind = parsed.find((entry) => entry.mediaKind === kind && entry.mediaIndex !== null);
     const preferred = sameKind ?? parsed.find((entry) => entry.mediaIndex === null) ?? parsed[0];
-    return withMediaIndex(preferred, preferred.mediaKind === kind ? preferred.mediaIndex ?? inferredIndex : inferredIndex, kind);
+    const mediaIndex = kind === "video" ? inferredIndex ?? (preferred.mediaKind === kind ? preferred.mediaIndex : null)
+      : preferred.mediaKind === kind ? preferred.mediaIndex ?? inferredIndex : inferredIndex;
+    return withMediaIndex(preferred, mediaIndex, kind);
   }
 
   function findVideoPostSource(video) {
@@ -187,7 +217,7 @@
     if (!postId || source?.postId === postId) return source;
     const avatar = postScope(video)?.querySelector?.('[data-testid^="UserAvatar-Container-"]');
     const author = avatar?.getAttribute?.('data-testid')?.match(/^UserAvatar-Container-([A-Za-z0-9_]{1,15})$/)?.[1] || 'i';
-    return withMediaIndex({author, postId, sourceUrl:`https://x.com/${author}/status/${postId}`}, inferVideoIndex(video), "video");
+    return withMediaIndex({author, postId, sourceUrl:`https://x.com/${author}/status/${postId}`}, inferOverallMediaIndex(video, "video"), "video");
   }
 
   function findDirectStatusLink(element, kind) {
@@ -233,7 +263,7 @@
   }
 
   function inferMediaIndex(element, mediaUrl, kind) {
-    if (kind === "video") return inferVideoIndex(element);
+    if (kind === "video") return inferOverallMediaIndex(element, kind);
     return inferPhotoIndex(element, mediaUrl);
   }
 
@@ -254,19 +284,36 @@
     return index >= 0 ? index + 1 : null;
   }
 
-  function inferVideoIndex(video) {
-    const article = postScope(video);
-    if (!article?.querySelectorAll) return 1;
-    const players = [...article.querySelectorAll('[data-testid="videoPlayer"]')]
-      .filter(player => !player.closest || postScope(player) === article);
-    const currentPlayer = video.closest?.('[data-testid="videoPlayer"]');
-    if (currentPlayer && players.length) {
-      const index = players.indexOf(currentPlayer);
-      if (index >= 0) return index + 1;
+  // X permalinks number the complete media sequence, including stills. Keep the
+  // same identity in the permalink, candidate and endpoint lookup.
+  function inferOverallMediaIndex(element, kind) {
+    const article = postScope(element);
+    const direct = findDirectStatusLink(element, kind);
+    if (direct?.mediaKind === kind && direct.mediaIndex > 0
+      && postScope(element.closest?.('a[href*="/status/"]')) === article) return direct.mediaIndex;
+    if (!article?.querySelectorAll) return null;
+    const inScope = node => postScope(node) === article;
+    const players = [...article.querySelectorAll('[data-testid="videoPlayer"], [data-testid="videoComponent"], video')].filter(inScope);
+    const containers = players.filter(node => !players.some(parent => parent !== node && parent.contains(node)));
+    const seen = new Set();
+    const stills = [...article.querySelectorAll("img")].filter(inScope).filter(image => {
+      if (containers.some(player => player.contains(image))) return false;
+      const url = normalizeMediaUrl(imageSource(image));
+      if (!url || seen.has(url)) return false;
+      seen.add(url); return true;
+    });
+    // A detached media permalink is attributable only when this post has one
+    // player and one unambiguous video link. Never borrow another player's link.
+    if (kind === "video" && containers.length === 1) {
+      const links = [...article.querySelectorAll('a[href*="/status/"]')].filter(inScope).map(parseStatusLink).filter(Boolean);
+      const videoLinks = links.filter(link => link.mediaKind === "video" && link.mediaIndex > 0);
+      const identities = new Set(videoLinks.map(link => `${link.postId}:${link.mediaIndex}`));
+      const postIds = new Set(links.map(link => link.postId));
+      if (identities.size === 1 && postIds.size === 1) return videoLinks[0].mediaIndex;
     }
-    const videos = [...article.querySelectorAll("video")].filter(item => postScope(item) === article);
-    const index = videos.indexOf(video);
-    return index >= 0 ? index + 1 : 1;
+    const media = [...stills, ...containers].sort((a, b) => a.compareDocumentPosition(b) & 4 ? -1 : 1);
+    const index = media.findIndex(node => node === element || node.contains(element));
+    return index >= 0 ? index + 1 : null;
   }
 
   function extensionFromPath(pathname) {
@@ -276,6 +323,7 @@
   globalThis.LakomicsXSource = {
     postScope,
     findCandidate,
+    inferOverallMediaIndex,
     inferMediaIndex,
     normalizeMediaUrl,
     parseStatusLink,

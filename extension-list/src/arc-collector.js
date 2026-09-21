@@ -33,6 +33,13 @@
     let dialFrame = null, dialVelocity = 0, dialLastTime = 0, dialMoving = false, dialInputUntil = 0, dialDetentTarget = null, wheelTimer = null;
     let wheelBurstUntil = 0, wheelBurstDirection = 0, wheelAccumulator = 0, dialNodeParent = null, dialPoolStart = null, dialLabelSignature = null;
     const dialNodes = new Map(), dialLabels = new Map();
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const motions = new Map();
+    let outgoing = null, exitTimer = null;
+    const SAVE_ICON = 'M -12 -5 V 9 Q -12 11 -10 11 H 10 Q 12 11 12 9 V -4 Q 12 -6 10 -6 H 1 L -3 -9 H -10 Q -12 -9 -12 -7 Z M 2 -2 V 6 M -2 2 L 2 6 L 6 2';
+    const DOWNLOAD_ICON = 'M 0 -9 V 3 M -4 -1 L 0 3 L 4 -1 M -8 5 V 9 H 8 V 5';
+    const BACK_ICON = 'M 7 -7 H -2 Q -9 -7 -9 0 V 4 M -13 0 L -9 4 L -5 0';
+    const icon = path => `<svg viewBox="-18 -18 36 36" aria-hidden="true"><path d="${path}"/></svg>`;
     const requestFrame = window.requestAnimationFrame?.bind(window) || (callback => setTimeout(() => callback(performance.now()), 16));
     const cancelFrame = window.cancelAnimationFrame?.bind(window) || (id => clearTimeout(id));
     const host = document.createElement("div"); host.id = "lakomics-arc-collector"; host.classList.toggle("editing", editing);
@@ -41,7 +48,7 @@
     const backdrop = document.createElement("div"); backdrop.className = "backdrop";
     const panel = document.createElement("section"); panel.className = "panel";
     panel.setAttribute("role", editing ? "region" : "dialog"); if (!editing) panel.setAttribute("aria-modal", "true"); panel.setAttribute("aria-label", editing ? "반원 폴더 배치" : "분류 선택");
-    panel.innerHTML = '<div class="path" aria-live="polite"></div><div class="arc"><div class="sectors"></div><div class="dial-labels" aria-hidden="true"></div><div class="center"><button class="back"><span>‹ 뒤로</span></button><button class="save-current"><span class="save-label"><span class="destination"></span><strong>저장</strong></span></button></div></div><footer><button class="root-next" hidden></button><div class="notice" role="status" hidden></div></footer>';
+    panel.innerHTML = `<div class="path" aria-live="polite"></div><div class="arc"><div class="folders"><div class="sectors"></div><div class="dial-labels" aria-hidden="true"></div></div><div class="center"><button class="save-current"><span class="action-icon">${icon(SAVE_ICON)}</span><span class="destination" hidden></span></button><button class="back"><span class="action-icon">${icon(DOWNLOAD_ICON)}</span></button></div></div><footer><button class="root-next" hidden></button><div class="notice" role="status" hidden></div></footer>`;
     if (editing) {
       const controls = document.createElement("div"); controls.className = "edit-controls";
       controls.innerHTML = '<div class="edit-selection" aria-live="polite"></div><div class="edit-actions"><button class="move-before">이전 칸</button><button class="move-after">다음 칸</button><button class="hide-folder">숨기기</button></div>';
@@ -68,14 +75,92 @@
       return Math.max(0, Math.min(max, Number(current.dialPosition) || 0));
     }
     function setLocked(value) { locked = Boolean(value); host.classList.toggle("input-locked", locked); }
-    function close(result) {
-      if (disposed) return;
-      disposed = true; host.remove();
+    function stopMotion(target) {
+      const animation = motions.get(target);
+      if (!animation) return;
+      motions.delete(target); animation.onfinish = null; animation.cancel();
+    }
+    function motion(target, frames, duration, after) {
+      stopMotion(target);
+      if (reducedMotion?.matches || !target.animate) { after?.(); return; }
+      const animation = target.animate(frames, { duration, easing: "cubic-bezier(.2,0,0,1)" });
+      motions.set(target, animation);
+      animation.onfinish = () => {
+        if (motions.get(target) !== animation) return;
+        motions.delete(target); after?.();
+      };
+    }
+    function clearFolderMotion() {
+      stopMotion($(".folders"));
+      if (outgoing) { stopMotion(outgoing); outgoing.remove(); outgoing = null; }
+    }
+    function snapshotFolders() {
+      if (reducedMotion?.matches || !$(".folders").animate) return null;
+      const foreground = $(".folders");
+      const useOutgoing = outgoing && Number(window.getComputedStyle(foreground).opacity) < .5;
+      const source = useOutgoing ? outgoing.shadowRoot.querySelector(".folder-exit") : foreground;
+      const opacity = parseFloat(window.getComputedStyle(useOutgoing ? outgoing : source).opacity);
+      const layer = source.cloneNode(true);
+      layer.className = "folders folder-exit"; layer.inert = true;
+      layer.setAttribute("inert", ""); layer.setAttribute("aria-hidden", "true");
+      // Freeze the old dial independently of the new folder's rotation variables.
+      if (!useOutgoing) {
+        layer.style.setProperty("--dial-angle", $(".arc").style.getPropertyValue("--dial-angle"));
+        layer.style.setProperty("--dial-counter-angle", $(".arc").style.getPropertyValue("--dial-counter-angle"));
+      }
+      for (const button of layer.querySelectorAll("button")) { button.disabled = true; button.tabIndex = -1; }
+      return { layer, opacity: Number.isFinite(opacity) ? opacity : 1 };
+    }
+    function changeFolder(change) {
+      const snapshot = snapshotFolders();
+      clearFolderMotion(); stopDialSpring(); clearTimeout(wheelTimer);
+      wheelBurstUntil = 0; wheelBurstDirection = 0; wheelAccumulator = 0;
+      change(); render(); focusFirst();
+      if (!snapshot) return;
+      // A separate shadow tree keeps inert snapshots out of live button queries.
+      const wrapper = document.createElement("div"); wrapper.className = "folder-exit-host";
+      wrapper.inert = true; wrapper.setAttribute("aria-hidden", "true");
+      wrapper.classList.toggle("editing", editing);
+      const root = wrapper.attachShadow({ mode: "open" });
+      const snapshotStyle = style.cloneNode(true);
+      snapshotStyle.textContent += `:host{position:absolute;inset:0;z-index:2;pointer-events:none;width:100%;height:100%}${side === "left" && !editing ? '.dial-label{transform:translate(-50%,-50%) scaleX(-1)}' : ''}`;
+      root.append(snapshotStyle, snapshot.layer);
+      $(".arc").append(wrapper); outgoing = wrapper;
+      motion(wrapper, [{ opacity: snapshot.opacity }, { opacity: 0 }], 140, () => { wrapper.remove(); if (outgoing === wrapper) outgoing = null; });
+      motion($(".folders"), [{ opacity: 0 }, { opacity: 1 }], 180);
+    }
+    function cleanup() {
+      disposed = true;
       clearTimeout(temporaryTimer); clearTimeout(wheelTimer);
-      if (dialFrame !== null) cancelFrame(dialFrame);
+      stopDialSpring(); clearFolderMotion();
+      for (const target of [...motions.keys()]) stopMotion(target);
+      if (pointer) { try { $(".arc").releasePointerCapture?.(pointer.id); } catch {} pointer = null; }
       window.removeEventListener("resize", position);
       window.visualViewport?.removeEventListener("resize", position);
       window.visualViewport?.removeEventListener("scroll", position);
+    }
+    function dispose() {
+      cleanup(); clearTimeout(exitTimer); host.remove();
+      reducedMotion?.removeEventListener?.("change", onReducedMotion);
+      window.removeEventListener("pagehide", dispose);
+    }
+    function onReducedMotion() {
+      if (!reducedMotion.matches) return;
+      if (disposed) { dispose(); return; }
+      clearFolderMotion();
+      for (const target of [...motions.keys()]) stopMotion(target);
+      stopDialSpring(); if (!editing) paintDial(Math.round(clampedDialPosition()), false, true);
+    }
+    function close(result, action = ".save-current") {
+      if (disposed) return;
+      const success = result?.ok && !editing && !reducedMotion?.matches && Boolean(panel.animate);
+      cleanup();
+      if (success) {
+        host.inert = true; host.removeAttribute("id"); host.setAttribute("aria-hidden", "true"); host.classList.add("exiting");
+        motion($(`${action} .action-icon`), [{ transform: "scale(1)" }, { transform: "scale(1.12)", offset: .45 }, { transform: "scale(1)" }], 100);
+        motion(panel, [{ opacity: 1 }, { opacity: 0 }], 100, dispose);
+        exitTimer = setTimeout(dispose, 160);
+      } else dispose();
       !editing && previousFocus?.isConnected && previousFocus.focus?.({ preventScroll: true });
       onClose?.(result);
     }
@@ -83,13 +168,14 @@
     function focusFirst() { $(".sector:not(:disabled)")?.focus({ preventScroll: true }); }
     function back() {
       if (!available() || history.length < 2) return;
-      lastTap = null; history.pop();
+      lastTap = null;
+      changeFolder(() => history.pop());
       if (history.length === 1) {
         temporaryBlockedUntil = performance.now() + 400;
         clearTimeout(temporaryTimer);
         temporaryTimer = setTimeout(() => { temporaryTimer = null; if (!disposed) render(); }, 400);
       }
-      notice(""); render(); focusFirst();
+      notice(""); render();
     }
     function nextPage() {
       if (!available() || pageInfo().count < 2) return;
@@ -114,7 +200,8 @@
       const id = destination()?.id;
       if (!available() || !hasChildren(id) || history.some(item => item.id === id)) return;
       lastTap = null;
-      history.push({ id, page: 0, selectedId: editing ? null : id, dialPosition: 0 }); notice(""); render(); focusFirst();
+      notice("");
+      changeFolder(() => history.push({ id, page: 0, selectedId: editing ? null : id, dialPosition: 0 }));
     }
     function update(next) {
       entries = next.classifications?.entries ?? entries; profile = next.profile ?? profile;
@@ -186,23 +273,14 @@
     function shape(button, index) {
       const step = editing ? 30 : DIAL_VISUAL_STEP_DEGREES;
       const centerAngle = (editing ? -75 : runtimeDialOrigin()) + index * step;
-      const from = centerAngle - step / 2 + .25, to = centerAngle + step / 2 - .25;
-      function ringPolygon(outerRadius, innerRadius) {
-        const points = [];
-        for (let angle = from; angle < to; angle += 2) points.push(point(outerRadius, angle));
-        points.push(point(outerRadius, to));
-        for (let angle = to; angle > from; angle -= 2) points.push(point(innerRadius, angle));
-        points.push(point(innerRadius, from));
-        return `polygon(${points.map(p => p.map(n => `${n.toFixed(2)}px`).join(" ")).join(",")})`;
+      const from = centerAngle - step / 2 + 1.5, to = centerAngle + step / 2 - 1.5;
+      function roundedWedge(outer, inner) {
+        const corner = 7, od = corner / outer * 180 / Math.PI, id = corner / inner * 180 / Math.PI;
+        const p = (r, a) => point(r, a).map(n => n.toFixed(2)).join(" ");
+        return `path("M ${p(outer, from + od)} A ${outer} ${outer} 0 0 0 ${p(outer, to - od)} Q ${p(outer, to)} ${p(outer - corner, to)} L ${p(inner + corner, to)} Q ${p(inner, to)} ${p(inner, to - id)} A ${inner} ${inner} 0 0 1 ${p(inner, from + id)} Q ${p(inner, from)} ${p(inner + corner, from)} L ${p(outer - corner, from)} Q ${p(outer, from)} ${p(outer, from + od)} Z")`;
       }
-      const polygon = innerRadius => ringPolygon(radius, innerRadius);
-      button.style.clipPath = polygon(radius * .48);
-      if (button.classList.contains("branch")) {
-        button.style.setProperty("--branch-ring", ringPolygon(radius, radius - 5));
-        button.style.setProperty("--branch-highlight", ringPolygon(radius - 5, radius - 6));
-      } else {
-        button.style.removeProperty("--branch-ring"); button.style.removeProperty("--branch-highlight");
-      }
+      button.style.clipPath = roundedWedge(radius, radius * .50);
+      button.style.setProperty("--sector-face", roundedWedge(button.classList.contains("branch") ? radius - 5 : radius, radius * .50));
       const label = button.querySelector(".sector-label"), center = point(radius * .75, centerAngle);
       label.style.left = `${center[0]}px`; label.style.top = `${center[1]}px`;
     }
@@ -320,6 +398,7 @@
       $(".arc")?.classList.remove("dial-moving", "dial-detent");
     }
     function startDialMotion(initialVelocity = null) {
+      if (reducedMotion?.matches) { stopDialSpring(); paintDial(Math.round(clampedDialPosition()), false, true); return; }
       if (Number.isFinite(initialVelocity)) dialVelocity = Math.max(-DIAL_MAX_VELOCITY, Math.min(DIAL_MAX_VELOCITY, initialVelocity));
       if (dialFrame !== null) return;
       dialMoving = true; $(".arc").classList.add("dial-moving"); dialLastTime = performance.now();
@@ -355,6 +434,7 @@
     }
     function kickDial(direction) {
       const current = frame(), { max } = dialInfo(current), position = clampedDialPosition(current);
+      if (reducedMotion?.matches) { stopDialSpring(); paintDial(Math.round(position) + direction, false, true); return; }
       if ((position <= 0 && direction < 0) || (position >= max && direction > 0)) {
         dialDetentTarget = null; dialVelocity = 0; paintDial(position + direction * .10, true); startDialMotion(0); return;
       }
@@ -382,13 +462,13 @@
       $(".path").textContent = path;
       const root = current.id === null;
       $(".back").classList.toggle("temporary", root);
-      $(".back span").textContent = root ? "임시 저장" : "‹ 뒤로";
+      $(".back path").setAttribute("d", root ? DOWNLOAD_ICON : BACK_ICON);
       $(".back").setAttribute("aria-label", root ? "임시 저장" : "뒤로");
       $(".back").disabled = busy || (root && (editing || !onTemporary || performance.now() < temporaryBlockedUntil));
       $(".save-current").disabled = busy || !destination() || (editing && (!hasChildren(destination()?.id) || destination()?.id === current.id));
       $(".save-current").setAttribute("aria-label", editing ? "선택한 폴더의 하위 폴더 열기" : destination() ? `${path}에 저장` : "폴더 선택 후 저장");
       $(".destination").textContent = destination()?.name || "폴더 선택";
-      $(".save-current strong").textContent = editing ? "열기" : busy ? "저장 중…" : "저장";
+      $(".save-current").setAttribute("aria-busy", String(busy));
       $(".root-next").hidden = !editing || current.id !== null || count < 2;
       $(".root-next").disabled = busy;
       const pageLabel = `${current.page === count - 1 ? "처음으로" : "다음"} · ${current.page + 1}/${count}`;
@@ -453,15 +533,18 @@
       panel.style.right = side === "right" ? `${Math.max(0, window.innerWidth - width - (viewport?.offsetLeft || 0))}px` : "auto";
       panel.style.top = `${(viewport?.offsetTop || 0) + Math.max(8, (height - (radius * 2 + 104)) / 2)}px`;
       panel.dataset.side = side;
-      panel.querySelectorAll(".sector").forEach((button, index) => shape(button, index));
+      panel.querySelectorAll(".sector").forEach(button => shape(button, Number(button.dataset.slot)));
       paintDialLabels(Number(frame().dialPosition) || 0, true);
     }
     $(".back").onclick = async () => {
       if (frame().id !== null) { back(); return; }
       if (!available() || editing || !onTemporary || performance.now() < temporaryBlockedUntil) return;
       busy = true; render();
-      try { if (await onTemporary() !== false) close(); }
-      catch { notice("임시 저장을 열지 못했습니다."); }
+      try {
+        const result = await onTemporary();
+        if (result !== false) close(result?.ok ? result : undefined, ".back");
+      }
+      catch { if (!disposed) notice("임시 저장을 열지 못했습니다."); }
       finally { busy = false; if (!disposed) render(); }
     };
     $(".save-current").onclick = () => editing ? openSelected() : void save();
@@ -544,6 +627,10 @@
       pointer = null; suppressClick = true; lastTap = null;
     });
     for (const type of ["contextmenu", "selectstart", "dragstart"]) panel.addEventListener(type, event => { event.preventDefault(); event.stopPropagation(); });
+    for (const type of ["focusin", "focusout"]) panel.addEventListener(type, () => {
+      const id = shadow.activeElement?.dataset.classificationId;
+      for (const label of dialLabels.values()) label.classList.toggle("focused", type === "focusin" && label.dataset.classificationId === id);
+    });
     panel.addEventListener("keydown", event => {
       event.stopPropagation();
       if (event.key === "Escape") { if (!editing) { event.preventDefault(); cancel(); } return; }
@@ -579,38 +666,44 @@
       if (event.key === "Enter" && event.ctrlKey) { event.preventDefault(); if (editing) openSelected(); else void save(); }
       if (event.key === "Enter" || event.key === " ") suppressClick = false;
     });
-    setLocked(locked); render(); position(); if (!editing) focusFirst();
+    setLocked(locked); render(); position();
+    reducedMotion?.addEventListener?.("change", onReducedMotion);
+    window.addEventListener("pagehide", dispose);
+    if (!editing) {
+      focusFirst();
+      motion(panel, [{ opacity: 0, transform: `translateX(${side === "right" ? 8 : -8}px)` }, { opacity: 1, transform: "translateX(0)" }], 140);
+    }
     window.addEventListener("resize", position);
     window.visualViewport?.addEventListener("resize", position);
     window.visualViewport?.addEventListener("scroll", position);
-    return { host, close: cancel, update, get tree() { return tree; }, unlockInput: () => setLocked(false), lockInput: () => setLocked(true) };
+    return { host, close: cancel, dispose, update, get tree() { return tree; }, unlockInput: () => setLocked(false), lockInput: () => setLocked(true) };
   }
 
   const CSS = `
-:host{--paper:#d9d8d2;--ink:#343532;--line:#a6a59f;--muted:#73746f;--sector:#d8d7d1;--selected:#454744;--inverse:#f6f5f0;position:fixed;inset:0;z-index:2147483646;pointer-events:none;font:15px/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif;color:var(--ink);-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-*{box-sizing:border-box;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}button{font:inherit;color:inherit;cursor:pointer;border:0;touch-action:manipulation}button:disabled{cursor:default;color:#777865}button:focus-visible{outline:2px solid var(--ink);outline-offset:-4px}[hidden]{display:none!important}
-.backdrop{position:fixed;inset:0;pointer-events:auto;background:rgba(0,0,0,.14)}:host(.input-locked) .backdrop{pointer-events:none}
+:host{--paper:#252f3e;--ink:#e2eaf5;--line:#465265;--muted:#a5b3c6;--sector:#343e4e;--selected:#3579df;--inverse:#fff;position:fixed;inset:0;z-index:2147483646;pointer-events:none;font:15px/1.4 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif;color:var(--ink);-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+*{box-sizing:border-box;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}button{font:inherit;color:inherit;cursor:pointer;border:0;touch-action:manipulation}button:disabled{cursor:default;color:var(--muted)}button:focus-visible{outline:2px solid var(--ink);outline-offset:-4px}[hidden]{display:none!important}
+.backdrop{position:fixed;inset:0;pointer-events:auto;background:rgba(0,0,0,.14)}:host(.input-locked) .backdrop,:host(.exiting) .backdrop{pointer-events:none}
 .panel{position:fixed;width:var(--radius,224px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none;padding-bottom:8px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.30)) drop-shadow(0 14px 28px rgba(0,0,0,.22))}
 .path{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .root-next{width:100%;min-height:44px;padding:2px;background:none;color:var(--inverse);text-shadow:0 1px 3px #000c;font-size:12px}
-.arc{position:relative;width:var(--radius);height:calc(var(--radius) * 2);border-radius:100% 0 0 100% / 50% 0 0 50%;background:var(--line);margin:6px 0;isolation:isolate;box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);--dial-angle:0deg;--dial-counter-angle:0deg;--dial-brightness:1}:host(:not(.editing)) .arc{overflow:hidden;touch-action:none}.sectors{position:absolute;inset:0;z-index:1}.dial-labels{display:none}:host(:not(.editing)) .sectors{width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);right:auto;bottom:auto;transform-origin:50% 50%;transform:rotate(var(--dial-angle));filter:brightness(var(--dial-brightness));will-change:transform,filter}:host(:not(.editing)) .dial-labels{display:block;position:absolute;left:0;top:0;width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);z-index:2;pointer-events:none;filter:brightness(var(--dial-brightness))}:host(:not(.editing)) .sector>.sector-label{display:none}.dial-label{position:absolute;transform:translate(-50%,-50%);width:calc(var(--radius) * .36);display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--ink);opacity:0;pointer-events:none;will-change:left,top,opacity}.dial-label.selected{color:var(--inverse)}.center{z-index:3}:host(:not(.editing)) .sector:disabled{pointer-events:none}:host(:not(.editing)) .sector.dial-buffer:disabled{color:inherit}@media(pointer:fine){:host(:not(.editing)) .sector:not(:disabled){cursor:grab}:host(:not(.editing)) .arc.dial-moving .sector:not(:disabled){cursor:grabbing}}
-.sector{position:absolute;inset:0;width:100%;height:100%;background:linear-gradient(115deg,#dfded8 0%,var(--sector) 56%,#cfcec8 100%);padding:0}.sector:nth-child(even){background:linear-gradient(115deg,#dad9d3 0%,#d3d2cc 58%,#cac9c3 100%)}.sector:not(:disabled):hover{background:#c8c7c1}.sector[aria-pressed=true]{background:linear-gradient(120deg,#4c4e4a 0%,var(--selected) 58%,#3d3f3c 100%);color:var(--inverse)}.sector[aria-pressed=true] small{color:#e3e2dd}.sector.empty{background:#cecdc7}
-.sector.branch:before,.sector.branch:after{content:'';position:absolute;inset:0;pointer-events:none}.sector.branch:before{background:linear-gradient(180deg,#3b3d3a 0%,#2f312f 55%,#282a28 100%);clip-path:var(--branch-ring);filter:drop-shadow(0 1px 1px rgba(0,0,0,.24))}.sector.branch:after{background:rgba(255,255,255,.34);clip-path:var(--branch-highlight);opacity:.52}.sector[aria-pressed=true].branch:before{background:linear-gradient(180deg,#4b4d49 0%,#343633 58%,#2a2c2a 100%)}.sector[aria-pressed=true].branch:after{background:rgba(255,255,255,.42);opacity:.62}
-.sector-label{position:absolute;transform:translate(-50%,-50%) rotate(var(--dial-counter-angle));width:calc(var(--radius) * .36);display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none}.name{width:100%;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;text-align:center;font-size:14px;font-weight:500;letter-spacing:-.01em;line-height:1.25}.dial-label .name{font-weight:600}.sector-label small{font-size:11px;color:var(--muted)}.sector.next{background:#bdbba3}.sector.next:disabled{background:#c6c3ae}
-.sector:focus-visible,.center button:focus-visible{outline:none}.sector:focus-visible .name,.back:focus-visible>span,.save-current:focus-visible strong{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:2px}
-.center{position:absolute;right:0;top:50%;transform:translateY(-50%);width:calc(var(--radius) * .47);height:calc(var(--radius) * .94);border-radius:100% 0 0 100% / 50% 0 0 50%;overflow:hidden;background:var(--line);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}.center button{position:absolute;right:0;width:100%;height:50%;padding:0;background:linear-gradient(145deg,#e7e6e0,#d9d8d2)}.back{top:0;border-radius:100% 0 0 0;font-size:14px}.back:not(:disabled):hover{background:#cfcec8}.save-current{bottom:0;border-radius:0 0 0 100%;border-top:1px solid var(--line)}.save-current:not(:disabled){background:linear-gradient(120deg,#4c4e4a,var(--selected) 62%,#3d3f3c);color:var(--inverse)}.save-current:not(:disabled):hover{background:#50524e}.back>span,.save-label{position:absolute;left:64%;width:70%;transform:translate(-50%,-50%);pointer-events:none}.back>span{top:66%;white-space:nowrap}.save-label{top:35%;display:flex;flex-direction:column;align-items:center;gap:4px}.destination{width:100%;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;font-size:12px}.save-current strong{font-size:16px;font-weight:600}
-footer{background:none}.center .temporary:not(:disabled){background:linear-gradient(145deg,#e4e3dd,#d6d5cf);color:#4a4b48}.center .temporary:not(:disabled):hover{background:#cfcec8}.notice{padding:10px;max-height:100px;overflow:auto;background:var(--paper);font-size:13px;color:#794425}
-.panel[data-side=left] .arc{transform:scaleX(-1)}.panel[data-side=left] .sector-label{transform:translate(-50%,-50%) rotate(var(--dial-counter-angle)) scaleX(-1)}.panel[data-side=left] .dial-label{transform:translate(-50%,-50%) scaleX(-1)}.panel[data-side=left] .back>span,.panel[data-side=left] .save-label{transform:translate(-50%,-50%) scaleX(-1)}
+.arc{position:relative;width:var(--radius);height:calc(var(--radius) * 2);border-radius:100% 0 0 100% / 50% 0 0 50%;background:transparent;margin:6px 0;isolation:isolate;--dial-angle:0deg;--dial-counter-angle:0deg;--dial-brightness:1}:host(:not(.editing)) .arc{overflow:hidden;touch-action:none}.folders{position:absolute;inset:0;opacity:1}.folder-exit-host{position:absolute;inset:0;z-index:2;pointer-events:none}.sectors{position:absolute;inset:0;z-index:1}.dial-labels{display:none}:host(:not(.editing)) .sectors{width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);right:auto;bottom:auto;transform-origin:50% 50%;transform:rotate(var(--dial-angle));filter:brightness(var(--dial-brightness));will-change:transform,filter}:host(:not(.editing)) .dial-labels{display:block;position:absolute;left:0;top:0;width:calc(var(--radius) * 2);height:calc(var(--radius) * 2);z-index:2;pointer-events:none;filter:brightness(var(--dial-brightness))}:host(:not(.editing)) .sector>.sector-label{display:none}.dial-label{position:absolute;transform:translate(-50%,-50%);width:calc(var(--radius) * .36);display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--ink);opacity:0;pointer-events:none;will-change:left,top,opacity}.dial-label.selected{color:var(--inverse)}.center{z-index:3}:host(:not(.editing)) .sector:disabled{pointer-events:none}:host(:not(.editing)) .sector.dial-buffer:disabled{color:inherit}@media(pointer:fine){:host(:not(.editing)) .sector:not(:disabled){cursor:grab}:host(:not(.editing)) .arc.dial-moving .sector:not(:disabled){cursor:grabbing}}
+.sector{position:absolute;inset:0;width:100%;height:100%;background:transparent;padding:0}.sector:before{content:'';position:absolute;inset:0;clip-path:var(--sector-face);background:var(--sector);pointer-events:none;transition:background-color 90ms ease-out}.sector.branch{background:#647187}.sector.branch[aria-pressed=true]{background:#8eb8f5}.sector:not(:disabled):hover:before{background:#424f63}.sector[aria-pressed=true]:before{background:var(--selected)}.sector[aria-pressed=true]{color:var(--inverse)}.sector:not(:disabled):active:before{background:#53627a}.sector[aria-pressed=true]:active:before{background:#2865bf}.sector.empty:before{background:#242d3a}:host(:not(.editing)) .sector.empty{visibility:hidden}
+.sector-label{position:absolute;transform:translate(-50%,-50%) rotate(var(--dial-counter-angle));width:calc(var(--radius) * .36);display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none}.name{width:100%;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;text-align:center;font-size:14px;font-weight:500;letter-spacing:-.01em;line-height:1.25}.dial-label .name{font-weight:600}.sector-label small{font-size:11px;color:var(--muted)}.sector.next:before{background:#2b3749}
+.sector:focus-visible,.center button:focus-visible{outline:none}.sector:focus-visible:before{background:#526985}.sector[aria-pressed=true]:focus-visible:before{background:#195bbd}.sector:focus-visible .name,.dial-label.focused .name{text-decoration:underline;text-underline-offset:3px}.center button:focus-visible .action-icon{outline:2px solid #fff;outline-offset:3px;border-radius:8px}
+.center{position:absolute;right:0;top:50%;transform:translateY(-50%);width:calc(var(--radius) * .43);height:calc(var(--radius) * .86);border-radius:100% 0 0 100% / 50% 0 0 50%;overflow:hidden;background:#2b3749;box-shadow:inset 0 0 0 1px #49596f}.center button{position:absolute;right:0;width:100%;padding:0;background:transparent;color:#c5d1e3}.save-current{top:0;height:61%;border-bottom:1px solid #49596f}.back{bottom:0;height:39%}.save-current:not(:disabled){background:#326ed0;color:#fff}.save-current:not(:disabled):hover{background:#407fdf}.back:not(:disabled):hover{background:#39495f}.center button:disabled{color:#8291a6}.action-icon{position:absolute;width:34px;height:34px;left:calc(62% - 17px);top:calc(55% - 17px);pointer-events:none}.back .action-icon{left:calc(66% - 16px);top:calc(40% - 16px);width:32px;height:32px}.action-icon svg{display:block;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.save-current[aria-busy=true] .action-icon{opacity:.55}
+footer{background:none}.notice{padding:10px;max-height:100px;overflow:auto;background:var(--paper);border-radius:12px;font-size:13px;color:#f0c5aa}
+.panel[data-side=left] .arc{transform:scaleX(-1)}.panel[data-side=left] .sector-label{transform:translate(-50%,-50%) rotate(var(--dial-counter-angle)) scaleX(-1)}.panel[data-side=left] .dial-label{transform:translate(-50%,-50%) scaleX(-1)}.panel[data-side=left] .action-icon svg{transform:scaleX(-1)}
+@media(prefers-reduced-motion:reduce){.sector:before{transition:none}}
 :host(.editing){position:relative;inset:auto;z-index:auto;display:block;pointer-events:auto;width:100%;font-family:inherit}
 :host(.editing) .backdrop{position:static;background:none}
 :host(.editing) .panel{position:relative;width:100%;overflow:visible;filter:none;padding:0}
 :host(.editing) .arc{margin:18px auto 12px;overflow:visible;touch-action:manipulation}:host(.editing) .sectors{transform:none}
-:host(.editing) .root-next{color:var(--inverse);text-shadow:none;border:1px solid #55564d;max-width:224px;display:block;margin:0 auto 12px}
-.edit-controls{border-top:1px solid #55564d;padding-top:14px;color:var(--inverse)}
+:host(.editing) .root-next{color:var(--inverse);text-shadow:none;border:1px solid var(--line);border-radius:12px;max-width:224px;display:block;margin:0 auto 12px}
+.edit-controls{border-top:1px solid var(--line);padding-top:14px;color:var(--inverse)}
 .edit-selection{min-height:40px;text-align:center;font-size:13px;overflow-wrap:anywhere}
 .edit-actions{display:flex;gap:6px;justify-content:center}
-.edit-actions button{min-height:44px;flex:1;max-width:120px;padding:8px 4px;border:1px solid #77786d;background:#292b26;color:var(--inverse);font-size:13px}
-.edit-actions button:not(:disabled):hover{background:#41443a}.edit-actions button:disabled{color:#828477;background:#24251f}
+.edit-actions button{min-height:44px;flex:1;max-width:120px;padding:8px 4px;border:1px solid var(--line);border-radius:12px;background:#2b3749;color:var(--inverse);font-size:13px}
+.edit-actions button:not(:disabled):hover{background:#39495f}.edit-actions button:disabled{color:#8291a6;background:#242d3a}
 :host(.editing) .notice{margin-bottom:12px}
 `;
   globalThis.LakomicsArcCollector = { mount };

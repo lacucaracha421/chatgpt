@@ -34,7 +34,7 @@ const entries = [
   ...Array.from({ length: 14 }, (_, i) => ({ id: `child${i}`, name: `하위 ${i}`, parentId: 'game7' })),
 ];
 let views = [];
-afterEach(() => { for (const view of views) { view.unlockInput(); view.close(); } views = []; });
+afterEach(() => { for (const view of views) view.dispose(); views = []; delete dom.window.Element.prototype.animate; delete dom.window.matchMedia; });
 function mount(options = {}) {
   const view = globalThis.LakomicsArcCollector.mount({ entries, profile: {}, onSave: async () => ({ ok: true }), ...options });
   views.push(view);
@@ -54,18 +54,89 @@ const tap = (view, id) => row(view, id).dispatchEvent(new dom.window.MouseEvent(
 const enter = (view, id) => { tap(view, id); tap(view, id); };
 
 
-test('branch folders use a clean curved rim flush with the outer edge', () => {
+test('rounded spaced sectors expose a rear surface for branches and icon-only central actions', () => {
   const view = mount();
-  const style = view.host.shadowRoot.querySelector('style').textContent;
-  assert.match(style, /\.sector\.branch:before\{[^}]*clip-path:var\(--branch-ring\)/);
-  assert.match(style, /\.sector\.branch:after\{[^}]*clip-path:var\(--branch-highlight\)/);
-  assert.doesNotMatch(style, /--branch-x|--branch-y/);
-  const radius = parseFloat(view.$('.panel').style.getPropertyValue('--radius'));
-  const ring = row(view, 'games').style.getPropertyValue('--branch-ring');
-  const points = [...ring.matchAll(/(-?\d+(?:\.\d+)?)px (-?\d+(?:\.\d+)?)px/g)]
-    .map(match => [Number(match[1]), Number(match[2])]);
-  const outer = Math.max(...points.map(([x, y]) => Math.hypot(x - radius, y - radius)));
-  assert.ok(Math.abs(outer - radius) < 0.02, `expected branch rim at outer edge ${radius}, got ${outer}`);
+  const branch = row(view, 'games'), leaf = row(view, 'root0');
+  assert.match(branch.style.clipPath, /^path\("M .* Q /);
+  assert.notEqual(branch.style.getPropertyValue('--sector-face'), branch.style.clipPath);
+  assert.equal(leaf.style.getPropertyValue('--sector-face'), leaf.style.clipPath);
+  assert.equal(view.$('.center').firstElementChild.className, 'save-current');
+  assert.equal(view.$$('.center svg').length, 2);
+  assert.equal(view.$('.destination').hidden, true);
+  assert.equal(view.$('.back').getAttribute('aria-label'), '임시 저장');
+});
+
+function mockMotion() {
+  const animations = [];
+  dom.window.Element.prototype.animate = function(frames, options) {
+    const animation = { target: this, frames, options, cancelled: false,
+      cancel() { this.cancelled = true; }, finish() { this.onfinish?.(); } };
+    animations.push(animation); return animation;
+  };
+  return animations;
+}
+
+test('folder crossfade keeps one inert snapshot while new controls work immediately', () => {
+  const animations = mockMotion();
+  const view = mount();
+  assert.equal(animations[0].options.duration, 140);
+  enter(view, 'games');
+  const outgoing = view.$('.folder-exit-host');
+  assert.ok(outgoing.inert);
+  assert.equal(outgoing.getAttribute('aria-hidden'), 'true');
+  assert.ok(outgoing.shadowRoot.querySelector('.sector[data-classification-id="games"]'));
+  assert.equal(view.$$('.sector').length, 14, 'snapshot controls stay outside live queries');
+  assert.deepEqual(animations.slice(-2).map(a => a.options.duration), [140, 180]);
+  row(view, 'game2').click();
+  assert.equal(view.$('.destination').textContent, '게임 2');
+  view.$('.back').click();
+  assert.equal(outgoing.isConnected, false);
+  assert.equal(view.$$('.folder-exit-host').length, 1);
+  view.dispose();
+  assert.equal(view.host.isConnected, false);
+  assert.ok(animations.every(a => a.cancelled));
+});
+
+test('dispose is unconditional, silent and blocks late save completion', async () => {
+  let complete, closes = 0;
+  const opener = document.querySelector('#opener'); opener.focus();
+  const view = mount({ onSave: () => new Promise(resolve => { complete = resolve; }), onClose: () => closes++ });
+  row(view, 'root0').click(); view.$('.save-current').click();
+  view.lockInput(); view.close(); assert.equal(view.host.isConnected, true);
+  const focus = document.createElement('button'); document.body.append(focus); focus.focus();
+  view.dispose(); view.dispose();
+  complete({ ok: true }); await tick();
+  assert.equal(closes, 0); assert.equal(document.activeElement, focus);
+  assert.equal(view.host.isConnected, false); focus.remove();
+});
+
+test('success releases ownership immediately and its exit cannot remove a new menu', async () => {
+  const animations = mockMotion(); let complete, closes = 0;
+  const first = mount({ onSave: () => new Promise(resolve => { complete = resolve; }), onClose: () => closes++ });
+  row(first, 'root0').click(); first.$('.save-current').click();
+  assert.equal(animations.some(a => a.options.duration === 100), false);
+  complete({ ok: true }); await tick();
+  assert.equal(closes, 1); assert.equal(first.host.inert, true);
+  const exit = animations.find(a => a.target === first.$('.panel') && a.options.duration === 100);
+  assert.ok(exit);
+  const second = mount(); exit.finish();
+  assert.equal(first.host.isConnected, false); assert.equal(second.host.isConnected, true);
+});
+
+test('reduced motion skips entrance and folder fades and wheel coasting', () => {
+  const animations = mockMotion();
+  dom.window.matchMedia = () => ({ matches: true });
+  const view = mount(); enter(view, 'games'); wheel(view);
+  assert.equal(animations.length, 0); assert.equal(view.$('.folder-exit-host'), null);
+  assert.equal(view.$('.panel').dataset.dialIndex, '1');
+  assert.equal(frameQueue.size, 0);
+});
+
+test('resize preserves pooled physical slots after dial movement', async () => {
+  const view = mount(); enter(view, 'games'); wheel(view); await settleDial();
+  const before = [...view.$$('.sector')].map(button => [button, button.style.clipPath]);
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  for (const [button, clip] of before) assert.equal(button.style.clipPath, clip);
 });
 
 test('resting runtime labels snap to device pixels for crisp text', () => {
