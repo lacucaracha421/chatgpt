@@ -37,7 +37,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 
 ## Current reference documents
 
-- `agents/pc-design-reference.md` — Chrome 03b shell, Asset browsing, selection, floating surfaces, search, Works physicality, responsive/performance rules, and current implementation checkpoint.
+- `agents/pc-design-reference.md` — Chrome 03b shell, content, and interaction contracts for affected desktop UI.
 - `agents/works-viewer-design.md` — type-specific Works presentation inside the shared PC design: manga shelf, game exhibit, video poster archive, Showcase.
 - `agents/lakomics-works-handoff-v2.md` — Collection/Works product and architecture boundaries.
 - `agents/domain.md` — how to resolve documentation/domain conflicts.
@@ -55,6 +55,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.
 - `research/reference-projects.md` — optional external-project research, not adopted implementation.
+- [Seed-first character automation and Jev evaluation direction](research/character-autonomy-and-jev-direction-20260921.md) — user automation requirements, source-verified constraints, corrected assumptions, and staged evidence/Jev experiments; research direction, not runtime activation or a second backlog.
 - `research/character-classification-quiet-workflow-design-20260911.md` — approved quiet character workflow, parent-folder inference scope, reference curation, and normal-folder conversion.
 - `research/character-reference-delta-reconsideration-design-20260911.md` — accepted batched reference expansion and delta-only historical reconsideration contract.
 - `research/character-ingestion-flow-audit-20260912.md` — image arrival cases, character classification paths, failure visibility gaps, historical refresh coverage, and bottleneck candidates; diagnostic findings, not an implementation plan.
