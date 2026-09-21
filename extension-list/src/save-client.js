@@ -137,7 +137,8 @@
     let data;
     try { data = await response.json(); }
     catch { return { ok: false, code: "video_info_failed" }; }
-    if (!data || data.__typename === "TweetTombstone") return { ok: false, code: "video_unavailable" };
+    if (data?.__typename === "TweetTombstone") return { ok: false, code: "video_public_unavailable" };
+    if (!data) return { ok: false, code: "video_unavailable" };
     const details = Array.isArray(data.mediaDetails) ? data.mediaDetails : [];
     const videos = details.map((media) => bestXVideoUrl(media?.video_info?.variants));
     const index = resolveMediaIndex(candidate, details);

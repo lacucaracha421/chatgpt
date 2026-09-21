@@ -225,6 +225,52 @@ test('temporary download feedback survives normal session teardown', async () =>
   f.close();
 });
 
+test('permanent and PC temporary video saves use page-resolved media before messaging the worker', async () => {
+  for (const action of ['onSave', 'onTemporary']) {
+    const f = fixture();
+    const mediaUrl = 'https://video.twimg.com/amplify_video/123/vid/clip.mp4';
+    f.w.LakomicsForumSource.findCandidate = target => target.id === 'image' ? {
+      element: target, source: 'x', type: 'video', mediaUrl: null,
+      postId: '2101939591297294668', mediaIndex: 1, overallMediaIndex: 1,
+      sourceUrl: 'https://x.com/AniGodoyG/status/2101939591297294668/video/1',
+    } : null;
+    let resolutions = 0;
+    f.w.LakomicsXVideo = { resolve: async candidate => { resolutions++; return { ...candidate, mediaUrl }; } };
+    f.pointer('pointerdown', 'touch'); await f.advance(500);
+    f.pointer('pointerup', 'touch'); await f.advance(1);
+    assert.equal(resolutions, 0, 'opening the menu must not request a save or resolve media');
+    const pending = f.mounts[0][action]('games');
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    await f.advance(1);
+    const result = await pending;
+    assert.equal(result.ok, true);
+    const type = action === 'onSave' ? 'collector:save' : 'collector:temporary';
+    const request = f.requests.find(message => message.type === type);
+    assert.equal((request.payload?.candidate || request.candidate).mediaUrl, mediaUrl);
+    assert.equal(resolutions, 1);
+    f.close();
+  }
+});
+
+test('navigation during page-video lookup cannot submit a stale save or download', async () => {
+  for (const action of ['onSave', 'onTemporary']) {
+    const f = fixture(); let finish;
+    f.w.LakomicsForumSource.findCandidate = target => target.id === 'image' ? {
+      element: target, source: 'x', type: 'video', mediaUrl: null,
+      postId: '2101939591297294668', overallMediaIndex: 1,
+      sourceUrl: 'https://x.com/AniGodoyG/status/2101939591297294668/video/1',
+    } : null;
+    f.w.LakomicsXVideo = { resolve: candidate => new Promise(resolve => { finish = () => resolve({ ...candidate, mediaUrl: 'https://video.twimg.com/clip.mp4' }); }) };
+    f.pointer('pointerdown', 'touch'); await f.advance(500);
+    f.pointer('pointerup', 'touch'); await f.advance(1);
+    const pending = f.mounts[0][action]('games');
+    f.w.dispatchEvent(new f.w.Event('popstate'));
+    finish(); await pending; await f.advance(1);
+    assert.equal(f.requests.some(message => ['collector:save', 'collector:temporary'].includes(message.type)), false);
+    f.close();
+  }
+});
+
 test('an idle page runs no session watch, so a URL change alone tears nothing down', async () => {
   const f = fixture();
   await f.advance(5000);

@@ -54,6 +54,7 @@ test('collector save waits for the server contract instead of timing out at 15 s
 test('save failures expose useful server reasons', () => {
   assert.equal(content.saveFailureMessage({code:'video_unavailable'}), 'X 영상을 찾을 수 없음');
   assert.equal(content.saveFailureMessage({code:'video_info_failed'}), 'X 영상 정보 조회 실패');
+  assert.equal(content.saveFailureMessage({code:'video_public_unavailable'}), 'X 공개 조회에서 영상 정보를 제공하지 않음 · 현재 방식으로 저장 불가');
   assert.equal(content.saveFailureMessage({code:'server_save_failed',httpStatus:400,serverDetail:'Invalid source URL'}), '서버 거절 · 원문 URL 검증 실패');
   assert.equal(content.saveFailureMessage({code:'server_save_failed',httpStatus:400,serverDetail:'Unsupported content type: text/html'}), '서버 거절 · 원본 형식 text/html');
   assert.equal(content.saveFailureMessage({code:'server_save_failed',httpStatus:502,serverDetail:'Media returned HTTP 403'}), '서버 원본 수신 실패 · HTTP 403');

@@ -59,9 +59,10 @@
   function wait(ms) { return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve(); }
   function retryAfterMs(response) {
     const raw = response?.headers?.get?.("retry-after");
-    const seconds = Number(raw);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60000, Math.round(seconds * 1000));
-    if (raw) {
+    // Number(null) is 0, so an absent header would otherwise mean "retry now".
+    const seconds = typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
+    if (Number.isFinite(seconds)) return seconds >= 0 ? Math.min(60000, Math.round(seconds * 1000)) : DEFAULT_RATE_LIMIT_MS;
+    if (typeof raw === "string" && raw.trim()) {
       const at = Date.parse(raw);
       if (Number.isFinite(at)) return Math.min(60000, Math.max(0, at - Date.now()));
     }

@@ -13,6 +13,8 @@ dragging on desktop requires a held press of at least 250 ms and movement of
 losing window focus, or cancelling the pointer cancels the pending opening. Releasing the opening finger never selects a folder or saves an image.
 The menu uses the approved dark One UI-inspired treatment: graphite surfaces,
 blue selection, rounded separated sectors and a radial gap around the center.
+Selected sectors retain their blue face while hovered; neutral hover/press colors
+apply only to unselected sectors.
 One continuous central panel contains a larger upper Save action and a smaller
 lower Temporary save action, which becomes Back inside folders. Actions use
 outline icons with accessible labels and distinct keyboard focus, without repeated
@@ -125,7 +127,18 @@ no server deployment, extra browser permission, or new credential type is needed
 
 X GIF-like animations are commonly delivered as MP4. A mounted progressive
 `https://video.twimg.com/*.mp4` resource (including a video's `source` child) is
-retained without a public lookup. Otherwise the worker resolves the selected
+retained without a public lookup. For blob/HLS players, the collector first asks
+a small page-world observer for the matching progressive MP4 from GraphQL
+responses X has already received. It observes fetch/XHR response copies from
+same-origin X GraphQL endpoints without reading cookies or request headers, making
+extra network requests, or consuming X's original response. The in-memory cache
+retains at most 200 post IDs and their all-media-indexed URLs, not raw tweets. Only
+the requested ID, ordinal and validated `video.twimg.com` MP4 cross the bridge;
+a page reply never triggers a capture or download by itself. Both permanent saves
+and PC temporary downloads use this lookup on explicit save, and navigation
+invalidates a pending lookup. No additional extension permission is needed.
+
+If no matching page metadata is available, the worker still resolves the selected
 media through X's public syndication endpoint with a bounded request and chooses
 the highest-bitrate progressive MP4. Manifests and still posters are not downloaded
 as animations. The original MP4 bytes stay MP4 and use the existing `video` capture
@@ -137,7 +150,17 @@ rather than falling back to another video. Public resolution may be unavailable
 for some posts even when their logged-in page can play the media. Browser temporary
 download feedback confirms initiation, not completion. The supplied example post
 `2100596455262331116` was not publicly verifiable; this is not a claim that it is
-private or deleted, nor live download acceptance.
+private or deleted, nor live download acceptance. Public lookup for the reported
+post `2101939591297294668` returned `TweetTombstone` without media or a reason on
+2026-09-21. The user confirmed playback in a logged-in X page. The page-metadata
+path now covers this failure class when X supplies a progressive MP4 variant;
+actual logged-in download acceptance for that post remains unverified. A post
+with neither a mounted MP4 nor usable page/public metadata still fails closed.
+Reload both the extension and X tab after updating so the page observer starts
+before X requests the tweet. A page refresh clears the metadata cache. This path
+requires a Chromium runtime supporting manifest `world: "MAIN"`; Android/Titanium
+acceptance has not been verified. HLS-only media without an MP4 variant is not
+converted or downloaded as a manifest.
 
 Successful permanent X saves automatically like the saved post when the existing
 Save auto-like preference is enabled. Already-liked posts are left liked. Quote
@@ -166,8 +189,14 @@ model calls in flight. Links, hashtags, mentions,
 emoji and explicit line breaks are retained; link placeholders must stay in their
 original order. Results use text nodes, not model HTML. Translation cards use
 X-aware light/dim/lights-out contrast with blue link accents. Network, timeout and
-server failures retry once; 429 responses honor a bounded cooldown and retry
-without treating the API key as missing. Authentication/payment failures pause
+server failures retry once. Unchanged failures are not re-requested by unrelated
+page mutations; transient failures can retry after leaving and re-entering the
+viewport. Other failures remain parked until the post changes or translation is
+reset. Short Han/Kana posts remain eligible even below three letters.
+429 responses honor a bounded cooldown (1.5 seconds if `Retry-After` is missing
+or invalid), without treating the API key as missing. Each unchanged post stops
+automatic retries after three rate-limited content requests; each worker request
+still has at most one network retry. Authentication/payment failures pause
 new requests until translation settings are refreshed. The bounded cache is
 shared across tabs, and disabling auto or clearing it invalidates in-flight results.
 

@@ -8,6 +8,7 @@ const content = await readFile(new URL('../src/x-translate.js', import.meta.url)
 function fakeTimers(w) {
   let now = 0, nextId = 0;
   const timers = new Map();
+  w.Date.now = () => now;
   w.setTimeout = (callback, delay = 0, ...args) => {
     const id = ++nextId;
     timers.set(id, { at: now + Math.max(0, Number(delay) || 0), callback, args });
@@ -33,6 +34,18 @@ function fakeTimers(w) {
     }
   }
   return { advance };
+}
+function translationWindow(html, handleMessage) {
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window;
+  const listeners=[];
+  // The background answers an update and then announces it through storage.onChanged, which
+  // is how the content script learns the new settings; that path is exercised here too.
+  w.chrome={runtime:{sendMessage(message,callback){
+    const result=handleMessage(message);
+    if(message.type==='translation:update') for(const fn of listeners) fn({'lakomics:translation:v1':{newValue:{enabled:result.enabled}}},'local');
+    callback(result);
+  }},storage:{onChanged:{addListener(fn){listeners.push(fn);}}}};
+  return w;
 }
 function fixture(initial={}, fetcher) {
   const memory = structuredClone(initial), calls = [];
@@ -113,12 +126,11 @@ test('mounted translator handles initial scan, recycled tweet text, off and on w
   element.getBoundingClientRect = () => ({width:300,height:60,top:10,bottom:70});
   w.IntersectionObserver = class { observe() {} unobserve() {} };
   w.chrome = {runtime:{sendMessage(message, callback) {
-    if (message.type === 'translation:settings') callback({ok:true,enabled,hasApiKey:true});
-    if (message.type === 'translation:request') { requests++; callback({ok:true,text:message.text.includes('Changed')?'변경된 글':'안녕하세요'}); }
-    if (message.type === 'translation:request-batch') { requests++; callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:item.text.includes('Changed')?'변경된 글':'안녕하세요'}))}); }
+    if(message.type==='translation:settings') callback({ok:true,enabled,hasApiKey:true});
+    if(message.type==='translation:request') { requests++; callback({ok:true,text:message.text.includes('Changed')?'변경된 글':'안녕하세요'}); return; }
+    if(message.type==='translation:request-batch') { requests++; callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:item.text.includes('Changed')?'변경된 글':'안녕하세요'}))}); }
   }}, storage:{onChanged:{addListener(fn) { changed=fn; }}}};
-  w.eval(content);
-  await clock.advance(400); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'안녕하세요');
+  w.eval(content); await clock.advance(400); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'안녕하세요');
   element.textContent='Changed post'; await clock.advance(500);
   assert.equal(w.document.querySelector('.lakomics-translation').textContent,'변경된 글');
   enabled=false; changed({'lakomics:translation:v1':{newValue:{enabled:false}}},'local'); await clock.advance(400);
@@ -194,19 +206,247 @@ test('visible tweets use one fast lane request and keep the remainder in a four-
   assert.equal(singles,1); assert.deepEqual(batches,[4]); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
 });
 
-test('transient content failure is retried when the tweet re-enters the viewport',async()=>{
-  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Retry this post</div>',{url:'https://x.com',runScripts:'outside-only'});
-  const w=dom.window, element=w.document.querySelector('div'), clock=fakeTimers(dom.window); let observer, requests=0;
+test('rate limit header parsing falls back to the default unless the header states a value',()=>{
+  const cases=[null,'','   ','soon','-1'];
+  return Promise.all(cases.map(header=>{
+    const f=fixture(legacy,async()=>({ok:false,status:429,headers:{get(name){return name.toLowerCase()==='retry-after'?header:null;}}}));
+    return f.handle({type:'translation:request',text:'Rate limited'}).then(result=>{
+      assert.equal(result.code,'http_429',`${JSON.stringify(header)} must stay a rate limit`);
+      assert.equal(result.retryAfterMs,1500,`${JSON.stringify(header)} must use the default wait`);
+    });
+  }));
+});
+
+test('an explicit Retry-After of zero is honored instead of the default wait',async()=>{
+  const f=fixture(legacy,async()=>({ok:false,status:429,headers:{get(name){return name.toLowerCase()==='retry-after'?'0':null;}}}));
+  const result=await f.handle({type:'translation:request',text:'Rate limited'});
+  assert.equal(result.code,'http_429'); assert.equal(result.retryAfterMs,0);
+});
+
+test('an HTTP-date Retry-After is converted to a bounded wait',async()=>{
+  const f=fixture(legacy,async()=>({ok:false,status:429,headers:{get(name){return name.toLowerCase()==='retry-after'?new Date(Date.now()+4000).toUTCString():null;}}}));
+  const result=await f.handle({type:'translation:request',text:'Rate limited'});
+  assert.equal(result.code,'http_429'); assert.ok(result.retryAfterMs>0&&result.retryAfterMs<=4000,`wait was ${result.retryAfterMs}`);
+});
+
+test('a persistent rate limit stops after the documented retries instead of looping',async()=>{
+  let attempts=0;
+  const f=fixture(legacy,async()=>{attempts+=1; return {ok:false,status:429,headers:{get(){return '0';}}};});
+  const results=await Promise.all([f.handle({type:'translation:request',text:'One'}),
+    f.handle({type:'translation:request',text:'Two'})]);
+  assert.ok(results.every(result=>result.ok===false&&result.code==='http_429'));
+  // One attempt plus the single bounded retry the service is allowed to make.
+  assert.equal(attempts,4,'a persistent rate limit is retried once per request and then gives up');
+});
+
+const contentSettingsKey=(()=>{
+  const match=/const SETTINGS = "([^"]+)"/.exec(content);
+  return match?match[1]:null;
+})();
+const serviceSettingsKey=(()=>{
+  const match=/const SETTINGS = "([^"]+)"/.exec(service);
+  return match?match[1]:null;
+})();
+
+test('content script and service worker agree on the lakomics:translation:v1 settings key',()=>{
+  assert.equal(contentSettingsKey,'lakomics:translation:v1');
+  assert.equal(serviceSettingsKey,'lakomics:translation:v1');
+  assert.equal(serviceSettingsKey,contentSettingsKey,'both clients must share one storage key');
+});
+
+test('language detection translates short Han and Kana posts but still skips noise',()=>{
+  const dom=new JSDOM('<div data-testid="tweetText">text</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const w=dom.window; w.__LAKOMICS_TEST__=true; w.IntersectionObserver=class{}; w.eval(content);
+  const api=w.LakomicsTranslateContent, element=w.document.querySelector('div');
+  element.lang='ja'; assert.equal(api.needsTranslation(element,'最高'),true);
+  element.lang='zh'; assert.equal(api.needsTranslation(element,'谢谢'),true);
+  element.lang='en'; assert.equal(api.needsTranslation(element,'OK'),false); assert.equal(api.needsTranslation(element,'AI'),false);
+  element.lang='und'; assert.equal(api.needsTranslation(element,'好'),true); assert.equal(api.needsTranslation(element,'한'),false);
+  assert.equal(api.needsTranslation(element,'a'),false); assert.equal(api.needsTranslation(element,'한국어'),false); w.close();
+});
+
+test('a transient content failure is retried on viewport re-entry but not on unrelated DOM changes',async()=>{
+  let requests=0, succeed=false;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Retry this post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1;
+    if(!succeed) return {ok:false,code:'network_error'};
+    return {ok:true,text:'재시도 성공',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'재시도 성공'}))};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w); let observer;
   element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
-  w.IntersectionObserver=class{constructor(cb){this.cb=cb;observer=this;} observe(){} unobserve(){}};
+  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(600);
+  assert.equal(requests,1); assert.ok(w.document.querySelector('.lakomics-translation').dataset.error==='true');
+  // Unrelated DOM churn alone must not re-offer the unchanged failing post.
+  for(let round=0;round<4;round+=1){
+    w.document.body.append(w.document.createElement('div'));
+    await clock.advance(600);
+  }
+  assert.equal(requests,1,'an unrelated DOM change must not retry an unchanged failed post');
+  succeed=true;
+  observer.cb([{isIntersecting:false,target:element}]);
+  observer.cb([{isIntersecting:true,target:element}]);
+  await clock.advance(600);
+  assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'재시도 성공'); w.close();
+});
+
+test('repeated unrelated DOM changes cause zero retries of an unchanged failed post',async()=>{
+  let requests=0;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Broken post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1;
+    return {ok:false,code:'invalid_translation'};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(600);
+  assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'true');
+  for(let round=0;round<5;round+=1){
+    w.document.body.append(w.document.createElement('div'));
+    w.document.body.append(w.document.createElement('span'));
+    await clock.advance(600);
+  }
+  assert.equal(requests,1,'unrelated DOM changes must not re-run an unchanged failed post');
+  assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'true');
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 실패 · 자동 번역을 껐다 켜면 재시도'); w.close();
+});
+
+test('a post edited after a failure is translated again with a fresh attempt',async()=>{
+  let requests=0, succeed=false;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Broken post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1;
+    if(!succeed) return {ok:false,code:'invalid_translation'};
+    return {ok:true,text:'고친 번역',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'고친 번역'}))};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(600);
+  assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'true');
+  w.document.body.append(w.document.createElement('div')); await clock.advance(600);
+  assert.equal(requests,1,'unchanged content must stay parked');
+  succeed=true; element.textContent='Fixed post text'; await clock.advance(600);
+  assert.equal(requests,2);
+  assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'false');
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'고친 번역'); w.close();
+});
+
+test('re-enabling automatic translation resets failure state and translates once',async()=>{
+  let enabled=true, succeed=false, requests=0;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Broken post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled,hasApiKey:true};
+    if(message.type==='translation:update'){ enabled=message.enabled; return {ok:true,enabled,hasApiKey:true}; }
+    requests+=1;
+    if(!succeed) return {ok:false,code:'invalid_translation'};
+    return {ok:true,text:'복구 번역',items:(message.items||[]).map(item=>({id:item.id,ok:true,text:'복구 번역'}))};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+
+  w.eval(content); await clock.advance(600);
+  assert.equal(requests,1); assert.ok(w.document.querySelector('.lakomics-translation').dataset.error==='true');
+  succeed=true;
+  const toggle=w.document.getElementById('lakomics-translation-controls').shadowRoot.getElementById('auto');
+  toggle.checked=false; await toggle.onchange(); await clock.advance(600);
+  assert.equal(w.document.querySelector('.lakomics-translation'),null);
+  assert.equal(enabled,false);
+  toggle.checked=true; await toggle.onchange(); await clock.advance(600);
+  assert.equal(requests,2,'re-enabling translates once, not as a retry loop');
+  assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'false');
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'복구 번역'); w.close();
+});
+
+test('initial intersection delivery and DOM changes during a request cannot retry its failure',async()=>{
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Pending post</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0, finish, observer;
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
   w.chrome={runtime:{sendMessage(message,callback){
     if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
-    else if(message.type==='translation:request'){requests+=1; callback(requests===1?{ok:false,code:'network_error'}:{ok:true,text:'재시도 성공'});}
-    else if(message.type==='translation:request-batch'){requests+=1; callback(requests===1?{ok:false,code:'network_error'}:{ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'재시도 성공'}))});}
+    else { requests++; finish=callback; }
   }},storage:{onChanged:{addListener(){}}}};
-  w.eval(content); await clock.advance(450);
-  observer.cb([{isIntersecting:true,target:element}]); await clock.advance(450);
-  assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'재시도 성공'); w.close();
+  w.eval(content); await clock.advance(40);
+  observer.cb([{isIntersecting:true,target:element}]);
+  w.document.body.append(w.document.createElement('aside')); await clock.advance(400);
+  finish({ok:false,code:'network_error'}); await clock.advance(400);
+  observer.cb([{isIntersecting:true,target:element}]); await clock.advance(400);
+  assert.equal(requests,1); w.close();
+});
+
+test('permanent translation failures stay parked through viewport re-entry',async()=>{
+  let requests=0, observer;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Invalid post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests++; return {ok:false,code:'invalid_translation'};
+  });
+  const clock=fakeTimers(w), element=w.document.querySelector('div');
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(400);
+  for(let i=0;i<4;i++) {
+    observer.cb([{isIntersecting:false,target:element}]);
+    observer.cb([{isIntersecting:true,target:element}]);
+    await clock.advance(400);
+  }
+  assert.equal(requests,1); w.close();
+});
+
+test('content rate-limit cooldown survives DOM churn and re-entry and eventually stops',async()=>{
+  let requests=0, observer;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Rate limited post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests++; return {ok:false,code:'http_429',retryAfterMs:2000};
+  });
+  const clock=fakeTimers(w), element=w.document.querySelector('div');
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(40);
+  w.document.body.append(w.document.createElement('aside')); await clock.advance(400);
+  observer.cb([{isIntersecting:false,target:element}]);
+  observer.cb([{isIntersecting:true,target:element}]); await clock.advance(400);
+  assert.equal(requests,1,'DOM and viewport events must not bypass Retry-After');
+  await clock.advance(6000);
+  assert.equal(requests,3,'stop after three failed content requests, including the initial one');
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 요청 한도 · 자동 재시도 중단');
+  w.document.body.append(w.document.createElement('aside'));
+  observer.cb([{isIntersecting:false,target:element}]);
+  observer.cb([{isIntersecting:true,target:element}]); await clock.advance(10000);
+  assert.equal(requests,3); w.close();
+});
+
+test('a cache clear removes parked failures and requests the visible post again',async()=>{
+  let requests=0, changed;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Invalid post</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests++; return {ok:false,code:'invalid_translation'};
+  });
+  const clock=fakeTimers(w), element=w.document.querySelector('div');
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.chrome.storage.onChanged.addListener=fn=>{changed=fn;};
+  w.eval(content); await clock.advance(400);
+  changed({'lakomics:translation-cache:v2':{newValue:[]}},'local'); await clock.advance(400);
+  assert.equal(requests,2); w.close();
+});
+
+test('editing a post during an in-flight request translates its new text',async()=>{
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">Old post text</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const w=dom.window, clock=fakeTimers(w), element=w.document.querySelector('div'); let requests=0, finish;
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
+    else if(++requests===1) finish=callback;
+    else callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'새 번역'}))});
+  }},storage:{onChanged:{addListener(){}}}};
+  w.eval(content); await clock.advance(40);
+  element.textContent='New post text'; await clock.advance(400);
+  finish({ok:true,text:'옛 번역'}); await clock.advance(400);
+  assert.equal(requests,2); assert.equal(w.document.querySelector('.lakomics-translation').textContent,'새 번역'); w.close();
 });
 
 test('translator uses a compact floating icon popover and themed translation card',async()=>{

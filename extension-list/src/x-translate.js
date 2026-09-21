@@ -5,10 +5,13 @@
   const CACHE = "lakomics:translation-cache:v2";
   const MAX_BATCH_ITEMS = 4;
   const MAX_BATCH_CHARS = 6000;
+  const MAX_FAILURES = 3;
+  const RETRY_DELAY_CAP_MS = 60000;
+  const RETRY_DELAY_DEFAULT_MS = 1500;
   let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true;
   let initialSettings = null;
   const pending = new Set(), observed = new Set();
-  let completed = new WeakMap(), intersection, ui;
+  let completed = new WeakMap(), failures = new WeakMap(), outsideViewport = new WeakSet(), intersection, ui;
   const rendered = new Map();
 
   function send(message) {
@@ -39,8 +42,11 @@
     const lang = (element.getAttribute("lang") || "").split("-")[0].toLowerCase();
     if (lang === "ko") return false;
     const prose = text.replace(/\[\[LINK_\d+\]\]/g, "");
+    // A couple of Han or Kana characters are a complete post, so they count as content
+    // while a stray single letter does not.
+    const script = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}/u.test(prose);
     const letters = prose.match(/\p{L}/gu) || [];
-    if (letters.length < 3) return false;
+    if (letters.length < 3 && !script) return false;
     if (lang && lang !== "und" && lang !== "zxx") return true;
     const korean = prose.match(/[가-힣ㄱ-ㅎㅏ-ㅣ]/g) || [];
     return korean.length / letters.length < 0.55;
@@ -97,14 +103,21 @@
     if (code === "http_402") return "OpenRouter 잔액을 확인하세요";
     if (code === "http_403") return "OpenRouter API 접근 권한을 확인하세요";
     if (code === "http_429") return "번역 요청 한도 · 잠시 후 자동 재시도";
-    if (code === "timeout" || code === "network_error" || /^http_5\d\d$/.test(code || "")) return "번역 연결 실패 · 다시 보이면 재시도";
-    return "번역 실패 · 다시 보이면 재시도";
+    if (isTransientFailure(code)) return "번역 연결 실패 · 다시 보이면 재시도";
+    return "번역 실패 · 자동 번역을 껐다 켜면 재시도";
   }
   function setNotice(text = "", kind = "") {
     if (!ui) return;
     ui.notice = kind;
     ui.status.textContent = text;
     updateControlState();
+  }
+  function isTransientFailure(code) {
+    return ["timeout", "network_error", "worker_failed"].includes(code) || /^http_5\d\d$/.test(code || "");
+  }
+  function failuresFor(element, signature) {
+    const record = failures.get(element);
+    return record && record.signature === signature ? record : null;
   }
   function updateControlState() {
     if (!ui) return;
@@ -143,6 +156,8 @@
       if (batch.length >= limit) break;
       pending.delete(element);
       const snapshot = source(element);
+      // DOM scans must not bypass a cooldown or retry an unchanged failed post.
+      if (failuresFor(element, snapshot.signature)?.nextAttemptAt > Date.now()) continue;
       if (completed.get(element) === snapshot.signature) continue;
       if (!needsTranslation(element, snapshot.text)) {
         completed.set(element, snapshot.signature);
@@ -161,14 +176,31 @@
     for (const element of [...pending]) if (!element.isConnected || !visible(element)) pending.delete(element);
     return batch;
   }
-  function requeueLater(candidates, waitMs) {
-    const retryEpoch = epoch;
+  function requeueLater(candidates, waitMs, requestEpoch) {
+    const delay = Math.max(250, Math.min(RETRY_DELAY_CAP_MS, Number.isFinite(waitMs) && waitMs >= 0 ? waitMs : RETRY_DELAY_DEFAULT_MS));
+    const retry = [];
+    for (const candidate of candidates) {
+      if (!current(candidate, requestEpoch)) continue;
+      const previous = failuresFor(candidate.element, candidate.snapshot.signature);
+      const attempts = (previous?.attempts || 0) + 1;
+      const record = { signature: candidate.snapshot.signature, code: "http_429", attempts,
+        nextAttemptAt: attempts < MAX_FAILURES ? Date.now() + delay : Infinity };
+      failures.set(candidate.element, record);
+      if (attempts < MAX_FAILURES) retry.push({ candidate, record });
+      else {
+        const message = "번역 요청 한도 · 자동 재시도 중단";
+        render(candidate.element, candidate.snapshot, message, true);
+        setNotice(message, "warning");
+      }
+    }
+    if (!retry.length) return;
     setTimeout(() => {
-      if (retryEpoch !== epoch || !enabled || !hasApiKey || blocked) return;
-      for (const candidate of candidates) if (candidate.element.isConnected && source(candidate.element).signature === candidate.snapshot.signature) pending.add(candidate.element);
-      setNotice("", "");
+      if (requestEpoch !== epoch || !enabled || !hasApiKey || blocked) return;
+      for (const { candidate, record } of retry) {
+        if (current(candidate, requestEpoch) && failures.get(candidate.element) === record) pending.add(candidate.element);
+      }
       schedule();
-    }, Math.max(250, Math.min(60000, Number(waitMs) || 1500)));
+    }, delay);
   }
   function blockFor(code) {
     blocked = true;
@@ -183,11 +215,16 @@
     }
     if (code === "http_429") {
       setNotice(failure(code), "warning");
-      requeueLater(candidates, result?.retryAfterMs);
+      requeueLater(candidates, result?.retryAfterMs, requestEpoch);
       return "cooldown";
     }
     setNotice(failure(code), "warning");
-    for (const candidate of candidates) if (current(candidate, requestEpoch)) render(candidate.element, candidate.snapshot, failure(code), true);
+    for (const candidate of candidates) {
+      if (!current(candidate, requestEpoch)) continue;
+      const record = failuresFor(candidate.element, candidate.snapshot.signature);
+      failures.set(candidate.element, { signature: candidate.snapshot.signature, code, attempts: (record?.attempts || 0) + 1, nextAttemptAt: Infinity });
+      render(candidate.element, candidate.snapshot, failure(code), true);
+    }
     return "failed";
   }
   async function handleItem(candidate, item, requestEpoch) {
@@ -195,6 +232,7 @@
     if (item?.ok) {
       render(candidate.element, candidate.snapshot, item.text);
       completed.set(candidate.element, candidate.snapshot.signature);
+      failures.delete(candidate.element);
       setNotice("", "");
       return;
     }
@@ -204,6 +242,7 @@
       if (fallback?.ok) {
         render(candidate.element, candidate.snapshot, fallback.text);
         completed.set(candidate.element, candidate.snapshot.signature);
+        failures.delete(candidate.element);
         setNotice("", "");
         return;
       }
@@ -268,6 +307,7 @@
         intersection?.unobserve(element);
         observed.delete(element);
         pending.delete(element);
+        failures.delete(element);
         removeResult(element);
       }
     }
@@ -276,9 +316,14 @@
         observed.add(element);
         intersection?.observe(element);
       }
-      const signature = source(element).signature;
-      if (completed.has(element) && completed.get(element) !== signature) {
+      const snapshot = source(element);
+      // Recycled text is a new job even if its previous translation failed.
+      const record = failures.get(element);
+      const changed = Boolean(record && record.signature !== snapshot.signature)
+        || (completed.has(element) && completed.get(element) !== snapshot.signature);
+      if (changed) {
         completed.delete(element);
+        failures.delete(element);
         removeResult(element);
       }
       if (visible(element)) pending.add(element);
@@ -291,6 +336,8 @@
     fastLanePending = true;
     pending.clear();
     completed = new WeakMap();
+    failures = new WeakMap();
+    outsideViewport = new WeakSet();
     for (const element of [...rendered.keys()]) removeResult(element);
   }
   async function refresh() {
@@ -348,8 +395,12 @@
       ui.button.setAttribute("aria-expanded", String(!ui.popover.hidden));
     };
     ui.toggle.onchange = async () => {
-      await send({ type: "translation:update", enabled: ui.toggle.checked });
-      await refresh();
+      const result = await send({ type: "translation:update", enabled: ui.toggle.checked });
+      // A successful write refreshes every tab through storage.onChanged.
+      if (!result?.ok) {
+        await refresh();
+        setNotice("번역 설정 저장 실패", "warning");
+      }
     };
     shadow.getElementById("clear").onclick = async () => {
       const result = await send({ type: "translation:clear" });
@@ -382,7 +433,12 @@
       }
     });
     intersection = new IntersectionObserver(entries => {
-      for (const entry of entries) if (entry.isIntersecting) pending.add(entry.target);
+      for (const entry of entries) {
+        if (!entry.isIntersecting) { outsideViewport.add(entry.target); continue; }
+        if (outsideViewport.has(entry.target) && isTransientFailure(failures.get(entry.target)?.code)) failures.delete(entry.target);
+        outsideViewport.delete(entry.target);
+        pending.add(entry.target);
+      }
       schedule();
     });
     let scanTimer = null;

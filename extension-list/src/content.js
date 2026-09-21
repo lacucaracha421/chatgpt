@@ -187,6 +187,7 @@
     if (result.code === "offline" || result.code === "server_offline") return "서버 연결 실패";
     if (result.code === "media_unsupported") return "지원하지 않는 미디어";
     if (result.code === "video_unavailable") return "X 영상을 찾을 수 없음";
+    if (result.code === "video_public_unavailable") return "X 공개 조회에서 영상 정보를 제공하지 않음 · 현재 방식으로 저장 불가";
     if (result.code === "video_info_failed") return "X 영상 정보 조회 실패";
     const detail = String(result.serverDetail || "");
     if (/^Invalid source URL$/i.test(detail)) return "서버 거절 · 원문 URL 검증 실패";
@@ -604,20 +605,25 @@
         onTemporary: temporaryAvailable(candidate, android) ? async () => {
           if (!sessions.holds(sessionState)) return false;
           if (android) { window.location.href = temporary; return true; }
-          const result = await runtimeMessage({ type: "collector:temporary", candidate });
+          const resolvedCandidate = globalThis.LakomicsXVideo?.resolve ? await globalThis.LakomicsXVideo.resolve(candidate) : candidate;
+          if (!sessions.holds(sessionState)) return false;
+          const result = await runtimeMessage({ type: "collector:temporary", candidate: resolvedCandidate });
           if (!sessions.holds(sessionState)) return false;
           if (!result?.ok) { showStatus(temporaryFailureMessage(result), "error"); return false; }
           return { ok: true, message: "임시 다운로드 시작됨" };
         } : null,
         onSave: async (classificationId) => {
+          if (!sessions.holds(sessionState)) return null;
+          const resolvedCandidate = globalThis.LakomicsXVideo?.resolve ? await globalThis.LakomicsXVideo.resolve(candidate) : candidate;
+          if (!sessions.holds(sessionState)) return null;
           const model = globalThis.LakomicsClassificationTree.createModel(state.classifications.entries, state.profile);
           const classificationPath = model.path(classificationId).map((entry) => entry.name);
-          const result = await runtimeMessage({ type: "collector:save", payload: { candidate, classificationId, classificationPath } });
+          const result = await runtimeMessage({ type: "collector:save", payload: { candidate: resolvedCandidate, classificationId, classificationPath } });
           if (result?.ok) {
             // The worker already accepted this exact capture. Its completed-save side
             // effect is applied before any session check so a navigation that landed
             // meanwhile cannot discard or resubmit it.
-            globalThis.LakomicsXGalleryRuntime?.markSaved?.(candidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
+            globalThis.LakomicsXGalleryRuntime?.markSaved?.(resolvedCandidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
             if (!sessions.holds(sessionState)) return null;
             let like = null;
             if (candidate.source === "x" && state.profile.preferences.autoLikeOnSave !== false && candidate.postId) like = await autoLikePost({ postId: candidate.postId });

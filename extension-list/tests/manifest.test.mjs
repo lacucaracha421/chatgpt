@@ -17,6 +17,20 @@ test('collection uses the arc menu and keeps the list editor out of content page
 });
 
 
+test('X page video observation starts early without exposing other extension scripts to MAIN', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
+  const page = manifest.content_scripts.find(entry => entry.js?.includes('src/x-video-page.js'));
+  assert.deepEqual(page.matches, ['https://x.com/*', 'https://twitter.com/*']);
+  assert.deepEqual(page.js, ['src/x-video-page.js']);
+  assert.equal(page.world, 'MAIN');
+  assert.equal(page.run_at, 'document_start');
+  const client = manifest.content_scripts.find(entry => entry.js?.includes('src/x-video-client.js'));
+  assert.notEqual(client.world, 'MAIN');
+  assert.equal(client.run_at, 'document_start');
+  assert.equal(manifest.permissions.includes('cookies'), false);
+  assert.equal(manifest.permissions.includes('webRequest'), false);
+});
+
 test('permanent saves remain server-only while temporary PC saves allow downloads', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.permissions.includes('downloads'));

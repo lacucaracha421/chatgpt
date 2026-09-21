@@ -39,6 +39,18 @@
         "https://twitter.com/*"
       ],
       "js": [
+        "src/x-video-page.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "src/x-video-client.js",
         "src/x-translate.js"
       ],
       "run_at": "document_start"
