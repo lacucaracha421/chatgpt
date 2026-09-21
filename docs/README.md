@@ -37,7 +37,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 
 ## Current reference documents
 
-- `agents/pc-design-reference.md` — Chrome 03b shell, content, and interaction contracts for affected desktop UI.
+- `agents/pc-design-reference.md` — Chrome 03b shell, Asset browsing, selection, floating surfaces, search, Works physicality, responsive/performance rules, and current implementation checkpoint.
 - `agents/works-viewer-design.md` — type-specific Works presentation inside the shared PC design: manga shelf, game exhibit, video poster archive, Showcase.
 - `agents/lakomics-works-handoff-v2.md` — Collection/Works product and architecture boundaries.
 - `agents/domain.md` — how to resolve documentation/domain conflicts.
