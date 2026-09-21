@@ -1,9 +1,9 @@
 //! Native queue consumer. One complete asset result is the publication unit.
+#[cfg(test)]
+use super::character_autotag;
 use super::{
-    character_autotag::{self, Context, Job, Prediction, ReviewState},
-    character_scan::{
-        automatic_evidence_regions, competitor_allows_automatic, same_person, ScanResult,
-    },
+    character_autotag::{Context, Job, Prediction, ReviewState},
+    character_scan::{same_person, ScanResult},
     character_sources::Source,
     character_worker::{RuntimeConfig, BASELINE},
     characters::{Error, Result},
@@ -14,6 +14,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Write,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -40,6 +41,13 @@ impl PreparedReferences {
     }
 }
 
+struct AugmentationResult {
+    snapshot_id: String,
+    sources: Arc<BTreeMap<String, Source>>,
+    query_identity: Value,
+    response: Value,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct Engine {
     running: bool,
@@ -56,6 +64,7 @@ pub(super) struct Engine {
     config: Option<RuntimeConfig>,
     next_config: Option<RuntimeConfig>,
     prepared_references: Option<Arc<PreparedReferences>>,
+    training_sources: Option<(String, Arc<BTreeMap<String, Source>>)>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -448,6 +457,24 @@ impl Library {
             }
             Ok((predictions, refresh_delta_targets))
         })?;
+        // Borrow separately: an optional worker failure resets the child but
+        // cannot discard the already completed native comparisons.
+        let augmentation =
+            if config.augmentation_model.is_some() && ready["augmentationAvailable"] == true {
+                self.compare_character_augmentation(
+                    job,
+                    config,
+                    stop.clone(),
+                    &context,
+                    &query,
+                    &predictions,
+                    &reference_targets,
+                )
+                .ok()
+                .flatten()
+            } else {
+                None
+            };
         let verification_started = Instant::now();
         query.verify(self)?;
         self.check_incremental_references(&prepared)?;
@@ -467,14 +494,29 @@ impl Library {
         if current != decision_sequence {
             return Err(Error::Stale);
         }
-        self.finalize_incremental(
+        let extra = augmentation.as_ref().filter(|a| {
+            self.character_training_snapshot(&tx, &context)
+                .is_ok_and(|s| s.id == a.snapshot_id)
+                && super::character_training::query_identity(&tx, &job.asset_id)
+                    .is_ok_and(|identity| identity == a.query_identity)
+                && a.sources
+                    .values()
+                    .all(|source| source.check_identity(self).is_ok())
+        });
+        self.finalize_incremental_augmented(
             &tx,
             job,
             &context,
             &predictions,
             &reference_targets,
             &refresh_delta_targets,
+            extra.map(|a| &a.response),
         )?;
+        if let Some(a) = extra {
+            for source in a.sources.values() {
+                source.check_identity(self)?;
+            }
+        }
         query.check_identity(self)?;
         self.check_incremental_references(&prepared)?;
         if stop.load(Ordering::Acquire) {
@@ -500,6 +542,141 @@ impl Library {
         }
         Ok(())
     }
+    fn compare_character_augmentation(
+        &self,
+        job: &Job,
+        config: &RuntimeConfig,
+        stop: Arc<AtomicBool>,
+        context: &Context,
+        query: &Source,
+        predictions: &[Prediction],
+        reference_targets: &BTreeSet<String>,
+    ) -> Result<Option<AugmentationResult>> {
+        let (snapshot, query_identity, prior) = {
+            let mut c = self.connection()?;
+            let tx = c.transaction()?;
+            let identity = super::character_training::query_identity(&tx, &job.asset_id)?;
+            if identity["pdq"].as_str().is_none_or(|pdq| pdq.len() != 128)
+                || identity["quality"].as_i64().unwrap_or(0) < 50
+            {
+                return Ok(None);
+            }
+            let mut prior = BTreeMap::new();
+            let rows = tx.prepare("SELECT target_id,decision FROM character_decisions WHERE source_asset_id=?1 ORDER BY sequence DESC")?
+                .query_map([&job.asset_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?
+                .collect::<std::result::Result<Vec<_>,_>>()?;
+            for (target, decision) in rows {
+                prior.entry(target).or_insert(decision);
+            }
+            let snapshot = self.character_training_snapshot(&tx, context)?;
+            (snapshot, identity, prior)
+        };
+        let (native, _) =
+            super::character_augmentation::native_selection(predictions, &prior, reference_targets);
+        let native_ids = native
+            .iter()
+            .map(|p| p.target_id.clone())
+            .chain(
+                prior
+                    .iter()
+                    .filter(|(_, decision)| decision.as_str() == "accepted")
+                    .map(|(id, _)| id.clone()),
+            )
+            .collect::<BTreeSet<_>>();
+        if !predictions.iter().any(|p| {
+            !native_ids.contains(&p.target_id)
+                && !prior.contains_key(&p.target_id)
+                && !reference_targets.contains(&p.target_id)
+                && p.result
+                    .evidence
+                    .as_ref()
+                    .is_some_and(|e| e["passed"] == true && e["wholeFallback"] == false)
+        }) {
+            return Ok(None);
+        }
+        let cached = self
+            .character_incremental
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .training_sources
+            .as_ref()
+            .filter(|(id, _)| id == &snapshot.id)
+            .map(|(_, sources)| sources.clone());
+        let sources = if let Some(sources) = cached.filter(|sources| {
+            sources
+                .values()
+                .all(|source| source.check_identity(self).is_ok())
+        }) {
+            sources
+        } else {
+            let mut sources = BTreeMap::new();
+            let mut bytes = 0_u64;
+            for (id, (hash, path)) in &snapshot.sources {
+                bytes = bytes.saturating_add(self.open_library_media(path)?.file.metadata()?.len());
+                if bytes > 512 * 1024 * 1024 {
+                    return Err(Error::Invalid("보완 학습 이미지 용량 한도를 넘었습니다."));
+                }
+                if stop.load(Ordering::Acquire) {
+                    return Err(Error::Stale);
+                }
+                sources.insert(id.clone(), Source::capture(self, path, hash)?);
+            }
+            let sources = Arc::new(sources);
+            self.character_incremental
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .training_sources = Some((snapshot.id.clone(), sources.clone()));
+            sources
+        };
+        let mut body = snapshot.value;
+        body["policy"] = super::character_augmentation::policy();
+        for asset in body["assets"].as_array_mut().ok_or(Error::Stale)? {
+            let id = asset["id"].as_str().ok_or(Error::Stale)?;
+            asset["path"] = json!(sources.get(id).ok_or(Error::Stale)?.path());
+        }
+        let mut file = tempfile::NamedTempFile::new()?;
+        file.write_all(&serde_json::to_vec(&body)?)?;
+        file.flush()?;
+        let cache = self.root.join(".cache/characters");
+        let result = self.character_worker_pool.with(config, &cache, stop, false, |worker, ready| {
+            if ready["runtimeFingerprint"] != context.runtime || ready["augmentationAvailable"] != true { return Ok(None); }
+            worker.send(&json!({"type":"augmentation_prepare","snapshotId":snapshot.id,"snapshotPath":file.path()}))?;
+            let mut response = worker.receive()?;
+            // Amortize cold preparation across arriving jobs rather than blocking
+            // the laptop on an entire training inventory in one queue item.
+            for _ in 0..4 {
+                if response["type"] != "augmentation_prepared" || response["snapshotId"] != snapshot.id { return Err(Error::Worker("보완 학습 준비 실패".into())); }
+                if response["state"] == "ready" { break; }
+                if response["state"] != "building" { return Err(Error::Stale); }
+                worker.send(&json!({"type":"augmentation_step","snapshotId":snapshot.id}))?;
+                response = worker.receive()?;
+            }
+            if response["type"] != "augmentation_prepared" || response["snapshotId"] != snapshot.id { return Err(Error::Stale); }
+            if response["state"] == "building" { return Ok(None); }
+            if response["state"] != "ready" || !super::character_augmentation::is_hash(&response["modelId"]) { return Err(Error::Stale); }
+            let model_id = response["modelId"].clone();
+            // The pool may have serviced a manual request since native comparison.
+            worker.send(&json!({"type":"load_query","assetId":job.asset_id,"hash":job.content_hash,"path":query.path()}))?;
+            let loaded = worker.receive()?;
+            if loaded["type"] != "query_loaded" || loaded["assetId"] != job.asset_id || loaded["contentHash"] != job.content_hash { return Err(Error::Stale); }
+            let bundle = predictions.iter().map(|p| (p.target_id.clone(), p.result.evidence.clone().unwrap_or(Value::Null))).collect::<BTreeMap<_,_>>();
+            worker.send(&json!({"type":"augment_query","snapshotId":snapshot.id,"assetId":job.asset_id,"hash":job.content_hash,"path":query.path(),
+                "queryIdentity":query_identity,"nativeAccepted":native_ids,"bundle":bundle}))?;
+            let response = worker.receive()?;
+            if response["type"] != "augmentation_result" || response["snapshotId"] != snapshot.id || response["modelId"] != model_id { return Err(Error::Stale); }
+            Ok((response["state"] == "ready").then_some(response))
+        })?;
+        for source in sources.values() {
+            source.check_identity(self)?;
+        }
+        Ok(result.map(|response| AugmentationResult {
+            snapshot_id: snapshot.id,
+            sources,
+            query_identity,
+            response,
+        }))
+    }
+
     fn prepare_incremental_references(
         &self,
         key: PreparedKey,
@@ -554,6 +731,7 @@ impl Library {
             engine.prepared_references = None;
         }
     }
+    #[cfg(test)]
     fn finalize_incremental(
         &self,
         tx: &rusqlite::Transaction<'_>,
@@ -563,23 +741,38 @@ impl Library {
         reference_targets: &BTreeSet<String>,
         refresh_delta_targets: &BTreeSet<String>,
     ) -> Result<()> {
+        self.finalize_incremental_augmented(
+            tx,
+            job,
+            context,
+            predictions,
+            reference_targets,
+            refresh_delta_targets,
+            None,
+        )
+    }
+
+    fn finalize_incremental_augmented(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        job: &Job,
+        context: &Context,
+        predictions: &[Prediction],
+        reference_targets: &BTreeSet<String>,
+        refresh_delta_targets: &BTreeSet<String>,
+        augmentation: Option<&Value>,
+    ) -> Result<()> {
         let decisions=tx.prepare("SELECT target_id,decision,origin FROM character_decisions WHERE source_asset_id=?1 ORDER BY sequence DESC")?
             .query_map([&job.asset_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut latest = BTreeMap::new();
         for (id, decision, _) in &decisions {
-            latest.entry(id).or_insert(decision);
+            latest.entry(id.clone()).or_insert(decision.clone());
         }
-        let blocked = latest
-            .iter()
-            .filter(|(_, d)| matches!(d.as_str(), "rejected" | "cleared"))
-            .map(|(id, _)| id.as_str())
-            .collect::<BTreeSet<_>>();
-        let candidates = predictions
-            .iter()
-            .filter(|p| !blocked.contains(p.target_id.as_str()))
-            .collect::<Vec<_>>();
-        let mut accepted = Vec::new();
-        let mut covered = Vec::new();
+        let (mut accepted, mut covered) = super::character_augmentation::native_selection(
+            predictions,
+            &latest,
+            reference_targets,
+        );
         let boxes = predictions
             .first()
             .and_then(|p| p.result.evidence.as_ref())
@@ -590,53 +783,32 @@ impl Library {
             || latest
                 .values()
                 .any(|decision| decision.as_str() == "accepted");
-        for p in &candidates {
-            let evidence = p.result.evidence.as_ref();
-            if reference_targets.contains(&p.target_id)
-                || p.result.error.is_some()
-                || !matches!(p.result.state.as_str(), "recommended" | "unmatched")
-            {
-                continue;
-            }
-            let Some(regions) = automatic_evidence_regions(evidence) else {
-                continue;
-            };
-            if regions.is_empty() {
-                continue;
-            }
-            let unique = regions
-                .iter()
-                .filter(|region| {
-                    candidates
-                        .iter()
-                        .filter(|other| other.target_id != p.target_id)
-                        .all(|other| {
-                            other.result.error.is_none()
-                                && matches!(other.result.state.as_str(), "recommended" | "unmatched")
-                                && competitor_allows_automatic(region, other.result.evidence.as_ref())
-                                    == Some(true)
-                        })
-                })
-                .map(|region| region.bounds)
-                .collect::<Vec<_>>();
-            if unique.is_empty() {
-                continue;
-            }
-            if decisions.iter().any(|(id, _, _)| id == &p.target_id) {
-                if decisions
+        let native_ids = accepted
+            .iter()
+            .map(|p| p.target_id.clone())
+            .chain(
+                latest
                     .iter()
-                    .find(|(id, _, _)| id == &p.target_id)
-                    .is_some_and(|(_, d, _)| d == "accepted")
-                {
-                    covered.extend(unique);
-                }
-                continue;
+                    .filter(|(_, decision)| decision.as_str() == "accepted")
+                    .map(|(id, _)| id.clone()),
+            )
+            .collect::<BTreeSet<_>>();
+        let additions = augmentation
+            .and_then(|response| {
+                super::character_augmentation::additions(
+                    response,
+                    predictions,
+                    &native_ids,
+                    &latest,
+                    reference_targets,
+                )
+            })
+            .unwrap_or_default();
+        for p in predictions {
+            if let Some(regions) = additions.get(&p.target_id) {
+                covered.extend(regions);
+                accepted.push(p);
             }
-            if known && boxes.len() == 1 {
-                continue;
-            }
-            covered.extend(unique);
-            accepted.push(*p);
         }
         let unresolved = boxes
             .iter()
@@ -669,6 +841,9 @@ impl Library {
             evidence["learnedReferences"] =
                 json!(target.usable_learned_references().collect::<Vec<_>>());
             evidence["automaticScope"] = json!(true);
+            if additions.contains_key(&p.target_id) {
+                evidence["augmentation"] = augmentation.cloned().unwrap_or(Value::Null);
+            }
             let snapshot = json!({"scanId":evidence_id,"runtimeFingerprint":context.runtime,"prediction":evidence,"references":target.usable_references().collect::<Vec<_>>()});
             tx.execute("INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,baseline_fingerprint,reference_snapshot,origin,created_at)
                 VALUES(?1,?2,?2,?3,'accepted',?4,?5,?6,'automatic',?7)",params![target.id,job.asset_id,job.content_hash,target.fingerprint,context.runtime,serde_json::to_string(&snapshot)?,chrono::Utc::now().to_rfc3339()])?;

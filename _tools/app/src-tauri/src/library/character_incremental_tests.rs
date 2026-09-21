@@ -4,6 +4,205 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 #[test]
+fn augmentation_publication_is_additive_and_respects_manual_vetoes() {
+    for mode in [
+        "add",
+        "off",
+        "malformed",
+        "gate",
+        "wrong_crop",
+        "rejected",
+        "cleared",
+        "rollback",
+    ] {
+        let f = Fixture::new();
+        let a = f.ready("A");
+        let b = f.ready("B");
+        add_learned_reference(&f, &a.id);
+        if matches!(mode, "rejected" | "cleared") {
+            f.library
+                .record_character_decisions(super::super::characters::DecisionRequest {
+                    target_id: b.id.clone(),
+                    expected_fingerprint: b.fingerprint.clone(),
+                    asset_ids: vec!["asset-5".into()],
+                    decision: if mode == "rejected" {
+                        super::super::characters::DecisionKind::Rejected
+                    } else {
+                        super::super::characters::DecisionKind::Cleared
+                    },
+                    baseline_fingerprint: None,
+                    scan_id: None,
+                })
+                .unwrap();
+        }
+        character_autotag::enqueue(
+            &f.library.connection().unwrap(),
+            "asset-5",
+            character_autotag::Cause::Ingestion,
+        )
+        .unwrap();
+        let job = f.library.claim_character_autotag().unwrap().unwrap();
+        let mut c = f.library.connection().unwrap();
+        let tx = c.transaction().unwrap();
+        let context = f
+            .library
+            .character_autotag_context(&tx, &job, &"a".repeat(64))
+            .unwrap();
+        let boxes = json!([[0, 0, 40, 100], [60, 0, 100, 100]]);
+        let predictions = context.targets.iter().map(|target| {
+            let n = target.usable_references().count();
+            let matched_box = if target.id == a.id { 0 } else { 1 };
+            let votes = if target.id == a.id { 6 } else { 2 };
+            let rows = (0..2).map(|index| {
+                let distances = (0..n).map(|j| if index == matched_box && j < votes { 0.1 } else { 0.4 }).collect::<Vec<_>>();
+                json!({"matchedReferences":if index == matched_box { (0..votes).collect::<Vec<_>>() } else { vec![] },"referenceDistances":distances})
+            }).collect::<Vec<_>>();
+            Prediction { target_id:target.id.clone(),result:ScanResult {asset_id:job.asset_id.clone(),content_hash:job.content_hash.clone(),state:"recommended".into(),error:None,
+                evidence:Some(json!({"passed":true,"wholeFallback":false,"queryBoxes":boxes,"evidence":rows,"baselineFingerprint":BASELINE,
+                    "referenceHashes":target.usable_references().map(|r|r.asset_hash.clone()).collect::<Vec<_>>() }))}}
+        }).collect::<Vec<_>>();
+        let gate =
+            json!({"enabled":true,"positive":2,"negative":2,"additional_tp":2,"additional_fp":0});
+        let mut response = json!({"type":"augmentation_result","state":"ready","modelId":"b".repeat(64),"assetId":job.asset_id,"contentHash":job.content_hash,"queryBoxes":boxes,
+            "gates":{a.id.clone():gate,b.id.clone():gate},"headDecision":{"unavailable_heads":{},"regions":[
+                {"index":0,"state":"accepted_shadow","candidates":[a.id]}, {"index":1,"state":"accepted_shadow","candidates":[b.id]}]}});
+        match mode {
+            "malformed" => response["queryBoxes"] = json!([]),
+            "gate" => response["gates"][&b.id]["additional_fp"] = json!(1),
+            "wrong_crop" => {
+                response["headDecision"]["regions"][0]["candidates"] = json!([b.id]);
+                response["headDecision"]["regions"][1]["candidates"] = json!([a.id]);
+            }
+            _ => {}
+        }
+        f.library
+            .finalize_incremental_augmented(
+                &tx,
+                &job,
+                &context,
+                &predictions,
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+                (mode != "off").then_some(&response),
+            )
+            .unwrap();
+        if mode == "rollback" {
+            tx.rollback().unwrap();
+        } else {
+            tx.commit().unwrap();
+        }
+        drop(c);
+        let relations = f
+            .library
+            .character_relations_for_asset("asset-5")
+            .unwrap()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let expected = if mode == "rollback" {
+            BTreeSet::new()
+        } else if mode == "add" {
+            BTreeSet::from([a.id.clone(), b.id.clone()])
+        } else {
+            BTreeSet::from([a.id.clone()])
+        };
+        assert_eq!(relations, expected, "{mode}");
+        if mode == "add" {
+            let snapshot: String = f.library.connection().unwrap().query_row("SELECT reference_snapshot FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1", [&b.id], |r|r.get(0)).unwrap();
+            let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+            assert_eq!(
+                snapshot["prediction"]["augmentation"]["modelId"],
+                "b".repeat(64)
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires explicit test Python; fake augmentation worker in TEMP"]
+fn augmentation_worker_warmup_and_transport_failure_preserve_native() {
+    for fail in [false, true] {
+        let f = Fixture::new();
+        let a = f.ready("A");
+        let b = f.ready("B");
+        add_learned_reference(&f, &a.id);
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET perceptual_hash=zeroblob(64),perceptual_hash_quality=90",
+                [],
+            )
+            .unwrap();
+        let mut config = config(&f);
+        config.augmentation_model = Some(f.temp.path().join("optional.onnx"));
+        if fail {
+            std::fs::write(f.temp.path().join("fail-optional"), "yes").unwrap();
+        }
+        std::fs::write(&config.script, r#"
+import json,sys,pathlib
+base='40246ab31230e100e9592811d032e7383959ad168c1c738520003993bf357199'
+def emit(v): print(json.dumps(v),flush=True)
+emit({'type':'ready','baselineFingerprint':base,'runtimeFingerprint':'a'*64,'augmentationAvailable':True})
+refs=[]; snapshot=None; sid=None; loaded=0
+boxes=[[0,0,40,100],[60,0,100,100]]
+for line in sys.stdin:
+ r=json.loads(line); kind=r['type']
+ if kind=='prepare':
+  refs=[v['hash'] for v in r['references']];emit({'type':'prepared','referenceHashes':refs})
+ elif kind=='load_query':
+  emit({'type':'query_loaded','assetId':r['assetId'],'contentHash':r['hash']})
+ elif kind=='compare_query':
+  n=len(refs); region=0 if n==6 else 1; votes=6 if n==6 else 2
+  rows=[{'matchedReferences':list(range(votes)) if i==region else [], 'referenceDistances':[.1 if i==region and j<votes else .4 for j in range(n)]} for i in range(2)]
+  emit({'type':'result','assetId':r['assetId'],'contentHash':r['hash'],'baselineFingerprint':base,'referenceHashes':refs,'passed':True,'distance':.1,'wholeFallback':False,'queryBoxes':boxes,'evidence':rows})
+ elif kind=='augmentation_prepare':
+  snapshot=json.loads(pathlib.Path(r['snapshotPath']).read_text())
+  assert all(isinstance(a['labels'],dict) and len(a['pdq'])==128 and pathlib.Path(a['path']).is_file() for a in snapshot['assets'])
+  assert {ref['assetId'] for t in snapshot['targets'] for ref in t['references']} <= {a['id'] for a in snapshot['assets']}
+  if sid!=r['snapshotId']: loaded=0
+  sid=r['snapshotId']
+  emit({'type':'augmentation_prepared','snapshotId':sid,'state':'ready' if loaded>=len(snapshot['assets']) else 'building','modelId':'b'*64})
+ elif kind=='augmentation_step':
+  loaded+=1;emit({'type':'augmentation_prepared','snapshotId':sid,'state':'ready' if loaded>=len(snapshot['assets']) else 'building','modelId':'b'*64})
+ elif kind=='augment_query':
+  if pathlib.Path(__file__).with_name('fail-optional').exists(): sys.exit(7)
+  regions=[]
+  for i in range(2):
+   tid=next(t['id'] for t in snapshot['targets'] if (len(t['references'])==6)==(i==0))
+   regions.append({'index':i,'state':'accepted_shadow','candidates':[tid]})
+  gates={t['id']:{'enabled':True,'positive':2,'negative':2,'additional_tp':2,'additional_fp':0} for t in snapshot['targets']}
+  emit({'type':'augmentation_result','snapshotId':sid,'modelId':'b'*64,'assetId':r['assetId'],'contentHash':r['hash'],'state':'ready','queryBoxes':boxes,'gates':gates,'headDecision':{'regions':regions,'unavailable_heads':{}}})
+ else: raise ValueError(kind)
+"#).unwrap();
+        run(&f, &config, "asset-5");
+        assert_eq!(
+            f.library.character_relations_for_asset("asset-5").unwrap(),
+            vec![a.id.clone()]
+        );
+        run_with_cause(
+            &f,
+            &config,
+            "asset-5",
+            character_autotag::Cause::ManualScanEnrollment,
+        );
+        let actual = f
+            .library
+            .character_relations_for_asset("asset-5")
+            .unwrap()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual,
+            if fail {
+                BTreeSet::from([a.id])
+            } else {
+                BTreeSet::from([a.id, b.id])
+            }
+        );
+    }
+}
+
+#[test]
 fn automation_setting_reports_the_worker_pause_independently_of_history_pause() {
     let f = Fixture::new();
     f.library.set_character_incremental_paused(true).unwrap();
@@ -106,6 +305,7 @@ for line in sys.stdin:
             .into(),
         script,
         models: f.temp.path().into(),
+        augmentation_model: None,
     }
 }
 fn prepare_paths(config: &RuntimeConfig) -> Vec<Vec<String>> {
@@ -702,6 +902,7 @@ fn real_native_incremental_queue_reuses_kisaki_references() {
             .into(),
         script: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../character-runtime/scan_worker.py"),
+        augmentation_model: None,
         models: std::env::var_os("LAKOMICS_CHARACTER_TEST_MODELS")
             .unwrap()
             .into(),

@@ -248,6 +248,7 @@ fn config(script: PathBuf, models: PathBuf) -> RuntimeConfig {
             .into(),
         script,
         models,
+        augmentation_model: None,
     }
 }
 

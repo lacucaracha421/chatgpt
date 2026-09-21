@@ -11,6 +11,79 @@ classification membership. Product scope enforcement belongs to the Rust
 native owner: the selected classification's recursive subtree, with a separate
 character relation. Do not expose this path-based protocol to the renderer or HTTP.
 
+## Standalone learned classifier
+
+[CLASSIFIER.md](CLASSIFIER.md) documents the opt-in S36 plus per-character learned
+head CLI. It supports local extraction, grouped training/calibration, held-out
+replay and image-to-JSON predictions. It is **shadow-only**, is not imported by the
+native scan worker, and does not publish or change production classifications.
+
+## Conditional native augmentation (opt-in)
+
+The incremental queue can now retain every native acceptance and add a character
+only when a ready S36 learned head and at least two current B36 references support
+**the same detected person**, with no overlapping accepted-native or ready-head
+rival. Manual accepted/rejected/cleared decisions and reference-self guards still
+win. Full manual scans remain native-only.
+
+This path is **off by default**. In **Settings → General → Character omission
+augmentation** (`캐릭터 누락 보완`), use the on/off toggle; there is no model picker.
+When no explicit model path is saved, the runtime resolves
+`<configured models>/augmentation/model_feat.onnx` and keeps augmentation disabled.
+Provisioning that file does not enable classification. Disabling retains the path
+for later use. The UI reports model availability separately from learned-head
+readiness, validates the worker before enabling, and never starts a full historical
+sweep. Validation failure leaves settings intact.
+
+Settings persist in the existing machine-local `character-runtime.json`:
+`augmentation_model` retains the absolute model path and `augmentation_disabled`
+stores the off switch. Legacy files with a model path and no off switch keep their
+previous behavior. `LAKOMICS_CHARACTER_AUGMENTATION_MODEL` still overrides these
+fields; the UI explains this and locks changes while that override is present.
+The path must point to the pinned S36 ONNX weights (SHA256
+`484ad463f569ab95308cf47e91ba358b01c40bc53289b90b950b94fcde7f2628`).
+Keep S36 in its `augmentation` subdirectory: do not replace the B36
+`<configured models>/model_feat.onnx`. The app does not download or install weights;
+local provisioning is separate from activation. Settings and activation change
+only through an explicit user action. Re-running native runtime setup resets this opt-in.
+An empty environment override disables it; a missing, corrupt, or incompatible
+optional model leaves native classification working.
+
+Heads are built locally from current manual labels and seed references, not from
+experimental CV fold artifacts or previous automatic acceptances. Unknown
+memberships and cleared decisions never become negatives; supporting references
+without manual labels supply no training truth. Each source group gets one vote;
+PDQ whole/cropped near-duplicate groups remain in one deterministic 60/20/20
+train/calibration/held-out split, and reference groups are training-only. A head
+must additionally recover at least two positives beyond native on separate
+calibration groups (at least two positive and two negative groups), with zero
+additional labelled calibration errors. This gate is not a guarantee of production
+accuracy, particularly for unlabelled companions.
+
+To bound laptop work, preparation processes at most four sources per eligible
+queue item. Until preparation finishes, the native result alone is used. The
+snapshot includes at most eight targets, 128 selected labelled sources, and 256
+total sources including references (at most 512 MiB of source snapshots).
+Oversized rosters or references without a
+usable current PDQ fingerprint fall back to native. Models stay in the worker;
+restart rebuilds them from cached features. Warm-up does not automatically requeue
+already completed images; the existing explicit historical-refresh action remains
+the way to reconsider them. No new background history sweep is introduced.
+
+S36 uses B36's boxes without a second detector, two CPU threads, and an independent
+atomic feature-cache namespace. Once ready, query extraction is skipped unless an
+enabled, not-already-accepted target has B36 recommendation support. Exact and
+near-duplicate training/calibration exposures are withheld. Before publication,
+native code rechecks the training snapshot, source-file identities, query,
+references, scope and manual decisions. Optional failure or stale training drops
+only additions; source/scope changes invalidating native evidence still cancel the
+whole transaction. Added judgments retain model/snapshot/gate/region provenance
+under `prediction.augmentation`; files and saved folders are not moved.
+
+Code and fixture checks do not constitute Windows/Tauri-window acceptance or a
+production-quality measurement. The historical cross-validation gain belongs to
+its recorded experimental inputs, not automatically to a newly built live head.
+
 ## Frozen contract
 
 `baseline.json` pins the models, hashes, threshold, preprocessing and crop policy.

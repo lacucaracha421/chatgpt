@@ -22,6 +22,7 @@ import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
 import { MobileCatalogPublishSettings } from "./MobileCatalogPublishSettings";
 import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
 import { CharacterAutomationSettings } from "./CharacterAutomationSettings";
+import { CharacterAugmentationSettings } from "./CharacterAugmentationSettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -78,6 +79,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [switchingLibrary, setSwitchingLibrary] = useState(false);
   const [characterAutomationBusy, setCharacterAutomationBusy] = useState(false);
+  const [characterAugmentationBusy, setCharacterAugmentationBusy] = useState(false);
   useAutoDismiss(copyMessage, setCopyMessage);
   const [bookImportRunning, setBookImportRunning] = useState(false);
   const [bookImportMessage, setBookImportMessage] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [extensionPairingQr, setExtensionPairingQr] = useState<ExtensionPairingLink | null>(null);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
   useAutoDismiss(cloudMessage, setCloudMessage);
-  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary || characterAutomationBusy || privateVaultBusy;
+  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary || characterAutomationBusy || characterAugmentationBusy || privateVaultBusy;
 
   useEffect(() => {
     let active = true;
@@ -803,6 +805,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => { onPrivacyModeChange(event.target.checked); setSaved("비공개 모드 설정을 저장했습니다"); }}>켜기</Toggle>
         </dl>
         {library && <CharacterAutomationSettings key={library.root} disabled={pending} onBusyChange={setCharacterAutomationBusy} />}
+        {library && <CharacterAugmentationSettings key={`augmentation:${library.root}`} disabled={pending} onBusyChange={setCharacterAugmentationBusy} />}
         <dl className="settings-view__property">
           <dt>라이브러리 폴더</dt>
           <dd className="settings-view__path">{library?.root ?? "알 수 없음"}</dd>

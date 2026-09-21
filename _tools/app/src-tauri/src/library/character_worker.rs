@@ -22,32 +22,110 @@ pub struct RuntimeConfig {
     pub(super) python: PathBuf,
     pub(super) script: PathBuf,
     pub(super) models: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) augmentation_model: Option<PathBuf>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedRuntime {
+    #[serde(flatten)]
+    runtime: RuntimeConfig,
+    #[serde(default)]
+    augmentation_disabled: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AugmentationSettings {
+    pub enabled: bool,
+    pub model_name: Option<String>,
+    pub model_ready: bool,
+    pub runtime_configured: bool,
+    pub managed_by_environment: bool,
+}
+
+impl SavedRuntime {
+    fn effective(&self) -> RuntimeConfig {
+        let mut config = self.runtime.clone();
+        if self.augmentation_disabled {
+            config.augmentation_model = None;
+        }
+        config
+    }
 }
 
 impl RuntimeConfig {
-    pub(crate) fn configured(script: PathBuf, settings: &Path) -> Result<Self> {
+    fn load(script: PathBuf, settings: &Path) -> Result<SavedRuntime> {
+        let baseline_override = std::env::var_os("LAKOMICS_CHARACTER_PYTHON").is_some()
+            || std::env::var_os("LAKOMICS_CHARACTER_MODELS").is_some();
+        let saved = if settings.is_file() {
+            let loaded = std::fs::read(settings)
+                .map_err(Error::from)
+                .and_then(|bytes| {
+                    serde_json::from_slice::<SavedRuntime>(&bytes).map_err(Error::from)
+                });
+            match loaded {
+                Ok(saved) => Some(saved),
+                Err(_) if baseline_override => None,
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
         let path = |key| {
             std::env::var_os(key)
                 .map(PathBuf::from)
                 .ok_or_else(|| Error::Worker(format!("캐릭터 런타임 설정이 필요합니다: {key}")))
         };
-        let config = if std::env::var_os("LAKOMICS_CHARACTER_PYTHON").is_some()
+        let mut config = if std::env::var_os("LAKOMICS_CHARACTER_PYTHON").is_some()
             || std::env::var_os("LAKOMICS_CHARACTER_MODELS").is_some()
         {
             Self {
                 python: path("LAKOMICS_CHARACTER_PYTHON")?,
                 models: path("LAKOMICS_CHARACTER_MODELS")?,
                 script,
+                augmentation_model: saved
+                    .as_ref()
+                    .and_then(|saved| saved.runtime.augmentation_model.clone()),
             }
-        } else if settings.is_file() {
-            let mut saved: Self = serde_json::from_slice(&std::fs::read(settings)?)?;
-            saved.script = script;
-            saved
+        } else if let Some(saved) = &saved {
+            let mut runtime = saved.runtime.clone();
+            runtime.script = script;
+            runtime
         } else {
             return Err(Error::Invalid(
                 "초기 설정에서 Python과 모델 폴더를 지정해 주세요.",
             ));
         };
+        let mut disabled = saved
+            .as_ref()
+            .is_some_and(|saved| saved.augmentation_disabled);
+        if config.augmentation_model.is_none() {
+            config.augmentation_model =
+                Some(config.models.join("augmentation").join("model_feat.onnx"));
+            // Installing weights must not opt existing runtimes into classification.
+            disabled = true;
+        }
+        if let Some(path) = std::env::var_os("LAKOMICS_CHARACTER_AUGMENTATION_MODEL") {
+            config.augmentation_model = (!path.is_empty()).then(|| PathBuf::from(path));
+            disabled = false;
+        }
+        Ok(SavedRuntime {
+            runtime: config,
+            augmentation_disabled: disabled,
+        })
+    }
+
+    pub(crate) fn configured(script: PathBuf, settings: &Path) -> Result<Self> {
+        let mut config = Self::load(script, settings)?.effective();
+        // Optional failures must never invalidate an otherwise working native runtime.
+        if config
+            .augmentation_model
+            .as_ref()
+            .is_some_and(|path| !path.is_absolute() || !path.is_file())
+        {
+            config.augmentation_model = None;
+        }
         if !config.python.is_absolute()
             || !config.python.is_file()
             || !config.script.is_file()
@@ -57,6 +135,97 @@ impl RuntimeConfig {
             return Err(Error::Invalid("캐릭터 런타임 파일을 찾을 수 없습니다."));
         }
         Ok(config)
+    }
+
+    pub(crate) fn augmentation_settings(
+        script: PathBuf,
+        settings: &Path,
+    ) -> Result<AugmentationSettings> {
+        let managed = std::env::var_os("LAKOMICS_CHARACTER_AUGMENTATION_MODEL").is_some();
+        if !settings.is_file()
+            && std::env::var_os("LAKOMICS_CHARACTER_PYTHON").is_none()
+            && std::env::var_os("LAKOMICS_CHARACTER_MODELS").is_none()
+        {
+            return Ok(AugmentationSettings {
+                enabled: false,
+                model_name: None,
+                model_ready: false,
+                runtime_configured: false,
+                managed_by_environment: managed,
+            });
+        }
+        let saved = Self::load(script.clone(), settings)?;
+        let model = saved.runtime.augmentation_model.as_deref();
+        Ok(AugmentationSettings {
+            enabled: !saved.augmentation_disabled && model.is_some(),
+            model_name: model
+                .and_then(Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned()),
+            model_ready: model.is_some_and(|path| check_augmentation_model(path).is_ok()),
+            runtime_configured: Self::configured(script, settings).is_ok(),
+            managed_by_environment: managed,
+        })
+    }
+
+    pub(crate) fn update_augmentation(
+        script: PathBuf,
+        settings: &Path,
+        enabled: bool,
+    ) -> Result<AugmentationSettings> {
+        if std::env::var_os("LAKOMICS_CHARACTER_AUGMENTATION_MODEL").is_some() {
+            return Err(Error::Invalid(
+                "환경 변수로 지정된 보완 설정입니다. 환경 변수를 해제하고 앱을 다시 시작해 주세요.",
+            ));
+        }
+        let before = if settings.exists() {
+            Some(std::fs::read(settings)?)
+        } else {
+            None
+        };
+        let mut saved = Self::load(script.clone(), settings)?;
+
+        saved.augmentation_disabled = !enabled;
+        if enabled {
+            let model = saved
+                .runtime
+                .augmentation_model
+                .as_deref()
+                .ok_or(Error::Invalid("설치된 경량 보완 모델을 찾을 수 없습니다."))?;
+            check_augmentation_model(model)?;
+            let temp = tempfile::tempdir()?;
+            let mut worker = Worker::start(
+                &saved.effective(),
+                temp.path(),
+                Arc::new(AtomicBool::new(false)),
+            )?;
+            let ready = worker.receive()?;
+            if ready["type"] != "ready"
+                || ready["baselineFingerprint"] != BASELINE
+                || ready["augmentationAvailable"] != true
+            {
+                return Err(Error::Invalid(
+                    "보완 모델을 사용할 수 없습니다. 분석 환경과 모델 파일을 확인해 주세요.",
+                ));
+            }
+        }
+        let current = if settings.exists() {
+            Some(std::fs::read(settings)?)
+        } else {
+            None
+        };
+        if before != current {
+            return Err(Error::Stale);
+        }
+        let parent = settings
+            .parent()
+            .ok_or(Error::Invalid("설정 경로가 없습니다."))?;
+        std::fs::create_dir_all(parent)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(&serde_json::to_vec(&saved)?)?;
+        temporary
+            .persist(settings)
+            .map_err(|e| Error::Io(e.error))?;
+        Self::augmentation_settings(script, settings)
     }
 
     pub(crate) fn setup(
@@ -69,6 +238,7 @@ impl RuntimeConfig {
             python,
             models,
             script,
+            augmentation_model: None,
         };
         let temp = tempfile::tempdir()?;
         let mut worker = Worker::start(&config, temp.path(), Arc::new(AtomicBool::new(false)))?;
@@ -92,6 +262,37 @@ impl RuntimeConfig {
             .map_err(|e| Error::Io(e.error))?;
         Ok(())
     }
+}
+
+fn check_augmentation_model(path: &Path) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    if !path.is_absolute() || !path.is_file() {
+        return Err(Error::Invalid("경량 보완 모델 파일을 찾을 수 없습니다."));
+    }
+    let mut file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > 512 * 1024 * 1024 {
+        return Err(Error::Invalid("지원하는 경량 보완 모델이 아닙니다."));
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 65536];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        digest.update(&buffer[..n]);
+    }
+    let hash = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if hash != "484ad463f569ab95308cf47e91ba358b01c40bc53289b90b950b94fcde7f2628" {
+        return Err(Error::Invalid(
+            "설치된 보완 모델이 지원하는 S36 파일과 다릅니다. 보완 모델 설치를 확인해 주세요.",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
@@ -248,6 +449,12 @@ impl Worker {
                     Stdio::null()
                 },
             );
+        if let Some(model) = &config.augmentation_model {
+            command.arg("--augmentation-model").arg(model);
+        }
+        command
+            .env("OPENBLAS_NUM_THREADS", "2")
+            .env("OMP_NUM_THREADS", "2");
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

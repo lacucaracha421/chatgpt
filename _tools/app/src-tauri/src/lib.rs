@@ -294,6 +294,8 @@ pub fn run() {
             commands::characters::character_review_pending_map,
             commands::characters::character_runtime_status,
             commands::characters::setup_character_runtime,
+            commands::characters::character_augmentation_settings,
+            commands::characters::set_character_augmentation_enabled,
             commands::av::get_av_details,
             commands::av::save_av_details,
             commands::av::search_av_people,

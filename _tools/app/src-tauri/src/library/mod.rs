@@ -42,6 +42,8 @@ pub(crate) mod catalog_review;
 mod catalog_revision;
 pub(crate) mod catalog_update;
 mod catalog_visibility;
+mod character_augmentation;
+mod character_training;
 pub mod character_autotag;
 pub mod character_conversion;
 pub mod character_series_move;

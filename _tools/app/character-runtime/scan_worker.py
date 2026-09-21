@@ -36,6 +36,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--models", type=Path, required=True)
     parser.add_argument("--cache", type=Path, required=True)
+    # Optional native-ready augmentation. No flag means no import at all.
+    parser.add_argument("--augmentation-model", type=Path)
     args = parser.parse_args()
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
@@ -49,8 +51,22 @@ def main():
     except Exception as error:
         emit({"type": "startup_error", "error": str(error)})
         return 1
+    # Imported lazily and only on an explicit opt-in, so a disabled or broken
+    # augmentation never affects startup. No event is ever emitted before ready.
+    augmenter = None
+    augmentation_available = False
+    if args.augmentation_model is not None:
+        try:
+            import character_augmentation
+            augmenter, _ = character_augmentation.augmenter(args.models, args.augmentation_model,
+                                                            args.cache, engine, cache)
+            augmentation_available = augmenter is not None
+            if augmenter is None:
+                augmenter = character_augmentation.Unavailable("model_unavailable")
+        except Exception:
+            augmenter = None
     emit({"type": "ready", "baselineFingerprint": FINGERPRINT,
-          "runtimeFingerprint": fingerprint})
+          "runtimeFingerprint": fingerprint, "augmentationAvailable": augmentation_available})
     timings = None
     if os.environ.get("LAKOMICS_CHARACTER_PROFILE") == "1":
         import feature_cache, runtime
@@ -63,6 +79,7 @@ def main():
     selections = []
     bundles = ReferenceBundles(cache)
     resident = None
+    resident_path = None
     while True:
         line = inbox.get()
         request = {}
@@ -98,6 +115,9 @@ def main():
                 resident = None
                 query = cache.extract(Path(request["path"]), request["hash"])
                 resident = (request["assetId"], request["hash"], query)
+                # Keep the resident source path so an augmentation query need not
+                # re-derive it; the path is never part of a decision identity.
+                resident_path = (request["assetId"], Path(request["path"]))
                 emit({"type": "query_loaded", "assetId": request["assetId"],
                       "contentHash": query.content_hash, "cacheHits": cache.hits, "extractions": cache.misses})
             elif request["type"] == "compare_delta":
@@ -128,6 +148,25 @@ def main():
                         result = compare_bound(engine, query, refs, selections, projected)
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})
+            elif request["type"] in ("augmentation_prepare", "augmentation_step", "augment_query"):
+                # The resident query identity, never the caller bundle, is the source of truth.
+                resident_binding = {}
+                if resident is not None:
+                    resident_binding[resident[0]] = (resident[1], resident[2].boxes, resident[2].fallback)
+                if ("path" not in request and resident_path is not None
+                        and request.get("assetId") == resident_path[0]):
+                    request = {**request, "path": str(resident_path[1])}
+                if augmenter is None:
+                    emit({"type": "augmentation_unavailable",
+                          "snapshotId": str(request.get("snapshotId", "")),
+                          "reason": "runtime_unavailable"})
+                else:
+                    try:
+                        emit(augmenter.handle(request, resident_binding))
+                    except Exception as error:
+                        # Optional failures never propagate; the baseline stays intact.
+                        emit({"type": "augmentation_unavailable",
+                              "snapshotId": str(request.get("snapshotId", "")), "reason": str(error)})
             else:
                 raise ValueError("Prepare references before querying")
         except Exception as error:

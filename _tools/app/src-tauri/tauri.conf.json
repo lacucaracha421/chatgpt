@@ -37,6 +37,10 @@
       "../character-runtime/feature_cache.py": "character-runtime/feature_cache.py",
       "../character-runtime/profiling.py": "character-runtime/profiling.py",
       "../character-runtime/scan_worker.py": "character-runtime/scan_worker.py",
+      "../character-runtime/character_augmentation.py": "character-runtime/character_augmentation.py",
+      "../character-runtime/character_head.py": "character-runtime/character_head.py",
+      "../character-runtime/character_encoder.py": "character-runtime/character_encoder.py",
+      "../character-runtime/holdout_rules.py": "character-runtime/holdout_rules.py",
       "licenses/*": "licenses/"
     },
     "icon": [

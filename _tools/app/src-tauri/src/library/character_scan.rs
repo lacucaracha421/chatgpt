@@ -753,10 +753,10 @@ mod tests;
 /// snapshots kept 13 of 410 later-rejected pairs with support alone and 0 with this distance
 /// gate. This only moves uncertain pairs to review; recommendation inference is unchanged.
 pub(super) const AUTOMATIC_REFERENCE_SUPPORT: usize = 6;
-const AUTOMATIC_MAX_SIXTH_DISTANCE: f64 = 0.16;
+pub(super) const AUTOMATIC_MAX_SIXTH_DISTANCE: f64 = 0.16;
 // Distances, not confidence probabilities. Compare the rival's recommendation-level
 // support to the winner's weakest required automatic support on the same person.
-const AUTOMATIC_COMPETITOR_MARGIN: f64 = 0.05;
+pub(super) const AUTOMATIC_COMPETITOR_MARGIN: f64 = 0.05;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct AutomaticRegion {
