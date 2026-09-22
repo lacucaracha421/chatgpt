@@ -21,9 +21,8 @@ native scan worker, and does not publish or change production classifications.
 ## Conditional native augmentation (opt-in)
 
 The incremental queue can now retain every native acceptance and add a character
-only when a ready S36 learned head and at least two current B36 references support
-**the same detected person**, with no overlapping accepted-native or ready-head
-rival. Manual accepted/rejected/cleared decisions and reference-self guards still
+when a recall-calibrated S36 learned head supports a detected person, even with
+zero B36 reference votes, with no overlapping strong-native or ready-head rival. Manual accepted/rejected/cleared decisions and reference-self guards still
 win. Full manual scans remain native-only.
 
 This path is **off by default**. In **Settings → General → Character omission
@@ -55,25 +54,41 @@ memberships and cleared decisions never become negatives; supporting references
 without manual labels supply no training truth. Each source group gets one vote;
 PDQ whole/cropped near-duplicate groups remain in one deterministic 60/20/20
 train/calibration/held-out split, and reference groups are training-only. A head
-must additionally recover at least two positives beyond native on separate
-calibration groups (at least two positive and two negative groups), with zero
-additional labelled calibration errors. This gate is not a guarantee of production
-accuracy, particularly for unlabelled companions.
+requires separate calibration groups with at least one positive and two negatives.
+Threshold candidates are 0.5 and unique calibration bag-max logistic scores at
+least 0.5. Eligible thresholds recover at least one positive, have positive
+`TP - 2*FP` utility, and allow at most `max(1, floor(negative_count / 10))` errors.
+Selection maximizes `(TP - 2*FP, -FP, threshold, TP, FP)`. There is no additional
+B36-support or zero-error incremental-gain gate. Logistic scores are not calibrated
+identity probabilities. This recall tradeoff permits occasional false positives;
+calibration is not a guarantee of production accuracy, especially for unlabelled
+companions. The standalone classifier's strict calibration is unchanged.
 
-To bound laptop work, preparation processes at most four sources per eligible
-queue item. Until preparation finishes, the native result alone is used. The
-snapshot includes at most eight targets, 128 selected labelled sources, and 256
+Cold preparation never runs inside an image classification job. Until a matching
+head is ready, the native result alone is published. The existing queue consumer
+prepares the latest requested scope only when no native jobs or historical refresh
+remain. Each idle turn captures or extracts at most one source; arriving work
+gets priority before the next turn. Both automation pause and history pause block
+preparation, and manual requests retain priority on the shared worker. There is
+no second worker or additional CPU concurrency. A worker restart defers rebuilding
+the head to idle time again. Optional preparation failure drops that request;
+a later eligible query may request preparation again. The snapshot includes at
+most eight targets, 128 selected labelled sources, and 256
 total sources including references (at most 512 MiB of source snapshots).
 Oversized rosters or references without a
 usable current PDQ fingerprint fall back to native. Models stay in the worker;
-restart rebuilds them from cached features. Warm-up does not automatically requeue
+restart rebuilds them from cached features when idle. Warm-up does not automatically requeue
 already completed images; the existing explicit historical-refresh action remains
 the way to reconsider them. No new background history sweep is introduced.
 
 S36 uses B36's boxes without a second detector, two CPU threads, and an independent
 atomic feature-cache namespace. Once ready, query extraction is skipped unless an
-enabled, not-already-accepted target has B36 recommendation support. Exact and
-near-duplicate training/calibration exposures are withheld. Before publication,
+enabled, ready, not-already-accepted target exists. Missing query PDQ is computed
+from the captured immutable source outside the database lock, in memory only;
+stored low-quality PDQ is still rejected. Training/reference sources still require
+stored usable PDQ. Exact and near-duplicate training/calibration exposures are
+withheld. Native code accepts only `recall-tp-minus-2fp-v1` policy responses and
+validates their calibration counts, error budget, utility and threshold. Before publication,
 native code rechecks the training snapshot, source-file identities, query,
 references, scope and manual decisions. Optional failure or stale training drops
 only additions; source/scope changes invalidating native evidence still cancel the
@@ -81,8 +96,8 @@ whole transaction. Added judgments retain model/snapshot/gate/region provenance
 under `prediction.augmentation`; files and saved folders are not moved.
 
 Code and fixture checks do not constitute Windows/Tauri-window acceptance or a
-production-quality measurement. The historical cross-validation gain belongs to
-its recorded experimental inputs, not automatically to a newly built live head.
+production-quality measurement. Historical recall-calibration gains belong to
+their recorded experimental inputs, not automatically to a newly built live head.
 
 ## Frozen contract
 

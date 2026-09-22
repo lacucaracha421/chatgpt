@@ -41,9 +41,34 @@ impl PreparedReferences {
     }
 }
 
+type TrainingSources = BTreeMap<String, Arc<Source>>;
+
+#[derive(Debug)]
+struct AugmentationTraining {
+    context: Context,
+    snapshot_id: String,
+    body: Value,
+    paths: BTreeMap<String, (String, String)>,
+    sources: Arc<TrainingSources>,
+    bytes: u64,
+    ready: bool,
+}
+
+fn training_file(mut body: Value, sources: &TrainingSources) -> Result<tempfile::NamedTempFile> {
+    body["policy"] = super::character_augmentation::policy();
+    for asset in body["assets"].as_array_mut().ok_or(Error::Stale)? {
+        let id = asset["id"].as_str().ok_or(Error::Stale)?;
+        asset["path"] = json!(sources.get(id).ok_or(Error::Stale)?.path());
+    }
+    let mut file = tempfile::NamedTempFile::new()?;
+    file.write_all(&serde_json::to_vec(&body)?)?;
+    file.flush()?;
+    Ok(file)
+}
+
 struct AugmentationResult {
     snapshot_id: String,
-    sources: Arc<BTreeMap<String, Source>>,
+    sources: Arc<TrainingSources>,
     query_identity: Value,
     response: Value,
 }
@@ -64,7 +89,7 @@ pub(super) struct Engine {
     config: Option<RuntimeConfig>,
     next_config: Option<RuntimeConfig>,
     prepared_references: Option<Arc<PreparedReferences>>,
-    training_sources: Option<(String, Arc<BTreeMap<String, Source>>)>,
+    training: Option<AugmentationTraining>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +126,9 @@ impl Library {
                 engine.stop.store(true, Ordering::Release);
             }
             return;
+        }
+        if engine.config.as_ref() != Some(&config) {
+            engine.training = None;
         }
         engine.config = Some(config.clone());
         engine.next_config = None;
@@ -152,6 +180,7 @@ impl Library {
         engine.next_config = None;
         engine.stop.store(true, Ordering::Release);
         engine.prepared_references = None;
+        engine.training = None;
     }
     pub fn character_incremental_status(&self) -> Result<Status> {
         let (running, work_active, persistent_error, mut active_work) = {
@@ -209,7 +238,13 @@ impl Library {
                     return Ok(false);
                 }
                 let Some(job) = self.claim_character_autotag()? else {
-                    return Ok(self.advance_character_reference_refresh(32)? > 0);
+                    if self.advance_character_reference_refresh(32)? > 0 {
+                        return Ok(true);
+                    }
+                    // Optional preparation never delays a queued native result.
+                    return Ok(self
+                        .advance_character_augmentation(&config, stop.clone())
+                        .unwrap_or(false));
                 };
                 if self.supersede_invalid_reference_refresh_job(&job)? {
                     return Ok(true);
@@ -556,11 +591,7 @@ impl Library {
             let mut c = self.connection()?;
             let tx = c.transaction()?;
             let identity = super::character_training::query_identity(&tx, &job.asset_id)?;
-            if identity["pdq"].as_str().is_none_or(|pdq| pdq.len() != 128)
-                || identity["quality"].as_i64().unwrap_or(0) < 50
-            {
-                return Ok(None);
-            }
+
             let mut prior = BTreeMap::new();
             let rows = tx.prepare("SELECT target_id,decision FROM character_decisions WHERE source_asset_id=?1 ORDER BY sequence DESC")?
                 .query_map([&job.asset_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?
@@ -590,69 +621,78 @@ impl Library {
                 && p.result
                     .evidence
                     .as_ref()
-                    .is_some_and(|e| e["passed"] == true && e["wholeFallback"] == false)
+                    .is_some_and(|e| e["wholeFallback"] == false)
         }) {
             return Ok(None);
         }
-        let cached = self
-            .character_incremental
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .training_sources
-            .as_ref()
-            .filter(|(id, _)| id == &snapshot.id)
-            .map(|(_, sources)| sources.clone());
-        let sources = if let Some(sources) = cached.filter(|sources| {
-            sources
-                .values()
-                .all(|source| source.check_identity(self).is_ok())
-        }) {
-            sources
-        } else {
-            let mut sources = BTreeMap::new();
-            let mut bytes = 0_u64;
-            for (id, (hash, path)) in &snapshot.sources {
-                bytes = bytes.saturating_add(self.open_library_media(path)?.file.metadata()?.len());
-                if bytes > 512 * 1024 * 1024 {
-                    return Err(Error::Invalid("보완 학습 이미지 용량 한도를 넘었습니다."));
-                }
-                if stop.load(Ordering::Acquire) {
-                    return Err(Error::Stale);
-                }
-                sources.insert(id.clone(), Source::capture(self, path, hash)?);
-            }
-            let sources = Arc::new(sources);
-            self.character_incremental
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .training_sources = Some((snapshot.id.clone(), sources.clone()));
-            sources
-        };
-        let mut body = snapshot.value;
-        body["policy"] = super::character_augmentation::policy();
-        for asset in body["assets"].as_array_mut().ok_or(Error::Stale)? {
-            let id = asset["id"].as_str().ok_or(Error::Stale)?;
-            asset["path"] = json!(sources.get(id).ok_or(Error::Stale)?.path());
+        if stop.load(Ordering::Acquire) {
+            return Err(Error::Stale);
         }
-        let mut file = tempfile::NamedTempFile::new()?;
-        file.write_all(&serde_json::to_vec(&body)?)?;
-        file.flush()?;
+        let sources = {
+            let mut engine = self
+                .character_incremental
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if engine
+                .training
+                .as_ref()
+                .is_none_or(|training| training.snapshot_id != snapshot.id)
+            {
+                engine.training = Some(AugmentationTraining {
+                    context: Context {
+                        hash: context.hash.clone(),
+                        runtime: context.runtime.clone(),
+                        scope: context.scope.clone(),
+                        targets: context.targets.clone(),
+                    },
+                    snapshot_id: snapshot.id.clone(),
+                    body: snapshot.value.clone(),
+                    paths: snapshot.sources,
+                    sources: Arc::new(BTreeMap::new()),
+                    bytes: 0,
+                    ready: false,
+                });
+            }
+            let training = engine.training.as_ref().ok_or(Error::Stale)?;
+            if !training.ready {
+                return Ok(None);
+            }
+            training.sources.clone()
+        };
+        for source in sources.values() {
+            if let Err(error) = source.check_identity(self) {
+                self.character_incremental
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .training = None;
+                return Err(error);
+            }
+        }
+        let Some(worker_identity) =
+            super::character_augmentation::query_identity(&query_identity, query)?
+        else {
+            return Ok(None);
+        };
+        query.check_identity(self)?;
+        if stop.load(Ordering::Acquire) {
+            return Err(Error::Stale);
+        }
+        let file = training_file(snapshot.value, &sources)?;
         let cache = self.root.join(".cache/characters");
         let result = self.character_worker_pool.with(config, &cache, stop, false, |worker, ready| {
             if ready["runtimeFingerprint"] != context.runtime || ready["augmentationAvailable"] != true { return Ok(None); }
             worker.send(&json!({"type":"augmentation_prepare","snapshotId":snapshot.id,"snapshotPath":file.path()}))?;
-            let mut response = worker.receive()?;
-            // Amortize cold preparation across arriving jobs rather than blocking
-            // the laptop on an entire training inventory in one queue item.
-            for _ in 0..4 {
-                if response["type"] != "augmentation_prepared" || response["snapshotId"] != snapshot.id { return Err(Error::Worker("보완 학습 준비 실패".into())); }
-                if response["state"] == "ready" { break; }
-                if response["state"] != "building" { return Err(Error::Stale); }
-                worker.send(&json!({"type":"augmentation_step","snapshotId":snapshot.id}))?;
-                response = worker.receive()?;
-            }
+            let response = worker.receive()?;
             if response["type"] != "augmentation_prepared" || response["snapshotId"] != snapshot.id { return Err(Error::Stale); }
-            if response["state"] == "building" { return Ok(None); }
+            if response["state"] == "building" {
+                // A worker restart lost the head, not the native result. Rebuild only when idle.
+                if let Some(training) = self.character_incremental.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner).training.as_mut()
+                    .filter(|training| training.snapshot_id == snapshot.id) {
+                    training.ready = false;
+                }
+                return Ok(None);
+            }
             if response["state"] != "ready" || !super::character_augmentation::is_hash(&response["modelId"]) { return Err(Error::Stale); }
             let model_id = response["modelId"].clone();
             // The pool may have serviced a manual request since native comparison.
@@ -661,7 +701,7 @@ impl Library {
             if loaded["type"] != "query_loaded" || loaded["assetId"] != job.asset_id || loaded["contentHash"] != job.content_hash { return Err(Error::Stale); }
             let bundle = predictions.iter().map(|p| (p.target_id.clone(), p.result.evidence.clone().unwrap_or(Value::Null))).collect::<BTreeMap<_,_>>();
             worker.send(&json!({"type":"augment_query","snapshotId":snapshot.id,"assetId":job.asset_id,"hash":job.content_hash,"path":query.path(),
-                "queryIdentity":query_identity,"nativeAccepted":native_ids,"bundle":bundle}))?;
+                "queryIdentity":worker_identity,"nativeAccepted":native_ids,"bundle":bundle}))?;
             let response = worker.receive()?;
             if response["type"] != "augmentation_result" || response["snapshotId"] != snapshot.id || response["modelId"] != model_id { return Err(Error::Stale); }
             Ok((response["state"] == "ready").then_some(response))
@@ -675,6 +715,109 @@ impl Library {
             query_identity,
             response,
         }))
+    }
+
+    fn augmentation_idle_allowed(&self, stop: &AtomicBool) -> Result<bool> {
+        if stop.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        Ok(self.connection()?.query_row(
+            "SELECT NOT paused AND NOT reference_refresh_paused
+                AND NOT EXISTS(SELECT 1 FROM character_autotag_jobs WHERE state IN ('pending','processing'))
+                AND NOT EXISTS(SELECT 1 FROM character_reference_refreshes WHERE state IN ('pending','running'))
+             FROM character_autotag_control WHERE singleton=1", [], |row| row.get(0),
+        )?)
+    }
+
+    /// One source capture or extraction per idle turn; no second worker or history requeue.
+    fn advance_character_augmentation(
+        &self,
+        config: &RuntimeConfig,
+        stop: Arc<AtomicBool>,
+    ) -> Result<bool> {
+        if config.augmentation_model.is_none() || !self.augmentation_idle_allowed(&stop)? {
+            return Ok(false);
+        }
+        let mut training = {
+            let mut engine = self
+                .character_incremental
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if engine
+                .training
+                .as_ref()
+                .is_none_or(|training| training.ready)
+            {
+                return Ok(false);
+            }
+            engine.training.take().ok_or(Error::Stale)?
+        };
+        // Invalid or failed optional preparation is dropped; a later eligible query can retry.
+        let snapshot = {
+            let mut connection = self.connection()?;
+            let transaction = connection.transaction()?;
+            self.character_training_snapshot(&transaction, &training.context)?
+        };
+        if snapshot.id != training.snapshot_id {
+            return Ok(false);
+        }
+        let progressed = if let Some((id, (hash, path))) = training
+            .paths
+            .iter()
+            .find(|(id, _)| !training.sources.contains_key(*id))
+        {
+            if !self.augmentation_idle_allowed(&stop)? {
+                false
+            } else {
+                training.bytes = training
+                    .bytes
+                    .saturating_add(self.open_library_media(path)?.file.metadata()?.len());
+                if training.bytes > 512 * 1024 * 1024 {
+                    return Err(Error::Invalid("보완 학습 이미지 용량 한도를 넘었습니다."));
+                }
+                let source = Arc::new(Source::capture(self, path, hash)?);
+                Arc::make_mut(&mut training.sources).insert(id.clone(), source);
+                true
+            }
+        } else {
+            for source in training.sources.values() {
+                source.check_identity(self)?;
+            }
+            let file = training_file(training.body.clone(), &training.sources)?;
+            let cache = self.root.join(".cache/characters");
+            self.character_worker_pool.with(config, &cache, stop.clone(), false, |worker, ready| {
+                // Recheck after waiting for a manual request to release the shared worker.
+                if !self.augmentation_idle_allowed(&stop)? { return Ok(false); }
+                if ready["runtimeFingerprint"] != training.context.runtime || ready["augmentationAvailable"] != true {
+                    return Err(Error::Stale);
+                }
+                worker.send(&json!({"type":"augmentation_prepare","snapshotId":training.snapshot_id,"snapshotPath":file.path()}))?;
+                let mut response = worker.receive()?;
+                if response["type"] != "augmentation_prepared" || response["snapshotId"] != training.snapshot_id {
+                    return Err(Error::Stale);
+                }
+                if response["state"] == "building" && self.augmentation_idle_allowed(&stop)? {
+                    worker.send(&json!({"type":"augmentation_step","snapshotId":training.snapshot_id}))?;
+                    response = worker.receive()?;
+                }
+                if response["type"] != "augmentation_prepared" || response["snapshotId"] != training.snapshot_id {
+                    return Err(Error::Stale);
+                }
+                if response["state"] == "ready" && super::character_augmentation::is_hash(&response["modelId"]) {
+                    training.ready = true;
+                } else if response["state"] != "building" {
+                    return Err(Error::Stale);
+                }
+                Ok(true)
+            })?
+        };
+        if !stop.load(Ordering::Acquire) {
+            self.character_incremental
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .training = Some(training);
+        }
+        Ok(progressed)
     }
 
     fn prepare_incremental_references(

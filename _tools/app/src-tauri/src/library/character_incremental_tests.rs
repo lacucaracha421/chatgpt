@@ -10,6 +10,10 @@ fn augmentation_publication_is_additive_and_respects_manual_vetoes() {
         "off",
         "malformed",
         "gate",
+        "compensated",
+        "old_policy",
+        "missing_policy",
+        "collision",
         "wrong_crop",
         "rejected",
         "cleared",
@@ -52,23 +56,33 @@ fn augmentation_publication_is_additive_and_respects_manual_vetoes() {
         let predictions = context.targets.iter().map(|target| {
             let n = target.usable_references().count();
             let matched_box = if target.id == a.id { 0 } else { 1 };
-            let votes = if target.id == a.id { 6 } else { 2 };
+            let votes = if target.id == a.id { 6 } else { 0 };
             let rows = (0..2).map(|index| {
                 let distances = (0..n).map(|j| if index == matched_box && j < votes { 0.1 } else { 0.4 }).collect::<Vec<_>>();
                 json!({"matchedReferences":if index == matched_box { (0..votes).collect::<Vec<_>>() } else { vec![] },"referenceDistances":distances})
             }).collect::<Vec<_>>();
-            Prediction { target_id:target.id.clone(),result:ScanResult {asset_id:job.asset_id.clone(),content_hash:job.content_hash.clone(),state:"recommended".into(),error:None,
-                evidence:Some(json!({"passed":true,"wholeFallback":false,"queryBoxes":boxes,"evidence":rows,"baselineFingerprint":BASELINE,
+            Prediction { target_id:target.id.clone(),result:ScanResult {asset_id:job.asset_id.clone(),content_hash:job.content_hash.clone(),state:if votes > 0 { "recommended" } else { "unmatched" }.into(),error:None,
+                evidence:Some(json!({"passed":votes > 0,"wholeFallback":false,"queryBoxes":boxes,"evidence":rows,"baselineFingerprint":BASELINE,
                     "referenceHashes":target.usable_references().map(|r|r.asset_hash.clone()).collect::<Vec<_>>() }))}}
         }).collect::<Vec<_>>();
-        let gate =
-            json!({"enabled":true,"positive":2,"negative":2,"additional_tp":2,"additional_fp":0});
-        let mut response = json!({"type":"augmentation_result","state":"ready","modelId":"b".repeat(64),"assetId":job.asset_id,"contentHash":job.content_hash,"queryBoxes":boxes,
+        let gate = json!({"enabled":true,"positive":2,"negative":2,"recovered":2,"false_positive":0,"threshold":0.6});
+        let mut response = json!({"type":"augmentation_result","policyId":super::super::character_augmentation::RECALL_POLICY,"state":"ready","modelId":"b".repeat(64),"assetId":job.asset_id,"contentHash":job.content_hash,"queryBoxes":boxes,
             "gates":{a.id.clone():gate,b.id.clone():gate},"headDecision":{"unavailable_heads":{},"regions":[
                 {"index":0,"state":"accepted_shadow","candidates":[a.id]}, {"index":1,"state":"accepted_shadow","candidates":[b.id]}]}});
         match mode {
             "malformed" => response["queryBoxes"] = json!([]),
-            "gate" => response["gates"][&b.id]["additional_fp"] = json!(1),
+            "gate" => response["gates"][&b.id]["false_positive"] = json!(1),
+            "compensated" => {
+                response["gates"][&b.id] = json!({"enabled":true,"positive":4,"negative":2,"recovered":4,"false_positive":1,"threshold":0.6})
+            }
+            "old_policy" => response["policyId"] = json!("strict-v1"),
+            "missing_policy" => {
+                response.as_object_mut().unwrap().remove("policyId");
+            }
+            "collision" => {
+                response["headDecision"]["regions"][1]["candidates"] = json!([a.id, b.id]);
+                response["headDecision"]["regions"][1]["state"] = json!("competing_characters");
+            }
             "wrong_crop" => {
                 response["headDecision"]["regions"][0]["candidates"] = json!([b.id]);
                 response["headDecision"]["regions"][1]["candidates"] = json!([a.id]);
@@ -100,7 +114,7 @@ fn augmentation_publication_is_additive_and_respects_manual_vetoes() {
             .collect::<BTreeSet<_>>();
         let expected = if mode == "rollback" {
             BTreeSet::new()
-        } else if mode == "add" {
+        } else if matches!(mode, "add" | "compensated") {
             BTreeSet::from([a.id.clone(), b.id.clone()])
         } else {
             BTreeSet::from([a.id.clone()])
@@ -119,8 +133,8 @@ fn augmentation_publication_is_additive_and_respects_manual_vetoes() {
 
 #[test]
 #[ignore = "requires explicit test Python; fake augmentation worker in TEMP"]
-fn augmentation_worker_warmup_and_transport_failure_preserve_native() {
-    for fail in [false, true] {
+fn augmentation_idle_warmup_and_transport_failure_preserve_native() {
+    for (fail, missing_pdq) in [(false, false), (true, false), (false, true)] {
         let f = Fixture::new();
         let a = f.ready("A");
         let b = f.ready("B");
@@ -133,6 +147,26 @@ fn augmentation_worker_warmup_and_transport_failure_preserve_native() {
                 [],
             )
             .unwrap();
+        if missing_pdq {
+            let path = f.temp.path().join("assets/asset-5.png");
+            image::RgbImage::from_fn(128, 128, |x, y| {
+                image::Rgb([
+                    (x * 17 + y * 31) as u8,
+                    (x * 43 + y * 7) as u8,
+                    (x * 11 + y * 53) as u8,
+                ])
+            })
+            .save(&path)
+            .unwrap();
+            let hash: String = Sha256::digest(std::fs::read(&path).unwrap())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            f.library.connection().unwrap().execute(
+                "UPDATE assets SET content_hash=?1,perceptual_hash=NULL,perceptual_hash_quality=NULL WHERE id='asset-5'",
+                [&hash],
+            ).unwrap();
+        }
         let mut config = config(&f);
         config.augmentation_model = Some(f.temp.path().join("optional.onnx"));
         if fail {
@@ -147,14 +181,15 @@ refs=[]; snapshot=None; sid=None; loaded=0
 boxes=[[0,0,40,100],[60,0,100,100]]
 for line in sys.stdin:
  r=json.loads(line); kind=r['type']
+ with pathlib.Path(__file__).with_suffix('.operations').open('a') as log: log.write(kind+'\n')
  if kind=='prepare':
   refs=[v['hash'] for v in r['references']];emit({'type':'prepared','referenceHashes':refs})
  elif kind=='load_query':
   emit({'type':'query_loaded','assetId':r['assetId'],'contentHash':r['hash']})
  elif kind=='compare_query':
-  n=len(refs); region=0 if n==6 else 1; votes=6 if n==6 else 2
+  n=len(refs); region=0 if n==6 else 1; votes=6 if n==6 else 0
   rows=[{'matchedReferences':list(range(votes)) if i==region else [], 'referenceDistances':[.1 if i==region and j<votes else .4 for j in range(n)]} for i in range(2)]
-  emit({'type':'result','assetId':r['assetId'],'contentHash':r['hash'],'baselineFingerprint':base,'referenceHashes':refs,'passed':True,'distance':.1,'wholeFallback':False,'queryBoxes':boxes,'evidence':rows})
+  emit({'type':'result','assetId':r['assetId'],'contentHash':r['hash'],'baselineFingerprint':base,'referenceHashes':refs,'passed':votes>0,'distance':.1 if votes else .4,'wholeFallback':False,'queryBoxes':boxes,'evidence':rows})
  elif kind=='augmentation_prepare':
   snapshot=json.loads(pathlib.Path(r['snapshotPath']).read_text())
   assert all(isinstance(a['labels'],dict) and len(a['pdq'])==128 and pathlib.Path(a['path']).is_file() for a in snapshot['assets'])
@@ -165,13 +200,14 @@ for line in sys.stdin:
  elif kind=='augmentation_step':
   loaded+=1;emit({'type':'augmentation_prepared','snapshotId':sid,'state':'ready' if loaded>=len(snapshot['assets']) else 'building','modelId':'b'*64})
  elif kind=='augment_query':
+  assert len(r['queryIdentity']['pdq'])==128 and r['queryIdentity']['quality']>=50
   if pathlib.Path(__file__).with_name('fail-optional').exists(): sys.exit(7)
   regions=[]
   for i in range(2):
    tid=next(t['id'] for t in snapshot['targets'] if (len(t['references'])==6)==(i==0))
    regions.append({'index':i,'state':'accepted_shadow','candidates':[tid]})
-  gates={t['id']:{'enabled':True,'positive':2,'negative':2,'additional_tp':2,'additional_fp':0} for t in snapshot['targets']}
-  emit({'type':'augmentation_result','snapshotId':sid,'modelId':'b'*64,'assetId':r['assetId'],'contentHash':r['hash'],'state':'ready','queryBoxes':boxes,'gates':gates,'headDecision':{'regions':regions,'unavailable_heads':{}}})
+  gates={t['id']:{'enabled':True,'positive':2,'negative':2,'recovered':2,'false_positive':0,'threshold':.6} for t in snapshot['targets']}
+  emit({'type':'augmentation_result','policyId':'recall-tp-minus-2fp-v1','snapshotId':sid,'modelId':'b'*64,'assetId':r['assetId'],'contentHash':r['hash'],'state':'ready','queryBoxes':boxes,'gates':gates,'headDecision':{'regions':regions,'unavailable_heads':{}}})
  else: raise ValueError(kind)
 "#).unwrap();
         run(&f, &config, "asset-5");
@@ -179,6 +215,152 @@ for line in sys.stdin:
             f.library.character_relations_for_asset("asset-5").unwrap(),
             vec![a.id.clone()]
         );
+        let operations =
+            || std::fs::read_to_string(config.script.with_extension("operations")).unwrap();
+        assert!(
+            !operations().contains("augmentation_"),
+            "cold foreground must do no preparation"
+        );
+        assert!(f
+            .library
+            .character_incremental
+            .lock()
+            .unwrap()
+            .training
+            .as_ref()
+            .unwrap()
+            .sources
+            .is_empty());
+        let stop = Arc::new(AtomicBool::new(false));
+        f.library.set_character_incremental_paused(true).unwrap();
+        assert!(!f
+            .library
+            .advance_character_augmentation(&config, stop.clone())
+            .unwrap());
+        f.library.set_character_incremental_paused(false).unwrap();
+        f.library
+            .set_character_reference_refresh_paused(true)
+            .unwrap();
+        assert!(!f
+            .library
+            .advance_character_augmentation(&config, stop.clone())
+            .unwrap());
+        f.library
+            .set_character_reference_refresh_paused(false)
+            .unwrap();
+        stop.store(true, Ordering::Release);
+        assert!(!f
+            .library
+            .advance_character_augmentation(&config, stop.clone())
+            .unwrap());
+        stop.store(false, Ordering::Release);
+        let mut disabled = config.clone();
+        disabled.augmentation_model = None;
+        assert!(!f
+            .library
+            .advance_character_augmentation(&disabled, stop.clone())
+            .unwrap());
+
+        character_autotag::enqueue(
+            &f.library.connection().unwrap(),
+            "asset-5",
+            character_autotag::Cause::ManualScanEnrollment,
+        )
+        .unwrap();
+        assert!(!f
+            .library
+            .advance_character_augmentation(&config, stop.clone())
+            .unwrap());
+        run_with_cause(
+            &f,
+            &config,
+            "asset-5",
+            character_autotag::Cause::ManualScanEnrollment,
+        );
+        assert!(
+            !operations().contains("augmentation_"),
+            "back-to-back jobs never warm up inline"
+        );
+        assert_eq!(
+            f.library.character_relations_for_asset("asset-5").unwrap(),
+            vec![a.id.clone()]
+        );
+
+        if !fail && !missing_pdq {
+            // An idle request cannot silently train after source grouping metadata changes.
+            f.library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE assets SET perceptual_hash_quality=91 WHERE id='asset-0'",
+                    [],
+                )
+                .unwrap();
+            assert!(!f
+                .library
+                .advance_character_augmentation(&config, stop.clone())
+                .unwrap());
+            assert!(f
+                .library
+                .character_incremental
+                .lock()
+                .unwrap()
+                .training
+                .is_none());
+            run_with_cause(
+                &f,
+                &config,
+                "asset-5",
+                character_autotag::Cause::ManualScanEnrollment,
+            );
+        }
+        let generation = f
+            .library
+            .character_autotag_job("asset-5")
+            .unwrap()
+            .unwrap()
+            .generation;
+        drain_augmentation(&f, &config);
+        assert_eq!(
+            f.library.character_relations_for_asset("asset-5").unwrap(),
+            vec![a.id.clone()]
+        );
+        let job = f.library.character_autotag_job("asset-5").unwrap().unwrap();
+        assert_eq!(
+            (job.state.as_str(), job.generation),
+            ("completed", generation),
+            "warmup must not requeue history"
+        );
+
+        if !fail && !missing_pdq {
+            f.library
+                .character_worker_pool
+                .with(
+                    &config,
+                    &f.temp.path().join("cache"),
+                    stop.clone(),
+                    false,
+                    |_, _| Err::<(), _>(Error::Stale),
+                )
+                .unwrap_err();
+            let steps = operations().matches("augmentation_step").count();
+            run_with_cause(
+                &f,
+                &config,
+                "asset-5",
+                character_autotag::Cause::ManualScanEnrollment,
+            );
+            assert_eq!(
+                operations().matches("augmentation_step").count(),
+                steps,
+                "a worker restart cannot trigger inline training"
+            );
+            assert_eq!(
+                f.library.character_relations_for_asset("asset-5").unwrap(),
+                vec![a.id.clone()]
+            );
+            drain_augmentation(&f, &config);
+        }
         run_with_cause(
             &f,
             &config,
@@ -199,7 +381,69 @@ for line in sys.stdin:
                 BTreeSet::from([a.id, b.id])
             }
         );
+        if missing_pdq {
+            let identity = super::super::character_training::query_identity(
+                &f.library.connection().unwrap(),
+                "asset-5",
+            )
+            .unwrap();
+            assert!(identity["pdq"].is_null());
+        }
     }
+}
+
+fn drain_augmentation(f: &Fixture, config: &RuntimeConfig) {
+    for _ in 0..40 {
+        let (before, ready) = {
+            let engine = f.library.character_incremental.lock().unwrap();
+            let training = engine.training.as_ref().unwrap();
+            (training.sources.len(), training.ready)
+        };
+        if ready {
+            return;
+        }
+        let count_steps = || {
+            std::fs::read_to_string(config.script.with_extension("operations"))
+                .unwrap()
+                .matches("augmentation_step")
+                .count()
+        };
+        let steps = count_steps();
+        assert!(f
+            .library
+            .advance_character_augmentation(config, Arc::new(AtomicBool::new(false)))
+            .unwrap());
+        let engine = f.library.character_incremental.lock().unwrap();
+        assert!(engine.training.as_ref().unwrap().sources.len() <= before + 1);
+        assert!(count_steps() <= steps + 1);
+    }
+    panic!("idle augmentation never became ready");
+}
+
+#[test]
+fn augmentation_idle_guard_yields_to_undiscovered_history_and_processing_jobs() {
+    let f = Fixture::new();
+    let target = f.ready("A");
+    let stop = AtomicBool::new(false);
+    assert!(f.library.augmentation_idle_allowed(&stop).unwrap());
+    character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-5",
+        character_autotag::Cause::Ingestion,
+    )
+    .unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+    assert_eq!(job.state, "processing");
+    assert!(!f.library.augmentation_idle_allowed(&stop).unwrap());
+    f.library
+        .connection()
+        .unwrap()
+        .execute("DELETE FROM character_autotag_jobs", [])
+        .unwrap();
+    f.library
+        .request_character_reference_refresh(&target.id, target.revision)
+        .unwrap();
+    assert!(!f.library.augmentation_idle_allowed(&stop).unwrap());
 }
 
 #[test]

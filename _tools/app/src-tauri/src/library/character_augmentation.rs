@@ -10,6 +10,60 @@ use super::{
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) const RECALL_POLICY: &str = "recall-tp-minus-2fp-v1";
+
+fn recall_gate(gate: &Value) -> Option<bool> {
+    let enabled = gate["enabled"].as_bool()?;
+    let positive = gate["positive"].as_u64()?;
+    let negative = gate["negative"].as_u64()?;
+    let recovered = gate["recovered"].as_u64()?;
+    let errors = gate["false_positive"].as_u64()?;
+    if !enabled {
+        return Some(false);
+    }
+    let threshold = gate["threshold"].as_f64()?;
+    Some(
+        positive >= 1
+            && negative >= 2
+            && recovered <= positive
+            && errors <= negative
+            && errors <= (negative / 10).max(1)
+            && recovered > errors.checked_mul(2)?
+            && threshold.is_finite()
+            && (0.5..=1.0).contains(&threshold),
+    )
+}
+
+/// Derive missing query PDQ in memory; retain the stored identity for DB fences.
+/// Existing low-quality fingerprints must not bypass the quality guard.
+pub(super) fn query_identity(
+    stored: &Value,
+    source: &super::character_sources::Source,
+) -> super::characters::Result<Option<Value>> {
+    let identity = if stored["pdq"].is_null() {
+        let result =
+            super::similarity::perceptual_hash_from_file(std::fs::File::open(source.path())?)?;
+        let pdq: String = result
+            .fingerprint
+            .to_stored_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        json!({"pdq": pdq, "quality": result.fingerprint.quality})
+    } else {
+        stored.clone()
+    };
+    let usable = identity["pdq"].as_str().is_some_and(|pdq| {
+        pdq.len() == 128
+            && pdq
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }) && identity["quality"]
+        .as_u64()
+        .is_some_and(|quality| quality >= 50);
+    Ok(usable.then_some(identity))
+}
+
 pub(super) fn policy() -> Value {
     let baseline: Value =
         serde_json::from_str(include_str!("../../../character-runtime/baseline.json"))
@@ -107,6 +161,7 @@ pub(super) fn additions(
 ) -> Option<BTreeMap<String, Vec<[f64; 4]>>> {
     if response["type"] != "augmentation_result"
         || response["state"] != "ready"
+        || response["policyId"] != RECALL_POLICY
         || !is_hash(&response["modelId"])
     {
         return None;
@@ -211,7 +266,7 @@ pub(super) fn additions(
         if e["passed"] != json!(supported.iter().any(|s| *s)) {
             return None;
         }
-        by_target.insert(p.target_id.as_str(), (e, supported));
+        by_target.insert(p.target_id.as_str(), e);
     }
     let known = !references.is_empty() || prior.values().any(|d| d == "accepted");
     let mut added: BTreeMap<String, Vec<[f64; 4]>> = BTreeMap::new();
@@ -227,16 +282,7 @@ pub(super) fn additions(
         {
             continue;
         }
-        let gate = &gates[id];
-        if gate["enabled"] != true
-            || gate["positive"].as_u64()? < 2
-            || gate["negative"].as_u64()? < 2
-            || gate["additional_tp"].as_u64()? < 2
-            || gate["additional_fp"].as_u64()? != 0
-        {
-            continue;
-        }
-        if !by_target[id].1[i] {
+        if !recall_gate(&gates[id])? {
             continue;
         }
         let competing_head = matches.iter().enumerate().any(|(j, peers)| {
@@ -244,7 +290,7 @@ pub(super) fn additions(
         });
         let strong_native = native.iter().any(|other| {
             other != id
-                && by_target.get(other.as_str()).is_some_and(|(e, _)| {
+                && by_target.get(other.as_str()).is_some_and(|e| {
                     automatic_evidence_regions(Some(e)).is_some_and(|regions| {
                         regions
                             .iter()
@@ -257,6 +303,113 @@ pub(super) fn additions(
         }
     }
     Some(added)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::{character_sources::Source, characters::tests::Fixture};
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn recall_receipts_enforce_counts_budget_utility_and_threshold() {
+        let good = json!({"enabled":true,"positive":4,"negative":2,
+            "recovered":4,"false_positive":1,"threshold":0.6});
+        assert_eq!(recall_gate(&good), Some(true));
+        for (key, value) in [
+            ("enabled", json!(false)),
+            ("positive", json!(0)),
+            ("negative", json!(1)),
+            ("recovered", json!(5)),
+            ("recovered", json!(2)),
+            ("false_positive", json!(2)),
+            ("false_positive", json!(u64::MAX)),
+            ("threshold", json!(0.49)),
+            ("threshold", json!(1.01)),
+            ("threshold", Value::Null),
+            ("recovered", json!(-1)),
+            ("negative", json!(2.5)),
+        ] {
+            let mut bad = good.clone();
+            bad[key] = value;
+            assert_ne!(recall_gate(&bad), Some(true), "{key}: {bad}");
+        }
+        assert_eq!(
+            recall_gate(&json!({"enabled":true,"positive":1,"negative":2,
+            "recovered":1,"false_positive":0,"threshold":0.5})),
+            Some(true)
+        );
+        assert_eq!(
+            recall_gate(&json!({"enabled":true,"positive":5,"negative":20,
+            "recovered":5,"false_positive":2,"threshold":1.0})),
+            Some(true)
+        );
+        assert_ne!(
+            recall_gate(&json!({"enabled":true,"positive":2,"negative":2,
+            "additional_tp":2,"additional_fp":0})),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn augmentation_query_pdq_is_in_memory_and_preserves_stored_quality_guard() {
+        let f = Fixture::new();
+        let path = f.temp.path().join("assets/asset-5.png");
+        let image = image::RgbImage::from_fn(128, 128, |x, y| {
+            image::Rgb([
+                (x * 17 + y * 31) as u8,
+                (x * 43 + y * 7) as u8,
+                (x * 11 + y * 53) as u8,
+            ])
+        });
+        image.save(&path).unwrap();
+        let hash: String = Sha256::digest(std::fs::read(&path).unwrap())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        f.library.connection().unwrap().execute(
+            "UPDATE assets SET content_hash=?1,perceptual_hash=NULL,perceptual_hash_quality=NULL WHERE id='asset-5'",
+            [&hash],
+        ).unwrap();
+        let source = Source::capture(&f.library, "assets/asset-5.png", &hash).unwrap();
+        let stored = crate::library::character_training::query_identity(
+            &f.library.connection().unwrap(),
+            "asset-5",
+        )
+        .unwrap();
+        let derived = query_identity(&stored, &source).unwrap().unwrap();
+        assert_eq!(derived["pdq"].as_str().unwrap().len(), 128);
+        assert!(derived["quality"].as_u64().unwrap() >= 50);
+        assert!(stored["pdq"].is_null());
+        assert_eq!(
+            crate::library::character_training::query_identity(
+                &f.library.connection().unwrap(),
+                "asset-5",
+            )
+            .unwrap(),
+            stored
+        );
+        source.verify(&f.library).unwrap();
+        source.check_identity(&f.library).unwrap();
+        let existing = json!({"pdq":"ab".repeat(64),"quality":90});
+        assert_eq!(query_identity(&existing, &source).unwrap(), Some(existing));
+        assert!(
+            query_identity(&json!({"pdq":"ab".repeat(64),"quality":49}), &source)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            query_identity(&json!({"pdq":"invalid","quality":90}), &source)
+                .unwrap()
+                .is_none()
+        );
+        let invalid_hash: String = Sha256::digest(b"asset-4")
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let invalid = Source::capture(&f.library, "assets/asset-4.png", &invalid_hash).unwrap();
+        assert!(query_identity(&stored, &invalid).is_err());
+    }
 }
 
 pub(super) fn is_hash(value: &Value) -> bool {

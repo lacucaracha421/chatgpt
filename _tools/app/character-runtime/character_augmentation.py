@@ -6,8 +6,8 @@ one source at a time. Two rules keep the layer auditable and safe:
 * Geometry comes only from the *resident* B36 extraction. The snapshot carries
   no boxes, fallback flag, or native evidence, and a caller-supplied bundle can
   never introduce a crop the native worker did not detect.
-* A target changes behaviour only when separate calibration groups show a
-  recorded gain with no added explicit-negative error.
+* A target changes behaviour only when separate calibration groups show
+  positive recall utility within a bounded explicit-negative error budget.
 
 Nothing here writes to a library, opens a database, downloads a model, or runs
 a detector.
@@ -21,9 +21,9 @@ import zipfile
 
 import numpy as np
 
-from character_head import calibrate, decide, fingerprint, fit_head, grouped_split
+from character_head import decide, fingerprint, fit_head, grouped_split, probabilities
 from feature_cache import MAX_CACHE_BYTES
-from holdout_rules import automatic_targets, same_person, validate_evidence
+from holdout_rules import same_person, validate_evidence
 from reference_regions import compare_bound, project_reference, resolve_references
 from runtime import BASELINE, FINGERPRINT
 
@@ -32,9 +32,7 @@ MAX_LABEL_TARGETS = 8
 MAX_ASSETS = 256
 MAX_TARGETS = 8
 MINIMUM_QUALITY = 50
-MINIMUM_CALIBRATION_GAIN = 2
-MINIMUM_POSITIVE = MINIMUM_NEGATIVE = 2
-MAXIMUM_ADDED_FP = 0
+RECALL_POLICY = "recall-tp-minus-2fp-v1"
 # Two 32-byte halves per PDQ; a near-duplicate is within this Hamming distance
 # of ANY pairing of the stored whole-image and cropped variants.
 PDQ_HEX = 128
@@ -62,8 +60,46 @@ def policy_contract(native_policy):
             "automatic_competitor_margin": margin, "baseline_fingerprint": FINGERPRINT}
 
 
+def calibrate_recall(head, bags, labels):
+    """Select a recall boundary using only held-apart calibration groups.
+
+    Logistic scores are not identity probabilities. One false positive costs
+    two recovered positives; ties prefer fewer errors, then a higher boundary.
+    """
+    result = {key: value for key, value in head.items()
+              if key not in ("threshold", "calibration")}
+    if "weights" not in head:
+        return result
+    if len(bags) != len(labels) or any(type(label) is not bool for label in labels):
+        raise ValueError("Invalid calibration labels")
+    scores = [float(probabilities(head, bag).max()) for bag in bags]
+    if not np.isfinite(scores).all():
+        raise ValueError("Nonfinite calibration score")
+    positive, negative = sum(labels), len(labels) - sum(labels)
+    result["calibration"] = {"positive": positive, "negative": negative}
+    if positive < 1 or negative < 2:
+        result["state"] = "insufficient_calibration"
+        return result
+    budget = max(1, negative // 10)
+    candidates = []
+    for threshold in sorted({0.5, *(score for score in scores if score >= 0.5)}):
+        tp = sum(label and score >= threshold for score, label in zip(scores, labels))
+        fp = sum(not label and score >= threshold for score, label in zip(scores, labels))
+        utility = tp - 2 * fp
+        if fp <= budget and tp > 0 and utility > 0:
+            candidates.append((utility, -fp, threshold, tp, fp))
+    if not candidates:
+        result["state"] = "no_positive_calibration_utility"
+        return result
+    utility, _, threshold, tp, fp = max(candidates)
+    result.update(state="ready_shadow", threshold=threshold)
+    result["calibration"].update(recovered=tp, false_positive=fp,
+                                 utility=utility, error_budget=budget)
+    return result
+
+
 def potential_additions(native_accepted, bundle, head_decision, policy):
-    """Two different mechanisms must support the same crop, not separate people.
+    """A ready head may rescue a crop even with zero B36 reference votes.
 
     Local copy of the frozen experiment rule, kept here so no experiment module
     is imported at runtime. It receives no labels, and existing native
@@ -84,8 +120,7 @@ def potential_additions(native_accepted, bundle, head_decision, policy):
         target = region["candidates"][0]
         if target in existing or target in head_decision["unavailable_heads"]:
             continue
-        if len(bundle[target]["evidence"][index]["matchedReferences"]) < 2:
-            continue
+
         strong_competitor = any(
             same_person(boxes[index], box) and len(other_row["matchedReferences"]) >= support
             and sorted(other_row["referenceDistances"])[support - 1] <= policy["automatic_max_distance"]
@@ -408,59 +443,20 @@ class Session:
         heads = {}
         for target_id in sorted(self.targets):
             trains, calibrations = self.split_bags(target_id)
-            heads[target_id] = calibrate(_fit(trains), [bag for bag, _ in calibrations],
-                                         [label for _, label in calibrations])
-        self.gates = self._calibrate_gates(heads)
+            heads[target_id] = calibrate_recall(_fit(trains), [bag for bag, _ in calibrations],
+                                                [label for _, label in calibrations])
+        self.gates = {
+            target: {"enabled": head["state"] == "ready_shadow",
+                     "positive": head.get("calibration", {}).get("positive", 0),
+                     "negative": head.get("calibration", {}).get("negative", 0),
+                     "recovered": head.get("calibration", {}).get("recovered", 0),
+                     "false_positive": head.get("calibration", {}).get("false_positive", 0),
+                     "threshold": head.get("threshold")}
+            for target, head in heads.items()
+        }
         self.model = {"heads": heads, "enabled": sorted(tid for tid, gate in self.gates.items()
                                                         if gate["enabled"])}
 
-    def _calibrate_gates(self, heads):
-        """Per-target gate from separate calibration groups, with real decisions."""
-        views = self.reference_views()
-        candidates = sorted(self.targets)
-        rows = {}
-        replayed = {}
-        for group, members in self._calibration_groups().items():
-            for target_id in candidates:
-                label = self.group_labels(target_id, members)
-                if label is None:
-                    continue
-                witnesses = sorted((member for member in members if member.get("feature") is not None
-                                    and self.resolved_labels(target_id, member) is label),
-                                   key=lambda member: member["assetId"])
-                if not witnesses:
-                    continue
-                asset = witnesses[0]
-                if asset["assetId"] not in replayed:
-                    evidence = self.bundle(asset, views)
-                    decision = decide(heads, asset["feature"].vectors, candidates, False)
-                    native = automatic_targets(evidence, {}, asset["hash"], self.policy)
-                    potential = potential_additions(native, evidence, decision, self.policy)
-                    replayed[asset["assetId"]] = native, potential
-                native, potential = replayed[asset["assetId"]]
-                rows.setdefault(target_id, []).append((label, native, potential))
-        report = {}
-        for target_id in candidates:
-            observations = rows.get(target_id, [])
-            positive = sum(label is True for label, _, _ in observations)
-            negative = sum(label is False for label, _, _ in observations)
-            gain = sum(label is True and target_id in potential and target_id not in native
-                       for label, native, potential in observations)
-            errors = sum(label is False and target_id in potential and target_id not in native
-                         for label, native, potential in observations)
-            report[target_id] = {"positive": positive, "negative": negative, "additional_tp": gain,
-                                 "additional_fp": errors,
-                                 "enabled": (positive >= MINIMUM_POSITIVE and negative >= MINIMUM_NEGATIVE
-                                             and gain >= MINIMUM_CALIBRATION_GAIN
-                                             and errors <= MAXIMUM_ADDED_FP)}
-        return report
-
-    def _calibration_groups(self):
-        groups = {}
-        for asset in self.assets.values():
-            if self.split[asset["group"]] == "calibration":
-                groups.setdefault(asset["group"], []).append(asset)
-        return groups
 
     # --- queries ----------------------------------------------------------------
 
@@ -492,8 +488,6 @@ class Session:
         accepted = set(request.get("nativeAccepted") or [])
         if not any(gate["enabled"] and target not in accepted
                    and self.model["heads"][target]["state"] == "ready_shadow"
-                   and bundle[target]["passed"]
-                   and any(len(row["matchedReferences"]) >= 2 for row in bundle[target]["evidence"])
                    for target, gate in self.gates.items()):
             return {"state": "skipped", "reason": "nothing_to_augment"}
         feature = self._s36({"assetId": asset_id, "hash": content_hash, "path": path,
@@ -568,13 +562,14 @@ class Model:
                         "modelId": session.model_id(), "assetId": request["assetId"],
                         "contentHash": request["hash"], "queryBoxes": [],
                         "headDecision": None, "state": "skipped", "reason": outcome["reason"],
-                        "gates": self._gates(session)}
+                        "gates": self._gates(session), "policyId": RECALL_POLICY}
             decision = decide(session.model["heads"], outcome["feature"].vectors,
                               sorted(session.targets), False)
             return {"type": "augmentation_result", "snapshotId": session.snapshot_id,
                     "modelId": session.model_id(), "assetId": request["assetId"],
                     "contentHash": request["hash"], "queryBoxes": outcome["boxes"],
-                    "headDecision": decision, "state": "ready", "gates": self._gates(session)}
+                    "headDecision": decision, "state": "ready", "gates": self._gates(session),
+                    "policyId": RECALL_POLICY}
         raise ValueError("Unsupported augmentation message")
 
     def _prepare(self, request):
@@ -593,9 +588,7 @@ class Model:
 
     @staticmethod
     def _gates(session):
-        return {tid: {"enabled": gate["enabled"], "positive": gate["positive"],
-                      "negative": gate["negative"], "additional_tp": gate["additional_tp"],
-                      "additional_fp": gate["additional_fp"]} for tid, gate in session.gates.items()}
+        return {tid: dict(gate) for tid, gate in session.gates.items()}
 
     def _require(self, request):
         if self.session is None or self.session.snapshot_id != str(request.get("snapshotId", "")):

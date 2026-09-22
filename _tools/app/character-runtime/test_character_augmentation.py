@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -429,12 +430,13 @@ class GateTests(unittest.TestCase):
         session.fit()
         return rig, session
 
-    def test_enabled_gate_requires_gain_and_no_added_negative(self):
+    def test_enabled_gate_reports_recall_calibration(self):
         rig, session = self._fitted([True, True, False, False])
         gate = session.gates["t"]
         self.assertEqual((gate["positive"], gate["negative"]), (2, 2))
-        self.assertGreaterEqual(gate["additional_tp"], 2)
-        self.assertEqual(gate["additional_fp"], 0)
+        self.assertEqual(gate["recovered"], 2)
+        self.assertEqual(gate["false_positive"], 0)
+        self.assertGreaterEqual(gate["threshold"], 0.5)
         self.assertTrue(gate["enabled"])
         self.assertEqual(session.model["heads"]["t"]["state"], "ready_shadow")
 
@@ -443,25 +445,52 @@ class GateTests(unittest.TestCase):
         self.assertLess(session.gates["t"]["negative"], 2)
         self.assertFalse(session.gates["t"]["enabled"])
 
-    def test_added_false_positive_disables_the_target(self):
-        # A negative group the B36 path also supports is the only way an added
-        # false positive can arise; the gate must then stay disabled.
-        rig = mixed_rig([True, True, False, False],
-                        # B36 sees the reference person; S36 sees a distinct one.
-                        s36_person={"cal-2": 2, "cal-3": 3})
-        for name in ("cal-2", "cal-3"):
-            rig.persons[name] = 0
-        session = rig.rebuild().partition(rig.session(), partition_rule)
-        session.fit()
-        self.assertEqual(session.gates["t"]["additional_fp"], 0)
-        self.assertTrue(session.gates["t"]["enabled"])
-        # Drop the boundary so every region scores positive: the two negative
-        # calibration groups now become added false positives.
-        for head in session.model["heads"].values():
-            head["threshold"] = -1.0
-        gates = session._calibrate_gates(session.model["heads"])
-        self.assertGreater(gates["t"]["additional_fp"], 0)
-        self.assertFalse(gates["t"]["enabled"])
+    def _calibrate_scores(self, scores, labels):
+        # Isolate threshold selection; fitting and bag scoring have other tests.
+        head = {"weights": [1.0], "bias": 0.0, "state": "ready_shadow",
+                "threshold": 0.01, "calibration": {"old": True}}
+        with patch.object(augmentation, "probabilities", side_effect=[np.array(s) for s in scores]):
+            return augmentation.calibrate_recall(head, [None] * len(scores), labels)
+
+    def test_compensated_error_is_allowed(self):
+        head = self._calibrate_scores([.9, .8, .7, .6, .95, .1], [True] * 4 + [False] * 2)
+        self.assertEqual(head["state"], "ready_shadow")
+        self.assertEqual(head["threshold"], .6)
+        self.assertEqual(head["calibration"], {"positive": 4, "negative": 2,
+                         "recovered": 4, "false_positive": 1, "utility": 2, "error_budget": 1})
+
+    def test_ties_prefer_fewer_errors_then_higher_threshold(self):
+        head = self._calibrate_scores([.9, .7, .6, .8, .1], [True] * 3 + [False] * 2)
+        self.assertEqual(head["threshold"], .9)
+        self.assertEqual(head["calibration"]["false_positive"], 0)
+
+    def test_zero_utility_low_scores_and_excess_errors_hold(self):
+        for scores, labels in [([.9, .8, .95, .1], [True, True, False, False]),
+                               ([.4, .3, .2], [True, False, False]),
+                               ([.6] * 6 + [.9, .8], [True] * 6 + [False] * 2)]:
+            with self.subTest(scores=scores):
+                head = self._calibrate_scores(scores, labels)
+                self.assertEqual(head["state"], "no_positive_calibration_utility")
+                self.assertNotIn("threshold", head)
+
+    def test_minimum_counts_and_ten_percent_error_budget(self):
+        head = self._calibrate_scores([.5, .2, .1], [True, False, False])
+        self.assertEqual(head["threshold"], .5)
+        for labels in ([True, False], [False, False]):
+            self.assertEqual(self._calibrate_scores([.8] * len(labels), labels)["state"],
+                             "insufficient_calibration")
+        head = self._calibrate_scores([.6] * 5 + [.9] * 2 + [.1] * 18,
+                                     [True] * 5 + [False] * 20)
+        self.assertEqual(head["calibration"]["false_positive"], 2)
+        self.assertEqual(head["state"], "ready_shadow")
+
+    def test_bag_max_scores_and_invalid_labels(self):
+        head = self._calibrate_scores([[.1, .8], [.2], [.3]], [True, False, False])
+        self.assertEqual(head["threshold"], .8)
+        with self.assertRaises(ValueError):
+            self._calibrate_scores([.8, .2, .1], [True, 0, False])
+        with self.assertRaises(ValueError):
+            self._calibrate_scores([float("nan"), .2, .1], [True, False, False])
 
     def test_disabled_ready_rival_still_blocks_a_competitor(self):
         rig = mixed_rig([True, True, False, False])
@@ -506,6 +535,22 @@ class QueryTests(unittest.TestCase):
         result = session.query(self._request("query-pos", bundle=self._bundle(session, rig, "query-pos")))
         self.assertEqual(result["state"], "ready")
         self.assertEqual(result["boxes"], list(BOXES))
+
+    def test_zero_b36_votes_still_reaches_s36_and_proposes_target(self):
+        rig = mixed_rig([True, True, False, False], queries=("query-neg",),
+                        s36_person={"query-neg": 0})
+        session = rig.partition(rig.session(), partition_rule)
+        session.fit()
+        session.resident = {"query-neg": (hash_of("query-neg"), list(BOXES), False)}
+        bundle = self._bundle(session, rig, "query-neg")
+        self.assertFalse(bundle["t"]["passed"])
+        self.assertEqual(bundle["t"]["evidence"][0]["matchedReferences"], [])
+        session.s36_cache.reads.clear()
+        result = session.query(self._request("query-neg", bundle=bundle))
+        self.assertEqual(result["state"], "ready")
+        self.assertEqual(session.s36_cache.reads, [hash_of("query-neg")])
+        decision = augmentation.decide(session.model["heads"], result["feature"].vectors, ["t"])
+        self.assertEqual(augmentation.potential_additions([], bundle, decision, POLICY), {"t": [0]})
 
     def test_no_enabled_addition_skips_the_encoder(self):
         rig, session = self._ready()
@@ -609,6 +654,24 @@ class ProtocolTests(unittest.TestCase):
         final = drain(model)
         self.assertEqual(final["state"], "ready")
         self.assertEqual(len(final["modelId"]), 64)
+
+    def test_query_responses_include_policy_and_calibration_receipts(self):
+        rig = mixed_rig([True, True, False, False], queries=("query-pos",))
+        model, _ = rig.model()
+        session = rig.partition(model.session, partition_rule)
+        session.fit()
+        bundle = session.bundle(session.assets["query-pos"], session.reference_views())
+        request = {"type": "augment_query", "snapshotId": "s1", "assetId": "query-pos",
+                   "hash": hash_of("query-pos"), "path": "/tmp/query-pos.png", "bundle": bundle,
+                   "queryIdentity": {"pdq": pdq("query-pos"), "quality": 90}}
+        for resident, state in [({}, "skipped"),
+                                ({"query-pos": (hash_of("query-pos"), list(BOXES), False)}, "ready")]:
+            response = model.handle(request, resident=resident)
+            self.assertEqual(response["state"], state)
+            self.assertEqual(response["policyId"], augmentation.RECALL_POLICY)
+            self.assertEqual(response["gates"], session.gates)
+            self.assertEqual(response["gates"]["t"]["recovered"], 2)
+            self.assertNotIn("additional_tp", response["gates"]["t"])
 
     def test_model_id_covers_weights_and_gates(self):
         rig = Rig({name: 0 for name in REFERENCES}, {})

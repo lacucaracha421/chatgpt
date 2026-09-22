@@ -73,7 +73,7 @@ export function CharacterAugmentationSettings({ disabled, onBusyChange }: {
   const environment = settings?.managedByEnvironment ?? false;
   return <dl className="settings-view__property" aria-busy={busy || loading}>
     <dt>캐릭터 누락 보완</dt>
-    <dd className="settings-view__credential-status">기존 자동 분류와 수동 판정은 유지하고, 검증된 캐릭터의 누락만 경량 모델로 보완합니다. 이 PC의 설정이며, 캐릭터 자동 분류가 켜져 있을 때 동작합니다. 과거 이미지 재분석은 시작하지 않습니다.</dd>
+    <dd className="settings-view__credential-status">기존 자동 분류와 수동 판정은 유지하고, 경량 모델로 더 많은 누락을 보완합니다. 일부 오탐이 생길 수 있습니다. 이 PC의 설정이며, 캐릭터 자동 분류가 켜져 있을 때 동작합니다. 과거 이미지 재분석은 시작하지 않습니다.</dd>
     <dd className="settings-view__inline-controls">
       <Toggle aria-label="캐릭터 누락 보완" checked={settings?.enabled ?? false}
         disabled={locked || environment || (!settings?.enabled && (!settings?.modelReady || !settings?.runtimeConfigured))}
@@ -85,7 +85,7 @@ export function CharacterAugmentationSettings({ disabled, onBusyChange }: {
     </dd>
     {settings && <dd className="settings-view__credential-status" role="status">
       {!settings.runtimeConfigured ? "분석 환경 설정이 먼저 필요합니다."
-        : settings.modelReady ? (settings.enabled ? "초기 학습은 나눠 진행하며, 검증 전에는 기존 방식만 사용합니다." : "보완 모델이 준비되어 있습니다.")
+        : settings.modelReady ? (settings.enabled ? "기존 분석을 먼저 처리하고, 대기 작업이 없을 때 보완 모델을 준비합니다. 준비 전에는 기존 방식만 사용합니다." : "보완 모델이 준비되어 있습니다.")
           : "보완 모델 설치를 확인해 주세요. 사용할 수 없으면 기존 방식만 사용합니다."}
       {environment && " 환경 변수로 지정되어 있습니다. 앱에서 변경하려면 LAKOMICS_CHARACTER_AUGMENTATION_MODEL을 해제하고 다시 시작해 주세요."}
     </dd>}

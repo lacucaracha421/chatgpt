@@ -23,7 +23,7 @@ it("uses the preconnected model with only a toggle and native confirmation", asy
   await userEvent.click(toggle);
   expect(invoke).toHaveBeenLastCalledWith("set_character_augmentation_enabled", { enabled: true });
   expect(toggle).toBeChecked();
-  expect(screen.getByRole("status")).toHaveTextContent("초기 학습은 나눠 진행");
+  expect(screen.getByRole("status")).toHaveTextContent("기존 분석을 먼저 처리하고, 대기 작업이 없을 때 보완 모델을 준비합니다.");
   vi.mocked(invoke).mockResolvedValueOnce(ready);
   await userEvent.click(toggle);
   expect(toggle).not.toBeChecked();
