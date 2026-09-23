@@ -153,7 +153,16 @@ impl Library {
                 "SELECT decision FROM character_decisions WHERE source_asset_id=?1 AND target_id=?2 AND origin='manual' ORDER BY sequence DESC LIMIT 1",
                 params![id,target.id], |r| r.get(0)).optional()?;
             if manual.is_none() || manual.as_deref() == Some("cleared") {
-                outcomes.insert(target.id, "none".into());
+                // Record what the native pass already decided, like the live path does.
+                let native: Option<String> = c.query_row(
+                    "SELECT decision FROM character_decisions WHERE source_asset_id=?1 AND target_id=?2 AND origin<>'manual' ORDER BY sequence DESC LIMIT 1",
+                    params![id,target.id], |r| r.get(0)).optional()?;
+                let outcome = if native.as_deref() == Some("accepted") {
+                    "accepted_automatic"
+                } else {
+                    "none"
+                };
+                outcomes.insert(target.id, outcome.into());
             }
         }
         Ok((!outcomes.is_empty()).then(|| Pending {

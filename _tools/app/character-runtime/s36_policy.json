@@ -1,11 +1,11 @@
 {
-  "version": "s36-knn3-v1",
+  "version": "s36-knn3-v2",
   "status": "shadow-only: not read by the native runtime; baseline.json remains the active B36 policy",
   "feature_id": "e4be203d4030b1e58ff6b4577476701d438bfe3902d712cd9b03655a717eba9f",
   "scorer": "knn3",
   "score": "per image: minimum over person crops of the mean CCIP distance to the three nearest positive-gallery images (s36_scoring.knn); smaller is better",
-  "automatic_max_knn3": 0.13039766252040863,
-  "recommendation_max_knn3": 0.1490272581577301,
+  "automatic_max_knn3": 0.1085,
+  "recommendation_max_knn3": 0.12,
   "automatic_min_prior_manual_rejections": 100,
   "rules": [
     "Automatic membership only when the image score is <= automatic_max_knn3 and at least automatic_min_prior_manual_rejections manual rejections existed library-wide before the decision (cold-start guard).",
@@ -20,13 +20,31 @@
     "selection": "automatic = final walk-forward threshold for target FPR 2%; recommendation = target FPR 5%",
     "overall_knn3_auc": 0.7987,
     "post_warmup_window": "decisions from 2026-09-10T00:00Z: 458 accepted, 741 rejected",
-    "post_warmup_automatic": {"recall": 0.395, "false_positive_rate": 0.0081, "precision": 0.968},
-    "post_warmup_recommendation": {"recall": 0.485, "false_positive_rate": 0.0189, "precision": 0.941},
+    "post_warmup_automatic": {
+      "recall": 0.395,
+      "false_positive_rate": 0.0081,
+      "precision": 0.968
+    },
+    "post_warmup_recommendation": {
+      "recall": 0.485,
+      "false_positive_rate": 0.0189,
+      "precision": 0.941
+    },
     "cold_start_note": "Including 2026-09-09 the observed walk-forward FPR never falls below 2.5%: the first threshold came from 25 rejections and one character took 16-17 false positives. The rejection-count guard addresses this.",
     "limitations": [
       "Historical replay of selected labels, not prospective validation.",
       "Only about 17 manual rejections exist after 2026-09-13, so recent drift is weakly measured.",
       "1,104 earlier automatic acceptances were never manually reviewed and are not labels."
     ]
+  },
+  "revision": {
+    "date": "2026-09-23",
+    "reason": "Prospective shadow review of new findings (backfill of existing images): automatic <=0.1304 was 28/39 correct and recommendations <=0.1490 were 6/30 accepted; automatic <=0.1085 was 19/19 correct and <=0.12 was 22/26. Both thresholds tightened for further shadow collection.",
+    "previous": {
+      "version": "s36-knn3-v1",
+      "automatic_max_knn3": 0.13039766252040863,
+      "recommendation_max_knn3": 0.1490272581577301
+    },
+    "automatic_source": "post-warmup walk-forward threshold for target FPR 0.5% (recall 24.5%, FPR 0.27%)"
   }
 }

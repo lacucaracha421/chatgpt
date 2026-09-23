@@ -955,7 +955,14 @@ impl Library {
                     asset_id,
                     evidence
                         .get(asset_id)
-                        .is_some_and(|e| e["prediction"]["automaticScope"] == true),
+                        .is_some_and(|e| e["prediction"]["automaticScope"] == true)
+                        // A direct judgment may confirm or correct what the automatic
+                        // pass may classify, including parent-folder images it reaches.
+                        || (request.scan_id.is_none()
+                            && self
+                                .character_autotag_targets(transaction, asset_id)?
+                                .iter()
+                                .any(|t| t.id == target.id)),
                     request.scan_id.is_none(),
                 )?
                 .0

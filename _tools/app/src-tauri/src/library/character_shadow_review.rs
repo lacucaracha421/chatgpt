@@ -110,16 +110,29 @@ fn shadow_rows(root: &Path) -> Result<Option<(String, Vec<ShadowRow>)>> {
     if !path.is_file() {
         return Ok(None);
     }
-    let c = Connection::open_with_flags(
-        &path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    c.busy_timeout(std::time::Duration::from_millis(100))?;
-    let has_table: bool = c.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='scores')",
-        [],
-        |r| r.get(0),
-    )?;
+    let open = || -> rusqlite::Result<(Connection, bool)> {
+        let c = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        c.busy_timeout(std::time::Duration::from_millis(100))?;
+        let has_table = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='scores')",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok((c, has_table))
+    };
+    let (c, has_table) = match open() {
+        // A writer stopped mid-transaction (e.g. the app restarted during history
+        // scoring) leaves a hot journal that only a writable connection can roll back.
+        // The cache owner opens it once to recover, then this read stays read-only.
+        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ReadOnly => {
+            drop(super::character_shadow::Cache::open(root)?);
+            open()?
+        }
+        result => result?,
+    };
     if !has_table {
         return Ok(None);
     }
@@ -200,6 +213,32 @@ impl Library {
         };
         page.policy_version = Some(version);
         let c = self.connection()?;
+        // Pairs the native pass already accepted automatically come after new findings
+        // and are labelled as such; each group keeps the stable pseudo-random order.
+        // (Backfill rows recorded "none" as the native outcome for them.)
+        let rows = {
+            let mut native = c.prepare(
+                "SELECT decision FROM character_decisions
+                 WHERE target_id=?1 AND source_asset_id=?2 AND origin<>'manual'
+                 ORDER BY sequence DESC LIMIT 1",
+            )?;
+            let mut keyed = Vec::with_capacity(rows.len());
+            for (index, mut row) in rows.into_iter().enumerate() {
+                let classified = native
+                    .query_row(params![row.target_id, row.asset_id], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .optional()?
+                    .as_deref()
+                    == Some("accepted");
+                if classified && row.native_outcome == "none" {
+                    row.native_outcome = "accepted_automatic".into();
+                }
+                keyed.push(((row.verdict != "automatic", classified, index), row));
+            }
+            keyed.sort_by_key(|(key, _)| *key);
+            keyed.into_iter().map(|(_, row)| row).collect::<Vec<_>>()
+        };
         let mut targets: BTreeMap<String, Option<TargetInfo>> = BTreeMap::new();
         let mut asset_statement = c.prepare(
             "SELECT original_name,width,height FROM assets

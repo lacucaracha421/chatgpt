@@ -53,6 +53,9 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
   const [backfillError, setBackfillError] = useState<string | null>(null);
   const wasRunning = useRef(false);
   const skipped = useRef(new Set<string>());
+  // Judged in this window. A page requested before a judgment was stored can still list
+  // it, so every page and the queue are filtered by key rather than by object identity.
+  const judged = useRef(new Map<string, Judgment>());
   const queueRef = useRef(queue);
   queueRef.current = queue;
   const loadingRef = useRef(false);
@@ -67,7 +70,8 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
       const page = await api.page({ offset, limit: PAGE_SIZE });
       const known = new Set((reset ? [] : queueRef.current).map(shadowItemKey));
       const fresh = page.items.filter(item => { const key = shadowItemKey(item); return !skipped.current.has(key) && !known.has(key); });
-      setQueue(previous => reset ? fresh : [...previous, ...fresh]);
+      const open = (item: ShadowReviewItem) => !judged.current.has(shadowItemKey(item));
+      setQueue(previous => (reset ? fresh : [...previous, ...fresh]).filter(open));
       setSummary(page.summary);
       // A page with nothing new means the order shifted under us; stop refilling until a reload.
       setHasMore(page.nextOffset !== null && fresh.length > 0);
@@ -127,6 +131,8 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
   const backfillButton = <Button size="sm" disabled={starting || backfill?.running} onClick={() => void startBackfill()}>기존 이미지 채점</Button>;
 
   const current = queue[0];
+  // Another character already judged on this same image in this window.
+  const sameImage = current ? [...judged.current.values()].filter(j => j.item.assetId === current.assetId && j.item.targetId !== current.targetId) : [];
   const next = queue[1];
   useEffect(() => {
     if (!next || privacyMode) return;
@@ -139,7 +145,9 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     setBusy(true); setDecisionError(null);
     try {
       await decisions.decide({ targetId: current.targetId, expectedFingerprint: current.targetFingerprint, assetIds: [current.assetId], decision, baselineFingerprint: null, scanId: null });
-      setQueue(previous => previous.filter(item => item !== current));
+      const key = shadowItemKey(current);
+      judged.current.set(key, { item: current, decision });
+      setQueue(previous => previous.filter(item => shadowItemKey(item) !== key));
       setSummary(previous => adjust(previous, current, decision, 1));
       setLast({ item: current, decision });
       onChanged?.();
@@ -154,6 +162,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     setBusy(true); setDecisionError(null);
     try {
       await decisions.decide({ targetId: last.item.targetId, expectedFingerprint: last.item.targetFingerprint, assetIds: [last.item.assetId], decision: "cleared", baselineFingerprint: null, scanId: null });
+      judged.current.delete(shadowItemKey(last.item));
       setQueue(previous => [last.item, ...previous.filter(item => shadowItemKey(item) !== shadowItemKey(last.item))]);
       setSummary(previous => adjust(previous, last.item, last.decision, -1));
       setLast(null);
@@ -166,9 +175,10 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
   }
   function skip() {
     if (!current || busy) return;
-    skipped.current.add(shadowItemKey(current));
+    const key = shadowItemKey(current);
+    skipped.current.add(key);
     setDecisionError(null);
-    setQueue(previous => previous.filter(item => item !== current));
+    setQueue(previous => previous.filter(item => shadowItemKey(item) !== key));
   }
   function restoreSkipped() {
     skipped.current.clear();
@@ -219,6 +229,8 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
               {current.referenceAssetIds.length > 0 && <ul className="shadow-review__references" aria-label={`${current.targetName} 레퍼런스`}>
                 {current.referenceAssetIds.map(id => <li key={id}><img src={thumbnailUrl(id)} alt="" className={privacyMode ? "character-private" : undefined} loading="lazy" /></li>)}
               </ul>}
+              {current.nativeOutcome === "accepted_automatic" && <p className="shadow-review__same-image" role="note">기존 분류기가 이미 {current.targetName}(으)로 자동 분류한 이미지입니다. 새 후보를 다 본 뒤에 나오며, 틀렸으면 아님을 눌러 주세요.</p>}
+              {sameImage.length > 0 && <p className="shadow-review__same-image" role="note">같은 이미지의 다른 캐릭터 후보입니다. 앞에서 {sameImage.map(j => `${j.item.targetName} ${j.decision === "accepted" ? "맞음" : "아님"}`).join(", ")}(으)로 판단했습니다. 이 캐릭터도 그림에 있으면 맞음을 누르세요.</p>}
               <p className="shadow-review__meta">기존 판정 {nativeOutcomeLabel(current.nativeOutcome)}<span aria-hidden="true"> · </span>{current.originalName}</p>
               <div className="shadow-review__actions">
                 <Button variant="primary" disabled={busy} onClick={() => void judge("accepted")}>맞음 <kbd>→</kbd><kbd>D</kbd></Button>

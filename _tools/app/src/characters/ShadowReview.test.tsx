@@ -156,3 +156,39 @@ it("shows separate origin precision and updates only the judged origin", async (
   await userEvent.setup().keyboard("d");
   await waitFor(() => expect(screen.getByLabelText("진행 상황")).toHaveTextContent("자동 후보 정확도24/26 · 기존 19/21 · 신규 5/5"));
 });
+
+it("never shows a judged candidate again when a page requested before the judgment arrives later", async () => {
+  const a1 = item("a1", "automatic", 0.12), a2 = item("a2", "automatic", 0.121, "kisaki");
+  const summary = { ...emptyShadowSummary(), automatic: { pending: 2, accepted: 0, rejected: 0 } };
+  let resolveStale!: (page: ShadowReviewPage) => void;
+  const page = vi.fn()
+    .mockResolvedValueOnce({ items: [a1, a2], nextOffset: null, policyVersion: "v1", summary })
+    // The reload after history scoring was requested before the judgment was stored.
+    .mockImplementationOnce(() => new Promise<ShadowReviewPage>(resolve => { resolveStale = resolve; }));
+  const decide = vi.fn(async () => 1);
+  const api = { ...idleApi(), page, start: vi.fn().mockResolvedValue({ ...idleStatus, running: true }) };
+  render(<ShadowReview onClose={vi.fn()} api={api} decisions={{ decide }} />);
+  await screen.findByRole("heading", { level: 3, name: "히나" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "기존 이미지 채점" }));
+  await waitFor(() => expect(page).toHaveBeenCalledTimes(2), { timeout: 3000 });
+  await user.keyboard("{ArrowRight}");
+  await screen.findByRole("heading", { level: 3, name: "키사키" });
+  resolveStale({ items: [a1, a2], nextOffset: null, policyVersion: "v1", summary });
+  await waitFor(() => expect(page.mock.results[1]).toBeDefined());
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(screen.getByRole("heading", { level: 3, name: "키사키" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { level: 3, name: "히나" })).toBeNull();
+  // The same image offered for another character says what was already decided on it.
+  expect(screen.queryByRole("note")).toBeNull();
+});
+
+it("tells the reviewer when another character on the same image was already judged", async () => {
+  const { decide } = fixture([item("a1", "automatic", 0.12), item("a1", "automatic", 0.125, "kisaki")]);
+  await screen.findByRole("heading", { level: 3, name: "히나" });
+  const user = userEvent.setup();
+  await user.keyboard("{ArrowRight}");
+  await waitFor(() => expect(decide).toHaveBeenCalledTimes(1));
+  expect(await screen.findByRole("heading", { level: 3, name: "키사키" })).toBeInTheDocument();
+  expect(screen.getByRole("note")).toHaveTextContent("앞에서 히나 맞음(으)로 판단했습니다");
+});

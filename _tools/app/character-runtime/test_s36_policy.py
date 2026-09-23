@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 class S36PolicyTest(unittest.TestCase):
     def test_policy_is_ordered_and_bound_to_a_feature_namespace(self):
         policy = json.loads((HERE / "s36_policy.json").read_text())
-        self.assertEqual(policy["version"], "s36-knn3-v1")
+        self.assertEqual(policy["version"], "s36-knn3-v2")
         self.assertEqual(policy["scorer"], "knn3")
         self.assertRegex(policy["feature_id"], r"^[0-9a-f]{64}$")
         automatic, recommendation = policy["automatic_max_knn3"], policy["recommendation_max_knn3"]

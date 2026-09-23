@@ -388,6 +388,12 @@ supplies the optional stage 2d shadow observer described below. `baseline.json` 
 authorized stage. The policy file's retained status text describes its
 calibration-time state.
 
+Revision `s36-knn3-v2` (2026-09-23): the prospective review of backfilled new findings
+found automatic ≤ 0.1304 only 28/39 correct and recommendations ≤ 0.1490 only 6/30
+accepted, while automatic ≤ 0.1085 was 19/19 and ≤ 0.12 was 22/26. The shadow policy
+now uses automatic ≤ 0.1085 (the replay's 0.5% target) and recommendations ≤ 0.12;
+the previous values are kept under `revision.previous` in the policy file.
+
 
 ## S36 shadow scoring (stage 2d)
 
