@@ -24,20 +24,21 @@ type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;pro
 function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string,filterKey:string){return `${revision}:${filterKey}:${item.provider}:${item.providerWorkId}`;}
 
 function CatalogCover({item,revision,active}:{item:CatalogItem;revision:string;active:boolean}){
-  const [url,setUrl]=useState(''),[failed,setFailed]=useState(false),[visible,setVisible]=useState(false);
-  const host=useRef<HTMLSpanElement>(null);
+  const [image,setImage]=useState<{source:string;url:string}|null>(null),[failed,setFailed]=useState<string|null>(null),[visible,setVisible]=useState(false);
+  const host=useRef<HTMLSpanElement>(null),loaded=useRef<string|null>(null);
+  const source=JSON.stringify([item.provider,item.providerWorkId,item.thumbnailUrl,revision]);
   useEffect(()=>{if(!host.current)return;if(!window.IntersectionObserver){setVisible(true);return;}const observer=new IntersectionObserver(entries=>setVisible(entries.some(e=>e.isIntersecting)),{rootMargin:'120px'});observer.observe(host.current);return()=>observer.disconnect();},[]);
   useEffect(()=>{
-    if(!active||!visible||!item.thumbnailUrl)return;setFailed(false);
+    if(!active||!visible||!item.thumbnailUrl||loaded.current===source)return;setFailed(null);
     const controller=new AbortController();
     void catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl},controller.signal).then(ticket=>{
       if(controller.signal.aborted)return;
       if(!ticket.url.startsWith('https://app.lakomics.local/media-cache/')&&!(import.meta.env.DEV&&ticket.url.startsWith('data:image/')))throw new Error('Invalid catalog cover');
-      setUrl(ticket.url);
-    }).catch(()=>{if(!controller.signal.aborted)setFailed(true);});
+      loaded.current=source;setImage({source,url:ticket.url});
+    }).catch(()=>{if(!controller.signal.aborted)setFailed(source);});
     return()=>controller.abort();
-  },[item.providerWorkId,item.thumbnailUrl,revision,active,visible]);
-  return <span className="catalog-cover-image" ref={host}>{url&&!failed?<img src={url} alt="" onError={()=>setFailed(true)}/>:null}</span>;
+  },[source,active,visible]);
+  return <span className="catalog-cover-image" ref={host}>{image?.source===source&&failed!==source?<img src={image.url} alt="" onError={()=>{loaded.current=null;setFailed(source);}}/>:null}</span>;
 }
 
 export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string}){

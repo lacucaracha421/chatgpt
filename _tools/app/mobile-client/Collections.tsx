@@ -33,22 +33,42 @@ function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, 
     signal.addEventListener('abort',cancel,{once:true}); if(artworkActive<4)start();else artworkQueue.push(start);
   });
 }
+function artworkSource(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
+  const variant=original?'original':'thumbnail';
+  return JSON.stringify([item.id,id??null,item.coverAssetId??null,revision,variant,id?item.artworkVersions?.[id]?.[variant]??'':'']);
+}
+type LoadedArtwork = {source:string;url:string};
 function Artwork({item,id,revision,original=false,active=true,label}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string}) {
-  const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [url,setUrl]=useState(''), [failed,setFailed]=useState(false);
+  const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [image,setImage]=useState<LoadedArtwork|null>(null), [failed,setFailed]=useState<string|null>(null);
+  const source=artworkSource(item,id,revision,original),loaded=useRef<string|null>(null);
   useEffect(()=>{if(original || !host.current)return; if(!('IntersectionObserver' in window)){setVisible(true);return;} const observer=new IntersectionObserver(entries=>setVisible(entries.some(entry=>entry.isIntersecting)),{rootMargin:'120px'});observer.observe(host.current);return()=>observer.disconnect();},[original]);
-  useEffect(()=>{if(!active||!visible||(!id&&!item.coverAssetId))return;setFailed(false);const controller=new AbortController();void artworkTicket(item,id,revision,original,controller.signal).then(ticket=>{if(controller.signal.aborted)return;if(!/^https:\/\//.test(ticket.url)&&!(import.meta.env.DEV&&ticket.url.startsWith('data:image/')))throw new Error('Invalid artwork');setUrl(ticket.url);}).catch(()=>{if(!controller.signal.aborted)setFailed(true);});return()=>controller.abort();},[item.id,item.coverAssetId,id,revision,original,active,visible]);
-  return <span ref={host} className={`collection-art collection-art-${item.type}`}>{url&&!failed?<img src={url} alt={label??item.name} onError={()=>setFailed(true)}/>:<span className="collection-art-placeholder"><RectangleStackIcon/><span>{failed?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
+  useEffect(()=>{
+    if(!active||!visible||(!id&&!item.coverAssetId)||loaded.current===source)return;
+    setFailed(null);const controller=new AbortController();
+    void artworkTicket(item,id,revision,original,controller.signal).then(ticket=>{
+      if(controller.signal.aborted)return;
+      if(!/^https:\/\//.test(ticket.url)&&!(import.meta.env.DEV&&ticket.url.startsWith('data:image/')))throw new Error('Invalid artwork');
+      loaded.current=source;setImage({source,url:ticket.url});
+    }).catch(()=>{if(!controller.signal.aborted)setFailed(source);});
+    return()=>controller.abort();
+  },[source,active,visible]);
+  const broken=failed===source;
+  return <span ref={host} className={`collection-art collection-art-${item.type}`}>{image?.source===source&&!broken?<img src={image.url} alt={label??item.name} onError={()=>{loaded.current=null;setFailed(source);}}/>:<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
 }
 function HeroArtwork({item,id,revision,active}:{item:CollectionDetail;id:string;revision:string;active:boolean}) {
-  const [original,setOriginal]=useState('');
+  const [original,setOriginal]=useState<LoadedArtwork|null>(null),loaded=useRef<string|null>(null);
+  const available=item.artworks.find(art=>art.id===id)?.originalAvailable===true;
+  const source=JSON.stringify([artworkSource(item,id,revision,true),available]);
   useEffect(()=>{
-    if(!active||!item.artworks.find(art=>art.id===id)?.originalAvailable)return;
+    if(!active||!available||loaded.current===source)return;
     const controller=new AbortController();
     void artworkTicket(item,id,revision,true,controller.signal).then(async ticket=>{
-      const image=new Image();image.src=ticket.url;await image.decode();if(!controller.signal.aborted)setOriginal(ticket.url);
+      if(controller.signal.aborted)return;
+      const image=new Image();image.src=ticket.url;await image.decode();
+      if(!controller.signal.aborted){loaded.current=source;setOriginal({source,url:ticket.url});}
     }).catch(()=>{});return()=>controller.abort();
-  },[item.id,id,revision,active]);
-  return <div className="collection-backdrop"><Artwork item={item} id={id} revision={revision} active={active}/>{original&&<img className="collection-hero-original" src={original} alt=""/>}</div>;
+  },[source,active]);
+  return <div className="collection-backdrop"><Artwork item={item} id={id} revision={revision} active={active}/>{available&&original?.source===source&&<img className="collection-hero-original" src={original.url} alt="" onError={()=>{loaded.current=null;setOriginal(null);}}/>}</div>;
 }
 function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:string;active:boolean}) {
   const seasons=item.series?.seasons??[];
@@ -75,12 +95,40 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       setTool(null);setQuery(search);
       (tool==='search'?searchTrigger:filterTrigger).current?.focus();
     },[search,tool]);
-  useEffect(()=>{if(!active)return;const controller=new AbortController();setBusy(true);setError('');setLegacy(false);void api<CollectionPage>(collectionPath(type,search,showcase,cursor,filters),controller.signal).then(result=>{if(!controller.signal.aborted){if(result.ready&&!showcase&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');setPage(result);if(listRef.current)listRef.current.scrollTop=listScroll.current;}}).catch(reason=>{if(!controller.signal.aborted){if((reason as {status?:number}).status===404)setLegacy(true);else setError(errorText(reason));}}).finally(()=>{if(!controller.signal.aborted)setBusy(false);});return()=>controller.abort();},[active,type,search,showcase,cursor,refresh,filters]);
-  useEffect(()=>{if(!active||!selected)return;const controller=new AbortController();setDetail(current=>current?.item.id===selected?current:null);setDetailError('');setCoverIndex(null);setInformation(false);void api<{revision:string;item:CollectionDetail}>(`/v1/collections/${encodeURIComponent(selected)}`,controller.signal).then(result=>{if(!controller.signal.aborted){setDetail(result);setVolumeLimit(96);setEdition(current=>editions(result.item.volumes).includes(current)?current:editions(result.item.volumes)[0]??0);}}).catch(reason=>{if(!controller.signal.aborted)setDetailError(errorText(reason));});return()=>controller.abort();},[active,selected,detailRefresh]);
+  const listPath=collectionPath(type,search,showcase,cursor,filters),listKey=JSON.stringify([listPath,refresh]);
+  const detailKey=JSON.stringify([selected,detailRefresh]);
+  const committedList=useRef(''),committedDetail=useRef('');
+  useEffect(()=>{
+    if(!active||paused)return;
+    if(committedList.current===listKey){setBusy(false);return;}
+    const controller=new AbortController();setBusy(true);setError('');setLegacy(false);
+    void api<CollectionPage>(listPath,controller.signal).then(result=>{
+      if(controller.signal.aborted)return;
+      if(result.ready&&!showcase&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');
+      // Only a successful commit can suppress a return-time request; aborts and errors retry.
+      committedList.current=listKey;setPage(result);
+      if(listRef.current)listRef.current.scrollTop=listScroll.current;
+    }).catch(reason=>{if(!controller.signal.aborted){if((reason as {status?:number}).status===404)setLegacy(true);else setError(errorText(reason));}}).finally(()=>{if(!controller.signal.aborted)setBusy(false);});
+    return()=>controller.abort();
+  },[active,paused,listPath,listKey,showcase]);
+  useEffect(()=>{
+    committedDetail.current='';setDetail(current=>current?.item.id===selected?current:null);
+    setDetailError('');setCoverIndex(null);setInformation(false);setVolumeLimit(96);
+  },[selected]);
+  useEffect(()=>{
+    if(!active||paused||!selected||committedDetail.current===detailKey)return;
+    const controller=new AbortController();setDetailError('');
+    void api<{revision:string;item:CollectionDetail}>(`/v1/collections/${encodeURIComponent(selected)}`,controller.signal).then(result=>{
+      if(controller.signal.aborted)return;
+      committedDetail.current=detailKey;setDetail(result);
+      setEdition(current=>editions(result.item.volumes).includes(current)?current:editions(result.item.volumes)[0]??0);
+    }).catch(reason=>{if(!controller.signal.aborted)setDetailError(errorText(reason));});
+    return()=>controller.abort();
+  },[active,paused,selected,detailKey]);
   usePublicationCheck(active&&!paused&&coverIndex===null,'/v1/collections/status',page?.revision,(_reply,changed)=>{if(!changed)return;setCursor(null);setPrevious([]);setRefresh(n=>n+1);setDetailRefresh(n=>n+1);});
   const back=useCallback(()=>{if(coverIndex!==null){setCoverIndex(null);return true;}if(information){setInformation(false);informationRef.current?.querySelector('summary')?.focus();return true;}if(tool!==null){closeTool();return true;}if(drawer){setDrawer(false);return true;}if(selected){setSelected(null);return true;}return false;},[coverIndex,information,tool,drawer,selected,closeTool]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
-  const reset=()=>{setCursor(null);setPrevious([]);setPage(null);listScroll.current=0;};
+  const reset=()=>{committedList.current='';setCursor(null);setPrevious([]);setPage(null);listScroll.current=0;};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;reset();setFiltersByType(current=>({...current,[type]:next}));};
   const openTool=(panel:Tool)=>{if(selected)return;if(tool===panel){closeTool();return;}setQuery(search);setTool(panel);};
   // Opening a work drops the transient panel, so its controls cannot straddle the detail.
@@ -111,11 +159,11 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
             {tool==='search'&&<div className="collection-tools-panel"><form className="collection-search" onSubmit={event=>{event.preventDefault();reset();setSearch(query.trim());setTool(null);setRefresh(value=>value+1);searchTrigger.current?.focus();}}><input autoFocus aria-label="컬렉션 검색" placeholder="작품 검색" value={query} onChange={event=>setQuery(event.target.value)} enterKeyHint="search"/><Button type="submit" size="icon" variant="ghost" aria-label="검색 적용"><MagnifyingGlassIcon aria-hidden="true"/></Button><IconButton label="검색 닫기" icon={XMarkIcon} onClick={closeTool}/></form></div>}
       {tool==='filters'&&<div className="collection-tools-panel"><CollectionFilters value={filters} onChange={changeFilters}/></div>}</>}
       <div ref={listRef} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;}} className="collection-list" style={{display:selected?'none':undefined}}>
-        {busy&&<p role="status">컬렉션을 불러오는 중…</p>}
+        {busy&&!page&&<p role="status">컬렉션을 불러오는 중…</p>}
         {error&&<div className="error-message" role="alert">{error}<Button variant="ghost" onClick={()=>{reset();setRefresh(value=>value+1);}}>처음부터 새로고침</Button></div>}
         {legacy||page?.ready===false?<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>:page?.ready&&<><div className={`collection-grid ${showcase?'collection-showcase':''} collection-grid-${type}`} style={showcase?{'--showcase-columns':page.items.length<=9?3:4} as React.CSSProperties:undefined}>{page.items.map(work=><button className="collection-tile" key={work.id} onClick={()=>openWork(work.id)}><Artwork item={work} id={collectionCover(work)} revision={page.revision??''} active={active&&!paused&&!selected}/><span className="collection-title">{work.name}</span><span className="collection-credit">{collectionCardCredit(work)}</span><span className="collection-card-meta"><span className="collection-date">{collectionCardDate(work)}</span>{!showcase&&work.myScore!=null&&<span className="collection-score" aria-label={`내 별점 ${work.myScore.toFixed(1)}점`}>★ {work.myScore.toFixed(1)}</span>}</span></button>)}</div>{!page.items.length&&<div className="empty-state"><h2>{!showcase&&filtered?'조건에 맞는 작품이 없습니다':showcase?'쇼케이스에 작품이 없습니다':'아직 컬렉션이 없습니다'}</h2><p>{!showcase&&filtered?'검색어나 별점 조건을 바꿔 보세요.':'PC에서 작품을 정리한 뒤 다시 게시하면 반영됩니다.'}</p>{!showcase&&filtered&&<Button onClick={()=>{reset();setQuery('');setSearch('');changeFilters({...filters,rating:'all'});}}>검색·필터 초기화</Button>}</div>}<footer className="page-footer"><Button variant="ghost" disabled={!previous.length||busy} onClick={()=>{setCursor(previous[previous.length-1]);setPrevious(values=>values.slice(0,-1));listScroll.current=0;}}><ChevronLeftIcon/>이전</Button><span>{previous.length+1}</span><Button variant="ghost" disabled={!page.nextCursor||busy} onClick={()=>{if(page.nextCursor===cursor){setError('목록 커서가 진행되지 않습니다.');return;}setPrevious(values=>[...values,cursor]);setCursor(page.nextCursor);listScroll.current=0;}}>다음<ChevronRightIcon/></Button></footer></>}
       </div>
-      {selected&&<div className="collection-detail">{detailError?<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>:!item?<p role="status">작품을 불러오는 중…</p>:<>{background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}<div className={`collection-detail-intro ${background?'has-backdrop':''}`}><button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button><div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}</div></div>{volumes.length>0&&<section className="collection-volume-section" aria-label="권별 표지"><h2>{volumes.length}권</h2><div className="collection-volume-shelf">{volumes.slice(0,volumeLimit).map((volume,index)=><button key={volume.id} className="collection-tile" onClick={()=>setCoverIndex(index+1)}><Artwork item={item} id={volume.coverArtworkId} revision={detail!.revision} active={active&&!paused}/><span>{volumeLabel(volume)}</span></button>)}</div>{volumes.length>volumeLimit&&<Button variant="ghost" onClick={()=>setVolumeLimit(value=>value+96)}>표지 더 보기</Button>}</section>}<details ref={informationRef} className="collection-information" open={information}><summary onClick={event=>{event.preventDefault();setInformation(value=>!value);}}>작품 정보<ChevronDownIcon aria-hidden="true"/></summary><CollectionMetadata item={item}/></details>{item.series&&<SeriesDetails key={item.id} item={item} revision={detail!.revision} active={active&&!paused}/>}
+      {selected&&<div className="collection-detail">{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status">작품을 불러오는 중…</p>):<>{background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}<div className={`collection-detail-intro ${background?'has-backdrop':''}`}><button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button><div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}</div></div>{volumes.length>0&&<section className="collection-volume-section" aria-label="권별 표지"><h2>{volumes.length}권</h2><div className="collection-volume-shelf">{volumes.slice(0,volumeLimit).map((volume,index)=><button key={volume.id} className="collection-tile" onClick={()=>setCoverIndex(index+1)}><Artwork item={item} id={volume.coverArtworkId} revision={detail!.revision} active={active&&!paused}/><span>{volumeLabel(volume)}</span></button>)}</div>{volumes.length>volumeLimit&&<Button variant="ghost" onClick={()=>setVolumeLimit(value=>value+96)}>표지 더 보기</Button>}</section>}<details ref={informationRef} className="collection-information" open={information}><summary onClick={event=>{event.preventDefault();setInformation(value=>!value);}}>작품 정보<ChevronDownIcon aria-hidden="true"/></summary><CollectionMetadata item={item}/></details>{item.series&&<SeriesDetails key={item.id} item={item} revision={detail!.revision} active={active&&!paused}/>}
 {item.type==='movie'&&(item.overview||item.description)&&<p className="collection-overview">{item.overview||item.description}</p>}</>}</div>}
     </div>
     {active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription><div className="dialog-header"><IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div><Artwork key={`${edition}:${coverIndex}`} item={item} id={covers[coverIndex].id} revision={detail!.revision} label={covers[coverIndex].label} original/><footer><IconButton label="이전 표지" icon={ChevronLeftIcon} disabled={coverIndex===0} onClick={()=>setCoverIndex(value=>value!-1)}/><IconButton label="다음 표지" icon={ChevronRightIcon} disabled={coverIndex===covers.length-1} onClick={()=>setCoverIndex(value=>value!+1)}/></footer></div></Dialog>}

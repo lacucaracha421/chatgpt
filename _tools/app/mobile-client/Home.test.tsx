@@ -73,6 +73,42 @@ describe('classification discovery',() => {
     unmount(); await act(async() => {resolve({items:[],has_more:false,next_cursor:null});});
     expect(mocks.api).toHaveBeenCalledTimes(2);
   });
+  it('retains loaded covers while paused and does not refetch them on return',async() => {
+    const input=props(); const view=render(<Home {...input}/>);
+    await waitFor(()=>expect(view.container.querySelectorAll('img')).toHaveLength(5));
+    const images=[...view.container.querySelectorAll('img')];
+    const requests=mocks.api.mock.calls.length, thumbnails=mocks.loadThumbnail.mock.calls.length;
+    view.rerender(<Home {...input} paused/>);
+    expect([...view.container.querySelectorAll('img')]).toEqual(images);
+    await act(async()=>{view.rerender(<Home {...input}/>);});
+    expect(mocks.api).toHaveBeenCalledTimes(requests);
+    expect(mocks.loadThumbnail).toHaveBeenCalledTimes(thumbnails);
+    expect([...view.container.querySelectorAll('img')]).toEqual(images);
+    // A new committed page still refreshes the folder data, without blanking old covers.
+    let resolve!:(value:unknown)=>void;
+    mocks.api.mockImplementation(()=>new Promise(done=>{resolve=done;}));
+    view.rerender(<Home {...input} revision={2}/>);
+    expect(mocks.api).toHaveBeenCalledTimes(requests+2);
+    expect([...view.container.querySelectorAll('img')]).toEqual(images);
+    await act(async()=>{resolve({items:[{id:'new-cover',kind:'image',preview:'blob:new-cover'}],has_more:false,next_cursor:null});});
+    expect(view.container.querySelector('img[src="blob:new-cover"]')).toBeTruthy();
+  });
+  it('resumes unfinished folder covers and ignores a late paused request',async()=>{
+    const input={...props(),classifications:folders.slice(0,2)};
+    const pending:{resolve(value:unknown):void;signal:AbortSignal}[]=[];
+    mocks.api.mockImplementation((_path,signal)=>new Promise(resolve=>pending.push({resolve,signal})));
+    const view=render(<Home {...input}/>);
+    await act(async()=>{pending[0].resolve({items:[{id:'kept',kind:'image',preview:'blob:kept'}]});});
+    view.rerender(<Home {...input} paused/>);
+    expect(pending[1].signal.aborted).toBe(true);
+    await act(async()=>{pending[1].resolve({items:[{id:'late',kind:'image',preview:'blob:late'}]});});
+    expect(view.container.querySelector('img[src="blob:late"]')).toBeNull();
+    view.rerender(<Home {...input}/>);
+    expect(mocks.api).toHaveBeenCalledTimes(3);
+    await act(async()=>{pending[2].resolve({items:[{id:'resumed',kind:'image',preview:'blob:resumed'}]});});
+    expect(view.container.querySelector('img[src="blob:kept"]')).toBeTruthy();
+    expect(view.container.querySelector('img[src="blob:resumed"]')).toBeTruthy();
+  });
   it('opens canonical folder/date/creator/library views and recent asset indices',async() => {
     const input = props(); input.recentFolders=['folder-1']; input.revisit={bundles:[{kind:'date',title:'작년의 오늘',items:[{id:'old',kind:'image'}]},{kind:'creator',title:'작가',groups:[{creator_key:'real/key',creator_name:'작가 A',creator_handle:'handle',asset_count:8,items:[{id:'creator',kind:'image'}]}]}]};
     render(<Home {...input}/>);

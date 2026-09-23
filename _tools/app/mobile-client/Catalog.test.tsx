@@ -21,6 +21,90 @@ beforeEach(()=>{Object.defineProperty(window,'innerWidth',{configurable:true,val
   return page;
 });});
 afterEach(cleanup);
+describe('catalog cover retention',()=>{
+  const preview='https://app.lakomics.local/media-cache/cover';
+  const props={active:true,paused:false,backRef:{current:null}};
+  const image=()=>document.querySelector<HTMLImageElement>('.catalog-grid .catalog-cover-image img');
+  const requests=()=>mocks.native.mock.calls.filter(([op,payload])=>op==='catalogImage'&&payload.kind==='cover');
+  let work:CatalogItem,revision:string,observers:((visible:boolean)=>void)[];
+  beforeEach(()=>{
+    work={...item,thumbnailUrl:'https://example.invalid/cover.jpg'};revision='p1';observers=[];
+    vi.stubGlobal('IntersectionObserver',class {
+      constructor(callback:(entries:{isIntersecting:boolean}[])=>void){observers.push(visible=>callback([{isIntersecting:visible}]));}
+      observe(){} disconnect(){}
+    });
+    mocks.native.mockResolvedValue({url:preview});
+    mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{...capableStatus,publicationRevision:revision}:{...page,items:[work],publicationRevision:revision,countToken:null,countStatus:'ready',totalCount:1});
+  });
+  afterEach(()=>vi.unstubAllGlobals());
+  async function open(){
+    const view=render(<Catalog {...props}/>);await screen.findByText(item.title);
+    act(()=>observers.forEach(notify=>notify(true)));return view;
+  }
+  async function loaded(){await waitFor(()=>expect(image()).not.toBeNull());fireEvent.load(image()!);return image()!;}
+
+  it.each(['inactive','paused','invisible'] as const)('reuses the successful cover and image DOM after %s return',async(mode)=>{
+    const view=await open(),original=await loaded();expect(requests()).toHaveLength(1);
+    if(mode==='invisible'){act(()=>observers.forEach(notify=>notify(false)));act(()=>observers.forEach(notify=>notify(true)));}
+    else {view.rerender(<Catalog {...props} active={mode!=='inactive'} paused={mode==='paused'}/>);view.rerender(<Catalog {...props}/>);}
+    await act(async()=>{});
+    expect(requests()).toHaveLength(1);expect(image()).toBe(original);expect(image()?.src).toBe(preview);
+  });
+
+  it('retries a failed ticket and an image error on return, then reuses the recovered image',async()=>{
+    mocks.native.mockRejectedValueOnce(new Error('offline'));
+    const view=await open();await act(async()=>{});expect(image()).toBeNull();expect(requests()).toHaveLength(1);
+    view.rerender(<Catalog {...props} active={false}/>);view.rerender(<Catalog {...props}/>);
+    await loaded();expect(requests()).toHaveLength(2);
+    fireEvent.error(image()!);expect(image()).toBeNull();
+    act(()=>observers.forEach(notify=>notify(false)));act(()=>observers.forEach(notify=>notify(true)));
+    const recovered=await loaded();expect(requests()).toHaveLength(3);
+    view.rerender(<Catalog {...props} paused/>);view.rerender(<Catalog {...props}/>);await act(async()=>{});
+    expect(requests()).toHaveLength(3);expect(image()).toBe(recovered);
+  });
+
+  it('retries an aborted ticket and ignores its late reply even if native ignores cancellation',async()=>{
+    const old=Promise.withResolvers<{url:string}>();mocks.native.mockReturnValueOnce(old.promise);
+    const view=await open();await waitFor(()=>expect(requests()).toHaveLength(1));
+    const signal=requests()[0][2] as AbortSignal;
+    view.rerender(<Catalog {...props} active={false}/>);expect(signal.aborted).toBe(true);
+    view.rerender(<Catalog {...props}/>);const current=await loaded();expect(requests()).toHaveLength(2);
+    await act(async()=>old.resolve({url:`${preview}-stale`}));
+    expect(image()).toBe(current);expect(image()?.src).toBe(preview);
+    view.rerender(<Catalog {...props} paused/>);view.rerender(<Catalog {...props}/>);await act(async()=>{});
+    expect(requests()).toHaveLength(2);
+  });
+
+  it.each(['work','thumbnail','revision'] as const)('refreshes a changed %s on the same mounted card without presenting the old source',async(field)=>{
+    await open();await loaded();const card=document.querySelector('.catalog-card');
+    const next=Promise.withResolvers<{url:string}>();mocks.native.mockReturnValueOnce(next.promise);
+    if(field==='work')work={...work,providerWorkId:'77'};
+    if(field==='thumbnail')work={...work,thumbnailUrl:'https://example.invalid/new.jpg'};
+    if(field==='revision')revision='p2';
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});
+    await waitFor(()=>expect(requests()).toHaveLength(2));expect(document.querySelector('.catalog-card')).toBe(card);
+    expect(requests()[1][1]).toMatchObject({workId:work.providerWorkId,url:work.thumbnailUrl,revision});
+    expect(image()).toBeNull();
+    await act(async()=>next.resolve({url:`${preview}-new`}));expect(image()?.src).toBe(`${preview}-new`);
+  });
+
+  it('ignores an old source reply after the same mounted card changes source',async()=>{
+    const old=Promise.withResolvers<{url:string}>();mocks.native.mockReturnValueOnce(old.promise);
+    await open();await waitFor(()=>expect(requests()).toHaveLength(1));
+    const signal=requests()[0][2] as AbortSignal;
+    work={...work,thumbnailUrl:'https://example.invalid/new.jpg'};
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});
+    const current=await loaded();expect(signal.aborted).toBe(true);expect(requests()).toHaveLength(2);
+    await act(async()=>old.resolve({url:`${preview}-stale`}));expect(image()).toBe(current);expect(image()?.src).toBe(preview);
+  });
+
+  it('stops displaying a removed thumbnail without issuing a media request',async()=>{
+    await open();await loaded();work={...work,thumbnailUrl:null};
+    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});
+    await act(async()=>{});expect(image()).toBeNull();expect(requests()).toHaveLength(1);
+  });
+});
+
 describe('mobile catalog reads',()=>{
   it('ignores a reader response after the catalog becomes inactive even if transport ignores abort',async()=>{
     const original=mocks.api.getMockImplementation()!;

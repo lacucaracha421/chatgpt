@@ -36,7 +36,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   useLayoutEffect(()=>{
     const element=introduction.current;
     if(!element){setIntroHeight(0);return;}
-    const measure=()=>setIntroHeight(element.getBoundingClientRect().height);
+    const measure=()=>{if(parent.current?.clientWidth)setIntroHeight(element.getBoundingClientRect().height);};
     measure();const observer=new ResizeObserver(measure);observer.observe(element);return()=>observer.disconnect();
   },[intro!=null]);
   const [width, setWidth] = useState(600);
@@ -59,12 +59,13 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   useLayoutEffect(() => { if (parent.current) parent.current.scrollTop = restoreScroll; }, [identity, restoreScroll]);
   useEffect(() => {
     const element = parent.current; if (!element) return;
-    const observer = new ResizeObserver(() => setWidth(Math.max(1, element.clientWidth - 32)));
+    // A retained tab reports zero width under display:none, not a new gallery layout.
+    const observer = new ResizeObserver(() => {if (element.clientWidth > 32) setWidth(element.clientWidth - 32);});
     observer.observe(element); return () => observer.disconnect();
   }, []);
-  const checkEnd = () => {const element = parent.current; if (element && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
-  useEffect(checkEnd, [items.length, onNearEnd]);
-  return <div className="gallery-scroll" ref={parent} onScroll={event => {onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
+  const checkEnd = () => {const element = parent.current; if (!paused && element && element.clientHeight > 0 && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
+  useEffect(checkEnd, [items.length, onNearEnd, paused]);
+  return <div className="gallery-scroll" ref={parent} onScroll={event => {if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
     {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => <div className="gallery-row" key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>

@@ -203,6 +203,30 @@ describe('asset filters',()=>{
     expect(screen.queryByText('tile-unchecked')).toBeNull();
   });
 
+  it('restores committed filters and pagination when Library reselect cancels a delayed filter change',async()=>{
+    const pending=Promise.withResolvers<unknown>();let signal!:AbortSignal;
+    mocks.api.mockImplementation((path:string,requestSignal:AbortSignal)=>{
+      if(path.startsWith('/v1/library/assets')){
+        if(path.includes('media_kind')){signal=requestSignal;return pending.promise;}
+        return Promise.resolve(path.includes('cursor=c1')?page(['a2']):page(['a1'],{has_more:true,next_cursor:'c1'}));
+      }
+      return supporting()(path);
+    });
+    render(<App/>);await screen.findByText('tile-a1');
+    openFilters();chooseIn('미디어','영상');
+    await waitFor(()=>expect(signal).toBeTruthy());
+    expect(screen.getByText('필터 적용 대기')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByText('필터 적용 대기')).toBeNull();
+    expect(screen.getByRole('button',{name:'자산 필터',exact:true})).toBeTruthy();
+    await act(async()=>pending.resolve(page(['stale'])));
+    expect(screen.queryByText('tile-stale')).toBeNull();
+    fireEvent.click(screen.getByTestId('near-end'));
+    await screen.findByText('tile-a2');
+    expect(lastPagePath()).not.toContain('media_kind');
+  });
+
   it('blocks an append while a filter change is uncommitted, so the old cursor cannot continue under new filters',async()=>{
     mocks.api.mockImplementation((path:string)=>{
       if(path.startsWith('/v1/library/assets')&&path.includes('media_kind')){

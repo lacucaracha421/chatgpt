@@ -30,6 +30,16 @@ h1,h2,h3,p { margin:0; }
 .header-actions { display:flex; align-items:center; gap:12px; }
 .demo-label { color:var(--color-muted); font-size:11px; }
 .app-body { min-height:0; flex:1; display:flex; }
+/* Home and Library share a retained element: distinct names replay only on a committed tab change. */
+@keyframes mobile-tab-enter { from { opacity:.88; } to { opacity:1; } }
+@keyframes mobile-home-enter { from { opacity:.88; } to { opacity:1; } }
+@media (prefers-reduced-motion:no-preference) {
+  .app-body[data-active-tab="home"] > .library-main { animation:mobile-home-enter 100ms ease-out; }
+  .app-body[data-active-tab="library"] > .library-main,
+  .app-body[data-active-tab="collections"] > .mobile-collections,
+  .app-body[data-active-tab="catalog"] > .mobile-catalog,
+  .app-body[data-active-tab="notes"] > .mobile-notes { animation:mobile-tab-enter 100ms ease-out; }
+}
 .desktop-index { display:none; }
 .library-main { flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; }
 .home-context { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:30px var(--mobile-gutter) 22px; }

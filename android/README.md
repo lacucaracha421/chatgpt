@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.6.7 (23)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Release APK built with the existing installation certificate and installed in place on Galaxy Tab S11. Manual character exclusion is deployed and activated; a user-submitted Galaxy Tab correction was verified through server reflection and Linux PC acknowledgement. See the delivery checkpoint below.
+Current source version: **0.6.9 (25)**, declared in [AndroidManifest.xml](AndroidManifest.xml). The subtle tab fade and portrait character-folder strip/collapse improvements are installed in place on Galaxy Tab S11 with the existing installation certificate. The user confirmed checking the update; no specific exhaustive device acceptance or frame-level latency measurement is inferred from that confirmation. Manual character exclusion is deployed and activated; a user-submitted Galaxy Tab correction was verified through server reflection and Linux PC acknowledgement. See the delivery checkpoints below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,72 @@ Current source version: **0.6.7 (23)**, declared in [AndroidManifest.xml](Androi
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.6.9 — Subtle tab fade and collapsible character strip (2026-09-23)
+
+- Active tab content fades from opacity 0.88 to 1 over 100 ms, without sliding,
+  delaying navigation or remounting retained panels. Header/navigation stay unchanged.
+  Home/Library use distinct animation names on their shared element so the effect
+  follows committed tab changes, not background metadata updates. Reduced motion
+  disables the effect.
+- Portrait child folders use one horizontally scrollable row. The collapse toggle
+  sits beside the series filters; folding preserves the asset gallery and horizontal
+  position. Only nearby folder covers enter the media queue, and loaded previews
+  survive pauses. The landscape overview and bounded grid pages remain unchanged.
+- The prior character/filter/exclusion checks passed 51 tests; App/Settings passed
+  40 tests for this release. Mobile TypeScript/Vite and native release-builder checks
+  passed. The Java bootstrap-classpath/deprecated-API warnings remain non-fatal.
+  Browser fixtures checked strip layout, folding/scroll retention and landscape;
+  a shipped-CSS fixture verified 100 ms opacity keyframes, repeated tab transitions,
+  no metadata-triggered restart, stationary chrome and reduced-motion suppression.
+- APK: `android/build/lakomics-mobile-0.6.9-release.apk`, 1,250,724 bytes, SHA-256
+  `7f089834b18275d64a07d0e135ac321eaa7e470c43296b9ada687031e52a1c2b`.
+  Version 0.6.9 (25), SDK35, alignment, v2/v3 signatures, the previous signer and
+  all 12 bundled asset byte matches were verified.
+- Authorized `adb install -r` on Galaxy Tab S11 (`SM-X730`,
+  `100.118.150.55:39093`) succeeded, preserving first installation at
+  `2026-09-08 17:56:50`. Installed base APK SHA-256 matches the artifact above.
+  Cold activity launch returned `Status: ok` (425 ms activity launch, not fade timing).
+  The user then confirmed checking the update; device interaction stopped at that point.
+  No uninstall, app-data reset, cache clear, provider-setting change or server deployment
+  was performed. Browser motion checks do not establish frame-level Android performance.
+
+## 0.6.8 — Tab-return retention, installed and portrait-checked (2026-09-23)
+
+- Home keeps loaded covers through pauses; Gallery ignores hidden-width measurements
+  and suppresses paused pagination/scroll recording. Returning to retained Home/Library
+  preserves its committed scope, cancels superseded navigation, and retains fresh-read
+  fallback for servers without list-generation support. A delayed filter capability
+  response no longer restarts initial navigation.
+- Collections reuses successful list/detail requests and keeps disclosure/volume state.
+  Collections and Catalog reuse unchanged mounted artwork while preserving changed-source,
+  cancellation and failure recovery. Publication checks and manual refresh remain active.
+- Focused implementation checks passed 186 tests across 11 files; the version-specific
+  Settings suite passed 8 tests. Mobile TypeScript/Vite and the existing native release
+  builder's policy, cache, crypto and replica checks passed. Java compilation emitted
+  bootstrap-classpath and deprecated-API warnings, but completed successfully.
+- APK: `android/build/lakomics-mobile-0.6.8-release.apk`, 1,250,724 bytes, SHA-256
+  `c08cb16a9562378c705c78dd9efb38426f61f8ba91e7dabca206dbec7de4b742`.
+  Version 0.6.8 (24), SDK35, ZIP alignment, v2/v3 signatures, the existing 0.6.7 signer,
+  and all 12 bundled asset byte matches were verified.
+- The initial wireless address refused connection. After the user supplied port 39093,
+  ADB connected to Galaxy Tab S11 (`SM-X730`, `100.118.150.55:39093`). Authorized
+  `adb install -r` succeeded; package inspection confirmed 0.6.8 (24), retaining the
+  first installation at `2026-09-08 17:56:50`. The installed base APK SHA-256 matches
+  the artifact above. Cold activity launch returned `Status: ok` (414 ms activity launch,
+  not tab/network/render latency).
+- Portrait checks at 1600x2560 used native taps/swipes and screenshots. Library returned
+  to its selected character scope and the same scrolled asset rows. Home, Collections
+  and Catalog had byte-identical screenshots before/after settled tab round trips;
+  an additional scrolled Collections round trip also matched. These checks establish
+  sampled state/render retention, not absence of every transient frame or measured
+  speedup. The app remained running; the sampled process-specific AndroidRuntime/
+  Chromium error log was empty. UI Automator exposed only the WebView container, so
+  internal DOM/request counts were not measured on device.
+- No uninstall, app-data reset, cache clear, provider-setting change, server deployment
+  or explicit library mutation was performed. The app was left on Library. Landscape,
+  detailed Collection disclosure/volume interactions and frame-level latency remain
+  outside this device check; their fixture coverage is not native acceptance.
 
 ## 0.6.7 — Manual character exclusion, live verified (2026-09-20)
 

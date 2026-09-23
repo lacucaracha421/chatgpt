@@ -209,6 +209,74 @@ describe('committed view and browsing',()=>{
     fireEvent.click(screen.getByText('viewer next')); fireEvent.click(screen.getByText('viewer close'));
     expect(screen.getByText('tile-a1')).toBeTruthy(); expect(screen.queryByText('tile-b1')).toBeNull();
   });
+  it('does not reload or remount committed Home on reselect or return from Collections',async()=>{
+    render(<App/>); await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+    await screen.findByRole('button',{name:'전체 보기'});
+    const first=screen.getByText('tile-a1');
+    const reads=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')||path==='/v1/library/list-generation'||path.includes('/revisit?')||path.includes('/captures/pending')).length;
+    const count=reads();
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));});
+    expect(reads()).toBe(count);
+    fireEvent.click(screen.getByRole('button',{name:'Collections',exact:true}));
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));});
+    expect(reads()).toBe(count);
+    expect(screen.getByText('tile-a1')).toBe(first);
+  });
+  it.each(['success','failure'])('keeps the latest Home intent when a superseded folder request ends in %s',async(result)=>{
+    const original=mocks.api.getMockImplementation()!;
+    let resolve!:(value:unknown)=>void,reject!:(reason:unknown)=>void,signal!:AbortSignal;
+    mocks.api.mockImplementation((path:string,requestSignal:AbortSignal)=>path.includes('classification_id=b')?new Promise((done,fail)=>{resolve=done;reject=fail;signal=requestSignal;}):original(path,requestSignal));
+    render(<App/>); await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true})); await screen.findByRole('button',{name:'전체 보기'});
+    fireEvent.click(screen.getByRole('button',{name:'분류 B2'}));
+    await waitFor(()=>expect(resolve).toBeTypeOf('function'));
+    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+    expect(signal.aborted).toBe(true);
+    await act(async()=>{if(result==='success')resolve({items:b,has_more:false,next_cursor:null});else reject(new Error('late failure'));});
+    expect(screen.getByRole('button',{name:'전체 보기'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'Home',exact:true}).getAttribute('aria-current')).toBe('page');
+    expect(screen.queryByText('tile-b1')).toBeNull();
+    expect(screen.queryByText('connection failed')).toBeNull();
+    expect(screen.queryByLabelText('목록 불러오는 중')).toBeNull();
+  });
+  it.each(['Home','Library'])('refreshes retained %s on area return when generation checks are unavailable',async(tab)=>{
+    const original=mocks.api.getMockImplementation()!; let changed=false;
+    mocks.api.mockImplementation((path:string)=>{
+      if(path==='/v1/library/list-generation')return Promise.reject(new ApiError('missing',404,null));
+      if(changed&&path.startsWith('/v1/library/assets?'))return Promise.resolve({items:[{id:'updated',kind:'image'}],has_more:false,next_cursor:null});
+      return original(path);
+    });
+    render(<App/>); await screen.findByText('tile-a1');
+    if(tab==='Home'){
+      fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
+    }else{
+      fireEvent.click(screen.getByRole('button',{name:'분류 B2'}));await screen.findByText('tile-b1');
+      fireEvent.scroll(screen.getByLabelText('자산 목록'));
+    }
+    fireEvent.click(screen.getByRole('button',{name:'Collections',exact:true}));changed=true;
+    fireEvent.click(screen.getByRole('button',{name:tab,exact:true}));
+    await screen.findByText('tile-updated');
+    expect(screen.queryByText('tile-a1')).toBeNull();expect(screen.queryByText('tile-b1')).toBeNull();
+    if(tab==='Library'){
+      expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
+      expect(screen.getByLabelText('자산 목록').getAttribute('data-restore-scroll')).toBe('420');
+    }
+  });
+  it('does not restart initial navigation when the delayed filter capability arrives',async()=>{
+    const original=mocks.api.getMockImplementation()!; let probe=0,resolveCapability!:(value:unknown)=>void;
+    mocks.api.mockImplementation((path:string)=>{
+      if(path==='/v1/library/list-generation'&&++probe===2)return new Promise(resolve=>{resolveCapability=resolve;});
+      return original(path);
+    });
+    render(<App/>); await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'분류 B2'})); await screen.findByText('tile-b1');
+    const reads=mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')).length;
+    await act(async()=>{resolveCapability({generation:'a'.repeat(64),filterVersion:1});});
+    expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
+    expect(screen.getByText('tile-b1')).toBeTruthy();
+    expect(mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?'))).toHaveLength(reads);
+  });
   it('restores the last Library classification when switching tabs',async()=>{
     render(<App/>); await screen.findByText('tile-a1');
     fireEvent.click(screen.getByRole('button',{name:'분류 B2'})); await screen.findByText('tile-b1');
@@ -241,9 +309,12 @@ describe('committed view and browsing',()=>{
     fireEvent.click(screen.getByRole('button',{name:'분류 B2'})); await screen.findByText('tile-b1');
     fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));
     await screen.findByRole('region',{name:'만화 카탈로그'});
-    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+    const reads=mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')||path==='/v1/library/list-generation').length;
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));});
     expect(screen.queryByRole('region',{name:'만화 카탈로그'})).toBeNull();
     expect(screen.getByText('tile-b1')).toBeTruthy();
+    expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
+    expect(mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')||path==='/v1/library/list-generation')).toHaveLength(reads);
   });
 });
 

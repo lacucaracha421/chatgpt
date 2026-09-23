@@ -21,7 +21,178 @@ const metadataBlock=()=>within(disclosure()).getByLabelText('작품 정보',{sel
 /** jsdom renders `<details>` children regardless of state, so the open flag is the assertion. */
 const disclosure=()=>screen.getByLabelText('컬렉션',{selector:'section'}).querySelector('details.collection-information') as HTMLDetailsElement;
 beforeEach(()=>{mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
-afterEach(cleanup);
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
+describe('tab return retention',()=>{
+  const listCalls=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/collections?'));
+  const detailCalls=()=>mocks.api.mock.calls.filter(([path])=>path===`/v1/collections/${item.id}`);
+  const artworkCalls=(id:string,variant='thumbnail')=>mocks.native.mock.calls.filter(([op,payload])=>op==='collectionArtwork'&&payload.artworkId===id&&payload.variant===variant);
+
+  it.each(['inactive','paused'] as const)('retains a committed page, scroll and artwork after %s return',async(mode)=>{
+    const props={active:true,paused:false,backRef:{current:null}};
+    const view=render(<Collections {...props}/>);await screen.findByText(item.name);
+    const list=document.querySelector('.collection-list') as HTMLElement;
+    list.scrollTop=140;fireEvent.scroll(list);
+    const image=await screen.findByRole('img',{name:item.name});fireEvent.load(image);
+    expect(artworkCalls('cover')).toHaveLength(1);
+    view.rerender(<Collections {...props} active={mode!=='inactive'} paused={mode==='paused'}/>);
+    view.rerender(<Collections {...props}/>);
+    expect(screen.queryByText('컬렉션을 불러오는 중…')).toBeNull();
+    await act(async()=>{});
+    expect(listCalls()).toHaveLength(1);expect(list.scrollTop).toBe(140);
+    expect(screen.getByRole('img',{name:item.name})).toBe(image);
+    expect(artworkCalls('cover')).toHaveLength(1);
+  });
+
+  it.each(['inactive','paused'] as const)('retains detail disclosure, edition, expanded volumes and hero after %s return',async(mode)=>{
+    const work:CollectionDetail={...item,selectedHeroArtworkId:'hero',artworks:[{id:'hero',kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true}],volumes:[...item.volumes,...Array.from({length:100},(_,i)=>({id:`extra-${i}`,volumeNumber:i+2,editionIndex:1,displayLabel:`특별판 ${i+2}권`}))]};
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.startsWith('/v1/collections?')?page:{revision:'r1',item:work});
+    const decode=vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('Image',class {src='';decode=decode;});
+    const props={active:true,paused:false,backRef:{current:null}};
+    const view=render(<Collections {...props}/>);fireEvent.click(await screen.findByText(item.name));
+    const select=await screen.findByRole('combobox',{name:'판본'});
+    fireEvent.change(select,{target:{value:'1'}});
+    fireEvent.click(screen.getByRole('button',{name:'표지 더 보기'}));
+    fireEvent.click(screen.getByText('작품 정보'));
+    await waitFor(()=>expect(document.querySelector('.collection-hero-original')).not.toBeNull());
+    const hero=document.querySelector('.collection-hero-original');
+    view.rerender(<Collections {...props} active={mode!=='inactive'} paused={mode==='paused'}/>);
+    view.rerender(<Collections {...props}/>);await act(async()=>{});
+    expect(listCalls()).toHaveLength(1);expect(detailCalls()).toHaveLength(1);
+    expect(disclosure().open).toBe(true);expect((select as HTMLSelectElement).value).toBe('1');
+    expect(within(screen.getByRole('region',{name:'권별 표지'})).getAllByRole('button')).toHaveLength(101);
+    expect(document.querySelector('.collection-hero-original')).toBe(hero);
+    expect(artworkCalls('hero','original')).toHaveLength(1);expect(decode).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a later page and still fetches after an actual query change',async()=>{
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:{...page,nextCursor:'page-2',items:[{...item,name:path.includes('cursor=')?'Second page':item.name}]});
+    const props={active:true,paused:false,backRef:{current:null}};const view=render(<Collections {...props}/>);
+    await screen.findByText(item.name);fireEvent.click(screen.getByRole('button',{name:'다음'}));
+    await screen.findByText('Second page');
+    view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);await act(async()=>{});
+    expect(listCalls()).toHaveLength(2);expect(document.querySelector('.page-footer span')?.textContent).toBe('2');
+    expect(screen.getByText('Second page')).toBeTruthy();
+    pressInRow('만화');await screen.findByText(item.name);
+    expect(listCalls()).toHaveLength(3);expect(listCalls().at(-1)?.[0]).toContain('type=manga');
+    expect(listCalls().at(-1)?.[0]).not.toContain('cursor=');
+  });
+
+  it('does not start requests while initially paused and resumes interrupted list/detail loads',async()=>{
+    const props={active:true,paused:false,backRef:{current:null}};
+    const oldList=Promise.withResolvers<CollectionPage>(),oldDetail=Promise.withResolvers<{revision:string;item:CollectionDetail}>();
+    let lists=0,details=0;
+    mocks.api.mockImplementation((path:string)=>{
+      if(path.endsWith('/status'))return Promise.resolve({revision:'r1'});
+      if(path.startsWith('/v1/collections?'))return ++lists===1?oldList.promise:Promise.resolve(page);
+      return ++details===1?oldDetail.promise:Promise.resolve({revision:'r1',item});
+    });
+    const view=render(<Collections {...props} paused/>);await act(async()=>{});
+    expect(mocks.api).not.toHaveBeenCalled();
+    view.rerender(<Collections {...props}/>);expect(lists).toBe(1);
+    const listSignal=listCalls()[0][1] as AbortSignal;
+    view.rerender(<Collections {...props} paused/>);expect(listSignal.aborted).toBe(true);
+    view.rerender(<Collections {...props}/>);fireEvent.click(await screen.findByText(item.name));
+    expect(details).toBe(1);const detailSignal=detailCalls()[0][1] as AbortSignal;
+    view.rerender(<Collections {...props} active={false}/>);expect(detailSignal.aborted).toBe(true);
+    view.rerender(<Collections {...props}/>);await screen.findByRole('heading',{level:1,name:item.name});
+    await act(async()=>{oldList.resolve({...page,items:[{...item,name:'stale list'}]});oldDetail.resolve({revision:'old',item:{...item,name:'stale detail'}});});
+    expect(lists).toBe(2);expect(details).toBe(2);
+    expect(screen.queryByText('stale list')).toBeNull();expect(screen.queryByText('stale detail')).toBeNull();
+  });
+
+  it('retries failed list and detail loads on return without hiding committed detail on refresh failure',async()=>{
+    const props={active:true,paused:false,backRef:{current:null}};
+    let failList=true,failDetail=true;
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.endsWith('/status'))return {revision:'r1'};
+      if(path.startsWith('/v1/collections?')){if(failList)throw new Error('list offline');return page;}
+      if(failDetail)throw new Error('detail offline');return {revision:'r1',item};
+    });
+    const view=render(<Collections {...props}/>);await screen.findByText(/list offline/);failList=false;
+    view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);
+    fireEvent.click(await screen.findByText(item.name));await screen.findByText(/detail offline/);failDetail=false;
+    view.rerender(<Collections {...props} paused/>);view.rerender(<Collections {...props}/>);
+    await screen.findByRole('heading',{level:1,name:item.name});fireEvent.click(screen.getByText('작품 정보'));
+    failDetail=true;fireEvent.click(screen.getByRole('button',{name:'새로고침'}));await screen.findByText(/detail offline/);
+    expect(screen.getByRole('heading',{level:1,name:item.name})).toBeTruthy();expect(disclosure().open).toBe(true);
+    failDetail=false;view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);
+    await waitFor(()=>expect(screen.queryByText(/detail offline/)).toBeNull());
+    expect(listCalls()).toHaveLength(2);expect(detailCalls()).toHaveLength(4);
+  });
+
+  it('refreshes explicitly and on publication change while retaining the old page until replacement commits',async()=>{
+    let revision='r1';const replacement=Promise.withResolvers<CollectionPage>();let lists=0;
+    mocks.api.mockImplementation((path:string)=>{
+      if(path.endsWith('/status'))return Promise.resolve({revision});
+      if(path.startsWith('/v1/collections?'))return ++lists===2?replacement.promise:Promise.resolve({...page,revision});
+      return Promise.resolve({revision,item});
+    });
+    const props={active:true,paused:false,backRef:{current:null}};
+    const view=render(<Collections {...props}/>);await screen.findByText(item.name);
+    fireEvent.click(screen.getByRole('button',{name:'새로고침'}));expect(listCalls()).toHaveLength(2);
+    expect(screen.getByText(item.name)).toBeTruthy();
+    await act(async()=>replacement.resolve(page));
+    fireEvent.click(screen.getByText(item.name));await screen.findByRole('heading',{level:1,name:item.name});
+    revision='r2';view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);
+    await waitFor(()=>expect(detailCalls()).toHaveLength(2));
+    expect(listCalls()).toHaveLength(3);
+    await act(async()=>{});view.rerender(<Collections {...props} paused/>);view.rerender(<Collections {...props}/>);
+    await act(async()=>{});expect(listCalls()).toHaveLength(3);expect(detailCalls()).toHaveLength(2);
+  });
+
+  it('retries failed artwork on return, and reloads changed digest/revision without reusing the old source',async()=>{
+    let work={...item,artworkVersions:{cover:{thumbnail:'digest-1'}}},revision='r1';
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision}:{...page,revision,items:[work]});
+    mocks.native.mockRejectedValueOnce(new Error('media offline')).mockImplementation(async(_op,payload)=>({url:`https://example.invalid/${payload.revision}-${payload.digest}`}));
+    const props={active:true,paused:false,backRef:{current:null}};const view=render(<Collections {...props}/>);
+    await screen.findByText('이미지를 불러오지 못했습니다');
+    view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);
+    const image=await screen.findByRole('img',{name:item.name});expect(artworkCalls('cover')).toHaveLength(2);
+    fireEvent.error(image);view.rerender(<Collections {...props} paused/>);view.rerender(<Collections {...props}/>);
+    await screen.findByRole('img',{name:item.name});expect(artworkCalls('cover')).toHaveLength(3);
+    work={...work,artworkVersions:{cover:{thumbnail:'digest-2'}}};fireEvent.click(screen.getByRole('button',{name:'새로고침'}));
+    await waitFor(()=>expect(screen.getByRole('img',{name:item.name}).getAttribute('src')).toContain('digest-2'));
+    expect(artworkCalls('cover')).toHaveLength(4);
+    revision='r2';fireEvent.click(screen.getByRole('button',{name:'새로고침'}));
+    await waitFor(()=>expect(screen.getByRole('img',{name:item.name}).getAttribute('src')).toContain('r2-digest-2'));
+    expect(artworkCalls('cover')).toHaveLength(5);
+  });
+
+  it('retries interrupted artwork and ignores a late ticket from the abandoned request',async()=>{
+    const old=Promise.withResolvers<{url:string}>();
+    mocks.native.mockReturnValueOnce(old.promise).mockResolvedValue({url:'https://example.invalid/current'});
+    const props={active:true,paused:false,backRef:{current:null}};const view=render(<Collections {...props}/>);
+    await screen.findByText(item.name);await waitFor(()=>expect(artworkCalls('cover')).toHaveLength(1));
+    const signal=artworkCalls('cover')[0][2] as AbortSignal;
+    view.rerender(<Collections {...props} active={false}/>);expect(signal.aborted).toBe(true);
+    view.rerender(<Collections {...props}/>);
+    await screen.findByRole('img',{name:item.name});expect(artworkCalls('cover')).toHaveLength(2);
+    await act(async()=>old.resolve({url:'https://example.invalid/stale'}));
+    expect(screen.getByRole('img',{name:item.name}).getAttribute('src')).toBe('https://example.invalid/current');
+    view.rerender(<Collections {...props} paused/>);view.rerender(<Collections {...props}/>);await act(async()=>{});
+    expect(artworkCalls('cover')).toHaveLength(2);
+  });
+
+  it('retries hero decode failures and reloads an original when its digest or availability changes',async()=>{
+    let work:CollectionDetail={...item,selectedHeroArtworkId:'hero',artworkVersions:{hero:{original:'one'}},artworks:[{id:'hero',kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true}]};
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.startsWith('/v1/collections?')?page:{revision:'r1',item:work});
+    mocks.native.mockImplementation(async(_op,payload)=>({url:`https://example.invalid/${payload.artworkId}-${payload.variant}-${payload.digest}`}));
+    const decode=vi.fn().mockRejectedValueOnce(new Error('decode failed')).mockResolvedValue(undefined);
+    vi.stubGlobal('Image',class {src='';decode=decode;});
+    const props={active:true,paused:false,backRef:{current:null}};const view=render(<Collections {...props}/>);
+    fireEvent.click(await screen.findByText(item.name));await waitFor(()=>expect(decode).toHaveBeenCalledTimes(1));
+    await act(async()=>{});expect(document.querySelector('.collection-hero-original')).toBeNull();
+    view.rerender(<Collections {...props} paused/>);view.rerender(<Collections {...props}/>);
+    await waitFor(()=>expect(document.querySelector('.collection-hero-original')).not.toBeNull());
+    expect(artworkCalls('hero','original')).toHaveLength(2);
+    work={...work,artworkVersions:{hero:{original:'two'}}};fireEvent.click(screen.getByRole('button',{name:'새로고침'}));
+    await waitFor(()=>expect(document.querySelector('.collection-hero-original')?.getAttribute('src')).toContain('-two'));
+    work={...work,artworks:work.artworks.map(art=>({...art,originalAvailable:false}))};fireEvent.click(screen.getByRole('button',{name:'새로고침'}));
+    await waitFor(()=>expect(document.querySelector('.collection-hero-original')).toBeNull());
+  });
+});
+
 describe('read-only collections',()=>{
   it('filters the server list, resets pagination and retains per-type choices outside Showcase',async()=>{
     mocks.api.mockResolvedValue({...page,nextCursor:'page-2'});

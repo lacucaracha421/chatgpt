@@ -66,7 +66,7 @@ export function App() {
   const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'; character?:ViewerCharacterContext|null} | null>(null);
   const [density, setDensity] = useState(() => {try {const d = JSON.parse(localStorage.getItem('lakomics.mobile.density') ?? '1'); return [0,1,2].includes(d) ? d as number : 1;} catch {return 1;}});
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
-  const latest = useRef({page, viewer, settings, drawer, status, area, viewSettings, filtersOpen}); latest.current = {page, viewer, settings, drawer, status, area, viewSettings, filtersOpen};
+  const latest = useRef({page, viewer, settings, drawer, status, area, viewSettings, filtersOpen, filterVersion}); latest.current = {page, viewer, settings, drawer, status, area, viewSettings, filtersOpen, filterVersion};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]; filters:AssetFiltersValue}>({view:LIBRARY,cursor:null,previous:[],filters:{...EMPTY_FILTERS}});
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
   // Committed assets view left behind when a Character folder is opened from the index.
@@ -112,7 +112,7 @@ export function App() {
       // A server that cannot promise the filter contract must not be asked to pretend.
       // The refusal happens before the page fetch so an unfiltered list can never be
       // committed under a filtered identity.
-      if (filtered && filterVersion === null) throw new Error('이 서버는 자산 필터를 지원하지 않습니다. 서버를 업데이트해 주세요.');
+      if (filtered && latest.current.filterVersion === null) throw new Error('이 서버는 자산 필터를 지원하지 않습니다. 서버를 업데이트해 주세요.');
       // A character scope is served by its own reader, not by the page route, so its
       // synthetic empty page is a placeholder that carries no contract. It is therefore
       // never validated against the filter version below.
@@ -147,7 +147,7 @@ export function App() {
       setError(errorText(reason));
     } }
     finally { if (gate.current.current(request.id)) setBusy(false); }
-  }, [cancelMore, filterVersion]);
+  }, [cancelMore]);
   useEffect(() => {
     if (!status.configured) return;
     let running=false, active=true;
@@ -342,13 +342,29 @@ export function App() {
   const clearFilters = () => applyFilters({...EMPTY_FILTERS});
   const openAll = () => {setArea('assets'); setDrawer(false); if(!isAll(latest.current.page.view) || hasActiveFilters(latest.current.page.filters)) void load(LIBRARY, null, [], 0, false, EMPTY_FILTERS);};
   const selectView = (view: View) => {if(isAll(view)) openAll(); else select(view);};
+  const retainAssets = () => {
+    const state = latest.current, current = state.page, intent = lastIntent.current;
+    // A retained tab is also a navigation intent: a delayed replacement must not win later.
+    if (viewKey(intent.view,intent.filters) !== viewKey(current.view,current.filters) || intent.cursor !== current.cursor) {
+      gate.current.cancel(); cancelMore(); setBusy(false); setError(''); setFilterNotice(''); setFilters(current.filters);
+      lastIntent.current = {view:current.view,cursor:current.cursor,previous:current.previous,filters:current.filters};
+    }
+    // Older servers have no change signal, so returning still needs a fresh read.
+    if (state.area !== 'assets' && current.generation === null)
+      void load(current.view,current.cursor,current.previous,scroll.current,true,current.filters);
+  };
   // Settle area and drawer before loading, so a press from another area cannot leave it mounted.
   const openLibrary = () => {
     setArea('assets'); setDrawer(false);
-    if(latest.current.page.view.tab === 'library' && latest.current.area === 'assets') return;
+    if(latest.current.page.view.tab === 'library') {retainAssets();return;}
     const saved=lastLibrary.current;
     if(saved && !isAll(saved.view)) void load(saved.view,saved.cursor,saved.previous,saved.scroll,false,saved.filters);
     else openAll();
+  };
+  const openHome = () => {
+    setArea('assets'); setDrawer(false);
+    if (latest.current.page.view.tab === 'home') retainAssets();
+    else select(HOME);
   };
   const openCurrent = (index: number) => {
     // Opening the still-visible gallery cancels its uncommitted replacement.
@@ -399,7 +415,7 @@ export function App() {
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
   return <div className="mobile-app">
     <header className="app-header"><button className="brand" aria-label="사이드바 열기" disabled={!status.configured} onClick={()=>{if(area==='assets'){if(window.matchMedia?.('(orientation:landscape) and (min-width:1000px)').matches)setIndexHidden(v=>!v);else setDrawer(v=>!v);}else window.dispatchEvent(new Event('lakomics-sidebar'));}}><Bars3Icon className="navigation-icon" aria-hidden="true"/><Mark/><span>LAKOMICS</span><span className="brand-divider"/><span className="section-name">{area === 'notes' ? 'Notes' : area === 'catalog' ? 'Catalog' : area === 'collections' ? 'Collections' : page.view.tab === 'home' ? 'Home' : 'Library'}</span></button><div id="context-location">{(area==='catalog'||area==='notes')&&<h2 className="header-area">{area==='catalog'?'Catalog':'Notes'}</h2>}</div><div className="header-actions"><div id="context-tools"/>{demo && <span className="demo-label">디자인 미리보기</span>}<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={() => setSettings(true)}/></div></header>
-    {status.configured ? <div className="app-body">
+    {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area}>
       <aside className="desktop-index" style={{display:area!=='assets'||indexHidden?'none':undefined}}><div className="index-title"><span>라이브러리</span><RectangleStackIcon/></div>{folderTools}{indexError && <p className="error-message">{indexError}</p>}<ClassificationIndex items={classifications} characters={characterIndex} view={page.view} onSelect={selectView} collapsed={collapsed} setCollapsed={setCollapsed}/><Albums active={area==='assets'&&!settings&&!viewer} paused={settings||!!viewer||drawer} onOpen={(items,index)=>setViewer({items,index})} backRef={albumsBack}/></aside>
       <main className="library-main" style={{display:area!=='assets'?'none':undefined}}>
         <HeaderTools active={area==='assets'} target="context-location"><div className={`gallery-heading ${page.view.characters?'is-character':''}`}><div className="location"><span className="location-square"/><h2>{page.view.title}</h2><span className="numeric muted">{page.view.tab==='library' && page.items.length ? `${page.items.length}개${page.has_more ? '+' : ''}` : ''}</span>{filterable && hasActiveFilters(page.filters) && <span className="asset-filter-summary">{filterSummary(page.filters)}</span>}{filterPending && <span className="asset-filter-summary">필터 적용 대기</span>}</div><div className="heading-actions">{filterable && <IconButton label={hasActiveFilters(filters) ? `자산 필터: ${filterSummary(filters)}` : '자산 필터'} icon={FunnelIcon} active={hasActiveFilters(page.filters)} onClick={()=>setFiltersOpen(true)}/>}{page.view.tab === 'library' && <IconButton label={`갤러리 보기: ${DENSITIES[density]}`} icon={Squares2X2Icon} onClick={()=>setViewSettings(true)}/>}<IconButton label="새로고침" icon={ArrowPathIcon} disabled={busy} onClick={refresh}/></div></div></HeaderTools>
@@ -416,7 +432,7 @@ export function App() {
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer || drawer} backRef={catalogBack}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
-    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={() => select(HOME)}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={openLibrary}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setDrawer(false);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setDrawer(false);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setDrawer(false);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}
+    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={openHome}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={openLibrary}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setDrawer(false);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setDrawer(false);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setDrawer(false);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}
     {drawer && <Dialog open title="분류" onClose={() => setDrawer(false)}><DialogDescription className="sr-only">분류를 선택하면 해당 자산 목록을 엽니다.</DialogDescription><div className="dialog-header library-drawer-heading"><span className="sr-only">라이브러리</span><IconButton label="분류 닫기" icon={XMarkIcon} onClick={() => setDrawer(false)}/></div>{folderTools}{indexError && <p className="error-message">{indexError}</p>}<ClassificationIndex items={classifications} characters={characterIndex} view={page.view} onSelect={selectView} collapsed={collapsed} setCollapsed={setCollapsed}/><Albums active={area==='assets'&&!settings&&!viewer} paused={settings||!!viewer} onOpen={(items,index)=>setViewer({items,index})} backRef={albumsBack}/></Dialog>}
     {viewSettings && <Dialog open title="갤러리 보기" onClose={()=>setViewSettings(false)}><DialogDescription className="sr-only">썸네일 크기를 선택합니다. 설정은 이 기기에 저장됩니다.</DialogDescription><div className="view-density" role="group" aria-label="썸네일 크기">{DENSITIES.map((label,value)=><Button key={label} variant="ghost" aria-pressed={density===value} onClick={()=>{setDensity(value);store('lakomics.mobile.density',value);}}>{label}</Button>)}</div><div className="view-settings-footer"><Button variant="ghost" onClick={()=>setViewSettings(false)}>닫기</Button></div></Dialog>}
     {filtersOpen && <Dialog open title="자산 필터" onClose={()=>setFiltersOpen(false)}><DialogDescription className="sr-only">미디어 종류, 비율과 영상 길이로 자산 목록을 좁힙니다. 선택하면 목록이 다시 불러와지고, 뒤로 가면 필터 없는 목록으로 돌아갑니다.</DialogDescription><AssetFilters value={filters} onChange={applyFilters}/><div className="view-settings-footer"><Button variant="ghost" onClick={()=>setFiltersOpen(false)}>닫기</Button></div></Dialog>}

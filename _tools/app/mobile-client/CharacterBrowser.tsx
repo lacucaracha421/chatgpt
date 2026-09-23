@@ -1,7 +1,7 @@
 import {HeaderTools} from './HeaderTools';
 import {usePublicationCheck} from './usePublicationCheck';
-import {useCallback,useEffect,useRef,useState,type MutableRefObject} from 'react';
-import {ArrowLeftIcon,ChevronLeftIcon,ChevronRightIcon,FolderIcon,PhotoIcon,UserGroupIcon} from '@heroicons/react/24/outline';
+import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject} from 'react';
+import {ArrowLeftIcon,ChevronLeftIcon,ChevronRightIcon,ChevronUpIcon,FolderIcon,PhotoIcon,UserGroupIcon} from '@heroicons/react/24/outline';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {FunnelIcon} from '@heroicons/react/24/outline';
 import {api,errorText} from './transport';
@@ -36,19 +36,29 @@ export function viewerCharacterContext(node:CharacterNode|undefined|null,index:C
 }
 
 function Preview({id,paused,label=''}:{id?:string|null;paused:boolean;label?:string}) {
-  const [preview,setPreview]=useState<string>();
+  const [loaded,setLoaded]=useState<{id:string;preview?:string}>();
+  const preview=loaded?.id===id?loaded?.preview:undefined;
   useEffect(()=>{
-    setPreview(undefined);if(paused||!id)return;
+    if(paused||!id||preview)return;
     const controller=new AbortController();
-    void loadThumbnail({id,kind:'image'},controller.signal).then(a=>{if(!controller.signal.aborted)setPreview(a.preview);},()=>{});
+    void loadThumbnail({id,kind:'image'},controller.signal).then(a=>{if(!controller.signal.aborted)setLoaded({id,preview:a.preview});},()=>{});
     return()=>controller.abort();
-  },[id,paused]);
+  },[id,paused,preview]);
   return preview?<img src={preview} alt={label}/>:<PhotoIcon aria-hidden="true"/>;
 }
-function Card({node,count,paused,onSelect,previews=[]}:{node:CharacterNode;count:number;paused:boolean;onSelect():void;previews?:string[]}) {
-  return <button className="character-card" data-kind={node.kind} onClick={onSelect} aria-label={`${node.name} · ${count}개`}>
+function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:CharacterNode;count:number;paused:boolean;onSelect():void;previews?:string[];lazy?:boolean}) {
+  const host=useRef<HTMLButtonElement>(null),[visible,setVisible]=useState(!lazy);
+  useEffect(()=>{
+    if(!lazy||!host.current)return;
+    if(!window.IntersectionObserver){setVisible(true);return;}
+    // The strip can contain every folder, but only nearby covers enter the media queue.
+    const observer=new IntersectionObserver(entries=>setVisible(entries.some(entry=>entry.isIntersecting)),{root:host.current.parentElement,rootMargin:'0px 120px'});
+    observer.observe(host.current);return()=>observer.disconnect();
+  },[lazy]);
+  const previewPaused=paused||(lazy&&!visible);
+  return <button ref={host} className="character-card" data-kind={node.kind} onClick={onSelect} aria-label={`${node.name} · ${count}개`}>
     <span className={`character-card-image${node.kind==='group'?' character-mosaic':''}`} data-count={previews.length}>
-      {node.kind==='group'&&previews.length?previews.map(id=><span key={id}><Preview id={id} paused={paused}/></span>):node.thumbnailAssetId?<Preview id={node.thumbnailAssetId} paused={paused}/>:node.kind==='folder'?<FolderIcon/>:<PhotoIcon/>}
+      {node.kind==='group'&&previews.length?previews.map(id=><span key={id}><Preview id={id} paused={previewPaused}/></span>):node.thumbnailAssetId?<Preview id={node.thumbnailAssetId} paused={previewPaused}/>:node.kind==='folder'?<FolderIcon/>:<PhotoIcon/>}
     </span>
     <span className="character-card-caption"><strong>{node.kind==='group'?<UserGroupIcon/>:node.kind==='folder'?<FolderIcon/>:null}{node.name}</strong><span className="muted numeric">{count}개</span></span>
     {node.excluded&&<small>자동 분류 제외</small>}
@@ -68,6 +78,8 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   const [committed,setCommitted]=useState<Location|null>(null);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[moreError,setMoreError]=useState('');
   const [more,setMore]=useState(false),[cardsPage,setCardsPage]=useState(0),[columns,setColumns]=useState(3);
+  const [foldersCollapsed,setFoldersCollapsed]=useState(false);
+  const folderStripId=useId();
   const [restore,setRestore]=useState(0);
   const [retry,setRetry]=useState(0);
   const host=useRef<HTMLDivElement>(null),scroll=useRef(0);
@@ -233,7 +245,9 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   const ancestors:CharacterNode[]=[];
   let parent=node?.parentId;
   while(parent&&index&&ancestors.length<3){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
-  const filterControls=node?.kind==='series'&&<div className="character-filters">{(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}</div>;
+  const folderStrip=!landscape&&!!node;
+  const foldable=folderStrip&&children.length>0;
+  const filterControls=(node?.kind==='series'||foldable)&&<div className="character-filters">{node?.kind==='series'&&(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}{foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>}</div>;
   const overview=<>
     {!landscape&&filterControls}
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
@@ -242,8 +256,8 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
     {index&&!index.ready&&<div className="empty-state"><h3>캐릭터 보기가 아직 공유되지 않았습니다</h3><p>PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다.</p></div>}
     {landscape&&node?.kind==='series'&&node.heroAssetId&&<div className="character-hero"><Preview id={node.heroAssetId} paused={!active||paused} label={`${node.name} 대표 이미지`}/></div>}
     {!!children.length&&landscape&&node&&<h4 className="character-section-title">{node.kind==='group'?'그룹 캐릭터':'캐릭터 · 폴더'}</h4>}
-    {!!children.length&&<div className={`character-cards${pages>1?' character-cards-paged':''}`} style={{gridTemplateColumns:`repeat(${columns},minmax(0,${landscape?'180px':'1fr'}))`}}>{children.slice(cardPage*capacity,(cardPage+1)*capacity).map(child=><Card key={`${index?.revision}:${child.id}`} node={child} count={index?.scopes.find(s=>s.nodeId===child.id&&s.filter==='all')?.totalCount??0} paused={!active||paused} previews={landscape&&child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>enterInside({node:child.id,filter:'all'})}/>)}</div>}
-    {pages>1&&<div className="character-card-pages"><IconButton label="이전 폴더" icon={ChevronLeftIcon} disabled={!cardPage} onClick={()=>setCardsPage(cardPage-1)}/><span>{cardPage+1} / {pages}</span><IconButton label="다음 폴더" icon={ChevronRightIcon} disabled={cardPage+1>=pages} onClick={()=>setCardsPage(cardPage+1)}/></div>}
+    {!!children.length&&<div key={where.node??'root'} id={folderStrip?folderStripId:undefined} className={`character-cards${folderStrip?' character-folder-strip':pages>1?' character-cards-paged':''}`} hidden={folderStrip&&foldersCollapsed} role={folderStrip?'region':undefined} aria-label={folderStrip?'캐릭터 폴더':undefined} tabIndex={folderStrip?0:undefined} style={folderStrip?undefined:{gridTemplateColumns:`repeat(${columns},minmax(0,${landscape?'180px':'1fr'}))`}}>{(folderStrip?children:children.slice(cardPage*capacity,(cardPage+1)*capacity)).map(child=><Card key={`${index?.revision}:${child.id}`} node={child} count={index?.scopes.find(s=>s.nodeId===child.id&&s.filter==='all')?.totalCount??0} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={landscape&&child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>enterInside({node:child.id,filter:'all'})}/>)}</div>}
+    {!folderStrip&&pages>1&&<div className="character-card-pages"><IconButton label="이전 폴더" icon={ChevronLeftIcon} disabled={!cardPage} onClick={()=>setCardsPage(cardPage-1)}/><span>{cardPage+1} / {pages}</span><IconButton label="다음 폴더" icon={ChevronRightIcon} disabled={cardPage+1>=pages} onClick={()=>setCardsPage(cardPage+1)}/></div>}
     {node?.description&&<p className="character-description">{node.description}</p>}
     {landscape&&filterControls}
     {scope&&scope.sourceCount>scope.totalCount&&<p className="character-description">서버에 보관된 {scope.totalCount}개를 표시합니다. 아직 공유되지 않은 자산 {scope.sourceCount-scope.totalCount}개가 있습니다.</p>}

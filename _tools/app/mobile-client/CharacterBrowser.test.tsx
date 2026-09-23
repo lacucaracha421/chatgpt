@@ -4,9 +4,9 @@ import type {Asset} from './types';
 import {CharacterBrowser} from './CharacterBrowser';
 import type {CharacterIndex,CharacterPage} from './characterModel';
 
-const mocks=vi.hoisted(()=>({api:vi.fn()}));
+const mocks=vi.hoisted(()=>({api:vi.fn(),loadThumbnail:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,errorText:(e:Error)=>e.message}));
-vi.mock('./media',()=>({loadThumbnail:vi.fn(async(a:Asset)=>({...a,preview:'data:image/png;base64,AA=='}))}));
+vi.mock('./media',()=>({loadThumbnail:mocks.loadThumbnail}));
 vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,intro}:{intro?:import('react').ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll:number})=><div aria-label="character gallery" data-scroll={restoreScroll}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{a.id}</button>)}<button onClick={onNearEnd}>more</button></div>}));
 const revision='a'.repeat(64);
 const node=(kind:'series'|'group'|'character',id:string,name:string,parentId:string|null)=>({id:`${kind}:${id}`,kind,sourceId:id,seriesId:'s',parentId,name,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false});
@@ -18,7 +18,7 @@ const onExit=vi.fn();
 const props={active:true,paused:false,density:1,refreshKey:1,onOpen,backRef,onExit};
 beforeEach(()=>{
   vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
-  mocks.api.mockReset();onOpen.mockReset();onExit.mockReset();backRef.current=null;
+  mocks.api.mockReset();mocks.loadThumbnail.mockReset();mocks.loadThumbnail.mockImplementation(async(a:Asset)=>({...a,preview:'data:image/png;base64,AA=='}));onOpen.mockReset();onExit.mockReset();backRef.current=null;
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(index):page());
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
@@ -39,6 +39,108 @@ it('navigates series, groups and characters, opens shared assets and returns to 
   act(()=>{backRef.current?.();});
   expect(await screen.findByRole('heading',{name:'Series'})).toBeTruthy();
   expect(mocks.api.mock.calls.some(([p])=>p.includes('node=character%3Ac')&&p.includes(`revision=${revision}`))).toBe(true);
+});
+
+it('shows every portrait child in one scroll strip and collapses it without replacing the gallery',async()=>{
+  const many=structuredClone(index);
+  many.nodes.push(...Array.from({length:9},(_,i)=>node('character',`extra-${i}`,`Extra ${i}`,'series:s')));
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?many:page());
+  const view=render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  const last=await screen.findByRole('button',{name:'Extra 8 · 0개'});
+  const strip=last.closest('.character-folder-strip') as HTMLElement;
+  expect(strip).toBeTruthy();
+  expect(strip.querySelectorAll('.character-card')).toHaveLength(10);
+  expect(screen.queryByRole('button',{name:'다음 폴더'})).toBeNull();
+  const gallery=await screen.findByLabelText('character gallery');
+  const asset=screen.getByText('asset-1');
+  const reads=mocks.api.mock.calls.length;
+  strip.scrollLeft=320;
+  const toggle=screen.getByRole('button',{name:'캐릭터 폴더 접기'});
+  expect(toggle.getAttribute('aria-controls')).toBe(strip.id);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(toggle.parentElement?.contains(screen.getByRole('button',{name:'미분류'}))).toBe(true);
+  fireEvent.click(toggle);
+  expect(strip.hidden).toBe(true);
+  expect(screen.queryByRole('button',{name:'Extra 8 · 0개'})).toBeNull();
+  expect(screen.getByText('asset-1')).toBe(asset);
+  expect(screen.getByLabelText('character gallery')).toBe(gallery);
+  expect(mocks.api).toHaveBeenCalledTimes(reads);
+  expect(backRef.current?.()).toBe(false);
+  view.rerender(<CharacterBrowser {...props} initialNode="series:s" paused/>);
+  view.rerender(<CharacterBrowser {...props} initialNode="series:s"/>);
+  fireEvent.click(screen.getByRole('button',{name:'캐릭터 폴더 펼치기'}));
+  expect(strip.hidden).toBe(false);expect(strip.scrollLeft).toBe(320);
+  fireEvent.click(screen.getByRole('button',{name:'Extra 8 · 0개'}));
+  await screen.findByRole('heading',{name:'Extra 8'});
+  expect(screen.queryByRole('button',{name:'캐릭터 폴더 접기'})).toBeNull();
+  act(()=>{expect(backRef.current?.()).toBe(true);});
+  await screen.findByRole('heading',{name:'Series'});
+});
+
+it('only requests nearby strip covers and retains loaded previews through folding',async()=>{
+  const observed=new Map<Element,(visible:boolean)=>void>();
+  vi.stubGlobal('IntersectionObserver',class {
+    constructor(private callback:(entries:{isIntersecting:boolean}[])=>void){}
+    observe(element:Element){observed.set(element,visible=>this.callback([{isIntersecting:visible}]));}
+    disconnect(){}
+  });
+  const many=structuredClone(index);
+  many.nodes.push(...Array.from({length:9},(_,i)=>({...node('character',`extra-${i}`,`Extra ${i}`,'series:s'),thumbnailAssetId:`thumb-${i}`})));
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?many:page());
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  const first=await screen.findByRole('button',{name:'Extra 0 · 0개'});
+  const last=screen.getByRole('button',{name:'Extra 8 · 0개'});
+  expect(mocks.loadThumbnail).not.toHaveBeenCalled();
+  await act(async()=>{observed.get(first)!(true);});
+  expect(mocks.loadThumbnail).toHaveBeenCalledTimes(1);
+  const image=first.querySelector('img');expect(image).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'캐릭터 폴더 접기'}));
+  act(()=>{observed.get(first)!(false);});
+  fireEvent.click(screen.getByRole('button',{name:'캐릭터 폴더 펼치기'}));
+  await act(async()=>{observed.get(first)!(true);});
+  expect(first.querySelector('img')).toBe(image);
+  expect(mocks.loadThumbnail).toHaveBeenCalledTimes(1);
+  await act(async()=>{observed.get(first)!(false);observed.get(last)!(true);});
+  expect(mocks.loadThumbnail).toHaveBeenCalledTimes(2);
+  expect(mocks.loadThumbnail.mock.calls.at(-1)?.[0].id).toBe('thumb-8');
+});
+
+it('keeps series filters usable while folded and offers folding inside a group',async()=>{
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  fireEvent.click(await screen.findByRole('button',{name:'캐릭터 폴더 접기'}));
+  fireEvent.click(screen.getByRole('button',{name:'미분류'}));
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('filter=unclassified'))).toBe(true));
+  expect(screen.getByRole('button',{name:'미분류'}).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button',{name:'캐릭터 폴더 펼치기'}).getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(screen.getByRole('button',{name:'캐릭터 폴더 펼치기'}));
+  fireEvent.click(screen.getByRole('button',{name:'Group · 2개'}));
+  await screen.findByRole('heading',{name:'Group'});
+  expect(screen.queryByRole('button',{name:'미분류'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'캐릭터 폴더 접기'}));
+  expect(screen.queryByRole('button',{name:'Character · 2개'})).toBeNull();
+  expect(screen.getByText('asset-1')).toBeTruthy();
+});
+
+it('preserves bounded landscape pages when rotating from a folded portrait strip',async()=>{
+  let rotate!:()=>void;
+  const media={matches:false,addEventListener:(_name:string,listener:()=>void)=>{rotate=listener;},removeEventListener:()=>{}};
+  vi.stubGlobal('matchMedia',()=>media);
+  const many=structuredClone(index);
+  many.nodes.push(...Array.from({length:9},(_,i)=>node('character',`extra-${i}`,`Extra ${i}`,'series:s')));
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?many:page());
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  fireEvent.click(await screen.findByRole('button',{name:'캐릭터 폴더 접기'}));
+  act(()=>{media.matches=true;rotate();});
+  expect(screen.queryByRole('button',{name:'캐릭터 폴더 펼치기'})).toBeNull();
+  expect(screen.getByRole('button',{name:'Group · 2개'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Extra 8 · 0개'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'다음 폴더'}));
+  expect(screen.getByRole('button',{name:'Extra 8 · 0개'})).toBeTruthy();
+  act(()=>{media.matches=false;rotate();});
+  expect(screen.getByRole('button',{name:'캐릭터 폴더 펼치기'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'캐릭터 폴더 펼치기'}));
+  expect(screen.getByRole('button',{name:'Group · 2개'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'Extra 8 · 0개'})).toBeTruthy();
 });
 
 it('rejects a late page after changing the series filter',async()=>{

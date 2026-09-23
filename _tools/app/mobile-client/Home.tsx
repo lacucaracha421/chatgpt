@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowUpRightIcon, PhotoIcon, PlayIcon} from '@heroicons/react/24/outline';
 import {ClassificationIcon, classificationColor} from '../src/classification/classificationAppearance';
 import {Button} from './ui';
@@ -10,14 +10,17 @@ import type {Asset, Classification, Page, Revisit, View} from './types';
 import './home.css';
 
 function Cover({asset, paused}: {asset:Asset; paused:boolean}) {
-  const [preview,setPreview] = useState(asset.preview);
+  const source = JSON.stringify([asset.id,asset.kind,asset.preview,asset.thumbnail_available,asset.pending]);
+  const [loaded,setLoaded] = useState<{source:string;preview?:string}|null>(null);
+  const preview = asset.preview ?? (loaded?.source === source ? loaded.preview : undefined);
   useEffect(() => {
-    const controller = new AbortController(); setPreview(asset.preview);
-    if (!paused && !asset.preview) void loadThumbnail(asset,controller.signal).then(ready => {
-      if (!controller.signal.aborted) setPreview(ready.preview);
+    if (paused || preview) return;
+    const controller = new AbortController();
+    void loadThumbnail(asset,controller.signal).then(ready => {
+      if (!controller.signal.aborted) setLoaded({source,preview:ready.preview});
     },() => {});
     return () => controller.abort();
-  },[asset.id,asset.preview,asset.thumbnail_available,asset.pending,paused]);
+  },[source,preview,paused]);
   return <span className="home-cover">{preview ? <img src={preview} alt="" loading="lazy" draggable={false}/> : <PhotoIcon className="missing-media"/>}{asset.kind === 'video' && <span className="video-mark"><PlayIcon/></span>}</span>;
 }
 function folderPath(folder:Classification,classifications:Classification[]) {const path = folderBreadcrumb(folder,classifications); return path === folder.name ? '' : path;}
@@ -39,17 +42,27 @@ export function Home({items,classifications,revisit,captures,busy,paused,seconda
   const folders = useMemo(() => discoveryFolders(classifications,day),[classifications,day]);
   const [covers,setCovers] = useState<Record<string,Asset[]>>({});
   const [failed,setFailed] = useState(false);
+  const coverKey = JSON.stringify([revision,folders.map(folder => folder.id)]);
+  const completed = useRef({key:'',ids:new Set<string>()});
   useEffect(() => {
-    const controller = new AbortController(); setCovers({}); setFailed(false);
-    if (!paused && revision) void mapBounded(folders,2,async folder => {
+    if (paused || !revision) return;
+    if (completed.current.key !== coverKey) completed.current = {key:coverKey,ids:new Set()};
+    const pending = folders.filter(folder => !completed.current.ids.has(folder.id));
+    if (!pending.length) return;
+    const controller = new AbortController(); setFailed(false);
+    // Keep committed covers during a refresh; resume only unfinished work after a pause.
+    void mapBounded(pending,2,async folder => {
       try {
         const params = new URLSearchParams({classification_id:folder.id,limit:'3'});
         const page = normalizePage(await api<Page>(`/v1/library/assets?${params}`,controller.signal));
-        if (!controller.signal.aborted) setCovers(current => ({...current,[folder.id]:page.items.slice(0,3)}));
+        if (!controller.signal.aborted) {
+          completed.current.ids.add(folder.id);
+          setCovers(current => Object.fromEntries(folders.map(item => [item.id,item.id === folder.id ? page.items.slice(0,3) : current[item.id] ?? []])));
+        }
       } catch {if (!controller.signal.aborted) setFailed(true);}
     },controller.signal).catch(() => {});
     return () => controller.abort();
-  },[folders,paused,revision]);
+  },[coverKey,paused,revision]);
   const groups = revisit.bundles.flatMap(bundle => bundle.kind === 'date' && bundle.items?.length ? [{key:'date',title:bundle.title,items:bundle.items,label:'날짜별 다시보기'}] : (bundle.groups ?? []).filter(group => group.items?.length).map(group => ({key:group.creator_key,title:group.creator_name || group.creator_handle,items:group.items,label:'작가별 다시보기'}))).slice(0,4);
   const openFolder = (folder:Classification) => onSelect({tab:'library',classification:folder.id,title:folder.name});
   return <div className="home-scroll" aria-label="홈 탐색">

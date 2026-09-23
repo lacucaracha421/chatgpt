@@ -7,7 +7,7 @@ import {PickerSettings} from './PickerSettings';
 import './Settings.css';
 
 type CacheStatus = {bytes:number; count:number; limit:number};
-const APP_VERSION = '0.6.7';
+const APP_VERSION = '0.6.9';
 
 export function Settings({status, onStatus, onClose, onCacheCleared}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void}) {
   const [endpoint, setEndpoint] = useState(status.endpoint);
