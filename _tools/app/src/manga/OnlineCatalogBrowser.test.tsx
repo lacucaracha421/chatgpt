@@ -782,6 +782,14 @@ function resolvedGallery(): ResolvedGallery {
   };
 }
 
+it("hides editions for a single-edition work and keeps its bookmark action", async () => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway);
+  expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "1개 판본" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: `${work.title} 북마크` })).toBeVisible();
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;

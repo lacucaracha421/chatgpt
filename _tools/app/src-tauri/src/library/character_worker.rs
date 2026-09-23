@@ -8,9 +8,9 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, Mutex, OnceLock,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 pub(super) const BASELINE: &str =
@@ -264,14 +264,36 @@ impl RuntimeConfig {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct VerifiedModelKey {
+    path: PathBuf,
+    len: u64,
+    modified: SystemTime,
+}
+
 fn check_augmentation_model(path: &Path) -> Result<()> {
     use sha2::{Digest, Sha256};
+    static VERIFIED_MODEL: OnceLock<Mutex<Option<VerifiedModelKey>>> = OnceLock::new();
+
     if !path.is_absolute() || !path.is_file() {
         return Err(Error::Invalid("경량 보완 모델 파일을 찾을 수 없습니다."));
     }
     let mut file = std::fs::File::open(path)?;
-    if file.metadata()?.len() > 512 * 1024 * 1024 {
+    let metadata = file.metadata()?;
+    if metadata.len() > 512 * 1024 * 1024 {
         return Err(Error::Invalid("지원하는 경량 보완 모델이 아닙니다."));
+    }
+    let key = VerifiedModelKey {
+        path: path.canonicalize()?,
+        len: metadata.len(),
+        modified: metadata.modified()?,
+    };
+    let mut verified = VERIFIED_MODEL
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if verified.as_ref() == Some(&key) {
+        return Ok(());
     }
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 65536];
@@ -291,6 +313,10 @@ fn check_augmentation_model(path: &Path) -> Result<()> {
         return Err(Error::Invalid(
             "설치된 보완 모델이 지원하는 S36 파일과 다릅니다. 보완 모델 설치를 확인해 주세요.",
         ));
+    }
+    let current = std::fs::metadata(path)?;
+    if current.len() == key.len && current.modified()? == key.modified {
+        *verified = Some(key);
     }
     Ok(())
 }

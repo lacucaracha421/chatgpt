@@ -831,7 +831,41 @@ textarea:focus-visible {
 }
 
 .ui-toggle input {
-  accent-color: var(--color-accent);
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2px;
+  background: var(--color-bg);
+  cursor: pointer;
+}
+
+.ui-toggle input:checked {
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.ui-toggle input:checked::before {
+  content: "";
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.ui-toggle input:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.ui-toggle input:disabled {
+  opacity: .45;
+  cursor: not-allowed;
 }
 
 .ui-slider {
@@ -3231,6 +3265,7 @@ textarea:focus-visible {
 .online-catalog-card__footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-2) var(--space-2); }
 .online-catalog-card__bookmark {
   flex: none;
+  margin-left: auto;
   display: grid;
   place-items: center;
   width: 30px;

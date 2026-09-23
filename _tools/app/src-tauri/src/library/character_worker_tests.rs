@@ -106,6 +106,19 @@ fn augmentation_model_validation_agrees_with_the_python_pin() {
     assert!(check_augmentation_model(Path::new("relative.onnx")).is_err());
 }
 
+#[test]
+fn failed_augmentation_model_verification_is_not_cached() {
+    let temp = tempfile::tempdir().unwrap();
+    let model = temp.path().join("model.onnx");
+    std::fs::write(&model, b"invalid weights").unwrap();
+    for _ in 0..2 {
+        assert!(matches!(check_augmentation_model(&model), Err(Error::Invalid(message))
+            if message == "설치된 보완 모델이 지원하는 S36 파일과 다릅니다. 보완 모델 설치를 확인해 주세요."));
+    }
+    std::fs::write(&model, b"changed invalid weights").unwrap();
+    assert!(check_augmentation_model(&model).is_err());
+}
+
 fn python() -> PathBuf {
     std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
         .expect("set explicit test Python executable")

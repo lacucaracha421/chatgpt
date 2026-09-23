@@ -38,7 +38,7 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
       </span>
     </button>
     <div className="online-catalog-card__footer">
-    <Button size="sm" variant="ghost" className="online-catalog-card__editions" onClick={() => onEditions(work)}>{work.versionCount}개 판본</Button>
+    {work.versionCount >= 2 && <Button size="sm" variant="ghost" className="online-catalog-card__editions" onClick={() => onEditions(work)}>{work.versionCount}개 판본</Button>}
     <button
       type="button"
       className="online-catalog-card__bookmark"

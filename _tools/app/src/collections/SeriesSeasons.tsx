@@ -30,7 +30,7 @@ export function SeriesSeasons({ series }: { series: TmdbSeriesData }) {
           <strong>{season.name}</strong>{" "}<small>{season.episodes.length}개 에피소드</small>
         </button>)}
       </div>
-      {selected && <section aria-label={`${selected.name} 에피소드`}>
+      {selected && <section className="series-seasons__detail" aria-label={`${selected.name} 에피소드`}>
         <h3>{selected.name} {selected.airDate && <small>{selected.airDate}</small>}</h3>
         {selected.overview && <p>{selected.overview}</p>}
         {selected.episodes.length === 0 ? <p>등록된 에피소드가 없습니다.</p> : <ol className="series-seasons__episodes">

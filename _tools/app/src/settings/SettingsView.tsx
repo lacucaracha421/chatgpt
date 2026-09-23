@@ -802,7 +802,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         <dl className="settings-view__property">
           <dt>비공개 모드</dt>
           <dd className="settings-view__credential-status">모든 이미지와 영상을 자리표시로 가립니다. 화면 공유 중에 내용이 보이지 않습니다.</dd>
-          <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => { onPrivacyModeChange(event.target.checked); setSaved("비공개 모드 설정을 저장했습니다"); }}>켜기</Toggle>
+          <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => { onPrivacyModeChange(event.target.checked); setSaved("비공개 모드 설정을 저장했습니다"); }}>{privacyMode ? "켜짐" : "꺼짐"}</Toggle>
         </dl>
         {library && <CharacterAutomationSettings key={library.root} disabled={pending} onBusyChange={setCharacterAutomationBusy} />}
         {library && <CharacterAugmentationSettings key={`augmentation:${library.root}`} disabled={pending} onBusyChange={setCharacterAugmentationBusy} />}
