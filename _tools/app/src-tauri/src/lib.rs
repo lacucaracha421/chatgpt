@@ -299,6 +299,7 @@ pub fn run() {
             commands::characters::setup_character_runtime,
             commands::characters::character_augmentation_settings,
             commands::characters::set_character_augmentation_enabled,
+            commands::characters::set_character_shadow_enabled,
             commands::av::get_av_details,
             commands::av::save_av_details,
             commands::av::search_av_people,

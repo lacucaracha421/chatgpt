@@ -383,6 +383,62 @@ The approved full-library extraction wrote 8,282 new entries (126 already cached
 rejections, and recommendations up to 0.1490 (target 5%). From 2026-09-10 this
 replays at 39.5% recall / 0.81% FPR automatic and 48.5% / 1.89% recommended. The
 first replay day is excluded by the rejection guard: with 25 rejections its
-threshold admitted 16–17 false positives for one character. The file is not read
-by the native runtime and `baseline.json` is unchanged; in-app shadow scoring
-(2d) and publication (3) remain separately authorized stages.
+threshold admitted 16–17 false positives for one character. The pinned file now
+supplies the optional stage 2d shadow observer described below. `baseline.json` is unchanged; publication (stage 3) remains a separately
+authorized stage. The policy file's retained status text describes its
+calibration-time state.
+
+
+## S36 shadow scoring (stage 2d)
+
+Settings → General → **S36 시험 채점** records scores without changing native
+classification, membership, recommendations or publication. It defaults on when
+the pinned model is available; `s36_shadow_disabled` in machine-local
+`character-runtime.json` defaults to false for legacy files. Model resolution
+uses augmentation's saved/default/environment path (including its empty override),
+but the switches are independent. No score counter is queried by this panel.
+Missing/malformed `s36_policy.json` or a runtime `feature_id` mismatch refuses
+shadow scoring, with no policy fallback.
+
+Only completed incremental queries and their evaluated targets enter a disposable
+in-memory queue (256 images). Native jobs, history refresh and augmentation warm-up
+have priority. The same worker/encoder runs shadow at idle; there is no second
+model, detector or historical sweep. New work/pause requests cooperative
+cancellation at 100 ms polling intervals, preserving the resident augmenter;
+one in-flight extraction may finish before acknowledgement. Existing stop,
+deadline and thread limits apply. Overflow, restart and errors can lose shadow
+observations; errors are logged and never fail/retry native jobs.
+
+Only the query can extract S36 features, reusing validated native crop geometry
+and `.cache/characters/s36-augmentation-v1/<feature_id>/<hash>.npz`. Non-images,
+missing geometry and whole-image fallbacks abstain. Gallery features are validated
+cache reads, never backfilled. The calibration's resolved references, chronological
+manual witnesses (one vote per image), same-post / transitive whole-image PDQ ≤31
+exclusions and shared knn3 scorer are reused. Feedback becomes available immediately
+after its timestamp, without offline replay's one-day lag. Automatic memberships
+are not positives; empty galleries abstain. The automatic guard counts prior
+library-wide manual rejection events at the scoring snapshot.
+
+Shadow writes only `.cache/characters/s36_shadow.sqlite`, table `scores`, upserting
+by `(asset_id, target_id, policy_version)`. Columns are `asset_id`, `content_hash`,
+`target_id`, nullable `knn3`, `verdict` (`automatic`, `recommended`, `none`,
+`abstain`), `policy_version`, `feature_id`, `native_outcome`, `native_at`,
+`scored_at`, and `prior_manual_rejections`. Native outcomes distinguish
+`accepted_automatic`, `accepted_manual`, `rejected_manual`, `cleared_manual`,
+`recommended` and `none`. Native observation and scoring times are separate.
+No native decision reads this disposable cache.
+
+The report CLI reads only this cache and an existing `replay_dataset.py export`
+JSON, never the library DB. It prints JSON and optionally creates an output outside
+the library, rejecting overwrites and symlink escapes:
+
+```text
+python -B s36_shadow_report.py --cache /fixture/library/.cache/characters/s36_shadow.sqlite --dataset /research/replay.json --output /research/shadow-report.json
+```
+
+Reports separate policy/feature versions, count later manual accept/reject/unknown
+labels per verdict, and show automatic precision, recommendation acceptance rate
+and native outcome cross-tabs/agreement. Truth is the latest strictly later manual
+judgment of the same asset/hash/target; clears and changed/unavailable assets are
+unknown. Rates use reviewed rows only, not all arrivals. Verification uses fixtures;
+real-library native runtime, actual model inference and Windows remain unverified.

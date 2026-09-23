@@ -190,7 +190,7 @@ def post_key(url):
     return urlunsplit(("https", host, re.sub(r"/photo/\d+$", "", path), urlencode(query), ""))
 
 
-def duplicate_groups(images, hashes=()):
+def duplicate_groups(images, hashes=(), *, cancelled=None):
     """Transitive PDQ<=31 and post union, including uncached bridge images."""
     parent = {h: h for h in sorted(set(images) | set(hashes))}
 
@@ -225,6 +225,8 @@ def duplicate_groups(images, hashes=()):
     if len(fingerprints) > 20000:
         raise ValueError("PDQ audit exceeds 20,000 fingerprints; export a narrower dataset")
     for i, (h, a) in enumerate(fingerprints):
+        if cancelled is not None and cancelled():
+            raise ValueError("Shadow scoring preempted")
         for other, b in fingerprints[i + 1:]:
             if (a ^ b).bit_count() <= 31:
                 union(h, other)
@@ -276,7 +278,7 @@ def score_crops(vectors, positive, negative, competitors, prior, policy):
 
 
 class Replay:
-    def __init__(self, data, features, groups, lag=1, *, witness="gallery", gallery_cap=None):
+    def __init__(self, data, features, groups, lag=1, *, witness="gallery", gallery_cap=None, policy=None):
         self.data, self.features, self.groups, self.lag = data, features, groups, lag
         if witness not in ("gallery", "references") or (gallery_cap is not None and gallery_cap < 0):
             raise ValueError("Invalid witness mode or gallery cap")
@@ -289,7 +291,7 @@ class Replay:
         self.state = defaultdict(dict)
         self.pending, self.serial = [], 0
         self.resolved_cache = {}
-        self.policy = current_policy()
+        self.policy = current_policy() if policy is None else policy
         if self.policy["automatic_support"] != 6:
             raise ValueError("Native support changed; rule6 needs review")
         self.audit = Counter()
@@ -393,11 +395,13 @@ class Replay:
         # No gallery rebuilding with future labels: fix the witness now.
         return feature.vectors[int(np.argmin(scores))]
 
-    def run(self, labels, events):
+    def run(self, labels, events, *, cancelled=None):
         truth = {r["sequence"]: r for r in labels}
         result = []
         index = 0
         while index < len(events):
+            if cancelled is not None and cancelled():
+                raise ValueError("Shadow scoring preempted")
             now = events[index]["time"]
             self.release(now)
             end = index

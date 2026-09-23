@@ -560,6 +560,8 @@ for line in sys.stdin:
         script,
         models: f.temp.path().into(),
         augmentation_model: None,
+        s36_shadow_disabled: true,
+        shadow_model: None,
     }
 }
 fn prepare_paths(config: &RuntimeConfig) -> Vec<Vec<String>> {
@@ -1171,6 +1173,8 @@ fn real_native_incremental_queue_reuses_kisaki_references() {
         script: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../character-runtime/scan_worker.py"),
         augmentation_model: None,
+        s36_shadow_disabled: true,
+        shadow_model: None,
         models: std::env::var_os("LAKOMICS_CHARACTER_TEST_MODELS")
             .unwrap()
             .into(),
@@ -2043,4 +2047,109 @@ fn work_status_uses_snapshot_totals_and_the_actual_comparison_target() {
     let status=serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
     assert_eq!(status["historyRefreshes"][0]["processed"],1);
     assert_eq!(status["historyRefreshes"][0]["remaining"],1);
+}
+
+#[test]
+#[ignore = "requires LAKOMICS_CHARACTER_TEST_PYTHON"]
+fn character_shadow_queue_publication_is_unchanged_on_off_and_failure() {
+    for mode in ["off", "on", "failure"] {
+        let f = Fixture::new();
+        let target = f.ready("Shadow");
+        let mut config = config(&f);
+        if mode != "off" {
+            config.shadow_model = Some(f.temp.path().join("fixture.onnx"));
+        }
+        if mode == "on" {
+            let policy: Value =
+                serde_json::from_str(include_str!("../../../character-runtime/s36_policy.json"))
+                    .unwrap();
+            std::fs::write(
+                config.script.with_file_name("s36_policy.json"),
+                serde_json::to_vec(&policy).unwrap(),
+            )
+            .unwrap();
+            let script=std::fs::read_to_string(&config.script).unwrap()
+                .replace("'runtimeFingerprint':'a'*64",&format!("'runtimeFingerprint':'a'*64,'s36FeatureId':'{}'",policy["feature_id"].as_str().unwrap()))
+                .replace("    elif r['type']=='load_query':", "    elif r['type']=='s36_shadow':\n        emit({'type':'s36_shadow_result','assetId':r['assetId'],'contentHash':r['hash'],'featureId':r['featureId'],'scores':{t:0.1 for t in r['targets']}})\n    elif r['type']=='load_query':");
+            std::fs::write(&config.script, script).unwrap();
+        }
+        run(&f, &config, "asset-5");
+        let c = f.library.connection().unwrap();
+        let before: (String,String,i64,i64)=c.query_row("SELECT state,review_state,(SELECT COUNT(*) FROM character_autotag_predictions),(SELECT COUNT(*) FROM character_decisions) FROM character_autotag_jobs WHERE asset_id='asset-5'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(before, ("completed".into(), "unresolved".into(), 1, 0));
+        let prediction: String = c
+            .query_row(
+                "SELECT result_json FROM character_autotag_predictions WHERE target_id=?1",
+                [&target.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&prediction).unwrap()["state"],
+            "recommended"
+        );
+        let changes = c.total_changes();
+        drop(c);
+        assert!(f
+            .library
+            .character_relations_for_asset("asset-5")
+            .unwrap()
+            .is_empty());
+        let queued = f.library.character_incremental.lock().unwrap().shadow.len();
+        assert_eq!(queued, usize::from(mode != "off"));
+        if mode != "off" {
+            assert!(f
+                .library
+                .advance_character_shadow(&config, Arc::new(AtomicBool::new(false))));
+            assert!(f
+                .library
+                .character_incremental
+                .lock()
+                .unwrap()
+                .error
+                .is_none());
+        }
+        f.library
+            .character_worker_pool
+            .with(
+                &config,
+                &f.temp.path().join(".cache/characters"),
+                Arc::new(AtomicBool::new(false)),
+                false,
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(config.script.with_extension("log"))
+                .unwrap()
+                .lines()
+                .filter(|line| *line == "start")
+                .count(),
+            1,
+            "shadow refusal must preserve the native session"
+        );
+        let c = f.library.connection().unwrap();
+        let after:(String,String,i64,i64)=c.query_row("SELECT state,review_state,(SELECT COUNT(*) FROM character_autotag_predictions),(SELECT COUNT(*) FROM character_decisions) FROM character_autotag_jobs WHERE asset_id='asset-5'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            c.total_changes(),
+            changes,
+            "shadow must issue no library SQL writes"
+        );
+        let after_prediction: String = c
+            .query_row(
+                "SELECT result_json FROM character_autotag_predictions WHERE target_id=?1",
+                [&target.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(prediction, after_prediction);
+        assert_eq!(
+            f.temp
+                .path()
+                .join(".cache/characters/s36_shadow.sqlite")
+                .exists(),
+            mode == "on"
+        );
+    }
 }

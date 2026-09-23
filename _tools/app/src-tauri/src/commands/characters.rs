@@ -189,6 +189,25 @@ pub async fn set_character_augmentation_enabled(
 }
 
 #[tauri::command]
+pub async fn set_character_shadow_enabled(
+    enabled: bool,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_worker::AugmentationSettings, CommandError> {
+    let library = current_required(state)?;
+    let (script, settings) = runtime_paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = crate::library::character_worker::RuntimeConfig::update_shadow(
+            script, &settings, enabled,
+        )?;
+        start_incremental_if_configured(&app, &library);
+        Ok(result)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
 pub async fn setup_character_runtime(
     app: tauri::AppHandle,
     state: State<'_, AppState>,

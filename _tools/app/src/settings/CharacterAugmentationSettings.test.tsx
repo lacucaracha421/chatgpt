@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { CharacterAugmentationSettings, type AugmentationSettings } from "./CharacterAugmentationSettings";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const empty: AugmentationSettings = { enabled: false, modelName: null, modelReady: false, runtimeConfigured: true, managedByEnvironment: false };
+const empty: AugmentationSettings = { enabled: false, shadowEnabled: false, modelName: null, modelReady: false, runtimeConfigured: true, managedByEnvironment: false };
 const ready = { ...empty, modelName: "S36.onnx", modelReady: true };
 beforeEach(() => vi.mocked(invoke).mockReset().mockResolvedValue(empty));
 afterEach(cleanup);
@@ -33,8 +33,8 @@ it("uses the preconnected model with only a toggle and native confirmation", asy
 it("keeps unavailable preinstalled models off without offering a picker", async () => {
   mount();
   expect(await screen.findByRole("status")).toHaveTextContent("보완 모델 설치를 확인");
-  expect(screen.getByRole("checkbox")).toBeDisabled();
-  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).not.toBeChecked();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
   expect(invoke).toHaveBeenCalledTimes(1);
 });
@@ -43,7 +43,7 @@ it("blocks duplicate saves and retains off after a failed enable", async () => {
   vi.mocked(invoke).mockResolvedValueOnce(ready);
   const busy = vi.fn();
   mount(busy);
-  const toggle = screen.getByRole("checkbox");
+  const toggle = screen.getByRole("checkbox", { name: "캐릭터 누락 보완" });
   await waitFor(() => expect(toggle).toBeEnabled());
   let reject!: (reason: Error) => void;
   vi.mocked(invoke).mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
@@ -64,14 +64,14 @@ it("shows environment ownership without allowing ineffective saves", async () =>
   vi.mocked(invoke).mockResolvedValueOnce({ ...ready, enabled: true, managedByEnvironment: true });
   mount();
   expect(await screen.findByRole("status")).toHaveTextContent("환경 변수로 지정");
-  expect(screen.getByRole("checkbox")).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: /보완 모델/ })).not.toBeInTheDocument();
 });
 
 it("allows disabling when the preconnected model is missing", async () => {
   vi.mocked(invoke).mockResolvedValueOnce({ ...ready, enabled: true, modelReady: false });
   mount();
-  const toggle = screen.getByRole("checkbox");
+  const toggle = screen.getByRole("checkbox", { name: "캐릭터 누락 보완" });
   await waitFor(() => expect(toggle).toBeEnabled());
   expect(screen.getByRole("status")).toHaveTextContent("보완 모델 설치를 확인");
   vi.mocked(invoke).mockResolvedValueOnce({ ...ready, enabled: false, modelReady: false });
@@ -84,10 +84,10 @@ it("recovers a failed settings read without changing any setting", async () => {
   vi.mocked(invoke).mockRejectedValueOnce(new Error("읽기 실패"));
   mount();
   expect(await screen.findByRole("alert")).toHaveTextContent("읽기 실패");
-  expect(screen.getByRole("checkbox")).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).toBeDisabled();
   vi.mocked(invoke).mockResolvedValueOnce(ready);
   await userEvent.click(screen.getByRole("button", { name: "보완 설정 다시 확인" }));
-  await waitFor(() => expect(screen.getByRole("checkbox")).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).toBeEnabled());
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(vi.mocked(invoke).mock.calls.every(([command]) => command === "character_augmentation_settings")).toBe(true);
 });
@@ -96,9 +96,34 @@ it("offers baseline setup without starting augmentation when no runtime is confi
   vi.mocked(invoke).mockResolvedValueOnce({ ...empty, runtimeConfigured: false });
   mount();
   const setup = await screen.findByRole("button", { name: "분석 환경 설정" });
-  expect(screen.getByRole("checkbox")).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).toBeDisabled();
   vi.mocked(invoke).mockResolvedValueOnce(false);
   await userEvent.click(setup);
   expect(invoke).toHaveBeenLastCalledWith("setup_character_runtime");
-  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).not.toBeChecked();
+});
+
+
+it("records shadow independently of augmentation and preserves state after save failure", async () => {
+  vi.mocked(invoke).mockResolvedValueOnce({ ...ready, shadowEnabled: true, managedByEnvironment: true });
+  mount();
+  const toggle = screen.getByRole("checkbox", { name: "S36 시험 채점" });
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(toggle).toBeEnabled();
+  expect(screen.getByText(/점수만 기록하며 분류는 바꾸지 않습니다/)).toBeInTheDocument();
+  vi.mocked(invoke).mockRejectedValueOnce(new Error("저장 실패"));
+  await userEvent.click(toggle);
+  expect(await screen.findByRole("alert")).toHaveTextContent("저장 실패");
+  expect(toggle).toBeChecked();
+  vi.mocked(invoke).mockResolvedValueOnce({ ...ready, shadowEnabled: false });
+  await userEvent.click(toggle);
+  expect(invoke).toHaveBeenLastCalledWith("set_character_shadow_enabled", { enabled: false });
+  expect(toggle).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).not.toBeChecked();
+});
+
+it("disables shadow when no model is available", async () => {
+  mount();
+  await screen.findByRole("status");
+  expect(screen.getByRole("checkbox", { name: "S36 시험 채점" })).toBeDisabled();
 });

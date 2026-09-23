@@ -104,7 +104,7 @@ class OwnershipTests(unittest.TestCase):
     def test_stdin_owner_loss_exits_while_main_thread_is_busy(self):
         code = """import queue,threading,time
 from scan_worker import read_requests
-threading.Thread(target=read_requests,args=(queue.Queue(1),),daemon=True).start()
+threading.Thread(target=read_requests,args=(queue.Queue(1),threading.Event()),daemon=True).start()
 print('ready',flush=True)
 time.sleep(30)
 """

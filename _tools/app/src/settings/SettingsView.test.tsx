@@ -9,7 +9,7 @@ import { SettingsView } from "./SettingsView";
 import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "character_augmentation_settings"
-  ? { enabled: false, modelName: null, modelReady: false, runtimeConfigured: true, managedByEnvironment: false }
+  ? { enabled: false, shadowEnabled: false, modelName: null, modelReady: false, runtimeConfigured: true, managedByEnvironment: false }
   : { automationEnabled: false, paused: false }) }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));

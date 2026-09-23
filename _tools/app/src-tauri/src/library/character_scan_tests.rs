@@ -249,6 +249,8 @@ fn config(script: PathBuf, models: PathBuf) -> RuntimeConfig {
         script,
         models,
         augmentation_model: None,
+        s36_shadow_disabled: true,
+        shadow_model: None,
     }
 }
 

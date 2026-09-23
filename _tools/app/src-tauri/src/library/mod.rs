@@ -62,6 +62,7 @@ pub mod character_reference_regions;
 pub mod character_scan;
 mod character_scope;
 pub mod character_series_move;
+mod character_shadow;
 mod character_sources;
 mod character_training;
 pub(crate) mod character_worker;

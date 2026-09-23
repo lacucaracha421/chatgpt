@@ -24,6 +24,10 @@ pub struct RuntimeConfig {
     pub(super) models: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) augmentation_model: Option<PathBuf>,
+    #[serde(default)]
+    pub(super) s36_shadow_disabled: bool,
+    #[serde(skip)]
+    pub(super) shadow_model: Option<PathBuf>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -38,6 +42,7 @@ struct SavedRuntime {
 #[serde(rename_all = "camelCase")]
 pub struct AugmentationSettings {
     pub enabled: bool,
+    pub shadow_enabled: bool,
     pub model_name: Option<String>,
     pub model_ready: bool,
     pub runtime_configured: bool,
@@ -47,6 +52,11 @@ pub struct AugmentationSettings {
 impl SavedRuntime {
     fn effective(&self) -> RuntimeConfig {
         let mut config = self.runtime.clone();
+        config.shadow_model = if config.s36_shadow_disabled {
+            None
+        } else {
+            config.augmentation_model.clone()
+        };
         if self.augmentation_disabled {
             config.augmentation_model = None;
         }
@@ -84,6 +94,10 @@ impl RuntimeConfig {
                 python: path("LAKOMICS_CHARACTER_PYTHON")?,
                 models: path("LAKOMICS_CHARACTER_MODELS")?,
                 script,
+                s36_shadow_disabled: saved
+                    .as_ref()
+                    .is_some_and(|s| s.runtime.s36_shadow_disabled),
+                shadow_model: None,
                 augmentation_model: saved
                     .as_ref()
                     .and_then(|saved| saved.runtime.augmentation_model.clone()),
@@ -126,6 +140,13 @@ impl RuntimeConfig {
         {
             config.augmentation_model = None;
         }
+        if config
+            .shadow_model
+            .as_ref()
+            .is_some_and(|path| !path.is_absolute() || !path.is_file())
+        {
+            config.shadow_model = None;
+        }
         if !config.python.is_absolute()
             || !config.python.is_file()
             || !config.script.is_file()
@@ -148,6 +169,7 @@ impl RuntimeConfig {
         {
             return Ok(AugmentationSettings {
                 enabled: false,
+                shadow_enabled: false,
                 model_name: None,
                 model_ready: false,
                 runtime_configured: false,
@@ -158,6 +180,8 @@ impl RuntimeConfig {
         let model = saved.runtime.augmentation_model.as_deref();
         Ok(AugmentationSettings {
             enabled: !saved.augmentation_disabled && model.is_some(),
+            shadow_enabled: !saved.runtime.s36_shadow_disabled
+                && model.is_some_and(|path| check_augmentation_model(path).is_ok()),
             model_name: model
                 .and_then(Path::file_name)
                 .map(|name| name.to_string_lossy().into_owned()),
@@ -228,6 +252,51 @@ impl RuntimeConfig {
         Self::augmentation_settings(script, settings)
     }
 
+    pub(crate) fn update_shadow(
+        script: PathBuf,
+        settings: &Path,
+        enabled: bool,
+    ) -> Result<AugmentationSettings> {
+        let before = std::fs::read(settings).ok();
+        let saved = Self::load(script.clone(), settings)?;
+        if enabled {
+            check_augmentation_model(
+                saved
+                    .runtime
+                    .augmentation_model
+                    .as_deref()
+                    .ok_or(Error::Invalid("설치된 S36 모델을 찾을 수 없습니다."))?,
+            )?;
+        }
+        // Persist only the switch. Environment overrides must never turn into
+        // saved augmentation activation as a side effect of changing shadow.
+        let mut document: Value = match &before {
+            Some(bytes) => serde_json::from_slice(bytes)?,
+            None => {
+                let mut value = serde_json::to_value(&saved)?;
+                value["augmentation_disabled"] = Value::Bool(true);
+                value
+            }
+        };
+        document
+            .as_object_mut()
+            .ok_or(Error::Invalid("Invalid runtime settings"))?
+            .insert("s36_shadow_disabled".into(), Value::Bool(!enabled));
+        if std::fs::read(settings).ok() != before {
+            return Err(Error::Stale);
+        }
+        let parent = settings
+            .parent()
+            .ok_or(Error::Invalid("설정 경로가 없습니다."))?;
+        std::fs::create_dir_all(parent)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(&serde_json::to_vec(&document)?)?;
+        temporary
+            .persist(settings)
+            .map_err(|e| Error::Io(e.error))?;
+        Self::augmentation_settings(script, settings)
+    }
+
     pub(crate) fn setup(
         python: PathBuf,
         models: PathBuf,
@@ -239,6 +308,8 @@ impl RuntimeConfig {
             models,
             script,
             augmentation_model: None,
+            s36_shadow_disabled: false,
+            shadow_model: None,
         };
         let temp = tempfile::tempdir()?;
         let mut worker = Worker::start(&config, temp.path(), Arc::new(AtomicBool::new(false)))?;
@@ -475,12 +546,18 @@ impl Worker {
                     Stdio::null()
                 },
             );
-        if let Some(model) = &config.augmentation_model {
+        if let Some(model) = config
+            .augmentation_model
+            .as_ref()
+            .or(config.shadow_model.as_ref())
+        {
             command.arg("--augmentation-model").arg(model);
         }
         command
             .env("OPENBLAS_NUM_THREADS", "2")
-            .env("OMP_NUM_THREADS", "2");
+            .env("OMP_NUM_THREADS", "2")
+            .env("MKL_NUM_THREADS", "2")
+            .env("ORT_DISABLE_TELEMETRY", "1");
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -574,9 +651,22 @@ impl Worker {
     }
 
     fn receive_until(&mut self, timeout: Duration) -> Result<Value> {
+        self.receive_while(timeout, || Ok(true))
+    }
+
+    pub(super) fn receive_while(
+        &mut self,
+        timeout: Duration,
+        mut allowed: impl FnMut() -> Result<bool>,
+    ) -> Result<Value> {
         let started = Instant::now();
+        let mut preempted = false;
         loop {
             self.check_cancel()?;
+            if !preempted && !allowed()? {
+                self.send(&serde_json::json!({"type":"s36_shadow_cancel"}))?;
+                preempted = true;
+            }
             if started.elapsed() >= timeout {
                 return Err(Error::Worker("캐릭터 worker 응답 시간 초과".into()));
             }

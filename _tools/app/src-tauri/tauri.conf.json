@@ -41,6 +41,12 @@
       "../character-runtime/character_head.py": "character-runtime/character_head.py",
       "../character-runtime/character_encoder.py": "character-runtime/character_encoder.py",
       "../character-runtime/holdout_rules.py": "character-runtime/holdout_rules.py",
+      "../character-runtime/s36_shadow.py": "character-runtime/s36_shadow.py",
+      "../character-runtime/s36_scoring.py": "character-runtime/s36_scoring.py",
+      "../character-runtime/s36_policy.json": "character-runtime/s36_policy.json",
+      "../character-runtime/replay_eval.py": "character-runtime/replay_eval.py",
+      "../character-runtime/replay_dataset.py": "character-runtime/replay_dataset.py",
+      "../character-runtime/holdout_dataset.py": "character-runtime/holdout_dataset.py",
       "licenses/*": "licenses/"
     },
     "icon": [

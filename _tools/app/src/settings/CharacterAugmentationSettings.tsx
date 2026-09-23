@@ -6,6 +6,7 @@ import { Toggle } from "../shared/ui/Toggle";
 
 export type AugmentationSettings = {
   enabled: boolean;
+  shadowEnabled: boolean;
   modelName: string | null;
   modelReady: boolean;
   runtimeConfigured: boolean;
@@ -13,7 +14,7 @@ export type AugmentationSettings = {
 };
 
 function checked(value: AugmentationSettings): AugmentationSettings {
-  if (!value || [value.enabled, value.modelReady, value.runtimeConfigured, value.managedByEnvironment].some(flag => typeof flag !== "boolean")
+  if (!value || [value.shadowEnabled, value.enabled, value.modelReady, value.runtimeConfigured, value.managedByEnvironment].some(flag => typeof flag !== "boolean")
     || (value.modelName !== null && typeof value.modelName !== "string")) {
     throw new Error("캐릭터 누락 보완 설정을 확인하지 못했습니다.");
   }
@@ -43,7 +44,7 @@ export function CharacterAugmentationSettings({ disabled, onBusyChange }: {
     return () => { active = false; };
   }, [retry]);
 
-  async function change(action: "toggle" | "runtime", enabled?: boolean) {
+  async function change(action: "toggle" | "shadow" | "runtime", enabled?: boolean) {
     if (disabled || saving.current || loading || !settings) return;
     saving.current = true;
     setBusy(true);
@@ -56,6 +57,8 @@ export function CharacterAugmentationSettings({ disabled, onBusyChange }: {
         if (!configured) return;
         next = await invoke<AugmentationSettings>("character_augmentation_settings");
 
+      } else if (action === "shadow") {
+        next = await invoke<AugmentationSettings>("set_character_shadow_enabled", { enabled });
       } else {
         next = await invoke<AugmentationSettings>("set_character_augmentation_enabled", { enabled });
       }
@@ -72,6 +75,15 @@ export function CharacterAugmentationSettings({ disabled, onBusyChange }: {
   const locked = disabled || busy || loading || !settings;
   const environment = settings?.managedByEnvironment ?? false;
   return <dl className="settings-view__property" aria-busy={busy || loading}>
+    <dt>S36 시험 채점</dt>
+    <dd className="settings-view__credential-status">이 PC에서 점수만 기록하며 분류는 바꾸지 않습니다. 새로 처리한 이미지에만 적용됩니다.</dd>
+    <dd className="settings-view__inline-controls">
+      <Toggle aria-label="S36 시험 채점" checked={settings?.shadowEnabled ?? false}
+        disabled={locked || (!settings?.shadowEnabled && (!settings?.modelReady || !settings?.runtimeConfigured))}
+        onChange={event => void change("shadow", event.target.checked)}>
+        {settings?.shadowEnabled ? "켜짐" : "꺼짐"}
+      </Toggle>
+    </dd>
     <dt>캐릭터 누락 보완</dt>
     <dd className="settings-view__credential-status">기존 자동 분류와 수동 판정은 유지하고, 경량 모델로 더 많은 누락을 보완합니다. 일부 오탐이 생길 수 있습니다. 이 PC의 설정이며, 캐릭터 자동 분류가 켜져 있을 때 동작합니다. 과거 이미지 재분석은 시작하지 않습니다.</dd>
     <dd className="settings-view__inline-controls">

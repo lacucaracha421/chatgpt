@@ -20,7 +20,7 @@ def emit(value):
     print(json.dumps(value, ensure_ascii=False, allow_nan=False), flush=True)
 
 
-def read_requests(inbox):
+def read_requests(inbox, shadow_cancel):
     # The native owner keeps stdin open for the entire session. EOF is ownership
     # loss/cancellation, including a crashed parent, even while ONNX is running.
     while True:
@@ -29,6 +29,15 @@ def read_requests(inbox):
             os._exit(0)
         if len(line.encode("utf-8")) > MAX_REQUEST_BYTES or not line.endswith("\n"):
             os._exit(2)
+        try:
+            kind = json.loads(line).get("type")
+        except (ValueError, AttributeError):
+            kind = None
+        if kind == "s36_shadow_cancel":
+            shadow_cancel.set()
+            continue
+        if kind == "s36_shadow":
+            shadow_cancel.clear()
         inbox.put(line)
 
 
@@ -42,7 +51,8 @@ def main():
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     inbox = queue.Queue(maxsize=1)
-    threading.Thread(target=read_requests, args=(inbox,), daemon=True).start()
+    shadow_cancel = threading.Event()
+    threading.Thread(target=read_requests, args=(inbox, shadow_cancel), daemon=True).start()
     try:
         engine = Runtime(args.models)
         fingerprint = runtime_fingerprint()
@@ -65,8 +75,16 @@ def main():
                 augmenter = character_augmentation.Unavailable("model_unavailable")
         except Exception:
             augmenter = None
+    shadow_feature_id = None
+    if augmentation_available:
+        try:
+            from character_encoder import feature_id
+            shadow_feature_id = feature_id()
+        except Exception:
+            pass
     emit({"type": "ready", "baselineFingerprint": FINGERPRINT,
-          "runtimeFingerprint": fingerprint, "augmentationAvailable": augmentation_available})
+          "runtimeFingerprint": fingerprint, "augmentationAvailable": augmentation_available,
+          "s36FeatureId": shadow_feature_id})
     timings = None
     if os.environ.get("LAKOMICS_CHARACTER_PROFILE") == "1":
         import feature_cache, runtime
@@ -148,6 +166,14 @@ def main():
                         result = compare_bound(engine, query, refs, selections, projected)
                 emit({"type": "result", "assetId": request["assetId"], **result,
                       "cacheHits": cache.hits, "extractions": cache.misses})
+            elif request["type"] == "s36_shadow":
+                try:
+                    if not augmentation_available:
+                        raise ValueError("S36 unavailable")
+                    from s36_shadow import handle
+                    emit(handle(augmenter, request, cancelled=shadow_cancel.is_set))
+                except Exception as error:
+                    emit({"type": "s36_shadow_unavailable", "reason": str(error)})
             elif request["type"] in ("augmentation_prepare", "augmentation_step", "augment_query"):
                 # The resident query identity, never the caller bundle, is the source of truth.
                 resident_binding = {}

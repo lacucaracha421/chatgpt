@@ -90,6 +90,7 @@ pub(super) struct Engine {
     next_config: Option<RuntimeConfig>,
     prepared_references: Option<Arc<PreparedReferences>>,
     training: Option<AugmentationTraining>,
+    shadow: std::collections::VecDeque<super::character_shadow::Pending>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +130,7 @@ impl Library {
         }
         if engine.config.as_ref() != Some(&config) {
             engine.training = None;
+            engine.shadow.clear();
         }
         engine.config = Some(config.clone());
         engine.next_config = None;
@@ -255,10 +257,14 @@ impl Library {
                     if self.advance_character_reference_refresh(32)? > 0 {
                         return Ok(true);
                     }
-                    // Optional preparation never delays a queued native result.
-                    return Ok(self
+                    // Preserve native augmentation warm-up priority as well.
+                    if self
                         .advance_character_augmentation(&config, stop.clone())
-                        .unwrap_or(false));
+                        .unwrap_or(false)
+                    {
+                        return Ok(true);
+                    }
+                    return Ok(self.advance_character_shadow(&config, stop.clone()));
                 };
                 if self.supersede_invalid_reference_refresh_job(&job)? {
                     return Ok(true);
@@ -571,7 +577,31 @@ impl Library {
         if stop.load(Ordering::Acquire) {
             return Err(Error::Stale);
         }
+        let shadow = if config.shadow_model.is_some() {
+            match super::character_shadow::observe(&tx, job, &predictions) {
+                Ok(pending) => Some(pending),
+                Err(error) => {
+                    eprintln!("S36 shadow observation skipped: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         tx.commit()?;
+        // Publication is complete. Shadow scoring/cache writes never participate
+        // in its transaction or return a failure to the native queue.
+        if let Some(pending) = shadow {
+            let mut engine = self
+                .character_incremental
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if engine.shadow.len() < 256 {
+                engine.shadow.push_back(pending);
+            } else {
+                eprintln!("S36 shadow skipped: pending observation budget reached");
+            }
+        }
         if std::env::var_os("LAKOMICS_CHARACTER_PROFILE").as_deref()
             == Some(std::ffi::OsStr::new("1"))
         {
@@ -731,7 +761,25 @@ impl Library {
         }))
     }
 
-    fn augmentation_idle_allowed(&self, stop: &AtomicBool) -> Result<bool> {
+    fn advance_character_shadow(&self, config: &RuntimeConfig, stop: Arc<AtomicBool>) -> bool {
+        if config.shadow_model.is_none() || !self.augmentation_idle_allowed(&stop).unwrap_or(false)
+        {
+            return false;
+        }
+        let pending = self
+            .character_incremental
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .shadow
+            .pop_front();
+        let Some(pending) = pending else { return false };
+        if let Err(error) = self.score_character_shadow(pending, config, stop) {
+            eprintln!("S36 shadow scoring skipped: {error}");
+        }
+        true
+    }
+
+    pub(super) fn augmentation_idle_allowed(&self, stop: &AtomicBool) -> Result<bool> {
         if stop.load(Ordering::Acquire) {
             return Ok(false);
         }

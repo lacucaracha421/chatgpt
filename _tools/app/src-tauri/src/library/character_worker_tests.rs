@@ -15,6 +15,8 @@ fn augmentation_settings_keep_the_selected_model_when_disabled() {
         script: script.clone(),
         models: temp.path().to_owned(),
         augmentation_model: Some(model.clone()),
+        s36_shadow_disabled: true,
+        shadow_model: None,
     };
     // Legacy JSON with a model path remains enabled until explicitly disabled.
     std::fs::write(&settings, serde_json::to_vec(&config).unwrap()).unwrap();
@@ -50,6 +52,8 @@ fn invalid_augmentation_model_does_not_overwrite_settings() {
         script: script.clone(),
         models: temp.path().to_owned(),
         augmentation_model: None,
+        s36_shadow_disabled: true,
+        shadow_model: None,
     };
     let before = serde_json::to_vec(&config).unwrap();
     std::fs::write(&settings, &before).unwrap();
@@ -75,6 +79,8 @@ fn preconnected_model_is_resolved_without_enabling_legacy_runtime() {
         script: script.clone(),
         models: temp.path().to_owned(),
         augmentation_model: None,
+        s36_shadow_disabled: true,
+        shadow_model: None,
     };
     let before = serde_json::to_vec(&config).unwrap();
     std::fs::write(&settings, &before).unwrap();
@@ -154,6 +160,8 @@ fn child_cancellation_deadline_exit_and_oversized_output_are_bounded() {
             script,
             models: temp.path().into(),
             augmentation_model: None,
+            s36_shadow_disabled: true,
+            shadow_model: None,
         };
         let mut worker = Worker::start(&config, temp.path(), cancel.clone()).unwrap();
         if mode == "blocked_input" {
@@ -196,4 +204,66 @@ fn delta_request_serializes_exact_protocol_and_rejects_invalid_additions() {
         serde_json::json!({"path":"/b","hash":"same"}),
     ];
     assert!(delta_compare_request("asset", "query", &old, &duplicate).is_err());
+}
+
+#[test]
+fn character_shadow_legacy_default_and_independent_off_switch() {
+    let old = serde_json::json!({"python":"/fixture/python","script":"/fixture/worker.py","models":"/fixture/models","augmentation_model":"/fixture/s36.onnx","augmentation_disabled":true});
+    let mut saved: SavedRuntime = serde_json::from_value(old).unwrap();
+    assert!(saved.effective().augmentation_model.is_none());
+    assert_eq!(
+        saved.effective().shadow_model,
+        Some(PathBuf::from("/fixture/s36.onnx"))
+    );
+    saved.runtime.s36_shadow_disabled = true;
+    assert!(saved.effective().shadow_model.is_none());
+    saved.augmentation_disabled = false;
+    assert!(saved.effective().augmentation_model.is_some());
+    let roundtrip: SavedRuntime =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    assert!(roundtrip.runtime.s36_shadow_disabled);
+}
+
+#[test]
+fn character_shadow_setting_save_preserves_augmentation_and_unknown_fields() {
+    let temp = tempfile::tempdir().unwrap();
+    let settings = temp.path().join("settings.json");
+    let script = temp.path().join("worker.py");
+    std::fs::write(&script, b"fixture").unwrap();
+    let before = serde_json::json!({"python":script,"script":script,"models":temp.path(),"augmentation_model":temp.path().join("s36.onnx"),"augmentation_disabled":true,"future_setting":"preserved"});
+    std::fs::write(&settings, serde_json::to_vec(&before).unwrap()).unwrap();
+    RuntimeConfig::update_shadow(script, &settings, false).unwrap();
+    let mut after: Value = serde_json::from_slice(&std::fs::read(settings).unwrap()).unwrap();
+    assert_eq!(after["s36_shadow_disabled"], true);
+    after.as_object_mut().unwrap().remove("s36_shadow_disabled");
+    assert_eq!(after, before);
+}
+
+#[test]
+#[ignore = "requires LAKOMICS_CHARACTER_TEST_PYTHON"]
+fn character_shadow_worker_response_is_preemptible() {
+    let temp = tempfile::tempdir().unwrap();
+    let script = temp.path().join("worker.py");
+    std::fs::write(&script, "import sys,json\nfor line in sys.stdin:\n r=json.loads(line)\n print(json.dumps({'type':'s36_shadow_unavailable' if r['type']=='s36_shadow_cancel' else 'native_still_ready'}),flush=True)\n").unwrap();
+    let config = RuntimeConfig {
+        python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
+            .unwrap()
+            .into(),
+        script,
+        models: temp.path().into(),
+        augmentation_model: None,
+        s36_shadow_disabled: true,
+        shadow_model: None,
+    };
+    let mut worker = Worker::start(&config, temp.path(), Arc::new(AtomicBool::new(false))).unwrap();
+    let start = Instant::now();
+    let mut polls = 0;
+    let result = worker.receive_while(Duration::from_secs(10), || {
+        polls += 1;
+        Ok(polls < 2)
+    });
+    assert_eq!(result.unwrap()["type"], "s36_shadow_unavailable");
+    assert!(start.elapsed() < Duration::from_secs(1));
+    worker.send(&serde_json::json!({"type":"native"})).unwrap();
+    assert_eq!(worker.receive().unwrap()["type"], "native_still_ready");
 }
