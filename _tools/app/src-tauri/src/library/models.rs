@@ -491,6 +491,8 @@ pub struct SimilarityReviewAsset {
 pub struct SimilarityReviewSummary {
     pub id: String,
     pub distance: u32,
+    pub historical: bool,
+    pub recommended_asset_id: Option<String>,
     pub existing: SimilarityReviewAsset,
     pub candidate: SimilarityReviewAsset,
 }
@@ -508,6 +510,18 @@ pub struct SimilarityReviewPage {
 pub struct SimilarityIndexProgress {
     pub remaining: u64,
     pub failed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageSimilarityScan {
+    pub id: String,
+    pub total_assets: u64,
+    pub skipped_assets: u64,
+    pub compared_pairs: u64,
+    pub total_pairs: u64,
+    pub reviews_created: u64,
+    pub completed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -1588,6 +1602,8 @@ mod tests {
         let value = serde_json::to_value(SimilarityReviewSummary {
             id: "review-1".into(),
             distance: 2,
+            historical: false,
+            recommended_asset_id: None,
             existing: review_asset.clone(),
             candidate: review_asset,
         })

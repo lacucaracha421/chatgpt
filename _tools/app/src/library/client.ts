@@ -57,6 +57,7 @@ import type {
   PrivateVaultScanReport,
   PrivateVaultStatus,
   PrivateVaultThumbnailCandidate,
+  ImageSimilarityScan,
   SimilarityIndexProgress,
   SimilarityReviewPage,
   TrashPage,
@@ -351,6 +352,12 @@ export const libraryGateway: LibraryGateway = {
     invoke("set_revisit_preference", { feedback }),
   indexMissingSimilarityHashes: () =>
     invoke<SimilarityIndexProgress>("index_missing_similarity_hashes"),
+  getImageSimilarityScan: () =>
+    invoke<ImageSimilarityScan | null>("get_image_similarity_scan"),
+  startImageSimilarityScan: () =>
+    invoke<ImageSimilarityScan>("start_image_similarity_scan"),
+  runImageSimilarityScanBatch: (scanId) =>
+    invoke<ImageSimilarityScan>("run_image_similarity_scan_batch", { scanId }),
   listSimilarityReviews: ({ after, limit }) =>
     invoke<SimilarityReviewPage>("list_similarity_reviews", { after, limit }),
   decideSimilarityReview: (request) =>

@@ -105,10 +105,49 @@ it("masks both previews with skeletons in privacy mode", async () => {
   expect(screen.getAllByRole("status", { name: "비공개 모드" })).toHaveLength(2);
 });
 
+it("runs an explicit historical scan in resumable batches", async () => {
+  const gateway = reviewGateway();
+  vi.mocked(gateway.getImageSimilarityScan!).mockResolvedValue(null);
+  vi.mocked(gateway.startImageSimilarityScan!).mockResolvedValue({
+    id: "scan-1", totalAssets: 3, skippedAssets: 1, comparedPairs: 0,
+    totalPairs: 3, reviewsCreated: 0, completed: false,
+  });
+  vi.mocked(gateway.runImageSimilarityScanBatch!).mockResolvedValue({
+    id: "scan-1", totalAssets: 3, skippedAssets: 1, comparedPairs: 3,
+    totalPairs: 3, reviewsCreated: 1, completed: true,
+  });
+  vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([], 0));
+  render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
+
+  await userEvent.click(await screen.findByRole("button", { name: "기존 보관함 검사" }));
+
+  expect(gateway.startImageSimilarityScan).toHaveBeenCalledOnce();
+  expect(gateway.runImageSimilarityScanBatch).toHaveBeenCalledWith("scan-1");
+  expect(await screen.findByText("검사 완료 · 검토 1건 발견")).toBeInTheDocument();
+});
+
+it("uses non-destructive historical review labels and recommendations", async () => {
+  const gateway = reviewGateway();
+  const historical = review("review-1");
+  historical.historical = true;
+  historical.recommendedAssetId = historical.existing.asset.id;
+  vi.mocked(gateway.listSimilarityReviews).mockResolvedValue(reviewPage([historical], 1));
+  render(<SimilarityReviewBrowser gateway={gateway} onCountChange={vi.fn()} onClose={vi.fn()} />);
+
+  expect(await screen.findByRole("img", { name: "이미지 A" })).toBeInTheDocument();
+  expect(screen.getByText("출처 정보가 더 충분한 이미지 A를 권장합니다.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "이미지 B 유지" }));
+  expect(gateway.decideSimilarityReview).toHaveBeenCalledWith({
+    reviewId: "review-1", decision: "replace_existing",
+  });
+});
+
 function review(id: string): SimilarityReviewSummary {
   return {
     id,
     distance: 2,
+    historical: false,
+    recommendedAssetId: null,
     existing: reviewAsset(`existing-${id}`, `existing-${id}.png`),
     candidate: reviewAsset(`candidate-${id}`, `candidate-${id}.png`),
   };
@@ -167,6 +206,9 @@ function reviewGateway(): LibraryGateway {
     setRevisitPreference: vi.fn().mockResolvedValue(undefined),
     listSimilarityReviews: vi.fn(),
     decideSimilarityReview: vi.fn().mockResolvedValue(undefined),
+    getImageSimilarityScan: vi.fn().mockResolvedValue(null),
+    startImageSimilarityScan: vi.fn(),
+    runImageSimilarityScanBatch: vi.fn(),
     getAsset: vi.fn(), updateAssetMetadata: vi.fn(), trashAssets: vi.fn(), restoreAsset: vi.fn(), restoreAssets: vi.fn(),
     listTrash: vi.fn(), emptyTrash: vi.fn(), getTrashPolicy: vi.fn(), setTrashPolicy: vi.fn(),
     ensureDailyBackup: vi.fn(), listMetadataBackups: vi.fn(), restoreMetadataBackup: vi.fn(), purgeExpiredTrash: vi.fn(),

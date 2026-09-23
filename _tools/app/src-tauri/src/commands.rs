@@ -31,16 +31,17 @@ use crate::{
             CatalogStatus, CatalogSuggestion, CatalogUpdateResult, CatalogUpdateStopReason,
             CatalogVisibilityPolicy, CatalogWorkDetail, ClassificationEntry, CollectionCover,
             CollectionSummary, CollectionVolume, CreateAlbum, CreateClassification,
-            CreateCollection, IngestMediaRequest, IngestOutcome, LibrarySummary,
-            MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
+            CreateCollection, ImageSimilarityScan, IngestMediaRequest, IngestOutcome,
+            LibrarySummary, MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
             MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexApplyRequest,
             MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
             MangaDexWorkPreview, MangaSeries, MetadataBackup, PrivateVaultAssetPage,
             PrivateVaultQuery, PrivateVaultScanReport, PrivateVaultStatus, PrivateVaultThumbnailCandidate, PurgeSummary, ReleaseWatchEvent,
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus,
             RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
-            SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewPage, TrashPage,
-            TrashPolicy, UpdateCollection, VideoPreparationProgress, VolumeImportProgress,
+            SimilarityDecisionRequest, SimilarityIndexProgress,
+            SimilarityReviewPage, TrashPage, TrashPolicy, UpdateCollection,
+            VideoPreparationProgress, VolumeImportProgress,
             WorkArtworkSummary,
         },
         Library,
@@ -750,6 +751,40 @@ pub async fn index_missing_similarity_hashes(
 ) -> Result<SimilarityIndexProgress, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.index_missing_similarity_hashes())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_image_similarity_scan(
+    state: State<'_, AppState>,
+) -> Result<Option<ImageSimilarityScan>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_image_similarity_scan())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn start_image_similarity_scan(
+    state: State<'_, AppState>,
+) -> Result<ImageSimilarityScan, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.start_image_similarity_scan())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn run_image_similarity_scan_batch(
+    scan_id: String,
+    state: State<'_, AppState>,
+) -> Result<ImageSimilarityScan, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.run_image_similarity_scan_batch(&scan_id))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

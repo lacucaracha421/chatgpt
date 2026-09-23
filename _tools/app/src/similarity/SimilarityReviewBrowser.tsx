@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, localDate, sourceLabel } from "../assets/assetMetadata";
 import { assetUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { LibraryGateway, SimilarityDecision, SimilarityReviewAsset, SimilarityReviewSummary } from "../library/types";
+import type { ImageSimilarityScan, LibraryGateway, SimilarityDecision, SimilarityReviewAsset, SimilarityReviewSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
@@ -38,6 +38,8 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
   const [initialTotal, setInitialTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
+  const [scan, setScan] = useState<ImageSimilarityScan | null | undefined>(undefined);
+  const [scanRunning, setScanRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
   const generationRef = useRef(0);
@@ -70,6 +72,22 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
   }, [load]);
 
   useEffect(() => {
+    let active = true;
+    if (!gateway.getImageSimilarityScan) {
+      setScan(null);
+      return () => { active = false; };
+    }
+    void gateway.getImageSimilarityScan()
+      .then((value) => { if (active) setScan(value); })
+      .catch((error) => {
+        if (!active) return;
+        setScan(null);
+        setMessage(commandErrorMessage(error, "기존 보관함 검사 상태를 불러오지 못했습니다."));
+      });
+    return () => { active = false; };
+  }, [gateway]);
+
+  useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !pending) onClose();
     };
@@ -92,32 +110,89 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
     }
   }
 
+  async function runHistoricalScan() {
+    if (scanRunning || !gateway.startImageSimilarityScan || !gateway.runImageSimilarityScanBatch) return;
+    setScanRunning(true);
+    setMessage(null);
+    try {
+      let current = scan && !scan.completed ? scan : await gateway.startImageSimilarityScan();
+      if (!mountedRef.current) return;
+      setScan(current);
+      while (mountedRef.current && !current.completed) {
+        current = await gateway.runImageSimilarityScanBatch(current.id);
+        if (!mountedRef.current) return;
+        setScan(current);
+      }
+      if (mountedRef.current) await load();
+    } catch (error) {
+      if (mountedRef.current) {
+        setMessage(commandErrorMessage(error, "기존 보관함 유사 이미지 검사를 이어가지 못했습니다."));
+      }
+    } finally {
+      if (mountedRef.current) setScanRunning(false);
+    }
+  }
+
   const current = initialTotal > 0 ? initialTotal - totalCount + 1 : 0;
+  const recommendation = review ? reviewRecommendation(review) : "";
   return <section className="similarity-review" aria-label="유사 검토" onKeyDown={(event) => event.stopPropagation()}>
     <ViewToolbar
       title="유사 검토"
       chrome={{ status: review && initialTotal > 0 ? <span>{current} / {initialTotal}</span> : undefined }}
     />
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
+    {gateway.startImageSimilarityScan && gateway.runImageSimilarityScanBatch && <HistoricalScanStatus
+      scan={scan}
+      running={scanRunning}
+      onRun={() => void runHistoricalScan()}
+    />}
     {loading ? <Skeleton className="similarity-review__skeleton" label="유사 이미지를 불러오는 중" /> : !review ? (
       <EmptyState title="검토할 유사 이미지가 없습니다">새 이미지가 들어오면 여기에 표시됩니다.</EmptyState>
     ) : <>
-      <p className="similarity-review__difference">{comparisonSummary(review)}</p>
+      <p className="similarity-review__difference">
+        {recommendation && <><span>{recommendation}</span> · </>}
+        {comparisonSummary(review)}
+      </p>
       <div className="similarity-review__comparison">
-        <ReviewAssetPanel side="기존 이미지" reviewAsset={review.existing} />
-        <ReviewAssetPanel side="새 이미지" reviewAsset={review.candidate} />
+        <ReviewAssetPanel side={review.historical ? "이미지 A" : "기존 이미지"} reviewAsset={review.existing} />
+        <ReviewAssetPanel side={review.historical ? "이미지 B" : "새 이미지"} reviewAsset={review.candidate} />
       </div>
       <footer className="similarity-review__actions">
-        <p className="similarity-review__action-hint">기존 이미지 유지 시 새 이미지는 영구 삭제됩니다. 교체 시 기존 이미지는 휴지통으로 이동합니다.</p>
-        <Button disabled={pending} onClick={() => void decide("keep_existing")}>기존 이미지 유지</Button>
-        <Button disabled={pending} onClick={() => void decide("replace_existing")}>새 이미지로 교체</Button>
+        <p className="similarity-review__action-hint">{review.historical
+          ? "유지하지 않은 이미지는 휴지통으로 이동합니다. 결정 전에는 원본을 변경하지 않습니다."
+          : "기존 이미지 유지 시 새 이미지는 영구 삭제됩니다. 교체 시 기존 이미지는 휴지통으로 이동합니다."}</p>
+        <Button disabled={pending} onClick={() => void decide("keep_existing")}>{review.historical ? "이미지 A 유지" : "기존 이미지 유지"}</Button>
+        <Button disabled={pending} onClick={() => void decide("replace_existing")}>{review.historical ? "이미지 B 유지" : "새 이미지로 교체"}</Button>
         <Button variant="secondary" disabled={pending} onClick={() => void decide("keep_both")}>둘 다 보관</Button>
       </footer>
     </>}
   </section>;
 }
 
-function ReviewAssetPanel({ side, reviewAsset }: { side: "기존 이미지" | "새 이미지"; reviewAsset: SimilarityReviewAsset }) {
+function HistoricalScanStatus({ scan, running, onRun }: {
+  scan: ImageSimilarityScan | null | undefined;
+  running: boolean;
+  onRun(): void;
+}) {
+  const detail = scan === undefined
+    ? "검사 상태 확인 중"
+    : scan === null
+      ? "저장된 이미지끼리 비교해 기존 유사 항목을 찾습니다."
+      : scan.completed
+        ? `검사 완료 · 검토 ${scan.reviewsCreated.toLocaleString()}건 발견`
+        : `${running ? "검사 중" : "일시 중지"} · ${scan.comparedPairs.toLocaleString()} / ${scan.totalPairs.toLocaleString()}쌍`;
+  const action = scan && !scan.completed ? "검사 이어가기" : scan?.completed ? "다시 검사" : "기존 보관함 검사";
+  return <section className="similarity-review__scan" aria-label="기존 보관함 유사 이미지 검사">
+    <div>
+      <strong>{detail}</strong>
+      {scan && <span>{scan.totalAssets.toLocaleString()}개 대상 · 해시 미준비 {scan.skippedAssets.toLocaleString()}개</span>}
+      {scan && scan.totalPairs > 0 && <progress value={scan.comparedPairs} max={scan.totalPairs} aria-label="기존 보관함 검사 진행률" />}
+    </div>
+    <Button variant="secondary" disabled={running || scan === undefined} onClick={onRun}>{running ? "검사 중" : action}</Button>
+  </section>;
+}
+
+function ReviewAssetPanel({ side, reviewAsset }: { side: string; reviewAsset: SimilarityReviewAsset }) {
   const { privacyMode } = usePrivacy();
   const { asset, format, classifications } = reviewAsset;
   return <section className="similarity-review__asset" aria-label={side}>
@@ -133,6 +208,12 @@ function ReviewAssetPanel({ side, reviewAsset }: { side: "기존 이미지" | "�
       <div><dt>분류</dt><dd>{classifications.map((entry) => entry.name).join(", ") || "미분류"}</dd></div>
     </dl>
   </section>;
+}
+
+function reviewRecommendation(review: SimilarityReviewSummary): string {
+  if (!review.historical || !review.recommendedAssetId) return "";
+  const side = review.recommendedAssetId === review.existing.asset.id ? "이미지 A" : "이미지 B";
+  return `출처 정보가 더 충분한 ${side}를 권장합니다.`;
 }
 
 function comparisonSummary(review: SimilarityReviewSummary): string {

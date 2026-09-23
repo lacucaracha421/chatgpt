@@ -43,6 +43,9 @@ describe("libraryGateway similarity contract", () => {
 
   it("uses the exact Tauri command names and camelCase payloads", async () => {
     await libraryGateway.indexMissingSimilarityHashes();
+    await libraryGateway.getImageSimilarityScan?.();
+    await libraryGateway.startImageSimilarityScan?.();
+    await libraryGateway.runImageSimilarityScanBatch?.("scan-1");
     await libraryGateway.listSimilarityReviews({ after: null, limit: 20 });
     await libraryGateway.decideSimilarityReview({
       reviewId: "review-1",
@@ -51,14 +54,17 @@ describe("libraryGateway similarity contract", () => {
     await libraryGateway.getAsset("asset-1");
 
     expect(invoke).toHaveBeenNthCalledWith(1, "index_missing_similarity_hashes");
-    expect(invoke).toHaveBeenNthCalledWith(2, "list_similarity_reviews", {
+    expect(invoke).toHaveBeenNthCalledWith(2, "get_image_similarity_scan");
+    expect(invoke).toHaveBeenNthCalledWith(3, "start_image_similarity_scan");
+    expect(invoke).toHaveBeenNthCalledWith(4, "run_image_similarity_scan_batch", { scanId: "scan-1" });
+    expect(invoke).toHaveBeenNthCalledWith(5, "list_similarity_reviews", {
       after: null,
       limit: 20,
     });
-    expect(invoke).toHaveBeenNthCalledWith(3, "decide_similarity_review", {
+    expect(invoke).toHaveBeenNthCalledWith(6, "decide_similarity_review", {
       request: { reviewId: "review-1", decision: "keep_both" },
     });
-    expect(invoke).toHaveBeenNthCalledWith(4, "get_asset", {
+    expect(invoke).toHaveBeenNthCalledWith(7, "get_asset", {
       assetId: "asset-1",
     });
   });

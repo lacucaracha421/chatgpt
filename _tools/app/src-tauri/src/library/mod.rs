@@ -1,15 +1,15 @@
 pub(crate) mod aladin;
 mod aladin_flow;
 mod album;
+pub(crate) mod album_authority;
 #[cfg(test)]
 #[path = "album_authority_tests.rs"]
 mod album_authority_tests;
-pub(crate) mod album_authority;
 pub(crate) mod album_reconciliation;
-pub(crate) mod asset_authority;
 #[cfg(test)]
 #[path = "album_reconciliation_tests.rs"]
 mod album_reconciliation_tests;
+pub(crate) mod asset_authority;
 mod asset_metadata;
 pub(crate) mod av_artwork;
 pub(crate) mod av_collection;
@@ -43,37 +43,37 @@ mod catalog_revision;
 pub(crate) mod catalog_update;
 mod catalog_visibility;
 mod character_augmentation;
-mod character_training;
 pub mod character_autotag;
 pub mod character_conversion;
-pub mod character_series_move;
-pub mod character_groups;
-pub mod character_folders;
-pub mod character_hub;
-pub mod character_incremental;
-pub mod character_reference_candidates;
-pub mod character_reference_regions;
-mod character_reference_curation;
-pub mod character_reference_refresh;
-#[cfg(test)]
-mod character_reference_refresh_bench;
-pub mod character_scan;
-mod character_scope;
-mod character_sources;
-pub(crate) mod character_worker;
-pub mod character_workflow;
-pub mod characters;
 pub(crate) mod character_exclusions;
 #[cfg(test)]
 #[path = "character_exclusions_tests.rs"]
 mod character_exclusions_tests;
+pub mod character_folders;
+pub mod character_groups;
+pub mod character_hub;
+pub mod character_incremental;
+pub mod character_reference_candidates;
+mod character_reference_curation;
+pub mod character_reference_refresh;
+#[cfg(test)]
+mod character_reference_refresh_bench;
+pub mod character_reference_regions;
+pub mod character_scan;
+mod character_scope;
+pub mod character_series_move;
+mod character_sources;
+mod character_training;
+pub(crate) mod character_worker;
+pub mod character_workflow;
+pub mod characters;
 mod classification;
 pub(crate) use classification::list_classifications_in;
 pub(crate) mod classification_authority;
-pub(crate) mod classification_reconciliation;
 #[cfg(test)]
 #[path = "classification_authority_tests.rs"]
 mod classification_authority_tests;
+pub(crate) mod classification_reconciliation;
 #[cfg(test)]
 #[path = "classification_reconciliation_tests.rs"]
 mod classification_reconciliation_tests;
@@ -83,8 +83,8 @@ pub(crate) mod collection_source;
 mod collection_volume;
 pub(crate) mod credential;
 pub(crate) mod credential_broker;
-pub(crate) mod dev_guard;
 mod db;
+pub(crate) mod dev_guard;
 pub(crate) use db::is_valid_library_id;
 mod drag_out;
 pub(crate) mod kakao_books;
@@ -94,6 +94,7 @@ pub(crate) mod notes;
 #[cfg(target_os = "linux")]
 pub(crate) use drag_out::PreparedAssetDrag;
 pub mod collection_tracking;
+pub(crate) mod collection_updates;
 pub mod error;
 mod external_binding;
 pub(crate) mod external_vault;
@@ -115,17 +116,17 @@ pub(crate) mod mobile_catalog;
 mod mobile_catalog_tests;
 pub mod models;
 mod online_catalog;
+mod provider_requests;
 mod query;
 mod release_watch;
-pub(crate) mod collection_updates;
-mod provider_requests;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
 pub(crate) mod remote_progress;
+pub(crate) mod restore_guard;
 mod revisit;
 mod revisit_color;
-pub(crate) mod restore_guard;
 mod similarity;
+mod similarity_scan;
 mod source_group;
 pub mod statistics;
 pub mod thumbnail_maintenance;
@@ -366,9 +367,7 @@ impl Library {
         gate: &Mutex<()>,
         pass: impl FnOnce() -> Result<T, LibraryError>,
     ) -> Result<T, LibraryError> {
-        let _guard = gate
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         pass()
     }
 

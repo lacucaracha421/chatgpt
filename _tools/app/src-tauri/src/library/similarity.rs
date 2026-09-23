@@ -16,16 +16,16 @@ use super::{
         dimensions_are_compatible, fingerprint, minimum_distance, ImageFingerprint,
     },
     models::{
-        AssetCursor, AssetSummary, ClassificationEntry, ClassificationKind,
-        SimilarityDecision, SimilarityDecisionRequest, SimilarityIndexProgress,
-        SimilarityReviewAsset, SimilarityReviewPage, SimilarityReviewSummary,
+        AssetCursor, AssetSummary, ClassificationEntry, ClassificationKind, SimilarityDecision,
+        SimilarityDecisionRequest, SimilarityIndexProgress, SimilarityReviewAsset,
+        SimilarityReviewPage, SimilarityReviewSummary,
     },
     query::asset_summary_from_row,
     Library, MediaVariant,
 };
 
-const PDQ_QUALITY_MIN: u8 = 50;
-const PDQ_DISTANCE_MAX: u32 = 20;
+pub(super) const PDQ_QUALITY_MIN: u8 = 50;
+pub(super) const PDQ_DISTANCE_MAX: u32 = 20;
 const INDEX_BATCH_SIZE: u32 = 50;
 const INDEX_WORKERS: usize = 2;
 // Bound decoding across overlapping UI requests, including a reopened library.
@@ -52,6 +52,7 @@ struct ReviewCursor {
 }
 
 struct OpenReviewRow {
+    historical: bool,
     id: String,
     existing_asset_id: String,
     candidate_asset_id: String,
@@ -60,6 +61,7 @@ struct OpenReviewRow {
 }
 
 struct StoredReview {
+    historical: bool,
     existing_asset_id: Option<String>,
     candidate_asset_id: Option<String>,
     status: String,
@@ -88,7 +90,7 @@ impl Library {
             .map(|cursor| (Some(cursor.created_at.as_str()), Some(cursor.id.as_str())))
             .unwrap_or((None, None));
         let mut statement = transaction.prepare(
-            "SELECT id, existing_asset_id, candidate_asset_id, distance, created_at
+            "SELECT id, existing_asset_id, candidate_asset_id, distance, created_at, review_kind = 'historical'
              FROM similarity_reviews
              WHERE status = 'open'
                AND (?1 IS NULL OR created_at > ?1 OR (created_at = ?1 AND id > ?2))
@@ -103,6 +105,7 @@ impl Library {
                     candidate_asset_id: row.get(2)?,
                     distance: row.get(3)?,
                     created_at: row.get(4)?,
+                    historical: row.get(5)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -122,16 +125,30 @@ impl Library {
         });
         // 리뷰당 4회 쿼리(N+1) 대신 자산 요약·분류를 배치로 로드한다.
         // 상태 보장(normal/review)은 배치 로딩으로 모아 온 뒤 클로저에서 검증한다.
-        let asset_ids: Vec<String> = rows.iter()
-            .flat_map(|row| [row.existing_asset_id.clone(), row.candidate_asset_id.clone()])
+        let asset_ids: Vec<String> = rows
+            .iter()
+            .flat_map(|row| {
+                [
+                    row.existing_asset_id.clone(),
+                    row.candidate_asset_id.clone(),
+                ]
+            })
             .collect();
         let summaries = load_asset_summaries(&transaction, &asset_ids)?;
         // 상태는 AssetSummary에 없으므로 id별 상태를 별도 맵으로 모은다.
         let statuses = load_asset_statuses(&transaction, &asset_ids)?;
         let classifications = classifications_for_assets(&transaction, &asset_ids)?;
-        let review_asset = |asset_id: &str, expected_status: &str| -> Result<SimilarityReviewAsset, LibraryError> {
-            let asset = summaries.get(asset_id).cloned().ok_or(LibraryError::AssetNotFound)?;
-            let actual_status = statuses.get(asset_id).map(String::as_str).ok_or(LibraryError::AssetNotFound)?;
+        let review_asset = |asset_id: &str,
+                            expected_status: &str|
+         -> Result<SimilarityReviewAsset, LibraryError> {
+            let asset = summaries
+                .get(asset_id)
+                .cloned()
+                .ok_or(LibraryError::AssetNotFound)?;
+            let actual_status = statuses
+                .get(asset_id)
+                .map(String::as_str)
+                .ok_or(LibraryError::AssetNotFound)?;
             if actual_status != expected_status {
                 return Err(LibraryError::AssetNotFound);
             }
@@ -152,11 +169,27 @@ impl Library {
         let items = rows
             .into_iter()
             .map(|row| {
+                let existing = review_asset(&row.existing_asset_id, "normal")?;
+                let candidate = review_asset(
+                    &row.candidate_asset_id,
+                    if row.historical { "normal" } else { "review" },
+                )?;
+                let recommended_asset_id = if row.historical {
+                    match provenance_rank(&existing.asset).cmp(&provenance_rank(&candidate.asset)) {
+                        std::cmp::Ordering::Greater => Some(existing.asset.id.clone()),
+                        std::cmp::Ordering::Less => Some(candidate.asset.id.clone()),
+                        std::cmp::Ordering::Equal => None,
+                    }
+                } else {
+                    None
+                };
                 Ok(SimilarityReviewSummary {
                     id: row.id,
                     distance: row.distance,
-                    existing: review_asset(&row.existing_asset_id, "normal")?,
-                    candidate: review_asset(&row.candidate_asset_id, "review")?,
+                    historical: row.historical,
+                    recommended_asset_id,
+                    existing,
+                    candidate,
                 })
             })
             .collect::<Result<Vec<_>, LibraryError>>()?;
@@ -183,6 +216,9 @@ impl Library {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let review = self.load_stored_review(&request.review_id)?;
         let requested = decision_name(request.decision);
+        if review.historical {
+            return self.resolve_historical_review(&request, &review);
+        }
         match review.status.as_str() {
             "resolved" if review.decision.as_deref() == Some(requested) => {
                 return Ok(());
@@ -240,7 +276,7 @@ impl Library {
     fn load_stored_review(&self, review_id: &str) -> Result<StoredReview, LibraryError> {
         self.connection()?
             .query_row(
-                "SELECT existing_asset_id, candidate_asset_id, status, decision
+                "SELECT existing_asset_id, candidate_asset_id, status, decision, review_kind = 'historical'
                  FROM similarity_reviews WHERE id = ?1",
                 [review_id],
                 |row| {
@@ -249,11 +285,52 @@ impl Library {
                         candidate_asset_id: row.get(1)?,
                         status: row.get(2)?,
                         decision: row.get(3)?,
+                        historical: row.get(4)?,
                     })
                 },
             )
             .optional()?
             .ok_or(LibraryError::SimilarityReviewNotFound)
+    }
+
+    fn resolve_historical_review(
+        &self,
+        request: &SimilarityDecisionRequest,
+        review: &StoredReview,
+    ) -> Result<(), LibraryError> {
+        let decision = decision_name(request.decision);
+        if review.status == "resolved" && review.decision.as_deref() == Some(decision) {
+            return Ok(());
+        }
+        if review.status != "open" {
+            return Err(LibraryError::SimilarityReviewConflict);
+        }
+        let (existing_id, candidate_id) = open_review_asset_ids(review)?;
+        let mut connection = self.connection()?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        verify_asset_status(&transaction, existing_id, "normal")?;
+        verify_asset_status(&transaction, candidate_id, "normal")?;
+        // Resolve first so the lifecycle trigger only invalidates OTHER overlapping pairs.
+        // Both assets already belong to the library: never use incoming-file cleanup or
+        // overwrite either asset's source, classifications, albums, or personal metadata.
+        resolve_review(&transaction, &request.review_id, decision)?;
+        let discarded = match request.decision {
+            SimilarityDecision::KeepExisting => Some(candidate_id),
+            SimilarityDecision::ReplaceExisting => Some(existing_id),
+            SimilarityDecision::KeepBoth => None,
+        };
+        if let Some(asset_id) = discarded {
+            super::trash::update_trash_status_in_transaction(
+                &transaction,
+                &[asset_id.to_owned()],
+                "normal",
+                "trash",
+                Some(&chrono::Utc::now().to_rfc3339()),
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     fn resolve_replace_existing(
@@ -271,13 +348,27 @@ impl Library {
             .query_map([existing_id], |r| r.get::<_,String>(0))?
             .collect::<Result<Vec<_>,_>>()?;
         // Do not silently choose a location for legacy invalid memberships.
-        if existing_classifications.len() > 1 { return Err(LibraryError::InvalidAssetSelection); }
-        if let Some(classification_id) = existing_classifications.first() {
-            transaction.execute("DELETE FROM asset_classifications WHERE asset_id=?1", [candidate_id])?;
-            transaction.execute("INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)", params![candidate_id,classification_id])?;
+        if existing_classifications.len() > 1 {
+            return Err(LibraryError::InvalidAssetSelection);
         }
-        let count: i64 = transaction.query_row("SELECT COUNT(*) FROM asset_classifications WHERE asset_id=?1", [candidate_id], |r| r.get(0))?;
-        if count > 1 { return Err(LibraryError::InvalidAssetSelection); }
+        if let Some(classification_id) = existing_classifications.first() {
+            transaction.execute(
+                "DELETE FROM asset_classifications WHERE asset_id=?1",
+                [candidate_id],
+            )?;
+            transaction.execute(
+                "INSERT INTO asset_classifications(asset_id,classification_id) VALUES(?1,?2)",
+                params![candidate_id, classification_id],
+            )?;
+        }
+        let count: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM asset_classifications WHERE asset_id=?1",
+            [candidate_id],
+            |r| r.get(0),
+        )?;
+        if count > 1 {
+            return Err(LibraryError::InvalidAssetSelection);
+        }
         transaction.execute(
             "INSERT OR IGNORE INTO collection_assets (collection_id, asset_id, added_at)
              SELECT collection_id, ?2, added_at
@@ -304,8 +395,16 @@ impl Library {
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
         )?;
-        super::character_autotag::enqueue(&transaction,candidate_id,super::character_autotag::Cause::SimilarityResolution)?;
-        crate::cloud::queue::enqueue_asset_upsert(&transaction, candidate_id, &chrono::Utc::now().to_rfc3339())?;
+        super::character_autotag::enqueue(
+            &transaction,
+            candidate_id,
+            super::character_autotag::Cause::SimilarityResolution,
+        )?;
+        crate::cloud::queue::enqueue_asset_upsert(
+            &transaction,
+            candidate_id,
+            &chrono::Utc::now().to_rfc3339(),
+        )?;
         resolve_review(&transaction, review_id, "replace_existing")?;
         transaction.commit()?;
         Ok(())
@@ -325,8 +424,16 @@ impl Library {
             "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
             [candidate_id],
         )?;
-        super::character_autotag::enqueue(&transaction,candidate_id,super::character_autotag::Cause::SimilarityResolution)?;
-        crate::cloud::queue::enqueue_asset_upsert(&transaction, candidate_id, &chrono::Utc::now().to_rfc3339())?;
+        super::character_autotag::enqueue(
+            &transaction,
+            candidate_id,
+            super::character_autotag::Cause::SimilarityResolution,
+        )?;
+        crate::cloud::queue::enqueue_asset_upsert(
+            &transaction,
+            candidate_id,
+            &chrono::Utc::now().to_rfc3339(),
+        )?;
         resolve_review(&transaction, review_id, "keep_both")?;
         transaction.commit()?;
         Ok(())
@@ -410,7 +517,9 @@ impl Library {
     }
 
     pub fn index_missing_similarity_hashes(&self) -> Result<SimilarityIndexProgress, LibraryError> {
-        let _index = INDEX_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _index = INDEX_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let asset_ids = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
@@ -429,13 +538,27 @@ impl Library {
             ids
         };
 
-        let workers = std::thread::available_parallelism().map_or(1, |count| count.get().min(INDEX_WORKERS));
+        let workers =
+            std::thread::available_parallelism().map_or(1, |count| count.get().min(INDEX_WORKERS));
         std::thread::scope(|scope| {
-            let handles: Vec<_> = asset_ids.chunks(asset_ids.len().div_ceil(workers).max(1))
-                .map(|chunk| scope.spawn(move || chunk.iter().try_for_each(|id| self.index_similarity_asset(id))))
+            let handles: Vec<_> = asset_ids
+                .chunks(asset_ids.len().div_ceil(workers).max(1))
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        chunk
+                            .iter()
+                            .try_for_each(|id| self.index_similarity_asset(id))
+                    })
+                })
                 .collect();
             // Each worker persists completed images immediately; no image buffers are queued.
-            handles.into_iter().map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                })
                 .collect::<Result<Vec<_>, LibraryError>>()
         })?;
 
@@ -467,7 +590,13 @@ impl Library {
                      SET perceptual_hash = ?2, perceptual_hash_quality = ?3, width = ?4, height = ?5
                      WHERE id = ?1 AND status = 'normal'
                        AND perceptual_hash IS NULL AND perceptual_hash_error IS NULL",
-                    params![asset_id, result.fingerprint.to_stored_bytes(), result.fingerprint.quality, i64::from(result.width), i64::from(result.height)],
+                    params![
+                        asset_id,
+                        result.fingerprint.to_stored_bytes(),
+                        result.fingerprint.quality,
+                        i64::from(result.width),
+                        i64::from(result.height)
+                    ],
                 )?;
             }
             Err(error) => {
@@ -563,7 +692,10 @@ fn load_asset_summaries(
     let mut statement = connection.prepare(&sql)?;
     let params: Vec<&str> = asset_ids.iter().map(String::as_str).collect();
     let mut map = HashMap::new();
-    let rows = statement.query_map(rusqlite::params_from_iter(params.iter()), asset_summary_from_row)?;
+    let rows = statement.query_map(
+        rusqlite::params_from_iter(params.iter()),
+        asset_summary_from_row,
+    )?;
     for summary in rows {
         let summary = summary?;
         map.insert(summary.id.clone(), summary);
@@ -715,6 +847,17 @@ fn load_asset_summary(
         .ok_or(LibraryError::AssetNotFound)
 }
 
+fn provenance_rank(asset: &AssetSummary) -> (bool, bool) {
+    let present =
+        |value: &Option<String>| value.as_deref().is_some_and(|text| !text.trim().is_empty());
+    (
+        present(&asset.source_url),
+        present(&asset.creator_url)
+            || present(&asset.creator_handle)
+            || present(&asset.creator_name),
+    )
+}
+
 fn decision_name(decision: SimilarityDecision) -> &'static str {
     match decision {
         SimilarityDecision::KeepExisting => "keep_existing",
@@ -803,13 +946,21 @@ pub(crate) fn perceptual_hash_from_file(
     let reader = ImageReader::new(BufReader::new(file))
         .with_guessed_format()
         .map_err(|_| LibraryError::UnsupportedImage)?;
-    let mut decoder = reader.into_decoder().map_err(|_| LibraryError::UnsupportedImage)?;
-    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut image = image::DynamicImage::from_decoder(decoder)
+    let mut decoder = reader
+        .into_decoder()
         .map_err(|_| LibraryError::UnsupportedImage)?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut image =
+        image::DynamicImage::from_decoder(decoder).map_err(|_| LibraryError::UnsupportedImage)?;
     image.apply_orientation(orientation);
     let fingerprint = fingerprint(&image)?;
-    Ok(PerceptualHashResult { fingerprint, width: image.width(), height: image.height() })
+    Ok(PerceptualHashResult {
+        fingerprint,
+        width: image.width(),
+        height: image.height(),
+    })
 }
 
 fn similarity_index_error_code(error: &LibraryError) -> Option<&'static str> {
@@ -832,6 +983,7 @@ mod tests {
     use rusqlite::params;
     use tempfile::TempDir;
 
+    use super::super::image_fingerprint::{fingerprint, minimum_distance, ImageFingerprint};
     use super::super::{
         error::LibraryError,
         models::{
@@ -841,7 +993,6 @@ mod tests {
         },
         Library,
     };
-    use super::super::image_fingerprint::{fingerprint, minimum_distance, ImageFingerprint};
     use super::{perceptual_hash_from_file, set_after_review_resolving_hook};
 
     #[derive(Clone, Copy)]
@@ -908,10 +1059,12 @@ mod tests {
         fs::write(
             oriented_path.path(),
             jpeg_with_exif_orientation(jpeg_bytes(&raw_rotated, 95), 6),
-        ).unwrap();
+        )
+        .unwrap();
 
         let plain = perceptual_hash_from_file(fs::File::open(plain_path.path()).unwrap()).unwrap();
-        let oriented = perceptual_hash_from_file(fs::File::open(oriented_path.path()).unwrap()).unwrap();
+        let oriented =
+            perceptual_hash_from_file(fs::File::open(oriented_path.path()).unwrap()).unwrap();
         assert_eq!((plain.width, plain.height), (640, 480));
         assert_eq!((oriented.width, oriented.height), (640, 480));
         assert!(minimum_distance(&plain.fingerprint, &oriented.fingerprint) <= 20);
@@ -988,7 +1141,12 @@ mod tests {
     #[test]
     fn candidate_search_rejects_a_hash_blob_with_the_wrong_length() {
         let fixture = library_with_hashes(&[]);
-        insert_asset(&fixture.library, "broken", "2026-08-09T00:00:00Z", Some(&[0; 7]));
+        insert_asset(
+            &fixture.library,
+            "broken",
+            "2026-08-09T00:00:00Z",
+            Some(&[0; 7]),
+        );
         let target = ImageFingerprint {
             bytes: [0; 32],
             cropped_bytes: [0; 32],
@@ -1017,10 +1175,42 @@ mod tests {
         distance_twenty[2] = 0b0000_1111;
         let mut distance_twenty_one = distance_twenty;
         distance_twenty_one[3] = 1;
-        insert_policy_asset(&fixture.library, "distance-20", &distance_twenty, 100, 100, 100, "image");
-        insert_policy_asset(&fixture.library, "distance-21", &distance_twenty_one, 100, 100, 100, "image");
-        insert_policy_asset(&fixture.library, "low-quality", &[0; 32], 49, 100, 100, "image");
-        insert_policy_asset(&fixture.library, "wrong-aspect", &[0; 32], 100, 200, 100, "image");
+        insert_policy_asset(
+            &fixture.library,
+            "distance-20",
+            &distance_twenty,
+            100,
+            100,
+            100,
+            "image",
+        );
+        insert_policy_asset(
+            &fixture.library,
+            "distance-21",
+            &distance_twenty_one,
+            100,
+            100,
+            100,
+            "image",
+        );
+        insert_policy_asset(
+            &fixture.library,
+            "low-quality",
+            &[0; 32],
+            49,
+            100,
+            100,
+            "image",
+        );
+        insert_policy_asset(
+            &fixture.library,
+            "wrong-aspect",
+            &[0; 32],
+            100,
+            200,
+            100,
+            "image",
+        );
         insert_policy_asset(&fixture.library, "video", &[0; 32], 100, 100, 100, "video");
 
         let candidate = fixture
@@ -1071,26 +1261,56 @@ mod tests {
         fixture.library.connection().unwrap().execute_batch(
             "CREATE TABLE hash_updates(asset_id TEXT); CREATE TRIGGER record_hash_update AFTER UPDATE OF perceptual_hash,perceptual_hash_error ON assets BEGIN INSERT INTO hash_updates VALUES(NEW.id); END;"
         ).unwrap();
-        let expected = perceptual_hash_from_file(fs::File::open(fixture.library.root().join("assets/asset-001.png")).unwrap()).unwrap();
+        let expected = perceptual_hash_from_file(
+            fs::File::open(fixture.library.root().join("assets/asset-001.png")).unwrap(),
+        )
+        .unwrap();
         let outcomes = std::thread::scope(|scope| {
             let library = &fixture.library;
             let first = scope.spawn(|| library.index_missing_similarity_hashes().unwrap());
             let second = scope.spawn(|| library.index_missing_similarity_hashes().unwrap());
             [first.join().unwrap(), second.join().unwrap()]
         });
-        assert_eq!(outcomes.iter().map(|outcome| outcome.remaining).sum::<u64>(), 1);
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|outcome| outcome.remaining)
+                .sum::<u64>(),
+            1
+        );
         let connection = fixture.library.connection().unwrap();
-        let updates: i64 = connection.query_row("SELECT COUNT(*) FROM hash_updates", [], |row| row.get(0)).unwrap();
+        let updates: i64 = connection
+            .query_row("SELECT COUNT(*) FROM hash_updates", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(updates, 51);
         let (bytes, quality, width, height): (Vec<u8>, u8, u32, u32) = connection.query_row(
             "SELECT perceptual_hash,perceptual_hash_quality,width,height FROM assets WHERE id='asset-001'", [],
             |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))
         ).unwrap();
         assert_eq!(bytes, expected.fingerprint.to_stored_bytes());
-        assert_eq!((quality,width,height), (expected.fingerprint.quality,expected.width,expected.height));
+        assert_eq!(
+            (quality, width, height),
+            (
+                expected.fingerprint.quality,
+                expected.width,
+                expected.height
+            )
+        );
         drop(connection);
-        assert_eq!(fixture.library.index_missing_similarity_hashes().unwrap().remaining, 0);
-        let updates: i64 = fixture.library.connection().unwrap().query_row("SELECT COUNT(*) FROM hash_updates", [], |row| row.get(0)).unwrap();
+        assert_eq!(
+            fixture
+                .library
+                .index_missing_similarity_hashes()
+                .unwrap()
+                .remaining,
+            0
+        );
+        let updates: i64 = fixture
+            .library
+            .connection()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM hash_updates", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(updates, 51);
     }
 
@@ -1208,34 +1428,110 @@ mod tests {
 
     #[test]
     fn exact_duplicate_preserves_review_and_rejects_trash_or_missing_original() {
-        let f=review_fixture();
-        let request=|path| IngestMediaRequest { source_path:path,classification_id:None,source_url:None,
-            collected_at:None,replace_duplicate_metadata:false,source_published_at:None,creator_name:None,
-            creator_handle:None,creator_url:None,import_source:ImportSource::Direct,
-            import_batch_id:"00000000-0000-4000-8000-000000000002".into() };
-        match f.library.ingest_media(request(f.input.join("candidate.jpg"))).unwrap() {
-            IngestOutcome::ReviewPending{review_id}=>assert_eq!(review_id,f.review_id),other=>panic!("{other:?}")
+        let f = review_fixture();
+        let request = |path| IngestMediaRequest {
+            source_path: path,
+            classification_id: None,
+            source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
+        };
+        match f
+            .library
+            .ingest_media(request(f.input.join("candidate.jpg")))
+            .unwrap()
+        {
+            IngestOutcome::ReviewPending { review_id } => assert_eq!(review_id, f.review_id),
+            other => panic!("{other:?}"),
         }
-        f.library.connection().unwrap().execute("UPDATE assets SET status='trash',trashed_at='2026-09-09' WHERE id=?1",[&f.existing_id]).unwrap();
-        assert!(matches!(f.library.ingest_media(request(f.input.join("existing.png"))),Err(LibraryError::DuplicateInTrash)));
-        let path:String=f.library.connection().unwrap().query_row("SELECT relative_path FROM assets WHERE id=?1",[&f.existing_id],|r|r.get(0)).unwrap();
-        f.library.connection().unwrap().execute("UPDATE assets SET status='normal',trashed_at=NULL WHERE id=?1",[&f.existing_id]).unwrap();
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET status='trash',trashed_at='2026-09-09' WHERE id=?1",
+                [&f.existing_id],
+            )
+            .unwrap();
+        assert!(matches!(
+            f.library
+                .ingest_media(request(f.input.join("existing.png"))),
+            Err(LibraryError::DuplicateInTrash)
+        ));
+        let path: String = f
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT relative_path FROM assets WHERE id=?1",
+                [&f.existing_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET status='normal',trashed_at=NULL WHERE id=?1",
+                [&f.existing_id],
+            )
+            .unwrap();
         fs::remove_file(f.library.root().join(path)).unwrap();
-        assert!(f.library.ingest_media(request(f.input.join("existing.png"))).is_err());
+        assert!(f
+            .library
+            .ingest_media(request(f.input.join("existing.png")))
+            .is_err());
     }
 
     #[test]
     fn review_promotion_and_outbox_are_atomic_and_idempotent() {
-        for decision in [SimilarityDecision::KeepBoth,SimilarityDecision::ReplaceExisting] {
-            let f=review_fixture();
-            let count=||f.library.connection().unwrap().query_row::<i64,_,_>("SELECT COUNT(*) FROM cloud_sync_queue WHERE entity_id=?1",[&f.candidate_id],|r|r.get(0)).unwrap();
-            assert_eq!(count(),0);
+        for decision in [
+            SimilarityDecision::KeepBoth,
+            SimilarityDecision::ReplaceExisting,
+        ] {
+            let f = review_fixture();
+            let count = || {
+                f.library
+                    .connection()
+                    .unwrap()
+                    .query_row::<i64, _, _>(
+                        "SELECT COUNT(*) FROM cloud_sync_queue WHERE entity_id=?1",
+                        [&f.candidate_id],
+                        |r| r.get(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(count(), 0);
             f.library.connection().unwrap().execute_batch("CREATE TRIGGER reject_queue BEFORE INSERT ON cloud_sync_queue BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
-            assert!(f.library.decide_similarity_review(SimilarityDecisionRequest{review_id:f.review_id.clone(),decision}).is_err());
-            assert_eq!(f.status(&f.candidate_id),"review");assert_eq!(count(),0);
-            f.library.connection().unwrap().execute_batch("DROP TRIGGER reject_queue;").unwrap();
-            for _ in 0..2 {f.library.decide_similarity_review(SimilarityDecisionRequest{review_id:f.review_id.clone(),decision}).unwrap();}
-            assert_eq!(f.status(&f.candidate_id),"normal");assert_eq!(count(),1);
+            assert!(f
+                .library
+                .decide_similarity_review(SimilarityDecisionRequest {
+                    review_id: f.review_id.clone(),
+                    decision
+                })
+                .is_err());
+            assert_eq!(f.status(&f.candidate_id), "review");
+            assert_eq!(count(), 0);
+            f.library
+                .connection()
+                .unwrap()
+                .execute_batch("DROP TRIGGER reject_queue;")
+                .unwrap();
+            for _ in 0..2 {
+                f.library
+                    .decide_similarity_review(SimilarityDecisionRequest {
+                        review_id: f.review_id.clone(),
+                        decision,
+                    })
+                    .unwrap();
+            }
+            assert_eq!(f.status(&f.candidate_id), "normal");
+            assert_eq!(count(), 1);
         }
     }
 
@@ -1287,9 +1583,13 @@ mod tests {
 
         assert_eq!(fixture.status(&fixture.existing_id), "trash");
         assert_eq!(fixture.status(&fixture.candidate_id), "normal");
-        let job=fixture.library.character_autotag_job(&fixture.candidate_id).unwrap().unwrap();
-        assert_eq!(job.state,"pending");
-        assert_eq!(job.classification_ids,vec![fixture.old_tag.clone()]);
+        let job = fixture
+            .library
+            .character_autotag_job(&fixture.candidate_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(job.state, "pending");
+        assert_eq!(job.classification_ids, vec![fixture.old_tag.clone()]);
         assert!(fixture.favorite(&fixture.candidate_id));
         let mut actual = fixture.classification_ids(&fixture.candidate_id);
         actual.sort();
@@ -1492,7 +1792,9 @@ mod tests {
 
     fn jpeg_bytes(source: &DynamicImage, quality: u8) -> Vec<u8> {
         let mut bytes = Vec::new();
-        JpegEncoder::new_with_quality(&mut bytes, quality).encode_image(source).unwrap();
+        JpegEncoder::new_with_quality(&mut bytes, quality)
+            .encode_image(source)
+            .unwrap();
         bytes
     }
 
@@ -1516,9 +1818,7 @@ mod tests {
     }
 
     fn test_dhash(image: &DynamicImage) -> u64 {
-        let pixels = image
-            .resize_exact(9, 8, FilterType::Triangle)
-            .to_luma8();
+        let pixels = image.resize_exact(9, 8, FilterType::Triangle).to_luma8();
         let mut hash = 0_u64;
         for y in 0..8 {
             for x in 0..8 {
@@ -1667,6 +1967,14 @@ mod tests {
             })
             .unwrap()
             .id;
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO character_series(classification_id,auto_classify) VALUES(?1,1)",
+                [&old_tag],
+            )
+            .unwrap();
         let base = striped_fixture(900, 600, StripeDirection::Vertical);
         let existing_source = input.join("existing.png");
         base.save(&existing_source).unwrap();

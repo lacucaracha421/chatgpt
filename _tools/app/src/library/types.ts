@@ -806,6 +806,8 @@ export type SimilarityReviewAsset = {
 export type SimilarityReviewSummary = {
   id: string;
   distance: number;
+  historical: boolean;
+  recommendedAssetId: string | null;
   existing: SimilarityReviewAsset;
   candidate: SimilarityReviewAsset;
 };
@@ -819,6 +821,16 @@ export type SimilarityReviewPage = {
 export type SimilarityIndexProgress = {
   remaining: number;
   failed: number;
+};
+
+export type ImageSimilarityScan = {
+  id: string;
+  totalAssets: number;
+  skippedAssets: number;
+  comparedPairs: number;
+  totalPairs: number;
+  reviewsCreated: number;
+  completed: boolean;
 };
 
 export type AssetQuery = {
@@ -1170,6 +1182,9 @@ export interface LibraryGateway {
   recordAssetsExposed(assetIds: string[], exposedAt: string): Promise<void>;
   setRevisitPreference(feedback: RevisitFeedback): Promise<void>;
   indexMissingSimilarityHashes(): Promise<SimilarityIndexProgress>;
+  getImageSimilarityScan?(): Promise<ImageSimilarityScan | null>;
+  startImageSimilarityScan?(): Promise<ImageSimilarityScan>;
+  runImageSimilarityScanBatch?(scanId: string): Promise<ImageSimilarityScan>;
   listSimilarityReviews(query: {
     after: AssetCursor | null;
     limit: number;
