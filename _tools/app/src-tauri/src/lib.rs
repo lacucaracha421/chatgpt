@@ -311,6 +311,7 @@ pub fn run() {
             commands::start_asset_drag,
             commands::get_manga_root,
             commands::set_manga_root,
+            commands::get_other_machine_manga_root,
             commands::scan_manga,
             commands::list_manga_series,
             commands::preview_manga_catalog_recovery,

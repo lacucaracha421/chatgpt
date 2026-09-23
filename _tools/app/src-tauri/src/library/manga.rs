@@ -6,6 +6,7 @@ use std::{
 use rusqlite::OptionalExtension;
 
 use super::error::LibraryError;
+use super::machine_settings::{self, LibraryEntry};
 use super::models::{
     MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryItem, MangaCatalogRecoveryPreview,
     MangaCatalogRecoverySelection, MangaCatalogRecoveryStatus, MangaRecoveryCandidate,
@@ -15,9 +16,47 @@ use super::Library;
 
 const THUMB_DIR: &str = ".lakomics-thumbs";
 
+/// The manga root for this computer. With machine settings configured, a
+/// machine-local entry wins; otherwise the legacy shared value is adopted (and
+/// recorded for this machine) only when it is an existing absolute directory
+/// here, so a path saved by the other OS reads as "not set on this PC".
 pub(crate) fn manga_root(
+    library: &Library,
     connection: &rusqlite::Connection,
 ) -> Result<Option<String>, LibraryError> {
+    let Some(settings) = library.machine_settings_path() else {
+        return shared_manga_root(connection);
+    };
+    let library_id = super::library_id_on(connection)?;
+    if let Some(entry) = machine_settings::entry(&settings, &library_id)? {
+        return Ok(entry.manga_root);
+    }
+    match shared_manga_root(connection)? {
+        Some(root) if machine_settings::usable_directory(&root) => {
+            machine_settings::set_entry(
+                &settings,
+                &library_id,
+                LibraryEntry {
+                    manga_root: Some(root.clone()),
+                },
+            )?;
+            Ok(Some(root))
+        }
+        _ => Ok(None),
+    }
+}
+
+pub(crate) fn other_machine_manga_root(
+    library: &Library,
+    connection: &rusqlite::Connection,
+) -> Result<Option<String>, LibraryError> {
+    if library.machine_settings_path().is_none() || manga_root(library, connection)?.is_some() {
+        return Ok(None);
+    }
+    Ok(shared_manga_root(connection)?.filter(|root| !machine_settings::usable_directory(root)))
+}
+
+fn shared_manga_root(connection: &rusqlite::Connection) -> Result<Option<String>, LibraryError> {
     let value = connection
         .query_row(
             "SELECT manga_root FROM library_settings WHERE singleton = 1",
@@ -29,14 +68,13 @@ pub(crate) fn manga_root(
     Ok(value)
 }
 
+/// With machine settings, the choice is recorded for this computer only and the
+/// shared value is left for the other OS; clearing records an explicit unset.
 pub(crate) fn set_manga_root(
+    library: &Library,
     connection: &rusqlite::Connection,
     path: Option<&str>,
 ) -> Result<(), LibraryError> {
-    connection.execute(
-        "UPDATE library_settings SET manga_root = ?1 WHERE singleton = 1",
-        [path],
-    )?;
     if let Some(root) = path {
         let series_dir = PathBuf::from(root);
         fs::create_dir_all(&series_dir).map_err(|source| LibraryError::CreateDirectory {
@@ -44,6 +82,20 @@ pub(crate) fn set_manga_root(
             source,
         })?;
     }
+    if let Some(settings) = library.machine_settings_path() {
+        let library_id = super::library_id_on(connection)?;
+        return machine_settings::set_entry(
+            &settings,
+            &library_id,
+            LibraryEntry {
+                manga_root: path.map(str::to_owned),
+            },
+        );
+    }
+    connection.execute(
+        "UPDATE library_settings SET manga_root = ?1 WHERE singleton = 1",
+        [path],
+    )?;
     Ok(())
 }
 
@@ -61,7 +113,7 @@ where
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let root = {
         let connection = library.connection()?;
-        manga_root(&connection)?
+        manga_root(library, &connection)?
     }
     .ok_or(LibraryError::MangaRootNotSet)?;
     let root_path = PathBuf::from(&root);
@@ -1137,6 +1189,126 @@ mod tests {
 
     use super::{list_page_files, parse_series_metadata, scan_with_thumbnail};
     use crate::library::{Library, LibraryError};
+
+    fn shared_manga_root(library: &Library) -> Option<String> {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT manga_root FROM library_settings WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn set_shared_manga_root(library: &Library, value: &str) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE library_settings SET manga_root = ?1 WHERE singleton = 1",
+                [value],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_shared_manga_root_from_the_other_os_reads_as_unset_on_this_pc() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let other_os = if cfg!(windows) {
+            "/home/laku/manga"
+        } else {
+            r"C:\lakomics\2군"
+        };
+        set_shared_manga_root(&library, other_os);
+        library.use_machine_settings(temp.path().join("config").join("library-machine.json"));
+        assert_eq!(library.manga_root().unwrap(), None);
+        assert_eq!(
+            library.other_machine_manga_root().unwrap().as_deref(),
+            Some(other_os)
+        );
+        assert!(matches!(
+            library.scan_manga(),
+            Err(LibraryError::MangaRootNotSet)
+        ));
+        // Nothing was recorded for this machine, and the shared value is untouched.
+        assert!(!temp
+            .path()
+            .join("config")
+            .join("library-machine.json")
+            .exists());
+        assert_eq!(shared_manga_root(&library).as_deref(), Some(other_os));
+    }
+
+    #[test]
+    fn a_usable_shared_manga_root_is_adopted_once_for_this_machine() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let manga = temp.path().join("manga");
+        fs::create_dir_all(&manga).unwrap();
+        let manga = manga.to_string_lossy().into_owned();
+        set_shared_manga_root(&library, &manga);
+        let settings = temp.path().join("config").join("library-machine.json");
+        library.use_machine_settings(settings.clone());
+        assert_eq!(
+            library.manga_root().unwrap().as_deref(),
+            Some(manga.as_str())
+        );
+        assert!(settings.exists());
+        assert_eq!(library.other_machine_manga_root().unwrap(), None);
+        // Later shared-database changes by the other OS no longer move this PC's root.
+        set_shared_manga_root(&library, r"C:\elsewhere");
+        assert_eq!(
+            library.manga_root().unwrap().as_deref(),
+            Some(manga.as_str())
+        );
+    }
+
+    #[test]
+    fn choosing_or_clearing_the_manga_root_only_changes_this_machine() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let other_os = if cfg!(windows) {
+            "/home/laku/manga"
+        } else {
+            r"C:\lakomics\2군"
+        };
+        set_shared_manga_root(&library, other_os);
+        library.use_machine_settings(temp.path().join("config").join("library-machine.json"));
+        let local = temp.path().join("local-manga");
+        library
+            .set_manga_root(Some(&local.to_string_lossy()))
+            .unwrap();
+        assert!(local.is_dir());
+        assert_eq!(
+            library.manga_root().unwrap().as_deref(),
+            Some(local.to_string_lossy().as_ref())
+        );
+        assert_eq!(shared_manga_root(&library).as_deref(), Some(other_os));
+        library.set_manga_root(None).unwrap();
+        assert_eq!(library.manga_root().unwrap(), None);
+        assert_eq!(shared_manga_root(&library).as_deref(), Some(other_os));
+    }
+
+    #[test]
+    fn two_libraries_keep_separate_machine_manga_roots() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = temp.path().join("config").join("library-machine.json");
+        let first = Library::open(temp.path().join("first")).unwrap();
+        let second = Library::open(temp.path().join("second")).unwrap();
+        first.use_machine_settings(settings.clone());
+        second.use_machine_settings(settings);
+        first
+            .set_manga_root(Some(&temp.path().join("m1").to_string_lossy()))
+            .unwrap();
+        second
+            .set_manga_root(Some(&temp.path().join("m2").to_string_lossy()))
+            .unwrap();
+        assert!(first.manga_root().unwrap().unwrap().ends_with("m1"));
+        assert!(second.manga_root().unwrap().unwrap().ends_with("m2"));
+    }
 
     #[test]
     fn list_page_files_sorts_two_and_three_digit_names() {

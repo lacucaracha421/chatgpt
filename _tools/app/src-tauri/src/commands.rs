@@ -400,6 +400,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidPrivateVaultTitle => "invalid_private_vault_title",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
+            LibraryError::MachineSettings { .. } => "machine_settings_failed",
             LibraryError::CollectionSourceRootNotSet => "collection_source_root_not_set",
             LibraryError::CollectionSourcePathNotSet => "collection_source_path_not_set",
             LibraryError::MangaSeriesNotFound => "manga_series_not_found",
@@ -438,7 +439,15 @@ pub async fn open_library(
     // 폴더 스캔·스키마 확인이 포함되어 수 초 걸릴 수 있으므로 메인 스레드를 막지 않는다.
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let summary=open_library_in_state(path,&state)?;
+        // Per-computer values (the manga root) live beside character-runtime.json,
+        // never in the library database that Windows and Linux share.
+        use tauri::Manager;
+        let machine_settings = app
+            .path()
+            .app_config_dir()
+            .ok()
+            .map(|dir| dir.join("library-machine.json"));
+        let summary=open_library_in_state(path,&state,machine_settings)?;
         if let Some(library)=state.current_library(){characters::start_incremental_if_configured(&app,&library);}
         Ok(summary)
     })
@@ -446,7 +455,11 @@ pub async fn open_library(
         .map_err(|_| background_task_error())?
 }
 
-fn open_library_in_state(path: String, state: &AppState) -> Result<LibrarySummary, CommandError> {
+fn open_library_in_state(
+    path: String,
+    state: &AppState,
+    machine_settings: Option<std::path::PathBuf>,
+) -> Result<LibrarySummary, CommandError> {
     let mut current = state
         .library
         .write()
@@ -459,6 +472,9 @@ fn open_library_in_state(path: String, state: &AppState) -> Result<LibrarySummar
     }
 
     let library = open_library_at(path)?;
+    if let Some(settings) = machine_settings {
+        library.use_machine_settings(settings);
+    }
     let summary = library.summary().map_err(CommandError::from)?;
     if let Some(previous) = current.as_ref() {
         previous.stop_character_scan();
@@ -1779,6 +1795,16 @@ pub fn start_asset_drag(
 pub fn get_manga_root(state: State<'_, AppState>) -> Result<Option<String>, CommandError> {
     let library = current_required(state)?;
     library.manga_root().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn get_other_machine_manga_root(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CommandError> {
+    let library = current_required(state)?;
+    library
+        .other_machine_manga_root()
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -3444,8 +3470,10 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         let state = AppState::default();
 
-        let first = open_library_in_state(root.to_string_lossy().into_owned(), &state).unwrap();
-        let second = open_library_in_state(root.to_string_lossy().into_owned(), &state).unwrap();
+        let first =
+            open_library_in_state(root.to_string_lossy().into_owned(), &state, None).unwrap();
+        let second =
+            open_library_in_state(root.to_string_lossy().into_owned(), &state, None).unwrap();
 
         assert_eq!(second, first);
         assert_eq!(second.root, root.to_string_lossy());

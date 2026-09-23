@@ -107,6 +107,7 @@ pub(crate) mod ingestion;
 pub mod legacy_migration;
 pub mod legacy_package_migration;
 mod lock;
+mod machine_settings;
 mod manga;
 pub(crate) mod mangadex;
 mod mangadex_flow;
@@ -247,6 +248,22 @@ pub struct Library {
     video_similarity_scan: Arc<Mutex<video_similarity::ScanState>>,
     igdb_token_cache: igdb::IgdbTokenCache,
     igdb_request_limiter: igdb::IgdbRequestLimiter,
+    // Machine-local settings file (app config dir) for per-computer values such as
+    // the manga root. None keeps the legacy shared-database behaviour (tests, tools).
+    machine_settings_path: Arc<RwLock<Option<PathBuf>>>,
+}
+
+/// The durable library identity read through a connection the caller already holds.
+pub(crate) fn library_id_on(connection: &Connection) -> Result<String, LibraryError> {
+    let value: Option<String> = connection.query_row(
+        "SELECT library_id FROM library_settings WHERE singleton = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    match value {
+        Some(value) if db::is_valid_library_id(&value) => Ok(value),
+        _ => Err(LibraryError::Database(rusqlite::Error::InvalidQuery)),
+    }
 }
 
 pub(crate) struct LockedConnection<'a> {
@@ -320,6 +337,7 @@ impl Library {
             video_similarity_scan: Arc::default(),
             igdb_token_cache: igdb::IgdbTokenCache::default(),
             igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
+            machine_settings_path: Arc::default(),
         };
         library.backfill_legacy_collection_kinds()?;
         library.normalize_showcase_orders()?;
@@ -337,6 +355,22 @@ impl Library {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Store per-computer values (the manga root) in this machine's settings file
+    /// instead of the shared library database.
+    pub fn use_machine_settings(&self, path: PathBuf) {
+        *self
+            .machine_settings_path
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(path);
+    }
+
+    pub(crate) fn machine_settings_path(&self) -> Option<PathBuf> {
+        self.machine_settings_path
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub(crate) fn igdb_client(&self) -> igdb::IgdbClient {
@@ -418,25 +452,24 @@ impl Library {
     /// Durable identity minted by migration 0079. Read-only by design: a library
     /// never mints or repairs its identity outside that migration transaction.
     pub(crate) fn library_id(&self) -> Result<String, LibraryError> {
-        let value: Option<String> = self.connection()?.query_row(
-            "SELECT library_id FROM library_settings WHERE singleton = 1",
-            [],
-            |row| row.get(0),
-        )?;
-        match value {
-            Some(value) if db::is_valid_library_id(&value) => Ok(value),
-            _ => Err(LibraryError::Database(rusqlite::Error::InvalidQuery)),
-        }
+        library_id_on(&*self.connection()?)
     }
 
     pub fn manga_root(&self) -> Result<Option<String>, LibraryError> {
         let connection = self.connection()?;
-        manga::manga_root(&connection)
+        manga::manga_root(self, &connection)
     }
 
     pub fn set_manga_root(&self, path: Option<&str>) -> Result<(), LibraryError> {
         let connection = self.connection()?;
-        manga::set_manga_root(&connection, path)
+        manga::set_manga_root(self, &connection, path)
+    }
+
+    /// The shared-database manga root when it is not usable on this computer
+    /// (typically saved by the other OS), shown as a hint while this PC is unset.
+    pub fn other_machine_manga_root(&self) -> Result<Option<String>, LibraryError> {
+        let connection = self.connection()?;
+        manga::other_machine_manga_root(self, &connection)
     }
 
     pub fn scan_manga(&self) -> Result<u64, LibraryError> {
@@ -474,7 +507,7 @@ impl Library {
 
     pub fn manga_cover(&self, series_id: &str) -> Result<MediaResponse, LibraryError> {
         let connection = self.connection()?;
-        let root = manga::manga_root(&connection)?.ok_or(LibraryError::MangaRootNotSet)?;
+        let root = manga::manga_root(self, &connection)?.ok_or(LibraryError::MangaRootNotSet)?;
         let thumb_relative: Option<String> = connection
             .query_row(
                 "SELECT thumbnail_relative_path FROM manga_series WHERE id = ?1",
@@ -497,7 +530,7 @@ impl Library {
         page_index: u32,
     ) -> Result<MediaResponse, LibraryError> {
         let connection = self.connection()?;
-        let root = manga::manga_root(&connection)?.ok_or(LibraryError::MangaRootNotSet)?;
+        let root = manga::manga_root(self, &connection)?.ok_or(LibraryError::MangaRootNotSet)?;
         let (relative_path, page_count): (String, i64) = connection
             .query_row(
                 "SELECT relative_path, page_count FROM manga_series WHERE id = ?1",

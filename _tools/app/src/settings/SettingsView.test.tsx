@@ -36,6 +36,23 @@ it("exposes persisted whole-engine automation in general settings without using 
   expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "pause_character_reference_refresh")).toBe(false);
 });
 
+it("shows the manga folder as unset on this PC with the other PC's path as a hint", async () => {
+  localStorage.setItem("lakomics.libraryPath", "/home/laku/Library");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "/home/laku/Library" });
+  vi.mocked(gateway.getMangaRoot).mockResolvedValue(null);
+  gateway.getOtherMachineMangaRoot = vi.fn().mockResolvedValue("C:\\lakomics\\2군");
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  expect(await screen.findByText("이 PC에서는 설정되지 않음")).toBeInTheDocument();
+  expect(await screen.findByText("다른 PC 경로: C:\\lakomics\\2군 · 이 PC의 폴더를 선택하세요")).toBeInTheDocument();
+  vi.mocked(open).mockResolvedValue("/home/laku/manga");
+  const row = screen.getByText("망가 폴더").closest("dl")!;
+  await userEvent.click(within(row as HTMLElement).getByRole("button", { name: "변경" }));
+  await waitFor(() => expect(gateway.setMangaRoot).toHaveBeenCalledWith("/home/laku/manga"));
+  expect(await screen.findByText("/home/laku/manga")).toBeInTheDocument();
+  expect(screen.queryByText(/다른 PC 경로/)).not.toBeInTheDocument();
+});
+
 it("keeps automation off and shows an error if the native setting cannot be saved", async () => {
   localStorage.setItem("lakomics.libraryPath", "C:\\Current");
   const gateway = createGateway();

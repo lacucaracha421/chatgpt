@@ -66,6 +66,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [backupRetryVersion, setBackupRetryVersion] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [mangaRoot, setMangaRoot] = useState<string | null>(null);
+  const [otherMachineMangaRoot, setOtherMachineMangaRoot] = useState<string | null>(null);
   const [mangaRootError, setMangaRootError] = useState<string | null>(null);
   const [collectionSourceRoot, setCollectionSourceRootState] = useState<string | null>(null);
   const [collectionSourceError, setCollectionSourceError] = useState<string | null>(null);
@@ -134,7 +135,12 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   useEffect(() => {
     let active = true;
     if (section === "general") void gateway.getMangaRoot()
-      .then((root) => { if (active) setMangaRoot(root); })
+      .then(async (root) => {
+        if (!active) return;
+        setMangaRoot(root);
+        const other = root === null ? await gateway.getOtherMachineMangaRoot?.().catch(() => null) : null;
+        if (active) setOtherMachineMangaRoot(other ?? null);
+      })
       .catch((error) => { if (active) setMangaRootError(commandErrorMessage(error, "망가 폴더를 확인하지 못했습니다.")); });
     if (section === "data") void gateway.getCollectionSourceRoot()
       .then((root) => { if (active) setCollectionSourceRootState(root); })
@@ -273,6 +279,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     try {
       await gateway.setMangaRoot(selected);
       setMangaRoot(selected);
+      setOtherMachineMangaRoot(null);
       setSaved("망가 폴더를 저장했습니다");
     } catch (error) {
       setMangaRootError(commandErrorMessage(error, "망가 폴더를 설정하지 못했습니다."));
@@ -818,8 +825,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
 
         <dl className="settings-view__property">
           <dt>망가 폴더</dt>
-          <dd className="settings-view__path">{mangaRoot ?? "설정되지 않음"}</dd>
+          <dd className="settings-view__path">{mangaRoot ?? "이 PC에서는 설정되지 않음"}</dd>
           <Button size="sm" onClick={() => void chooseMangaFolder()}>변경</Button>
+          {mangaRoot === null && otherMachineMangaRoot && (
+            <dd className="settings-view__row-message">다른 PC 경로: {otherMachineMangaRoot} · 이 PC의 폴더를 선택하세요</dd>
+          )}
           {mangaRootError && <dd className="settings-view__row-message" role="alert">{mangaRootError}</dd>}
         </dl>
       </div>

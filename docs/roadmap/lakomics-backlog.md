@@ -737,11 +737,13 @@ Keep VCK/kHentai as the default provider. If Heliotrope is revisited, isolate it
 
 ## PORT-001 — Manga folder stored as a machine-specific path in shared library data
 
-Status: `TODO`
+Status: `VERIFY` — implemented 2026-09-23; native Windows and Linux checks remain.
 
 Observed 2026-09-23 on the Linux host: Settings → General → 망가 폴더 shows `C:\lakomics\2군`. The value lives in `library_settings.manga_root` inside the library database, which Windows and Linux share, so an absolute path saved on one OS is shown and used on the other. This conflicts with the rule that machine-specific paths must not drive application behavior.
 
 Direction: keep the manga root as a per-machine setting (like `character-runtime.json`), or store it relative to a known root with a per-OS override. Migrate the existing value without losing the Windows setting, and show a clear "not set on this PC" state instead of a foreign path. Verify on both Windows and Linux.
+
+Implemented 2026-09-23: the app keeps the manga root per machine in `library-machine.json` (app config directory, keyed by `library_id`). A shared `library_settings.manga_root` is adopted and recorded for this machine only when it is an existing absolute directory here; otherwise Settings shows "이 PC에서는 설정되지 않음" with the other PC's path as a hint. Choosing or clearing the folder writes only this machine's entry; the shared column is left for machines that have not migrated. Remaining: open the app on Windows (value adopted, manga browsing unchanged) and on Linux (hint shown, choosing a local folder works).
 
 ## PC-UI-001 — PC UI consistency pass
 

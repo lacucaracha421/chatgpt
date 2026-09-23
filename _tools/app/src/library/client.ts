@@ -490,6 +490,7 @@ export const libraryGateway: LibraryGateway = {
   resetPrivateVaultThumbnail: (assetId) =>
     invoke<void>("reset_private_vault_thumbnail", { assetId }),
   getMangaRoot: () => invoke<string | null>("get_manga_root"),
+  getOtherMachineMangaRoot: () => invoke<string | null>("get_other_machine_manga_root"),
   setMangaRoot: (path) => invoke("set_manga_root", { path }),
   scanManga: () => invoke<number>("scan_manga"),
   listMangaSeries: () => invoke<MangaSeries[]>("list_manga_series"),

@@ -1270,6 +1270,8 @@ export interface LibraryGateway {
   setPrivateVaultThumbnailFromFrame?(assetId: string, timestampMs: number): Promise<void>;
   resetPrivateVaultThumbnail?(assetId: string): Promise<void>;
   getMangaRoot(): Promise<string | null>;
+  /** Manga root saved by another computer (e.g. the other OS) while this PC has none. */
+  getOtherMachineMangaRoot?(): Promise<string | null>;
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;
   listMangaSeries(): Promise<MangaSeries[]>;

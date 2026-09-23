@@ -545,6 +545,12 @@ pub enum LibraryError {
     },
     #[error("망가 루트 폴더가 설정되지 않았습니다")]
     MangaRootNotSet,
+    #[error("이 PC의 라이브러리 설정 파일을 읽거나 쓸 수 없습니다: {path}")]
+    MachineSettings {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("컬렉션 소스 루트가 설정되지 않았습니다")]
     CollectionSourceRootNotSet,
     #[error("컬렉션에 소스 경로가 설정되지 않았습니다")]
