@@ -17,7 +17,7 @@ public final class ThumbnailCacheTest {
    ThumbnailCache reopened=new ThumbnailCache(dir,10);reopened.obtain(a,reopened.generation(),f->downloads.incrementAndGet());check(downloads.get()==0);
    new File(dir,a).setLastModified(System.currentTimeMillis()-10000);put(cache,b,6);
    check(!new File(dir,a).exists() && new File(dir,b).isFile());check(cache.status()[0]<=10);
-   new File(dir,b).setLastModified(System.currentTimeMillis()-8L*24*60*60*1000);check(cache.status()[0]==0);
+   new File(dir,b).setLastModified(System.currentTimeMillis()-(ThumbnailCache.MAX_AGE_SECONDS+86400)*1000);check(cache.status()[0]==0);
    long old=cache.generation();
    try{cache.obtain(c,old,file->{Files.write(file.toPath(),new byte[4]);cache.clear();});throw new AssertionError("stale commit");}catch(IOException expected){check(cache.status()[0]==0);}
    try{cache.open(c,old);throw new AssertionError("stale read");}catch(IOException expected){check(true);}

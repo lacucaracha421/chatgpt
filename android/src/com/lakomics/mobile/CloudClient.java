@@ -56,12 +56,15 @@ final class CloudClient {
  void download(String url,File file,long max,CancellationSignal signal)throws Exception {
   URI u=new URI(url);if(!"https".equals(u.getScheme()) || u.getHost()==null || u.getUserInfo()!=null)throw new IOException("Invalid media URL");
   long deadline=System.nanoTime()+MediaTransfer.DEADLINE_NANOS;
-  HttpURLConnection c=(HttpURLConnection)u.toURL().openConnection();try{
+  HttpURLConnection c=(HttpURLConnection)u.toURL().openConnection();boolean reusable=false;try{
    prepare(c,signal);c.setRequestProperty("Accept-Encoding","identity");
    int status=c.getResponseCode();if(status!=200)throw new HttpFailure(status,null);
    String encoding=c.getHeaderField("Content-Encoding");if(encoding!=null&&!encoding.equalsIgnoreCase("identity"))throw new IOException("Unsupported media encoding");
    long expected=MediaTransfer.expectedLength(c.getHeaderField("Content-Length"),max);
    try(InputStream in=c.getInputStream();OutputStream out=new FileOutputStream(file)){MediaTransfer.copy(in,out,max,expected,deadline,signal==null?null:signal::throwIfCanceled);}
-  }finally{if(signal!=null)signal.setOnCancelListener(null);c.disconnect();}
+   // A fully read and closed body lets the platform pool keep the TLS connection for the
+   // next storage download; only failed or cancelled transfers tear the socket down.
+   reusable=true;
+  }finally{if(signal!=null)signal.setOnCancelListener(null);if(!reusable)c.disconnect();}
  }
 }

@@ -4,10 +4,11 @@ import {Button, Dialog, DialogDescription, IconButton} from './ui';
 import {errorText, native} from './transport';
 import type {Status} from './types';
 import {PickerSettings} from './PickerSettings';
+import {onWarmState, setWarmEnabled, warmEnabled, warmState, type WarmState} from './thumbnailWarm';
 import './Settings.css';
 
 type CacheStatus = {bytes:number; count:number; limit:number};
-const APP_VERSION = '0.7.4';
+const APP_VERSION = '0.7.6';
 
 export function Settings({status, onStatus, onClose, onCacheCleared}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void}) {
   const [endpoint, setEndpoint] = useState(status.endpoint);
@@ -58,14 +59,26 @@ export function Settings({status, onStatus, onClose, onCacheCleared}: {status: S
         void native<CacheStatus>('clearCache').then(result => {setCache(result);onCacheCleared();setCacheMessage('미디어 캐시를 지웠습니다.');}).catch(reason => setCacheMessage(errorText(reason))).finally(() => setCacheBusy(false));
       }}>{cacheBusy ? '지우는 중…' : '캐시 지우기'}</Button></div>
       {cacheMessage && <p role="status">{cacheMessage}</p>}
+      <ThumbnailWarmSetting/>
     </section>
     <PickerSettings configured={status.configured}/>
     <details className="settings-advanced">
       <summary>연결·캐시 동작 자세히</summary>
-      <p>썸네일과 감상한 이미지, 다른 앱에 첨부한 파일을 함께 저장합니다. 최대 1GB 안에서 오래 사용하지 않은 항목부터 정리하며, 7일 동안 보지 않은 파일도 삭제합니다.</p>
+      <p>썸네일과 감상한 이미지, 다른 앱에 첨부한 파일을 함께 저장합니다. 최대 1GB 안에서 오래 사용하지 않은 항목부터 정리하며, 1년 동안 보지 않은 파일도 삭제합니다. 썸네일 미리 받기는 앱이 켜져 있고 모바일 데이터가 아닐 때 전체 썸네일을 차례로 받아 둡니다.</p>
       <p>캐시 지우기는 이 기기에 저장된 미디어 사본만 삭제합니다. 서버의 원본과 연결 정보, 분류·앨범 구성은 그대로 유지됩니다.</p>
       <p>연결 해제는 기기에 저장된 서버 주소와 토큰을 지웁니다. 다시 사용하려면 주소와 토큰을 입력해야 합니다.</p>
     </details>
     <div className="settings-foot"><span>{APP_VERSION} · Android</span><Button variant="ghost" onClick={() => {void native('openExternal', {url:'https://github.com/lacucaracha421/chatgpt'}).catch(reason => setError(errorText(reason)));}}><ArrowTopRightOnSquareIcon/>프로젝트</Button></div>
   </Dialog>;
+}
+
+const warmLabels:Record<WarmState['status'],string>={off:'꺼짐',waiting:'앱을 다시 열면 이어서 받습니다',running:'받는 중',metered:'모바일 데이터에서는 멈춥니다',done:'모두 받아 두었습니다',error:'잠시 후 다시 시도합니다'};
+/** Library-wide thumbnail warm-up switch and its live progress. */
+function ThumbnailWarmSetting() {
+  const [enabled,setEnabled]=useState(warmEnabled),[state,setState]=useState(warmState);
+  useEffect(()=>onWarmState(setState),[]);
+  return <div className="settings-warm">
+    <label><input type="checkbox" checked={enabled} onChange={event=>{setEnabled(event.target.checked);setWarmEnabled(event.target.checked);}}/>썸네일 미리 받기</label>
+    <span className="muted" role="status">{enabled?`${warmLabels[state.status]} · 확인한 썸네일 ${state.warmed.toLocaleString()}장`:warmLabels.off}</span>
+  </div>;
 }

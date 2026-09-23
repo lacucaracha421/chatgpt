@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source and installed version: **0.7.4 (31)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source and installed version: **0.7.6 (33)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,28 @@ Current source and installed version: **0.7.4 (31)**, declared in [AndroidManife
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.7.5–0.7.6 — Library thumbnail warm-up, installed (2026-09-23)
+
+- **Warm-up:** while the app is visible and the connection is not cellular or
+  data-saving, the web layer walks every Library asset 100 at a time and asks native
+  for each thumbnail through the lowest-priority queue (visible tiles always first).
+  Progress is kept per endpoint and resumes after restart; a finished pass repeats
+  after a day for new assets. Settings → media cache has a `썸네일 미리 받기` switch
+  and live progress. Clearing the media cache resets progress.
+- **Native:** the media cache age limit is one year instead of seven days (the 1 GiB
+  least-recently-used bound is unchanged), and successful storage downloads leave the
+  connection to the platform pool instead of disconnecting.
+- **Measured (temporary WebView debugging, disabled again in the installed builds):**
+  about 200 thumbnails per minute, so a full ~9k library warms in roughly 45 minutes
+  of app time. Uncached thumbnails still take about 2.4 s each with eight in flight;
+  connection reuse did not change that, so storage response latency, not handshakes,
+  dominates.
+- 0.7.6 (33) is 0.7.5 rebuilt with the updated npm lockfile (React 19.3, Vite 8.3).
+  APK SHA-256 `b9f6b940b8ebb3c7ffae9ac0288861d18964dfc7045f1c24e1bba05d6b3cc88d`,
+  existing signer, installed in place with verified version, hash, cold start, no
+  app devtools socket and an empty crash log. Mobile suite 415/415; native checks
+  include the updated cache-age test.
 
 ## 0.7.4 — Faster uncached thumbnails, installed (2026-09-23)
 

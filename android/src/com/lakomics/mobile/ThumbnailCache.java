@@ -9,7 +9,9 @@ import java.util.*;
 final class ThumbnailCache {
  static final long LIMIT=1024L*1024*1024, MAX_FILE=16L*1024*1024;
  /** The one native cache lifetime. WebView must never let a copy outlive it. */
- static final long MAX_AGE_SECONDS=7L*24*60*60;
+ // Thumbnails are warmed library-wide, so age only drops media unseen for a year;
+ // the 1 GiB least-recently-used bound still applies.
+ static final long MAX_AGE_SECONDS=365L*24*60*60;
  private static final long MAX_AGE=MAX_AGE_SECONDS*1000;
  interface Download {void write(File file)throws Exception;}
  private final File directory;

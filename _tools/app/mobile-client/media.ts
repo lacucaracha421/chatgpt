@@ -97,3 +97,10 @@ export function prefetchThumbnails(assets: Asset[], signal: AbortSignal) {
     enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail').catch(() => undefined), signal, () => {});
   }
 }
+/** Library warm-up: one thumbnail through the prefetch queue, settled when native is done. */
+export function warmThumbnail(asset: Asset, signal: AbortSignal): Promise<void> {
+  if (asset.pending || asset.thumbnail_available === false) return Promise.resolve();
+  return new Promise(resolve => {
+    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail').then(() => resolve(), () => resolve()), signal, () => resolve());
+  });
+}

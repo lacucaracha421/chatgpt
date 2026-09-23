@@ -13,3 +13,7 @@
 .settings-advanced { padding:16px 0; border-bottom:1px solid var(--color-border); }
 .settings-advanced>summary { display:flex; align-items:center; min-height:var(--touch); cursor:pointer; font-size:13px; }
 .settings-advanced p { color:var(--color-muted); font-size:12px; line-height:1.7; margin:6px 0 0; }
+.settings-warm{display:flex;flex-direction:column;gap:4px;margin-top:12px}
+.settings-warm label{display:flex;align-items:center;gap:10px;min-height:44px}
+.settings-warm input{width:20px;height:20px}
+.settings-warm .muted{font-size:13px}
