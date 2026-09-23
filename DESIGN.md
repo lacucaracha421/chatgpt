@@ -48,6 +48,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 - shadow는 실제로 떠 있는 menu/dialog/drag preview와 의미 있는 collectible object에만 쓴다.
 - 일반 grid tile, toolbar, settings row, sidebar section에 장식용 shadow를 퍼뜨리지 않는다.
 - glassmorphism, 장식용 gradient, 큰 rounded card, pill 남발, 강한 glow는 사용하지 않는다.
+- NieR-motif exception: current-location selection may use square corners, a hard 1px ivory echo offset 3px right/down, and a small square cursor outside the left edge. The echo masks its interior with the actual panel background; blurred/decorative shadows remain banned. Index section labels may use a small square and a fading 1px hairline.
 
 ## 5. Typography와 색
 
@@ -64,7 +65,9 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 선택의 역할을 구분한다.
 
-- **현재 위치 / 주요 단일 선택**: pale ivory `#DDD8CA` 계열 면과 작은 내부 사각 표식. 글자와 표식은 어두운 색.
+- **Current location / slab**: the most specific navigation location uses `--color-sidebar-selection` / `--color-accent` with `--color-on-accent`, square corners, and `--selection-echo`. The NieR-motif exception allows the hard 1px echo and an ivory square cursor where a free pseudo-element and an unclipped gutter exist; retain existing inner markers. Use `--selection-echo-surface` on the standalone Settings surface. Blurred/decorative selection shadows remain banned.
+- **Parent context / tint**: the area rail, Collection Library/Showcase mode, and Notes scopes use `--color-selection-context` with `--color-selection-context-text`; hover uses `--color-selection-context-hover`. Keep existing small markers, with no echo or outside cursor. Collection type and update-provider inbox destinations remain slabs.
+- **Index section labels**: preserve font size/color and add a 5px square (`--color-section-mark`) followed by a fading 1px hairline (`--section-label-rule`).
 - **복수 선택 필터**: 중성 회색 면, 반복 사각 표식 없음. 누런/올리브 selection은 사용하지 않는다.
 - **자산 자체의 선택**: 좌상단 작은 사각 표식 + 이미지에만 청록색 선택 음영(`--asset-selection-tint`). 2026-09-06 사용자가 기존 중성 회색 음영의 낮은 가시성을 이유로 승인한 값이다. 바깥 selection outline과 metadata 영역의 색·여백 변화로 선택을 표현하지 않는다.
 - keyboard focus는 selection과 별도 상태다. focus가 이동했다고 선택으로 보이거나, 선택 때문에 focus가 사라지면 안 된다.

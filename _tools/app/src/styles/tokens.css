@@ -14,6 +14,16 @@
   --color-control-pressed: #353637;
   --color-selected: rgba(221, 216, 202, 0.12);
   --color-sidebar-selection: #ddd8ca;
+  --color-selection-context: rgba(221, 216, 202, 0.16);
+  --color-selection-context-hover: rgba(221, 216, 202, 0.22);
+  --color-selection-context-text: #f1eee6;
+  --color-selection-echo: rgba(221, 216, 202, 0.4);
+  --selection-echo: 3px 3px 0 -1px var(--color-sidebar), 3px 3px 0 0 var(--color-selection-echo);
+  --selection-echo-surface: 3px 3px 0 -1px var(--color-surface), 3px 3px 0 0 var(--color-selection-echo);
+  --selection-cursor-size: 5px;
+  --selection-cursor-offset: -7px;
+  --color-section-mark: rgba(221, 216, 202, 0.6);
+  --section-label-rule: linear-gradient(90deg, rgba(221, 216, 202, 0.3), rgba(221, 216, 202, 0.06));
   --color-sidebar-hover: #292a2b;
   --color-sidebar-connector: #59616b;
   --color-overlay: rgba(7, 10, 15, 0.82);

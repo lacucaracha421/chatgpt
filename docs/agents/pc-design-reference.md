@@ -148,9 +148,15 @@ The current UX may phrase the toggle as “정보 숨기기” when metadata is 
 
 ### Primary/current single selection
 
-Use the approved pale ivory surface (`#DDD8CA` reference) plus a small inner square marker for current navigation or other single-state controls where a strong current-location signal is useful.
+Use the N4 hierarchy for navigation selection:
 
-Do not spread ivory across every active control.
+- **Slab / most specific current location**: `--color-sidebar-selection` / `--color-accent` with `--color-on-accent`, radius 0, and `--selection-echo`. This applies to classification rows, quick views, pins, Collection types, update-provider inbox destinations, management/index links, Settings sections, and Notes list items. Update providers replace the type selection and identify the current inbox, so they remain slabs.
+- **Echo**: a hard 1px ivory line (`--color-selection-echo`) offset 3px right/down. The double shadow masks the interior with `--color-sidebar`; standalone Settings uses `--selection-echo-surface` to match `--color-surface`. Only the right/bottom outline is visible. Blurred/decorative selection shadows remain banned.
+- **Cursor**: use `--selection-cursor-size` (5px) and `--selection-cursor-offset` (-7px) for an ivory square centered just outside the slab's left edge, only with a free pseudo-element and enough unclipped gutter. Preserve existing inner markers. Classification tree rows keep their folder/inner square treatment without an outside cursor. Narrow horizontal Settings navigation also omits the cursor to avoid neighboring buttons. Collection cursors are limited to the vertical workspace index.
+- **Tint / parent context**: area rail, Collection Library/Showcase mode (`.collection-browser__segment--context`), and Notes scopes use `--color-selection-context` (16% ivory) and `--color-selection-context-text`. Keep existing small markers; omit echo and cursor. Hover uses `--color-selection-context-hover` (22%). Slab hover retains ivory.
+- **Index section labels**: `.workspace-section-label` and index `.chrome-settings-group > legend` use a 5px square (`--color-section-mark`, 60% ivory) before the text and a 1px fading hairline (`--section-label-rule`, 30% to 6% ivory) filling the remaining width. Preserve the existing font size/color.
+
+Keep keyboard `:focus-visible` outlines separate and visible on both slab and tint selections. Do not spread slabs across parent/context levels.
 
 ### Multi-select filters
 

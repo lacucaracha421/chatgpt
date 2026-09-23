@@ -391,7 +391,7 @@ function TypeSegment({
 }
 
 function ModeSegment({ showcase, onChange }: { showcase: boolean; onChange: (next: boolean) => void }) {
-  return <div className="collection-browser__segment" role="group" aria-label="보기">
+  return <div className="collection-browser__segment collection-browser__segment--context" role="group" aria-label="보기">
     <button type="button" className="collection-browser__segment-button" aria-pressed={!showcase} onClick={() => onChange(false)}>라이브러리</button>
     <button type="button" className="collection-browser__segment-button" aria-pressed={showcase} onClick={() => onChange(true)}>쇼케이스</button>
   </div>;

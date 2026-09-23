@@ -52,7 +52,7 @@ Most gallery captions read `작가 미상`.
 
 From an overall aesthetic review: the foundation is sound (media-first gallery, consistent shell, strong Film detail hero, good SUIT/Barlow pairing), but polish and identity lag behind. These are larger proposals; each needs a user decision and ideally a side-by-side CSS study in the real app before adoption.
 
-### B1. Selection treatment — direction chosen 2026-09-23 (not yet implemented)
+### B1. Selection treatment — implemented 2026-09-23, native visual acceptance pending
 
 The full-width ivory slab was chosen deliberately for a NieR:Automata feel, but several slabs per screen compete with media. The user compared six variants in [the ivory selection study](../prototypes/ivory-selection/index.html) (current, D, N1–N4) and chose **N4 · D + NieR details**:
 
@@ -61,7 +61,7 @@ The full-width ivory slab was chosen deliberately for a NieR:Automata feel, but 
 - Section labels become `■ label ────` (small square + fading hairline).
 - The neutral dark surfaces stay unchanged; the warm "paper" panels (N2/N3) were rejected because the user mainly uses dark mode.
 
-Before implementation: add an explicit NieR-motif exception to `DESIGN.md` (hard 1px echo line and square cursor are allowed for current selection; blurred decorative shadows remain banned), then apply to the rail, index links, classification tree, pins, settings navigation and memo lists. Verify against real media screens.
+Implemented N4 in the desktop selection rules and documented the NieR-motif exception in `DESIGN.md`. The rail, Collection mode, and Notes scopes use context tint; current-location rows retain the slab with echo and a cursor where the existing gutter and markers permit it. Update-provider inbox links remain slabs because they replace the type selection as the current destination. Native visual acceptance against real media screens remains pending.
 
 ### B2. One control family
 

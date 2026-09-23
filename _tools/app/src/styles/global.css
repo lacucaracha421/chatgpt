@@ -6316,6 +6316,13 @@ textarea:focus-visible {
 .classification-sidebar__quick-view[aria-current="page"] > .classification-sidebar__quick-view-surface,
 .classification-sidebar__tree-row[aria-selected="true"] > .classification-sidebar__tree-surface {
   color: var(--color-on-accent);
+  border-radius: 0;
+  box-shadow: var(--selection-echo);
+}
+.classification-sidebar__quick-view[aria-current="page"] > .classification-sidebar__quick-view-surface { position: relative; }
+.classification-sidebar__quick-view[aria-current="page"] > .classification-sidebar__quick-view-surface::before {
+  content: ""; position: absolute; left: var(--selection-cursor-offset); top: 50%; transform: translateY(-50%);
+  width: var(--selection-cursor-size); height: var(--selection-cursor-size); background: var(--color-sidebar-selection); pointer-events: none;
 }
 .classification-sidebar__quick-view[aria-current="page"] .classification-sidebar__quick-view-surface::after,
 .classification-sidebar__tree-row[aria-selected="true"] .classification-sidebar__tree-surface::after {
@@ -6331,7 +6338,22 @@ textarea:focus-visible {
 .revisit-browser__subtabs button[aria-selected="true"] {
   color: var(--color-on-accent); background: var(--color-accent); border-color: var(--color-accent);
 }
+.collection-browser__segment-button[aria-pressed="true"] { border-radius: 0; box-shadow: var(--selection-echo); }
+.collection-browser__segment-button[aria-pressed="true"]:hover { background: var(--color-accent-hover); }
+.collection-browser__segment--context > .collection-browser__segment-button[aria-pressed="true"] {
+  color: var(--color-selection-context-text); background: var(--color-selection-context); border-color: transparent; box-shadow: none;
+}
+.collection-browser__segment--context > .collection-browser__segment-button[aria-pressed="true"]:hover { background: var(--color-selection-context-hover); }
 .collection-browser__segment-button[aria-pressed="true"]::before { background: currentColor; }
+.settings-view__section-button[aria-current="page"] { border-radius: 0; box-shadow: var(--selection-echo-surface); }
+.workspace-index .settings-view__section-button[aria-current="page"] { box-shadow: var(--selection-echo); }
+/* Horizontal settings navigation has no gutter between adjacent buttons. */
+@media (min-width: 721px) {
+  .settings-view__section-button[aria-current="page"]::after {
+    content: ""; position: absolute; left: var(--selection-cursor-offset); top: 50%; transform: translateY(-50%);
+    width: var(--selection-cursor-size); height: var(--selection-cursor-size); background: var(--color-sidebar-selection); pointer-events: none;
+  }
+}
 .settings-view__section-button[aria-current="page"]::before { inset: auto var(--space-2) auto auto; width: var(--selection-mark-size); height: var(--selection-mark-size); background: currentColor; }
 .view-toolbar .ui-toggle:has(input:checked),
 .asset-toolbar__filter-menu[data-active="true"] .ui-menu__trigger {

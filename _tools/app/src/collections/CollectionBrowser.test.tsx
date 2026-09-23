@@ -100,6 +100,8 @@ describe("CollectionBrowser", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });
     expect(screen.getByRole("button", { name: "라이브러리" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("group", { name: "보기" })).toHaveClass("collection-browser__segment--context");
+    expect(screen.getByRole("group", { name: "유형" })).not.toHaveClass("collection-browser__segment--context");
     expect(screen.getByRole("button", { name: "제목 검색" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("media_date");
     expect(screen.getByRole("combobox", { name: "방향" })).toHaveValue("desc");
