@@ -1,6 +1,6 @@
 // Raster lifecycle is covered separately; jsdom has no canvas/WebGL implementation.
-vi.mock("./physical/collectibleRuntime", () => ({
-  coverKey: (request: unknown) => JSON.stringify(request),
+vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
   acquireCover: (_request: unknown, listener: (value: null) => void) => { listener(null); return () => undefined; },
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
 import { GameCollectionDetail } from "./GameCollectionDetail";
+import { coverSourceUrl } from "./physical/collectibleRuntime";
 
 afterEach(cleanup);
 
@@ -94,7 +95,7 @@ describe("GameCollectionDetail", () => {
     expect(hero).toHaveClass("game-collection-detail__hero--empty");
     expect(screen.queryByRole("img", { name: "Astral Chain 대표 아트워크" })).not.toBeInTheDocument();
     expect(hero.style.backgroundImage).not.toContain("cover.jpg");
-    expect(screen.getByRole("img", { name: "Astral Chain 표지" })).toHaveAttribute("src", "cover.jpg");
+    expect(screen.getByRole("img", { name: "Astral Chain 표지" })).toHaveAttribute("src", coverSourceUrl({ src: "cover.jpg", scope: "", revision: collection.updatedAt }));
   });
 
   it("renders only present game metadata", () => {

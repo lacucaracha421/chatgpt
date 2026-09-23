@@ -1,6 +1,6 @@
 // Raster lifecycle is covered separately; jsdom has no canvas/WebGL implementation.
-vi.mock("./physical/collectibleRuntime", () => ({
-  coverKey: (request: unknown) => JSON.stringify(request),
+vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
   acquireCover: (_request: unknown, listener: (value: null) => void) => { listener(null); return () => undefined; },
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
@@ -9,6 +9,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
 import { CollectionCard } from "./CollectionCard";
+import { coverSourceUrl } from "./physical/collectibleRuntime";
 
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 8, 23)); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -114,7 +115,7 @@ describe("CollectionCard", () => {
   it("keeps click and cover alt behavior", () => {
     const onClick = vi.fn();
     render(<CollectionCard collection={sample} coverUrl="cover.jpg" selected={true} onClick={onClick} />);
-    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", "cover.jpg");
+    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", coverSourceUrl({ src: "cover.jpg", scope: "", revision: sample.updatedAt }));
     expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("decoding", "async");
     expect(screen.getByRole("button")).toHaveAttribute("aria-selected", "true");
     screen.getByRole("button").click();
@@ -133,7 +134,7 @@ describe("CollectionCard", () => {
     view.rerender(
       <CollectionCard collection={sample} coverUrl="working.jpg" selected={false} onClick={vi.fn()} />,
     );
-    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", "working.jpg");
+    expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", coverSourceUrl({ src: "working.jpg", scope: "", revision: sample.updatedAt }));
     expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("decoding", "async");
   });
 });

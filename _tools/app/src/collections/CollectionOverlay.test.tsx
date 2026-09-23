@@ -3,8 +3,8 @@ vi.mock("./physical/coverVisibility", () => ({
   observeCover: (_element: Element, callback: (visible: boolean) => void) => { callback(true); return () => undefined; },
   observeCoverSize: () => () => undefined,
 }));
-vi.mock("./physical/collectibleRuntime", () => ({
-  coverKey: (request: unknown) => JSON.stringify(request),
+vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
   acquireCover: (_request: unknown, listener: (value: null) => void) => { listener(null); return () => undefined; },
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway, ReleaseWatchEvent } from "../library/types";
 import { CollectionOverlay } from "./CollectionOverlay";
+import { coverSourceUrl } from "./physical/collectibleRuntime";
 import { BackNavigationProvider, useBackHandler } from "../shared/navigation/BackNavigation";
 import { avGateway } from "./avClient";
 
@@ -242,7 +243,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await user.click(await sidebar.findByRole("button", { name: "대체판 1 선택" }));
     expect(sidebar.getByRole("button", { name: "대체판 1 선택" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getAllByRole("group", { name: "판본 선택" })).toHaveLength(1);
-    expect(screen.getByRole("img", { name: "1권 표지" })).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art1");
+    expect(screen.getByRole("img", { name: "1권 표지" })).toHaveAttribute("src", coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/art1", scope: "", revision: collection.updatedAt }));
   });
 
   it("explains legacy Aladin reconnection and opens Kakao without refreshing the old provider", async () => {
@@ -373,7 +374,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(onChanged).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "표시된 신간 알림 확인" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
-    expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
+    expect(shelfCover).toHaveAttribute("src", coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/art-1", scope: "", revision: collection.updatedAt }));
   });
 
   it("contains card refresh failures after taking unread release changes", async () => {
@@ -402,7 +403,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     });
     await waitFor(() => expect(screen.getByRole("img", { name: "1권 표지" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork-thumbnail/local-art",
+      coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/local-art", scope: "", revision: collection.updatedAt }),
     ));
     expect(document.querySelector(".collection-overlay__hero")).toBeNull();
   });
@@ -443,7 +444,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await user.click(screen.getByRole("button", { name: "기본판 선택" }));
     expect(await screen.findByRole("img", { name: "10권 표지" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork-thumbnail/art-10",
+      coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/art-10", scope: "", revision: collection.updatedAt }),
     );
   });
 
@@ -591,7 +592,7 @@ describe("CollectionOverlay MangaDex flow", () => {
       refreshKakao: vi.fn().mockResolvedValue({ added: 0, updated: 1, unchanged: 0, ignored: 0 }),
     });
     const shelfCover = await screen.findByRole("img", { name: "1권 표지" });
-    expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
+    expect(shelfCover).toHaveAttribute("src", coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/art-1", scope: "", revision: collection.updatedAt }));
     await waitFor(() => expect(gateway.syncMangaDexVolumeCovers).toHaveBeenCalledOnce());
     listCollectionVolumes.mockClear();
     listCollectionVolumes.mockResolvedValue([released]);
@@ -602,7 +603,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await waitFor(() => expect(gateway.refreshKakao).toHaveBeenCalledWith("collection-1"));
     expect(getReleaseWatchStatus).toHaveBeenCalledTimes(2);
     expect(listCollectionVolumes).toHaveBeenCalledOnce();
-    expect(shelfCover).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-1");
+    expect(shelfCover).toHaveAttribute("src", coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/art-1", scope: "", revision: collection.updatedAt }));
   });
 
   it("keeps the shelf visible when Kakao refresh fails", async () => {
@@ -661,7 +662,7 @@ describe("CollectionOverlay game detail flow", () => {
     expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Astral Chain 표지" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork/game-cover",
+      coverSourceUrl({ src: "http://lakomics.localhost/work-artwork/game-cover", scope: "", revision: gameCollection.updatedAt }),
     );
     expect(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" })).toHaveAttribute(
       "src",

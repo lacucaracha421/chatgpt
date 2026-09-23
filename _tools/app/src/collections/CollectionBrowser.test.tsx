@@ -1,11 +1,11 @@
 // Raster lifecycle is covered separately; jsdom has no canvas/WebGL implementation.
-vi.mock("./physical/collectibleRuntime", () => ({
-  coverKey: (request: unknown) => JSON.stringify(request),
+vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
   acquireCover: (_request: unknown, listener: (value: null) => void) => { listener(null); return () => undefined; },
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import type { CollectionSummary, LibraryGateway } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
+import { coverSourceUrl } from "./physical/collectibleRuntime";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 
 afterEach(cleanup);
@@ -168,7 +169,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/collection-source-thumbnail/c1",
+      coverSourceUrl({ src: "http://lakomics.localhost/collection-source-thumbnail/c1", scope: "", revision: sample.updatedAt }),
     );
   });
 
@@ -181,7 +182,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/thumbnail/asset-1",
+      coverSourceUrl({ src: "http://lakomics.localhost/thumbnail/asset-1", scope: "", revision: sample.updatedAt }),
     );
   });
 
@@ -193,8 +194,9 @@ describe("CollectionBrowser", () => {
   it("filters by type when type filter set", () => {
     const manga = { ...sample, id: "manga", name: "던전밥", type: "manga" as const };
     renderBrowser({ collections: [sample, manga], typeFilter: "game", showcase: false });
-    expect(screen.queryByRole("button", { name: "전체" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
+    const typeFilter = within(screen.getByRole("group", { name: "유형" }));
+    expect(typeFilter.queryByRole("button", { name: "전체" })).not.toBeInTheDocument();
+    expect(typeFilter.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
     expect(screen.queryByText("던전밥")).not.toBeInTheDocument();
   });
@@ -338,7 +340,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork-thumbnail/artwork-1",
+      coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/artwork-1", scope: "", revision: sample.updatedAt }),
     );
   });
 });

@@ -4,20 +4,26 @@ import { GameCase } from "./GameCase";
 import type { CoverRequest } from "./physical/collectibleRuntime";
 import type { Snapshot } from "./physical/RenderCache";
 const pending=vi.hoisted(()=>[] as Array<{request:CoverRequest;notify:(value:Snapshot)=>void;release:ReturnType<typeof vi.fn>}>);
-vi.mock("./physical/collectibleRuntime",()=>({
-  coverKey:(request:CoverRequest)=>JSON.stringify(request),
+vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
   acquireCover:(request:CoverRequest,notify:(value:Snapshot)=>void)=>{const release=vi.fn();pending.push({request,notify,release});return release;},
 }));
 vi.mock("./physical/coverVisibility",()=>({observeCover:(_element:unknown,notify:(value:boolean)=>void)=>{notify(true);return()=>undefined;},observeCoverSize:()=>()=>undefined}));
 afterEach(()=>{cleanup();pending.length=0;vi.clearAllMocks();});
 it("uses shared snapshots without creating a canvas for every case",()=>{
-  const view=render(<GameCase src="first.jpg" alt="게임 표지" />);
+  const view=render(<GameCase src="" alt="게임 표지" />);
   expect(view.container.querySelector("canvas")).toBeNull();
-  act(()=>pending.find(job=>job.request.src==="")!.notify({url:"blob:shell",width:256,height:362}));
+  const shell=pending.find(job=>job.request.src==="")!;
+  act(()=>shell.notify({url:"blob:shell",width:256,height:362}));
   expect(screen.getByRole("img")).toHaveAttribute("src","blob:shell");
+  view.rerender(<GameCase src="first.jpg" alt="게임 표지" />);
+  expect(shell.release).toHaveBeenCalledOnce();
+  expect(pending.filter(job=>job.request.src==="")).toHaveLength(1);
+  expect(screen.getByRole("img")).toHaveAttribute("src","first.jpg");
   const obsolete=pending.find(job=>job.request.src==="first.jpg")!;
   view.rerender(<GameCase src="second.jpg" alt="게임 표지" />);
   expect(obsolete.release).toHaveBeenCalledOnce();
+  expect(screen.getByRole("img")).toHaveAttribute("src","second.jpg");
   act(()=>obsolete.notify({url:"blob:obsolete",width:256,height:362}));
   expect(screen.getByRole("img")).not.toHaveAttribute("src","blob:obsolete");
   act(()=>pending.find(job=>job.request.src==="second.jpg")!.notify({url:"blob:current",width:256,height:362}));

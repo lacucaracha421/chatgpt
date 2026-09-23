@@ -1464,7 +1464,7 @@ describe("App", () => {
     const search = await screen.findByRole("searchbox", { name: "제목 검색" });
     await user.type(search, "nier{Enter}");
     await user.click(await screen.findByText("NieR: Automata"));
-    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }, { timeout: 5_000 }));
+    await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }, { timeout: 5_000 }));
     expect(await screen.findByRole("button", { name: "검색 해제" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "제목 검색" }));
     expect(await screen.findByRole("searchbox", { name: "제목 검색" })).toHaveValue("nier");
@@ -1514,12 +1514,12 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     await user.click(await screen.findByRole("button", { name: "만화" }));
     await user.click(await screen.findByText("던전밥"));
-    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
+    await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
 
     expect(await screen.findByRole("heading", { name: "만화 컬렉션" })).toBeInTheDocument();
     expect(screen.getByText("던전밥")).toBeInTheDocument();
     await user.click(screen.getByText("던전밥"));
-    await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" });
+    await screen.findByRole("button", { name: "컬렉션으로 돌아가기" });
     fireEvent.mouseUp(window, { button: 3 });
     expect(await screen.findByRole("heading", { name: "만화 컬렉션" })).toBeInTheDocument();
   });
@@ -1542,7 +1542,7 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     await user.click(await screen.findByRole("button", { name: "쇼케이스" }));
     await user.click(await screen.findByText("Showcase Game"));
-    await user.click(await screen.findByRole("button", { name: "컬렉션 표지 보기 닫기" }));
+    await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
     expect(await screen.findByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
   });
