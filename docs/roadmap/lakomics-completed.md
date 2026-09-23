@@ -2,6 +2,35 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-23 — Similarity discovery and mobile tab switching
+
+The user confirmed both items complete. This records that closure; it is not a new deployment or production-library audit.
+
+### SIMILARITY-004 — Existing-library similarity discovery
+
+Status: `DONE` — closed 2026-09-23 at the user's confirmation; committed as `20d99a6`.
+
+The PC implementation compares a frozen snapshot of eligible assets in durable, resumable batches and records historical `similarity_reviews` (schema v90, `0090_historical_similarity.sql`). The existing Similarity Review UI shows scan progress and a recommended asset for historical pairs. Originals change only through the existing explicit similarity decision.
+
+Evidence at commit time: frontend similarity/client suites **48/48**, Rust `similarity` tests **40 passed, 3 ignored**, and `db::tests` **68/68**, including the v90 migration test that preserves incoming reviews and Cloud Capture links. Active-library use is accepted on the user's confirmation, not on a separately recorded native run.
+
+Original goal and acceptance, retained for reference:
+
+- add an explicit bounded `기존 보관함 유사 이미지 찾기` operation;
+- reuse current PDQ quality/aspect/distance policy and the existing Similarity Review UI;
+- discover historical pairs without forcing fingerprint reindex;
+- skip already reviewed/decided pairs and remain idempotent across retry/restart;
+- run in resumable batches without blocking normal browsing or ingestion;
+- keep originals unchanged until the user makes an existing explicit similarity decision.
+
+Acceptance: two pre-existing near-duplicates produce exactly one review; rerun/restart does not duplicate it; unrelated or incompatible candidates stay excluded. Measure the current ~8k–10k scale before considering a metric index.
+
+Follow-ups stay in the backlog: mobile Asset duplicate review, mirror/rotation matching (`SIMILARITY-002B`), and the metric-index gate (`PERF-SIMILARITY`).
+
+### Mobile tab switching
+
+Status: `DONE` — closed 2026-09-23 at the user's confirmation. This was the "Faster tab switching" request in the 2026-09-21 future-work notes (suggested sequence item 2). Implementation details and device evidence were not recorded in this closure.
+
 ## Closure checkpoint — 2026-09-20 — Authority scope split and product acceptance
 
 This checkpoint records the user's scope decisions after a read-only source, Git and

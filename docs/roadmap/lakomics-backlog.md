@@ -7,8 +7,9 @@ Reconciled 2026-09-20 after the user separated completed server-authority rollou
 ## Current priority
 
 1. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
-2. **SIMILARITY-004** — discover near-duplicates that already coexist in the library.
-3. **WORKS-001** — small Film polish: cast/director, release information, and related works.
+2. **WORKS-001** — small Film polish: cast/director, release information, and related works.
+
+`SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
 `MEDIA-R2-001` is closed at the currently satisfactory media-delivery scope; extra variants are not required. `CHAR-AUTO-001` is closed for this improvement pass; future concrete classification mistakes can open bounded follow-up work rather than keeping a permanent accuracy task active.
 
@@ -144,8 +145,7 @@ User-requested notes for later work, not an implementation start or priority cha
 
 - **Collection 3D model viewer:** view actual 3D models in Collection, rather than merely giving covers a 3D presentation. This clarifies the earlier `MOBILE-UX-001` 3D feasibility question; renderer and supported formats remain undecided.
 - **New-release notifications:** add notifications for new releases. Follow targets and notification delivery details remain to be defined.
-- **Faster tab switching:** improve transition animations and/or loading speed when switching tabs.
-- **Asset duplicate checking:** make duplicate checking available in the mobile Asset Library. Coordinate with `SIMILARITY-004` where relevant; keep this distinct from Catalog edition duplicates.
+- **Asset duplicate checking:** make duplicate checking available in the mobile Asset Library. Build on the completed desktop `SIMILARITY-004` discovery where relevant; keep this distinct from Catalog edition duplicates.
 - **Manga Catalog duplicate-edition checking:** check for duplicate editions in the mobile Manga Catalog. Continue the existing `MOBILE-UX-001` Catalog duplicate-check evaluation.
 - **Asset Library multi-select move:** select multiple assets and move them together. Coordinate with `MOBILE-WRITE-002`; the destination and move semantics remain to be defined.
 
@@ -170,12 +170,10 @@ Recorded at the user's request after the backlog review. This is a recommendatio
 Suggested first sequence:
 
 1. **Extension reliability and polish:** reproduce and fix the persistent semicircle after navigation, then refine entrance, roulette and selection effects.
-2. **Mobile tab switching:** distinguish loading and rendering bottlenecks from animation quality; reduce waiting/flicker before adding short transitions. A new durable metadata database is not an assumed prerequisite.
-3. **Existing-library duplicate discovery (`SIMILARITY-004`):** compare already-stored assets using the existing fingerprint policy and review UI, with resumable/idempotent candidate discovery and no automatic original-file deletion. Mobile review is a separate follow-up, not an assumed part of this first slice.
-4. **Home artist Revisit (`ARTIST-001`):** start with a small Home rediscovery module, such as long-unseen or recently collected artists, rather than requiring the complete Artist hub first.
-5. **Mobile multi-select move:** define album-membership changes versus actual folder/file moves before implementation; coordinate the chosen write scope with `MOBILE-WRITE-002`.
+2. **Home artist Revisit (`ARTIST-001`):** start with a small Home rediscovery module, such as long-unseen or recently collected artists, rather than requiring the complete Artist hub first.
+3. **Mobile multi-select move:** define album-membership changes versus actual folder/file moves before implementation; coordinate the chosen write scope with `MOBILE-WRITE-002`.
 
-If choosing only one new feature, prefer `SIMILARITY-004`. If prioritizing everyday usability, start with extension reliability and mobile switching instead.
+Mobile tab switching and `SIMILARITY-004` from the original sequence were completed on 2026-09-23. If prioritizing everyday usability, start with extension reliability.
 
 Other follow-up candidates, without a fixed order:
 
@@ -629,22 +627,6 @@ Keep clustering/re-identification research deferred while explicit-reference cla
 
 # Similarity / media identity
 
-## SIMILARITY-004 — Existing-library similarity discovery
-
-Status: `TODO`
-
-Current gap confirmed 2026-09-13: `index_missing_similarity_hashes()` backfills PDQ for existing normal image/GIF assets, making them candidates for future ingestion, but it does not compare already-stored assets against one another or create historical `similarity_reviews`.
-
-Goal:
-- add an explicit bounded `기존 보관함 유사 이미지 찾기` operation;
-- reuse current PDQ quality/aspect/distance policy and the existing Similarity Review UI;
-- discover historical pairs without forcing fingerprint reindex;
-- skip already reviewed/decided pairs and remain idempotent across retry/restart;
-- run in resumable batches without blocking normal browsing or ingestion;
-- keep originals unchanged until the user makes an existing explicit similarity decision.
-
-Acceptance: two pre-existing near-duplicates produce exactly one review; rerun/restart does not duplicate it; unrelated or incompatible candidates stay excluded. Measure the current ~8k–10k scale before considering a metric index.
-
 ## SIMILARITY-002B — PDQ geometric-invariance candidates
 
 Status: `TODO`
@@ -766,9 +748,8 @@ Implementation exists. Remaining scope is targeted real X/Titanium/Galaxy accept
 This is guidance, not authorization to start or mutate production data.
 
 1. `CLOUD-POST-001` only the residual publication/compatibility scope, when its consumer and ownership prerequisites are met; do not repeat completed authority rollouts.
-2. `SIMILARITY-004` existing-library discovery.
-3. `WORKS-001` small Film polish.
-4. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
-5. `SIMILARITY-002B` transform matching when useful.
+2. `WORKS-001` small Film polish.
+3. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
+4. `SIMILARITY-002B` transform matching when useful.
 
 Verification-only items (`CLOUD-INGEST-002`, `CHAR-AUTO-006`, `EXT-011`, `EXT-012`) may be closed opportunistically when the user naturally exercises them. `CLOUD-UI-001` was already closed on 2026-09-16 and must not be selected again. HOLD items should not be promoted without a new product reason.
