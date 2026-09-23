@@ -16,7 +16,15 @@
   const SAVED_MAX_ITEMS = 3000;
   const SAVED_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
   const DISMISSED_STORAGE_KEY = "lakomicsXGalleryDismissedMediaV1";
-  const ARTIST_DISINTEREST_STORAGE_KEY = "lakomicsXGalleryArtistDisinterestV1";
+  const ARTIST_DISINTEREST_V1_STORAGE_KEY = "lakomicsXGalleryArtistDisinterestV1";
+  // V2 keeps one timestamp per "관심없음" so the penalty can fade: each event halves
+  // every 30 days, and saving that artist cancels the newest event.
+  const ARTIST_DISINTEREST_STORAGE_KEY = "lakomicsXGalleryArtistDisinterestV2";
+  const DISINTEREST_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000;
+  const DISINTEREST_MAX_EVENTS = 20;
+  const GALLERY_MAX_RETAINED_IMAGES = 1500;
+  const LIBRARY_INDEX_MIN_INTERVAL_MS = 60_000;
+  const UNDO_MS = 6000;
   const GALLERY_INITIAL_RENDER_ITEMS = 36;
   const GALLERY_RENDER_BATCH_ITEMS = 24;
   const GALLERY_LOAD_MORE_THRESHOLD_PX = 900;
@@ -217,12 +225,41 @@
     return 0;
   }
 
+  // Counts are decayed event weights: one fresh "관심없음" is 1 and still counts
+  // (≥ .5) for 30 days.
   function getArtistDisinterestScore(item, disinterestSource) {
     const count = getArtistDisinterestCount(item, disinterestSource);
-    if (count >= 8) return 3;
-    if (count >= 3) return 2;
-    if (count >= 1) return 1;
+    if (count >= 6) return 3;
+    if (count >= 2.5) return 2;
+    if (count >= .5) return 1;
     return 0;
+  }
+
+  function normalizeDisinterestEvents(value, now = Date.now()) {
+    const result = {};
+    for (const [rawAuthor, raw] of Object.entries(value && typeof value === "object" ? value : {})) {
+      const author = normalizeAuthorKey(rawAuthor);
+      const events = (Array.isArray(raw) ? raw : []).map(Number)
+        .filter((at) => Number.isFinite(at) && at > 0 && at <= now + 60_000).sort((a, b) => a - b).slice(-DISINTEREST_MAX_EVENTS);
+      if (author && events.length) result[author] = events;
+    }
+    const authors = Object.keys(result).sort((a, b) => result[b].at(-1) - result[a].at(-1)).slice(0, ARTIST_AFFINITY_MAX_ITEMS);
+    return Object.fromEntries(authors.map((author) => [author, result[author]]));
+  }
+
+  // V1 stored plain counts; they become that many events dated at migration time.
+  function migrateDisinterestCounts(value, now = Date.now()) {
+    const events = {};
+    for (const [author, count] of Object.entries(pruneArtistAffinity(value))) {
+      events[author] = Array.from({ length: Math.min(DISINTEREST_MAX_EVENTS, Number(count)) }, () => now);
+    }
+    return normalizeDisinterestEvents(events, now);
+  }
+
+  function decayedDisinterest(events, now = Date.now()) {
+    let total = 0;
+    for (const at of events ?? []) total += 0.5 ** (Math.max(0, now - Number(at)) / DISINTEREST_HALF_LIFE_MS);
+    return total;
   }
 
   function isDismissedMedia(item, dismissedSource) {
@@ -324,10 +361,12 @@
       const mediaUrl = normalizer(source);
       if (!mediaUrl || seen.has(mediaUrl)) continue;
       seen.add(mediaUrl);
-      images.push({
-        url: mediaUrl,
-        index: images.length + 1,
-      });
+      // The photo's own /photo/N link is X's ordinal; DOM order among loaded images
+      // shifts when an earlier photo loads late, so it is only a fallback.
+      const link = image.closest?.('a[href*="/photo/"]');
+      const linked = parseStatusHref(link?.getAttribute?.("href") || link?.href || "");
+      const index = linked?.tweetId === identity.tweetId && linked.photoIndex !== null ? linked.photoIndex + 1 : images.length + 1;
+      images.push({ url: mediaUrl, index });
     }
     if (!images.length) return null;
 
@@ -376,8 +415,28 @@
     return result;
   }
 
-  function createGalleryStore(onChange = () => {}) {
-    const posts = new Map();
+  function createGalleryStore(onChange = () => {}, { maxImages = Infinity, keep = () => false } = {}) {
+    const posts = new Map(), byKey = new Map();
+    let flatCache = null, totalImages = 0;
+
+    function index(post, images = post.images) {
+      for (const item of flattenPostImages(post, images)) byKey.set(galleryItemKey(item), item);
+    }
+    // Oldest posts go first; posts the caller keeps (saved or on screen) never do.
+    function evict() {
+      if (totalImages <= maxImages) return;
+      const removed = [];
+      for (const post of Array.from(posts.values()).sort((a, b) => (a.collectedAt ?? 0) - (b.collectedAt ?? 0))) {
+        if (totalImages <= maxImages) break;
+        const items = flattenPostImages(post);
+        if (items.some((item) => keep(item))) continue;
+        posts.delete(post.tweetId);
+        totalImages -= post.images.length;
+        for (const item of items) byKey.delete(galleryItemKey(item));
+        removed.push(...items);
+      }
+      if (removed.length) { flatCache = null; onChange({ type: "evict", items: removed }); }
+    }
 
     function upsert(post) {
       if (!post?.tweetId || !Array.isArray(post.images) || !post.images.length) return false;
@@ -388,7 +447,9 @@
           images: post.images.map((image) => ({ ...image })),
         };
         posts.set(post.tweetId, stored);
+        totalImages += stored.images.length; index(stored); flatCache = null;
         onChange({ type: "upsert", items: flattenPostImages(stored) });
+        evict();
         return true;
       }
 
@@ -404,44 +465,37 @@
       if (storedAdditions.length) {
         existing.images.push(...storedAdditions);
         existing.collectedAt = Math.min(existing.collectedAt ?? post.collectedAt, post.collectedAt);
+        totalImages += storedAdditions.length;
       }
+      index(existing); flatCache = null;
       onChange({
         type: likeCountImproved ? "metadata" : "upsert",
         items: likeCountImproved ? flattenPostImages(existing) : flattenPostImages(existing, storedAdditions),
       });
+      evict();
       return true;
     }
 
+    // Memoized until the next change; callers must not mutate the returned list.
     function flatImages() {
-      return Array.from(posts.values())
+      return flatCache ??= Array.from(posts.values())
         .sort((a, b) => (b.collectedAt ?? 0) - (a.collectedAt ?? 0))
         .flatMap((post) => flattenPostImages(post));
     }
 
-    function imageCount(minLikes = 0) {
-      let count = 0;
-      for (const post of posts.values()) {
-        if (matchesLikeFilter(post, minLikes)) count += post.images.length;
-      }
-      return count;
-    }
+    function get(key) { return byKey.get(key) ?? null; }
 
-    function postCount(minLikes = 0) {
-      let count = 0;
-      for (const post of posts.values()) {
-        if (matchesLikeFilter(post, minLikes)) count += 1;
-      }
-      return count;
-    }
+    function imageCount() { return totalImages; }
+    function postCount() { return posts.size; }
 
     function clear() {
       if (!posts.size) return false;
-      posts.clear();
+      posts.clear(); byKey.clear(); flatCache = null; totalImages = 0;
       onChange({ type: "clear", items: [] });
       return true;
     }
 
-    return { upsert, flatImages, imageCount, postCount, clear };
+    return { upsert, flatImages, get, imageCount, postCount, clear };
   }
 
   function nextAutoHarvestState({ currentCount, targetCount, noProgressRounds, elapsedMs, stillForYou, moved }) {
@@ -493,24 +547,6 @@
     return null;
   }
 
-  function timelineSavedBadgePosition(rect, viewportWidth, viewportHeight) {
-    const width = Number(viewportWidth);
-    const height = Number(viewportHeight);
-    if (!rect || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
-    const left = Number(rect.left);
-    const top = Number(rect.top);
-    const right = Number(rect.right);
-    const bottom = Number(rect.bottom);
-    const rectWidth = Number(rect.width);
-    const rectHeight = Number(rect.height);
-    if (![left, top, right, bottom, rectWidth, rectHeight].every(Number.isFinite)) return null;
-    if (rectWidth <= 8 || rectHeight <= 8 || bottom <= 0 || right <= 0 || top >= height || left >= width) return null;
-    return {
-      left: Math.max(4, Math.min(width - 27, right - 28)),
-      top: Math.max(4, Math.min(height - 27, top + 7)),
-    };
-  }
-
   if (globalThis.__LAKOMICS_TEST__) {
     globalThis.LakomicsXGallery = {
       AUTO_TARGET_NEW_IMAGES,
@@ -541,7 +577,11 @@
       pruneSavedEntries,
       savedXMediaKey,
       isSavedMediaState,
-      timelineSavedBadgePosition,
+      normalizeDisinterestEvents,
+      migrateDisinterestCounts,
+      decayedDisinterest,
+      DISINTEREST_HALF_LIFE_MS,
+      GALLERY_MAX_RETAINED_IMAGES,
       stableTimelineBadgeHost,
       compareGalleryItems,
       getArtistAffinityCount,
@@ -587,7 +627,12 @@
     const timelineSavedBadges = new WeakMap();
     const dismissedMedia = new Map();
     const artistAffinity = new Map();
+    // author → decayed "관심없음" weight, rebuilt from the stored events.
     const artistDisinterest = new Map();
+    let disinterestEvents = {};
+    const renderedCards = new Map();
+    const markerQueue = new Set(), photoSignatures = new WeakMap();
+    let markerFlushQueued = false, libraryLoadedAt = 0, undoTimer = null, resetConfirmTimer = null;
 
     const ui = createGalleryUi();
     globalThis.LakomicsXGalleryRuntime = { markSaved };
@@ -595,6 +640,8 @@
       storeVersion += 1;
       if (change?.type === "clear") {
         resetGalleryRender();
+      } else if (change?.type === "evict") {
+        for (const item of change.items) pendingGalleryItems.delete(galleryItemKey(item));
       } else {
         for (const item of change?.items ?? []) {
           const key = galleryItemKey(item);
@@ -604,13 +651,90 @@
         }
       }
       updateCounters();
-      if (overlayOpen && !harvest?.running) queueGalleryRender();
+      if (overlayOpen) queueGalleryRender();
+    }, {
+      maxImages: GALLERY_MAX_RETAINED_IMAGES,
+      keep: (item) => renderedGalleryKeys.has(galleryItemKey(item)) || isSavedMediaState(
+        item.imageUrl, item.tweetId, item.imageIndex,
+        savedMedia, librarySavedKeys, librarySavedIndexAuthoritative, sessionSavedMedia),
     });
-    void loadSavedMedia();
+
+    // Every tab reads and writes the same four records. Writes are
+    // read-modify-write of the stored value (never a stale whole-map snapshot), and
+    // storage.onChanged mirrors other tabs' writes into this one.
+    const STORED = {
+      [SAVED_STORAGE_KEY]: {
+        normalize: (value) => pruneSavedEntries(value),
+        current: () => Object.fromEntries(savedMedia),
+        apply: (value) => { replaceMap(savedMedia, value); refreshTimelineSavedMarkers(document); refreshSavedMarkers(); },
+      },
+      [DISMISSED_STORAGE_KEY]: {
+        normalize: (value) => pruneSavedEntries(value),
+        current: () => Object.fromEntries(dismissedMedia),
+        apply: (value) => { replaceMap(dismissedMedia, value); removeDismissedCards(); updateCounters(); },
+      },
+      [ARTIST_AFFINITY_STORAGE_KEY]: {
+        normalize: (value) => pruneArtistAffinity(value),
+        current: () => Object.fromEntries(artistAffinity),
+        apply: (value) => { replaceMap(artistAffinity, value); refreshRenderedMetadata(); updateCounters(); },
+      },
+      [ARTIST_DISINTEREST_STORAGE_KEY]: {
+        normalize: (value) => normalizeDisinterestEvents(value),
+        current: () => disinterestEvents,
+        apply: (value) => { disinterestEvents = value; rebuildDisinterest(); refreshRenderedMetadata(); updateCounters(); },
+      },
+    };
+    const storageChains = new Map();
+    function replaceMap(map, value) {
+      map.clear();
+      for (const [key, entry] of Object.entries(value)) map.set(key, typeof entry === "number" ? entry : Number(entry));
+    }
+    function rebuildDisinterest(now = Date.now()) {
+      artistDisinterest.clear();
+      for (const [author, events] of Object.entries(disinterestEvents)) artistDisinterest.set(author, decayedDisinterest(events, now));
+    }
+    function updateStored(key, mutate) {
+      const spec = STORED[key];
+      spec.apply(spec.normalize(mutate(structuredClone(spec.current()))));
+      // X tabs share one origin, so a Web Lock serializes the read-modify-write across
+      // tabs; without it two tabs saving at once would each drop the other's entry.
+      const write = async () => {
+        const next = spec.normalize(mutate(spec.normalize((await storageGet(key))?.[key])));
+        await storageSet({ [key]: next });
+        spec.apply(next);
+        return next;
+      };
+      const locks = globalThis.navigator?.locks;
+      const run = (storageChains.get(key) ?? Promise.resolve())
+        .then(() => typeof locks?.request === "function" ? locks.request(`lakomics-x-gallery:${key}`, write) : write());
+      storageChains.set(key, run.catch(() => {}));
+      return run;
+    }
+    async function loadStored(key) {
+      const spec = STORED[key];
+      let raw = (await storageGet(key))?.[key];
+      if (key === ARTIST_DISINTEREST_STORAGE_KEY && raw === undefined) {
+        const legacy = (await storageGet(ARTIST_DISINTEREST_V1_STORAGE_KEY))?.[ARTIST_DISINTEREST_V1_STORAGE_KEY];
+        if (legacy !== undefined) {
+          raw = migrateDisinterestCounts(legacy);
+          await storageSet({ [key]: raw });
+          await storageRemove(ARTIST_DISINTEREST_V1_STORAGE_KEY);
+        }
+      }
+      const value = spec.normalize(raw);
+      spec.apply(value);
+      if (raw !== undefined && JSON.stringify(value) !== JSON.stringify(raw)) void storageSet({ [key]: value });
+    }
+    for (const key of Object.keys(STORED)) void loadStored(key);
     void loadLibrarySavedIndex();
-    void loadDismissedMedia();
-    void loadArtistAffinity();
-    void loadArtistDisinterest();
+    try {
+      chrome.storage?.onChanged?.addListener?.((changes, area) => {
+        if (area !== "local") return;
+        for (const [key, spec] of Object.entries(STORED)) {
+          if (changes[key]) spec.apply(spec.normalize(changes[key].newValue));
+        }
+      });
+    } catch {}
 
     const intersectionObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
@@ -645,6 +769,16 @@
           if (nested.length) timelineTouched = true;
           for (const article of nested) observeArticle(article);
         }
+        // X virtualizes the timeline; stop observing tweets it has removed.
+        for (const node of mutation.removedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          const removed = node.matches?.(TWEET_SELECTOR) ? [node] : Array.from(node.querySelectorAll?.(TWEET_SELECTOR) ?? []);
+          for (const article of removed) {
+            if (article.isConnected) continue;
+            intersectionObserver.unobserve(article);
+            observedArticles.delete(article); visibleArticles.delete(article); pendingArticles.delete(article);
+          }
+        }
         if (timelineTouched) timelineVersion += 1;
       }
       if (routeMayHaveChanged) queueRouteSync();
@@ -659,13 +793,38 @@
     updateCounters();
 
     window.addEventListener("popstate", syncRouteState);
-    window.addEventListener("focus", () => { void loadLibrarySavedIndex(); });
+    // Returning to the window refreshes the server's saved index at most once a minute.
+    window.addEventListener("focus", () => {
+      if (document.visibilityState === "hidden" || Date.now() - libraryLoadedAt < LIBRARY_INDEX_MIN_INTERVAL_MS) return;
+      void loadLibrarySavedIndex();
+    });
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && overlayOpen) closeGallery();
+      if (!overlayOpen) return;
+      // Escape closes only the innermost surface: a save menu opened over a gallery
+      // image handles it and the gallery stays open.
+      if (event.key === "Escape" && !document.getElementById("lakomics-arc-collector")) closeGallery();
+      if (event.key === "Tab" && !document.getElementById("lakomics-arc-collector")) trapFocus(event);
     }, true);
 
     ui.trigger.addEventListener("click", () => overlayOpen ? closeGallery() : openGallery());
     ui.close.addEventListener("click", closeGallery);
+    ui.reset.addEventListener("click", () => {
+      if (resetConfirmTimer === null) {
+        ui.reset.textContent = "한 번 더 누르면 초기화";
+        ui.reset.classList.add("is-confirming");
+        resetConfirmTimer = window.setTimeout(clearResetConfirm, 4000);
+        return;
+      }
+      clearResetConfirm();
+      void Promise.all([
+        updateStored(ARTIST_AFFINITY_STORAGE_KEY, () => ({})),
+        updateStored(ARTIST_DISINTEREST_STORAGE_KEY, () => ({})),
+        updateStored(DISMISSED_STORAGE_KEY, () => ({})),
+      ]);
+      if (overlayOpen) { resetGalleryRender(); renderInitialGallery(); }
+      updateHarvestUi("학습 기록을 초기화했습니다");
+    });
+    ui.toastUndo.addEventListener("click", () => { const undo = ui.toast.undo; hideUndo(); undo?.(); });
     ui.clear.addEventListener("click", () => {
       if (harvest?.running) stopAutoHarvest("자동 수집을 중지했습니다", true);
       store.clear();
@@ -695,9 +854,43 @@
       return sortGalleryItems(items, galleryFilterMode, artistAffinity, artistDisinterest);
     }
 
+    function clearResetConfirm() {
+      window.clearTimeout(resetConfirmTimer); resetConfirmTimer = null;
+      ui.reset.textContent = "학습 초기화"; ui.reset.classList.remove("is-confirming");
+    }
+
+    function trapFocus(event) {
+      const focusable = Array.from(ui.overlay.querySelectorAll("button, select, a[href]"))
+        .filter((node) => !node.hidden && !node.disabled && !node.closest("[hidden]"));
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable.at(-1), active = document.activeElement;
+      if (!ui.overlay.contains(active)) { event.preventDefault(); first.focus(); }
+      else if (event.shiftKey && active === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
+    }
+
+    // Saved badges on the timeline are refreshed once per frame, and only for tweets
+    // whose photos changed; X mutates tweets constantly (counters, timers).
+    function queueMarkers(article) {
+      markerQueue.add(article);
+      if (markerFlushQueued) return;
+      markerFlushQueued = true;
+      requestAnimationFrame(() => {
+        markerFlushQueued = false;
+        for (const queued of markerQueue) {
+          if (!queued.isConnected) continue;
+          const signature = Array.from(queued.querySelectorAll(PHOTO_SELECTOR), (image) => image.currentSrc || image.src || "").join("|");
+          if (photoSignatures.get(queued) === signature) continue;
+          photoSignatures.set(queued, signature);
+          refreshTimelineSavedMarkers(queued);
+        }
+        markerQueue.clear();
+      });
+    }
+
     function observeArticle(article) {
       if (!article) return;
-      refreshTimelineSavedMarkers(article);
+      queueMarkers(article);
       if (observedArticles.has(article)) return;
       observedArticles.add(article);
       intersectionObserver.observe(article);
@@ -743,7 +936,7 @@
       const pathname = location.pathname;
       const routeChanged = pathname !== lastPathname;
       lastPathname = pathname;
-      ui.trigger.hidden = !isHomeRoute(pathname);
+      ui.trigger.hidden = overlayOpen || !isHomeRoute(pathname);
       if (!isHomeRoute(pathname) && overlayOpen) closeGallery();
       if (harvest?.running && !isForYouTimeline(document)) {
         stopAutoHarvest("추천 탭을 벗어나 자동 수집을 중지했습니다", true);
@@ -757,7 +950,9 @@
     function openGallery() {
       overlayOpen = true;
       ui.overlay.hidden = false;
+      ui.trigger.hidden = true;
       ui.trigger.setAttribute("aria-expanded", "true");
+      rebuildDisinterest();
       resetGalleryRender();
       renderInitialGallery();
       ui.close.focus({ preventScroll: true });
@@ -767,16 +962,19 @@
       overlayOpen = false;
       if (harvest?.running) stopAutoHarvest("자동 수집을 중지했습니다", true);
       ui.overlay.hidden = true;
+      hideUndo();
+      ui.trigger.hidden = !isHomeRoute(location.pathname);
       ui.trigger.setAttribute("aria-expanded", "false");
-      ui.trigger.focus({ preventScroll: true });
+      if (!ui.trigger.hidden) ui.trigger.focus({ preventScroll: true });
     }
 
+    // New images also appear while auto-harvest runs; cards are inserted in place.
     function queueGalleryRender() {
-      if (galleryRenderQueued || !overlayOpen || harvest?.running) return;
+      if (galleryRenderQueued || !overlayOpen) return;
       galleryRenderQueued = true;
       requestAnimationFrame(() => {
         galleryRenderQueued = false;
-        if (!overlayOpen || harvest?.running) return;
+        if (!overlayOpen) return;
         const items = sortCurrentGalleryItems(
           Array.from(pendingGalleryItems.values()).filter(matchesCurrentGalleryFilter),
         );
@@ -802,23 +1000,23 @@
       const filteredImageCount = filteredItems.length;
       const filteredPostCount = new Set(filteredItems.map((item) => String(item.tweetId || ""))).size;
       ui.triggerCount.textContent = String(imageCount);
+      const partial = `이미지 ${filteredImageCount}/${imageCount}장 · 게시물 ${filteredPostCount}개`;
       if (galleryFilterMode === GALLERY_FILTER_RECOMMENDED) {
-        ui.summary.textContent = `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · 🎨 추천`;
+        ui.summary.textContent = `${partial} · 추천`;
       } else if (galleryFilterMode === GALLERY_FILTER_ARTISTS) {
         const filteredArtistCount = new Set(filteredItems.map((item) => normalizeAuthorKey(item.username || item.author))).size;
-        ui.summary.textContent = `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · 👤 관심 작가 ${filteredArtistCount}명`;
+        ui.summary.textContent = `${partial} · 관심 작가 ${filteredArtistCount}명`;
       } else {
         const numericFilter = Number(galleryFilterMode) || 0;
         ui.summary.textContent = numericFilter
-          ? `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · ♥ ${formatLikeCount(numericFilter)}+`
+          ? `${partial} · ♥ ${formatLikeCount(numericFilter)}+`
           : filteredImageCount === imageCount
-            ? `${imageCount} images · ${store.postCount()} posts`
-            : `${filteredImageCount}/${imageCount} images · ${filteredPostCount} posts · 관심없음 제외`;
+            ? `이미지 ${imageCount}장 · 게시물 ${store.postCount()}개`
+            : `${partial} · 관심없음 제외`;
       }
       ui.trigger.classList.toggle("is-empty", imageCount === 0);
-      ui.trigger.title = isForYouTimeline(document)
-        ? `추천 이미지 ${imageCount}개 — 추천 피드를 보며 수집 중`
-        : `추천 이미지 ${imageCount}개 — 팔로잉 탭에서는 수집 일시정지`;
+      ui.trigger.setAttribute("aria-label", `추천 이미지 갤러리 · ${imageCount}장`);
+      ui.trigger.setAttribute("aria-description", isForYouTimeline(document) ? "추천 피드를 보며 수집 중" : "팔로잉 탭에서는 수집 일시정지");
       updateHarvestUi();
     }
 
@@ -841,6 +1039,7 @@
 
     function resetGalleryRender() {
       renderedGalleryKeys.clear();
+      renderedCards.clear();
       pendingGalleryItems.clear();
       ui.grid.replaceChildren();
       ui.empty.hidden = store.flatImages().some(matchesCurrentGalleryFilter);
@@ -874,8 +1073,9 @@
       const fragment = document.createDocumentFragment();
       for (const item of fresh) {
         const key = galleryItemKey(item);
-        renderedGalleryKeys.add(key);
-        fragment.append(createCard(item));
+        const card = createCard(item);
+        renderedGalleryKeys.add(key); renderedCards.set(key, card);
+        fragment.append(card);
       }
       ui.grid.append(fragment);
       ui.empty.hidden = true;
@@ -895,13 +1095,13 @@
         let before = null;
         for (const child of ui.grid.children) {
           const childKey = child.getAttribute("data-lakomics-gallery-key");
-          const childItem = childKey ? store.flatImages().find((entry) => galleryItemKey(entry) === childKey) : null;
+          const childItem = childKey ? store.get(childKey) : null;
           if (!childItem) continue;
           if (compareGalleryItems(item, childItem, artistAffinity, galleryFilterMode, artistDisinterest) < 0) continue;
           before = child;
           break;
         }
-        renderedGalleryKeys.add(key);
+        renderedGalleryKeys.add(key); renderedCards.set(key, card);
         ui.grid.insertBefore(card, before);
       }
       ui.empty.hidden = true;
@@ -930,7 +1130,7 @@
       imageLink.href = item.postUrl;
       imageLink.target = "_blank";
       imageLink.rel = "noopener noreferrer";
-      imageLink.title = "두 번 탭하여 원문 열기";
+      imageLink.setAttribute("aria-description", "두 번 탭하면 원문이 열리고 길게 누르면 저장합니다");
       let lastImageTapAt = 0;
       imageLink.addEventListener("click", (event) => {
         event.preventDefault();
@@ -962,100 +1162,90 @@
       const savedBadge = document.createElement("span");
       savedBadge.className = "lakomics-x-gallery-saved-badge";
       savedBadge.textContent = "✓";
-      savedBadge.title = "Lakomics 서버 저장됨";
       savedBadge.setAttribute("aria-label", "Lakomics 서버 저장됨");
 
       const recommendedBadge = document.createElement("span");
       recommendedBadge.className = "lakomics-x-gallery-recommended-badge";
-      recommendedBadge.textContent = "🎨 추천";
-      recommendedBadge.hidden = recommendedScore < RECOMMENDED_FILTER_MIN_SCORE;
-      recommendedBadge.title = `추천 점수 ${recommendedScore}`;
 
       const footer = document.createElement("div");
       footer.className = "lakomics-x-gallery-footer";
       const author = document.createElement("span");
       author.className = "lakomics-x-gallery-author";
       author.textContent = item.author;
-      const affinityCount = getArtistAffinityCount(item, artistAffinity);
       const affinity = document.createElement("span");
       affinity.className = "lakomics-x-gallery-affinity";
-      affinity.hidden = affinityCount <= 0;
-      affinity.textContent = `👤 ${affinityCount}`;
-      affinity.title = affinityCount > 0 ? `관심 작가 저장 ${affinityCount}회` : "관심 작가 아님";
+      const disinterest = document.createElement("span");
+      disinterest.className = "lakomics-x-gallery-disinterest";
+      disinterest.textContent = "관심없음";
       const likes = document.createElement("span");
       likes.className = "lakomics-x-gallery-likes";
-      likes.textContent = `♥ ${formatLikeCount(item.likeCount)}`;
-      likes.title = Number.isFinite(Number(item.likeCount)) ? `좋아요 ${Number(item.likeCount).toLocaleString()}개` : "좋아요 수를 읽지 못함";
       const noInterest = document.createElement("button");
       noInterest.className = "lakomics-x-gallery-no-interest";
       noInterest.type = "button";
       noInterest.textContent = "⊘";
-      noInterest.title = "관심없음 · 이 이미지를 다시 표시하지 않음";
-      noInterest.setAttribute("aria-label", "관심없음");
+      noInterest.setAttribute("aria-label", "관심없음 · 이 이미지를 숨기고 이 작가의 추천을 낮춤");
       noInterest.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         markNotInterested(item, card);
       });
-      const hint = document.createElement("span");
-      hint.className = "lakomics-x-gallery-hint";
-      hint.textContent = "길게 눌러 저장 · 두번 탭 원문";
-      footer.append(author, affinity, recommendedBadge, likes, noInterest, hint);
+      footer.append(author, affinity, disinterest, recommendedBadge, likes, noInterest);
       card.append(imageLink, savedBadge, footer);
+      paintCardMetadata(card, item);
       return card;
     }
 
+    // Score and artist state are visible text, never hover-only.
+    function paintCardMetadata(card, item) {
+      const count = Number(item.likeCount);
+      const recommendedScore = getRecommendedScore(item, artistAffinity, artistDisinterest);
+      card.setAttribute("data-lakomics-like-count", Number.isFinite(count) ? String(count) : "");
+      card.setAttribute("data-lakomics-recommended-score", String(recommendedScore));
+      const affinityCount = getArtistAffinityCount(item, artistAffinity);
+      const affinity = card.querySelector(".lakomics-x-gallery-affinity");
+      affinity.hidden = affinityCount <= 0;
+      affinity.textContent = `관심 ${affinityCount}`;
+      card.querySelector(".lakomics-x-gallery-disinterest").hidden = getArtistDisinterestScore(item, artistDisinterest) <= 0;
+      const likes = card.querySelector(".lakomics-x-gallery-likes");
+      likes.textContent = `♥ ${formatLikeCount(item.likeCount)}`;
+      likes.setAttribute("aria-label", Number.isFinite(count) ? `좋아요 ${count.toLocaleString()}개` : "좋아요 수를 읽지 못함");
+      const badge = card.querySelector(".lakomics-x-gallery-recommended-badge");
+      badge.hidden = recommendedScore < RECOMMENDED_FILTER_MIN_SCORE;
+      badge.textContent = `추천 ${recommendedScore}`;
+    }
+
     function updateRenderedCardMetadata(item) {
-      const key = galleryItemKey(item);
-      if (!key) return;
-      for (const card of ui.grid.children) {
-        if (card.getAttribute("data-lakomics-gallery-key") !== key) continue;
-        const count = Number(item.likeCount);
-        const recommendedScore = getRecommendedScore(item, artistAffinity, artistDisinterest);
-        card.setAttribute("data-lakomics-like-count", Number.isFinite(count) ? String(count) : "");
-        card.setAttribute("data-lakomics-recommended-score", String(recommendedScore));
-        const affinityCount = getArtistAffinityCount(item, artistAffinity);
-        const affinity = card.querySelector(".lakomics-x-gallery-affinity");
-        if (affinity) {
-          affinity.hidden = affinityCount <= 0;
-          affinity.textContent = `👤 ${affinityCount}`;
-          affinity.title = affinityCount > 0 ? `관심 작가 저장 ${affinityCount}회` : "관심 작가 아님";
-        }
-        const likes = card.querySelector(".lakomics-x-gallery-likes");
-        if (likes) {
-          likes.textContent = `♥ ${formatLikeCount(item.likeCount)}`;
-          likes.title = Number.isFinite(count) ? `좋아요 ${count.toLocaleString()}개` : "좋아요 수를 읽지 못함";
-        }
-        const recommendedBadge = card.querySelector(".lakomics-x-gallery-recommended-badge");
-        if (recommendedBadge) {
-          recommendedBadge.hidden = recommendedScore < RECOMMENDED_FILTER_MIN_SCORE;
-          recommendedBadge.title = `추천 점수 ${recommendedScore}`;
-        }
-        break;
+      const card = renderedCards.get(galleryItemKey(item));
+      if (card) paintCardMetadata(card, item);
+    }
+
+    function refreshRenderedMetadata() {
+      for (const [key, card] of renderedCards) {
+        const item = store.get(key);
+        if (item) paintCardMetadata(card, item);
       }
     }
 
-    async function loadSavedMedia() {
-      const stored = await storageGet(SAVED_STORAGE_KEY);
-      const pruned = pruneSavedEntries(stored?.[SAVED_STORAGE_KEY]);
-      savedMedia.clear();
-      for (const [url, timestamp] of Object.entries(pruned)) savedMedia.set(url, Number(timestamp));
-      refreshTimelineSavedMarkers(document);
-      if (overlayOpen) refreshSavedMarkers();
-      if (Object.keys(pruned).length !== Object.keys(stored?.[SAVED_STORAGE_KEY] ?? {}).length) {
-        void storageSet({ [SAVED_STORAGE_KEY]: pruned });
+    function removeDismissedCards() {
+      for (const [key, card] of renderedCards) {
+        const item = store.get(key);
+        if (!item || !isDismissedMedia(item, dismissedMedia)) continue;
+        card.remove(); renderedCards.delete(key); renderedGalleryKeys.delete(key);
       }
     }
 
     async function loadLibrarySavedIndex() {
       if (librarySavedLoadPromise) return librarySavedLoadPromise;
+      libraryLoadedAt = Date.now();
       const promise = runtimeMessage({ type: "saved-index:get" })
         .then((response) => {
           if (!response?.ok || response.authoritative !== true || !Array.isArray(response.savedKeys)) return false;
+          const keys = response.savedKeys.filter((key) => typeof key === "string" && /^\d+:\d+$/.test(key));
+          // An unchanged index needs no rescan of every timeline photo.
+          const unchanged = librarySavedIndexAuthoritative && keys.length === librarySavedKeys.size && keys.every((key) => librarySavedKeys.has(key));
+          if (unchanged) return true;
           librarySavedKeys.clear();
-          for (const key of response.savedKeys) {
-            if (typeof key === "string" && /^\d+:\d+$/.test(key)) librarySavedKeys.add(key);
-          }
+          for (const key of keys) librarySavedKeys.add(key);
           librarySavedIndexAuthoritative = true;
           refreshSavedMarkers();
           refreshTimelineSavedMarkers(document);
@@ -1067,56 +1257,6 @@
         });
       librarySavedLoadPromise = promise;
       return promise;
-    }
-
-    async function loadArtistAffinity() {
-      const stored = await storageGet(ARTIST_AFFINITY_STORAGE_KEY);
-      const pruned = pruneArtistAffinity(stored?.[ARTIST_AFFINITY_STORAGE_KEY]);
-      artistAffinity.clear();
-      for (const [author, count] of Object.entries(pruned)) artistAffinity.set(author, Number(count));
-      if (overlayOpen) {
-        resetGalleryRender();
-        renderInitialGallery();
-      }
-      updateCounters();
-      if (Object.keys(pruned).length !== Object.keys(stored?.[ARTIST_AFFINITY_STORAGE_KEY] ?? {}).length) {
-        void storageSet({ [ARTIST_AFFINITY_STORAGE_KEY]: pruned });
-      }
-    }
-
-    async function loadDismissedMedia() {
-      const stored = await storageGet(DISMISSED_STORAGE_KEY);
-      const pruned = pruneSavedEntries(stored?.[DISMISSED_STORAGE_KEY]);
-      dismissedMedia.clear();
-      for (const [url, timestamp] of Object.entries(pruned)) dismissedMedia.set(url, Number(timestamp));
-      if (overlayOpen) {
-        resetGalleryRender();
-        renderInitialGallery();
-      }
-      updateCounters();
-      if (Object.keys(pruned).length !== Object.keys(stored?.[DISMISSED_STORAGE_KEY] ?? {}).length) {
-        void storageSet({ [DISMISSED_STORAGE_KEY]: pruned });
-      }
-    }
-
-    async function loadArtistDisinterest() {
-      const stored = await storageGet(ARTIST_DISINTEREST_STORAGE_KEY);
-      const pruned = pruneArtistAffinity(stored?.[ARTIST_DISINTEREST_STORAGE_KEY]);
-      artistDisinterest.clear();
-      for (const [author, count] of Object.entries(pruned)) artistDisinterest.set(author, Number(count));
-      if (overlayOpen) {
-        for (const item of pendingGalleryItems.values()) updateRenderedCardMetadata(item);
-        for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
-          const key = card.getAttribute('data-lakomics-gallery-key');
-          if (!key) continue;
-          const item = store.flatImages().find((entry) => galleryItemKey(entry) === key);
-          if (item) updateRenderedCardMetadata(item);
-        }
-      }
-      updateCounters();
-      if (Object.keys(pruned).length !== Object.keys(stored?.[ARTIST_DISINTEREST_STORAGE_KEY] ?? {}).length) {
-        void storageSet({ [ARTIST_DISINTEREST_STORAGE_KEY]: pruned });
-      }
     }
 
     function resolveSavedAuthorKey(mediaUrl, meta = {}) {
@@ -1136,41 +1276,30 @@
       const normalized = typeof normalizer === "function" ? normalizer(mediaUrl) : mediaUrl;
       if (!normalized) return;
       sessionSavedMedia.add(normalized);
-      if (meta?.status !== "downloaded") {
-        const libraryKey = savedXMediaKey(meta?.postId, meta?.mediaIndex);
-        if (libraryKey) librarySavedKeys.add(libraryKey);
-      }
+      const libraryKey = savedXMediaKey(meta?.postId, meta?.mediaIndex);
+      if (libraryKey) librarySavedKeys.add(libraryKey);
       const wasAlreadySaved = savedMedia.has(normalized);
-      savedMedia.set(normalized, Date.now());
-      const snapshot = pruneSavedEntries(Object.fromEntries(savedMedia));
-      savedMedia.clear();
-      for (const [url, timestamp] of Object.entries(snapshot)) savedMedia.set(url, Number(timestamp));
-      void storageSet({ [SAVED_STORAGE_KEY]: snapshot });
+      const now = Date.now();
+      void updateStored(SAVED_STORAGE_KEY, (value) => ({ ...value, [normalized]: now }));
 
+      // Timeline saves pass the author; gallery saves can also be resolved from the card.
       const authorKey = resolveSavedAuthorKey(normalized, meta);
       if (authorKey && !wasAlreadySaved) {
-        artistAffinity.set(authorKey, Math.max(1, Number(artistAffinity.get(authorKey) || 0) + 1));
-        const affinitySnapshot = pruneArtistAffinity(Object.fromEntries(artistAffinity));
-        artistAffinity.clear();
-        for (const [author, count] of Object.entries(affinitySnapshot)) artistAffinity.set(author, Number(count));
-        void storageSet({ [ARTIST_AFFINITY_STORAGE_KEY]: affinitySnapshot });
-      }
-
-      for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
-        if (card.getAttribute('data-lakomics-media-url') === normalized) card.classList.add('is-saved');
-      }
-      refreshTimelineSavedMarkers(document, normalized);
-      if (overlayOpen) {
-        // Do not re-sort/rebuild the gallery after a save. The new preference order
-        // is applied the next time the gallery/filter is reopened or changed.
-        for (const item of pendingGalleryItems.values()) updateRenderedCardMetadata(item);
-        for (const card of ui.grid.querySelectorAll('.lakomics-x-gallery-card')) {
-          const key = card.getAttribute('data-lakomics-gallery-key');
-          if (!key) continue;
-          const item = store.flatImages().find((entry) => galleryItemKey(entry) === key);
-          if (item) updateRenderedCardMetadata(item);
+        void updateStored(ARTIST_AFFINITY_STORAGE_KEY, (value) => ({ ...value, [authorKey]: Math.max(1, Number(value[authorKey] || 0) + 1) }));
+        // A save cancels that artist's newest "관심없음".
+        if (disinterestEvents[authorKey]?.length) {
+          void updateStored(ARTIST_DISINTEREST_STORAGE_KEY, (value) => {
+            const events = (value[authorKey] ?? []).slice(0, -1);
+            const next = { ...value };
+            if (events.length) next[authorKey] = events; else delete next[authorKey];
+            return next;
+          });
         }
       }
+      for (const [key, card] of renderedCards) {
+        if (store.get(key)?.imageUrl === normalized) card.classList.add("is-saved");
+      }
+      refreshTimelineSavedMarkers(document, normalized);
       updateCounters();
     }
 
@@ -1179,26 +1308,43 @@
       const normalized = typeof normalizer === "function" ? normalizer(item?.imageUrl) : item?.imageUrl;
       if (!normalized) return;
       const wasAlreadyDismissed = dismissedMedia.has(normalized);
-      dismissedMedia.set(normalized, Date.now());
-      const dismissedSnapshot = pruneSavedEntries(Object.fromEntries(dismissedMedia));
-      dismissedMedia.clear();
-      for (const [url, timestamp] of Object.entries(dismissedSnapshot)) dismissedMedia.set(url, Number(timestamp));
-      void storageSet({ [DISMISSED_STORAGE_KEY]: dismissedSnapshot });
-
+      const now = Date.now();
+      void updateStored(DISMISSED_STORAGE_KEY, (value) => ({ ...value, [normalized]: now }));
       const authorKey = normalizeAuthorKey(item?.username || item?.author);
-      if (authorKey && !wasAlreadyDismissed) {
-        artistDisinterest.set(authorKey, Math.max(1, Number(artistDisinterest.get(authorKey) || 0) + 1));
-        const disinterestSnapshot = pruneArtistAffinity(Object.fromEntries(artistDisinterest));
-        artistDisinterest.clear();
-        for (const [author, count] of Object.entries(disinterestSnapshot)) artistDisinterest.set(author, Number(count));
-        void storageSet({ [ARTIST_DISINTEREST_STORAGE_KEY]: disinterestSnapshot });
-      }
+      const addsEvent = Boolean(authorKey && !wasAlreadyDismissed);
+      if (addsEvent) void updateStored(ARTIST_DISINTEREST_STORAGE_KEY, (value) => ({ ...value, [authorKey]: [...(value[authorKey] ?? []), now] }));
 
       const key = galleryItemKey(item);
-      if (key) pendingGalleryItems.delete(key);
+      if (key) { pendingGalleryItems.delete(key); renderedCards.delete(key); renderedGalleryKeys.delete(key); }
       card?.remove?.();
       updateCounters();
       queueGalleryLoadMore();
+      showUndo(() => {
+        void updateStored(DISMISSED_STORAGE_KEY, (value) => { const next = { ...value }; delete next[normalized]; return next; });
+        if (addsEvent) {
+          void updateStored(ARTIST_DISINTEREST_STORAGE_KEY, (value) => {
+            const events = (value[authorKey] ?? []).filter((at) => at !== now);
+            const next = { ...value };
+            if (events.length) next[authorKey] = events; else delete next[authorKey];
+            return next;
+          });
+        }
+        if (overlayOpen) insertGalleryItemsSorted([item]);
+        updateCounters();
+      });
+    }
+
+    function showUndo(undo) {
+      window.clearTimeout(undoTimer);
+      ui.toast.undo = undo;
+      ui.toastText.textContent = "숨김";
+      ui.toast.hidden = false;
+      undoTimer = window.setTimeout(hideUndo, UNDO_MS);
+    }
+
+    function hideUndo() {
+      window.clearTimeout(undoTimer); undoTimer = null;
+      ui.toast.hidden = true; ui.toast.undo = null;
     }
 
     function timelineImageMediaUrl(image) {
@@ -1290,6 +1436,7 @@
       const scrollTop = getScrollTop();
       harvest = {
         running: true,
+        startPath: location.pathname,
         startScrollTop: scrollTop,
         startImageCount: store.imageCount(),
         targetImageCount: store.imageCount() + AUTO_TARGET_NEW_IMAGES,
@@ -1352,13 +1499,14 @@
       harvestLoopToken += 1;
       harvest = null;
       updateHarvestUi(reason);
-      if (overlayOpen) {
-        resetGalleryRender();
-        renderInitialGallery();
-      }
-      if (restorePosition && Number.isFinite(current.startScrollTop)) {
+      // Cards were inserted during the run, so the gallery keeps its scroll position.
+      if (overlayOpen) queueGalleryRender();
+      // Return to the start only on the timeline the harvest scrolled; a stop caused
+      // by opening a post or another route must never move that page.
+      const sameTimeline = () => location.pathname === current.startPath && isForYouTimeline(document);
+      if (restorePosition && Number.isFinite(current.startScrollTop) && sameTimeline()) {
         window.setTimeout(() => {
-          setScrollTop(current.startScrollTop);
+          if (sameTimeline()) setScrollTop(current.startScrollTop);
         }, 120);
       }
     }
@@ -1422,6 +1570,17 @@
     });
   }
 
+  function storageRemove(key) {
+    return new Promise((resolve) => {
+      try {
+        const maybe = chrome.storage.local.remove([key], () => resolve());
+        if (maybe && typeof maybe.then === "function") maybe.then(resolve).catch(resolve);
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   function getScrollTop() {
     return globalThis.scrollY
       ?? document.scrollingElement?.scrollTop
@@ -1453,7 +1612,7 @@
     root.id = GALLERY_ROOT_ID;
     root.innerHTML = `
       <style>
-        #${GALLERY_ROOT_ID}, #${GALLERY_ROOT_ID} * { box-sizing: border-box; }
+        #${GALLERY_ROOT_ID}, #${GALLERY_ROOT_ID} * { box-sizing: border-box; word-break: keep-all; overflow-wrap: anywhere; }
         #${GALLERY_ROOT_ID} { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-trigger { position: fixed; top: 72px; right: 18px; min-width: 52px; height: 38px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(127,127,127,.34); border-radius: 999px; background: rgba(18,18,18,.88); color: #f2f2f2; box-shadow: 0 8px 26px rgba(0,0,0,.24); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); cursor: pointer; pointer-events: auto; font: inherit; font-size: 13px; font-weight: 650; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-trigger:hover { background: rgba(34,34,34,.94); }
@@ -1492,24 +1651,39 @@
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-likes { flex: 0 0 auto; color: #fb7185; font-size: 11px; font-weight: 750; white-space: nowrap; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-no-interest { flex: 0 0 auto; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: #71717a; cursor: pointer; font: inherit; font-size: 15px; line-height: 1; }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-no-interest:hover { background: rgba(255,255,255,.08); color: #d4d4d8; }
-        #${GALLERY_ROOT_ID} .lakomics-x-gallery-hint { margin-left: auto; color: #71717a; white-space: nowrap; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-hint { margin-top: 2px; color: #71717a; font-size: 11px; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-disinterest { flex: 0 0 auto; color: #a1a1aa; font-size: 11px; white-space: nowrap; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-disinterest[hidden] { display: none !important; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-reset { font-size: 12px; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-reset.is-confirming { color: #fca5a5 !important; background: rgba(239,68,68,.14) !important; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-toast { position: absolute; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: #1c1c20; color: #e4e4e7; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-toast[hidden] { display: none !important; }
+        #${GALLERY_ROOT_ID} .lakomics-x-gallery-undo { min-height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(29,155,240,.18); color: #8fd3ff; font: inherit; font-weight: 700; cursor: pointer; }
+        #${GALLERY_ROOT_ID} button:focus-visible, #${GALLERY_ROOT_ID} select:focus-visible, #${GALLERY_ROOT_ID} a:focus-visible { outline: 2px solid #8fd3ff; outline-offset: 2px; }
+        /* Wide desktop X keeps its search and trends in the right column near the top;
+           sit above the translation button at the bottom right instead. */
+        @media (min-width: 1000px) and (pointer: fine) {
+          #${GALLERY_ROOT_ID} .lakomics-x-gallery-trigger { top: auto; bottom: calc(128px + env(safe-area-inset-bottom, 0px)); right: 12px; }
+        }
         #${GALLERY_ROOT_ID} .lakomics-x-gallery-empty { max-width: 440px; margin: 18vh auto 0; padding: 28px; text-align: center; color: #a1a1aa; line-height: 1.6; }
         @media (max-width: 720px) {
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-trigger { top: 62px; right: 10px; height: 36px; padding: 0 10px; }
-          #${GALLERY_ROOT_ID} .lakomics-x-gallery-header { min-height: 56px; padding: 7px 10px; gap: 5px; }
+          #${GALLERY_ROOT_ID} .lakomics-x-gallery-header { min-height: 56px; padding: 7px 10px; gap: 5px; flex-wrap: wrap; }
+          #${GALLERY_ROOT_ID} .lakomics-x-gallery-title-wrap { flex: 1 0 100%; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-title { font-size: 16px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-header button { min-height: 34px; padding: 0 9px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-like-filter { width: 92px; padding-left: 8px; font-size: 11px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-scroll { padding: 8px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-grid { column-width: 160px; column-gap: 8px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-card { margin-bottom: 8px; border-radius: 9px; }
-          #${GALLERY_ROOT_ID} .lakomics-x-gallery-hint { display: none; }
+          #${GALLERY_ROOT_ID} .lakomics-x-gallery-hint { font-size: 10px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-footer { gap: 7px; }
         }
         @media (max-width: 430px) {
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-title { font-size: 15px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-auto { font-size: 11px; }
           #${GALLERY_ROOT_ID} .lakomics-x-gallery-clear { display: none; }
+          #${GALLERY_ROOT_ID} .lakomics-x-gallery-reset { font-size: 11px; padding: 0 6px !important; }
         }
         @media (prefers-reduced-motion: reduce) {
           #${GALLERY_ROOT_ID} * { scroll-behavior: auto !important; transition: none !important; }
@@ -1524,9 +1698,10 @@
           <div class="lakomics-x-gallery-title-wrap">
             <h2 class="lakomics-x-gallery-title">추천 이미지</h2>
             <div class="lakomics-x-gallery-summary">0 images · 0 posts</div>
+            <div class="lakomics-x-gallery-hint">길게 눌러 저장 · 두 번 탭해 원문 · ⊘ 숨기기</div>
             <div class="lakomics-x-gallery-harvest-status" hidden></div>
           </div>
-          <select class="lakomics-x-gallery-like-filter" aria-label="추천/좋아요 필터" title="좋아요 수 또는 추천 점수로 갤러리 필터">
+          <select class="lakomics-x-gallery-like-filter" aria-label="추천/좋아요 필터">
             <option value="0">전체</option>
             <option value="1000">♥ 1천+</option>
             <option value="5000">♥ 5천+</option>
@@ -1534,14 +1709,16 @@
             <option value="recommend">🎨 추천</option>
             <option value="artist">👤 관심 작가</option>
           </select>
-          <button class="lakomics-x-gallery-auto" type="button" title="추천 피드를 자동으로 내려 새 이미지 100장을 수집하고 시작 위치로 돌아갑니다">▶ 자동 수집</button>
-          <button class="lakomics-x-gallery-clear" type="button" title="이번 세션 수집 목록 비우기">초기화</button>
-          <button class="lakomics-x-gallery-close" type="button" aria-label="갤러리 닫기" title="닫기">✕</button>
+          <button class="lakomics-x-gallery-auto" type="button" aria-description="추천 피드를 자동으로 내려 새 이미지 100장을 모은 뒤 시작 위치로 돌아갑니다">▶ 자동 수집</button>
+          <button class="lakomics-x-gallery-clear" type="button" aria-description="이번 세션에 모은 목록만 비웁니다">목록 비우기</button>
+          <button class="lakomics-x-gallery-reset" type="button" aria-description="관심 작가, 관심없음, 숨긴 이미지 기록을 지웁니다">학습 초기화</button>
+          <button class="lakomics-x-gallery-close" type="button" aria-label="갤러리 닫기">✕</button>
         </header>
         <div class="lakomics-x-gallery-scroll">
           <div class="lakomics-x-gallery-empty">추천 탭에서 <b>자동 수집</b>을 누르면 뒤의 피드가 알아서 내려가며 새 이미지 최대 100장을 모읍니다. 평소처럼 직접 스크롤해도 계속 수집됩니다.</div>
           <div class="lakomics-x-gallery-grid"></div>
         </div>
+        <div class="lakomics-x-gallery-toast" role="status" hidden><span class="lakomics-x-gallery-toast-text">숨김</span><button class="lakomics-x-gallery-undo" type="button">되돌리기</button></div>
       </section>
     `;
     document.documentElement.append(root);
@@ -1552,6 +1729,10 @@
       overlay: root.querySelector(".lakomics-x-gallery-overlay"),
       close: root.querySelector(".lakomics-x-gallery-close"),
       clear: root.querySelector(".lakomics-x-gallery-clear"),
+      reset: root.querySelector(".lakomics-x-gallery-reset"),
+      toast: root.querySelector(".lakomics-x-gallery-toast"),
+      toastText: root.querySelector(".lakomics-x-gallery-toast-text"),
+      toastUndo: root.querySelector(".lakomics-x-gallery-undo"),
       auto: root.querySelector(".lakomics-x-gallery-auto"),
       likeFilter: root.querySelector(".lakomics-x-gallery-like-filter"),
       summary: root.querySelector(".lakomics-x-gallery-summary"),

@@ -116,7 +116,10 @@ keeps its existing dial behavior.
 - The opening press determines the edge: the left half of the visible screen
   opens the left menu, and the right half opens the right menu. There are no
   direction or close buttons. Tap outside the curved menu, including its
-  transparent corners, or press Escape to dismiss it. Saving and the opening
+  transparent corners, press Escape, or scroll the page by more than a quarter of the
+  screen (at least 120 px) from where it opened to dismiss it. A dial or center
+  gesture the browser cancelled (for example, taken over for scrolling) no longer
+  swallows the next outside tap. Saving and the opening
   finger lock prevent accidental dismissal. Short windows allow the panel to
   scroll rather than shrinking targets indefinitely.
 - Temporary saving is available by downward center drag or wheel on every live screen.
@@ -189,6 +192,35 @@ browser, paste into Connection link, and press Connect. The PC panel also offers
 Copy link and Reissue if needed. Tablet QR connection remains a separate button.
 Both methods use the existing pairing endpoint and session/profile contract;
 no server deployment, extra browser permission, or new credential type is needed.
+
+## X recommendation gallery
+
+On x.com home (For You), photos from posts that come into view are collected into
+an in-memory gallery (a reload clears it; at most 1,500 images are kept, oldest
+first, never evicting saved or rendered cards). A pill button opens it; on wide
+pointer screens the pill sits above the translation button at the bottom right,
+elsewhere under X's header at the top right, and it hides while the gallery is open.
+Filters: 전체, ♥ 1천+/5천+/1만+, 추천 and 관심 작가. **자동 수집** scrolls the For You
+feed until 100 new images, 120 s or no progress, adding cards to the open gallery as
+they arrive; it returns to the starting scroll position only when it stopped on the
+same timeline, never after opening a post or another route.
+
+Long-press a card to save it with the edge menu, double-tap to open the post, or ⊘
+to hide it (a "숨김 · 되돌리기" toast offers undo for 6 seconds). Cards show the
+recommendation score as text ("추천 N"), the artist's saved count ("관심 N") and
+"관심없음" when that artist is penalised. The score is the like tier (1천/5천/1만/3만
+→ 1-4) plus the artist tier (1/3/6/12 saves → 1-4) minus the disinterest tier, clamped
+to 0-8; 추천 shows scores of 2 or more. Each ⊘ records a dated disinterest event
+whose weight halves every 30 days (tiers at 0.5/2.5/6), and saving that artist
+cancels the newest event. Saves from the timeline count toward the artist too.
+**학습 초기화** clears artist affinity, disinterest and hidden images after a second
+press. Saved, hidden, affinity and disinterest records are shared by all X tabs:
+writes are read-modify-write under a Web Lock and storage changes are mirrored into
+every open tab. Legacy disinterest counts migrate once to dated events. The saved
+index from the server refreshes on window focus at most once a minute. Escape
+closes the save menu first, then the gallery; Tab stays within the open gallery.
+There are no hover tooltips; hints and state are visible text or accessible
+descriptions.
 
 ## X saving and translation
 

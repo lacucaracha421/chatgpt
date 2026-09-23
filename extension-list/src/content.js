@@ -649,7 +649,7 @@
         if (result?.ok) {
           // The worker accepted this exact capture; its side effects apply even if the
           // page navigated meanwhile, and it is never resubmitted.
-          globalThis.LakomicsXGalleryRuntime?.markSaved?.(payload.candidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
+          globalThis.LakomicsXGalleryRuntime?.markSaved?.(payload.candidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl, author: candidate.author });
           const like = autoLike ? await autoLikePost({ postId: candidate.postId }).catch(() => ({ ok: false })) : null;
           status = {
             kind: "success", label: result.status === "duplicate" ? `이미 있음 · ${folder}` : folder, like: like ? like.ok : null,
