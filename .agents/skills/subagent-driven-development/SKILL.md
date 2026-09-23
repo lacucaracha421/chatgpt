@@ -35,7 +35,9 @@ Keep small briefs and reports in the conversation. Use task-owned files only whe
 
 If the actual dispatch interface supports model selection, prefer a fast model for well-specified mechanical work and a stronger model for architecture, difficult debugging, or high-risk review. Use verified configured model identifiers only.
 
-If the interface has no model parameter, do not invent one or claim a worker ran on DeepSeek, Astra, or any other model. Report that routing is host-controlled or unverified. Skill installation does not configure providers, credentials, billing, or model routing.
+When the worker is Codex CLI launched through `codex exec`, the model and reasoning effort are explicit command arguments; pass the brief through stdin, run from the owning project root, keep the `workspace-write` or `read-only` sandbox, and record the exit status and the model and effort shown in the output header. Choose the Codex model by task difficulty as the host instructions define. A built-in host subagent runs on that host's models, so do not describe it as a Codex worker.
+
+If the interface has no model parameter, do not invent one or claim a worker ran on Astra, Sol, or any other model. Report that routing is host-controlled or unverified. Skill installation does not configure providers, credentials, billing, or model routing.
 
 ## Review and integration
 

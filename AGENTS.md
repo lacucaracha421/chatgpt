@@ -37,7 +37,7 @@
 - The controller owns scope, integration, and final claims. Give each worker a bounded goal, relevant context, exact read/write scope, constraints, acceptance criteria, and evidence requirements. Workers and reviewers must not delegate further.
 - Parallel investigation is allowed; parallel implementation requires disjoint write sets and agreed interfaces. Serialize dependent or overlapping changes and preserve concurrent work.
 - Review actual changes and evidence, not just a worker's success summary. Use a separate reviewer when risk warrants it and tools support it; otherwise review inline and disclose the lack of independent review.
-- Model routing depends on the real tool and host configuration. Do not claim an Astra/DeepSeek split without verified routing; never invent a model argument. Delegation does not grant Git or operational permissions.
+- Model routing depends on the real tool and host configuration. The intended split is a Claude Code controller (Opus 5.5) delegating bounded implementation to Codex CLI (`codex exec`): `gpt-6-astra` at high effort for difficult work and `gpt-6-sol` at medium effort for routine, clearly specified work. The host's own instructions own the exact command and difficulty criteria. Claude Code's built-in subagents are Claude models, not Codex workers. Confirm routing from the actual command or tool output, report an unavailable model instead of substituting one, and never invent a model argument. Delegation does not grant Git or operational permissions.
 
 ## Verification
 
