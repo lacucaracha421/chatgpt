@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Ivory selection study</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<style>
+  /* Local study only. Uses the app's real tokens and fonts; no product code. */
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: #0e0f10; color: var(--color-text); font-family: var(--font-ui, "SUIT", "Segoe UI", sans-serif); font-size: var(--text-md); }
+  h1 { margin: 0 0 4px; font-size: var(--text-title); font-weight: 600; }
+  .lead { margin: 0 0 20px; color: var(--color-muted); font-size: var(--text-sm); }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .variant > header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .variant > header strong { font-size: var(--text-lg); }
+  .variant > header span { color: var(--color-muted); font-size: var(--text-sm); }
+
+  .app { display: grid; grid-template-columns: 64px 232px 1fr; height: 460px; border: 1px solid var(--color-border); background: var(--color-bg); overflow: hidden; }
+  .rail { isolation: isolate; display: grid; align-content: start; gap: 6px; padding: 8px 6px; background: var(--color-sidebar); border-right: 1px solid var(--color-border); }
+  .rail a { position: relative; display: grid; place-items: center; gap: 2px; height: 58px; color: var(--color-muted); font-size: 11px; text-decoration: none; border-radius: var(--radius-selection); }
+  .rail a i { display: block; width: 16px; height: 16px; border: 1.5px solid currentColor; border-radius: 2px; }
+  .index { isolation: isolate; padding: 12px 10px; background: var(--color-sidebar); border-right: 1px solid var(--color-border); }
+  .label { margin: 14px 6px 6px; color: var(--color-muted); font-size: var(--text-xs); }
+  .row { position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; color: var(--color-text); border-radius: var(--radius-selection); font-size: var(--text-md); }
+  .row small { margin-left: auto; color: var(--color-muted); font-family: var(--font-numeric, "Rajdhani", sans-serif); font-size: var(--text-sm); }
+  .row .ico { width: 14px; height: 12px; border: 1.5px solid var(--color-muted); border-radius: 1px; flex: none; }
+  .row.indent { padding-left: 28px; }
+  .row.indent2 { padding-left: 46px; }
+  .content { padding: 14px 16px; overflow: hidden; }
+  .content .title { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: var(--text-md); }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .tile { border-radius: var(--radius-tile); }
+  .tile.t1 { height: 150px; background: linear-gradient(160deg, #f2e7ea 0%, #d77fa1 45%, #3b2a58 100%); }
+  .tile.t2 { height: 190px; background: linear-gradient(200deg, #eef3f7 0%, #7fb4d9 50%, #1d2f4a 100%); }
+  .tile.t3 { height: 120px; background: linear-gradient(170deg, #fff6d8 0%, #e3b04b 50%, #5a3317 100%); }
+  .tile.t4 { height: 170px; background: linear-gradient(190deg, #e9f5ea 0%, #6fb58a 50%, #1c3a2a 100%); }
+  .tile.t5 { height: 140px; background: linear-gradient(150deg, #f5f5f5 0%, #b9b9c9 60%, #2c2c3a 100%); }
+  .tile.t6 { height: 160px; background: linear-gradient(210deg, #fde8dc 0%, #e0785a 50%, #40201a 100%); }
+  .cap { display: flex; justify-content: space-between; margin-top: 4px; color: var(--color-muted); font-size: var(--text-xs); }
+
+  /* ---------- Current: full ivory slab ---------- */
+  .v-current .rail a.on { background: var(--color-accent); color: var(--color-on-accent); }
+  .v-current .rail a.on::after { content: ""; position: absolute; right: 4px; top: 4px; width: 4px; height: 4px; background: currentColor; }
+  .v-current .row.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); }
+  .v-current .row.on small { color: var(--color-on-accent); opacity: .7; }
+  .v-current .row.on .ico { border: 0; width: 7px; height: 7px; background: #000; margin: 0 3px; }
+  .v-current .row.on.link::after { content: ""; margin-left: auto; width: var(--selection-mark-size); height: var(--selection-mark-size); background: currentColor; }
+  .v-current .title::before, .v-c .title::before, .v-d .title::before, .v-n1 .title::before, .v-n2 .title::before, .v-n3 .title::before, .v-n4 .title::before { content: ""; width: 7px; height: 7px; background: var(--color-sidebar-selection); }
+
+  /* ---------- C: ivory hairline frame-free tint + inner marker ---------- */
+  .v-c .rail a.on { background: rgba(221, 216, 202, .18); color: var(--color-sidebar-selection); }
+  .v-c .rail a.on::after { content: ""; position: absolute; right: 4px; top: 4px; width: 4px; height: 4px; background: var(--color-sidebar-selection); }
+  .v-c .row.on { background: rgba(221, 216, 202, .18); color: #f1eee6; }
+  .v-c .row.on .ico { border: 0; width: 7px; height: 7px; margin: 0 3px; background: var(--color-sidebar-selection); }
+  .v-c .row.on.link::after { content: ""; margin-left: auto; width: var(--selection-mark-size); height: var(--selection-mark-size); background: var(--color-sidebar-selection); }
+  .v-c .row.on.second { background: rgba(221, 216, 202, .08); }
+  .v-c .row.on.second.link::after { background: var(--color-muted); }
+
+  /* ---------- D: compromise — one slab for the most specific location, context rows tinted ---------- */
+  .v-d .rail a.on { background: rgba(221, 216, 202, .16); color: var(--color-sidebar-selection); }
+  .v-d .rail a.on::after { content: ""; position: absolute; right: 4px; top: 4px; width: 4px; height: 4px; background: var(--color-sidebar-selection); }
+  .v-d .row.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); }
+  .v-d .row.on small { color: var(--color-on-accent); opacity: .7; }
+  .v-d .row.on .ico { border: 0; width: 7px; height: 7px; margin: 0 3px; background: var(--color-on-accent); }
+  .v-d .row.on.second::after { content: ""; margin-left: auto; width: var(--selection-mark-size); height: var(--selection-mark-size); background: currentColor; }
+  .v-d .row.on.context { background: rgba(221, 216, 202, .16); color: #f1eee6; }
+  .v-d .row.on.context::after { content: ""; margin-left: auto; width: var(--selection-mark-size); height: var(--selection-mark-size); background: var(--color-sidebar-selection); }
+
+  /* ---------- N1: YoRHa menu — block rows, slab with offset echo and outside cursor ---------- */
+  .v-n1 .label { display: flex; align-items: center; gap: 6px; }
+  .v-n1 .label::before { content: ""; width: 5px; height: 5px; background: rgba(221, 216, 202, .7); }
+  .v-n1 .label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(221, 216, 202, .35), rgba(221, 216, 202, .08)); }
+  .v-n1 .row { margin: 3px 0; background: rgba(221, 216, 202, .045); border-radius: 0; }
+  .v-n1 .row.on { background: var(--color-sidebar-selection); color: #2d2b26; }
+  .v-n1 .row.on::after { content: ""; position: absolute; z-index: -1; inset: 3px -3px -3px 3px; border: 1px solid rgba(221, 216, 202, .45); }
+  .v-n1 .row.on::before { content: ""; position: absolute; left: -9px; width: 6px; height: 6px; background: var(--color-sidebar-selection); }
+  .v-n1 .row.on small { color: #2d2b26; opacity: .65; }
+  .v-n1 .row.on .ico { border-color: #2d2b26; }
+  .v-n1 .row.on.context { background: rgba(221, 216, 202, .16); color: #f1eee6; }
+  .v-n1 .row.on.context::after { display: none; }
+  .v-n1 .rail a { border-radius: 0; }
+  .v-n1 .rail a.on { background: var(--color-sidebar-selection); color: #2d2b26; }
+  .v-n1 .rail a.on::after { content: ""; position: absolute; z-index: -1; inset: 3px -3px -3px 3px; border: 1px solid rgba(221, 216, 202, .45); }
+  .v-n1 .title { letter-spacing: .04em; }
+
+  /* ---------- N2: paper panel — the index becomes the in-game beige menu ---------- */
+  .v-n2 .index { background: #cfc9b7 repeating-linear-gradient(0deg, rgba(0, 0, 0, .03) 0 1px, transparent 1px 3px); color: #3b3830; border-right-color: #9e9887; }
+  .v-n2 .label { display: flex; align-items: center; gap: 6px; color: #6e6a5e; }
+  .v-n2 .label::before { content: ""; width: 5px; height: 5px; background: #6e6a5e; }
+  .v-n2 .label::after { content: ""; flex: 1; height: 1px; background: rgba(59, 56, 48, .3); }
+  .v-n2 .row { margin: 3px 0; color: #3b3830; background: rgba(59, 56, 48, .07); border-radius: 0; }
+  .v-n2 .row small { color: #6e6a5e; }
+  .v-n2 .row .ico { border-color: #6e6a5e; }
+  .v-n2 .row.on { background: #3b3830; color: #e4dfd0; }
+  .v-n2 .row.on::after { content: ""; position: absolute; z-index: -1; inset: 3px -3px -3px 3px; border: 1px solid rgba(59, 56, 48, .45); }
+  .v-n2 .row.on::before { content: ""; position: absolute; left: -9px; width: 6px; height: 6px; background: #3b3830; }
+  .v-n2 .row.on small { color: #e4dfd0; opacity: .7; }
+  .v-n2 .row.on .ico { border-color: #e4dfd0; }
+  .v-n2 .row.on.context { background: rgba(59, 56, 48, .2); color: #2d2b26; font-weight: 600; }
+  .v-n2 .row.on.context::after { display: none; }
+  .v-n2 .rail a { border-radius: 0; }
+  .v-n2 .rail a.on { background: #cfc9b7; color: #3b3830; }
+
+  /* ---------- N3: dark paper — N2 structure on a warm dark panel ---------- */
+  .v-n3 .index { background: #201f1b repeating-linear-gradient(0deg, rgba(207, 201, 183, .025) 0 1px, transparent 1px 3px); color: #cfc9b7; border-right-color: #3a3730; }
+  .v-n3 .rail { background: #1b1a17; }
+  .v-n3 .label { display: flex; align-items: center; gap: 6px; color: #8f897a; }
+  .v-n3 .label::before { content: ""; width: 5px; height: 5px; background: #8f897a; }
+  .v-n3 .label::after { content: ""; flex: 1; height: 1px; background: rgba(207, 201, 183, .22); }
+  .v-n3 .row { margin: 3px 0; color: #d6d0bf; background: rgba(207, 201, 183, .05); border-radius: 0; }
+  .v-n3 .row small { color: #8f897a; }
+  .v-n3 .row .ico { border-color: #8f897a; }
+  .v-n3 .row.on { background: #cfc9b7; color: #2b2924; }
+  .v-n3 .row.on::after { content: ""; position: absolute; z-index: -1; inset: 3px -3px -3px 3px; border: 1px solid rgba(207, 201, 183, .45); }
+  .v-n3 .row.on::before { content: ""; position: absolute; left: -9px; width: 6px; height: 6px; background: #cfc9b7; }
+  .v-n3 .row.on small { color: #2b2924; opacity: .65; }
+  .v-n3 .row.on .ico { border-color: #2b2924; }
+  .v-n3 .row.on.context { background: rgba(207, 201, 183, .16); color: #ece7da; }
+  .v-n3 .row.on.context::after { display: none; }
+  .v-n3 .rail a { border-radius: 0; color: #8f897a; }
+  .v-n3 .rail a.on { background: rgba(207, 201, 183, .16); color: #e4dfd0; }
+  .v-n3 .rail a.on::before { content: ""; position: absolute; left: -6px; top: 50%; width: 5px; height: 5px; margin-top: -2px; background: #cfc9b7; }
+  .v-n3 .title { letter-spacing: .04em; }
+
+  /* ---------- N4: D rule + NieR details on the existing neutral dark ---------- */
+  .v-n4 .label { display: flex; align-items: center; gap: 6px; }
+  .v-n4 .label::before { content: ""; width: 5px; height: 5px; background: rgba(221, 216, 202, .6); }
+  .v-n4 .label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(221, 216, 202, .3), rgba(221, 216, 202, .06)); }
+  .v-n4 .row { border-radius: 0; }
+  .v-n4 .row.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); }
+  .v-n4 .row.on::after { content: ""; position: absolute; z-index: -1; inset: 3px -3px -3px 3px; border: 1px solid rgba(221, 216, 202, .4); }
+  .v-n4 .row.on::before { content: ""; position: absolute; left: -9px; width: 6px; height: 6px; background: var(--color-sidebar-selection); }
+  .v-n4 .row.on small { color: var(--color-on-accent); opacity: .7; }
+  .v-n4 .row.on .ico { border-color: var(--color-on-accent); }
+  .v-n4 .row.on.context { background: rgba(221, 216, 202, .16); color: #f1eee6; }
+  .v-n4 .row.on.context::after { display: none; }
+  .v-n4 .rail a { border-radius: 0; }
+  .v-n4 .rail a.on { background: rgba(221, 216, 202, .16); color: var(--color-sidebar-selection); }
+  .v-n4 .rail a.on::before { content: ""; position: absolute; left: -6px; top: 50%; width: 5px; height: 5px; margin-top: -2px; background: var(--color-sidebar-selection); }
+</style>
+</head>
+<body>
+<h1>아이보리 선택 표시 시안</h1>
+<p class="lead">실제 앱 tokens.css와 폰트를 사용한 로컬 비교용 페이지입니다. 각 시안은 레일 · 분류 트리 · 컬렉션 인덱스(1단계/2단계)를 같은 조건으로 보여줍니다. 타일은 작품 색을 흉내 낸 그라디언트입니다.</p>
+<div class="grid" id="grid"></div>
+
+<template id="panel">
+  <div class="app">
+    <nav class="rail">
+      <a class="on"><i></i>에셋</a><a><i></i>컬렉션</a><a><i></i>망가</a><a><i></i>다시보기</a>
+    </nav>
+    <aside class="index">
+      <div class="label">폴더</div>
+      <div class="row"><span class="ico"></span>전체</div>
+      <div class="row indent"><span class="ico"></span>게임<small>425</small></div>
+      <div class="row indent2"><span class="ico"></span>리버스<small>1614</small></div>
+      <div class="row indent2 on"><span class="ico"></span>젠레스<small>787</small></div>
+      <div class="row indent2"><span class="ico"></span>명조<small>506</small></div>
+      <div class="label">컬렉션 인덱스</div>
+      <div class="row link on context">라이브러리</div>
+      <div class="row link">쇼케이스</div>
+      <div class="label">작품 유형</div>
+      <div class="row link">게임</div>
+      <div class="row link on second">영화</div>
+    </aside>
+    <main class="content">
+      <div class="title">젠레스</div>
+      <div class="tiles">
+        <div><div class="tile t1"></div><div class="cap"><span>isuka_syumi</span><span>21:46</span></div></div>
+        <div><div class="tile t2"></div><div class="cap"><span>vrcitadel</span><span>22:13</span></div></div>
+        <div><div class="tile t3"></div><div class="cap"><span></span><span>18:08</span></div></div>
+        <div><div class="tile t4"></div><div class="cap"><span></span><span>08:50</span></div></div>
+        <div><div class="tile t5"></div><div class="cap"><span></span><span>10:06</span></div></div>
+        <div><div class="tile t6"></div><div class="cap"><span></span><span>09:57</span></div></div>
+      </div>
+    </main>
+  </div>
+</template>
+
+<script>
+  const variants = [
+    ["v-current", "현재", "아이보리 면 + 검은 사각 표식."],
+    ["v-d", "D · 절충", "가장 구체적인 현재 위치만 아이보리 면, 상위 문맥은 틴트."],
+    ["v-n2", "N2 · 종이 패널", "인덱스를 베이지 종이로 반전. 참고용."],
+    ["v-n3", "N3 · 어두운 종이", "N2의 종이 질감 · 블록 행 · 따뜻한 팔레트를 어두운 갈색 패널로. 선택은 베이지 면 + 잔상 선 + 커서, 상위 문맥은 틴트."],
+    ["v-n4", "N4 · D + 니어 디테일", "지금의 중성 다크 그대로, D 규칙에 잔상 선 · 바깥 커서 · ■─ 섹션 제목만 추가."],
+    ["v-n1", "N1 · YoRHa 메뉴", "참고용: 블록 행 + 잔상 선 + 커서."],
+  ];
+  const grid = document.getElementById("grid");
+  const tpl = document.getElementById("panel");
+  for (const [cls, name, desc] of variants) {
+    const section = document.createElement("section");
+    section.className = `variant ${cls}`;
+    section.innerHTML = `<header><strong>${name}</strong><span>${desc}</span></header>`;
+    section.append(tpl.content.cloneNode(true));
+    grid.append(section);
+  }
+</script>
+</body>
+</html>

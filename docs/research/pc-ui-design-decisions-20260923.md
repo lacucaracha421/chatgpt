@@ -20,6 +20,8 @@ The detail-close `X` sits directly beside the window-close `X` in the title bar.
 
 `라이브러리/쇼케이스` and `작품 유형` both use the full ivory selection block at once.
 
+Resolved by the B1 direction (2026-09-23): the most specific level keeps the slab, the parent level uses the tint.
+
 - **Option 1 (recommended):** keep ivory for the primary level only; the second level uses the neutral selected surface with an ivory marker or text accent.
 - Option 2: keep both, but reduce ivory to a marker-only treatment everywhere (see B1).
 
@@ -50,9 +52,16 @@ Most gallery captions read `작가 미상`.
 
 From an overall aesthetic review: the foundation is sound (media-first gallery, consistent shell, strong Film detail hero, good SUIT/Barlow pairing), but polish and identity lag behind. These are larger proposals; each needs a user decision and ideally a side-by-side CSS study in the real app before adoption.
 
-### B1. Ivory as a marker, not a slab (highest impact, small change)
+### B1. Selection treatment — direction chosen 2026-09-23 (not yet implemented)
 
-The full-width ivory selection row is the brightest element on most screens, which contradicts "UI steps back". Proposal: keep ivory as the identity color but express selection with a thin left edge, the small square marker and text color on a subtle neutral surface. Prepare two or three variants in the running app for comparison.
+The full-width ivory slab was chosen deliberately for a NieR:Automata feel, but several slabs per screen compete with media. The user compared six variants in [the ivory selection study](../prototypes/ivory-selection/index.html) (current, D, N1–N4) and chose **N4 · D + NieR details**:
+
+- Only the most specific current location keeps the full ivory slab; parent/context selections (area rail, `라이브러리`/`쇼케이스` level) use a ~16% ivory tint with ivory text.
+- The slab gains NieR details: a 1px ivory "echo" outline offset 3px down-right, a small ivory square cursor just outside its left edge, and square corners.
+- Section labels become `■ label ────` (small square + fading hairline).
+- The neutral dark surfaces stay unchanged; the warm "paper" panels (N2/N3) were rejected because the user mainly uses dark mode.
+
+Before implementation: add an explicit NieR-motif exception to `DESIGN.md` (hard 1px echo line and square cursor are allowed for current selection; blurred decorative shadows remain banned), then apply to the rail, index links, classification tree, pins, settings navigation and memo lists. Verify against real media screens.
 
 ### B2. One control family
 
@@ -68,7 +77,7 @@ Fixed poster sizes leave large empty areas in the Film library, the detail layou
 
 ### B5. Accent palette
 
-Ivory (navigation selection), teal (Asset selection tint) and blue (focus, checked toggles) follow separate rules. Proposal: define one accent family and document the role of each color in `tokens.css`, keeping the user-approved Asset selection tint unless explicitly revisited.
+Ivory (`--color-accent`: navigation selection and checked toggles), teal (Asset selection tint) and blue (`--color-focus` ring) follow separate rules. Proposal: define one accent family and document the role of each color in `tokens.css`, keeping the user-approved Asset selection tint unless explicitly revisited.
 
 ## Documentation follow-up
 
