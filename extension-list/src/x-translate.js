@@ -15,7 +15,7 @@
   // other slot never sends the same post twice.
   const pending = new Set(), observed = new Set(), requested = new Set(), fallbacks = [];
   let completed = new WeakMap(), failures = new WeakMap(), outsideViewport = new WeakSet(), intersection, ui;
-  const rendered = new Map();
+  const rendered = new Map(), toggles = new Map();
 
   function send(message) {
     return new Promise(resolve => {
@@ -54,6 +54,14 @@
     const korean = prose.match(/[가-힣ㄱ-ㅎㅏ-ㅣ]/g) || [];
     return korean.length / letters.length < 0.55;
   }
+  // Posts up to 1.5 screens below (and a quarter screen above) are translated ahead
+  // while the slots are free, so they are usually ready on arrival; posts on screen
+  // still come first because work is ordered by distance from the viewport centre.
+  const AHEAD_SCREENS = 1.5, BEHIND_SCREENS = 0.25;
+  function near(element) {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.bottom > -innerHeight * BEHIND_SCREENS && rect.top < innerHeight * (1 + AHEAD_SCREENS);
+  }
   function visible(element) {
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
@@ -73,9 +81,46 @@
     for (const node of rendered.values()) node.dataset.theme = theme;
     return theme;
   }
+  const PENDING_DELAY_MS = 250, COLLAPSE_MIN_HEIGHT = 44;
   function removeResult(element) {
     rendered.get(element)?.remove();
     rendered.delete(element);
+    toggles.get(element)?.remove();
+    toggles.delete(element);
+    element.removeAttribute?.("data-lakomics-collapsed");
+  }
+  // A quiet "번역 중…" line appears only when a request outlasts a short delay, so fast
+  // answers never flash; the result later replaces it in place.
+  function showPending(element) {
+    setTimeout(() => {
+      if (!requested.has(element) || !element.isConnected) return;
+      const card = rendered.get(element);
+      if (card && card.dataset.error !== "true") return;
+      removeResult(element);
+      const node = document.createElement("div");
+      node.className = "lakomics-translation"; node.dataset.state = "pending"; node.dataset.theme = detectTheme();
+      node.setAttribute("aria-hidden", "true"); node.textContent = "번역 중…";
+      element.after(node); rendered.set(element, node);
+    }, PENDING_DELAY_MS);
+  }
+  // With a translation shown, a long original folds to two lines behind a toggle so a
+  // post does not take twice its height; the button never opens the post itself.
+  function collapseOriginal(element, node) {
+    if (element.getBoundingClientRect().height <= COLLAPSE_MIN_HEIGHT) return;
+    element.dataset.lakomicsCollapsed = "true";
+    const toggle = document.createElement("button");
+    toggle.type = "button"; toggle.className = "lakomics-translation-toggle";
+    const sync = () => {
+      const collapsed = element.dataset.lakomicsCollapsed === "true";
+      toggle.textContent = collapsed ? "원문 펼치기" : "원문 접기";
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+    };
+    toggle.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      element.dataset.lakomicsCollapsed = element.dataset.lakomicsCollapsed === "true" ? "false" : "true";
+      sync();
+    });
+    sync(); node.after(toggle); toggles.set(element, toggle);
   }
   function render(element, snapshot, text, error = false) {
     removeResult(element);
@@ -111,6 +156,7 @@
     }
     element.after(node);
     rendered.set(element, node);
+    if (!error) collapseOriginal(element, node);
   }
   function failure(code, retryable = false) {
     if (code === "http_401" || code === "api_key_missing") return "번역 API 키를 확인하세요";
@@ -159,7 +205,7 @@
   }
   function collectBatch(limit = MAX_BATCH_ITEMS, forceSingle = false) {
     const center = innerHeight / 2;
-    const elements = [...pending].filter(element => element.isConnected && visible(element))
+    const elements = [...pending].filter(element => element.isConnected && near(element))
       .sort((a, b) => {
         const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
         return Math.abs((ar.top + ar.bottom) / 2 - center) - Math.abs((br.top + br.bottom) / 2 - center);
@@ -190,7 +236,7 @@
       chars += snapshot.text.length;
       batch.push({ id: String(++requestSerial), element, snapshot, single: forceSingle });
     }
-    for (const element of [...pending]) if (!element.isConnected || !visible(element)) pending.delete(element);
+    for (const element of [...pending]) if (!element.isConnected || !near(element)) pending.delete(element);
     return batch;
   }
   function requeueLater(candidates, waitMs, requestEpoch) {
@@ -285,7 +331,8 @@
     for (const candidate of batch) handleItem(candidate, items.get(candidate.id), requestEpoch);
   }
   async function runFallback({ candidate, requestEpoch }) {
-    const result = await send({ type: "translation:request", text: candidate.snapshot.text });
+    // A batch item the main model answered badly is asked of the sub model first.
+    const result = await send({ type: "translation:request", text: candidate.snapshot.text, fallback: true });
     requested.delete(candidate.element);
     if (!current(candidate, requestEpoch)) return;
     if (result?.ok) accept(candidate, result.text);
@@ -308,7 +355,7 @@
         if (fastLanePending) { batch = collectBatch(1, true); fastLanePending = false; }
         if (!batch.length) batch = collectBatch();
         if (!batch.length) break;
-        for (const candidate of batch) requested.add(candidate.element);
+        for (const candidate of batch) { requested.add(candidate.element); showPending(candidate.element); }
         work = () => runGroup(batch, requestEpoch);
       }
       inFlight += 1; running = true; updateControlState();
@@ -345,7 +392,7 @@
       }
       if (visible(element) && !pending.has(element) && !requested.has(element) && completed.get(element) !== snapshot.signature && !failures.has(element)) {
         pending.add(element); fastLanePending = true;
-      } else if (visible(element)) pending.add(element);
+      } else if (near(element)) pending.add(element);
     }
     applyTheme();
     schedule(immediate);
@@ -377,7 +424,7 @@
   function mount() {
     const style = document.createElement("style");
     style.textContent = `
-      .lakomics-translation{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:.96em;line-height:1.52;margin:8px 0 10px;padding:8px 10px;border-left:2px solid rgb(29,155,240);border-radius:0 8px 8px 0;box-sizing:border-box}
+      .lakomics-translation{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:.96em;line-height:1.36;margin:8px 0 10px;padding:8px 10px;border-left:2px solid rgb(29,155,240);border-radius:0 8px 8px 0;box-sizing:border-box}
       .lakomics-translation[data-theme="light"]{color:#0f1419;background:rgba(29,155,240,.07)}
       .lakomics-translation[data-theme="dim"]{color:#f0f2f4;background:rgba(29,155,240,.09)}
       .lakomics-translation[data-theme="lights-out"]{color:#e7e9ea;background:rgba(29,155,240,.08)}
@@ -385,11 +432,19 @@
       .lakomics-translation a:hover,.lakomics-translation a:focus-visible{text-decoration:underline}
       .lakomics-translation[data-error="true"]{font-size:12px;padding:4px 8px;background:transparent;opacity:.82}
       .lakomics-translation[data-error="true"][data-theme="light"]{color:#536471;border-left-color:#aab8c2}
-      .lakomics-translation[data-error="true"]:not([data-theme="light"]){color:#8b98a5;border-left-color:#536471}`;
+      .lakomics-translation[data-error="true"]:not([data-theme="light"]){color:#8b98a5;border-left-color:#536471}
+      .lakomics-translation[data-state="pending"]{font-size:12px;padding:4px 8px;background:transparent;opacity:.7;color:#8b98a5;border-left-color:#536471}
+      .lakomics-translation[data-state="pending"][data-theme="light"]{color:#536471;border-left-color:#aab8c2}
+      [data-testid="tweetText"][data-lakomics-collapsed="true"]{display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+      .lakomics-translation-toggle{display:block;margin:-4px 0 8px auto;padding:2px 0;border:0;background:none;font:inherit;font-size:12px;color:rgb(29,155,240);cursor:pointer;white-space:nowrap}
+      .lakomics-translation-toggle:hover,.lakomics-translation-toggle:focus-visible{text-decoration:underline}
+      .lakomics-translation-toggle:focus-visible{outline:2px solid rgb(29,155,240);outline-offset:2px;border-radius:2px}`;
     document.head.append(style);
     const host = document.createElement("div");
     host.id = "lakomics-translation-controls";
-    host.style.cssText = "position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:2147483000";
+    // Wide desktop X docks its messages drawer at the bottom right; sit above it there.
+    const clearDrawer = globalThis.matchMedia?.("(min-width: 1000px) and (pointer: fine)")?.matches;
+    host.style.cssText = `position:fixed;right:12px;bottom:calc(${clearDrawer ? 76 : 12}px + env(safe-area-inset-bottom,0px));z-index:2147483000`;
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `<style>
       :host{font:13px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e7e9ea;--panel:#111214;--border:#343638;--muted:#8b98a5;--button:#1d1f21;--accent:#1d9bf0}
@@ -397,7 +452,7 @@
       :host([data-theme="light"]){color:#0f1419;--panel:#fff;--border:#cfd9de;--muted:#536471;--button:#f7f9f9}
       *{box-sizing:border-box}[hidden]{display:none!important}.wrap{position:relative}.launcher{position:relative;width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--muted);box-shadow:0 4px 16px rgba(0,0,0,.22);display:grid;place-items:center;cursor:pointer;padding:0}.launcher:hover{filter:brightness(1.08)}.launcher:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.launcher svg{width:23px;height:23px}.launcher[data-state="on"],.launcher[data-state="busy"]{color:var(--accent)}.launcher[data-state="busy"] svg{animation:pulse 1.1s ease-in-out infinite}.dot{position:absolute;right:1px;top:1px;width:8px;height:8px;border-radius:50%;background:transparent;border:1px solid transparent}.launcher[data-state="error"] .dot{background:#f4212e;border-color:var(--panel)}.launcher[data-state="warning"] .dot{background:#ffd400;border-color:var(--panel)}@keyframes pulse{50%{opacity:.45;transform:scale(.94)}}
       .panel{position:absolute;right:0;bottom:48px;width:min(270px,calc(100vw - 24px));padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.28)}.head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}.head strong{font-size:13px}.model{font-size:11px;color:var(--muted);white-space:nowrap}.toggle{display:flex;align-items:center;gap:8px;margin:8px 0 12px}.toggle input{accent-color:var(--accent)}.actions{display:flex;gap:6px}.actions button{font:inherit;color:inherit;background:var(--button);border:1px solid var(--border);border-radius:7px;padding:6px 9px;cursor:pointer}.status{font-size:11px;color:var(--muted);margin:9px 0 0}.status:empty{display:none}
-    </style><div class="wrap"><button id="translator-button" class="launcher" type="button" aria-label="AI 번역" aria-controls="translator-popover" aria-expanded="false" title="AI 번역"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h7M7.5 3v2.5m-2.2 3.2c1.5 2.1 3.5 3.8 6 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10.7 8.5c-.9 2.1-2.5 4-4.8 5.6M13.5 18.5l3.1-8 3.1 8m-5-2.7h3.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="dot"></span></button><div id="translator-popover" class="panel" role="dialog" aria-label="AI 번역 설정" hidden><div class="head"><strong>AI 번역</strong><span class="model" id="model-name">Gemini 3.1 Flash Lite</span></div><label class="toggle"><input id="auto" type="checkbox"> 자동 번역</label><div class="actions"><button id="clear" type="button">캐시 비우기</button><button id="settings" type="button">설정</button></div><p id="status" class="status" role="status"></p></div></div>`;
+    </style><div class="wrap"><button id="translator-button" class="launcher" type="button" aria-label="AI 번역" aria-controls="translator-popover" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h7M7.5 3v2.5m-2.2 3.2c1.5 2.1 3.5 3.8 6 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10.7 8.5c-.9 2.1-2.5 4-4.8 5.6M13.5 18.5l3.1-8 3.1 8m-5-2.7h3.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="dot"></span></button><div id="translator-popover" class="panel" role="dialog" aria-label="AI 번역 설정" hidden><div class="head"><strong>AI 번역</strong><span class="model" id="model-name">Gemini 3.1 Flash Lite</span></div><label class="toggle"><input id="auto" type="checkbox"> 자동 번역</label><div class="actions"><button id="clear" type="button">캐시 비우기</button><button id="settings" type="button">설정</button></div><p id="status" class="status" role="status"></p></div></div>`;
     document.body.append(host);
     ui = {
       host,
@@ -460,15 +515,15 @@
           else if (record.retryOnReentry) { record.retryOnReentry = false; record.nextAttemptAt = 0; }
         }
         outsideViewport.delete(entry.target);
-        if (!pending.has(entry.target) && !requested.has(entry.target) && !completed.has(entry.target)) fastLanePending = true;
+        if (visible(entry.target) && !pending.has(entry.target) && !requested.has(entry.target) && !completed.has(entry.target)) fastLanePending = true;
         pending.add(entry.target);
       }
       schedule();
-    });
+    }, { rootMargin: `${BEHIND_SCREENS * 100}% 0px ${AHEAD_SCREENS * 100}% 0px` });
     let scanTimer = null;
     new MutationObserver(records => {
-      if (!records.some(record => !record.target.closest?.('.lakomics-translation, #lakomics-translation-controls')
-        && (record.type !== "childList" || [...record.addedNodes, ...record.removedNodes].some(node => !node.matches?.('.lakomics-translation'))))) return;
+      if (!records.some(record => !record.target.closest?.('.lakomics-translation, .lakomics-translation-toggle, #lakomics-translation-controls')
+        && (record.type !== "childList" || [...record.addedNodes, ...record.removedNodes].some(node => !node.matches?.('.lakomics-translation, .lakomics-translation-toggle'))))) return;
       if (scanTimer !== null) return;
       scanTimer = setTimeout(() => { scanTimer = null; scan(); }, 200);
     }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["lang", "href"] });

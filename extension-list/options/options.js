@@ -125,11 +125,19 @@
     $("translation-enabled").checked = result.enabled;
     $("translation-model").replaceChildren(...(result.models || []).map(model => new Option(model.label, model.id)));
     $("translation-model").value = result.model || "";
+    // The sub model answers when the main model fails or times out; it cannot equal the main model.
+    $("translation-fallback").replaceChildren(new Option("사용 안 함", ""), ...(result.models || []).filter(model => model.id !== result.model).map(model => new Option(model.label, model.id)));
+    $("translation-fallback").value = result.fallbackModel || "";
     $("translation-key").placeholder = result.hasApiKey ? "API 키 저장됨 · 변경할 키 입력" : "OpenRouter API 키";
   }
   $("translation-model").onchange = async () => {
     const result = await send({ type: "translation:update", model: $("translation-model").value });
     $("translation-status").textContent = result?.ok ? "모델 변경됨 · 캐시 초기화" : "모델 변경 실패";
+    await translationSettings();
+  };
+  $("translation-fallback").onchange = async () => {
+    const result = await send({ type: "translation:update", fallbackModel: $("translation-fallback").value });
+    $("translation-status").textContent = result?.ok ? "보조 모델 저장됨" : "보조 모델 저장 실패";
     await translationSettings();
   };
   $("translation-enabled").onchange = async () => {

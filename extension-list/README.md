@@ -244,12 +244,22 @@ retain an API key, model selection, one automatic on/off switch and Clear cache.
 Changing models clears the shared translation cache so results from different
 models are not mixed. On X, a
 compact floating translation icon opens the same controls in a small popover.
-Other providers, automatic model fallback, manual translate, diagnostics and
-tuning remain removed. Existing OpenRouter keys and automatic preferences migrate
+A sub model (default Gemma 4 26B A4B; "사용 안 함" turns it off; never the main
+model) answers when the main model hits a rate limit, 5xx, timeout, network error or
+another non-auth rejection, and gets one try when the main model's answer is invalid;
+batch items the main model answered badly are re-asked of the sub model first.
+Auth/payment failures never fall back. Without a sub model the main model is retried
+once as before. Requests turn reasoning off (3.1 Flash Lite, Gemma) or keep it at the
+minimum where it is mandatory (3.5 Flash Lite), and ask OpenRouter to route to the
+lowest-latency provider. Other providers, manual translate, diagnostics and tuning
+remain removed. Existing OpenRouter keys and automatic preferences migrate
 locally; retired provider settings and pre-3.1 translation caches are removed.
 Keys stay in extension storage and the worker: they are never returned to X
 content scripts or synced with the server profile. The worker is warmed as soon as
 the content script starts, and the first visible scan bypasses the normal debounce.
+Posts up to 1.5 screens below the viewport (and a quarter screen above) are
+translated ahead while slots are free, so they are usually ready on arrival; work is
+ordered by distance from the viewport centre, so posts on screen always go first.
 Two request slots run continuously: whenever one frees, the next group starts
 without waiting for the other. After new posts come into view, the one nearest the
 viewport center is sent alone first so it renders first; other work is grouped up
@@ -261,7 +271,13 @@ move link placeholders (Korean word order), and a link it drops is re-attached a
 the end of the card, while unknown or duplicated placeholders are invalid. A valid
 answer without Korean (names, Latin terms, "www") means nothing to translate: no
 card is shown and the result is cached. Results use text nodes, not model HTML.
-Translation cards use X-aware light/dim/lights-out contrast with blue link accents.
+Translation cards use X-aware light/dim/lights-out contrast with blue link accents
+and a line height close to X's. A request still unanswered after 250 ms shows a quiet
+"번역 중…" line that the result replaces in place (fast answers never flash it). When a
+translation is shown, an original taller than two lines folds to two lines, with a
+원문 펼치기/접기 button under the card that never opens the post. The floating
+translation button has no hover tooltip and sits above X's bottom-right messages
+drawer on wide pointer screens (76 px up; 12 px elsewhere).
 Network, timeout and server failures retry once. Unchanged failures are not
 re-requested by unrelated page mutations; transient failures can retry after leaving
 and re-entering the viewport. Other failures get one such re-entry retry
