@@ -277,5 +277,69 @@ class ReplayTests(unittest.TestCase):
                 writer.close()
 
 
+class S36ReplayOptionsTests(unittest.TestCase):
+    def test_shared_knn3_matches_frozen_float32_replay_fixture_exactly(self):
+        import s36_scoring
+        rng = np.random.default_rng(36)
+        q, p, n, c = [s36_scoring.unit(rng.normal(size=(size, 768))) for size in (8, 11, 5, 7)]
+        def old_knn(pool):
+            d = .5 * (1. - q @ pool.T)
+            k = min(3, len(pool))
+            return np.partition(d, k-1, axis=1)[:, :k].mean(axis=1)
+        own = old_knn(p)
+        scores, _ = score_crops(q, p, n, c, .5, current_policy())
+        self.assertEqual(scores['knn3'], float(own.min()))
+        self.assertEqual(scores['contrast'], float((own - np.minimum(old_knn(n), old_knn(c))).min()))
+        np.testing.assert_array_equal(s36_scoring.crop_scores(q, p, n, c, normalized=True)['knn3'], own)
+
+    def test_reference_witness_excludes_manual_gallery_and_future_references(self):
+        data = dataset()
+        data['references'] = [{'target_id': 't', 'asset_hash': h(1), 'kind': 'anchor'},
+            {'target_id': 't', 'asset_hash': h(5), 'kind': 'learned', 'created_at': '2026-09-20T00:00:00Z'}]
+        features = {h(1): feature(1), h(5): feature(5, (1,)), h(9): feature(9, (0, 1))}
+        engine = Replay(data, features, {}, witness='references')
+        for n in (2, 3, 4):
+            e = event(n, '2026-09-09T00:00:00Z')
+            engine.state['t'][h(n)] = (e, feature(n, (1,)).vectors[0])
+        for decision in ('accepted', 'rejected'):
+            e = event(9, '2026-09-10T00:00:00Z', decision)
+            self.assertEqual(np.argmax(engine.witness(e, e['time'])), 0)
+        engine.witness_mode = 'gallery'
+        e = event(9, '2026-09-10T00:00:00Z')
+        self.assertEqual(np.argmax(engine.witness(e, e['time'])), 1)
+        engine.witness_mode = 'references'
+        engine.groups = {h(1): 'same', h(9): 'same'}
+        self.assertIsNone(engine.witness(e, e['time']))
+
+    def test_cap_latest_per_polarity_keeps_references_and_prior_counts(self):
+        data = dataset()
+        data['references'] = [{'target_id': 't', 'asset_hash': h(1), 'kind': 'anchor'}]
+        engine = Replay(data, {h(1): feature(1)}, {}, gallery_cap=1)
+        for n, decision in [(2, 'accepted'), (3, 'accepted'), (4, 'rejected'), (5, 'rejected')]:
+            e = event(n, f'2026-09-{n:02}T00:00:00Z', decision)
+            engine.state['t'][h(n)] = (e, feature(n).vectors[0])
+        positive, negative, counts = engine.gallery('t', h(9), time_ns('2026-09-10T00:00:00Z'))
+        self.assertEqual(set(positive), {h(1), h(3)})
+        self.assertEqual(set(negative), {h(5)})
+        self.assertEqual(counts, [2, 2])
+        engine.gallery_cap = 0
+        self.assertEqual(set(engine.gallery('t', h(9), 0)[0]), {h(1)})
+        with self.assertRaises(ValueError):
+            Replay(data, {}, {}, gallery_cap=-1)
+
+    def test_custom_rates_reach_metrics_and_stream(self):
+        data = dataset()
+        data.update(images={}, limitations=[])
+        result = evaluate({'dataset': data, 'sha256': 'fixture'}, {}, rates=(.1,), stream=True,
+                          witness='references', gallery_cap=12)
+        self.assertEqual(set(result['metrics']['knn3']['overall']['walk_forward']), {'0.1'})
+        self.assertEqual(set(result['stream']['overall']['accepted_volume']['knn3']), {'0.1'})
+        self.assertEqual(result['witness'], 'references')
+        self.assertEqual(result['gallery_cap'], 12)
+        for rates in ((), (1,), (-.1,), (float('nan'),)):
+            with self.assertRaises(ValueError):
+                evaluate({'dataset': data}, {}, rates=rates)
+
+
 if __name__ == "__main__":
     unittest.main()

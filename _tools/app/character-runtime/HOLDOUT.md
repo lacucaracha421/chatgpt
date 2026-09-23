@@ -157,3 +157,41 @@ Previous B36 0.610 / S36 0.731 AUC used all-target contrast; same-series values
 were 0.448 / 0.568. Prior 0.132 / 0.380 recall was anjo-excluded **oracle** recall.
 Those scripts also retained query relatives, guessed multi-person seed witnesses,
 and excluded reference-self truth pairs. These are different evaluation contracts.
+
+### S36 preparation and replay controls
+
+S36 cache identity uses the vector-producing encoder AST, pinned model SHA256,
+and baseline extraction identity/library versions. Comments or unrelated helpers
+do not expire vectors; vector-affecting edits do. The change creates a new
+namespace once and does not assert compatibility with old S36 caches.
+
+Replay and future S36 consumers share `s36_scoring.py` (NumPy only): normalize
+float32 vectors to unit L2 length, then use `0.5 * (1 - cosine)`. Per query crop,
+knn3 is the mean of the nearest `min(3, gallery size)` positive distances. Contrast
+is that positive mean minus the smaller of the manual-rejection knn3 mean and
+the same-series competitor knn3 mean. Empty negative pools contribute 1.0;
+empty positive pools abstain. Each score is minimized over query crops only after
+computing its per-crop value. Existing replay arithmetic and rule6 are unchanged.
+
+- `--witness references` fixes both accepted and rejected witnesses to the crop
+  nearest any current resolved reference view at the historical event time.
+  Later references/manual labels cannot choose the witness. Query relatives and
+  stale/ambiguous references remain excluded. Multi-person feedback without a
+  usable reference abstains; a single detected person is unambiguous. Default
+  `gallery` retains historical witness behavior.
+- `--gallery-cap N` retains the latest N manual accepted and N manual rejected
+  states per target, after query-relative exclusion. Missing witnesses consume a
+  slot; references stay separate and uncapped. Latest rejections/clears still
+  suppress reference votes, and the prior canary still counts all manual states.
+  Default is unlimited; zero disables manual feature-gallery additions.
+- `--rates 0.01 0.02 0.05` controls both oracle and walk-forward target FP rates,
+  including stream estimates. Those values remain the defaults. Rates must be
+  finite in `[0, 1)` and are recorded with witness/cap settings in the report.
+
+Use `s36_library_cache.py --dry-run` first to inspect extraction counts and CPU
+planning assumptions (see [README.md](README.md#s36-primary-model-preparation-stage-2a-code-only)).
+It consumes the export or a hash/media-kind list, reuses B36 boxes read-only, and
+writes only S36 cache entries on an explicitly approved real run. Real extraction
+requires the printed `--expect-namespace`; no library extraction is authorized
+by these code or fixture changes. The old `locate()` research helper now lives in
+`replay_dataset.py` and verifies canonical content hashes for both tools.

@@ -1,7 +1,6 @@
 """Pinned local S36 extraction for the standalone classifier; no network or DB."""
 from __future__ import annotations
-
-
+import ast
 from pathlib import Path
 
 import numpy as np
@@ -16,10 +15,32 @@ from runtime import (BASELINE, Features, ccip_input, decode, expanded_box,
 SMALL_SHA256 = "484ad463f569ab95308cf47e91ba358b01c40bc53289b90b950b94fcde7f2628"
 
 
-def contract():
+def extraction_digest(source=None):
+    """Hash only vector-producing code; storage and comments do not expire vectors."""
+    source = Path(__file__).read_text() if source is None else source
+    tree = ast.parse(source)
+    names = {"contract", "checked_image", "validate"}
+    methods = {"__init__", "detect", "extract"}
+    selected = []
+    found = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in names:
+            selected.append(ast.dump(node, include_attributes=False))
+            found.add(node.name)
+        elif isinstance(node, ast.ClassDef) and node.name == "SmallEncoder":
+            for method in node.body:
+                if isinstance(method, ast.FunctionDef) and method.name in methods:
+                    selected.append(ast.dump(method, include_attributes=False))
+                    found.add(method.name)
+    if found != names | methods:
+        raise ValueError("S36 extraction contract functions missing")
+    return fingerprint(selected)
+
+
+def contract(source=None):
     return {"format": 1, "encoder": SMALL_SHA256, "width": 768,
             "baseline_extraction": extraction_fingerprint(),
-            "implementation": sha256(Path(__file__))}
+            "implementation": extraction_digest(source)}
 
 
 def feature_id():
@@ -82,22 +103,27 @@ class SmallEncoder:
         self.feature = ort.InferenceSession(str(small_model), sess_options=opts, providers=["CPUExecutionProvider"])
         self.detector_path, self.options, self.detector = detector_model, opts, None
 
+    def detect(self, image):
+        """Current B36 crop policy, without B36 or S36 feature inference."""
+        if self.detector is None:
+            self.detector = ort.InferenceSession(str(self.detector_path), sess_options=self.options,
+                                                 providers=["CPUExecutionProvider"])
+        blob, ratio = letterbox(image)
+        raw = self.detector.run(None, {self.detector.get_inputs()[0].name: blob[None]})[0]
+        if not np.isfinite(raw).all():
+            raise ValueError("Non-finite detector output")
+        detected, scores = decode(raw, image.size, ratio)
+        boxes = []
+        for i in np.argsort(scores)[::-1][:BASELINE["max_boxes"]]:
+            box = expanded_box(detected[int(i)], image.size)
+            if min(box[2] - box[0], box[3] - box[1]) >= BASELINE["min_crop_side"]:
+                boxes.append(box)
+        return boxes
+
     def extract(self, path, expected_hash=None, boxes=None):
         path, digest, image = checked_image(path, expected_hash)
         if boxes is None:
-            if self.detector is None:
-                self.detector = ort.InferenceSession(str(self.detector_path), sess_options=self.options,
-                                                     providers=["CPUExecutionProvider"])
-            blob, ratio = letterbox(image)
-            raw = self.detector.run(None, {self.detector.get_inputs()[0].name: blob[None]})[0]
-            if not np.isfinite(raw).all():
-                raise ValueError("Non-finite detector output")
-            detected, scores = decode(raw, image.size, ratio)
-            boxes = []
-            for i in np.argsort(scores)[::-1][:BASELINE["max_boxes"]]:
-                box = expanded_box(detected[int(i)], image.size)
-                if min(box[2] - box[0], box[3] - box[1]) >= BASELINE["min_crop_side"]:
-                    boxes.append(box)
+            boxes = self.detect(image)
         if len(boxes) > 8 or any(not (0 <= x0 < x1 <= image.width and 0 <= y0 < y1 <= image.height)
                                 for x0, y0, x1, y1 in boxes):
             raise ValueError("Crop outside source")

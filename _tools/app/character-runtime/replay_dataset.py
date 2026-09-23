@@ -16,6 +16,39 @@ SCHEMA = "lakomics-feature-replay-v1"
 HERE = Path(__file__).resolve().parent
 
 
+def locate(library, hashes):
+    """Resolve unique canonical assets/<prefix>/<hash>.* paths and verify bytes.
+
+    No database, recursive search, backups or thumbnails. Reject escapes and
+    malformed hashes before opening source bytes; callers recheck after decoding.
+    """
+    library = Path(library).resolve(strict=True)
+    paths, errors = {}, {}
+    for h in sorted(hashes):
+        if not is_hash(h):
+            raise ValueError("Invalid source content hash")
+        folder = library / "assets" / h[:2]
+        if not folder.resolve().is_relative_to(library):
+            raise ValueError("Source escapes library")
+        matches = sorted(folder.glob(h + ".*"))
+        if len(matches) != 1:
+            errors[h] = f"canonical_asset_path_candidates={len(matches)}"
+            continue
+        try:
+            path = matches[0].resolve(strict=True)
+            if not path.is_relative_to(library):
+                raise ValueError("Source escapes library")
+            with path.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            if digest != h:
+                errors[h] = "source_hash_mismatch"
+                continue
+            paths[h] = path
+        except OSError:
+            errors[h] = "source_unavailable"
+    return paths, errors
+
+
 def outside_library(destination, library):
     destination, library = Path(destination).resolve(), Path(library).resolve()
     if destination == library or library in destination.parents:
@@ -32,7 +65,7 @@ def save_exclusive(value, destination, library):
 
 
 def source_hashes():
-    paths = [HERE / "replay_dataset.py", HERE / "replay_eval.py",
+    paths = [HERE / "replay_dataset.py", HERE / "replay_eval.py", HERE / "s36_scoring.py",
              HERE / "reference_regions.py", HERE / "holdout_rules.py",
              HERE.parent / "src-tauri/src/library/character_scope.rs",
              HERE.parent / "src-tauri/src/library/image_fingerprint.rs"]

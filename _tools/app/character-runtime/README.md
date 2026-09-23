@@ -324,3 +324,51 @@ throughput or justify a CPU/GPU configuration change.
 See [HOLDOUT.md](HOLDOUT.md) for the standard-library-only exporter and evaluator.
 It freezes explicit manual labels and pre-feedback evidence, screens duplicate and
 reference leakage, and reports automatic/recommendation metrics without inference.
+
+## S36 primary-model preparation (stage 2a, code only)
+
+The primary native classifier remains B36. `baseline.json` and manual region
+bindings are unchanged. S36 `feature_id` now hashes only the encoder's contract,
+image validation, session setup, detector crop selection and extraction AST,
+plus pinned S36 weights and the baseline extraction identity (including Python,
+NumPy, Pillow and ONNX Runtime versions). Comments, cache I/O and unrelated
+functions no longer expire vectors. This is a one-time namespace change from the
+old whole-file identity; no old cache is migrated, copied or declared compatible.
+S36 writes use unique same-directory `.part` files and atomic replacement.
+Startup cleanup preserves live POSIX writers; legacy/unidentified partials have
+24 hours of grace (also used on Windows, where no process signal is sent).
+
+`s36_scoring.py` is the NumPy-only shared CCIP cosine/knn3/contrast implementation,
+with per-crop scores and the native same-person overlap test. Replay calls that
+implementation with already normalized float32 vectors, preserving its numerical
+results. Raw-vector callers normalize through the default scoring entry point.
+No primary-model activation or native publication integration is included here.
+
+`s36_library_cache.py` prepares only
+`.cache/characters/s36-augmentation-v1/<feature_id>/<hash>.npz`. It accepts a
+read-only replay export, or `--hashes` with a JSON list of objects containing
+`content_hash` and `media_kind`. It verifies canonical source bytes, reads existing
+B36 boxes without constructing a cache writer, and otherwise runs the current
+B36 detector policy through the encoder/runtime helpers. It skips non-images and
+whole-image fallbacks, uses at most two ONNX intra-op threads (one inter-op), and
+resumes from validated S36 entries. It never opens a library database.
+
+**Dry-run first. A real run needs explicit user approval because it writes the
+library `.cache`.** Use the installed runtime Python with `-B`; supply actual
+paths and the dry-run's exact `feature_id` for an approved write:
+
+```text
+python -B s36_library_cache.py --dataset /research/replay.json --library /fixture/library --models /existing/models --cpu-minutes 5 --stop /research/STOP --limit 10 --dry-run
+python -B s36_library_cache.py --dataset /research/replay.json --library /fixture/library --models /existing/models --cpu-minutes 5 --stop /research/STOP --limit 10 --expect-namespace <feature_id>
+```
+
+Dry-run prints JSON counts and an explicitly assumed CPU planning range without
+loading ONNX sessions, creating directories or cleaning partials. Detection may
+later discover additional fallbacks. The CLI disables ORT telemetry before import
+to prevent telemetry files or uploads. `--limit` bounds uncached image attempts;
+validated hits do not consume it. STOP and CPU time are checked between blocking
+operations; one in-flight decode/hash/model call can exceed the budget, after
+which no further extraction or publication occurs. The CPU budget is per run,
+including all process threads; resume gets a new budget, with no ledger writes.
+Full-library extraction, calibration, in-app shadow and publication are later,
+separately authorized stages.

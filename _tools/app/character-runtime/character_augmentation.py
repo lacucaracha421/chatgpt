@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
+import time
 import zipfile
 
 import numpy as np
@@ -177,9 +180,27 @@ def augmentation_available(models, augmentation_model):
 class S36FeatureCache:
     """Atomic S36 features in the caller's cache, namespaced away from B36."""
 
-    def __init__(self, root, implementation=None):
+    def __init__(self, root, implementation=None, *, cleanup=True):
         self.root = (Path(root) / S36_NAMESPACE
                      / (feature_identity() if implementation is None else implementation))
+        if cleanup:
+            # Do not unlink another process's active atomic write. Old legacy
+            # hash.part names have no owner and receive a 24-hour grace period.
+            for partial in self.root.glob("*.part"):
+                try:
+                    owner, separator, _ = partial.name.partition("-")
+                    if separator and owner.isdecimal() and os.name == "posix":
+                        try:
+                            os.kill(int(owner), 0)
+                        except ProcessLookupError:
+                            pass
+                        else:
+                            continue
+                    elif time.time() - partial.stat().st_mtime < 86400:
+                        continue
+                    partial.unlink(missing_ok=True)
+                except (OSError, OverflowError):
+                    pass
 
     def path(self, content_hash):
         return self.root / (content_hash + ".npz")
@@ -204,15 +225,18 @@ class S36FeatureCache:
         from character_encoder import feature_id
         self.root.mkdir(parents=True, exist_ok=True)
         destination = self.path(feature.content_hash)
-        temporary = destination.with_suffix(".part")
+        temporary = None
         try:
-            with temporary.open("wb") as stream:
+            with tempfile.NamedTemporaryFile(dir=self.root, prefix=f"{os.getpid()}-",
+                                             suffix=".part", delete=False) as stream:
+                temporary = Path(stream.name)
                 np.savez(stream, content_hash=feature.content_hash, vectors=feature.vectors,
                          boxes=np.asarray(feature.boxes, dtype=np.int64).reshape(-1, 4),
                          fallback=feature.fallback, feature_id=feature_id())
-            temporary.replace(destination)
+            os.replace(temporary, destination)
         finally:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
 
 class Unavailable:

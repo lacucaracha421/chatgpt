@@ -746,5 +746,84 @@ def rig_b36(model):
     return model.b36_cache.extracted
 
 
+class S36CacheTests(unittest.TestCase):
+    def test_stable_extraction_identity(self):
+        import character_encoder as encoder
+        from character_head import fingerprint
+        source = Path(encoder.__file__).read_text()
+        original = encoder.feature_id()
+        self.assertEqual(original, fingerprint(encoder.contract(source)))
+        unrelated = source + "\n# A comment\ndef unrelated():\n    return 42\n"
+        self.assertEqual(original, fingerprint(encoder.contract(unrelated)))
+        self.assertEqual(original, fingerprint(encoder.contract(source.replace(
+            'Expanded feature file exceeds budget', 'Storage-only error'))))
+        changed = source.replace('views = [image.crop(b) for b in boxes]',
+                                 'views = [image.crop(b).transpose(Image.Transpose.FLIP_LEFT_RIGHT) for b in boxes]')
+        self.assertNotEqual(original, fingerprint(encoder.contract(changed)))
+        for old, new in [('"width": 768', '"width": 769'),
+                         ('Source exceeds pixel limit', 'Changed validation'),
+                         ('min(box[2] - box[0]', 'min(1 + box[2] - box[0]')]:
+            self.assertNotEqual(original, fingerprint(encoder.contract(source.replace(old, new))))
+        with patch.object(encoder, 'SMALL_SHA256', '0' * 64):
+            self.assertNotEqual(original, encoder.feature_id())
+        with patch.object(encoder, 'extraction_fingerprint', return_value='1' * 64):
+            self.assertNotEqual(original, encoder.feature_id())
+
+    def test_concurrent_writers_same_hash_and_startup_cleanup(self):
+        from concurrent.futures import ThreadPoolExecutor
+        import os
+        import threading
+        import time
+        from character_encoder import load_feature
+        with tempfile.TemporaryDirectory() as tmp:
+            first, second = augmentation.S36FeatureCache(tmp), augmentation.S36FeatureCache(tmp)
+            feature = Features(hash_of('concurrent'), list(BOXES), np.ones((1, 768), np.float32), False)
+            barrier = threading.Barrier(2)
+            names = []
+            save = np.savez
+            def simultaneous(stream, **values):
+                names.append(stream.name)
+                save(stream, **values)
+                barrier.wait(timeout=5)
+                # A new cache owner must not delete either active partial.
+                augmentation.S36FeatureCache(tmp)
+                self.assertTrue(Path(stream.name).exists())
+            with patch.object(augmentation.np, 'savez', side_effect=simultaneous):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = [pool.submit(cache.write, feature) for cache in (first, second)]
+                    for future in futures:
+                        future.result(timeout=10)
+            self.assertEqual(len(set(names)), 2)
+            np.testing.assert_array_equal(load_feature(first.path(feature.content_hash), feature.content_hash).vectors, feature.vectors)
+            self.assertFalse(list(first.root.glob('*.part')))
+            legacy = first.root / ('a' * 64 + '.part')
+            legacy.write_bytes(b'interrupted')
+            os.utime(legacy, (time.time()-90000,) * 2)
+            augmentation.S36FeatureCache(tmp)
+            self.assertFalse(legacy.exists())
+
+    def test_dead_writer_partial_is_cleaned_on_posix(self):
+        import os
+        if os.name != 'posix':
+            self.skipTest('POSIX process-liveness probe')
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = augmentation.S36FeatureCache(tmp)
+            cache.root.mkdir(parents=True)
+            partial = cache.root / '123-fixture.part'
+            partial.write_bytes(b'interrupted')
+            with patch.object(augmentation.os, 'kill', side_effect=ProcessLookupError):
+                augmentation.S36FeatureCache(tmp)
+            self.assertFalse(partial.exists())
+
+    def test_failed_publish_cleans_only_own_temporary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = augmentation.S36FeatureCache(tmp)
+            feature = Features(hash_of('failed'), list(BOXES), np.ones((1, 768), np.float32), False)
+            with patch.object(augmentation.os, 'replace', side_effect=OSError('fixture')):
+                with self.assertRaises(OSError):
+                    cache.write(feature)
+            self.assertFalse(list(cache.root.iterdir()))
+
+
 if __name__ == "__main__":
     unittest.main()

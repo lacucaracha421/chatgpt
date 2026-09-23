@@ -633,7 +633,7 @@ Two read-only analyses of the active library (an Opus pass and an independent Fa
 
 Stages:
 1. **Chronological feature-replay evaluator** (in progress): each prediction uses only earlier manual decisions, excludes same-post/PDQ neighbours, reports walk-forward thresholds and a target-prior leakage canary. All later changes are judged with it.
-2. **S36 switch in shadow mode**: needs a full-library S36 feature extraction into the library cache (roughly 1–2 CPU hours, separate approval) and recalibrated thresholds.
+2. **S36 switch in shadow mode**: needs a full-library S36 feature extraction into the library cache (about 3.5–4.6 CPU hours, separate approval) and recalibrated thresholds.
 3. **Scoring**: positive gallery = references + manual acceptances only; subtract the nearer of own manual rejections and same-series competitors. Keep automatic confirmation strict; growth goes to recommendations.
 4. **Fast review loop** for recommendations so new manual decisions feed stage 3.
 

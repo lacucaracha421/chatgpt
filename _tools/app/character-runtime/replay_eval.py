@@ -23,6 +23,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import numpy as np
 
+from s36_scoring import distance, knn, score_crops as shared_score_crops, unit as normalized_vectors
 from holdout_rules import current_policy, is_hash
 from replay_dataset import HERE, canonical, load_dataset, outside_library, save_exclusive, source_hashes
 
@@ -59,15 +60,7 @@ def unit(vectors):
     vectors = np.asarray(vectors, dtype=np.float32)
     if vectors.ndim != 2 or vectors.shape[1] != 768 or not 1 <= len(vectors) <= 8:
         raise ValueError("Expected 1..8 crop vectors of dimension 768")
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    if not np.isfinite(vectors).all() or np.any(norms <= 0):
-        raise ValueError("Nonfinite or zero feature vector")
-    return vectors / norms
-
-
-def distance(left, right):
-    return 0.5 * (1.0 - left @ right.T)
-
+    return normalized_vectors(vectors)
 
 @dataclass
 class Features:
@@ -273,33 +266,21 @@ def prepare_labels(data):
         events, key=lambda r: (r["time"], r["sequence"])), unreviewed, dict(excluded)
 
 
-def knn(vectors, pool):
-    if not len(pool):
-        return np.ones(len(vectors))
-    d = distance(vectors, pool)
-    k = min(3, len(pool))
-    return np.partition(d, k - 1, axis=1)[:, :k].mean(axis=1)
-
-
 def stack(entries):
     return np.stack(list(entries)) if len(entries) else np.empty((0, 768), dtype=np.float32)
 
 
 def score_crops(vectors, positive, negative, competitors, prior, policy):
-    ds = distance(vectors, positive)
-    support = policy["automatic_support"]
-    rule = float(np.partition(ds, support - 1, axis=1)[:, support - 1].min()) if len(positive) >= support else None
-    own = knn(vectors, positive)
-    scores = {"rule6": rule, "knn3": float(own.min()) if len(positive) else None,
-              "contrast": float((own - np.minimum(knn(vectors, negative), knn(vectors, competitors))).min()) if len(positive) else None,
-              "prior": -prior}
-    recommended = bool(((ds <= policy["recommendation_threshold"]).sum(axis=1) >= 2).any())
-    return scores, recommended
+    return shared_score_crops(vectors, positive, negative, competitors, prior, policy,
+                             normalized=True)
 
 
 class Replay:
-    def __init__(self, data, features, groups, lag=1):
+    def __init__(self, data, features, groups, lag=1, *, witness="gallery", gallery_cap=None):
         self.data, self.features, self.groups, self.lag = data, features, groups, lag
+        if witness not in ("gallery", "references") or (gallery_cap is not None and gallery_cap < 0):
+            raise ValueError("Invalid witness mode or gallery cap")
+        self.witness_mode, self.gallery_cap = witness, gallery_cap
         self.targets = {t["id"]: t for t in data["targets"]}
         self.references = defaultdict(list)
         for r in data["references"]:
@@ -321,7 +302,7 @@ class Replay:
             _, _, event, vector = heapq.heappop(self.pending)
             self.state[event["target_id"]][event["asset_hash"]] = (event, vector)
 
-    def gallery(self, target, query_hash, now):
+    def gallery(self, target, query_hash, now, *, references_only=False):
         created = self.targets[target].get("created_at")
         if created and time_ns(created) >= now:
             return {}, {}, [0, 0]
@@ -355,12 +336,23 @@ class Replay:
         positive = dict(self.resolved_cache[cache_key])
         negative = {}
         counts = [0, 0]
-        for h, (event, vector) in self.state[target].items():
+        if references_only:
+            return positive, negative, counts
+        # Cap latest manual states separately for accepted and rejected images.
+        # Clears/revisions were applied by release(); seeds remain independent.
+        used = Counter()
+        states = self.state[target].items()
+        if self.gallery_cap is not None:
+            states = sorted(states, key=lambda item: (item[1][0]["time"], item[1][0]["sequence"]), reverse=True)
+        for h, (event, vector) in states:
             if self.same_group(h, query_hash):
                 continue
             decision = event["decision"]
             if decision in ("accepted", "rejected"):
                 counts[int(decision == "accepted")] += 1
+                if self.gallery_cap is not None and used[decision] >= self.gallery_cap:
+                    continue
+                used[decision] += 1
                 if vector is not None:
                     (positive if decision == "accepted" else negative).setdefault(h, vector)
         return positive, negative, counts
@@ -391,12 +383,12 @@ class Replay:
         feature = self.features.get(h)
         if event["decision"] == "cleared" or feature is None or feature.fallback:
             return None
-        positive, _, _ = self.gallery(target, h, now)
+        positive, _, _ = self.gallery(target, h, now, references_only=self.witness_mode == "references")
         pool = stack(list(positive.values()))
         if len(feature.vectors) > 1 and not len(pool):
             self.audit["multi_person_feedback_without_prior_witness_basis"] += 1
             return None
-        scores = (distance(feature.vectors, pool).min(axis=1) if len(pool) and event["decision"] == "rejected"
+        scores = (distance(feature.vectors, pool).min(axis=1) if len(pool) and (self.witness_mode == "references" or event["decision"] == "rejected")
                   else knn(feature.vectors, pool))
         # No gallery rebuilding with future labels: fix the witness now.
         return feature.vectors[int(np.argmin(scores))]
@@ -451,14 +443,14 @@ def passes(score, boundary):
     return score is not None and boundary is not None and score < boundary
 
 
-def metrics(rows, scorer, lag):
+def metrics(rows, scorer, lag, rates=RATES):
     rows = sorted(rows, key=lambda r: (r["time"], r["sequence"]))
     p = sum(r["label"] for r in rows)
     n = len(rows) - p
     result = {"pairs": len(rows), "positives": p, "negatives": n, "auc": auc(rows, scorer),
               "abstentions": sum(r["scores"][scorer] is None for r in rows),
               "walk_forward": {}, "oracle": {}}
-    for rate in RATES:
+    for rate in rates:
         history, pending = [], []
         tp = fp = cold = 0
         last = None
@@ -505,7 +497,7 @@ def count_windows(rows):
             for (o, d, label), count in sorted(counts.items())]
 
 
-def stream_estimate(replay, data, labels, report, scorers):
+def stream_estimate(replay, data, labels, report, scorers, rates=RATES):
     # The last decision time is the replay horizon. Do not release later feedback.
     now = report["horizon_ns"]
     truth = {(r["target_id"], r["asset_hash"]) for r in labels}
@@ -520,7 +512,7 @@ def stream_estimate(replay, data, labels, report, scorers):
         if not meta["enabled"] or meta.get("manual_only"):
             continue
         volume = {"name": meta["name"], "unlabeled_pairs": 0, "missing_features": 0,
-                  "fallback": 0, "accepted_volume": {s: {str(r): 0 for r in RATES} for s in scorers}}
+                  "fallback": 0, "accepted_volume": {s: {str(r): 0 for r in rates} for s in scorers}}
         for h in sorted(scoped[meta["series_id"]]):
             if (target, h) in truth or (target, h) in references:
                 continue
@@ -532,7 +524,7 @@ def stream_estimate(replay, data, labels, report, scorers):
                 volume["fallback"] += 1
             scores, _ = replay.query(target, h, now)
             for scorer in scorers:
-                for rate in RATES:
+                for rate in rates:
                     boundary = report["metrics"][scorer]["overall"]["walk_forward"][str(rate)]["final_threshold"]
                     volume["accepted_volume"][scorer][str(rate)] += int(passes(scores[scorer], boundary))
         targets[target] = volume
@@ -540,19 +532,23 @@ def stream_estimate(replay, data, labels, report, scorers):
             "per_target": targets,
             "overall": {"unlabeled_pairs": sum(t["unlabeled_pairs"] for t in targets.values()),
                         "missing_features": sum(t["missing_features"] for t in targets.values()),
-                        "accepted_volume": {s: {str(r): sum(t["accepted_volume"][s][str(r)] for t in targets.values()) for r in RATES} for s in scorers}}}
+                        "accepted_volume": {s: {str(r): sum(t["accepted_volume"][s][str(r)] for t in targets.values()) for r in rates} for s in scorers}}}
 
 
-def evaluate(envelope, features, *, lag=1, scorers=SCORERS, stream=False):
+def evaluate(envelope, features, *, lag=1, scorers=SCORERS, stream=False,
+             witness="gallery", gallery_cap=None, rates=RATES):
+    if not rates or any(not np.isfinite(rate) or not 0 <= rate < 1 for rate in rates):
+        raise ValueError("Rates must be finite values in [0, 1)")
     data = envelope["dataset"]
     labels, events, unreviewed, excluded = prepare_labels(data)
     hashes = {r["asset_hash"] for r in data["references"] + data["decisions"]}
     groups, group_info = duplicate_groups(data["images"], hashes)
-    replay = Replay(data, features, groups, lag)
+    replay = Replay(data, features, groups, lag, witness=witness, gallery_cap=gallery_cap)
     rows = replay.run(labels, events)
     eligible = [r for r in rows if r["feature_status"] == "available"]
     names = {t["id"]: t["name"] for t in data["targets"]}
     report = {"dataset_sha256": envelope["sha256"], "source_sha256": source_hashes(),
+              "witness": witness, "gallery_cap": gallery_cap, "rates": list(rates),
               "feedback_lag_days": lag, "day_timezone": "UTC", "grouping": group_info,
               "horizon_ns": max((r["time"] for r in events), default=0),
               "policy": replay.policy, "targets": data["targets"], "excluded_labels": excluded,
@@ -567,7 +563,7 @@ def evaluate(envelope, features, *, lag=1, scorers=SCORERS, stream=False):
               "limitations": data["limitations"] + [
                   "Selected historical labels, not prospective validation. Current untimestamped seeds/regions are an explicit initial-condition assumption.",
                   "Rule6 is the native sixth-distance/support component, not native geometry/competitor publication arbitration; S36 uses the same numeric thresholds for research only.",
-                  "Witnesses are fixed at each historical manual event using only then-available, query-group-excluded positives. Multi-person feedback without a witness basis abstains.",
+                  "Witnesses are fixed at each historical manual event using only then-available, query-group-excluded positives (resolved references only in references mode). Multi-person feedback without a witness basis abstains.",
                   "Feature scorers skip missing/fallback queries; empty galleries abstain and rank last in AUC. Prior is unsmoothed positive rate (cold start 0.5), using earlier manual state including feature-missing pairs.",
                   "Contrast uses the union of enabled same-series competitor positive galleries; no rival/reject pool has distance 1.0. Same-crop contrast is minimized over query crops.",
                   "Walk-forward calibration uses frozen earlier prediction scores and the same feedback lag, not rescored training images. Measured FPR can exceed its calibration target under drift.",
@@ -575,14 +571,14 @@ def evaluate(envelope, features, *, lag=1, scorers=SCORERS, stream=False):
               ]}
     for scorer in scorers:
         cohort = rows if scorer == "prior" else eligible
-        report["metrics"][scorer] = {"overall": metrics(cohort, scorer, lag),
-            "anjo_excluded": metrics([r for r in cohort if names[r["target_id"]] != "안조"], scorer, lag),
+        report["metrics"][scorer] = {"overall": metrics(cohort, scorer, lag, rates),
+            "anjo_excluded": metrics([r for r in cohort if names[r["target_id"]] != "안조"], scorer, lag, rates),
             "coverage": {"evaluated_pairs": len(cohort), "labeled_pairs": len(rows),
                          "fraction": len(cohort) / len(rows) if rows else None}}
         if scorer == "prior":
-            report["metrics"][scorer]["feature_matched"] = metrics(eligible, scorer, lag)
+            report["metrics"][scorer]["feature_matched"] = metrics(eligible, scorer, lag, rates)
     if stream:
-        report["stream"] = stream_estimate(replay, data, labels, report, scorers)
+        report["stream"] = stream_estimate(replay, data, labels, report, scorers, rates)
     return report
 
 
@@ -598,6 +594,9 @@ def main():
     command.add_argument("--space", choices=("b36", "s36"), required=True)
     command.add_argument("--scorers", nargs="+", choices=SCORERS, default=list(SCORERS))
     command.add_argument("--feedback-lag", type=int, default=1)
+    command.add_argument("--witness", choices=("gallery", "references"), default="gallery")
+    command.add_argument("--gallery-cap", type=int, help="Latest manual images per accepted/rejected pool; seeds uncapped")
+    command.add_argument("--rates", type=float, nargs="+", default=list(RATES))
     command.add_argument("--stream", action="store_true")
     command.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -609,14 +608,17 @@ def main():
         if args.output.exists():
             raise FileExistsError(args.output)
         features, provenance = read_features(args.features, args.space, args.extra_s36, args.box_features)
-        report = evaluate(envelope, features, lag=args.feedback_lag, scorers=args.scorers, stream=args.stream)
+        report = evaluate(envelope, features, lag=args.feedback_lag, scorers=args.scorers, stream=args.stream,
+                          witness=args.witness, gallery_cap=args.gallery_cap, rates=args.rates)
         report.update(space=args.space, feature_sources=provenance)
         save_exclusive(report, args.output, envelope["dataset"]["library_root"])
         print(f"{args.space}: coverage {report['coverage']}; unreviewed automatic {report['unreviewed_automatic']['pairs']}")
         for scorer, results in report["metrics"].items():
             all_rows, without = results["overall"], results["anjo_excluded"]
-            walk = all_rows["walk_forward"]["0.02"]
-            print(f"{scorer}: AUC={all_rows['auc']} / no-anjo={without['auc']}; WF R@2%={walk['recall']} (observed FPR={walk['observed_fpr']}); macro={all_rows['macro_auc']}; oracle R@2%={all_rows['oracle']['0.02']['recall']}")
+            print(f"{scorer}: AUC={all_rows['auc']} / no-anjo={without['auc']}; macro={all_rows['macro_auc']}")
+            for rate in args.rates:
+                walk = all_rows["walk_forward"][str(rate)]
+                print(f"  WF R@{rate:.1%}={walk['recall']} (observed FPR={walk['observed_fpr']}); oracle={all_rows['oracle'][str(rate)]['recall']}")
         print("Historical research only; see report limitations. No runtime acceptance claim.")
     except (OSError, ValueError, KeyError, pickle.UnpicklingError) as error:
         parser.exit(2, f"Evaluation failed: {error}\n")
