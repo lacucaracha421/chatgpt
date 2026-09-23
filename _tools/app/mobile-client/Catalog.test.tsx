@@ -20,6 +20,9 @@ beforeEach(()=>{Object.defineProperty(window,'innerWidth',{configurable:true,val
   if(path.includes('/editions?'))return {publicationRevision:'p1',groupId:'group',selectedProviderWorkId:null,items:[item],nextCursor:null,totalCount:1};
   return page;
 });});
+const CHOICES:Record<string,string>={korean:'한국어',japanese:'일본어',all:'전체 언어',latest:'최신순',views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
+/** Open a chip's sheet and pick one option, as a user does. */
+function choose(group:'카탈로그 언어'|'카탈로그 정렬',value:string){fireEvent.click(screen.getByRole('button',{name:new RegExp(`^${group}`)}));fireEvent.click(screen.getByRole('radio',{name:CHOICES[value]}));}
 afterEach(cleanup);
 describe('catalog cover retention',()=>{
   const preview='https://app.lakomics.local/media-cache/cover';
@@ -81,7 +84,7 @@ describe('catalog cover retention',()=>{
     if(field==='work')work={...work,providerWorkId:'77'};
     if(field==='thumbnail')work={...work,thumbnailUrl:'https://example.invalid/new.jpg'};
     if(field==='revision')revision='p2';
-    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});
+    choose('카탈로그 언어','japanese');
     await waitFor(()=>expect(requests()).toHaveLength(2));expect(document.querySelector('.catalog-card')).toBe(card);
     expect(requests()[1][1]).toMatchObject({workId:work.providerWorkId,url:work.thumbnailUrl,revision});
     expect(image()).toBeNull();
@@ -93,14 +96,14 @@ describe('catalog cover retention',()=>{
     await open();await waitFor(()=>expect(requests()).toHaveLength(1));
     const signal=requests()[0][2] as AbortSignal;
     work={...work,thumbnailUrl:'https://example.invalid/new.jpg'};
-    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});
+    choose('카탈로그 언어','japanese');
     const current=await loaded();expect(signal.aborted).toBe(true);expect(requests()).toHaveLength(2);
     await act(async()=>old.resolve({url:`${preview}-stale`}));expect(image()).toBe(current);expect(image()?.src).toBe(preview);
   });
 
   it('stops displaying a removed thumbnail without issuing a media request',async()=>{
     await open();await loaded();work={...work,thumbnailUrl:null};
-    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});
+    choose('카탈로그 언어','japanese');
     await act(async()=>{});expect(image()).toBeNull();expect(requests()).toHaveLength(1);
   });
 });
@@ -174,8 +177,8 @@ describe('mobile catalog reads',()=>{
       return original(path,...args);
     });
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});await waitFor(()=>expect(searches).toBe(2));
-    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'all'}});await screen.findByText('밤의 도서관');
+    choose('카탈로그 언어','japanese');await waitFor(()=>expect(searches).toBe(2));
+    choose('카탈로그 언어','all');await screen.findByText('밤의 도서관');
     await act(async()=>resolve({...page,items:[{...item,title:'오래된 결과'}]}));expect(screen.queryByText('오래된 결과')).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'북마크',exact:true}));await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked'))).toBe(true));
     expect(mocks.api.mock.calls.every(([, ,body])=>body===undefined)).toBe(true);
@@ -213,7 +216,7 @@ describe('mobile catalog reads',()=>{
     expect(visible).toHaveLength(2);expect(visible.map(e=>e.style.flexBasis)).toEqual(['50%','50%']);
   });
   it('starts with Today popular sorting',async()=>{
-    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');expect((screen.getByRole('combobox',{name:'카탈로그 정렬'}) as HTMLSelectElement).value).toBe('hotDay');
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['hotDay']);
   });
   it('observes the reader stage after the dialog portal mounts',async()=>{
     const observe=vi.fn(),disconnect=vi.fn();const previous=window.ResizeObserver;
@@ -255,8 +258,8 @@ describe('mobile catalog reads',()=>{
   });
   it('forces latest sort when bookmark scope is enabled',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 정렬'}),{target:{value:'views'}});await waitFor(()=>expect((screen.getByRole('combobox',{name:'카탈로그 정렬'}) as HTMLSelectElement).value).toBe('views'));
-    fireEvent.click(screen.getByRole('button',{name:'북마크',exact:true}));await waitFor(()=>expect((screen.getByRole('combobox',{name:'카탈로그 정렬'}) as HTMLSelectElement).value).toBe('latest'));
+    choose('카탈로그 정렬','views');await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['views']));
+    fireEvent.click(screen.getByRole('button',{name:'북마크',exact:true}));await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['latest']));
     expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked')&&path.includes('sort=latest'))).toBe(true);
   });
   it('uses a ready total without issuing the extra count request',async()=>{
@@ -281,16 +284,16 @@ describe('mobile catalog reads',()=>{
   });
   it('disables retained cards while a replacement query is pending',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');await screen.findByText('1',{selector:'.catalog-total'});
-    mocks.api.mockImplementation(()=>new Promise(()=>{}));fireEvent.change(screen.getByRole('combobox',{name:'카탈로그 언어'}),{target:{value:'japanese'}});
+    mocks.api.mockImplementation(()=>new Promise(()=>{}));choose('카탈로그 언어','japanese');
     expect((screen.getByText('밤의 도서관').closest('button') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('밤의 도서관'));expect(screen.queryByText('상세 정보')).toBeNull();
   });
   it('opens Catalog settings from the top bar and applies several categories in one request',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     // Only the top-bar icon opens settings; the gallery has no second filter control.
-    expect(screen.getAllByRole('button',{name:'카탈로그 설정'})).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));
-    const panel=await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    expect(screen.getAllByRole('button',{name:/^필터/})).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));
+    const panel=await screen.findByRole('dialog',{name:'필터'});
     expect(panel).toBeTruthy();
     // Every category starts included, so narrowing means unchecking the rest. The
     // whole set is composed in one read, not one request per tap.
@@ -303,7 +306,7 @@ describe('mobile catalog reads',()=>{
   });
   it('shows every category checked by default and starts a selection from all',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     // "No restriction" is presented as all categories checked.
     for(const label of ['동인지','만화','아티스트 CG','비공개'])expect((screen.getByLabelText(label) as HTMLInputElement).checked).toBe(true);
     // Unchecking one starts a concrete selection from all, not from nothing.
@@ -311,13 +314,13 @@ describe('mobile catalog reads',()=>{
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('categories')).toBe('[1,3,4,5,6,7,8,9,10,11]'));
     // The panel offers one way back to no restriction.
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     fireEvent.click(screen.getByRole('button',{name:'모두 포함'}));fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')).at(-1)![0]).not.toContain('categories='));
   });
   it('adds one namespaced avoidance tag, rejects a duplicate, and removes it again',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     // The user enters one string, not a namespace and value in separate fields.
     fireEvent.change(screen.getByLabelText('회피 태그'),{target:{value:'female:scat'}});
     fireEvent.click(screen.getByRole('button',{name:'추가'}));
@@ -329,7 +332,7 @@ describe('mobile catalog reads',()=>{
     await waitFor(()=>expect(JSON.parse(searchParams(lastSearch()).get('excludedTags')!)).toEqual([{namespace:'female',value:'scat'}]));
     // A tag value is never sent as the search text.
     expect(searchParams(lastSearch()).get('text')).toBe('');
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     expect(screen.getByText('female:scat')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'female:scat 회피 해제'}));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
@@ -338,7 +341,7 @@ describe('mobile catalog reads',()=>{
   });
   it('refuses a tag set that would exceed the combined encoded filter budget',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     const entry=screen.getByLabelText('회피 태그');
     const value='x'.repeat(60);
     for(let index=0;index<40;index++){
@@ -361,7 +364,7 @@ describe('mobile catalog reads',()=>{
     const before=mocks.api.mock.calls.filter(([path])=>(path as string).includes('/works/kHentai/42?')).length;
     // A narrower filter is applied: the work may no longer be eligible, so the old
     // detail response must not be reused for the new filter identity.
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     for(const label of ['동인지','만화','아티스트 CG','서양','이미지 세트','비성인','코스프레','아시아 포르노','기타','비공개'])fireEvent.click(screen.getByLabelText(label));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('categories')).toBe('[4]'));
@@ -373,7 +376,7 @@ describe('mobile catalog reads',()=>{
     const list=document.querySelector('.catalog-scroll') as HTMLElement;list.scrollTop=140;fireEvent.scroll(list);
     const searches=mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')).length;
     // Apply without changing anything: this is not a filter change.
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await act(async()=>{});
     expect(mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')).length).toBe(searches);
@@ -382,11 +385,11 @@ describe('mobile catalog reads',()=>{
   });
   it('hides the settings icon while the detail or reader is open',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    expect(screen.getByRole('button',{name:'카탈로그 설정'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:/^필터/})).toBeTruthy();
     fireEvent.click(screen.getByText('밤의 도서관'));await screen.findByText('40페이지 · 조회 1,200');
-    expect(screen.queryByRole('button',{name:'카탈로그 설정'})).toBeNull();
+    expect(screen.queryByRole('button',{name:/^필터/})).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'읽기'}));await screen.findByRole('button',{name:'읽기 닫기'});
-    expect(screen.queryByRole('button',{name:'카탈로그 설정'})).toBeNull();
+    expect(screen.queryByRole('button',{name:/^필터/})).toBeNull();
   });
   it('sends searchMode=mobile only after the server advertises the capability',async()=>{
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?capableStatus:path.includes('/count?')?{publicationRevision:'p1',totalCount:1}:page);
@@ -403,20 +406,20 @@ describe('mobile catalog reads',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
     fireEvent.change(search,{target:{value:'artist:"작가" AND tag:"밤"'}});
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     for(const label of ['동인지','아티스트 CG','게임 CG','서양','이미지 세트','비성인','코스프레','아시아 포르노','기타','비공개'])fireEvent.click(screen.getByLabelText(label));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('categories')).toBe('[2]'));
     // The draft is neither discarded nor quietly committed by the filter apply.
     expect((screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('artist:"작가" AND tag:"밤"');
     expect(searchParams(lastSearch()).get('text')).toBe('');
-    fireEvent.click(screen.getByRole('button',{name:'검색'}));
+    fireEvent.submit(screen.getByRole('search'));
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:"작가" AND tag:"밤"'));
     expect(searchParams(lastSearch()).get('categories')).toBe('[2]');
   });
   it('resets to the first page and clears cursors only when the filter is applied',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     for(const label of ['동인지','만화','아티스트 CG','서양','이미지 세트','비성인','코스프레','아시아 포르노','기타','비공개'])fireEvent.click(screen.getByLabelText(label));
     // An unapplied draft changes nothing on the wire.
     expect(mocks.api.mock.calls.filter(([path])=>searchParams(path as string).has('categories'))).toHaveLength(0);
@@ -428,19 +431,19 @@ describe('mobile catalog reads',()=>{
   it('closes settings with Back and Escape before leaving the catalog, preserving scroll',async()=>{
     const backRef={current:null};render(<Catalog active paused={false} backRef={backRef}/>);await screen.findByText('밤의 도서관');
     const list=document.querySelector('.catalog-scroll') as HTMLElement;list.scrollTop=120;fireEvent.scroll(list);
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     // Back closes the modal and does not consume the catalog's own back step.
-    act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryByRole('dialog',{name:'카탈로그 설정'})).toBeNull();
+    act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryByRole('dialog',{name:'필터'})).toBeNull();
     expect(screen.getByText('밤의 도서관')).toBeTruthy();expect(list.scrollTop).toBe(120);
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});
-    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'카탈로그 설정'})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'필터'})).toBeNull());
     expect(backRef.current?.()).toBe(false);
   });
   it('persists the device filter per endpoint and restores it after re-entering',async()=>{
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?capableStatus:path.includes('/count?')?{publicationRevision:'p1',totalCount:1}:path.includes('/works/')?{publicationRevision:'p1',item:{...item,tagGroups:[],uploader:null,category:1,updated:null,fileSize:null,rating:null}}:page);
     const backRef={current:null};const view=render(<Catalog active paused={false} backRef={backRef} endpoint="https://a.invalid"/>);await screen.findByText('밤의 도서관');
-    fireEvent.click(screen.getByRole('button',{name:'카탈로그 설정'}));await screen.findByRole('dialog',{name:'카탈로그 설정'});
+    fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     fireEvent.click(screen.getByLabelText('만화'));fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('categories')).toBe('[1,3,4,5,6,7,8,9,10,11]'));
     expect(localStorage.getItem('lakomics.catalog.preferences.https://a.invalid')).toBeTruthy();
@@ -502,5 +505,59 @@ describe('mobile catalog reads',()=>{
     await screen.findByText('밤의 도서관');
     expect(localStorage.getItem('lakomics.catalog.preferences.https://a.invalid')).toBeNull();
     expect(searchParams(lastSearch()).has('categories')).toBe(false);
+  });
+});
+describe('mobile catalog layout',()=>{
+  const second:CatalogItem={...item,providerWorkId:'43',groupId:'group-2',title:'계절의 기록',versionCount:1,bookmarked:false,hasBookmarkedVersion:false};
+  it('appends the next cursor page while scrolling and restarts when the publication changes',async()=>{
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return capableStatus;
+      if(path.includes('/count?'))return {publicationRevision:'p1',totalCount:2};
+      if(path.includes('cursor=c2'))return {...page,items:[second],nextCursor:null};
+      if(path.includes('cursor=j2'))return {...page,publicationRevision:'p2',items:[{...second,title:'다른 게시본'}],nextCursor:null};
+      // Real cursors are opaque and carry the query, so each language has its own.
+      return {...page,nextCursor:searchParams(path).get('language')==='japanese'?'j2':'c2'};
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    // jsdom has no layout, so the short first page already counts as scrolled to the end.
+    await screen.findByText('계절의 기록');expect(screen.getByText('밤의 도서관')).toBeTruthy();
+    expect(screen.getByText('마지막 작품입니다')).toBeTruthy();
+    expect(screen.queryByRole('button',{name:'이전'})).toBeNull();expect(screen.queryByRole('button',{name:'다음'})).toBeNull();
+    // A page from another publication is never mixed into the list; the list starts over.
+    mocks.api.mockClear();
+    fireEvent.click(screen.getByRole('button',{name:/^카탈로그 언어/}));fireEvent.click(screen.getByRole('radio',{name:'일본어'}));
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>(path as string).includes('cursor=j2'))).toBe(true));
+    await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>(path as string).includes('/search?')&&!(path as string).includes('cursor=')).length).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByText('다른 게시본')).toBeNull();
+    // The stale first page is not reloaded in a loop.
+    await screen.findByText('목록이 갱신되었습니다. 당겨서 새로고침해 주세요.');
+  });
+  it('counts active filters on the chip and applies the blocked switch from the filter sheet',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    expect(screen.getByRole('button',{name:'필터'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'필터'}));await screen.findByRole('dialog',{name:'필터'});
+    const blocked=screen.getByRole('switch',{name:/차단 항목 보기/});expect(blocked.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(blocked);fireEvent.change(screen.getByLabelText('회피 태그'),{target:{value:'female:scat'}});fireEvent.click(screen.getByRole('button',{name:'추가'}));
+    fireEvent.click(screen.getByRole('button',{name:'적용'}));
+    await waitFor(()=>expect(searchParams(lastSearch()).get('revealBlocked')).toBe('true'));
+    expect(screen.getByRole('button',{name:'필터 2개 적용'})).toBeTruthy();
+    expect(screen.queryByText('PC 공통 정책의 차단 항목 보기')).toBeNull();
+  });
+  it('shows how long ago the catalog was published and offers the server refresh in the title bar',async()=>{
+    const publishedAt=new Date(Date.now()-23*60_000).toISOString();
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return {...capableStatus,capabilities:{...capableStatus.capabilities,refreshRequest:true}};
+      if(path.includes('/refresh'))return {job:null};
+      if(path.includes('/count?'))return {publicationRevision:'p1',totalCount:1};
+      return {...page,publishedAt};
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    await screen.findByText('23분 전 갱신');expect(await screen.findByRole('button',{name:'새 작품 가져오기'})).toBeTruthy();
+  });
+  it('offers to continue reading from the saved page',async()=>{
+    localStorage.setItem('lakomics.catalog.reading.kHentai:42','11');
+    render(<Catalog active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText('밤의 도서관'));
+    expect(await screen.findByRole('button',{name:'이어 읽기 12p'})).toBeTruthy();
+    expect(screen.getByText('태그를 누르면 같은 태그로 검색합니다.')).toBeTruthy();
   });
 });

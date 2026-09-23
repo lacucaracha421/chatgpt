@@ -335,11 +335,13 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
   // Collections draws its own title bar, so the shared bar and its sidebar button are absent.
   expect(document.querySelector('.app-header')).toBeNull();
   expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));
-  expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
-  const sidebar=vi.fn();window.addEventListener('lakomics-sidebar',sidebar);
-  fireEvent.click(screen.getByRole('button',{name:'사이드바 열기'}));expect(sidebar).toHaveBeenCalledOnce();
-  window.removeEventListener('lakomics-sidebar',sidebar);
+  // Catalog and Notes also draw their own title bars; no area offers the old sidebar.
+  for(const area of ['Catalog','Notes']){
+    fireEvent.click(screen.getByRole('button',{name:area,exact:true}));
+    expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
+    expect(document.querySelector('.app-header')).toBeNull();
+    expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
+  }
 });
 it('opens density as a sheet, stores the existing preference and restores focus',async()=>{
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');

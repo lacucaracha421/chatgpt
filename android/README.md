@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source and installed version: **0.7.7 (34)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source and installed version: **0.7.8 (35)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,20 @@ Current source and installed version: **0.7.7 (34)**, declared in [AndroidManife
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.7.8 — Catalog and Notes follow the mobile layout (2026-09-23)
+
+Catalog and Notes drop the PC-style sidebar header and draw their own title bars, like
+Library and Collections. Catalog: the title shows the work count and how long ago the
+catalog was last published ("N분 전 갱신") beside the fetch-new-works action; search submits
+on Enter; language/sort/bookmark/filter are chips with sheets, and the "show blocked"
+switch moved into the filter sheet; the grid scrolls continuously instead of paging and
+pulls to refresh; the detail is a full screen with a blurred cover backdrop, a large Read
+(or "continue at page N") action, edition cards and tag chips. Notes: pinned and recent
+note cards, a small trash link that opens its own screen, a floating new-note button and a
+full-screen editor with pin/trash icons and read-only restore for trashed notes. The
+sticky chip row keeps a short fading gap under the title bar in Catalog and Collections.
+Data behavior (bookmarks, publication checks, filters, reader, notes sync) is unchanged.
 
 ## 0.7.7 — Background thumbnails yield to visible ones, installed (2026-09-23)
 

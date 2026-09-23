@@ -24,7 +24,7 @@
 .collection-shelf::-webkit-scrollbar{display:none}
 .collection-shelf>.collection-tile{width:168px;flex-shrink:0}
 .collection-shelf>p{margin:8px 0}
-.collection-chips{position:sticky;top:0;z-index:1;background:var(--color-bg);padding:8px 0 12px;margin:0}
+
 .collection-chips .filter-chip svg:first-child{width:16px}
 .collection-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px 12px}
 @media(min-width:700px){.collection-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}

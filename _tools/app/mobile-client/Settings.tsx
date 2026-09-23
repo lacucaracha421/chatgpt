@@ -8,7 +8,7 @@ import {onWarmState, setWarmEnabled, warmEnabled, warmState, type WarmState} fro
 import './Settings.css';
 
 type CacheStatus = {bytes:number; count:number; limit:number};
-const APP_VERSION = '0.7.7';
+const APP_VERSION = '0.7.8';
 
 export function Settings({status, onStatus, onClose, onCacheCleared}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void}) {
   const [endpoint, setEndpoint] = useState(status.endpoint);

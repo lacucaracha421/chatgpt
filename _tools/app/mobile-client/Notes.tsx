@@ -1,7 +1,8 @@
 import {useCallback,useEffect,useRef,useState,type MutableRefObject} from 'react';
-import {ArrowLeftIcon,ArrowPathIcon,PlusIcon,TrashIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon,ArrowPathIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {PinIcon} from './PinIcon';
 import {Button,IconButton} from './ui';
-import {HeaderTools} from './HeaderTools';
+import {usePullToRefresh} from './usePullToRefresh';
 import {native,errorText} from './transport';
 import './notes.css';
 export type MobileNote={id:string;title:string;body:string;pinned:boolean;deleted:boolean;createdAt:string;updatedAt:string;localRevision:number;pending:boolean;conflict:boolean};
@@ -43,17 +44,60 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   useEffect(()=>{if(!active||!state.notes.some(n=>n.pending))return;const timer=setTimeout(()=>void sync(),2000);return()=>clearTimeout(timer);},[active,state.notes,sync]);
   useEffect(()=>{const leave=()=>{if(document.visibilityState==='hidden')void flush().catch(()=>{});};document.addEventListener('visibilitychange',leave);return()=>document.removeEventListener('visibilitychange',leave);},[flush]);
   const leave=()=>{void flush().then(()=>setSelected(null)).catch(()=>{});};
-  useEffect(()=>{backRef.current=()=>{if(!selected)return false;leave();return true;};return()=>{backRef.current=null;};},[selected,flush,backRef]);
-  useEffect(()=>{if(!active)return;const toggle=()=>{if(selected)leave();};window.addEventListener('lakomics-sidebar',toggle);return()=>window.removeEventListener('lakomics-sidebar',toggle);},[active,selected,flush]);
+  useEffect(()=>{backRef.current=()=>{if(selected){leave();return true;}if(trash){setTrash(false);return true;}return false;};return()=>{backRef.current=null;};},[selected,trash,flush,backRef]);
   async function open(note:MobileNote){try{await flush();const next={...note,dirty:false,generation:0};current.current=next;setDraft(next);setSelected(note.id);}catch{/* Keep the unsaved editor visible. */}}
   async function create(){try{await flush();const now=new Date().toISOString();const next:Draft={id:crypto.randomUUID(),title:'',body:'',pinned:false,deleted:false,createdAt:now,updatedAt:now,localRevision:0,pending:true,conflict:false,dirty:true,generation:1};current.current=next;setDraft(next);setSelected(next.id);}catch{}}
   function edit(change:Partial<MobileNote>){const old=current.current;if(!old)return;const next={...old,...change,dirty:true,generation:old.generation+1};current.current=next;setDraft(next);}
-  const visible=state.notes.filter(n=>n.deleted===trash&&`${n.title}\n${n.body}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updatedAt.localeCompare(a.updatedAt));
-  return <section className={`mobile-notes ${selected?'note-open':''}`} style={{display:active?undefined:'none'}} aria-label="메모">
-    <HeaderTools active={active&&state.unlocked}><span className="notes-save-state" role="status">{saving?'저장 중':draft?.dirty?'저장 대기':syncing?'동기화 중':state.notes.some(n=>n.pending)?'동기화 대기':''}</span><IconButton label="메모 동기화" icon={ArrowPathIcon} disabled={syncing} onClick={()=>void sync()}/><IconButton label="새 메모" icon={PlusIcon} onClick={()=>void create()}/></HeaderTools>
-    {!loaded?<p>메모를 불러오는 중…</p>:!state.unlocked?<form className="notes-unlock" onSubmit={event=>{event.preventDefault();setError('');void native<NotesState>('notesUnlock',{key}).then(next=>{setKey('');accept(next);}).catch(reason=>setError(errorText(reason)));}}><h2>메모 연결</h2><p>PC 메모에서 사용하는 복구 키를 한 번 입력하세요.</p><input type="password" aria-label="메모 복구 키" value={key} autoComplete="off" spellCheck={false} autoCapitalize="none" onChange={event=>setKey(event.target.value)}/><Button type="submit" disabled={key.trim().length!==64}>메모 열기</Button></form>:<>
-      <aside className="notes-index"><input aria-label="메모 검색" placeholder="메모 검색" value={query} onChange={event=>setQuery(event.target.value)}/><div className="notes-modes"><Button variant="ghost" aria-pressed={!trash} onClick={()=>setTrash(false)}>메모</Button><Button variant="ghost" aria-pressed={trash} onClick={()=>setTrash(true)}>휴지통</Button></div><div className="notes-list">{visible.map(note=><button key={note.id} aria-current={selected===note.id?'true':undefined} onClick={()=>void open(note)}><strong>{note.pinned?'◆ ':''}{note.title||'제목 없음'}</strong><span>{note.body.slice(0,100)}</span><small>{note.conflict?'충돌 사본 · ':''}{new Date(note.updatedAt).toLocaleDateString()}{note.pending?' · 동기화 대기':''}</small></button>)}{!visible.length&&<p className="muted">{trash?'휴지통이 비어 있습니다.':'아직 메모가 없습니다.'}</p>}</div></aside>
-      <div className="notes-editor">{selected&&draft?<><div className="notes-editor-actions"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={leave}/><Button variant="ghost" aria-pressed={draft.pinned} onClick={()=>edit({pinned:!draft.pinned})}>고정</Button>{draft.deleted?<Button variant="ghost" onClick={()=>edit({deleted:false})}>복원</Button>:<IconButton label="메모 휴지통으로" icon={TrashIcon} onClick={()=>edit({deleted:true})}/>}</div>{draft.conflict&&<p className="hint">다른 기기의 수정과 겹쳐 두 내용을 모두 보관했습니다.</p>}<input aria-label="메모 제목" placeholder="제목" maxLength={200} value={draft.title} onChange={event=>edit({title:event.target.value})}/><textarea aria-label="메모 내용" placeholder="여기에 메모하세요." value={draft.body} onChange={event=>edit({body:event.target.value})}/></>:<div className="empty-state"><p>메모를 선택하거나 새로 작성하세요.</p><Button onClick={()=>void create()}>새 메모</Button></div>}</div>
-    </>}{error&&<div className="notes-error" role="alert">{error}<Button variant="ghost" onClick={()=>void sync()}>다시 시도</Button></div>}
+  const visible=state.notes.filter(n=>n.deleted===trash&&`${n.title}\n${n.body}`.toLocaleLowerCase().includes((trash?'':query).toLocaleLowerCase())).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updatedAt.localeCompare(a.updatedAt));
+  const pinned=trash?[]:visible.filter(n=>n.pinned),recent=trash?visible:visible.filter(n=>!n.pinned);
+  const trashed=state.notes.filter(n=>n.deleted).length;
+  const status=saving?'저장 중':draft?.dirty?'저장 대기':syncing?'동기화 중':state.notes.some(n=>n.pending)?'동기화 대기':'동기화됨';
+  const list=useRef<HTMLDivElement>(null);
+  const pull=usePullToRefresh(list,()=>void sync(),syncing,!active||!state.unlocked||!!selected);
+  const card=(note:MobileNote)=><button key={note.id} className="note-card" onClick={()=>void open(note)}><strong className={note.title?undefined:'is-untitled'}>{note.title||'제목 없음'}</strong>{note.body&&<span>{note.body.slice(0,240)}</span>}<small>{note.conflict&&<em>충돌 사본</em>}{note.conflict&&' · '}{relativeTime(note.updatedAt)}{note.pending&&<> · <i aria-hidden="true"/>동기화 대기</>}</small></button>;
+  const editing=selected&&draft;
+  return <section className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none'}} aria-label="메모">
+    {!loaded?<p className="hint notes-loading">메모를 불러오는 중…</p>:!state.unlocked?<>
+      <header className="notes-top"><h1>메모</h1></header>
+      <form className="notes-unlock" onSubmit={event=>{event.preventDefault();setError('');void native<NotesState>('notesUnlock',{key}).then(next=>{setKey('');accept(next);}).catch(reason=>setError(errorText(reason)));}}><h2>메모 연결</h2><p>PC 메모에서 사용하는 복구 키를 한 번 입력하세요.</p><input type="password" aria-label="메모 복구 키" value={key} autoComplete="off" spellCheck={false} autoCapitalize="none" onChange={event=>setKey(event.target.value)}/><Button type="submit" variant="primary" disabled={key.trim().length!==64}>메모 열기</Button></form>
+    </>:null}
+    {loaded&&state.unlocked&&editing&&<>
+      <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={leave}/><span className="notes-top__space"/><span className="notes-save-state" role="status">{saving?'저장 중':draft.dirty?'저장 대기':'저장됨'}</span>
+        {!draft.deleted&&<><IconButton label={draft.pinned?'고정 해제':'고정'} icon={PinIcon} active={draft.pinned} onClick={()=>edit({pinned:!draft.pinned})}/><IconButton label="메모 휴지통으로" icon={TrashIcon} onClick={()=>{edit({deleted:true});leave();}}/></>}</header>
+      <div className="notes-editor"><div className="notes-editor__inner">
+        {draft.deleted&&<div className="notes-restore"><span>휴지통에 있는 메모입니다.</span><Button variant="ghost" onClick={()=>edit({deleted:false})}>복원</Button></div>}
+        {draft.conflict&&<p className="notes-conflict">다른 기기의 수정과 겹쳐 두 내용을 모두 보관했습니다.</p>}
+        <input aria-label="메모 제목" placeholder="제목" maxLength={200} value={draft.title} readOnly={draft.deleted} onChange={event=>edit({title:event.target.value})}/>
+        <p className="notes-when">{relativeTime(draft.updatedAt)} 수정</p>
+        <textarea aria-label="메모 내용" placeholder="여기에 메모하세요." value={draft.body} readOnly={draft.deleted} onChange={event=>edit({body:event.target.value})}/>
+      </div></div>
+    </>}
+    {/* Always mounted once unlocked so its pull-to-refresh gesture stays attached. */}
+    <div className="notes-list-view" style={{display:loaded&&state.unlocked&&!editing?undefined:'none'}}>
+      {trash
+        ?<header className="notes-top is-sub"><IconButton label="메모 목록으로" icon={ArrowLeftIcon} onClick={()=>setTrash(false)}/><h1>휴지통<span className="numeric muted">{trashed}</span></h1></header>
+        :<header className="notes-top"><h1>메모</h1><span className="notes-top__space"/><span className="notes-save-state" role="status">{status}</span><IconButton label="메모 동기화" icon={ArrowPathIcon} disabled={syncing} onClick={()=>void sync()}/></header>}
+      <div ref={list} className="notes-scroll">
+        {pull}
+        {trash?<p className="hint notes-trash-hint">열어서 복원할 수 있습니다.</p>:<form className="library-search notes-search" role="search" onSubmit={event=>{event.preventDefault();(document.activeElement as HTMLElement|null)?.blur();}}><MagnifyingGlassIcon aria-hidden="true"/><input aria-label="메모 검색" placeholder="메모 검색" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</form>}
+        {pinned.length>0&&<><h2 className="notes-label"><PinIcon aria-hidden="true"/>고정됨</h2><div className="notes-grid">{pinned.map(card)}</div></>}
+        {recent.length>0&&<>{pinned.length>0&&<h2 className="notes-label">최근</h2>}<div className="notes-grid">{recent.map(card)}</div></>}
+        {!visible.length&&<div className="empty-state"><h2>{trash?'휴지통이 비어 있습니다':query?'찾는 메모가 없습니다':'아직 메모가 없습니다'}</h2>{!trash&&!query&&<p>아래 버튼으로 첫 메모를 써 보세요.</p>}</div>}
+        {!trash&&trashed>0&&<button className="notes-trash-link" onClick={()=>setTrash(true)}><TrashIcon aria-hidden="true"/>휴지통 <span className="numeric">{trashed}</span></button>}
+      </div>
+      {!trash&&<Button variant="primary" className="notes-fab" onClick={()=>void create()}><PlusIcon aria-hidden="true"/>새 메모</Button>}
+    </div>
+    {error&&<div className="notes-error" role="alert">{error}<Button variant="ghost" onClick={()=>void sync()}>다시 시도</Button></div>}
   </section>;
+}
+
+/** "N분 전" for recent edits, then the calendar date. */
+export function relativeTime(iso:string,now=Date.now()){
+  const at=Date.parse(iso);if(!Number.isFinite(at))return '';
+  const minutes=Math.floor((now-at)/60_000);
+  if(minutes<1)return '방금';
+  if(minutes<60)return `${minutes}분 전`;
+  if(minutes<1440)return `${Math.floor(minutes/60)}시간 전`;
+  if(minutes<10080)return `${Math.floor(minutes/1440)}일 전`;
+  return new Date(at).toLocaleDateString();
 }

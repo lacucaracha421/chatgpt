@@ -16,10 +16,10 @@ describe('server catalog refresh',()=>{
     });
     const onPublished=vi.fn();
     const {rerender}=render(<CatalogRefresh active language="japanese" publication="old" endpoint="test" onPublished={onPublished}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'카탈로그 갱신',exact:true}));
+    fireEvent.click(await screen.findByRole('button',{name:'새 작품 가져오기',exact:true}));
     await screen.findByText('갱신 중');
     expect(mocks.api.mock.calls.find(([, ,body])=>body)?.[2]).toMatchObject({language:'japanese',operationId:expect.any(String)});
-    expect((screen.getByRole('button',{name:'카탈로그 갱신'}) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button',{name:'새 작품 가져오기'}) as HTMLButtonElement).disabled).toBe(true);
     job={...complete,language:'japanese'};
     rerender(<CatalogRefresh active={false} language="japanese" publication="old" endpoint="test" onPublished={onPublished}/>);
     rerender(<CatalogRefresh active language="japanese" publication="old" endpoint="test" onPublished={onPublished}/>);
@@ -38,9 +38,9 @@ describe('server catalog refresh',()=>{
     });
     const props={active:true,language:'korean' as const,publication:'old',endpoint:'server-1',onPublished:vi.fn()};
     const first=render(<CatalogRefresh {...props}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'카탈로그 갱신',exact:true}));await screen.findByRole('alert');first.unmount();
+    fireEvent.click(await screen.findByRole('button',{name:'새 작품 가져오기',exact:true}));await screen.findByRole('alert');first.unmount();
     render(<CatalogRefresh {...props}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'카탈로그 갱신',exact:true}));await screen.findByRole('alert');
+    fireEvent.click(await screen.findByRole('button',{name:'새 작품 가져오기',exact:true}));await screen.findByRole('alert');
     expect(requests).toHaveLength(2);expect(requests[0]).toEqual(requests[1]);
   });
   it('keeps unsupported servers read-only and pauses polling when inactive',async()=>{
@@ -56,7 +56,7 @@ describe('server catalog refresh',()=>{
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{capabilities:{refreshRequest:true}}:{job:{...complete,state:'failed',error:'기존 목록은 유지됩니다.'}});
     render(<CatalogRefresh active language="korean" publication="old" endpoint="test" onPublished={onPublished}/>);
     await screen.findByText('기존 목록은 유지됩니다.');
-    expect((screen.getByRole('button',{name:'카탈로그 갱신',exact:true}) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button',{name:'새 작품 가져오기',exact:true}) as HTMLButtonElement).disabled).toBe(false);
     expect(onPublished).not.toHaveBeenCalled();
   });
 });

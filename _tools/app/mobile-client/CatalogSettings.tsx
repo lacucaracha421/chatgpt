@@ -8,12 +8,13 @@ import {EXCLUDED_TAG_MAX,catalogPreferencesFit,parseExcludedTagInput,validExclud
 const ALL_CATEGORY_IDS:number[]=catalogCategories.map(category=>category.id);
 
 // Keep edits local until Apply, avoiding a server search for every checkbox tap.
-export function CatalogSettings({open,preferences,capability,onClose,onApply,onReset}:{
+export function CatalogSettings({open,preferences,revealBlocked,capability,onClose,onApply,onReset}:{
   open:boolean;
   preferences:CatalogPreferences;
+  revealBlocked:boolean;
   capability:'checking'|'supported'|'unsupported'|'failed';
   onClose():void;
-  onApply(next:CatalogPreferences):void;
+  onApply(next:CatalogPreferences,revealBlocked:boolean):void;
 
   onReset():void;
 }){
@@ -22,13 +23,15 @@ export function CatalogSettings({open,preferences,capability,onClose,onApply,onR
   const [excluded,setExcluded]=useState(preferences.excludedTags);
   const [entry,setEntry]=useState('');
   const [message,setMessage]=useState('');
+  const [blocked,setBlocked]=useState(revealBlocked);
   // Reopening starts from the committed setting, not an abandoned draft.
   useEffect(()=>{
     if(!open)return;
     setCategories(preferences.categories);
     setExcluded(preferences.excludedTags);
+    setBlocked(revealBlocked);
     setEntry('');setMessage('');
-  },[open,preferences]);
+  },[open,preferences,revealBlocked]);
 
   const selected=new Set(categories??[]);
   function toggle(id:number){
@@ -55,8 +58,8 @@ export function CatalogSettings({open,preferences,capability,onClose,onApply,onR
   // list shows. Unchecking one therefore starts a concrete selection from all.
   const allChecked=categories===null||ALL_CATEGORY_IDS.every(id=>selected.has(id));
 
-  return <Dialog open={open} title="카탈로그 설정" onClose={onClose}>
-    <header className="catalog-settings-heading"><DialogDescription className="hint">이 기기에만 적용됩니다. PC 설정은 유지됩니다.</DialogDescription><IconButton label="카탈로그 설정 닫기" icon={XMarkIcon} onClick={onClose}/></header>
+  return <Dialog open={open} title="필터" onClose={onClose}><div className="library-sheet catalog-filter-sheet">
+    <header className="catalog-settings-heading"><DialogDescription className="hint">이 기기에만 적용됩니다. PC 설정은 유지됩니다.</DialogDescription><IconButton label="필터 닫기" icon={XMarkIcon} onClick={onClose}/></header>
     {capability==='unsupported'&&<p className="catalog-settings-warning" role="alert">서버 업데이트 후 사용할 수 있습니다.</p>}
     {capability==='checking'&&<p role="status">서버 지원 여부 확인 중…</p>}
     {capability==='failed'&&<p role="alert">서버 상태를 확인하지 못했습니다. 창을 닫고 다시 시도해 주세요.</p>}
@@ -74,14 +77,17 @@ export function CatalogSettings({open,preferences,capability,onClose,onApply,onR
       <p className="hint">입력한 태그가 있는 작품을 숨깁니다.</p>
       {excluded.length>0&&<ul className="catalog-settings-tags">{excluded.map(tag=><li key={`${tag.namespace}:${tag.value}`}><code>{tag.namespace}:{tag.value}</code><IconButton label={`${tag.namespace}:${tag.value} 회피 해제`} icon={TrashIcon} onClick={()=>{setExcluded(excluded.filter(item=>item!==tag));setMessage('');}}/></li>)}</ul>}
     </section>
+    <section className="catalog-settings-section" aria-label="차단 항목">
+      <div className="catalog-settings-head"><h3>차단 항목</h3></div>
+      <button className="catalog-settings-switch" role="switch" aria-checked={blocked} onClick={()=>setBlocked(value=>!value)}><span>PC 공통 정책의 차단 항목 보기<small>평소에는 숨겨 둡니다.</small></span><span className="catalog-switch" aria-hidden="true"/></button>
+    </section>
     {message&&<p className="catalog-settings-message" role="alert">{message}</p>}
     <div className="dialog-actions catalog-settings-footer">
       <Button variant="ghost" onClick={onClose}>취소</Button>
       {supported
         ?<Button variant="ghost" disabled={preferences.categories===null&&!preferences.excludedTags.length} onClick={onReset}>설정 지우기</Button>
         :<Button variant="ghost" onClick={onReset}>설정 지우고 계속</Button>}
-      <Button variant="primary" disabled={!supported||!fits} onClick={()=>onApply({categories,excludedTags:excluded})}>적용</Button>
+      <Button variant="primary" disabled={supported?!fits:blocked===revealBlocked} onClick={()=>onApply({categories,excludedTags:excluded},blocked)}>적용</Button>
     </div>
-
-  </Dialog>;
+  </div></Dialog>;
 }
