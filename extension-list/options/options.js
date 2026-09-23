@@ -12,6 +12,7 @@
     const settings = await send({ type: "settings:get" });
     const paired = Boolean(settings?.paired);
     $("state-dot").classList.toggle("online", paired);
+    $("state-label").textContent = paired ? "연결됨" : "연결 안 됨";
     $("pair-help").hidden = paired;
     $("pair-form").hidden = paired; document.querySelector(".paired-actions").hidden = !paired;
     $("pin-section").hidden = !paired; $("order-section").hidden = !paired; $("preference-section").hidden = !paired;
@@ -100,7 +101,21 @@
     } finally { busy = false; }
   };
   $("refresh").onclick = async () => { const result = await send({ type: "profile:refresh" }); if (result?.ok) { state = result.state; render(); setStatus(""); } else setStatus("연결 실패"); };
-  $("disconnect").onclick = async () => { await send({ type: "disconnect" }); state = null; await load(); };
+  let disconnectTimer = null;
+  function resetDisconnect() {
+    clearTimeout(disconnectTimer); disconnectTimer = null;
+    $("disconnect").classList.remove("confirm"); $("disconnect").textContent = "×"; $("disconnect").ariaLabel = "연결 해제";
+    $("pair-status").textContent = "";
+  }
+  $("disconnect").onclick = async () => {
+    // Disconnecting also clears this browser's hidden folders and layout, so it takes a second press.
+    if (!disconnectTimer) {
+      $("disconnect").classList.add("confirm"); $("disconnect").textContent = "해제"; $("disconnect").ariaLabel = "연결 해제 확인";
+      $("pair-status").textContent = "한 번 더 누르면 연결이 해제되고 이 브라우저의 숨긴 폴더 설정도 지워집니다.";
+      disconnectTimer = setTimeout(resetDisconnect, 4000); return;
+    }
+    resetDisconnect(); await send({ type: "disconnect" }); state = null; await load();
+  };
   $("pin-add").onclick = () => { const id = $("pin-candidate").value; if (id && state) void patch({ pinnedClassificationIds: [...state.profile.pinnedClassificationIds, id] }); };
   $("auto-like").onchange = () => void patch({ preferences: { autoLikeOnSave: $("auto-like").checked } });
   void load();

@@ -206,6 +206,12 @@
     return result.httpStatus ? `서버 저장 실패 · HTTP ${result.httpStatus}` : "서버 저장 실패";
   }
 
+  // Failures that a plain resubmission cannot fix are not offered a retry.
+  function saveRetryable(result) {
+    return !["revoked", "classification_stale", "media_unsupported", "video_unavailable", "video_public_unavailable"].includes(result?.code)
+      && !(result?.httpStatus >= 400 && result.httpStatus < 500);
+  }
+
   function temporaryFailureMessage(result) {
     const detail = String(result?.browserMessage || "").trim();
     return detail ? `임시 다운로드 실패 · ${detail}` : "임시 다운로드 실패";
@@ -374,6 +380,7 @@
     let suppressClickTimer = null;
     let toast = null, toastTimer = null;
     let statusSequence = 0;
+    let saveToast = null, saveToastTimer = null, pendingSaves = 0;
     let gestureTarget = null;
     let touchGuardRestore = [];
 
@@ -618,37 +625,108 @@
           if (!sessions.holds(sessionState)) return null;
           const model = globalThis.LakomicsClassificationTree.createModel(state.classifications.entries, state.profile);
           const classificationPath = model.path(classificationId).map((entry) => entry.name);
-          const result = await runtimeMessage({ type: "collector:save", payload: { candidate: resolvedCandidate, classificationId, classificationPath } });
-          if (result?.ok) {
-            // The worker already accepted this exact capture. Its completed-save side
-            // effect is applied before any session check so a navigation that landed
-            // meanwhile cannot discard or resubmit it.
-            globalThis.LakomicsXGalleryRuntime?.markSaved?.(resolvedCandidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
-            if (!sessions.holds(sessionState)) return null;
-            let like = null;
-            if (candidate.source === "x" && state.profile.preferences.autoLikeOnSave !== false && candidate.postId) like = await autoLikePost({ postId: candidate.postId });
-            if (!sessions.holds(sessionState)) return null;
-            return { ok: true, message: saveResultMessage(result) + (like ? (like.ok ? " · 좋아요 완료" : " · 좋아요 실패") : "") };
-          }
-          if (!sessions.holds(sessionState)) return null;
-          const message = saveFailureMessage(result);
-          showStatus(message, "error", 5200);
-          return { ok: false, message };
+          const autoLike = candidate.source === "x" && state.profile.preferences.autoLikeOnSave !== false && Boolean(candidate.postId);
+          // The server downloads and stores the original before it answers, so the
+          // menu does not wait for it: the capture finishes in the background and
+          // reports through the page-level save status, independent of this session.
+          submitSave({ payload: { candidate: resolvedCandidate, classificationId, classificationPath }, candidate, autoLike });
+          return { ok: true, pending: true };
         },
         onClose: (result) => {
           if (!sessions.holds(sessionState)) return;
           // The arc owns its short success exit; release invocation ownership now.
           endSession(!result?.ok);
-          if (result?.ok) showStatus(result.message || "저장됨", "success");
+          if (result?.ok && !result.pending) showStatus(result.message || "저장됨", "success");
         },
       });
+    }
+
+    function submitSave({ payload, candidate, autoLike }) {
+      const folder = payload.classificationPath.at(-1) || "";
+      pendingSaves += 1; showSaveStatus({ kind: "pending", label: "저장 중" });
+      void runtimeMessage({ type: "collector:save", payload }).then(async (result) => {
+        let status;
+        if (result?.ok) {
+          // The worker accepted this exact capture; its side effects apply even if the
+          // page navigated meanwhile, and it is never resubmitted.
+          globalThis.LakomicsXGalleryRuntime?.markSaved?.(payload.candidate.mediaUrl, { status: result.status, postId: candidate.postId, mediaIndex: candidate.mediaIndex, sourceUrl: candidate.sourceUrl });
+          const like = autoLike ? await autoLikePost({ postId: candidate.postId }).catch(() => ({ ok: false })) : null;
+          status = {
+            kind: "success", label: result.status === "duplicate" ? `이미 있음 · ${folder}` : folder, like: like ? like.ok : null,
+            detail: `${saveResultMessage(result)} · ${payload.classificationPath.join(" › ")}${like ? (like.ok ? " · 좋아요 완료" : " · 좋아요 실패") : ""}`,
+          };
+        } else {
+          const reason = saveFailureMessage(result);
+          status = {
+            kind: "error", label: `${reason.split(" · ")[0]} · ${folder}`, detail: `${reason} · ${payload.classificationPath.join(" › ")}`,
+            retry: saveRetryable(result) ? () => submitSave({ payload, candidate, autoLike }) : null,
+          };
+        }
+        pendingSaves -= 1;
+        showSaveStatus(status);
+      });
+    }
+
+    const SAVE_ICONS = {
+      pending: '<circle cx="12" cy="12" r="8" opacity=".3"/><path d="M12 4a8 8 0 0 1 8 8"/>',
+      success: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+      error: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5M12 16.5v.5"/>',
+      like: '<path d="M12 19.5s-7-4.3-7-9.3A4 4 0 0 1 12 7.8a4 4 0 0 1 7 2.4c0 5-7 9.3-7 9.3z"/>',
+      retry: '<path d="M19 12a7 7 0 1 1-2.05-4.95M19 5v4h-4"/>',
+    };
+    function saveIcon(name, className = "") {
+      const icon = document.createElement("span"); icon.className = `lakomics-save-icon ${name} ${className}`.trim(); icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = `<svg viewBox="0 0 24 24">${SAVE_ICONS[name]}</svg>`;
+      return icon;
+    }
+
+    function toastLayer() {
+      let layer = document.querySelector(".lakomics-list-toasts");
+      if (!layer) { layer = document.createElement("div"); layer.className = "lakomics-list-toasts"; document.documentElement.append(layer); }
+      return layer;
+    }
+
+    // Save outcomes outlive the menu session, so they use their own compact toast
+    // that ending a session does not clear: an icon, the destination folder, and a
+    // spinner chip while other saves are still running. The full wording stays in
+    // the accessible label.
+    function showSaveStatus({ kind, label, detail = label, like = null, retry = null }) {
+      if (saveToastTimer !== null) clearTimeout(saveToastTimer);
+      saveToastTimer = null; saveToast?.remove();
+      saveToast = document.createElement("div"); saveToast.className = `lakomics-list-toast save ${kind}`;
+      saveToast.setAttribute("role", "status");
+      // While pending, the spinner is the icon and a chip shows the count once several
+      // run; after an outcome, a spinner chip shows how many saves are still running.
+      const chipCount = kind === "pending" ? (pendingSaves > 1 ? pendingSaves : 0) : pendingSaves;
+      saveToast.setAttribute("aria-label", detail + (chipCount ? (kind === "pending" ? ` ${chipCount}개` : ` · 남은 저장 ${chipCount}개`) : ""));
+      const text = document.createElement("span"); text.className = "lakomics-save-text"; text.textContent = label;
+      saveToast.append(saveIcon(kind), text);
+      if (like !== null) saveToast.append(saveIcon("like", like ? "on" : "off"));
+      if (chipCount) {
+        const chip = document.createElement("span"); chip.className = "lakomics-save-chip";
+        if (kind !== "pending") chip.append(saveIcon("pending"));
+        chip.append(document.createTextNode(String(chipCount)));
+        saveToast.append(chip);
+      }
+      if (retry) {
+        const button = document.createElement("button"); button.type = "button"; button.setAttribute("aria-label", "다시 시도");
+        button.append(saveIcon("retry"), document.createTextNode("재시도"));
+        button.onclick = () => { if (saveToastTimer !== null) clearTimeout(saveToastTimer); saveToastTimer = null; saveToast?.remove(); saveToast = null; retry(); };
+        saveToast.classList.add("actionable"); saveToast.append(button);
+      }
+      toastLayer().append(saveToast);
+      const current = saveToast, durationMs = kind === "pending" ? null : kind === "error" ? 9000 : 1800;
+      if (durationMs !== null) saveToastTimer = setTimeout(() => {
+        if (saveToast !== current) return;
+        saveToast.remove(); saveToast = null; saveToastTimer = null;
+      }, durationMs);
     }
 
     function showStatus(message, kind, durationMs = 2200) {
       clearStatus();
       const sequence = statusSequence;
       toast = document.createElement("div"); toast.className = `lakomics-list-toast ${kind || ""}`; toast.textContent = message;
-      document.documentElement.append(toast);
+      toastLayer().prepend(toast);
       toastTimer = setTimeout(() => {
         if (sequence !== statusSequence) return;
         toast?.remove(); toast = null; toastTimer = null;

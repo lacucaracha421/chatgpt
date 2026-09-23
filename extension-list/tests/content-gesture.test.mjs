@@ -324,9 +324,9 @@ test('navigation bypasses the busy and input locks the guarded dismissal respect
   saving.w.dispatchEvent(new saving.w.Event('popstate'));
   await saving.advance(1);
   assert.equal(busyView.disposed, 1);
-  // Disposal reports no save outcome, so an accepted save is not restated as a
-  // cancellation and no success toast is raised for a departed session.
-  assert.equal(saving.w.document.querySelector('.lakomics-list-toast'), null);
+  // Disposal reports no save outcome through the menu, and no menu success toast
+  // is raised for a departed session; only the page-level save status remains.
+  assert.equal(saving.w.document.querySelector('.lakomics-list-toast:not(.save)'), null);
   saving.close();
 });
 
@@ -351,11 +351,15 @@ test('a save that completed before departure keeps its side effects and is not r
   f.w.dispatchEvent(new f.w.Event('popstate'));
   await f.advance(1);
   assert.equal(options._view.disposed, 1);
-  // The already-accepted result still lands: its side effects are preserved rather
-  // than being restated as a cancellation, and the save is never resubmitted.
+  // The menu returned as soon as the request was sent; the already-accepted result
+  // still lands afterwards with its side effects and is never resubmitted.
+  { const early = await pending; assert.equal(early.ok, true); assert.equal(early.pending, true); }
+  assert.match(f.w.document.querySelector('.lakomics-list-toast.save.pending').textContent, /저장 중/);
   release();
   await f.advance(1);
-  assert.equal(await pending, null);
+  const done = f.w.document.querySelector('.lakomics-list-toast.save.success');
+  assert.match(done.getAttribute('aria-label'), /서버 저장됨/);
+  assert.equal(done.textContent, '게임');
   assert.deepEqual(saved.map(([url]) => url), ['https://example.test/image.jpg']);
   assert.equal(f.requests.filter(request => request.type === 'collector:save').length, 1);
   assert.equal(f.mounts[0]._view.disposed, 1);
@@ -376,11 +380,14 @@ test('a delayed save callback cannot report into a reopened session', async () =
   const pending = stale.onSave('games');
   f.w.dispatchEvent(new f.w.Event('popstate'));
   await f.advance(1);
-  // The save resolves only when the worker answers; until then it stays pending,
-  // so the late answer is what must be dropped.
+  // The menu is released immediately; the late failure is reported only by the
+  // page-level save status (with a retry), never into a menu session.
+  { const early = await pending; assert.equal(early.ok, true); assert.equal(early.pending, true); }
   release();
   await f.advance(1);
-  assert.equal(await pending, null);
+  const failure = f.w.document.querySelector('.lakomics-list-toast.save.error');
+  assert.equal(failure.textContent.startsWith('서버 연결 실패 · 게임'), true);
+  assert.equal(failure.querySelector('button').getAttribute('aria-label'), '다시 시도');
 
   f.pointer('pointerup'); await f.advance(400);
   f.pointer('pointerdown'); f.pointer('pointermove', 'mouse', 60);
@@ -389,10 +396,40 @@ test('a delayed save callback cannot report into a reopened session', async () =
   const fresh = f.mounts[1];
   assert.equal(fresh._view.disposed, 0);
   await f.advance(1);
-  // The failure belongs to the departed session: no toast, no error state on the
-  // freshly mounted list.
-  assert.equal(f.w.document.querySelector('.lakomics-list-toast'), null);
+  // The failure belongs to the departed session: no menu toast and no error state
+  // on the freshly mounted list; only the page-level save status keeps its retry.
+  assert.equal(f.w.document.querySelector('.lakomics-list-toast:not(.save)'), null);
+  assert.ok(f.w.document.querySelector('.lakomics-list-toast.save.error button'));
   assert.equal(fresh._view.disposed, 0);
   assert.equal(stale._view.disposed, 1);
+  f.close();
+});
+
+test('background saves count concurrently, retry resubmits once, and permanent failures offer no retry', async () => {
+  const f = fixture();
+  const replies = [];
+  f.w.chrome.runtime.sendMessage = (message, callback) => {
+    f.requests.push(message);
+    if (message.type === 'collector:save') { replies.push(callback); return; }
+    f.w.setTimeout(() => callback(f.w.lakomicsStateReply({ preferences: { autoLikeOnSave: false } })), 0);
+  };
+  f.pointer('pointerdown'); f.pointer('pointermove', 'mouse', 60);
+  await f.advance(251);
+  const options = f.mounts[0];
+  await options.onSave('games'); await options.onSave('games');
+  const status = () => f.w.document.querySelector('.lakomics-list-toast.save');
+  assert.equal(status().querySelector('.lakomics-save-chip').textContent, '2');
+  replies[0]({ ok: false, code: 'offline' }); await f.advance(1);
+  assert.equal(status().querySelector('button').getAttribute('aria-label'), '다시 시도');
+  status().querySelector('button').click(); await f.advance(1);
+  assert.equal(f.requests.filter(request => request.type === 'collector:save').length, 3);
+  assert.deepEqual(f.requests.filter(request => request.type === 'collector:save').map(request => request.payload.classificationId), ['games', 'games', 'games']);
+  replies[1]({ ok: true, status: 'captured', captureStatus: 'pending' }); await f.advance(1);
+  assert.match(status().getAttribute('aria-label'), /서버 저장됨 · PC 수신 대기 · 게임 · 남은 저장 1개/);
+  assert.equal(status().querySelector('.lakomics-save-text').textContent, '게임');
+  assert.equal(status().querySelector('.lakomics-save-chip').textContent, '1');
+  replies[2]({ ok: false, code: 'revoked' }); await f.advance(1);
+  assert.match(status().textContent, /다시 연결 필요 · 게임/);
+  assert.equal(status().querySelector('button'), null);
   f.close();
 });

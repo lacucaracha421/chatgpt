@@ -1,4 +1,20 @@
-.lakomics-list-toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 14px);bottom:auto;transform:translateX(-50%);z-index:2147483647;padding:8px 12px;border:1px solid #414244;border-radius:3px;background:#191a1c;color:#e5e3dd;font:13px/1.4 Barlow,SUIT,'Segoe UI','Malgun Gothic',sans-serif;box-shadow:0 8px 24px #0008;pointer-events:none}.lakomics-list-toast.success{border-color:#77766d;color:#ddd8ca}.lakomics-list-toast.error{color:#e3b987}html.lakomics-list-active{-webkit-user-select:none;user-select:none}
+.lakomics-list-toasts{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 14px);transform:translateX(-50%);z-index:2147483647;display:flex;flex-direction:column;align-items:center;gap:6px;max-width:calc(100vw - 32px);pointer-events:none}
+.lakomics-list-toast{padding:8px 12px;word-break:keep-all;overflow-wrap:anywhere;border:1px solid #414244;border-radius:3px;background:#191a1c;color:#e5e3dd;font:13px/1.4 Barlow,SUIT,'Segoe UI','Malgun Gothic',sans-serif;box-shadow:0 8px 24px #0008;pointer-events:none}.lakomics-list-toast.success{border-color:#77766d;color:#ddd8ca}.lakomics-list-toast.error{color:#e3b987}
+.lakomics-list-toast.actionable{display:flex;align-items:center;gap:10px;pointer-events:auto}
+.lakomics-list-toast button{flex:none;min-height:28px;padding:2px 10px;border:1px solid #77766d;border-radius:3px;background:#232426;color:#e5e3dd;font:inherit;cursor:pointer}
+.lakomics-list-toast button:hover{background:#303133}
+.lakomics-list-toast button:focus-visible{outline:2px solid #ddd8ca;outline-offset:2px}html.lakomics-list-active{-webkit-user-select:none;user-select:none}
 html.lakomics-list-touch-active,html.lakomics-list-touch-active *{-webkit-touch-callout:none!important}.lakomics-list-gesture-target{-webkit-user-select:none!important;user-select:none!important;-webkit-touch-callout:none!important}
 #lakomics-x-saved-badge-layer{display:none!important}
 .lakomics-x-saved-badge-portal{position:absolute;top:8px;right:8px;z-index:7;display:grid;width:30px;height:30px;place-items:center;border:1px solid #819487;border-radius:3px;background:#607e67;color:#f4f1e7;box-shadow:0 3px 10px rgb(0 0 0 / 34%);font:900 20px/1 SUIT,'Segoe UI','Malgun Gothic',sans-serif;pointer-events:none}
+.lakomics-list-toast.save{display:flex;align-items:center;gap:7px;min-height:34px;padding:6px 12px 6px 10px;border-radius:17px;max-width:min(360px,calc(100vw - 32px))}
+.lakomics-save-text{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lakomics-save-icon{flex:none;display:grid;width:18px;height:18px}.lakomics-save-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lakomics-list-toast.save.success .lakomics-save-icon.success{color:#8fbf9a}.lakomics-list-toast.save.error .lakomics-save-icon.error{color:#e3b987}
+.lakomics-save-icon.like{width:16px;height:16px}.lakomics-save-icon.like.on{color:#e0708a}.lakomics-save-icon.like.on svg{fill:currentColor}.lakomics-save-icon.like.off{color:#77766d}
+.lakomics-save-icon.pending svg{animation:lakomics-save-spin .8s linear infinite}
+.lakomics-save-chip{flex:none;display:flex;align-items:center;gap:3px;height:20px;padding:0 7px;border-radius:10px;background:#2a2b2e;color:#a6a7a5;font-size:12px}.lakomics-save-chip .lakomics-save-icon{width:12px;height:12px}
+.lakomics-list-toast.save button{display:flex;align-items:center;gap:4px;border-radius:12px}.lakomics-list-toast.save button .lakomics-save-icon{width:14px;height:14px}
+@keyframes lakomics-save-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.lakomics-save-icon.pending svg{animation:none}}
+.lakomics-list-toast.save.error .lakomics-save-text{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}.lakomics-list-toast.save.error{border-radius:14px}

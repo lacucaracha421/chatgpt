@@ -7,7 +7,7 @@ retained.
 
 ## Edge menu
 
-Version 3.0.0.30 uses a semicircle attached to the selected screen edge. Image
+Version 3.0.0.34 uses a semicircle attached to the selected screen edge. Image
 dragging on desktop requires a held press of at least 250 ms and movement of
 12 px. Touch requires a stationary 500 ms long press. Releasing early, scrolling,
 losing window focus, or cancelling the pointer cancels the pending opening. Releasing the opening finger never selects a folder or saves an image.
@@ -15,27 +15,78 @@ The menu uses the approved dark One UI-inspired treatment: graphite surfaces,
 blue selection, rounded separated sectors and a radial gap around the center.
 Selected sectors retain their blue face while hovered; neutral hover/press colors
 apply only to unselected sectors.
-One continuous central panel contains a larger upper Save action and a smaller
-lower Temporary save action, which becomes Back inside folders. Actions use
-outline icons with accessible labels and distinct keyboard focus, without repeated
-destination text, selection checkmarks or branch chevrons.
-Temporary save stays disabled when unsupported and in the settings preview.
-Returning to the first screen disables it for 400 ms to guard repeated Back taps.
-Folder labels contain only their names. Folders with children expose a subtly
+The live center is one Save button filling the entire half-disc, with a centered
+outline icon and no lower button or divider. Its icon uses direct placement on
+either edge. It has an accessible name and gesture description, keyboard focus,
+and no tooltip or repeated destination text. Without a selection it looks disabled
+but still accepts Back and Temporary gestures. Settings keep their existing Open
+button and lower Back control.
+The live collector shows breadcrumb pills above the arc, or below it in short
+windows. Muted ancestor pills follow the folders actually entered (including
+shortcut Back history); the selected destination is blue. The row is hidden at
+root without selection, keeps the entered path when selection is empty, and
+collapses overflowing early ancestors into “…” while retaining the last two
+ancestors and selection within two lines. Both edge alignments preserve normal
+text order. The pills do not intercept outside taps and are absent in settings.
+Only appended pills grow/fade in (180 ms); sibling selections crossfade text and
+width in the same pill (140 ms). Back fades removed pills out (120 ms), and another
+Back immediately finishes an outstanding removal. Reduced motion is instant.
+Drag vertically from the live center: up goes Back one visited level; down starts
+Temporary save on any screen. Touch, pen and mouse use the same rules. Movement
+under 10 px remains a Save tap; at 10 px the direction locks, and a horizontal or
+diagonal tie cancels without saving. Vertical gestures commit at 48 px on release.
+Progress reveals a green #2f7d5b face from below for Temporary or a neutral #39495f
+face from above for Back. Download rises or Back descends by up to 24 px while
+fading in; Save moves away in the opposite direction and fades out. Drag and
+trackpad progress follow directly; wheel notch steps ease out over 120 ms. The full
+face holds for 120 ms before acting, except an upward notch with no down-progress
+still goes Back immediately. Cancelling or releasing below threshold drains in
+150 ms; Temporary failures keep the menu and drain too. Pointer capture keeps
+tracking outside the panel, and a drag's following click cannot save. Up at root
+and unsupported Temporary show no commit state and do nothing. Opening-finger
+locks, pending saves and the commit hold block actions. Reduced motion shows
+progress instantly without sliding or animated steps/returns; actions still work.
+Folder labels contain only their names, without underlines or text outlines.
+Keyboard focus changes the wedge face (including selected wedges); opening or
+using the menu with a pointer does not highlight the programmatically focused
+first wedge. Keyboard opening and subsequent keyboard use show focus. Folders with children expose a subtly
 offset rear surface within the sector's bounds. The live collector uses the outer ring as a
 bounded rotary dial: six folders stay visible while overflow folders rotate in.
+The next hidden folder peeks halfway into each arc end where more folders remain,
+with a dimmed wedge and fading label clipped by the semicircle. Tapping a peek
+rotates one slot without selecting it; dragging it rotates the ring. The same
+wedge and label move continuously into view. Peeks stay out of keyboard navigation
+and assistive technology; the ring exposes a folder count and scrolling hint.
+Ends without more folders stay empty, including during rubber-band overscroll.
 Desktop mouse-wheel/trackpad input drives the ring while the pointer is over the
-outer arc; touch and pointer drags follow the semicircle directly. Wheel input adds
-bounded momentum to one continuous dial position instead of choosing a target slot
-up front. The ring coasts under friction, then captures the nearest slot only after
-velocity falls below the detent threshold, producing a late mechanical stop rather
-than a page-like snap. Visible folder nodes remain mounted while their geometry is
-rebased continuously. Runtime labels are not recycled with the fixed physical
+outer arc. Touch and pointer drags track the finger angle directly, with rubber-band
+resistance at either end (0.55 resistance, 1.5-slot span). Release uses the last
+100 ms of samples, discards momentum after a 60 ms stationary hold, and projects a
+slot with 0.998-per-ms deceleration. One critically damped motion reaches that exact
+slot without overshoot or a separate late snap: 250 ms for slow releases,
+300–700 ms for flings, and 350 ms for an overscrolled return.
+Mouse notches and PageUp/PageDown move one slot in 220 ms. Distinct notches
+accumulate smoothly with a three-slot lead limit; same-direction bursts within
+110 ms count once. Small trackpad deltas follow the ring directly and settle after
+120 ms idle; OS inertia is already included and receives no second momentum boost.
+Visible folder nodes remain mounted while their geometry is rebased continuously. Runtime labels are not recycled with the fixed physical
 wedge pool: every child label is mounted once when its folder opens, then follows
 the continuous dial position directly. Labels use a separate overlay outside each
 wedge clip-path and fade smoothly near the arc edge. At rest, runtime labels snap
-to device-pixel coordinates for crisper tablet text without quantizing motion. The central Temporary/Back and Save
-surfaces never rotate and do not capture wheel scrolling.
+to device-pixel coordinates for crisper tablet text without quantizing motion.
+Both edges use direct geometry without mirrored text or icons. Korean folder
+names keep words together within the two-line limit while long strings can wrap.
+The center never rotates. Over it, vertical wheel input is consumed. Horizontal-
+dominant input is left to the page. Line/page deltas or pixel deltas of at least
+40 px count as notches; same-direction bursts within 110 ms count once. Each down
+notch adds one third of Temporary progress, so three counted notches commit. An up
+notch cancels existing down-progress without Back; at zero progress it immediately
+goes Back one visited level. Small trackpad deltas accumulate with opposite deltas
+subtracting: Temporary needs 150 px downward, while Back keeps its 48 px threshold.
+Uncommitted progress drains in 150 ms after 600 ms idle. After committing, remaining
+trackpad Back inertia is ignored until 200 ms idle. Temporary cannot repeat until
+300 ms of wheel idle, including events received while saving. Ring wheel input
+keeps its existing dial behavior.
 
 - The first screen shows six visible slots, using the order edited in settings. Initially, pinned shortcuts precede
   root classifications. If there are more than six, rotate the outer ring to
@@ -44,19 +95,21 @@ surfaces never rotate and do not capture wheel scrolling.
   canonical siblings. Unpinning restores them to the original child order.
   This affects menu presentation only; the classification hierarchy is retained.
 - Inside a folder, all six wedges can show children. Runtime wedge spacing uses a
-  fourteen-position circular geometry so one middle wedge can face the screen center
-  while the sixth visible wedge remains fully inside the semicircle. Lists of six or
+  fourteen-position circular geometry with six centered visible wedges and half a
+  wedge peeking at either end when more folders remain. Lists of six or
   fewer are centered as a group. Preserved empty layout slots are compacted out of
   the live dial so scrolling never exposes a blank wedge between real folders.
 - On coarse-pointer portrait devices such as a tablet, the live dial radius is
   capped at 208 px to preserve touch targets while reducing visual bulk. Fine-pointer
-  desktop use caps at 200 px. Initial wheel and release momentum is deliberately
-  restrained; the existing late detent stop remains unchanged.
-- Tap any folder once to select it, including a branch or pinned shortcut.
-  Double-tap the same folder within 350 ms to enter its children. Selection is
-  immediate; neither tap submits media. The central Save button saves to the
-  selected folder, so roots and branches are directly saveable.
-- Back, below Save, follows visited screens and restores the previous dial
+  desktop use caps at 200 px. The same projected-slot settling and bounded wheel
+  targets apply on both device classes.
+- Tap any fully visible folder once to select it, including a branch or pinned shortcut.
+  Double-tap the same folder within 350 ms to enter its children, or save to it
+  immediately when it has no visible children. A single tap only selects. Leaf
+  double-tap uses the same save flow as the center button, including busy protection
+  and failure handling. Peek taps still only rotate. The central Save button saves
+  to the selected folder, so roots and branches are directly saveable.
+- Back, via an upward center drag or wheel notch, follows visited screens and restores the previous dial
   position and selection. Entering a pinned shortcut and going back returns to
   the first screen, rather than inserting that shortcut's canonical ancestors.
   Dial movement does not add history entries.
@@ -66,7 +119,7 @@ surfaces never rotate and do not capture wheel scrolling.
   transparent corners, or press Escape to dismiss it. Saving and the opening
   finger lock prevent accidental dismissal. Short windows allow the panel to
   scroll rather than shrinking targets indefinitely.
-- Temporary saving occupies the root screen's smaller lower central area.
+- Temporary saving is available by downward center drag or wheel on every live screen.
   Android retains the image-only temporary album intent; it does not send MP4 to
   that image contract. PC supports images and X progressive MP4/GIF-like videos,
   starting a browser download
@@ -79,10 +132,21 @@ surfaces never rotate and do not capture wheel scrolling.
 Entrance fades and moves inward by 8 px over 140 ms. Folder navigation keeps the
 ring stationary: one inert, accessibility-hidden outgoing snapshot fades over
 140 ms while new controls fade in over 180 ms and work immediately. Repeated
-navigation replaces the snapshot instead of queuing transitions. Successful saves
-release menu ownership immediately and show a concurrent 100 ms icon/exit effect;
-failed or pending saves never receive success feedback. Reduced motion skips these
-effects and post-release dial coasting.
+navigation replaces the snapshot instead of queuing transitions. Saving closes the
+menu as soon as the request is handed to the worker (after any page-video lookup)
+with the 100 ms icon/exit effect; the server's download and storage of the original
+continue in the background, so the next image can be collected immediately. A
+compact page-level save pill, separate from menu toasts and stacked with them, shows
+a spinner with "저장 중" (and a count chip for concurrent saves), then a check with
+the destination folder name, "이미 있음" for duplicates, a filled/grey heart for the
+auto-like result and a spinner chip with the number of saves still running; success
+disappears after 1.8 seconds and the full wording stays in its accessible label.
+Failures show a warning icon, the short reason and folder for 9 seconds (two lines
+at most) with a 재시도 button that resubmits the same capture once; revoked, stale
+classification, unsupported/unavailable media and other 4xx rejections offer no
+retry. A full page reload or departure from X before the answer still completes the
+save in the worker but loses that status and auto-like. Reduced motion skips these
+effects and jumps directly to the chosen dial slot.
 
 Navigation tears down both pending and mounted sessions, including busy or
 opening-finger-locked menus, without claiming an accepted save was cancelled.
@@ -111,8 +175,11 @@ positions. Disconnect clears these connection-specific local preferences.
 
 Keyboard users can navigate with Tab, arrow keys, Enter/Space, Backspace,
 PageUp/PageDown (one dial step in the live collector), ArrowRight to open children,
-Ctrl+Enter to save, and Escape to dismiss. The settings editor keeps its existing
-page controls and allows normal Tab navigation out to other settings.
+Ctrl+Enter to save, and Escape to dismiss. Enter/Space on a leaf still only select
+it. Unmodified t/T starts Temporary when supported, except while an input-like
+element is focused. The settings editor keeps its existing page controls, Open
+and lower Back buttons, never saves on leaf double-tap, and allows normal Tab
+navigation out to other settings.
 
 ## Connect a PC browser
 

@@ -85,9 +85,10 @@ test('quote poster long press suppresses native context and successful save reac
   pointer('pointerdown');
   const context=new w.MouseEvent('contextmenu',{bubbles:true,cancelable:true});poster.dispatchEvent(context);assert.equal(context.defaultPrevented,true);
   await clock.advance(550); assert.ok(mounted); pointer('pointerup');
-  assert.equal((await mounted.onSave('games')).ok,false); assert.equal(clicks,0);
-  saveOk=true; const pendingSave=mounted.onSave('games'); await clock.advance(420); const result=await pendingSave;
-  assert.equal(result.ok,true); assert.match(result.message,/좋아요 완료/); assert.equal(clicks,1);
+  await mounted.onSave('games'); await clock.advance(1);
+  assert.match(w.document.querySelector('.lakomics-list-toast.save.error').getAttribute('aria-label'),/서버 저장 실패/); assert.equal(clicks,0);
+  saveOk=true; const result=await mounted.onSave('games'); await clock.advance(420);
+  assert.equal(result.ok,true); assert.equal(result.pending,true); assert.match(w.document.querySelector('.lakomics-list-toast.save').getAttribute('aria-label'),/좋아요 완료/); assert.ok(w.document.querySelector('.lakomics-list-toast.save .lakomics-save-icon.like.on')); assert.equal(clicks,1);
   assert.equal(requests.find(message=>message.type==='collector:save').payload.candidate.postId,'222');
   assert.equal(w.document.querySelector('article button').dataset.testid,'like'); w.close();
 });

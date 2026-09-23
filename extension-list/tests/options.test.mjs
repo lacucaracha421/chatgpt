@@ -91,3 +91,28 @@ test('translation options expose both supported models and persist a model chang
   assert.equal(selected, 'google/gemma-4-26b-a4b-it');
   dom.window.close();
 });
+
+test('disconnect needs a second press and the header states the connection in text', async () => {
+  const dom = new JSDOM(html, { url: 'https://extension.test/options.html', runScripts: 'outside-only' });
+  const w = dom.window, messages = [];
+  let paired = true;
+  w.chrome = { runtime: { async sendMessage(message) {
+    messages.push(message.type);
+    if (message.type === 'settings:get') return { paired, state: null };
+    if (message.type === 'disconnect') { paired = false; return { ok: true }; }
+    return { ok: false };
+  } } };
+  for (const source of sources) w.eval(source);
+  w.eval(optionsSource); await tick(); await tick();
+  const doc = w.document, button = doc.querySelector('#disconnect');
+  assert.equal(doc.querySelector('#state-label').textContent, '연결됨');
+  button.click(); await tick();
+  assert.equal(messages.includes('disconnect'), false);
+  assert.equal(button.classList.contains('confirm'), true);
+  assert.match(doc.querySelector('#pair-status').textContent, /한 번 더/);
+  button.click(); await tick(); await tick();
+  assert.equal(messages.filter(type => type === 'disconnect').length, 1);
+  assert.equal(doc.querySelector('#state-label').textContent, '연결 안 됨');
+  assert.equal(button.classList.contains('confirm'), false);
+  w.close();
+});

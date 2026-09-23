@@ -49,7 +49,7 @@ test('permanent saves remain server-only while temporary PC saves allow download
 
 test('status toast is top-safe and saved badges never force X positioning', async () => {
   const css = await readFile(new URL('../src/content.css', import.meta.url), 'utf8');
-  assert.match(css, /\.lakomics-list-toast\{[^}]*top:calc\(env\(safe-area-inset-top,0px\) \+ 14px\)/);
+  assert.match(css, /\.lakomics-list-toasts\{[^}]*top:calc\(env\(safe-area-inset-top,0px\) \+ 14px\)/);
   assert.equal(css.includes('.lakomics-x-saved-badge-host{position:relative'), false);
 
   const gallerySource = await readFile(new URL('../src/x-gallery.js', import.meta.url), 'utf8');
