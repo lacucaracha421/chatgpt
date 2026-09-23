@@ -459,8 +459,18 @@ fn automation_setting_reports_the_worker_pause_independently_of_history_pause() 
     assert_eq!(status["automationEnabled"], true);
     assert_eq!(status["paused"], true);
     let connection = f.library.connection().unwrap();
-    let jobs: i64 = connection.query_row("SELECT COUNT(*) FROM character_autotag_jobs", [], |r| r.get(0)).unwrap();
-    let refreshes: i64 = connection.query_row("SELECT COUNT(*) FROM character_reference_refreshes", [], |r| r.get(0)).unwrap();
+    let jobs: i64 = connection
+        .query_row("SELECT COUNT(*) FROM character_autotag_jobs", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let refreshes: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM character_reference_refreshes",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!((jobs, refreshes), (0, 0));
     drop(connection);
     drop(f.library);
@@ -579,8 +589,10 @@ fn unified_reference_pool_compares_remaining_images_and_restores_six_vote_accept
     let target = f.ready("Unified");
     add_learned_reference(&f, &target.id);
     let config = config(&f);
-    let worker = std::fs::read_to_string(&config.script).unwrap()
-        .replace("'matchedReferences':[0,1,2,3]", "'matchedReferences':list(range(len(refs)))");
+    let worker = std::fs::read_to_string(&config.script).unwrap().replace(
+        "'matchedReferences':[0,1,2,3]",
+        "'matchedReferences':list(range(len(refs)))",
+    );
     std::fs::write(&config.script, worker).unwrap();
 
     f.library.trash_assets(&["asset-0".into()]).unwrap();
@@ -590,8 +602,20 @@ fn unified_reference_pool_compares_remaining_images_and_restores_six_vote_accept
 
     f.library.restore_assets(&["asset-0".into()]).unwrap();
     // Restore enrollment is independent of this query; isolate its next claim.
-    f.library.connection().unwrap().execute("DELETE FROM character_autotag_jobs WHERE asset_id='asset-0'", []).unwrap();
-    run_with_cause(&f, &config, "asset-5", character_autotag::Cause::ManualScanEnrollment);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "DELETE FROM character_autotag_jobs WHERE asset_id='asset-0'",
+            [],
+        )
+        .unwrap();
+    run_with_cause(
+        &f,
+        &config,
+        "asset-5",
+        character_autotag::Cause::ManualScanEnrollment,
+    );
     assert_eq!(prepare_paths(&config)[1].len(), 6);
     assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(), vec![target.id.clone()]);
     let current = f.library.get_character_target(&target.id).unwrap();
@@ -1277,7 +1301,13 @@ fn parent_inference_reuses_one_query_per_image_across_two_dozen_characters() {
     assert_eq!(log.lines().filter(|line| *line == "load_query").count(), 2);
     assert_eq!(log.lines().filter(|line| *line == "compare_query").count(), 48);
     let c = f.library.connection().unwrap();
-    let predictions: i64 = c.query_row("SELECT COUNT(*) FROM character_autotag_predictions", [], |r| r.get(0)).unwrap();
+    let predictions: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM character_autotag_predictions",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(predictions, 48);
 }
 
@@ -1292,7 +1322,13 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
         add_learned_reference(&f, &a.id);
         add_learned_reference(&f, &b.id);
         let c = f.library.connection().unwrap();
-        let root: String = c.query_row("SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |r| r.get(0)).unwrap();
+        let root: String = c
+            .query_row(
+                "SELECT parent_id FROM classification_entries WHERE id=?1",
+                [&f.series],
+                |r| r.get(0),
+            )
+            .unwrap();
         drop(c);
         let parent = if intermediate {
             f.library.create_classification(super::super::models::CreateClassification {
@@ -1301,9 +1337,19 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
             }).unwrap().id
         } else { root };
         let c = f.library.connection().unwrap();
-        c.execute("UPDATE classification_entries SET parent_id=?1 WHERE id=?2", params![parent, f.series]).unwrap();
-        c.execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'", [&parent]).unwrap();
-        assert!(character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+        c.execute(
+            "UPDATE classification_entries SET parent_id=?1 WHERE id=?2",
+            params![parent, f.series],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+            [&parent],
+        )
+        .unwrap();
+        assert!(
+            character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap()
+        );
         drop(c);
         let job = f.library.claim_character_autotag().unwrap().unwrap();
         let mut c = f.library.connection().unwrap();
@@ -1319,9 +1365,24 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
                     "queryBoxes": [[0,0,40,100]], "evidence": [{"matchedReferences": (0..votes).collect::<Vec<_>>(), "referenceDistances": vec![0.1; 6]}]})),
             },
         }).collect::<Vec<_>>();
-        f.library.finalize_incremental(&tx, &job, &context, &predictions, &BTreeSet::new(), &BTreeSet::new()).unwrap();
+        f.library
+            .finalize_incremental(
+                &tx,
+                &job,
+                &context,
+                &predictions,
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+            )
+            .unwrap();
         tx.commit().unwrap();
-        let saved: String = c.query_row("SELECT classification_id FROM asset_classifications WHERE asset_id='asset-5'", [], |r| r.get(0)).unwrap();
+        let saved: String = c
+            .query_row(
+                "SELECT classification_id FROM asset_classifications WHERE asset_id='asset-5'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(saved, parent);
         drop(c);
         assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap().len(), expected);
@@ -1496,10 +1557,12 @@ fn arbitration_releases_monie_only_when_the_rival_is_safely_weaker() {
                 predictions[1].result.evidence = None;
                 predictions[1].result.state = "error".into();
             }
-            "fallback" => predictions[1].result.evidence.as_mut().unwrap()["wholeFallback"] = json!(true),
+            "fallback" => {
+                predictions[1].result.evidence.as_mut().unwrap()["wholeFallback"] = json!(true)
+            }
             "error" | "stale" => predictions[1].result.state = invalid.into(),
             "error_field" => predictions[1].result.error = Some("comparison failed".into()),
-            _ => {},
+            _ => {}
         }
         f.library.finalize_incremental(
             &tx, &job, &context, &predictions, &BTreeSet::new(), &BTreeSet::new(),
@@ -1764,7 +1827,13 @@ fn manual_decisions_recalculate_cross_series_review_state_from_saved_regions() {
         )
         .unwrap();
     tx.commit().unwrap();
-    let evidence_id: String = c.query_row("SELECT id FROM character_autotag_evidence WHERE asset_id='asset-5'", [], |r| r.get(0)).unwrap();
+    let evidence_id: String = c
+        .query_row(
+            "SELECT id FROM character_autotag_evidence WHERE asset_id='asset-5'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     for target in [&a, &b] {
         let (_, saved) = character_autotag::evidence_row(&c, &evidence_id, &target.id)
             .unwrap()
@@ -1945,7 +2014,11 @@ fn work_status_uses_snapshot_totals_and_the_actual_comparison_target() {
     let c = f.library.connection().unwrap();
     c.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
         SELECT 'second','second',media_kind,original_name,'assets/second.png','thumbnails/second.webp',byte_size,width,height,collected_at,status FROM assets WHERE id='asset-5'", []).unwrap();
-    c.execute("INSERT INTO asset_classifications VALUES('second',?1)",[&f.series]).unwrap();
+    c.execute(
+        "INSERT INTO asset_classifications VALUES('second',?1)",
+        [&f.series],
+    )
+    .unwrap();
     drop(c);
     f.library.request_character_reference_refresh(&target.id,target.revision).unwrap();
     f.library.advance_character_reference_refresh(1).unwrap();
