@@ -457,6 +457,22 @@ missing-thumbnail count was zero; the API remained active/running with `NRestart
 This confirms server generation and delivery; tablet rendering of these four repaired
 items has not yet been separately confirmed. No APK or Git write was performed.
 
+### 2026-09-23 video thumbnail limits and repair
+
+Two X videos saved from the extension on 2026-09-23 showed no mobile thumbnail; both
+jobs were terminal `sourceUndecodable`, while the files were valid. A 4K (3840x2160)
+H.264 frame could not be decoded inside the 384 MiB encoder address-space cap (it
+decodes at 768 MiB, peak RSS ~180 MiB, ~7 s CPU on the 1 vCPU host). The other video
+(1426x1920) decoded fine on re-run: it had run out of time under load, and a timeout
+was classified as terminal. Fix: video runs use 768 MiB, 30 s CPU and a 20 s decode
+wall clock (worker bound 60 s); images are unchanged. A tool that runs out of wall
+clock or CPU now exits `EXIT_TIMED_OUT` (8) and the worker retries it as
+`encodeTimedOut`. Server tests 1,241/1,241 passed; the candidate encoder produced both
+thumbnails on the host before deployment. Deployed after user approval (previous files
+in `backups/video-thumb-limits-20260923T075105Z/`, service active, `NRestarts=0`), then
+only the two failed jobs were re-queued with `retry_terminal`; both finished `done` on
+the first attempt. Tablet rendering of these two items was not separately inspected.
+
 ### 2026-09-20 later posters, Asset filters and hourly refresh
 
 **Implementation checkpoint (subsequent deployment/install recorded below):**

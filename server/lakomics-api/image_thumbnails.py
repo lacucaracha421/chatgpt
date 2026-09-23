@@ -100,6 +100,9 @@ DOWNLOAD_TIMEOUT_SECONDS = 60.0
 #: callback would run between fork and exec in a threaded process and is a documented
 #: deadlock risk, so it is deliberately not used.
 ENCODE_TIMEOUT_SECONDS = 20.0
+#: A video run may probe (6 s) and decode twice (20 s each, the first-frame fallback)
+#: at low priority on the 1 vCPU host, so its outer bound is wider.
+VIDEO_ENCODE_TIMEOUT_SECONDS = 60.0
 
 DERIVED_PREFIX = "derived/image-thumbnails/v2"
 DERIVED_CONTENT_TYPE = "image/webp"
@@ -360,6 +363,7 @@ EXIT_UNSUPPORTED_PLATFORM = 3
 EXIT_UNSUPPORTED_INPUT = 4
 EXIT_ENCODE_FAILED = 5
 EXIT_TOOL_UNAVAILABLE = 7
+EXIT_TIMED_OUT = 8
 
 #: Ceiling on the encoded artifact, mirroring the encoder's own promise. The parent
 #: re-applies it when reading the child's output file.
@@ -688,7 +692,7 @@ class ImageThumbnailWorker:
                 command, start_new_session=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL)
-            code = process.wait(timeout=ENCODE_TIMEOUT_SECONDS)
+            code = process.wait(timeout=VIDEO_ENCODE_TIMEOUT_SECONDS if kind == "video" else ENCODE_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             raise _TransientError(E_RETRY["encodeTimedOut"])
         except (OSError, subprocess.SubprocessError):
@@ -704,6 +708,9 @@ class ImageThumbnailWorker:
             return
         if code == EXIT_TOOL_UNAVAILABLE:
             raise _TerminalError(E_TERMINAL["encodeToolUnavailable"])
+        if code == EXIT_TIMED_OUT:
+            # A tool ran out of time under load; the source may be fine, so retry later.
+            raise _TransientError(E_RETRY["encodeTimedOut"])
         if code == EXIT_UNSUPPORTED_PLATFORM:
             # The child could not bound its own memory. Retrying cannot change that, and
             # publishing nothing keeps the original untouched.

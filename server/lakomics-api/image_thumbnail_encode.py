@@ -59,6 +59,7 @@ import math
 import os
 import selectors
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -75,6 +76,9 @@ EXIT_INTERNAL = 6
 #: because no retry and no different input can change it: the host is not provisioned
 #: to encode this kind of source.
 EXIT_TOOL_UNAVAILABLE = 7
+#: A tool ran out of its wall clock or CPU time. On the 1 vCPU host that is load, not a
+#: property of the source, so unlike EXIT_ENCODE_FAILED the worker retries it later.
+EXIT_TIMED_OUT = 8
 
 #: Absolute paths, not bare names. Nothing in this process reads PATH, which is what
 #: makes "is FFmpeg installed" a decidable question with one answer: either the binary
@@ -118,6 +122,11 @@ WEBP_METHOD = 4
 #: inherit resource limits across fork/exec, independently of session membership.
 ADDRESS_SPACE_BYTES = 384 * 1024 * 1024
 CPU_LIMIT_SECONDS = 10
+#: Video decodes need more: a 4K H.264 frame fails to decode inside 384 MiB of address
+#: space (measured peak RSS ~180 MiB, but the decoder's virtual mappings exceed the cap),
+#: and seeking a few seconds into a high-bitrate 4K clip took ~7 s of CPU on the host.
+VIDEO_ADDRESS_SPACE_BYTES = 768 * 1024 * 1024
+VIDEO_CPU_LIMIT_SECONDS = 30
 #: Linux niceness. The host is a 1 vCPU VPS serving live requests, so encoding must
 #: yield to the API under any contention. Ignored where the host has no such notion.
 NICENESS = 10
@@ -147,6 +156,7 @@ PROBE_TIMEOUT_MICROSECONDS = 5_000_000
 #: budget so this process always gets to report its own exit code.
 PROBE_WALL_SECONDS = 6.0
 DECODE_TIMEOUT_SECONDS = 8.0
+VIDEO_DECODE_TIMEOUT_SECONDS = 20.0
 #: Grace between SIGTERM and SIGKILL when a timed-out tool is reaped.
 GRACE_SECONDS = 1.0
 #: Bound on how many times a timed-out tool may be signalled before the encoder gives up.
@@ -217,6 +227,25 @@ class _EncodeFailed(Exception):
     pass
 
 
+#: Limits for this run; ``main`` widens them for a video before applying them.
+_active_limits = {"address_space": ADDRESS_SPACE_BYTES, "cpu": CPU_LIMIT_SECONDS,
+                  "decode_timeout": DECODE_TIMEOUT_SECONDS}
+#: Whether the most recent ``_run_bounded`` call ran out of wall clock (not output).
+_last_run_timed_out = False
+
+
+class _TimedOut(Exception):
+    """A tool ran out of wall clock or CPU time; the source itself may be fine."""
+
+
+def _use_kind_limits(kind):
+    video = kind == KIND_VIDEO
+    _active_limits.update(
+        address_space=VIDEO_ADDRESS_SPACE_BYTES if video else ADDRESS_SPACE_BYTES,
+        cpu=VIDEO_CPU_LIMIT_SECONDS if video else CPU_LIMIT_SECONDS,
+        decode_timeout=VIDEO_DECODE_TIMEOUT_SECONDS if video else DECODE_TIMEOUT_SECONDS)
+
+
 def main(argv):
     if len(argv) < 3 or len(argv) > 4:
         return EXIT_USAGE
@@ -225,6 +254,7 @@ def main(argv):
     if kind not in KINDS:
         return EXIT_USAGE
 
+    _use_kind_limits(kind)
     if not _apply_own_resource_limits():
         # Fail closed. Without an address-space cap an image that decodes to gigabytes
         # would be bounded only by luck, and the host has under a gigabyte to spare.
@@ -243,6 +273,8 @@ def main(argv):
             payload, metadata = _still_thumbnail(input_path, kind)
     except _UnsupportedInput:
         return EXIT_UNSUPPORTED_INPUT
+    except _TimedOut:
+        return EXIT_TIMED_OUT
     except _EncodeFailed:
         return EXIT_ENCODE_FAILED
     except BaseException:
@@ -345,11 +377,12 @@ def _apply_own_resource_limits():
             return False
     try:
         _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-        limit = ADDRESS_SPACE_BYTES
+        limit = _active_limits["address_space"]
         if hard != resource.RLIM_INFINITY:
             limit = min(limit, hard)
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-        resource.setrlimit(resource.RLIMIT_CPU, (CPU_LIMIT_SECONDS, CPU_LIMIT_SECONDS + 5))
+        cpu = _active_limits["cpu"]
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 5))
     except (AttributeError, ValueError, OSError):
         return False
     # Read the effective limit back: a platform that accepts setrlimit but does not
@@ -493,6 +526,8 @@ def _run_bounded(command, timeout, limit_bytes):
     The command is passed as a list and never through a shell, so a path containing spaces,
     quotes or a leading dash is an argument rather than syntax.
     """
+    global _last_run_timed_out
+    _last_run_timed_out = False
     try:
         process = subprocess.Popen(
             list(command), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -519,6 +554,7 @@ def _run_bounded(command, timeout, limit_bytes):
                 except OSError:
                     pass
 
+    _last_run_timed_out = not over_budget and (timed_out or time.monotonic() >= deadline)
     if over_budget or timed_out or time.monotonic() >= deadline:
         # Over its output bound, out of wall clock, or finished exactly as the clock ran
         # out. None of the three produced a result this process can use.
@@ -637,6 +673,14 @@ def _reap(process, force):
     return False
 
 
+def _ran_out_of_time(code):
+    """A run stopped at its wall clock, or killed for exceeding its CPU limit (SIGXCPU)."""
+    if code is None:
+        return _last_run_timed_out
+    sigxcpu = getattr(signal, "SIGXCPU", None)
+    return sigxcpu is not None and code == -sigxcpu
+
+
 def _probe_display(input_path):
     """Ask FFprobe for the *display* geometry of the first video stream.
 
@@ -662,6 +706,8 @@ def _probe_display(input_path):
         "-of", "json", "-timeout", str(PROBE_TIMEOUT_MICROSECONDS),
         "-i", input_path]
     code, stdout = _run_bounded(base, PROBE_WALL_SECONDS, MAX_PROBE_BYTES + 1)
+    if _ran_out_of_time(code):
+        raise _TimedOut
     if code != 0 or not stdout or len(stdout) > MAX_PROBE_BYTES:
         raise _UnsupportedInput
     report = _parse_report(stdout)
@@ -882,7 +928,9 @@ def _decode_frame(input_path, seek_seconds, limit, output_path):
         "-f", "image2", "-fs", str(limit), "-y", output_path,
     ]
     # stdout is only a diagnostic channel here and is bounded by the same limit.
-    code, _stdout = _run_bounded(command, DECODE_TIMEOUT_SECONDS, limit)
+    code, _stdout = _run_bounded(command, _active_limits["decode_timeout"], limit)
+    if _ran_out_of_time(code):
+        raise _TimedOut
     if code != 0:
         return False, b""
     try:
