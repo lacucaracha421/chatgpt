@@ -89,3 +89,71 @@ cases; recording source hashes does not automatically translate new Rust logic.
 ```bash
 python3 -B -m unittest discover -s _tools/app/character-runtime -p 'test_character_holdout*.py' -v
 ```
+
+## Chronological feature replay
+
+`replay_dataset.py` / `replay_eval.py` are offline, standard-library + NumPy tools.
+Run in `character-runtime/` with the existing runtime Python and `-B`. Output names
+must be new, in an existing directory outside the library. No inference or writes
+back to the library occur; input/code digests and interpretation limits are reported.
+
+```bash
+python -B replay_dataset.py export --database /library/library.sqlite \
+  --output /research/replay/dataset.json
+python -B replay_eval.py evaluate --dataset /research/replay/dataset.json \
+  --space b36 --features /library/.cache/characters/B36_64_HEX_NAMESPACE \
+  --scorers rule6 knn3 contrast prior --feedback-lag 1 \
+  --output /research/replay/b36.json
+python -B replay_eval.py evaluate --dataset /research/replay/dataset.json \
+  --space s36 \
+  --features /library/.cache/characters/s36-augmentation-v1/S36_64_HEX_NAMESPACE \
+  --extra-s36 /research/s36_extra.pkl \
+  --box-features /library/.cache/characters/B36_64_HEX_NAMESPACE \
+  --feedback-lag 1 --stream --output /research/replay/s36.json
+python -B -m unittest test_replay_eval -v
+```
+
+Replace namespace placeholders with actual hashes. Repeat feature arguments in
+first-wins precedence order. Namespace compatibility is a caller assertion. The
+optional S36 pickle is `hash -> ndarray/None`; its model identity and alignment to
+B36 boxes cannot be independently verified. SQLite uses `mode=ro`, `query_only=ON`,
+one read transaction, never `immutable=1`. If WAL sidecars prevent read-only access,
+use a separately captured consistent external snapshot with `--library-root` set
+to the original library; document capture provenance, never silently omit a WAL.
+
+- Latest manual state per target/hash supplies truth; clears invalidate it.
+  Automatic-only pairs are **unreviewed automatic**, never negatives. Historical
+  manual revisions feed galleries only when available. Equal-time labels never
+  train each other; lag 1 releases feedback on the next UTC day (lag 0 is strictly
+  earlier timestamps). Learned references must predate the query.
+- Current untimestamped anchors/region choices are an **initial-seed assumption**,
+  not proven historical availability. Known target creation times gate galleries.
+  The unchanged `reference_regions` resolver runs through an AST adapter with a
+  NumPy metric; ambiguous/stale/fallback references abstain. Witnesses are fixed
+  at decision time. See report limitations for missing historical state.
+- Rust `image_fingerprint.rs` confirms whole-image PDQ occupies bytes 0..32 of
+  the 64-byte blob. The old holdout reader only accepts 32-byte blobs and misses
+  this format. Replay uses transitive Hamming <=31/post groups, including uncached
+  bridges, to exclude query relatives before gallery resolution; missing PDQ is
+  reported. No PDQ quality filter is imposed.
+- Snapshot scope follows `character_scope.rs`: one folder, nearest registered
+  ancestor with authoritative opt-out, otherwise eligible descendant series;
+  originals and inherited folder/per-asset exclusions apply. Historical folder
+  changes and native job/publication fences are not reconstructed.
+- `rule6` measures the sixth-distance/support component, with a two-vote flag,
+  not full native arbitration. `contrast` uses the pooled enabled same-series
+  competitor gallery and same-crop margins. Empty positive galleries abstain
+  (ranked last in AUC); missing/fallback query features are skipped and counted.
+- **Walk-forward** thresholds use earlier frozen scores and the feedback lag;
+  cold starts abstain. Report observed FPR beside recall: drift can exceed 2%.
+  **Oracle** thresholds use all evaluation labels and are optimistic. Inspect
+  the `prior` canary and macro AUC (>=5 positives and >=5 negatives per target)
+  before interpreting pooled AUC as visual discrimination.
+- `--stream` freezes the final walk-forward threshold: counts are **unlabeled
+  volume, not precision**, limited by feature availability. Automatic-only pairs
+  remain unlabeled; explicit reference pairs are withheld.
+
+Previous B36 0.610 / S36 0.731 AUC used all-target contrast; same-series values
+were 0.448 / 0.568. Prior 0.132 / 0.380 recall was anjo-excluded **oracle** recall.
+Those scripts also retained query relatives, guessed multi-person seed witnesses,
+and excluded reference-self truth pairs. These are different evaluation contracts.
