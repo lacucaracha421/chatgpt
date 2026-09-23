@@ -29,6 +29,7 @@ import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
 import { ShadowReview } from "./ShadowReview";
+import { S36CharacterExclusion, S36SeriesControl, readinessLabel, useS36Publication, useS36Readiness, s36PublicationApi } from "./S36Publication";
 import { characterApi, draftReferenceRegions, type CharacterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
@@ -60,6 +61,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const { gateway } = useLibrary();
   const [folders, setFolders] = useState<SeriesFolder[]>([]);
   const [shadowReview, setShadowReview] = useState(false);
+  const [readinessVersion, setReadinessVersion] = useState(0);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
   const [all, setAll] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
@@ -105,6 +107,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     ? [...ordinarySeriesGalleryViews, { value: "excluded" as const, label: "자동 분류 제외" }]
     : ordinarySeriesGalleryViews;
   const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
+  const readiness = useS36Readiness(series.classificationId, readinessVersion);
+  const { settings: s36Settings } = useS36Publication(s36PublicationApi);
+  const s36Driven = (targetId: string) => Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.excludedTargets.includes(targetId));
   const name = classifications.find(c => c.id === series.classificationId)?.name ?? "시리즈";
   const pickerScope = picking && picking.kind !== "hero" ? `${series.classificationId}:${editor?.target?.id ?? "new"}:${pickFromSeries ? "series" : "character"}:${all}` : null;
   const scope = `${series.classificationId}:${picking ? picking.kind === "hero" ? "pick-hero" : `pick-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ? `character-${targetId}` : currentGroup ? `group-${currentGroup.id}` : `series-${seriesGalleryView}`}:${all}`;
@@ -272,6 +277,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         <div className="character-registry__section-body">
           {current.ready && !current.manualOnly && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void requestHistoricalRefresh(current)}>과거 미분류 이미지 갱신</Button>}
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setEditor(null); setConverting(true); }}>일반 폴더로 전환</Button>
+          <S36CharacterExclusion seriesId={series.classificationId} targetId={current.id} disabled={busy} />
         </div>
       </details>}
     </>}
@@ -385,6 +391,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 {(target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
                 <strong><span className="series-character__name">{target.displayName}</span></strong>
                 {!target.enabled ? <small className="series-character__status">자동 분석 꺼짐</small> : activeCharacterReferences(target).length < 6 && <small className="series-character__status">레퍼런스 {activeCharacterReferences(target).length}장 · 자동 확정 보류</small>}
+                {target.enabled && !s36Driven(target.id) && readiness.get(target.id) && <small className={`series-character__s36 series-character__s36--${readiness.get(target.id)!.status}`}>{readinessLabel(readiness.get(target.id)!)}</small>}
               </button>
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
             </article>)}</>}</CharacterGroups>
@@ -401,6 +408,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               </label>)}
             </fieldset>
             <div className="series-gallery-heading__aside">
+              <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
               <Button size="sm" variant="ghost" disabled={busy} aria-description="S36 시험 채점 후보를 하나씩 확인" onClick={() => setShadowReview(true)}>S36 확인</Button>
               <small className="series-gallery-filter-count" aria-live="polite">{page.totalCount.toLocaleString()}장</small>
             </div>
@@ -434,7 +442,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       onSaved={() => { setReferenceSuggestionTarget(null); refresh(); }}
     />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
-    {shadowReview && <ShadowReview onClose={() => setShadowReview(false)} onChanged={refresh} privacyMode={privacyMode} decisions={api} />}
+    {shadowReview && <ShadowReview onClose={() => { setShadowReview(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} decisions={api} />}
     <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />
   </section>;

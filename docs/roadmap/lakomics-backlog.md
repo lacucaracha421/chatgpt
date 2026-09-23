@@ -8,7 +8,7 @@ Updated 2026-09-23 (evening): the Android 0.7 browse-first redesign, thumbnail l
 
 ## Current priority
 
-1. **CHAR-AUTO-007** — collect S36 shadow verdicts and review them in the S36 review screen (stage 4 brought forward) until the automatic tier has enough manual judgments to decide the stage 3 publication switch.
+1. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. Next: switch 젠레스 (시시아 excluded), 명조, 아이돌 and 리버스 on the user's PC, spot-check S36 acceptances, then widen.
 2. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
 3. **WORKS-001** — small Film polish: cast/director, release information, and related works.
 

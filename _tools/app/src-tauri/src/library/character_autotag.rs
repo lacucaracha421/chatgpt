@@ -37,6 +37,7 @@ impl ReviewState {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct Prediction {
     pub target_id: String,
     pub result: super::character_scan::ScanResult,

@@ -11,7 +11,7 @@ export type ShadowReviewItem = {
   targetName: string;
   targetFingerprint: string;
   referenceAssetIds: string[];
-  verdict: "automatic" | "recommended";
+  verdict: "automatic" | "recommended" | "none";
   origin: "live" | "backfill";
   knn3: number | null;
   nativeOutcome: string;
@@ -19,10 +19,12 @@ export type ShadowReviewItem = {
 };
 export type ShadowVerdictCounts = { pending: number; accepted: number; rejected: number };
 export type ShadowTierCounts = { automatic: ShadowVerdictCounts; recommended: ShadowVerdictCounts };
-export type ShadowReviewSummary = ShadowTierCounts & { byOrigin: Record<"live" | "backfill", ShadowTierCounts> };
+export type ShadowReviewSummary = ShadowTierCounts & { byOrigin: Record<"live" | "backfill", ShadowTierCounts>; doubtful?: ShadowVerdictCounts };
 export type ShadowBackfillStatus = { running: boolean; preparing: boolean; total: number; scored: number; skipped: number; cancelled: boolean; error: string | null };
 export type ShadowReviewPage = { items: ShadowReviewItem[]; nextOffset: number | null; policyVersion: string | null; summary: ShadowReviewSummary };
-export type ShadowReviewQuery = { offset: number; limit: number };
+/** `doubtful`: existing automatic acceptances that S36 does not support. */
+export type ShadowReviewMode = "candidates" | "doubtful";
+export type ShadowReviewQuery = { offset: number; limit: number; mode?: ShadowReviewMode };
 
 export interface ShadowReviewApi {
   page(query: ShadowReviewQuery): Promise<ShadowReviewPage>;
@@ -40,11 +42,11 @@ export const shadowReviewApi: ShadowReviewApi = {
 };
 
 const emptyTiers = (): ShadowTierCounts => ({ automatic: { pending: 0, accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 } });
-export const emptyShadowSummary = (): ShadowReviewSummary => ({ ...emptyTiers(), byOrigin: { live: emptyTiers(), backfill: emptyTiers() } });
+export const emptyShadowSummary = (): ShadowReviewSummary => ({ ...emptyTiers(), byOrigin: { live: emptyTiers(), backfill: emptyTiers() }, doubtful: { pending: 0, accepted: 0, rejected: 0 } });
 
 export const shadowItemKey = (item: Pick<ShadowReviewItem, "assetId" | "targetId">) => `${item.assetId}:${item.targetId}`;
 
-export const verdictLabel = (verdict: ShadowReviewItem["verdict"]) => verdict === "automatic" ? "자동 후보" : "추천";
+export const verdictLabel = (verdict: ShadowReviewItem["verdict"]) => verdict === "automatic" ? "자동 후보" : verdict === "recommended" ? "추천" : "S36 미지지";
 
 const NATIVE_OUTCOMES: Record<string, string> = {
   accepted_automatic: "자동 확정",

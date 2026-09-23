@@ -414,6 +414,7 @@ mod tests {
             augmentation_model: None,
             shadow_model: Some(f.temp.path().join("unused-model")),
             s36_shadow_disabled: false,
+            s36: Default::default(),
         }
     }
     fn idle(f: &Fixture, config: &RuntimeConfig) {

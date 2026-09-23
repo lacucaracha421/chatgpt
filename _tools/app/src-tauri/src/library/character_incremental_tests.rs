@@ -98,6 +98,7 @@ fn augmentation_publication_is_additive_and_respects_manual_vetoes() {
                 &BTreeSet::new(),
                 &BTreeSet::new(),
                 (mode != "off").then_some(&response),
+                &crate::library::character_worker::S36Publication::default(),
             )
             .unwrap();
         if mode == "rollback" {
@@ -561,6 +562,7 @@ for line in sys.stdin:
         models: f.temp.path().into(),
         augmentation_model: None,
         s36_shadow_disabled: true,
+        s36: Default::default(),
         shadow_model: None,
     }
 }
@@ -1174,6 +1176,7 @@ fn real_native_incremental_queue_reuses_kisaki_references() {
             .join("../character-runtime/scan_worker.py"),
         augmentation_model: None,
         s36_shadow_disabled: true,
+        s36: Default::default(),
         shadow_model: None,
         models: std::env::var_os("LAKOMICS_CHARACTER_TEST_MODELS")
             .unwrap()
@@ -2151,5 +2154,60 @@ fn character_shadow_queue_publication_is_unchanged_on_off_and_failure() {
                 .exists(),
             mode == "on"
         );
+    }
+}
+
+#[test]
+fn s36_series_suppresses_native_automatic_membership_only_for_its_targets() {
+    for s36_series in [false, true] {
+        let f = Fixture::new();
+        let target = f.ready("A");
+        add_learned_reference(&f, &target.id);
+        character_autotag::enqueue(
+            &f.library.connection().unwrap(),
+            "asset-5",
+            character_autotag::Cause::Ingestion,
+        )
+        .unwrap();
+        let job = f.library.claim_character_autotag().unwrap().unwrap();
+        let mut c = f.library.connection().unwrap();
+        let tx = c.transaction().unwrap();
+        let context = f
+            .library
+            .character_autotag_context(&tx, &job, &"a".repeat(64))
+            .unwrap();
+        let prediction = Prediction {
+            target_id: target.id.clone(),
+            result: ScanResult {
+                asset_id: job.asset_id.clone(),
+                content_hash: job.content_hash.clone(),
+                state: "recommended".into(),
+                error: None,
+                evidence: Some(json!({
+                    "passed": true, "wholeFallback": false, "queryBoxes": [[0,0,832,1216]],
+                    "evidence": [{"matchedReferences": [0,1,2,3,4,5], "referenceDistances": vec![0.05; 6]}]
+                })),
+            },
+        };
+        let mut s36 = crate::library::character_worker::S36Publication::default();
+        if s36_series {
+            s36.s36_series.insert(f.series.clone());
+        }
+        f.library
+            .finalize_incremental_augmented(
+                &tx,
+                &job,
+                &context,
+                &[prediction],
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+                None,
+                &s36,
+            )
+            .unwrap();
+        tx.commit().unwrap();
+        drop(c);
+        let relations = f.library.character_relations_for_asset("asset-5").unwrap();
+        assert_eq!(relations.is_empty(), s36_series, "S36 series = {s36_series}");
     }
 }

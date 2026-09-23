@@ -351,7 +351,136 @@ impl Library {
             )));
         }
         source.verify(self)?;
-        Cache::open(&self.root)?.record(&pending, &policy, &response, rejections, &at)
+        Cache::open(&self.root)?.record(&pending, &policy, &response, rejections, &at)?;
+        let published = self.publish_s36(&pending, &policy, &response, rejections, &config.s36)?;
+        if published > 0 {
+            eprintln!(
+                "S36 automatic classification: {published} for {}",
+                pending.asset_id
+            );
+        }
+        Ok(())
+    }
+
+    /// Rollback: clear S36-made automatic acceptances of one series that nobody has
+    /// judged since, through the ordinary manual decision path. B36 and manual
+    /// decisions are never touched. Returns the number cleared.
+    pub fn clear_s36_automatic(&self, series_id: &str) -> Result<u64> {
+        let pairs = {
+            let c = self.connection()?;
+            let mut rows = c.prepare(
+                "SELECT d.target_id,d.source_asset_id FROM character_decisions d
+                 JOIN character_targets t ON t.id=d.target_id
+                 WHERE t.series_classification_id=?1 AND d.origin='automatic' AND d.decision='accepted'
+                   AND json_extract(d.reference_snapshot,'$.prediction.engine')='s36'
+                   AND d.sequence=(SELECT MAX(x.sequence) FROM character_decisions x
+                                   WHERE x.target_id=d.target_id AND x.source_asset_id=d.source_asset_id)
+                 ORDER BY d.target_id,d.source_asset_id",
+            )?;
+            let found = rows
+                .query_map([series_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for (target, asset) in found {
+                grouped.entry(target).or_default().push(asset);
+            }
+            grouped
+        };
+        let mut cleared = 0;
+        for (target_id, assets) in pairs {
+            for chunk in assets.chunks(200) {
+                let fingerprint = {
+                    let c = self.connection()?;
+                    self.read_character_target(&c, &target_id)?.fingerprint
+                };
+                cleared += self.record_character_decisions(super::characters::DecisionRequest {
+                    target_id: target_id.clone(),
+                    expected_fingerprint: fingerprint,
+                    asset_ids: chunk.to_vec(),
+                    decision: super::characters::DecisionKind::Cleared,
+                    baseline_fingerprint: None,
+                    scan_id: None,
+                })?;
+            }
+        }
+        Ok(cleared)
+    }
+
+    /// Stage 3. In a series switched to S36, an automatic verdict becomes an automatic
+    /// acceptance. Any earlier decision for the pair (manual, automatic or cleared) wins,
+    /// and scope, content and exclusion are rechecked in this write transaction.
+    pub(super) fn publish_s36(
+        &self,
+        pending: &Pending,
+        policy: &Policy,
+        response: &Value,
+        rejections: u64,
+        s36: &super::character_worker::S36Publication,
+    ) -> Result<usize> {
+        if s36.s36_series.is_empty() {
+            return Ok(0);
+        }
+        let scores = response["scores"].as_object().ok_or(Error::Stale)?;
+        let mut c = self.connection()?;
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT content_hash FROM assets WHERE id=?1 AND status='normal' AND media_kind='image'",
+                [&pending.asset_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if current.as_deref() != Some(pending.content_hash.as_str()) {
+            return Ok(0);
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut published = 0;
+        for target in self.character_autotag_targets(&tx, &pending.asset_id)? {
+            if !s36.owns(target.series_classification_id.as_deref())
+                || s36.s36_excluded_targets.contains(&target.id)
+            {
+                continue;
+            }
+            let Some(score) = scores.get(&target.id).and_then(Value::as_f64) else {
+                continue;
+            };
+            if policy.verdict(Some(score), rejections) != "automatic" {
+                continue;
+            }
+            let earlier: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2)",
+                params![target.id, pending.asset_id],
+                |r| r.get(0),
+            )?;
+            if earlier {
+                continue;
+            }
+            let snapshot = json!({
+                "scanId": null,
+                "prediction": {
+                    "engine": "s36",
+                    "policyVersion": policy.version,
+                    "featureId": policy.feature_id,
+                    "knn3": score,
+                    "priorManualRejections": rejections,
+                    "automaticScope": true,
+                },
+                "references": target.usable_references().collect::<Vec<_>>(),
+            });
+            tx.execute(
+                "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+                 VALUES(?1,?2,?2,?3,'accepted',?4,?5,'automatic',?6)",
+                params![target.id, pending.asset_id, pending.content_hash, target.fingerprint, serde_json::to_string(&snapshot)?, now],
+            )?;
+            published += 1;
+        }
+        if published > 0 {
+            super::character_autotag::refresh_character_review_state(&tx, &pending.asset_id)?;
+        }
+        tx.commit()?;
+        Ok(published)
     }
 }
 
@@ -545,6 +674,131 @@ mod tests {
                 )))
                 .unwrap(),
             ("backfill".into(), "recommended".into())
+        );
+    }
+    fn s36_fixture() -> (
+        super::super::characters::tests::Fixture,
+        super::super::characters::Target,
+        Policy,
+        Pending,
+    ) {
+        let f = super::super::characters::tests::Fixture::new();
+        let target = f.ready("S36");
+        let policy = Policy {
+            version: "s36-knn3-v2".into(),
+            feature_id: "a".repeat(64),
+            scorer: "knn3".into(),
+            automatic_max_knn3: 0.1085,
+            recommendation_max_knn3: 0.12,
+            automatic_min_prior_manual_rejections: 100,
+        };
+        let hash: String = f
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT content_hash FROM assets WHERE id='asset-5'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let pending = Pending {
+            asset_id: "asset-5".into(),
+            content_hash: hash,
+            relative_path: String::new(),
+            outcomes: BTreeMap::from([(target.id.clone(), "none".into())]),
+            native_at: "2026-09-24T00:00:00Z".into(),
+        };
+        (f, target, policy, pending)
+    }
+    fn response(pending: &Pending, target: &str, score: f64) -> Value {
+        json!({"type":"s36_shadow_result","assetId":pending.asset_id,"contentHash":pending.content_hash,
+               "featureId":"a".repeat(64),"queryAvailable":true,"scores":{target: score}})
+    }
+    #[test]
+    fn s36_publication_accepts_only_confident_unjudged_pairs_in_s36_series_and_rolls_back() {
+        let (f, target, policy, pending) = s36_fixture();
+        let mut s36 = super::super::character_worker::S36Publication::default();
+        let confident = response(&pending, &target.id, 0.05);
+        // Not an S36 series: nothing is published.
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &confident, 100, &s36)
+                .unwrap(),
+            0
+        );
+        s36.s36_series.insert(f.series.clone());
+        // Below the guard or above the threshold: nothing is published.
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &confident, 99, &s36)
+                .unwrap(),
+            0
+        );
+        let unsure = response(&pending, &target.id, 0.11);
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &unsure, 100, &s36)
+                .unwrap(),
+            0
+        );
+        // Excluded character: nothing is published.
+        s36.s36_excluded_targets.insert(target.id.clone());
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &confident, 100, &s36)
+                .unwrap(),
+            0
+        );
+        s36.s36_excluded_targets.clear();
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &confident, 100, &s36)
+                .unwrap(),
+            1
+        );
+        let (origin, engine): (String, String) = f.library.connection().unwrap().query_row(
+            "SELECT origin,json_extract(reference_snapshot,'$.prediction.engine') FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1",
+            [&target.id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((origin.as_str(), engine.as_str()), ("automatic", "s36"));
+        assert_eq!(
+            f.library.character_relations_for_asset("asset-5").unwrap(),
+            vec![target.id.clone()]
+        );
+        // An earlier decision always wins; publishing again changes nothing.
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &confident, 100, &s36)
+                .unwrap(),
+            0
+        );
+        // Rollback clears it through the manual path, and S36 does not re-add it.
+        assert_eq!(f.library.clear_s36_automatic(&f.series).unwrap(), 1);
+        assert!(f
+            .library
+            .character_relations_for_asset("asset-5")
+            .unwrap()
+            .is_empty());
+        assert_eq!(f.library.clear_s36_automatic(&f.series).unwrap(), 0);
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &confident, 100, &s36)
+                .unwrap(),
+            0
+        );
+    }
+    #[test]
+    fn s36_publication_skips_changed_content() {
+        let (f, target, policy, mut pending) = s36_fixture();
+        let mut s36 = super::super::character_worker::S36Publication::default();
+        s36.s36_series.insert(f.series.clone());
+        pending.content_hash = "b".repeat(64);
+        let confident = response(&pending, &target.id, 0.05);
+        assert_eq!(
+            f.library
+                .publish_s36(&pending, &policy, &confident, 100, &s36)
+                .unwrap(),
+            0
         );
     }
 }

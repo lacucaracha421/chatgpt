@@ -38,3 +38,6 @@
 .shadow-review__stats small { color: var(--color-muted); font-size: var(--text-xs); }
 
 .shadow-review__same-image{margin:0;padding:8px 10px;border-radius:var(--radius-sm);background:var(--color-selected);font-size:12px;line-height:1.5}
+.shadow-review__modes{display:flex;gap:2px;padding:2px;border:1px solid var(--color-border);border-radius:var(--radius-sm)}
+.shadow-review__modes button{padding:4px 10px;border:0;border-radius:2px;background:transparent;color:var(--color-muted);font:inherit;font-size:12px;cursor:pointer}
+.shadow-review__modes button[aria-selected=true]{background:var(--color-selected);color:var(--color-text)}

@@ -583,6 +583,7 @@ impl Library {
             &reference_targets,
             &refresh_delta_targets,
             extra.map(|a| &a.response),
+            &config.s36,
         )?;
         if let Some(a) = extra {
             for source in a.sources.values() {
@@ -971,6 +972,7 @@ impl Library {
             reference_targets,
             refresh_delta_targets,
             None,
+            &super::character_worker::S36Publication::default(),
         )
     }
 
@@ -983,7 +985,21 @@ impl Library {
         reference_targets: &BTreeSet<String>,
         refresh_delta_targets: &BTreeSet<String>,
         augmentation: Option<&Value>,
+        s36: &super::character_worker::S36Publication,
     ) -> Result<()> {
+        // Targets of series switched to S36 get no B36 or augmentation membership here;
+        // S36 decides them after scoring (see `character_shadow::publish`).
+        let owned = context
+            .targets
+            .iter()
+            .filter(|t| s36.owns(t.series_classification_id.as_deref()))
+            .map(|t| t.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let selectable = predictions
+            .iter()
+            .filter(|p| !owned.contains(p.target_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
         let decisions=tx.prepare("SELECT target_id,decision,origin FROM character_decisions WHERE source_asset_id=?1 ORDER BY sequence DESC")?
             .query_map([&job.asset_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut latest = BTreeMap::new();
@@ -991,7 +1007,7 @@ impl Library {
             latest.entry(id.clone()).or_insert(decision.clone());
         }
         let (mut accepted, mut covered) = super::character_augmentation::native_selection(
-            predictions,
+            &selectable,
             &latest,
             reference_targets,
         );
@@ -1019,14 +1035,14 @@ impl Library {
             .and_then(|response| {
                 super::character_augmentation::additions(
                     response,
-                    predictions,
+                    &selectable,
                     &native_ids,
                     &latest,
                     reference_targets,
                 )
             })
             .unwrap_or_default();
-        for p in predictions {
+        for p in &selectable {
             if let Some(regions) = additions.get(&p.target_id) {
                 covered.extend(regions);
                 accepted.push(p);

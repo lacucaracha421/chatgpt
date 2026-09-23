@@ -28,6 +28,34 @@ pub struct RuntimeConfig {
     pub(super) s36_shadow_disabled: bool,
     #[serde(skip)]
     pub(super) shadow_model: Option<PathBuf>,
+    #[serde(flatten)]
+    pub(super) s36: S36Publication,
+}
+
+/// Machine-local stage 3 choice: series whose automatic character classification
+/// uses S36 instead of B36, and characters of those series left to manual work.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct S36Publication {
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(super) s36_series: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(super) s36_excluded_targets: BTreeSet<String>,
+}
+impl S36Publication {
+    /// A target whose automatic membership is decided by S36 (or by nobody, if excluded).
+    pub(super) fn owns(&self, series: Option<&str>) -> bool {
+        series.is_some_and(|series| self.s36_series.contains(series))
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S36PublicationSettings {
+    pub series: Vec<String>,
+    pub excluded_targets: Vec<String>,
+    /// S36 scoring must be running for S36 series to classify anything.
+    pub scoring_enabled: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -98,6 +126,10 @@ impl RuntimeConfig {
                     .as_ref()
                     .is_some_and(|s| s.runtime.s36_shadow_disabled),
                 shadow_model: None,
+                s36: saved
+                    .as_ref()
+                    .map(|s| s.runtime.s36.clone())
+                    .unwrap_or_default(),
                 augmentation_model: saved
                     .as_ref()
                     .and_then(|saved| saved.runtime.augmentation_model.clone()),
@@ -297,6 +329,75 @@ impl RuntimeConfig {
         Self::augmentation_settings(script, settings)
     }
 
+    pub(crate) fn s36_publication(
+        script: PathBuf,
+        settings: &Path,
+    ) -> Result<S36PublicationSettings> {
+        let saved = Self::load(script, settings)?;
+        let scoring_enabled = !saved.runtime.s36_shadow_disabled
+            && saved
+                .runtime
+                .augmentation_model
+                .as_deref()
+                .is_some_and(|path| check_augmentation_model(path).is_ok());
+        Ok(S36PublicationSettings {
+            series: saved.runtime.s36.s36_series.iter().cloned().collect(),
+            excluded_targets: saved
+                .runtime
+                .s36
+                .s36_excluded_targets
+                .iter()
+                .cloned()
+                .collect(),
+            scoring_enabled,
+        })
+    }
+
+    pub(crate) fn update_s36_publication(
+        script: PathBuf,
+        settings: &Path,
+        series: BTreeSet<String>,
+        excluded_targets: BTreeSet<String>,
+    ) -> Result<S36PublicationSettings> {
+        let valid =
+            |id: &String| !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control);
+        if series.len() > 512
+            || excluded_targets.len() > 4096
+            || !series.iter().all(valid)
+            || !excluded_targets.iter().all(valid)
+        {
+            return Err(Error::Invalid("S36 설정 값이 올바르지 않습니다."));
+        }
+        let before = std::fs::read(settings).ok();
+        // Loading validates the file; only the two keys below are written.
+        Self::load(script.clone(), settings)?;
+        let mut document: Value = serde_json::from_slice(
+            before
+                .as_deref()
+                .ok_or(Error::Invalid("캐릭터 런타임 설정을 먼저 저장해 주세요."))?,
+        )?;
+        let object = document
+            .as_object_mut()
+            .ok_or(Error::Invalid("Invalid runtime settings"))?;
+        object.insert("s36_series".into(), serde_json::to_value(&series)?);
+        object.insert(
+            "s36_excluded_targets".into(),
+            serde_json::to_value(&excluded_targets)?,
+        );
+        if std::fs::read(settings).ok() != before {
+            return Err(Error::Stale);
+        }
+        let parent = settings
+            .parent()
+            .ok_or(Error::Invalid("설정 경로가 없습니다."))?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(&serde_json::to_vec(&document)?)?;
+        temporary
+            .persist(settings)
+            .map_err(|e| Error::Io(e.error))?;
+        Self::s36_publication(script, settings)
+    }
+
     pub(crate) fn setup(
         python: PathBuf,
         models: PathBuf,
@@ -310,6 +411,7 @@ impl RuntimeConfig {
             augmentation_model: None,
             s36_shadow_disabled: false,
             shadow_model: None,
+            s36: S36Publication::default(),
         };
         let temp = tempfile::tempdir()?;
         let mut worker = Worker::start(&config, temp.path(), Arc::new(AtomicBool::new(false)))?;

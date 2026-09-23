@@ -449,6 +449,31 @@ judgment of the same asset/hash/target; clears and changed/unavailable assets ar
 unknown. Rates use reviewed rows only, not all arrivals. Verification uses fixtures;
 real-library native runtime, actual model inference and Windows remain unverified.
 
+## S36 publication by series (stage 3)
+
+The series header offers `자동 분류: 기존 / S36`; a character in an S36 series can be
+marked `S36 제외`. Both choices are machine-local, stored as `s36_series` and
+`s36_excluded_targets` in `character-runtime.json` (no library schema change), so each
+PC switches its own series. In an S36 series the native queue still runs B36 but
+publishes no B36 or augmentation membership for that series' targets. After the image's
+S36 shadow score is recorded (idle time, live queue and explicit historical refresh
+only — never the cached backfill), a `automatic` verdict under `s36_policy.json`
+becomes an automatic acceptance with `prediction.engine = "s36"`, policy version,
+feature id, knn3 and the rejection count in its evidence. Any earlier decision for the
+pair (manual, automatic or cleared), an excluded character, changed content or a
+target outside the automatic scope publishes nothing. S36 series therefore classify
+nothing while `S36 시험 채점` is off or the model is unavailable; the queue is never
+blocked. `S36 자동 분류 해제` clears the series' S36-made acceptances that nobody has
+judged since, through the ordinary manual decision path. The review screen adds a
+`기존 자동 분류 점검` tab listing automatic acceptances whose S36 score does not support
+them (shadow verdict `recommended`/`none`).
+
+Characters S36 does not classify yet (a B36 series, or `S36 제외`) show an S36
+readiness line: automatic candidates of the newest policy judged after scoring, the
+wrong ones among them, and manual acceptances (examples). `ready` needs at least 30
+judged with at most one wrong and 50 examples; two or three wrong is `hold`, four or
+more `keep`. It is a read-only summary; switching stays an explicit choice.
+
 ## S36 review screen (stage 4, early)
 
 Series view → `S36 확인` opens a fullscreen review of shadow rows scored

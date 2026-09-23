@@ -16,6 +16,7 @@ fn augmentation_settings_keep_the_selected_model_when_disabled() {
         models: temp.path().to_owned(),
         augmentation_model: Some(model.clone()),
         s36_shadow_disabled: true,
+        s36: Default::default(),
         shadow_model: None,
     };
     // Legacy JSON with a model path remains enabled until explicitly disabled.
@@ -53,6 +54,7 @@ fn invalid_augmentation_model_does_not_overwrite_settings() {
         models: temp.path().to_owned(),
         augmentation_model: None,
         s36_shadow_disabled: true,
+        s36: Default::default(),
         shadow_model: None,
     };
     let before = serde_json::to_vec(&config).unwrap();
@@ -80,6 +82,7 @@ fn preconnected_model_is_resolved_without_enabling_legacy_runtime() {
         models: temp.path().to_owned(),
         augmentation_model: None,
         s36_shadow_disabled: true,
+        s36: Default::default(),
         shadow_model: None,
     };
     let before = serde_json::to_vec(&config).unwrap();
@@ -161,6 +164,7 @@ fn child_cancellation_deadline_exit_and_oversized_output_are_bounded() {
             models: temp.path().into(),
             augmentation_model: None,
             s36_shadow_disabled: true,
+            s36: Default::default(),
             shadow_model: None,
         };
         let mut worker = Worker::start(&config, temp.path(), cancel.clone()).unwrap();
@@ -253,6 +257,7 @@ fn character_shadow_worker_response_is_preemptible() {
         models: temp.path().into(),
         augmentation_model: None,
         s36_shadow_disabled: true,
+        s36: Default::default(),
         shadow_model: None,
     };
     let mut worker = Worker::start(&config, temp.path(), Arc::new(AtomicBool::new(false))).unwrap();

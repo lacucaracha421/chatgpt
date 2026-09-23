@@ -967,15 +967,19 @@ impl Library {
                 )?
                 .0
             };
-            let previous: Option<String> = transaction
+            let previous: Option<(String, String)> = transaction
                 .query_row(
-                    "SELECT decision FROM character_decisions
+                    "SELECT decision,origin FROM character_decisions
                 WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence DESC LIMIT 1",
                     params![target.id, asset_id],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()?;
-            if previous.as_deref() == Some(request.decision.stored()) {
+            // Repeating a person's own decision changes nothing. Confirming an automatic
+            // acceptance is new evidence: it becomes a manual decision.
+            if previous.as_ref().is_some_and(|(decision, origin)| {
+                decision == request.decision.stored() && origin != "automatic"
+            }) {
                 super::character_autotag::refresh_character_review_state(transaction, asset_id)?;
                 continue;
             }

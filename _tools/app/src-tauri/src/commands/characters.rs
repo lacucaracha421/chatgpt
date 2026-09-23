@@ -336,6 +336,67 @@ pub async fn character_shadow_review_page(
         .map_err(Into::into)
 }
 
+#[tauri::command]
+pub async fn character_s36_publication(
+    app: tauri::AppHandle,
+) -> Result<crate::library::character_worker::S36PublicationSettings, CommandError> {
+    let (script, settings) = runtime_paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::library::character_worker::RuntimeConfig::s36_publication(script, &settings)
+            .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
+pub async fn set_character_s36_publication(
+    series: Vec<String>,
+    excluded_targets: Vec<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_worker::S36PublicationSettings, CommandError> {
+    let library = current_required(state)?;
+    let (script, settings) = runtime_paths(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = crate::library::character_worker::RuntimeConfig::update_s36_publication(
+            script,
+            &settings,
+            series.into_iter().collect(),
+            excluded_targets.into_iter().collect(),
+        )?;
+        // The running queue picks up the new series choice with its configuration.
+        start_incremental_if_configured(&app, &library);
+        Ok(result)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
+pub async fn clear_character_s36_automatic(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.clear_s36_automatic(&series_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_s36_readiness(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::character_shadow_review::S36Readiness>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_s36_readiness(&series_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
 impl From<Error> for CommandError {
     fn from(error: Error) -> Self {
         let code = match &error {
