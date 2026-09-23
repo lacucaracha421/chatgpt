@@ -8,6 +8,7 @@
 - Each of these needs explicit authorization for that action: Git writes (commit, push, merge, tag, branch/worktree creation or deletion), deployment, service provisioning, and production-data writes. Implementation, delegation, and skill activation never imply it.
 - Never broaden tool access, disable sandboxing, modify managed/plugin caches, or install dependencies to satisfy a skill or workflow. Use a supported equivalent or work inline, and disclose the limitation.
 - Be concise and truthful. Write new or rewritten instruction/documentation text in English; converse in the user's language. Do not translate unrelated documents incidentally.
+- Report progress and results to the user in terms of the user experience: what changes on screen or in behavior, what they will notice, what they need to decide or do, and what remains unverified. Do not explain internal code, algorithms, or implementation logic unless the user asks; keep that detail in commits, documentation, and the backlog. Honest limits and test outcomes still belong in the report, stated plainly.
 
 ## Repository map and compatibility
 

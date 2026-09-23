@@ -619,6 +619,35 @@ import, a held/failed native character claim, and a fake-server assertion that l
 publication precedes a failed ACK. Remaining acceptance is the real desktop browsing
 experience on the user's library and native Windows verification.
 
+## CHAR-AUTO-007 — Evidence-based accuracy plan (2026-09-23 re-analysis)
+
+Status: `IN_PROGRESS` — stage 1 only.
+
+Two read-only analyses of the active library (an Opus pass and an independent Fable review; scripts in the session scratchpad, not tracked) found:
+- The CCIP metric model is exactly `0.5 × (1 − cosine)` of L2-normalized features, so comparisons need no ONNX batching.
+- Random grouped cross-validation overstated gains (contrast score AUC 0.90) through target-prior leakage and same-day batch correlation. Chronological replay gives B36 AUC ≈ 0.61 and S36 ≈ 0.73–0.74 (recall at 2% FP ≈ 0.13 vs ≈ 0.33–0.38). Expect roughly one-third recall at a strict error budget, not 60%.
+- S36 features beat B36 in every measured condition; B36+S36 fusion added nothing.
+- Most rejections are unregistered people (open set), so "nearest registered character" arbitration is unsafe; competitors should be same-series only.
+- Automatic acceptances after 2026-09-13 were never manually confirmed (14 later rejections, 0 confirmations), so their precision is unknown, not high.
+- The 2026-09-11 안조 false-positive burst came from multi-person anchors voting with every crop before region handling existed. Current code already withholds unresolved multi-person anchors; 안조 now has 3 usable anchors and cannot auto-confirm.
+
+Stages:
+1. **Chronological feature-replay evaluator** (in progress): each prediction uses only earlier manual decisions, excludes same-post/PDQ neighbours, reports walk-forward thresholds and a target-prior leakage canary. All later changes are judged with it.
+2. **S36 switch in shadow mode**: needs a full-library S36 feature extraction into the library cache (roughly 1–2 CPU hours, separate approval) and recalibrated thresholds.
+3. **Scoring**: positive gallery = references + manual acceptances only; subtract the nearer of own manual rejections and same-series competitors. Keep automatic confirmation strict; growth goes to recommendations.
+4. **Fast review loop** for recommendations so new manual decisions feed stage 3.
+
+User follow-up for 안조: select regions for anchors `e60e44a1` (crop #1 or #2) and `90394071` (crop #4), and add the four manual acceptances as supporting references.
+
+## CHAR-AUTO-008 — Multi-form characters and reference quality hints
+
+Status: `TODO` — measure with the CHAR-AUTO-007 evaluator first.
+
+Some characters have distinct forms (아리아: robot form and human form). With per-reference voting a minority form rarely reaches the six-vote automatic rule, although it does not hurt the majority form.
+- Short term: add at least six references for each form that should auto-confirm.
+- Direction: cluster a character's references into forms/outfits (auto-suggested, user-confirmable) and count votes within a form, so automatic confirmation means "six references of the same form".
+- Reference hints in character settings should flag only isolated references that belong to no form cluster, not a whole second form. Observed isolated cases on 2026-09-23: 수나 `aeffff69` (abstract chibi), `5c2ca1c1` (backlit silhouette); 모니에 `720276e7` (legs only), `f29f450c` (blue silhouette). Also verify 수나 `ec4e8499`, whose automatically inferred region may be a different person. Thresholds for hints must come from the evaluator, not the ad-hoc 0.19 median used in the audit.
+
 ## CHAR-AUTO-003 — Cluster-based character candidate research
 
 Status: `HOLD`
