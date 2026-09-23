@@ -648,6 +648,24 @@ Some characters have distinct forms (아리아: robot form and human form). With
 - Direction: cluster a character's references into forms/outfits (auto-suggested, user-confirmable) and count votes within a form, so automatic confirmation means "six references of the same form".
 - Reference hints in character settings should flag only isolated references that belong to no form cluster, not a whole second form. Observed isolated cases on 2026-09-23: 수나 `aeffff69` (abstract chibi), `5c2ca1c1` (backlit silhouette); 모니에 `720276e7` (legs only), `f29f450c` (blue silhouette). Also verify 수나 `ec4e8499`, whose automatically inferred region may be a different person. Thresholds for hints must come from the evaluator, not the ad-hoc 0.19 median used in the audit.
 
+## CHAR-AUTO-009 — Person crop quality and main-character focus
+
+Status: `TODO` — measure with the CHAR-AUTO-007 evaluator; bundle any re-extraction with the S36 switch so the library is re-read once.
+
+User reports (2026-09-23): crops sometimes cut a face in half or pick up mascots, and multi-person images attach minor background characters. A random sample of 72 library crops showed roughly: ~10 non-human/mascot crops (mascot cats, chibi mushrooms, plush toys, objects), ~10 fragments (half faces, hat/hand/legs only), ~5 boxes containing several people, and frequent duplicate boxes for the same person (full body plus upper body, overlapping manga panels).
+
+User decisions:
+- **Main characters only:** in multi-person images, classify only the prominent people — those comparable in size to the largest person. Equal-size group art keeps everyone.
+- **Minor characters are ignored**: no automatic membership and no recommendation.
+
+Direction, in order of expected safety:
+1. Drop fragments, very small crops and non-human detections from classification.
+2. Keep the whole head inside a person crop (locate the head and extend the box when it is cut).
+3. Merge duplicate boxes of the same person.
+4. Consider a different person detector only if 1–3 are insufficient.
+
+Before enabling the main-character rule, measure how many existing manual acceptances are small/background people so the prominence threshold does not drop images the user deliberately assigned. Existing memberships are not removed retroactively without a separate decision.
+
 ## CHAR-AUTO-003 — Cluster-based character candidate research
 
 Status: `HOLD`
