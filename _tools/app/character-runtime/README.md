@@ -372,3 +372,17 @@ which no further extraction or publication occurs. The CPU budget is per run,
 including all process threads; resume gets a new budget, with no ledger writes.
 Full-library extraction, calibration, in-app shadow and publication are later,
 separately authorized stages.
+
+## S36 full-library features and calibration (stages 2b–2c, 2026-09-23)
+
+The approved full-library extraction wrote 8,282 new entries (126 already cached;
+436 non-images and 117 whole-image fallbacks skipped) into namespace
+`e4be203d…ba9f`. Chronological replay of that namespace chose knn3 (AUC 0.80).
+`s36_policy.json` pins the resulting shadow policy: automatic membership at knn3
+≤ 0.1304 (walk-forward target 2%) only after at least 100 earlier manual
+rejections, and recommendations up to 0.1490 (target 5%). From 2026-09-10 this
+replays at 39.5% recall / 0.81% FPR automatic and 48.5% / 1.89% recommended. The
+first replay day is excluded by the rejection guard: with 25 rejections its
+threshold admitted 16–17 false positives for one character. The file is not read
+by the native runtime and `baseline.json` is unchanged; in-app shadow scoring
+(2d) and publication (3) remain separately authorized stages.

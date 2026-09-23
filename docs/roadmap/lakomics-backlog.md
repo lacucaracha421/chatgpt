@@ -637,7 +637,7 @@ experience on the user's library and native Windows verification.
 
 ## CHAR-AUTO-007 — Evidence-based accuracy plan (2026-09-23 re-analysis)
 
-Status: `IN_PROGRESS` — stage 1 only.
+Status: `IN_PROGRESS` — stages 1–2c done (2026-09-23): full-library S36 features extracted and a shadow policy pinned in `_tools/app/character-runtime/s36_policy.json` (automatic knn3 ≤ 0.1304 after ≥100 prior rejections, recommendations ≤ 0.1490). Next: 2d in-app shadow scoring, then the publication switch, each separately authorized.
 
 Two read-only analyses of the active library (an Opus pass and an independent Fable review; scripts in the session scratchpad, not tracked) found:
 - The CCIP metric model is exactly `0.5 × (1 − cosine)` of L2-normalized features, so comparisons need no ONNX batching.

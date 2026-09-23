@@ -1,0 +1,32 @@
+{
+  "version": "s36-knn3-v1",
+  "status": "shadow-only: not read by the native runtime; baseline.json remains the active B36 policy",
+  "feature_id": "e4be203d4030b1e58ff6b4577476701d438bfe3902d712cd9b03655a717eba9f",
+  "scorer": "knn3",
+  "score": "per image: minimum over person crops of the mean CCIP distance to the three nearest positive-gallery images (s36_scoring.knn); smaller is better",
+  "automatic_max_knn3": 0.13039766252040863,
+  "recommendation_max_knn3": 0.1490272581577301,
+  "automatic_min_prior_manual_rejections": 100,
+  "rules": [
+    "Automatic membership only when the image score is <= automatic_max_knn3 and at least automatic_min_prior_manual_rejections manual rejections existed library-wide before the decision (cold-start guard).",
+    "Images scoring above automatic_max_knn3 and <= recommendation_max_knn3 are recommendations only, never automatic memberships.",
+    "An empty positive gallery abstains."
+  ],
+  "calibration": {
+    "date": "2026-09-23",
+    "method": "replay_eval.py evaluate --space s36 --scorers knn3 rule6 contrast --witness references --feedback-lag 1 --rates 0.005 0.01 0.015 0.02 0.03 0.05",
+    "dataset_sha256": "eb84e5424b33d66e40d400307df35ca55e6c7b81ee2ec63db9e69eae0f9dec85",
+    "report_sha256": "1ad75329379665fc953a21c7f415edef03812d62d473f98b0b2a4e5591fcbcdd",
+    "selection": "automatic = final walk-forward threshold for target FPR 2%; recommendation = target FPR 5%",
+    "overall_knn3_auc": 0.7987,
+    "post_warmup_window": "decisions from 2026-09-10T00:00Z: 458 accepted, 741 rejected",
+    "post_warmup_automatic": {"recall": 0.395, "false_positive_rate": 0.0081, "precision": 0.968},
+    "post_warmup_recommendation": {"recall": 0.485, "false_positive_rate": 0.0189, "precision": 0.941},
+    "cold_start_note": "Including 2026-09-09 the observed walk-forward FPR never falls below 2.5%: the first threshold came from 25 rejections and one character took 16-17 false positives. The rejection-count guard addresses this.",
+    "limitations": [
+      "Historical replay of selected labels, not prospective validation.",
+      "Only about 17 manual rejections exist after 2026-09-13, so recent drift is weakly measured.",
+      "1,104 earlier automatic acceptances were never manually reviewed and are not labels."
+    ]
+  }
+}
