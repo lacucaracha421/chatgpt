@@ -2,6 +2,64 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-23 (night) — Verification-only items
+
+The user closed the remaining verification-only items as complete on 2026-09-23 without a separately recorded acceptance run. Their last backlog text is kept below for reference; reopen with a concrete failure rather than reusing these IDs.
+
+### CLOUD-INGEST-002 — Cloud Capture를 server-native ingest로 전환
+
+Status: `DONE` — closed 2026-09-23 at the user's confirmation. Previous: `VERIFY` — server-native Capture promotion is implemented under the activated Asset lifecycle authority; the old description of a wholly PC-mediated ingest path is superseded. See the [completed authority slices](lakomics-completed.md#cloud-post-001--completed-authority-slices) and [ADR-0038](../adr/0038-asset-lifecycle-authority.md).
+
+Remaining scope is the specific PC-off Capture acceptance below, not another ingest implementation or authority activation. Reuse recorded evidence where it covers the exact flow; the lifecycle canary alone does not establish every Capture step. Preserve stable identity, idempotent retries, validation and recovery, and do not retire the inactive-authority PC fallback without checking its consumers. Character classification and other enrichment must not gate base-asset visibility.
+
+Acceptance: save from the extension while every PC is off; the asset becomes a canonical, viewable mobile item exactly once, and a PC started later adopts the same asset without re-ingesting or duplicating it.
+
+### CHAR-AUTO-006 — Show ingested assets before batch character classification finishes
+
+Status: `DONE` — closed 2026-09-23 at the user's confirmation. Previous: `VERIFY`
+
+User-visible problem (2026-09-13): when many images arrive together, they can remain absent from normal browsing until character classification for the batch finishes.
+
+Desired contract:
+- successful ingestion shows each normal asset in its ordinary series/folder gallery immediately;
+- character analysis runs in the background and must not gate base-gallery publication;
+- character-folder membership appears progressively as results commit;
+- a slow or failed character job never hides an otherwise-valid ingested asset.
+
+Implemented 2026-09-14: ordinary/series galleries coalesce same-scope refreshes
+instead of discarding every in-flight read. Each completed read can publish while
+classification continues; navigation and explicit mutations still invalidate old work.
+Cloud capture ingestion now sends a native channel update after each local commit,
+before acknowledgement and later downloads. Closed/stale UI listeners do not fail
+an import or populate another library.
+
+Regression coverage includes slow overlapping gallery reads, an app-level multi-file
+import, a held/failed native character claim, and a fake-server assertion that local
+publication precedes a failed ACK. Remaining acceptance is the real desktop browsing
+experience on the user's library and native Windows verification.
+
+### PORT-001 — Manga folder stored as a machine-specific path in shared library data
+
+Status: `DONE` — closed 2026-09-23 at the user's confirmation. Previous: `VERIFY` — implemented 2026-09-23; native Windows and Linux checks remain.
+
+Observed 2026-09-23 on the Linux host: Settings → General → 망가 폴더 shows `C:\lakomics\2군`. The value lives in `library_settings.manga_root` inside the library database, which Windows and Linux share, so an absolute path saved on one OS is shown and used on the other. This conflicts with the rule that machine-specific paths must not drive application behavior.
+
+Direction: keep the manga root as a per-machine setting (like `character-runtime.json`), or store it relative to a known root with a per-OS override. Migrate the existing value without losing the Windows setting, and show a clear "not set on this PC" state instead of a foreign path. Verify on both Windows and Linux.
+
+Implemented 2026-09-23: the app keeps the manga root per machine in `library-machine.json` (app config directory, keyed by `library_id`). A shared `library_settings.manga_root` is adopted and recorded for this machine only when it is an existing absolute directory here; otherwise Settings shows "이 PC에서는 설정되지 않음" with the other PC's path as a hint. Choosing or clearing the folder writes only this machine's entry; the shared column is left for machines that have not migrated. Remaining: open the app on Windows (value adopted, manga browsing unchanged) and on Linux (hint shown, choosing a local folder works).
+
+### EXT-011 — 반원 수집 메뉴와 PC 브라우저 연결
+
+Status: `DONE` — closed 2026-09-23 at the user's confirmation. Previous: `VERIFY`
+
+Implementation exists. Keep only real-browser/Titanium/PC integration acceptance for the current menu direction; do not revive older radial/list-only designs.
+
+### EXT-012 — X 번역 단순화·공유 게시물 저장·PC 임시저장
+
+Status: `DONE` — closed 2026-09-23 at the user's confirmation. Previous: `VERIFY`
+
+Implementation exists. Remaining scope is targeted real X/Titanium/Galaxy acceptance and concrete regressions only.
+
 ## Closure checkpoint — 2026-09-23 (evening) — Mobile 0.7, thumbnails and dependencies
 
 Delivered and pushed on 2026-09-23 (`e54f3c5`, `623c517`, `b5a84bd`, `8582573`, prototypes `fb22d6c`). Device evidence and hashes are in `android/README.md`.

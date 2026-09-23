@@ -16,8 +16,6 @@ Updated 2026-09-23 (evening): the Android 0.7 browse-first redesign, thumbnail l
 
 `MEDIA-R2-001` is closed at the currently satisfactory media-delivery scope; extra variants are not required. `CHAR-AUTO-001` is closed for this improvement pass; future concrete classification mistakes can open bounded follow-up work rather than keeping a permanent accuracy task active.
 
-Verification-only, close opportunistically through normal use: `CHAR-AUTO-006`, `EXT-011`, `EXT-012`.
-
 Later / optional: AV source-and-candidate selection (`LONG-001`), image mirror/rotation matching (`SIMILARITY-002B`), Artist hub (`ARTIST-001`), optional provider work (`CATALOG-002B`), Jev decision-model evaluation (`AI-JEV-001`), and Zed IDE workflow evaluation (`DEV-ZED-001`). Similar-video calibration stays deferred until representative samples naturally appear.
 
 ## Status legend
@@ -85,14 +83,6 @@ Current mobile binary caching (`MediaRepository` / `ThumbnailCache`) is useful, 
 
 Acceptance: after one successful sync, relaunching the Android app can show the previous library view without waiting for a full remote page load; later server changes update it incrementally without losing pending local intent.
 
-## CLOUD-INGEST-002 — Cloud Capture를 server-native ingest로 전환
-
-Status: `VERIFY` — server-native Capture promotion is implemented under the activated Asset lifecycle authority; the old description of a wholly PC-mediated ingest path is superseded. See the [completed authority slices](lakomics-completed.md#cloud-post-001--completed-authority-slices) and [ADR-0038](../adr/0038-asset-lifecycle-authority.md).
-
-Remaining scope is the specific PC-off Capture acceptance below, not another ingest implementation or authority activation. Reuse recorded evidence where it covers the exact flow; the lifecycle canary alone does not establish every Capture step. Preserve stable identity, idempotent retries, validation and recovery, and do not retire the inactive-authority PC fallback without checking its consumers. Character classification and other enrichment must not gate base-asset visibility.
-
-Acceptance: save from the extension while every PC is off; the asset becomes a canonical, viewable mobile item exactly once, and a PC started later adopts the same asset without re-ingesting or duplicating it.
-
 ## CLOUD-WORK-001 — Server-owned durable jobs with PC workers
 
 Status: `HOLD` — post-authority worker architecture.
@@ -159,7 +149,7 @@ User-requested notes for later work, not an implementation start or priority cha
 
 ## Browser extension
 
-These follow-ups apply to the active collector in `extension-list/` and relate to `EXT-011` / `EXT-012`; they are new pending requests, not completed acceptance of those entries.
+These follow-ups apply to the active collector in `extension-list/` and relate to `EXT-011` / `EXT-012` (both closed 2026-09-23 and archived); they remain pending requests of their own.
 
 - **Animation polish:** refine the semicircle menu's entrance and roulette-spinning animations for a more professional presentation.
 - **Persistent semicircle after navigation (bug):** the user reports that navigating to another page while the semicircle is open leaves it permanently visible. Reproduce the navigation path and investigate overlay cleanup; the root cause is not yet verified.
@@ -196,7 +186,7 @@ Do not count implemented flows awaiting acceptance as new feature builds: PC-off
 
 ### First recommended batch — extension reliability and interaction polish
 
-Planning checkpoint, 2026-09-21: source inspection only; no implementation, browser reproduction, device acceptance or deployment. This expands recommendation 1 above without changing the existing priority list or `EXT-011` / `EXT-012` verification status.
+Planning checkpoint, 2026-09-21: source inspection only; no implementation, browser reproduction, device acceptance or deployment. This expands recommendation 1 above without changing the existing priority list; `EXT-011` / `EXT-012` were later closed on 2026-09-23.
 
 Subsequent visual study: [three One UI-inspired concepts](../prototypes/collector-one-ui-concepts/index.html) and [comparison image](../prototypes/collector-one-ui-concepts/overview.png) present A — Everyday Light, B — Midnight Edge, and C — Soft Orbit. All show a separated center, spaced rounded sectors and the same selected folder. The standalone prototype only previews local selection; it performs no saves or network requests and does not implement dial motion or production lifecycle behavior. Headless Chrome rendering at 1680×1100 was inspected and JavaScript syntax checked. This is not live-extension, touch, animation or navigation-bug acceptance. The user subsequently chose B's dark appearance as the refinement base, not as production acceptance.
 
@@ -634,30 +624,6 @@ Vitest 5 changes assertion types to `Assertion<R, T>`; jest-dom 7.0.1 still augm
 
 The character UI/management workflow and current accuracy-improvement pass are accepted and archived. [CHAR-AUTO-001](lakomics-completed.md#char-auto-001--current-accuracy-improvement-pass) retains the implementation evidence, delivery limits and policy for case-driven follow-up. Batch-classification visibility remains a separate verification item below.
 
-## CHAR-AUTO-006 — Show ingested assets before batch character classification finishes
-
-Status: `VERIFY`
-
-User-visible problem (2026-09-13): when many images arrive together, they can remain absent from normal browsing until character classification for the batch finishes.
-
-Desired contract:
-- successful ingestion shows each normal asset in its ordinary series/folder gallery immediately;
-- character analysis runs in the background and must not gate base-gallery publication;
-- character-folder membership appears progressively as results commit;
-- a slow or failed character job never hides an otherwise-valid ingested asset.
-
-Implemented 2026-09-14: ordinary/series galleries coalesce same-scope refreshes
-instead of discarding every in-flight read. Each completed read can publish while
-classification continues; navigation and explicit mutations still invalidate old work.
-Cloud capture ingestion now sends a native channel update after each local commit,
-before acknowledgement and later downloads. Closed/stale UI listeners do not fail
-an import or populate another library.
-
-Regression coverage includes slow overlapping gallery reads, an app-level multi-file
-import, a held/failed native character claim, and a fake-server assertion that local
-publication precedes a failed ACK. Remaining acceptance is the real desktop browsing
-experience on the user's library and native Windows verification.
-
 ## CHAR-AUTO-007 — Evidence-based accuracy plan (2026-09-23 re-analysis)
 
 Status: `IN_PROGRESS` — stages 1–2c done (2026-09-23): full-library S36 features extracted and a shadow policy pinned in `_tools/app/character-runtime/s36_policy.json` (automatic knn3 ≤ 0.1304 after ≥100 prior rejections, recommendations ≤ 0.1490). Next: 2d in-app shadow scoring, then the publication switch, each separately authorized.
@@ -774,16 +740,6 @@ Keep VCK/kHentai as the default provider. If Heliotrope is revisited, isolate it
 
 # Desktop UI consistency
 
-## PORT-001 — Manga folder stored as a machine-specific path in shared library data
-
-Status: `VERIFY` — implemented 2026-09-23; native Windows and Linux checks remain.
-
-Observed 2026-09-23 on the Linux host: Settings → General → 망가 폴더 shows `C:\lakomics\2군`. The value lives in `library_settings.manga_root` inside the library database, which Windows and Linux share, so an absolute path saved on one OS is shown and used on the other. This conflicts with the rule that machine-specific paths must not drive application behavior.
-
-Direction: keep the manga root as a per-machine setting (like `character-runtime.json`), or store it relative to a known root with a per-OS override. Migrate the existing value without losing the Windows setting, and show a clear "not set on this PC" state instead of a foreign path. Verify on both Windows and Linux.
-
-Implemented 2026-09-23: the app keeps the manga root per machine in `library-machine.json` (app config directory, keyed by `library_id`). A shared `library_settings.manga_root` is adopted and recorded for this machine only when it is an existing absolute directory here; otherwise Settings shows "이 PC에서는 설정되지 않음" with the other PC's path as a hint. Choosing or clearing the folder writes only this machine's entry; the shared column is left for machines that have not migrated. Remaining: open the app on Windows (value adopted, manga browsing unchanged) and on Linux (hint shown, choosing a local folder works).
-
 ## PC-UI-001 — PC UI consistency pass
 
 Status: `IN_PROGRESS`
@@ -850,20 +806,6 @@ Status: `HOLD` — optional developer-experience experiment.
 
 Evaluate Zed on the Linux Lakomics checkout only as an editor/agent workflow improvement: fast native editing, integrated diff/terminal, and ACP-hosted agents such as Codex may reduce context switching. Treat Codex-in-Zed as the same Codex resource budget, **not** a way to bypass or reduce Codex quota. Keep Zed entirely optional: no repository/runtime dependency, toolchain migration, or workflow lock-in is justified unless a hands-on trial is clearly better than the current setup.
 
-# Extension follow-up
-
-## EXT-011 — 반원 수집 메뉴와 PC 브라우저 연결
-
-Status: `VERIFY`
-
-Implementation exists. Keep only real-browser/Titanium/PC integration acceptance for the current menu direction; do not revive older radial/list-only designs.
-
-## EXT-012 — X 번역 단순화·공유 게시물 저장·PC 임시저장
-
-Status: `VERIFY`
-
-Implementation exists. Remaining scope is targeted real X/Titanium/Galaxy acceptance and concrete regressions only.
-
 # Current execution order
 
 This is guidance, not authorization to start or mutate production data.
@@ -874,4 +816,4 @@ This is guidance, not authorization to start or mutate production data.
 4. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
 5. `SIMILARITY-002B` transform matching when useful.
 
-Verification-only items (`CLOUD-INGEST-002`, `CHAR-AUTO-006`, `EXT-011`, `EXT-012`) may be closed opportunistically when the user naturally exercises them. `CLOUD-UI-001` was already closed on 2026-09-16 and must not be selected again. HOLD items should not be promoted without a new product reason.
+`CLOUD-UI-001` was already closed on 2026-09-16 and must not be selected again. HOLD items should not be promoted without a new product reason.
