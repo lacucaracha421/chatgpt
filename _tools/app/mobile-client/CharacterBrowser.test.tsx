@@ -1,3 +1,4 @@
+import type {ReactNode} from 'react';
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import type {Asset} from './types';
@@ -219,14 +220,14 @@ it('sends the header arrow to the host on a direct entry without impersonating B
   window.addEventListener('lakomics-back',listener);
   render(<CharacterBrowser {...props} initialNode="series:s"/>);
   await screen.findByRole('heading',{name:'Series'});
-  fireEvent.click(screen.getByRole('button',{name:'상위 보기로'}));
+  fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
   // The host owns the exit, so no global Back event is synthesised.
   expect(onExit).toHaveBeenCalledTimes(1);
   expect(backEvents).toHaveLength(0);
   // Drilled down, the arrow still steps up inside the browser instead of exiting.
   fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
   await screen.findByRole('heading',{name:'Group'});
-  fireEvent.click(screen.getByRole('button',{name:'상위 보기로'}));
+  fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
   expect(await screen.findByRole('heading',{name:'Series'})).toBeTruthy();
   expect(onExit).toHaveBeenCalledTimes(1);
   window.removeEventListener('lakomics-back',listener);
@@ -251,10 +252,22 @@ it('distinguishes an older server from an unpublished character view',async()=>{
   fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));
   const hero=await screen.findByRole('img',{name:'Series 대표 이미지'});
   expect(screen.getByLabelText('character gallery').contains(hero)).toBe(true);
-  expect(screen.getByRole('navigation',{name:'캐릭터 위치'})).toBeTruthy();
+  expect(screen.getByRole('navigation',{name:'현재 위치'})).toBeTruthy();
   await screen.findByText('asset-1');
   act(()=>{media.matches=false;rotate();});
   expect(screen.queryByRole('img',{name:'Series 대표 이미지'})).toBeNull();
-  expect(screen.queryByRole('navigation',{name:'캐릭터 위치'})).toBeNull();
+  expect(screen.getByRole('navigation',{name:'현재 위치'})).toBeTruthy();
   expect(screen.getByText('asset-1')).toBeTruthy();
+});
+
+it('keeps an internal level on tab return but resets an explicit re-entry to its series',async()=>{
+  const view=render(<CharacterBrowser {...props} initialNode="series:s" entryKey={1}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
+  await screen.findByRole('heading',{name:'Group'});
+  view.rerender(<CharacterBrowser {...props} initialNode="series:s" entryKey={1} active={false}/>);
+  view.rerender(<CharacterBrowser {...props} initialNode="series:s" entryKey={1}/>);
+  await screen.findByRole('heading',{name:'Group'});
+  view.rerender(<CharacterBrowser {...props} initialNode="series:s" entryKey={2}/>);
+  await screen.findByRole('heading',{name:'Series'});
+  expect(backRef.current?.()).toBe(false);
 });

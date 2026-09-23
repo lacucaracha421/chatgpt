@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source and installed version: **0.6.10 (26)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Native media-ticket scheduling optimizations are installed in place on Galaxy Tab S11 with the existing certificate. Installed APK hash and startup were verified; device performance was not measured. The matching server optimizations were deployed and HTTP-smoke-verified on 2026-09-23; see `docs/agents/cloud-capture.md`. Manual character exclusion remains deployed and activated; see the delivery checkpoints below.
+Current source and installed version: **0.7.3 (30)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,35 @@ Current source and installed version: **0.6.10 (26)**, declared in [AndroidManif
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.7 — Browse-first Library and Collections, installed (2026-09-23)
+
+0.7.0 (27) through 0.7.3 (30) were built with the existing signer (certificate
+SHA-256 `8e7bd2ce…f4f7`) and installed in place on Galaxy Tab S11 without uninstall
+or data reset; each install verified version, installed-APK hash, cold start
+`Status: ok`, a live process and an empty crash log. 0.7.3 APK SHA-256:
+`4e2d47aa41434fe1bb2801f0e65d799d0be309ab449238ebb35e0232b51abbb6`.
+
+- **Library:** the drawer tree, fold tools and landscape side index are gone. The
+  root shows 분류/앨범 segments, folder·character search, text-only recent folders,
+  모든 자산 and cover cards; folders and albums open as ordinary drill-down screens
+  with breadcrumbs, child strips, filter chips (length disabled for images), a `⋮`
+  density sheet and pull to refresh. Android Back: sheet → filters → parent → root →
+  finish. A folder named like a published character inside its series is hidden in
+  favour of the character entry (the publication carries no link). Settings appear
+  only on Home. Gallery tiles drop per-tile captions.
+- **Collections:** own title bar, 게임/만화/영화/AV segments (AV waits for the PC and
+  requests nothing), debounced search, a collapsed Showcase shelf, sort/rating chips
+  with sheets, continuous scrolling and pull to refresh. The detail shows facts,
+  edition chips, volume release dates and open work information. The cover viewer
+  opens manga as the PC paperback and games as the PC case (`drawGameCase` gains an
+  optional angle and raster ceiling; PC defaults unchanged), turnable within limits
+  that keep the printed front in view, with pinch zoom and a flat mode.
+- Checks: mobile suite 411 tests, with two known intermittent `Catalog.test.tsx`
+  cases (unchanged code; they also failed in the pre-change baseline); PC collection
+  renderer tests 46/46; TypeScript/Vite build. Browser fixtures were rendered in
+  portrait and landscape. Touch feel, pinch, native Back and 3D performance on the
+  tablet are user-observed, not measured.
 
 ## 0.6.10 — Media-ticket optimization, installed (2026-09-23)
 

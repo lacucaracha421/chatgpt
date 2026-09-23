@@ -1,7 +1,7 @@
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {HeaderTools} from './HeaderTools';
-import {ClassificationIndex} from './ClassificationIndex';
+import {ALL_ASSETS,isAll} from './libraryModel';
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 it('moves one interactive toolbar between portrait content and landscape header',()=>{
   let changed=()=>{};const media={matches:false,addEventListener:(_:string,fn:()=>void)=>{changed=fn;},removeEventListener:vi.fn()};
@@ -12,7 +12,8 @@ it('moves one interactive toolbar between portrait content and landscape header'
   act(()=>{media.matches=false;changed();});expect(screen.getByRole('button').closest('main')).not.toBeNull();
   rerender(<><header id="context-location"/><main><HeaderTools active={false} target="context-location" landscapeOnly><button>도구</button></HeaderTools></main></>);expect(screen.queryByRole('button')).toBeNull();
 });
-it('opens all Library assets without a classification and removes sidebar search',()=>{
-  const select=vi.fn();render(<ClassificationIndex items={[]} view={{tab:'library',title:'최근 저장',classification:'previous'}} onSelect={select} collapsed={new Set()} setCollapsed={()=>{}}/>);
-  expect(screen.queryByRole('textbox',{name:'분류 찾기'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'전체',exact:true}));expect(select).toHaveBeenCalledWith({tab:'library',title:'전체'});
+it('identifies All independently of the root and character scopes',()=>{
+  expect(isAll(ALL_ASSETS)).toBe(true);
+  expect(isAll({tab:'library',root:true,title:'라이브러리'})).toBe(false);
+  expect(isAll({tab:'library',characters:true,title:'시리즈'})).toBe(false);
 });

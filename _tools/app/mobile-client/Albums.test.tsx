@@ -1,103 +1,162 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {ReactNode} from 'react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
-vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>String(reason)}));
-vi.mock('./media',()=>({mediaTicket:vi.fn()}));
-// The section's contract is which identity and URL it reads under, and what it renders
-// when nothing is adopted. The virtualized Gallery has its own check, so it is stubbed
-// here to keep this test about the Album section rather than DOM measurement.
-vi.mock('./Gallery',()=>({Gallery:({items,onNearEnd}:{items:{id:string}[];onNearEnd():void})=><div className="gallery-scroll"><ul>{items.map(item=><li key={item.id}>{item.id}</li>)}</ul><button data-testid="album-near-end" onClick={onNearEnd}>near end</button></div>}));
-import {Albums,albumPath} from './Albums';
-import type {AlbumTree,NativeAlbum} from './Albums';
-const albums:NativeAlbum[]=[{id:'root',name:'업로드용',parentId:null,iconKey:null,colorKey:null},{id:'child',name:'임시',parentId:'root',iconKey:null,colorKey:null},{id:'other',name:'Other',parentId:null,iconKey:null,colorKey:null}];
-const adopted:AlbumTree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums};
-const unadopted:AlbumTree={adopted:false,libraryId:null,epoch:null,code:'authorityInactive',albums:[]};
-const asset=(id:string)=>({id,kind:'image',content_type:'image/png',size_bytes:10,thumbnail_available:true});
-beforeEach(()=>{mocks.api.mockReset();mocks.native.mockReset();mocks.native.mockResolvedValue(adopted);mocks.api.mockResolvedValue({items:[asset('a1')],has_more:false,next_cursor:null});});
-afterEach(cleanup);
-describe('additive albums section',()=>{
-  it('renders nothing at all while Album authority is unadopted, so Classification navigation is untouched',async()=>{
-    mocks.native.mockResolvedValue(unadopted);
-    const {container}=render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
-    await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('albumTree',{},expect.anything()));
-    expect(container.querySelector('.album-section')).toBeNull();
-    expect(mocks.api).not.toHaveBeenCalled();
+vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:String,ApiError:class extends Error{status=404;}}));
+vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a)}));
+vi.mock('./Gallery',()=>({Gallery:({intro,items,onNearEnd,onOpen,onScroll,restoreScroll,identity,onRefresh}:{intro?:ReactNode;items:{id:string}[];onNearEnd():void;onOpen(i:number):void;onScroll(n:number):void;restoreScroll:number;identity:string;onRefresh():void})=><div className="gallery-scroll" data-identity={identity} data-restore={restoreScroll} onScroll={()=>onScroll(420)}>{intro}{items.map((item,i)=><button key={item.id} onClick={()=>onOpen(i)}>{item.id}</button>)}<button onClick={onNearEnd}>near end</button><button onClick={onRefresh}>refresh</button></div>}));
+vi.mock('./Viewer',()=>({Viewer:({items,onClose,onNearEnd}:{items:{id:string}[];onClose():void;onNearEnd():void})=><div data-testid="viewer">{items.map(item=><span key={item.id}>{`viewer:${item.id}`}</span>)}<button onClick={onClose}>viewer close</button><button onClick={onNearEnd}>viewer more</button></div>}));
+import {App} from './App';
+import {Albums,useAlbumTree} from './Albums';
+import {albumPath,albumPage,albumView,type AlbumTree,type NativeAlbum} from './albumModel';
+import {pagePath,viewKey} from './model';
+const albums:NativeAlbum[]=[{id:'root',name:'업로드용',parentId:null,iconKey:null,colorKey:null,assetCount:5},{id:'child',name:'임시',parentId:'root',iconKey:null,colorKey:null},{id:'other',name:'Other',parentId:null,iconKey:null,colorKey:null}];
+const tree:AlbumTree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums};
+const asset=(id:string)=>({id,kind:'image',preview:'data:image/png;base64,AA'});
+const page=(id='a1',more=false)=>({filterVersion:1,items:[asset(id)],hasMore:more,nextCursor:more?'c1':null});
+const albumReads=()=>mocks.api.mock.calls.filter(([path])=>String(path).includes('/v1/albums/assets')&&!String(path).includes('limit=3'));
+function baseApi(path:string) {
+ if(path==='/v1/library/list-generation')return {generation:'b'.repeat(64),filterVersion:1};
+ if(path.includes('/v1/albums/assets'))return page(path.includes('albumId=child')?'child-asset':path.includes('albumId=other')?'other-asset':'a1');
+ return {items:[],has_more:false,next_cursor:null};
+}
+async function openRootAlbum(){render(<App/>);fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByRole('heading',{name:'업로드용'});}
+async function choose(group='종류',choice='영상'){fireEvent.click(screen.getByRole('button',{name:group}));fireEvent.click(screen.getByRole('radio',{name:choice}));}
+function back(){act(()=>window.dispatchEvent(new Event('lakomics-back')));}
+beforeEach(()=>{
+ localStorage.clear();vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
+ mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>baseApi(path));
+ mocks.native.mockImplementation(async(op:string)=>op==='albumTree'?tree:{configured:true,endpoint:'https://example.invalid'});
+});
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+describe('album Library scopes',()=>{
+ it('renders only top-level cover cards with optional counts and child labels',async()=>{
+  render(<Albums tree={tree} paused={false} revision={1} onSelect={()=>{}}/>);
+  expect(screen.queryByText('임시')).toBeNull();expect(screen.getByText('하위 앨범 1')).toBeTruthy();
+  const cards=document.querySelectorAll('.library-folder-grid .library-folder');expect(cards).toHaveLength(2);
+  cards.forEach(card=>expect(card.firstElementChild?.classList.contains('home-cover-group')).toBe(true));
+  await waitFor(()=>expect(cards[0].querySelector('img')).not.toBeNull());
+  expect(mocks.api.mock.calls.every(([path])=>String(path).includes('limit=3'))).toBe(true);
+ });
+ it('opens the shared header, gallery, child strip, view options and filter chips without an album dialog',async()=>{
+  await openRootAlbum();expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('라이브러리›앨범');
+  expect(document.querySelector('.gallery-scroll .library-children .library-folder')?.textContent).toContain('임시');
+  expect(screen.getByRole('group',{name:'자산 필터'}).textContent).toBe('종류비율길이');
+  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(screen.getByRole('dialog',{name:'보기 옵션'})).toBeTruthy();back();
+  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('heading',{name:'업로드용'})).toBeTruthy();
+ });
+ it('walks inner sheet, filters, parent album, then root with Albums selected',async()=>{
+  await openRootAlbum();fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
+  expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('라이브러리›앨범›업로드용');
+  await choose();await screen.findByRole('button',{name:'영상'});fireEvent.click(screen.getByRole('button',{name:'비율'}));
+  back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('button',{name:'영상'})).toBeTruthy();
+  back();await screen.findByRole('button',{name:'종류'});expect(screen.getByRole('heading',{name:'임시'})).toBeTruthy();
+  back();await screen.findByRole('heading',{name:'업로드용'});back();await screen.findByRole('heading',{name:'라이브러리'});
+  expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true');expect(screen.getByRole('searchbox',{name:'앨범 찾기'})).toBeTruthy();
+ });
+ it('jumps through breadcrumbs and restores the parent gallery scroll',async()=>{
+  await openRootAlbum();fireEvent.scroll(document.querySelector('.gallery-scroll')!);
+  fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
+  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'업로드용'}));await screen.findByRole('heading',{name:'업로드용'});
+  expect(document.querySelector('.gallery-scroll')?.getAttribute('data-restore')).toBe('420');
+  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'앨범'}));await screen.findByRole('searchbox',{name:'앨범 찾기'});
+ });
+ it('uses the album envelope, identity, filter parameters and cursor on the normal append path',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/albums/assets')?page(path.includes('cursor=')?'a2':'a1',!path.includes('cursor=')):baseApi(path));
+  await openRootAlbum();await choose();await screen.findByRole('button',{name:'영상'});
+  fireEvent.click(screen.getByRole('button',{name:'near end'}));await screen.findByText('a2');
+  const paths=albumReads().map(([path])=>String(path));expect(paths.some(path=>path.includes('cursor=c1')&&path.includes('media_kind=videos'))).toBe(true);
+  expect(paths.every(path=>path.includes(`libraryId=${tree.libraryId}`)&&path.includes('epoch=1')&&path.includes('albumId=root'))).toBe(true);
+  expect(document.querySelector('.gallery-scroll')?.getAttribute('data-identity')).toContain('media_kind=videos');
+ });
+ it('keeps failed filters uncommitted, blocks append and retries the attempted query',async()=>{
+  let fail=true;
+  mocks.api.mockImplementation(async(path:string)=>{if(path.includes('/v1/albums/assets')){if(path.includes('media_kind')){if(fail)throw new Error('narrowing failed');return page('filtered');}return page('a1',true);}return baseApi(path);});
+  await openRootAlbum();await choose();await screen.findAllByText(/narrowing failed/);
+  expect(screen.getByText('a1')).toBeTruthy();expect(document.querySelector('.gallery-scroll')?.getAttribute('data-identity')).not.toContain('media_kind');
+  const reads=albumReads().length;fireEvent.click(screen.getByRole('button',{name:'near end'}));await act(async()=>{});expect(albumReads()).toHaveLength(reads);
+  fail=false;fireEvent.click(screen.getAllByRole('button',{name:'다시 시도'})[0]);await screen.findByText('filtered');expect(screen.getByRole('button',{name:'영상'})).toBeTruthy();
+ });
+ it.each([{}, {filter_version:1}, {filterVersion:2}])('refuses incompatible filtered envelopes %j',async contract=>{
+  mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/albums/assets')&&path.includes('media_kind')?{items:[asset('unchecked')],hasMore:false,nextCursor:null,...contract}:baseApi(path));
+  await openRootAlbum();await choose();await screen.findAllByText(/서버를 업데이트해 주세요/);expect(screen.queryByText('unchecked')).toBeNull();expect(screen.getByText('a1')).toBeTruthy();
+ });
+ it('validates every filtered continuation and retains existing rows',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>{
+   if(path.includes('/v1/albums/assets')&&path.includes('cursor='))return {items:[asset('unchecked')],hasMore:false,nextCursor:null};
+   if(path.includes('/v1/albums/assets')&&path.includes('media_kind'))return page('filtered',true);return baseApi(path);
   });
-  it('lists replica Albums and reads contents from the authority projection under the adopted identity',async()=>{
-    render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
-    await screen.findByText('업로드용');
-    expect(screen.getByText('Other')).toBeTruthy();
-    expect(screen.getByText('앨범').closest('.index-title')?.querySelector('svg')).toBeNull();
-    // A nested Album is not flattened into the top level.
-    expect(screen.queryByText('임시')).toBeNull();
-    fireEvent.click(screen.getByText('업로드용'));
-    await screen.findByText('a1');
-    const path=String(mocks.api.mock.calls.at(-1)?.[0]);
-    expect(path).toContain('/v1/albums/assets?');
-    expect(path).toContain(`libraryId=${'a'.repeat(32)}`);
-    expect(path).toContain('epoch=1');
-    expect(path).toContain('albumId=root');
+  await openRootAlbum();await choose();await screen.findByText('filtered');fireEvent.click(screen.getByRole('button',{name:'near end'}));await screen.findByText(/서버를 업데이트해 주세요/);
+  expect(screen.queryByText('unchecked')).toBeNull();expect(screen.getByText('filtered')).toBeTruthy();
+ });
+ it('aborts a late continuation when filters change',async()=>{
+  let release:(value:unknown)=>void=()=>{};let signal:AbortSignal|undefined;
+  mocks.api.mockImplementation((path:string,nextSignal?:AbortSignal)=>{
+   if(path.includes('cursor=')){signal=nextSignal;return new Promise(resolve=>{release=resolve;});}
+   if(path.includes('/v1/albums/assets'))return Promise.resolve(page(path.includes('media_kind')?'filtered':'a1',!path.includes('media_kind')));return Promise.resolve(baseApi(path));
   });
-  it('paginates the real Album wire shape with camelCase continuation fields',async()=>{
-    mocks.api.mockResolvedValueOnce({items:[asset('a1')],hasMore:true,nextCursor:'album-cursor'})
-      .mockResolvedValueOnce({items:[asset('a2')],hasMore:false,nextCursor:null});
-    render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
-    fireEvent.click(await screen.findByText('업로드용'));
-    await screen.findByText('a1');
-    fireEvent.click(screen.getByTestId('album-near-end'));
-    await screen.findByText('a2');
-    expect(String(mocks.api.mock.calls.at(-1)?.[0])).toContain('cursor=album-cursor');
-  });
-  it('places the Album Gallery inside a constrained dialog content region',async()=>{
-    render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
-    fireEvent.click(await screen.findByText('업로드용'));
-    await screen.findByText('a1');
-    expect(document.querySelector('.album-dialog-content .gallery-scroll')).not.toBeNull();
-  });
-  it('shows a nested Album and its breadcrumb rather than merging it into the parent',async()=>{
-    render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
-    fireEvent.click(await screen.findByText('업로드용'));
-    fireEvent.click(await screen.findByText('임시'));
-    await waitFor(()=>expect(String(mocks.api.mock.calls.at(-1)?.[0])).toContain('albumId=child'));
-    expect(screen.getAllByText('업로드용 / 임시').length).toBeGreaterThan(0);
-  });
-  it('surfaces an authority failure instead of rendering an empty Album',async()=>{
-    mocks.api.mockRejectedValue(new Error('앨범 권위가 아직 활성화되지 않았습니다.'));
-    render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
-    fireEvent.click(await screen.findByText('업로드용'));
-    await screen.findByText(/앨범 권위가 아직 활성화되지 않았습니다/);
-    expect(screen.queryByText('이 앨범에 자산이 없습니다')).toBeNull();
-  });
-  it('bounds a cyclic hierarchy instead of hanging',()=>{
-    const cyclic:NativeAlbum[]=[{id:'x',name:'X',parentId:'y',iconKey:null,colorKey:null},{id:'y',name:'Y',parentId:'x',iconKey:null,colorKey:null}];
-    expect(albumPath(cyclic,'x')).toBe('Y / X');
-  });
-  it('renders the Album icon key through the PC mapping instead of a fixed folder glyph',async()=>{
-    // The replica stores the same keys the PC catalog validates (`folder_appearance.rs`):
-    // a configured key, `null`, or an unknown future key. All three are resolved by the PC
-    // icon component, which is what makes the Album icon match the folder icon on desktop.
-    mocks.native.mockResolvedValue({...adopted,albums:[
-      {id:'root',name:'업로드용',parentId:null,iconKey:'sparkles',colorKey:'pink'},
-      {id:'plain',name:'No icon',parentId:null,iconKey:null,colorKey:null},
-      {id:'future',name:'Future key',parentId:null,iconKey:'not-an-icon',colorKey:null},
-    ]});
-    render(<Albums active paused={false} onOpen={()=>{}} backRef={{current:null}}/>);
-    const iconFor=async(name:string)=>(await screen.findByText(name)).closest('button')!.querySelector('svg');
-    expect((await iconFor('업로드용'))?.getAttribute('data-icon-key')).toBe('sparkles');
-    // `colorKey` resolves through the same PC palette (`#df6fa7` = pink); the browser
-    // normalizes it to `rgb()` in the inline style, so assert the resolved color.
-    expect((await iconFor('업로드용'))?.getAttribute('style')).toContain('rgb(223, 111, 167)');
-    expect((await iconFor('No icon'))?.getAttribute('data-icon-key')).toBe('folder');
-    // An unknown persisted key falls back rather than rendering a random glyph.
-    expect((await iconFor('Future key'))?.getAttribute('data-icon-key')).toBe('folder');
-  });
-  it('lets back close the Album dialog before leaving the library',async()=>{
-    const backRef:{current:(()=>boolean)|null}={current:null};
-    render(<Albums active paused={false} onOpen={()=>{}} backRef={backRef}/>);
-    fireEvent.click(await screen.findByText('업로드용'));
-    await screen.findByText('a1');
-    expect(backRef.current?.()).toBe(true);
-    await waitFor(()=>expect(screen.queryByText('a1')).toBeNull());
-    expect(backRef.current?.()).toBe(false);
-  });
+  await openRootAlbum();fireEvent.click(screen.getByRole('button',{name:'near end'}));await waitFor(()=>expect(signal).toBeDefined());
+  await choose();await screen.findByText('filtered');expect(signal?.aborted).toBe(true);await act(async()=>release(page('late')));expect(screen.queryByText('late')).toBeNull();
+ });
+ it('starts a sibling album unfiltered and separates album cache identities',async()=>{
+  await openRootAlbum();await choose();await screen.findByRole('button',{name:'영상'});
+  fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));fireEvent.click(await screen.findByRole('button',{name:'Other'}));await screen.findByText('other-asset');
+  expect(screen.getByRole('button',{name:'종류'})).toBeTruthy();expect(albumReads().at(-1)?.[0]).not.toContain('media_kind');
+  expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView(tree,albums[2])));
+  expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView({...tree,epoch:2},albums[0])));
+ });
+ it('opens the normal viewer, appends there, then refreshes the same album',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/albums/assets')?page(path.includes('cursor=')?'a2':'a1',!path.includes('cursor=')):baseApi(path));
+  await openRootAlbum();fireEvent.click(screen.getByRole('button',{name:'a1'}));expect(screen.getByTestId('viewer')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'viewer more'}));await screen.findByText('viewer:a2');back();await waitFor(()=>expect(screen.queryByTestId('viewer')).toBeNull());
+  const count=albumReads().length;fireEvent.click(screen.getByRole('button',{name:'refresh'}));await waitFor(()=>expect(albumReads().length).toBeGreaterThan(count));expect(screen.getByRole('heading',{name:'업로드용'})).toBeTruthy();
+ });
+ it('keeps the root on an authority error and retries the actual album intent',async()=>{
+  let fail=true;mocks.api.mockImplementation(async(path:string)=>{if(path.includes('/v1/albums/assets')&&fail)throw new Error('authority unavailable');return baseApi(path);});
+  render(<App/>);fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByText(/authority unavailable/);
+  expect(screen.getByRole('heading',{name:'라이브러리'})).toBeTruthy();fail=false;fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));await screen.findByRole('heading',{name:'업로드용'});
+ });
+ it('bounds malformed hierarchy paths and normalizes only the agreed envelope',()=>{
+  const cyclic=[{...albums[0],id:'x',name:'X',parentId:'y'},{...albums[0],id:'y',name:'Y',parentId:'x'}];expect(albumPath(cyclic,'x')).toBe('Y / X');
+  expect(albumPage({...page(),items:[asset('a'),asset('a')]})).toEqual({items:[asset('a')],has_more:false,next_cursor:null,filter_version:1});
+  expect(pagePath(albumView(tree,albums[0]),'cursor')).toContain('cursor=cursor');
+ });
+ it('shows no cards when authority is unadopted',()=>{
+  const view=render(<Albums tree={{...tree,adopted:false,albums:[]}} paused={false} revision={1} onSelect={()=>{}}/>);expect(view.container.childElementCount).toBe(0);expect(mocks.api).not.toHaveBeenCalled();
+ });
+});
+
+it('loads at most two visible album covers at a time and aborts on pause',async()=>{
+ const observers:{callback:IntersectionObserverCallback;target?:Element}[]=[];
+ vi.stubGlobal('IntersectionObserver',class{entry:{callback:IntersectionObserverCallback;target?:Element};constructor(callback:IntersectionObserverCallback){this.entry={callback};observers.push(this.entry);}observe(target:Element){this.entry.target=target;}disconnect(){}});
+ const many={...tree,albums:Array.from({length:6},(_,i)=>({...albums[0],id:String(i),name:`Album ${i}`}))};
+ const signals:AbortSignal[]=[],release:(()=>void)[]=[];
+ mocks.api.mockImplementation((_path,signal)=>new Promise(resolve=>{signals.push(signal);release.push(()=>resolve({...page(),items:[asset('one'),asset('two'),asset('three'),asset('four')]}));}));
+ const view=render(<Albums tree={many} paused={false} revision={1} onSelect={()=>{}}/>);expect(mocks.api).not.toHaveBeenCalled();
+ act(()=>observers.slice(0,4).forEach(o=>o.callback([{isIntersecting:true,target:o.target}] as IntersectionObserverEntry[],{} as IntersectionObserver)));
+ await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(2));await act(async()=>release[0]());await waitFor(()=>expect(mocks.api).toHaveBeenCalledTimes(3));
+ expect(view.container.querySelector('.home-cover-group')?.querySelectorAll('img')).toHaveLength(3);
+ view.rerender(<Albums tree={many} paused revision={1} onSelect={()=>{}}/>);expect(signals.every(signal=>signal.aborted)).toBe(true);
+ const reads=mocks.api.mock.calls.length;await act(async()=>release.slice(1).forEach(done=>done()));expect(mocks.api).toHaveBeenCalledTimes(reads);
+});
+it('reads the native replica on activation, refresh and resume, and cancels stale responses',async()=>{
+ const reads:{signal:AbortSignal;resolve:(value:AlbumTree)=>void}[]=[];
+ mocks.native.mockImplementation((_op,_args,signal)=>new Promise(resolve=>reads.push({signal,resolve})));
+ function Replica({active=true,revision=1}:{active?:boolean;revision?:number}){const {tree,error}=useAlbumTree(active,revision,'endpoint');return <div>{tree?.albums[0]?.name}{error}</div>;}
+ const view=render(<Replica active={false}/>);expect(mocks.native).not.toHaveBeenCalled();
+ view.rerender(<Replica/>);expect(mocks.native).toHaveBeenCalledWith('albumTree',{},expect.any(AbortSignal));
+ act(()=>window.dispatchEvent(new Event('lakomics-resume')));expect(reads[0].signal.aborted).toBe(true);
+ await act(async()=>reads[1].resolve(tree));expect(screen.getByText('업로드용')).toBeTruthy();
+ await act(async()=>reads[0].resolve({...tree,albums:[{...albums[0],name:'stale'}]}));expect(screen.queryByText('stale')).toBeNull();
+ view.rerender(<Replica revision={2}/>);expect(reads).toHaveLength(3);view.rerender(<Replica active={false} revision={2}/>);expect(reads[2].signal.aborted).toBe(true);
+});
+it('revalidates an album filter response after a generation retry',async()=>{
+ let generation='b'.repeat(64),filtered=0;
+ mocks.api.mockImplementation(async(path:string)=>{
+  if(path==='/v1/library/list-generation')return {generation,filterVersion:1};
+  if(path.includes('/v1/albums/assets')&&path.includes('media_kind')){filtered++;generation='c'.repeat(64);return filtered===1?page('first'):{items:[asset('unchecked')],hasMore:false,nextCursor:null};}
+  return baseApi(path);
+ });
+ await openRootAlbum();await choose();await screen.findAllByText(/서버를 업데이트해 주세요/);expect(filtered).toBe(2);expect(screen.queryByText('unchecked')).toBeNull();expect(screen.getByText('a1')).toBeTruthy();
 });

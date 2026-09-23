@@ -86,5 +86,5 @@ it('tucks the cache and connection recovery detail behind a disclosure',async()=
 
 it('reports the declared Android source version rather than a stale literal',async()=>{
   render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
-  expect(document.querySelector('.settings-foot')!.textContent).toContain('0.6.10 · Android');
+  expect(document.querySelector('.settings-foot')!.textContent).toContain('0.7.3 · Android');
 });

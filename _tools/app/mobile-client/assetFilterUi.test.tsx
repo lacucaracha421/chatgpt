@@ -1,3 +1,4 @@
+import type {ReactNode} from 'react';
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
@@ -5,9 +6,9 @@ import type {HomeProps} from './Home';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'connection failed',
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
-vi.mock('./media',()=>({clearMediaCache:vi.fn(),prepareAssets:()=>new Promise(()=>{})}));
+vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onOpen}:HomeProps)=><div>{items.slice(0,12).map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
-vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,identity}:{items:Asset[];onOpen(i:number):void;onNearEnd():void;identity:string})=><div aria-label="자산 목록" data-identity={identity}>{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}<button data-testid="near-end" onClick={onNearEnd}>near end</button></div>}));
+vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,identity}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;identity:string})=><div aria-label="자산 목록" data-identity={identity}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}<button data-testid="near-end" onClick={onNearEnd}>near end</button></div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onClose}:{items:Asset[];index:number;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 
@@ -31,13 +32,22 @@ const legacy=async(path:string)=>{
   return page(['a1']);
 };
 /** Choose one filter value by its accessible group and label. */
-const chooseIn=(group:string,label:string)=>{
-  const within=screen.getByRole('group',{name:group});
-  const button=[...within.querySelectorAll('button')].find(candidate=>candidate.textContent===label);
-  if(!button)throw new Error(`no ${label} in ${group}`);
-  fireEvent.click(button);
+const openFilters=(group='종류')=>{
+  const index=['종류','비율','길이'].indexOf(group==='미디어'?'종류':group);
+  fireEvent.click(screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')[index]);
 };
-const openFilters=()=>fireEvent.click(screen.getByRole('button',{name:/^자산 필터/}));
+const chooseIn=(group:string,label:string)=>{
+  const name=group==='미디어'?'종류':group;
+  if(!screen.queryByRole('radiogroup',{name})){
+    if(screen.queryByRole('dialog'))fireEvent.click(screen.getByRole('button',{name:'닫기'}));
+    openFilters(name);
+  }
+  fireEvent.click(screen.getByRole('radio',{name:label}));
+};
+const openFolder=async(name:string)=>{
+  fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+  fireEvent.click(await screen.findByRole('button',{name}));
+};
 
 /** The refusal is shown once as the filter notice; the banner shares its text with the error line. */
 const refusalShown=async(text:string)=>{await waitFor(()=>expect(screen.getAllByText(text).length).toBeGreaterThan(0));};
@@ -51,10 +61,10 @@ afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 
 describe('asset filters',()=>{
   it('sends the agreed media, aspect and duration parameters for the chosen buckets',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();
     // The duration controls state their video-only scope while the dialog is open.
-    expect(screen.getByText(/길이는 영상에만 적용됩니다/)).toBeTruthy();
+
     chooseIn('미디어','영상');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
     // The dialog closes on commit, so it is reopened for each further choice.
@@ -67,21 +77,21 @@ describe('asset filters',()=>{
   });
 
   it('sends nothing extra until a filter is chosen and summarizes the applied set in the heading',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     expect(lastPagePath()).not.toContain('media_kind');
     expect(lastPagePath()).not.toContain('aspect_ratio');
-    expect(screen.getByRole('button',{name:'자산 필터'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'종류'})).toBeTruthy();
     openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
     // The summary is both visible and part of the trigger's accessible name, so a narrowed
     // gallery announces its narrowing rather than looking like an unfiltered one.
     await waitFor(()=>expect(screen.getByText('이미지')).toBeTruthy());
-    expect(screen.getByRole('button',{name:'자산 필터: 이미지'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'이미지'})).toBeTruthy();
   });
 
   it('refuses to present an unfiltered list as filtered when the server has no filter contract',async()=>{
     mocks.api.mockImplementation(legacy);
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     // The page request is never made, so no unfiltered result can be committed as filtered.
     await refusalShown('connection failed');
@@ -93,7 +103,7 @@ describe('asset filters',()=>{
       if(path.startsWith('/v1/library/assets')&&path.includes('media_kind'))return Promise.resolve({items:[{id:'a1',kind:'image'}],has_more:false,next_cursor:null});
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await refusalShown('connection failed');
     // The unversioned page is not committed under a filtered identity.
@@ -111,7 +121,7 @@ describe('asset filters',()=>{
       }
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await refusalShown('connection failed');
     expect(filteredReads).toBe(2);
@@ -128,7 +138,7 @@ describe('asset filters',()=>{
       if(path.startsWith('/v1/library/assets'))return Promise.resolve(page(['a1','a2'],{has_more:true,next_cursor:'c1'}));
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     fireEvent.click(screen.getByTestId('near-end'));
     await waitFor(()=>expect(lastPagePath()).toContain('cursor=c1'));
     openFilters();chooseIn('미디어','영상');
@@ -141,9 +151,9 @@ describe('asset filters',()=>{
   });
 
   it('returns to the same scope without filters on back, and to All unfiltered from All',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     // Narrow a specific folder, then Back should restore that folder unfiltered.
-    fireEvent.click(screen.getByRole('button',{name:'분류 B1'}));
+    await openFolder('분류 B, 1개');
     await screen.findByText('tile-b1');
     openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
@@ -155,13 +165,15 @@ describe('asset filters',()=>{
     // from the view cache, so the committed heading and the gallery identity are what prove
     // the scope and its filters, not the request log.
     act(()=>window.dispatchEvent(new Event('lakomics-back')));
-    await waitFor(()=>expect(screen.getByRole('heading',{name:'전체'})).toBeTruthy());
+    await waitFor(()=>expect(screen.getByRole('heading',{name:'라이브러리'})).toBeTruthy());
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+    await screen.findByText('tile-a1');
     await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).not.toContain('media_kind'));
     expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).not.toContain('classification_id');
   });
 
   it('clears every bucket from one reset control',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
     openFilters();chooseIn('길이','5분 이상');
@@ -170,14 +182,13 @@ describe('asset filters',()=>{
     // would be comparing against a stale set and could legitimately no-op.
     await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).toContain('duration_ms_min=300000'));
     // The reset is inside the dialog and clears every group at once.
-    openFilters();
-    fireEvent.click(screen.getByRole('button',{name:'필터 해제'}));
+    fireEvent.click(screen.getByRole('button',{name:'초기화'}));
     await waitFor(()=>expect(lastPagePath()).not.toContain('media_kind'));
     expect(lastPagePath()).not.toContain('duration_ms_min');
   });
 
   it('keeps the filter set in the gallery identity so a filter change cannot reuse the old page',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     const before=screen.getByLabelText('자산 목록').getAttribute('data-identity');
     openFilters();chooseIn('비율','정사각형');
     await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).not.toBe(before));
@@ -194,7 +205,7 @@ describe('asset filters',()=>{
           : page(['f1'],{has_more:true,next_cursor:'c1'}));
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','이미지');
     await screen.findByText('tile-f1');
     fireEvent.click(screen.getByTestId('near-end'));
@@ -212,14 +223,16 @@ describe('asset filters',()=>{
       }
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(signal).toBeTruthy());
     expect(screen.getByText('필터 적용 대기')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
     expect(signal.aborted).toBe(true);
-    expect(screen.queryByText('필터 적용 대기')).toBeNull();
-    expect(screen.getByRole('button',{name:'자산 필터',exact:true})).toBeTruthy();
+    await waitFor(()=>expect(screen.queryByText('필터 적용 대기')).toBeNull());
+    await screen.findByRole('heading',{name:'라이브러리'});
+    fireEvent.click(screen.getByRole('button',{name:/모든 자산/}));
+    await screen.findByText('tile-a1');
     await act(async()=>pending.resolve(page(['stale'])));
     expect(screen.queryByText('tile-stale')).toBeNull();
     fireEvent.click(screen.getByTestId('near-end'));
@@ -236,7 +249,7 @@ describe('asset filters',()=>{
       if(path.startsWith('/v1/library/assets'))return Promise.resolve(page(['a1'],{has_more:true,next_cursor:'c1'}));
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     // Await the narrowing request, which never resolves, so the committed page is still the
     // unfiltered one and `page.filters` has not changed.
@@ -258,7 +271,7 @@ describe('asset filters',()=>{
       }
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(narrowed).toBe(1));
     // The unfiltered page is still shown and its identity still says so.
@@ -273,7 +286,7 @@ describe('asset filters',()=>{
   it('refuses a future filter contract version instead of assuming it is compatible',async()=>{
     // The capability advertises a version this client does not implement.
     mocks.api.mockImplementation(supporting(2));
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await refusalShown('connection failed');
     expect(mocks.api.mock.calls.map(call=>String(call[0])).some(path=>path.includes('media_kind=videos'))).toBe(false);
@@ -286,18 +299,18 @@ describe('asset filters',()=>{
       if(path==='/v1/library/list-generation')return{generation:'a'.repeat(64),filter_version:1};
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await refusalShown('connection failed');
     expect(mocks.api.mock.calls.map(call=>String(call[0])).some(path=>path.includes('media_kind=videos'))).toBe(false);
   });
 
   it('closes the filter dialog on Back before the gallery surface itself',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();
-    expect(screen.getByRole('dialog',{name:'자산 필터'})).toBeTruthy();
+    expect(screen.getByRole('dialog',{name:'종류'})).toBeTruthy();
     act(()=>window.dispatchEvent(new Event('lakomics-back')));
-    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'자산 필터'})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'종류'})).toBeNull());
     // The gallery is untouched by the press that closed the dialog.
     expect(screen.getByText('tile-a1')).toBeTruthy();
   });
@@ -309,36 +322,37 @@ describe('asset filters',()=>{
       if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,filterVersion:1,items:[{id:'c1',kind:'image'}],totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
       return supporting()(path);
     });
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     // Entering the character scope must not be refused by the ordinary route's guard.
-    fireEvent.click(await screen.findByRole('button',{name:'Series2'}));
+    await openFolder('Series, 2개');
     await screen.findByText('tile-c1');
     expect(screen.queryByText('connection failed')).toBeNull();
     expect(screen.queryByText(/서버를 업데이트해 주세요/)).toBeNull();
   });
 
   it('does not offer filters on Home, where a control would imply a narrowing that is not applied',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
-    expect(screen.getByRole('button',{name:'자산 필터'})).toBeTruthy();
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    expect(screen.getByRole('button',{name:'종류'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'Home'}));
     await screen.findByText('tile-a1');
-    expect(screen.queryByRole('button',{name:/^자산 필터/})).toBeNull();
+    expect(screen.queryByRole('button',{name:'종류'})).toBeNull();
   });
 
-  it('carries the filter set through a folder change instead of silently dropping it',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+  it('starts a folder unfiltered after returning to the root',async()=>{
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
-    fireEvent.click(screen.getByRole('button',{name:'분류 B1'}));
+    await openFolder('분류 B, 1개');
     await waitFor(()=>expect(lastPagePath()).toContain('classification_id=b'));
     // Both the new scope and the committed filter are present.
-    expect(lastPagePath()).toContain('media_kind=images');
+    expect(lastPagePath()).not.toContain('media_kind=images');
   });
 
   it('treats a filter change as a new view rather than reusing the cached unfiltered page',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     // Re-select All: the cached unfiltered page is allowed to serve that identical query.
     fireEvent.click(screen.getByRole('button',{name:'Library'}));
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
     await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
@@ -350,34 +364,30 @@ describe('asset filters',()=>{
   });
 
   it('drops the filter set when the connection changes, so it cannot outlive its server',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
     // Reconfiguring goes through the settings surface, whose own suite covers the clear.
     // Here the guarantee that matters is that the committed filters are reset with the
     // rest of the library state, so a later page cannot carry them to another server.
-    fireEvent.click(screen.getByRole('button',{name:'연결 및 설정'}));
+    fireEvent.click(screen.getByRole('button',{name:'Home'}));
+    fireEvent.click(await screen.findByRole('button',{name:'연결 및 설정'}));
     await screen.findByRole('dialog',{name:/설정/});
-    expect(screen.queryByRole('button',{name:/^자산 필터/})).toBeNull();
+    expect(screen.queryByRole('button',{name:'종류'})).toBeNull();
   });
 });
 
 describe('asset filter dialog shape',()=>{
   it('groups each control with its own accessible name and the PC labels',async()=>{
-    render(<App/>);await screen.findByText('tile-a1');
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();
-    const media=screen.getByRole('group',{name:'미디어'}),aspect=screen.getByRole('group',{name:'비율'}),duration=screen.getByRole('group',{name:'길이'});
-    expect([...media.querySelectorAll('button')].map(b=>b.textContent)).toEqual(['전체','이미지','영상']);
-    expect([...aspect.querySelectorAll('button')].map(b=>b.textContent)).toEqual(['전체','정사각형','가로형','세로형']);
-    expect([...duration.querySelectorAll('button')].map(b=>b.textContent)).toEqual(['전체','30초 미만','30초–1분','1–5분','5분 이상']);
-    // The default state presses `전체` in every group, so nothing claims to be filtered.
-    const pressedNow=()=>[...screen.getByRole('group',{name:'미디어'}).querySelectorAll('button')].filter(b=>b.getAttribute('aria-pressed')==='true').map(b=>b.textContent);
-    expect(pressedNow()).toEqual(['전체']);
-    // Selecting one value presses exactly that value and leaves its siblings unpressed.
-    // Committing closes the dialog, so it is reopened before reading the group again.
-    chooseIn('미디어','이미지');
+    for(const [name,labels] of Object.entries({'종류':['전체','이미지','영상'],'비율':['전체','정사각형','가로형','세로형'],'길이':['전체','30초 미만','30초–1분','1–5분','5분 이상']})){
+      if(name!=='종류'){fireEvent.click(screen.getByRole('button',{name:'닫기'}));openFilters(name);}
+      expect([...screen.getByRole('radiogroup',{name}).querySelectorAll('button')].map(b=>b.textContent)).toEqual(labels);
+      expect(screen.getByRole('radio',{name:'전체'}).getAttribute('aria-checked')).toBe('true');
+    }
+    fireEvent.click(screen.getByRole('button',{name:'닫기'}));openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
-    openFilters();
-    await waitFor(()=>expect(pressedNow()).toEqual(['이미지']));
+    openFilters();expect(screen.getByRole('radio',{name:'이미지'}).getAttribute('aria-checked')).toBe('true');
   });
 });

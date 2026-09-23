@@ -11,13 +11,18 @@ export function rowHeight(density: number, width: number) { return Math.min([290
  * restored position or a cached page from one filter set be reused for another.
  */
 export function viewKey(view: View, filters: AssetFiltersValue = EMPTY_FILTERS) {
-  const base = `${view.tab}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`;
+  const base = `${view.tab}:${view.root?'root':''}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`;
+  const scope = view.album ? `${base}:album:${JSON.stringify(view.album)}` : base;
   const key = filterKey(filters);
-  return key ? `${base}:${key}` : base;
+  return key ? `${scope}:${key}` : scope;
 }
-export function pagePath(view: View, cursor: string | null, filters: AssetFiltersValue = EMPTY_FILTERS) {
-  const params = new URLSearchParams({limit: String(PAGE_SIZE)});
+export function pagePath(view: View, cursor: string | null, filters: AssetFiltersValue = EMPTY_FILTERS, limit = PAGE_SIZE) {
+  const params = new URLSearchParams({limit: String(limit)});
   if (cursor) params.set('cursor', cursor);
+  if (view.album) {
+    params.set('libraryId',view.album.libraryId);params.set('epoch',String(view.album.epoch));params.set('albumId',view.album.id);
+    return withFilters(`/v1/albums/assets?${params}`,filters);
+  }
   if (view.classification) params.set('classification_id', view.classification);
   const path = view.revisit === 'date' ? '/v1/library/revisit/date' : view.revisit
     ? `/v1/library/revisit/creator/${encodeURIComponent(view.revisit)}/assets` : '/v1/library/assets';

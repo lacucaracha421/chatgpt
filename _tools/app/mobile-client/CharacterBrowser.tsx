@@ -1,16 +1,16 @@
-import {HeaderTools} from './HeaderTools';
+import {LibraryHeader,type LibraryCrumb} from './LibraryHeader';
+import {FilterChips,type FilterGroup} from './FilterChips';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject} from 'react';
-import {ArrowLeftIcon,ChevronLeftIcon,ChevronRightIcon,ChevronUpIcon,FolderIcon,PhotoIcon,UserGroupIcon} from '@heroicons/react/24/outline';
-import {Button,Dialog,DialogDescription,IconButton} from './ui';
-import {FunnelIcon} from '@heroicons/react/24/outline';
+import {ChevronLeftIcon,ChevronRightIcon,ChevronUpIcon,FolderIcon,PhotoIcon,UserGroupIcon} from '@heroicons/react/24/outline';
+import {Button,IconButton} from './ui';
 import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
 import {Gallery} from './Gallery';
 import {RequestGate} from './model';
 import type {Asset,AssetFiltersValue} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
-import {AssetFilters,filterSummary} from './AssetFilters';
+import {filterSummary} from './AssetFilters';
 import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import './characters.css';
 
@@ -65,7 +65,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:Characte
   </button>;
 }
 
-export function CharacterBrowser({onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{entryKey?:number;crumbs?:LibraryCrumb[];onOptions?():void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -85,7 +85,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   const host=useRef<HTMLDivElement>(null),scroll=useRef(0);
   const indexGate=useRef(new RequestGate()),pageGate=useRef(new RequestGate()),moreGate=useRef(new RequestGate());
   const cache=useRef(new Map<string,Cached>()),morePending=useRef(false);
-  const [filtersOpen,setFiltersOpen]=useState(false);
+  const [filtersOpen,setFiltersOpen]=useState<FilterGroup|null>(null);
   const latest=useRef({index,where,page,active,paused,committed,filtersOpen});latest.current={index,where,page,active,paused,committed,filtersOpen};
   // The filter set is part of the location, so it is already part of this key.
   const key=(revision:string,location:Location)=>`${revision}:${location.node}:${location.filter}:${filterKey(location.filters)}`;
@@ -108,7 +108,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
    * narrowing contents is not a hierarchy navigation step.
    */
   const applyFilters=useCallback((next:AssetFiltersValue)=>{
-    setFiltersOpen(false);
+    setFiltersOpen(null);
     const current=latest.current.where;
     if(sameFilters(next,current.filters))return;
     // Unlike a scope change, narrowing the scope already displayed keeps the committed page on
@@ -120,12 +120,13 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
     setError('');setMoreError('');setMore(false);setWhere({...current,filters:next});
   },[]);
   const appliedInitialNode=useRef<string|undefined>(undefined);
+  const appliedEntryKey=useRef(entryKey);
   // True once the user walks down the hierarchy from within the browser. This is tracked as
   // its own flag rather than by comparing `where.node` against the applied direct entry: the
   // entry effect updates its ref eagerly while `where` commits later, so comparing the two
   // reported a drill-down for a folder that had just been opened and wrongly consumed Back.
   const drilled=useRef(false);
-  useEffect(()=>{if(active&&initialNode&&appliedInitialNode.current!==initialNode){appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:'all',filters:{...EMPTY_FILTERS}});}},[initialNode,active,navigate]);
+  useEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:'all',filters:{...EMPTY_FILTERS}});}},[initialNode,entryKey,active,navigate]);
   // Changing a filter in the entry folder does not create a parent navigation step, and
   // entering a different child or moving between Series filters is a different scope, so
   // the filters start empty rather than carrying the previous scope's narrowing into it.
@@ -137,7 +138,8 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   useEffect(()=>{
     backRef.current=()=>{
       const s=latest.current;
-      if(s.filtersOpen){setFiltersOpen(false);return true;}
+      if(s.filtersOpen){setFiltersOpen(null);return true;}
+      if(hasActiveFilters(s.where.filters)){applyFilters({...EMPTY_FILTERS});return true;}
       if(!s.where.node)return false;
       // A folder opened directly from the index is a top-level entry, not an in-browser
       // drill-down. Consuming Back there would strand the user on the bare series
@@ -145,6 +147,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
       if(!drilled.current)return false;
       const node=s.index?.nodes.find(n=>n.id===s.where.node);
       const parent=node?.parentId??null;
+      if(!parent&&appliedInitialNode.current)return false;
       // Stepping back up to the folder this boundary was opened with ends the drill-down, so
       // the next Back leaves the boundary instead of walking into a synthetic series parent.
       if(!parent||parent===appliedInitialNode.current)drilled.current=false;
@@ -153,7 +156,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
       navigate({node:parent,filter:'all',filters:s.where.filters});return true;
     };
     return()=>{backRef.current=null;};
-  },[backRef,navigate]);
+  },[backRef,navigate,applyFilters]);
   // The header arrow means "leave this folder", not a global Back press: it steps up one
   // level inside the browser, or hands the direct entry back to the host so the host can
   // restore the prior context without closing an unrelated open surface.
@@ -197,7 +200,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   useEffect(()=>()=>{indexGate.current.cancel();pageGate.current.cancel();moreGate.current.cancel();},[]);
   // A scope change (drill-down, Series filter, or Back) closes the dialog, so the surface can
   // never be left open over a page it no longer describes.
-  useEffect(()=>{setFiltersOpen(false);},[where.node,where.filter]);
+  useEffect(()=>{setFiltersOpen(null);},[where.node,where.filter]);
   // The gallery's identity follows the page that is actually visible, so a failed narrowing
   // cannot re-key the gallery and reset its scroll anchor. The filter summary in the overview
   // reports what the user asked for, so a failed choice stays visible and retryable.
@@ -244,7 +247,7 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
   const scope=index?.scopes.find(s=>s.nodeId===where.node&&s.filter===where.filter);
   const ancestors:CharacterNode[]=[];
   let parent=node?.parentId;
-  while(parent&&index&&ancestors.length<3){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
+  while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
   const folderStrip=!landscape&&!!node;
   const foldable=folderStrip&&children.length>0;
   const filterControls=(node?.kind==='series'||foldable)&&<div className="character-filters">{node?.kind==='series'&&(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}{foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>}</div>;
@@ -264,15 +267,9 @@ export function CharacterBrowser({onLocation,initialNode,active,paused,density,r
     {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<div className="empty-state"><h3>{where.node?(filterPending?'조건에 맞는 자산이 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}</h3>{where.node&&hasActiveFilters(shown?.filters??EMPTY_FILTERS)&&<p>필터를 해제하면 이 보기의 자산을 모두 볼 수 있습니다.</p>}</div>}
   </>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
-    <HeaderTools active={active} target="context-location"><div className="character-location">{where.node&&<IconButton label="상위 보기로" icon={ArrowLeftIcon} onClick={goUp}/>}
-      {landscape&&node&&<nav className="character-breadcrumb" aria-label="캐릭터 위치"><Button variant="ghost" onClick={()=>enterInside({node:null,filter:'all'})}>시리즈</Button>{ancestors.map(ancestor=><span key={ancestor.id}><ChevronRightIcon/><Button variant="ghost" onClick={()=>enterInside({node:ancestor.id,filter:'all'})}>{ancestor.name}</Button></span>)}<ChevronRightIcon/></nav>}
-      <h3>{node?.name??'시리즈'}</h3>{scope&&<span className="numeric muted">{page?.totalCount??scope.totalCount}개</span>}
-      {where.node&&<IconButton label={hasActiveFilters(where.filters)?`자산 필터: ${filterSummary(where.filters)}`:'자산 필터'} icon={FunnelIcon} active={hasActiveFilters(where.filters)} onClick={()=>setFiltersOpen(true)}/>}</div></HeaderTools>
-    {!landscape&&overview}
-    {(landscape||!!page?.items.length)&&<Gallery items={page?.items??[]} intro={landscape?overview:undefined} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>}
+    <LibraryHeader title={node?.name??'시리즈'} count={page?.totalCount??scope?.totalCount} crumbs={[...crumbs,...ancestors.map(ancestor=>({id:ancestor.id,name:ancestor.name,onSelect:()=>{drilled.current=ancestor.id!==appliedInitialNode.current&&!!ancestor.parentId;navigate({node:ancestor.id,filter:'all',filters:{...EMPTY_FILTERS}});}}))]} onBack={goUp} onOptions={onOptions}/>
+    <Gallery items={page?.items??[]} intro={<>{overview}{where.node&&<FilterChips value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>
     {more&&<div className="loading-line" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
-    {/* The same filter surface every other scope uses, so the three cannot diverge. */}
-    {filtersOpen&&<Dialog open title="자산 필터" onClose={()=>setFiltersOpen(false)}><DialogDescription className="sr-only">미디어 종류, 비율과 영상 길이로 이 보기의 자산을 좁힙니다. 조건은 PC가 게시한 이 보기의 자산에만 적용되고 소속은 바꾸지 않습니다.</DialogDescription><AssetFilters value={where.filters} onChange={applyFilters}/><div className="view-settings-footer"><Button variant="ghost" onClick={()=>setFiltersOpen(false)}>닫기</Button></div></Dialog>}
   </section>;
 }

@@ -7,13 +7,19 @@ const VIEW_HEIGHT = 260;
 const CASE_SCALE = 0.95;
 
 /** One projected surface for the closed shells, seam, artwork and lip. */
-export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement | null, width: number, focused?: "front" | "spine" | "back") {
+/**
+ * Optional viewing angle in radians (omitted: the approved resting projection) and an optional
+ * raster ceiling for a large interactive view (omitted: the cached-card ceiling of 6).
+ */
+export type GameCaseView = { rx: number; ry: number; maxRatio?: number };
+export const GAME_CASE_REST: GameCaseView = { rx: -8 * Math.PI / 180, ry: -26 * Math.PI / 180 };
+export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement | null, width: number, focused?: "front" | "spine" | "back", view?: GameCaseView) {
   // Fit the shell to the artwork, so the full cover reaches every front edge.
   const artworkRatio = image && image.naturalWidth > 0 && image.naturalHeight > 0
     ? image.naturalWidth / image.naturalHeight : MAX_WIDTH / MAX_HEIGHT;
   const WIDTH = Math.min(MAX_WIDTH, MAX_HEIGHT * artworkRatio);
   const HEIGHT = WIDTH / artworkRatio;
-  const ratio = Math.min(6, Math.max(1, window.devicePixelRatio * 2 * width / VIEW_WIDTH));
+  const ratio = Math.min(view?.maxRatio ?? 6, Math.max(1, window.devicePixelRatio * 2 * width / VIEW_WIDTH));
   canvas.width = Math.ceil(VIEW_WIDTH * ratio);
   canvas.height = Math.ceil(VIEW_HEIGHT * ratio);
   const ctx = canvas.getContext("2d");
@@ -23,7 +29,7 @@ export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement 
   ctx.imageSmoothingQuality = "high";
   // Focused stops look straight at the actual selected surface. The spine image's
   // own aspect defines its width; no illustrated side is synthesized from a front.
-  const rx = focused ? 0 : -8 * Math.PI / 180, ry = focused ? 0 : -26 * Math.PI / 180;
+  const rx = focused ? 0 : (view ?? GAME_CASE_REST).rx, ry = focused ? 0 : (view ?? GAME_CASE_REST).ry;
   const project = (x: number, y: number, z: number): Point => {
     x -= WIDTH / 2; y -= HEIGHT / 2;
     const tx = Math.cos(ry) * x + Math.sin(ry) * z;

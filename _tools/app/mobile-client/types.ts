@@ -36,7 +36,7 @@ export type AssetMediaFilter = 'all' | 'images' | 'videos';
 export type AssetAspectFilter = 'all' | 'square' | 'landscape' | 'portrait';
 export type AssetDurationFilter = 'all' | 'under_30s' | '30s_1m' | '1m_5m' | 'over_5m';
 export interface AssetFiltersValue { media: AssetMediaFilter; aspect: AssetAspectFilter; duration: AssetDurationFilter }
-export interface View { characterNode?:string; characters?: boolean; tab: 'home' | 'library'; classification?: string; revisit?: 'date' | string; title: string }
+export interface View { album?:{id:string;libraryId:string;epoch:number}; root?:boolean; characterNode?:string; characters?: boolean; tab: 'home' | 'library'; classification?: string; revisit?: 'date' | string; title: string }
 export interface Ticket { url: string; expires_at?: string; expires_in?: number; content_type?: string }
 export interface Status { configured: boolean; endpoint: string; allowPrivateHttp?: boolean }
 export interface Revisit { bundles: {kind: string; title: string; items?: Asset[]; groups?: {creator_key: string; creator_name: string; creator_handle: string; asset_count: number; items: Asset[]}[]}[] }
