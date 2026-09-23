@@ -54,6 +54,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `agents/catalog-troubleshooting.md` — catalog transport/checkpoint behavior and rollout safeguards.
 - `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.
+- `research/pc-ui-design-decisions-20260923.md` — open PC UI consistency decisions and visual-direction proposals from the 2026-09-23 screenshot review; not approved design.
 - `research/reference-projects.md` — optional external-project research, not adopted implementation.
 - [Seed-first character automation and Jev evaluation direction](research/character-autonomy-and-jev-direction-20260921.md) — user automation requirements, source-verified constraints, corrected assumptions, and staged evidence/Jev experiments; research direction, not runtime activation or a second backlog.
 - `research/character-classification-quiet-workflow-design-20260911.md` — approved quiet character workflow, parent-folder inference scope, reference curation, and normal-folder conversion.

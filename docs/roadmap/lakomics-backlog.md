@@ -700,7 +700,7 @@ Direction: keep the manga root as a per-machine setting (like `character-runtime
 
 Status: `IN_PROGRESS`
 
-From a 2026-09-23 review of the design documents against real-app screenshots on the Linux host. Fix small items first; items marked *decision* need a user choice before implementation.
+From a 2026-09-23 review of the design documents against real-app screenshots on the Linux host. Fix small items first; items marked *decision* need a user choice before implementation. Options and recommendations for the open decisions, plus larger visual-direction proposals, are in [PC UI design decisions pending](../research/pc-ui-design-decisions-20260923.md).
 
 1. **Fixed 2026-09-23:** Settings: unchecked checkboxes (e.g. 비공개 모드) are nearly invisible on the dark surface, and labels mix action (`켜기`) with state (`켜짐`).
 2. **Fixed 2026-09-23:** Settings: `캐릭터 누락 보완` stayed at `확인 중...` because every Settings open re-hashed the ~150 MB S36 model; successful verification is now cached in-process by path, length and modification time.
