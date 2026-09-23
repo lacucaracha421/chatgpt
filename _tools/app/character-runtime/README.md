@@ -423,7 +423,7 @@ Shadow writes only `.cache/characters/s36_shadow.sqlite`, table `scores`, upsert
 by `(asset_id, target_id, policy_version)`. Columns are `asset_id`, `content_hash`,
 `target_id`, nullable `knn3`, `verdict` (`automatic`, `recommended`, `none`,
 `abstain`), `policy_version`, `feature_id`, `native_outcome`, `native_at`,
-`scored_at`, and `prior_manual_rejections`. Native outcomes distinguish
+`scored_at`, `prior_manual_rejections`, and `origin` (`live` / `backfill`). Native outcomes distinguish
 `accepted_automatic`, `accepted_manual`, `rejected_manual`, `cleared_manual`,
 `recommended` and `none`. Native observation and scoring times are separate.
 No native decision reads this disposable cache.
@@ -442,3 +442,51 @@ and native outcome cross-tabs/agreement. Truth is the latest strictly later manu
 judgment of the same asset/hash/target; clears and changed/unavailable assets are
 unknown. Rates use reviewed rows only, not all arrivals. Verification uses fixtures;
 real-library native runtime, actual model inference and Windows remain unverified.
+
+## S36 review screen (stage 4, early)
+
+Series view → `S36 확인` opens a fullscreen review of shadow rows scored
+`automatic` or `recommended` under the newest policy version, one image at a
+time with the candidate character's references. `맞음`/`아님` are ordinary
+manual decisions through `record_character_decisions` (undo clears the same
+pair); the shadow cache is only read, never written, and shadow rows remain
+non-evidence. The header shows the automatic tier's running precision and the
+recommendation acceptance rate from manual decisions made after scoring, which
+is the evidence stage 3 waits for. Pairs already decided, stale hashes, missing
+or disabled characters and non-image assets are excluded; a missing cache is an
+empty list.
+
+`기존 이미지 채점` explicitly scores historical normal images using validated S36
+cache entries only: no extraction or detection. It uses the native scope/ready,
+enabled, non-manual-only roster and excludes currently accepted/rejected manual
+pairs (clears are eligible). Missing, corrupt and whole-image fallback entries
+are skipped. One cancellable job groups candidates by their series target roster
+(including manual pair exclusions), with at most 32 images per native idle turn,
+below native jobs, reference refresh, augmentation and live shadow work. Each
+batch writes one metadata snapshot, loads gallery features once, and replays
+manual decisions once at the job's fixed scoring time. Query duplicate groups
+are excluded individually; exclusion of a reference group still resolves the
+remaining references so automatic multi-person choices stay identical. Normal
+stop, pause, worker deadlines and CPU/thread limits apply, with cancellation
+checks between queries. Completed/skipped progress counts images, not pairs;
+native preemption retries only the unpublished remainder, while explicit cancel
+discards it.
+
+The resident worker retains at most 8,192 gallery entries / 128 MiB of vectors,
+keyed by cache root, feature identity and content hash. File identity, size and
+nanosecond modification/change timestamps invalidate replaced/removed features;
+missing entries are also rechecked. Every new snapshot replays current labels
+and reference selections; image metadata invalidates the existing group cache.
+The live single-query scoring path is unchanged.
+Scoring reuses the live gallery/witness/knn3 policy and the rejection guard at its
+snapshot. Both paths already exclude the query's transitive same-post/PDQ ≤31
+group, including uncached bridges; the worker reuses one metadata-keyed group map
+until metadata changes. Backfill writes only the disposable shadow database;
+legacy rows upgrade to `origin=live`, unknown schemas are refused, and backfill
+cannot replace a live row scored at the same or a later time.
+
+Review keeps automatic before recommended, with stable SHA-256 ordering of
+`policy_version|asset_id|target_id` inside each tier. The summary retains overall
+`automatic`/`recommended` counts and adds `byOrigin.live`/`byOrigin.backfill`, each
+with both tiers' pending/accepted/rejected counts. The screen shows separate
+origin precision, progress and cancellation, and refreshes when the job finishes.

@@ -52,7 +52,7 @@ impl Policy {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct Pending {
     pub asset_id: String,
     pub content_hash: String,
@@ -147,6 +147,63 @@ pub(super) fn snapshot(c: &Connection, pending: &Pending) -> Result<(Value, u64)
     ))
 }
 
+/// Recognize only the original schema and our origin upgrade, including keys.
+/// Read-only callers use the returned flag to project legacy rows as live.
+pub(super) fn cache_has_origin(c: &Connection) -> Result<bool> {
+    let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let columns = c
+        .prepare("PRAGMA table_info(scores)")?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, bool>(3)?,
+                r.get::<_, i64>(5)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let names = [
+        "asset_id",
+        "content_hash",
+        "target_id",
+        "knn3",
+        "verdict",
+        "policy_version",
+        "feature_id",
+        "native_outcome",
+        "native_at",
+        "scored_at",
+        "prior_manual_rejections",
+        "origin",
+    ];
+    let origin = version == 1 && columns.len() == 12;
+    if !(origin || version == 0 && columns.len() == 11)
+        || columns
+            .iter()
+            .enumerate()
+            .any(|(i, (name, kind, required, key))| {
+                name != names[i]
+                    || kind
+                        != match i {
+                            3 => "REAL",
+                            10 => "INTEGER",
+                            _ => "TEXT",
+                        }
+                    || *required != (i != 3)
+                    || *key
+                        != match i {
+                            0 => 1,
+                            2 => 2,
+                            5 => 3,
+                            _ => 0,
+                        }
+            })
+    {
+        return Err(Error::Invalid("Unknown S36 shadow cache schema"));
+    }
+    Ok(origin)
+}
+
 pub(super) struct Cache(Connection);
 impl Cache {
     pub(super) fn open(root: &Path) -> Result<Self> {
@@ -158,17 +215,38 @@ impl Cache {
             }
         }
         std::fs::create_dir_all(path.parent().unwrap())?;
-        let c = Connection::open(path)?;
+        let mut c = Connection::open(path)?;
         c.busy_timeout(std::time::Duration::from_millis(100))?;
-        c.execute_batch(
-            "CREATE TABLE IF NOT EXISTS scores (
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='scores')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !exists {
+            let version: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            let tables: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                [],
+                |r| r.get(0),
+            )?;
+            if version != 0 || tables != 0 {
+                return Err(Error::Invalid("Unknown S36 shadow cache schema"));
+            }
+            tx.execute_batch(
+                "CREATE TABLE scores (
             asset_id TEXT NOT NULL, content_hash TEXT NOT NULL, target_id TEXT NOT NULL,
             knn3 REAL, verdict TEXT NOT NULL, policy_version TEXT NOT NULL,
             feature_id TEXT NOT NULL, native_outcome TEXT NOT NULL,
             native_at TEXT NOT NULL, scored_at TEXT NOT NULL,
             prior_manual_rejections INTEGER NOT NULL,
             PRIMARY KEY(asset_id,target_id,policy_version))",
-        )?;
+            )?;
+        }
+        if !cache_has_origin(&tx)? {
+            tx.execute_batch("ALTER TABLE scores ADD COLUMN origin TEXT NOT NULL DEFAULT 'live'; PRAGMA user_version=1;")?;
+        }
+        tx.commit()?;
         Ok(Self(c))
     }
     pub(super) fn record(
@@ -179,6 +257,20 @@ impl Cache {
         rejections: u64,
         at: &str,
     ) -> Result<()> {
+        self.record_origin(pending, policy, response, rejections, at, "live")
+    }
+    pub(super) fn record_origin(
+        &mut self,
+        pending: &Pending,
+        policy: &Policy,
+        response: &Value,
+        rejections: u64,
+        at: &str,
+        origin: &str,
+    ) -> Result<()> {
+        if !matches!(origin, "live" | "backfill") {
+            return Err(Error::Stale);
+        }
         if response["type"] != "s36_shadow_result"
             || response["assetId"] != pending.asset_id
             || response["contentHash"] != pending.content_hash
@@ -202,9 +294,10 @@ impl Cache {
                         .ok_or(Error::Stale)?,
                 )
             };
-            tx.execute("INSERT INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
-            ON CONFLICT(asset_id,target_id,policy_version) DO UPDATE SET content_hash=excluded.content_hash,knn3=excluded.knn3,verdict=excluded.verdict,feature_id=excluded.feature_id,native_outcome=excluded.native_outcome,native_at=excluded.native_at,scored_at=excluded.scored_at,prior_manual_rejections=excluded.prior_manual_rejections",
-                params![pending.asset_id,pending.content_hash,target,score,policy.verdict(score,rejections),policy.version,policy.feature_id,pending.outcomes[target],pending.native_at,at,rejections as i64])?;
+            tx.execute("INSERT INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections,origin) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+            ON CONFLICT(asset_id,target_id,policy_version) DO UPDATE SET content_hash=excluded.content_hash,knn3=excluded.knn3,verdict=excluded.verdict,feature_id=excluded.feature_id,native_outcome=excluded.native_outcome,native_at=excluded.native_at,scored_at=excluded.scored_at,prior_manual_rejections=excluded.prior_manual_rejections,origin=excluded.origin
+            WHERE NOT (excluded.origin='backfill' AND scores.origin='live' AND julianday(scores.scored_at)>=julianday(excluded.scored_at))",
+                params![pending.asset_id,pending.content_hash,target,score,policy.verdict(score,rejections),policy.version,policy.feature_id,pending.outcomes[target],pending.native_at,at,rejections as i64,origin])?;
         }
         tx.commit()?;
         Ok(())
@@ -362,5 +455,96 @@ mod tests {
             0
         );
         c.execute_batch("PRAGMA query_only=OFF").unwrap();
+    }
+    #[test]
+    fn character_shadow_origin_upgrade_refuses_unknown_schema() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".cache/characters/s36_shadow.sqlite");
+        let cache = Cache::open(temp.path()).unwrap();
+        cache
+            .0
+            .execute_batch("ALTER TABLE scores DROP COLUMN origin; PRAGMA user_version=0;")
+            .unwrap();
+        drop(cache);
+        let legacy = Connection::open(&path).unwrap();
+        legacy.execute("INSERT INTO scores VALUES('a','hash','t',0.1,'automatic','v','f','none','n','s',100)", []).unwrap();
+        assert!(!cache_has_origin(&legacy).unwrap());
+        drop(legacy);
+        let upgraded = Cache::open(temp.path()).unwrap();
+        assert!(cache_has_origin(&upgraded.0).unwrap());
+        assert_eq!(
+            upgraded
+                .0
+                .query_row("SELECT origin FROM scores", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "live"
+        );
+        upgraded.0.execute_batch("PRAGMA user_version=2").unwrap();
+        assert!(Cache::open(temp.path()).is_err());
+        upgraded
+            .0
+            .execute_batch("PRAGMA user_version=1; ALTER TABLE scores ADD COLUMN future TEXT;")
+            .unwrap();
+        assert!(Cache::open(temp.path()).is_err());
+    }
+
+    #[test]
+    fn character_shadow_backfill_cannot_replace_newer_live_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let policy: Policy =
+            serde_json::from_str(include_str!("../../../character-runtime/s36_policy.json"))
+                .unwrap();
+        let pending = Pending {
+            asset_id: "a".into(),
+            content_hash: "a".repeat(64),
+            relative_path: "unused".into(),
+            outcomes: BTreeMap::from([("t".into(), "none".into())]),
+            native_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let response = json!({"type":"s36_shadow_result","assetId":"a","contentHash":pending.content_hash,"featureId":policy.feature_id,"scores":{"t":0.1}});
+        let mut cache = Cache::open(temp.path()).unwrap();
+        cache
+            .record(&pending, &policy, &response, 100, "2026-01-02T00:00:00Z")
+            .unwrap();
+        cache
+            .record_origin(
+                &pending,
+                &policy,
+                &response,
+                0,
+                "2026-01-01T00:00:00Z",
+                "backfill",
+            )
+            .unwrap();
+        assert_eq!(
+            cache
+                .0
+                .query_row("SELECT origin,verdict FROM scores", [], |r| Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?
+                )))
+                .unwrap(),
+            ("live".into(), "automatic".into())
+        );
+        cache
+            .record_origin(
+                &pending,
+                &policy,
+                &response,
+                0,
+                "2026-01-03T00:00:00Z",
+                "backfill",
+            )
+            .unwrap();
+        assert_eq!(
+            cache
+                .0
+                .query_row("SELECT origin,verdict FROM scores", [], |r| Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?
+                )))
+                .unwrap(),
+            ("backfill".into(), "recommended".into())
+        );
     }
 }

@@ -28,6 +28,7 @@ import { needsReferenceConfirmation, useReferenceRegionInspection } from "./Refe
 import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
+import { ShadowReview } from "./ShadowReview";
 import { characterApi, draftReferenceRegions, type CharacterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
@@ -58,6 +59,7 @@ const emptyPage = (): CharacterBrowsePage => ({ items: [], nextCursor: null, tot
 export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi }: Props) {
   const { gateway } = useLibrary();
   const [folders, setFolders] = useState<SeriesFolder[]>([]);
+  const [shadowReview, setShadowReview] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
   const [all, setAll] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
@@ -398,7 +400,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 <span>{filter.label}</span>
               </label>)}
             </fieldset>
-            <small className="series-gallery-filter-count" aria-live="polite">{page.totalCount.toLocaleString()}장</small>
+            <div className="series-gallery-heading__aside">
+              <Button size="sm" variant="ghost" disabled={busy} aria-description="S36 시험 채점 후보를 하나씩 확인" onClick={() => setShadowReview(true)}>S36 확인</Button>
+              <small className="series-gallery-filter-count" aria-live="polite">{page.totalCount.toLocaleString()}장</small>
+            </div>
           </div>
           : picking && <div className="series-gallery-heading"><h3>{picking.kind === "hero" ? "히어로 이미지 선택" : all ? "선택 가능한 전체" : "미분류"}<small>{page.totalCount}</small></h3>{picking.kind !== "hero" && <Button size="sm" variant="ghost" aria-pressed={all} onClick={() => setAll(v => !v)}>{all ? "미분류만 보기" : "전체 보기"}</Button>}</div>}
         {picking && picking.kind !== "hero" && Boolean(page.unavailableReferenceIds?.length) && <p className="character-message" role="status">원본이 없는 이미지는 선택할 수 없습니다. 썸네일은 남아 있을 수 있습니다.</p>}
@@ -429,6 +434,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       onSaved={() => { setReferenceSuggestionTarget(null); refresh(); }}
     />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
+    {shadowReview && <ShadowReview onClose={() => setShadowReview(false)} onChanged={refresh} privacyMode={privacyMode} decisions={api} />}
     <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />
   </section>;

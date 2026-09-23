@@ -638,6 +638,40 @@ impl Library {
         Ok(())
     }
 
+    pub(super) fn character_autotag_targets(
+        &self,
+        connection: &Connection,
+        asset_id: &str,
+    ) -> Result<Vec<super::characters::Target>> {
+        let Some(scope) = super::character_scope::resolve_character_scope(connection, asset_id)?
+        else {
+            return Ok(Vec::new());
+        };
+        let ids = connection.prepare("SELECT t.id FROM character_targets t
+                WHERE t.series_classification_id IN (SELECT value FROM json_each(?1)) AND t.enabled=1 AND t.manual_only=0 ORDER BY t.id")?
+            .query_map([serde_json::to_string(&scope.series_classification_ids)?],|r|r.get::<_,String>(0))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut targets = Vec::new();
+        for id in ids {
+            let target = self.read_character_target(connection, &id)?;
+            if folders(connection, asset_id)?.len() == 1
+                && target.ready
+                && target
+                    .series_classification_id
+                    .as_ref()
+                    .is_some_and(|series| {
+                        super::character_hub::candidate_image_mode(
+                            connection, series, asset_id, true,
+                        )
+                        .is_ok()
+                    })
+            {
+                targets.push(target);
+            }
+        }
+        Ok(targets)
+    }
+
     pub(super) fn character_autotag_context(
         &self,
         connection: &Connection,
@@ -647,31 +681,7 @@ impl Library {
         Self::check_character_autotag_claim(connection, job)?;
         let scope = super::character_scope::resolve_character_scope(connection, &job.asset_id)?
             .ok_or(Error::Stale)?;
-        let ids = connection.prepare("SELECT t.id FROM character_targets t
-                WHERE t.series_classification_id IN (SELECT value FROM json_each(?1)) AND t.enabled=1 AND t.manual_only=0 ORDER BY t.id")?
-            .query_map([serde_json::to_string(&scope.series_classification_ids)?],|r|r.get::<_,String>(0))?
-            .collect::<std::result::Result<Vec<_>,_>>()?;
-        let mut targets = Vec::new();
-        for id in ids {
-            let target = self.read_character_target(connection, &id)?;
-            if job.classification_ids.len() == 1
-                && target.ready
-                && target
-                    .series_classification_id
-                    .as_ref()
-                    .is_some_and(|series| {
-                        super::character_hub::candidate_image_mode(
-                            connection,
-                            series,
-                            &job.asset_id,
-                            true,
-                        )
-                        .is_ok()
-                    })
-            {
-                targets.push(target);
-            }
-        }
+        let targets = self.character_autotag_targets(connection, &job.asset_id)?;
         let lineage=connection.prepare("WITH RECURSIVE ancestors(id,parent_id) AS (
             SELECT c.id,c.parent_id FROM classification_entries c JOIN asset_classifications a ON a.classification_id=c.id WHERE a.asset_id=?1
             UNION SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)

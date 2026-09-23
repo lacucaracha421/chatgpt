@@ -63,6 +63,8 @@ pub mod character_scan;
 mod character_scope;
 pub mod character_series_move;
 mod character_shadow;
+pub mod character_shadow_backfill;
+pub mod character_shadow_review;
 mod character_sources;
 mod character_training;
 pub(crate) mod character_worker;
@@ -246,6 +248,7 @@ pub struct Library {
     character_scan: Arc<Mutex<character_scan::ScanState>>,
     character_incremental: Arc<Mutex<character_incremental::Engine>>,
     character_worker_pool: Arc<character_worker::Pool>,
+    character_shadow_backfill: Arc<Mutex<character_shadow_backfill::State>>,
     video_similarity_scan: Arc<Mutex<video_similarity::ScanState>>,
     igdb_token_cache: igdb::IgdbTokenCache,
     igdb_request_limiter: igdb::IgdbRequestLimiter,
@@ -334,6 +337,7 @@ impl Library {
             revisit_color_lock: Arc::default(),
             character_scan: Arc::default(),
             character_incremental: Arc::default(),
+            character_shadow_backfill: Arc::default(),
             character_worker_pool: Arc::default(),
             video_similarity_scan: Arc::default(),
             igdb_token_cache: igdb::IgdbTokenCache::default(),

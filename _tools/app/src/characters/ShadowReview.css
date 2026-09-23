@@ -1,0 +1,38 @@
+/* S36 review: one candidate at a time inside the fullscreen dialog. */
+.shadow-review { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; color: var(--color-text); background: var(--color-viewer-bg); }
+.shadow-review__header { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.shadow-review__header h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: var(--line-ui); }
+.shadow-review__header > .ui-button { margin-left: auto; }
+.shadow-review__stats { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin: 0; min-width: 0; }
+.shadow-review__stats > div { display: flex; align-items: baseline; gap: var(--space-2); }
+.shadow-review__stats dt { font-size: var(--text-sm); line-height: var(--line-meta); color: var(--color-muted); white-space: nowrap; }
+.shadow-review__stats dd { margin: 0; font-family: var(--font-numeric); font-size: var(--text-md); line-height: var(--line-ui); font-variant-numeric: tabular-nums; }
+.shadow-review__notice { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); }
+.shadow-review__body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-4); flex: 1; min-height: 0; padding: var(--space-4); }
+.shadow-review__figure { position: relative; display: flex; align-items: center; justify-content: center; margin: 0; min-width: 0; min-height: 0; overflow: hidden; }
+.shadow-review__image { max-width: 100%; max-height: 100%; object-fit: contain; }
+.shadow-review__image--pending { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
+.shadow-review__image-note { position: absolute; right: var(--space-2); bottom: var(--space-2); margin: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); font-size: var(--text-xs); line-height: var(--line-meta); color: var(--color-muted); }
+.shadow-review__panel { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); overflow: auto; }
+.shadow-review__verdict { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.shadow-review__verdict small { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-muted); }
+.shadow-review__badge { display: inline-flex; align-items: center; min-height: var(--control-height-sm); padding: 0 var(--space-2); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: var(--line-ui); color: var(--color-text); }
+.shadow-review__badge--automatic { border-color: var(--color-accent); color: var(--color-accent); }
+.shadow-review__character { margin: 0; font-size: var(--text-title); line-height: var(--line-title); font-weight: 600; overflow-wrap: anywhere; }
+.shadow-review__references { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.shadow-review__references li { min-width: 0; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-tile); background: var(--color-surface-elevated); }
+.shadow-review__references img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.shadow-review__meta { margin: 0; font-size: var(--text-sm); line-height: var(--line-copy); color: var(--color-muted); overflow-wrap: anywhere; }
+.shadow-review__actions { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+.shadow-review__actions > .ui-button { justify-content: space-between; width: 100%; }
+.shadow-review kbd { display: inline-block; min-width: 1.4em; margin-left: var(--space-1); padding: 0 var(--space-1); border: 1px solid currentColor; border-radius: var(--radius-sm); font: inherit; font-size: var(--text-xs); line-height: var(--line-meta); text-align: center; opacity: 0.8; }
+.shadow-review__undo { align-self: flex-start; }
+.shadow-review .ui-empty-state { flex: 1; }
+.shadow-review__empty-copy { max-width: 36rem; margin: 0; text-align: center; }
+@media (max-width: 900px) {
+  .shadow-review__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .shadow-review__panel { max-height: 45vh; }
+}
+
+.shadow-review__backfill { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); color: var(--color-muted); font-size: var(--text-sm); }
+.shadow-review__stats small { color: var(--color-muted); font-size: var(--text-xs); }

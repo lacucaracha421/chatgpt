@@ -152,7 +152,6 @@ User-requested notes for later work, not an implementation start or priority cha
 These follow-ups apply to the active collector in `extension-list/` and relate to `EXT-011` / `EXT-012` (both closed 2026-09-23 and archived); they remain pending requests of their own.
 
 - **Animation polish:** refine the semicircle menu's entrance and roulette-spinning animations for a more professional presentation.
-- **Persistent semicircle after navigation (bug):** the user reports that navigating to another page while the semicircle is open leaves it permanently visible. Reproduce the navigation path and investigate overlay cleanup; the root cause is not yet verified.
 - **Selection feedback:** improve the extension menu's visual selection effects.
 - **Twitter/X GIF downloads:** support downloading GIF media from Twitter/X posts.
 
@@ -162,7 +161,7 @@ Recorded at the user's request after the backlog review. This is a recommendatio
 
 Suggested first sequence:
 
-1. **Extension reliability and polish:** reproduce and fix the persistent semicircle after navigation, then refine entrance, roulette and selection effects.
+1. **Extension polish:** refine entrance, roulette and selection effects. (The persistent-semicircle-after-navigation bug was confirmed resolved by the user on 2026-09-23.)
 2. **Home artist Revisit (`ARTIST-001`):** start with a small Home rediscovery module, such as long-unseen or recently collected artists, rather than requiring the complete Artist hub first.
 3. **Mobile multi-select move:** define album-membership changes versus actual folder/file moves before implementation; coordinate the chosen write scope with `MOBILE-WRITE-002`.
 
@@ -626,7 +625,7 @@ The character UI/management workflow and current accuracy-improvement pass are a
 
 ## CHAR-AUTO-007 — Evidence-based accuracy plan (2026-09-23 re-analysis)
 
-Status: `IN_PROGRESS` — stages 1–2c done (2026-09-23): full-library S36 features extracted and a shadow policy pinned in `_tools/app/character-runtime/s36_policy.json` (automatic knn3 ≤ 0.1304 after ≥100 prior rejections, recommendations ≤ 0.1490). Next: 2d in-app shadow scoring, then the publication switch, each separately authorized.
+Status: `IN_PROGRESS` — stages 1–2d done (2026-09-23): full-library S36 features extracted, a shadow policy pinned in `_tools/app/character-runtime/s36_policy.json` (automatic knn3 ≤ 0.1304 after ≥100 prior rejections, recommendations ≤ 0.1490), and in-app shadow scoring recording verdicts. The S36 review screen (stage 4 brought forward; series view → `S36 확인`) lets the user judge `automatic`/`recommended` shadow candidates through the normal manual decision path and shows running automatic precision and recommendation acceptance. Next: collect enough judgments, then the publication switch (stage 3), separately authorized.
 
 Two read-only analyses of the active library (an Opus pass and an independent Fable review; scripts in the session scratchpad, not tracked) found:
 - The CCIP metric model is exactly `0.5 × (1 − cosine)` of L2-normalized features, so comparisons need no ONNX batching.

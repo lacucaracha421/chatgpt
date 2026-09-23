@@ -61,6 +61,7 @@
 .series-gallery-filters input:checked + span { border-color: var(--color-filter-border); background: var(--color-filter-selected); color: var(--color-filter-text); font-weight: 600; }
 .series-gallery-filters input:focus-visible + span { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
 .series-gallery-filter-count { flex-shrink: 0; padding-top: calc((var(--control-height-sm) - var(--line-ui)) / 2); font-variant-numeric: tabular-nums; }
+.series-gallery-heading__aside { display: flex; align-items: flex-start; flex-shrink: 0; gap: var(--space-3); }
 .series-gallery { position: relative; isolation: isolate; flex: 1; min-height: 0; }
 .series-gallery > .asset-gallery { height: 100%; }
 .series-gallery__empty { padding: var(--space-4); color: var(--color-muted); pointer-events: none; }

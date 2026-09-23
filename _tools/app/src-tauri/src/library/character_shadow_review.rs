@@ -1,0 +1,698 @@
+//! Read-only review feed over the disposable S36 shadow cache.
+//!
+//! The screen behind this module asks the user to judge assets the shadow
+//! scorer called `automatic` or `recommended`. Judgments go through the normal
+//! manual decision path (`record_character_decisions`); nothing here writes to
+//! the shadow cache or the library, and shadow rows never become evidence.
+use super::{
+    characters::{Error, Result},
+    Library,
+};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, path::Path};
+
+const MAX_PAGE: u32 = 200;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowReviewQuery {
+    #[serde(default)]
+    pub offset: u32,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowReviewItem {
+    pub asset_id: String,
+    pub content_hash: String,
+    pub original_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub target_id: String,
+    pub target_name: String,
+    pub target_fingerprint: String,
+    pub reference_asset_ids: Vec<String>,
+    pub verdict: String,
+    pub origin: String,
+    pub knn3: Option<f64>,
+    pub native_outcome: String,
+    pub scored_at: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VerdictCounts {
+    pub pending: u32,
+    pub accepted: u32,
+    pub rejected: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowReviewSummary {
+    pub automatic: VerdictCounts,
+    pub recommended: VerdictCounts,
+    pub by_origin: BTreeMap<String, TierCounts>,
+}
+
+impl Default for ShadowReviewSummary {
+    fn default() -> Self {
+        Self {
+            automatic: VerdictCounts::default(),
+            recommended: VerdictCounts::default(),
+            by_origin: BTreeMap::from([
+                ("live".into(), TierCounts::default()),
+                ("backfill".into(), TierCounts::default()),
+            ]),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TierCounts {
+    pub automatic: VerdictCounts,
+    pub recommended: VerdictCounts,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowReviewPage {
+    pub items: Vec<ShadowReviewItem>,
+    pub next_offset: Option<u32>,
+    pub policy_version: Option<String>,
+    pub summary: ShadowReviewSummary,
+}
+
+struct ShadowRow {
+    asset_id: String,
+    content_hash: String,
+    target_id: String,
+    knn3: Option<f64>,
+    verdict: String,
+    native_outcome: String,
+    scored_at: String,
+    origin: String,
+}
+
+/// Rows of the newest policy version with a reviewable verdict, or `None`
+/// when the cache does not exist. The cache is opened read-only.
+fn shadow_rows(root: &Path) -> Result<Option<(String, Vec<ShadowRow>)>> {
+    let mut path = root.to_path_buf();
+    for part in [".cache", "characters", "s36_shadow.sqlite"] {
+        path.push(part);
+        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(Error::Invalid("Shadow cache must not contain symlinks"));
+        }
+    }
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let c = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    c.busy_timeout(std::time::Duration::from_millis(100))?;
+    let has_table: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='scores')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !has_table {
+        return Ok(None);
+    }
+    let origin = if super::character_shadow::cache_has_origin(&c)? {
+        "origin"
+    } else {
+        "'live'"
+    };
+    let Some(version) = c
+        .query_row(
+            "SELECT policy_version FROM scores GROUP BY policy_version ORDER BY MAX(scored_at) DESC, policy_version DESC LIMIT 1",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let mut rows = c
+        .prepare(&format!(
+            "SELECT asset_id,content_hash,target_id,knn3,verdict,native_outcome,scored_at,{origin} FROM scores
+             WHERE policy_version=?1 AND verdict IN ('automatic','recommended')"
+        ))?
+        .query_map([&version], |r| {
+            Ok(ShadowRow {
+                asset_id: r.get(0)?,
+                content_hash: r.get(1)?,
+                target_id: r.get(2)?,
+                knn3: r.get(3)?,
+                verdict: r.get(4)?,
+                native_outcome: r.get(5)?,
+                scored_at: r.get(6)?,
+                origin: r.get(7)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if rows
+        .iter()
+        .any(|row| !matches!(row.origin.as_str(), "live" | "backfill"))
+    {
+        return Err(Error::Invalid("Unknown S36 shadow origin"));
+    }
+    use sha2::{Digest, Sha256};
+    rows.sort_by_cached_key(|row| {
+        (
+            row.verdict != "automatic",
+            Sha256::digest(format!("{}|{}|{}", version, row.asset_id, row.target_id)).to_vec(),
+            row.asset_id.clone(),
+            row.target_id.clone(),
+        )
+    });
+    Ok(Some((version, rows)))
+}
+
+struct TargetInfo {
+    name: String,
+    enabled: bool,
+    fingerprint: String,
+    reference_asset_ids: Vec<String>,
+}
+
+impl Library {
+    pub fn character_shadow_review_page(
+        &self,
+        query: ShadowReviewQuery,
+    ) -> Result<ShadowReviewPage> {
+        if query.limit == 0 || query.limit > MAX_PAGE {
+            return Err(Error::Invalid("한 번에 1~200개 항목을 불러올 수 있습니다."));
+        }
+        let mut page = ShadowReviewPage {
+            items: Vec::new(),
+            next_offset: None,
+            policy_version: None,
+            summary: ShadowReviewSummary::default(),
+        };
+        let Some((version, rows)) = shadow_rows(&self.root)? else {
+            return Ok(page);
+        };
+        page.policy_version = Some(version);
+        let c = self.connection()?;
+        let mut targets: BTreeMap<String, Option<TargetInfo>> = BTreeMap::new();
+        let mut asset_statement = c.prepare(
+            "SELECT original_name,width,height FROM assets
+             WHERE id=?1 AND content_hash=?2 AND status='normal' AND media_kind='image'",
+        )?;
+        let mut decision_statement = c.prepare(
+            "SELECT decision,created_at FROM character_decisions
+             WHERE target_id=?1 AND source_asset_id=?2 AND origin='manual'
+             ORDER BY sequence DESC LIMIT 1",
+        )?;
+        let mut pending_seen = 0u32;
+        for row in rows {
+            let origin_tiers = page
+                .summary
+                .by_origin
+                .get_mut(&row.origin)
+                .ok_or(Error::Stale)?;
+            let origin_counts = if row.verdict == "automatic" {
+                &mut origin_tiers.automatic
+            } else {
+                &mut origin_tiers.recommended
+            };
+            let counts = match row.verdict.as_str() {
+                "automatic" => &mut page.summary.automatic,
+                _ => &mut page.summary.recommended,
+            };
+            let decision: Option<(String, String)> = decision_statement
+                .query_row(params![row.target_id, row.asset_id], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .optional()?;
+            match decision.as_ref().map(|(d, at)| (d.as_str(), at.as_str())) {
+                Some(("cleared", _)) | None => {}
+                Some((decision, at)) => {
+                    if at > row.scored_at.as_str() {
+                        if decision == "accepted" {
+                            counts.accepted += 1;
+                            origin_counts.accepted += 1;
+                        } else {
+                            counts.rejected += 1;
+                            origin_counts.rejected += 1;
+                        }
+                    }
+                    continue;
+                }
+            }
+            let asset: Option<(String, i64, i64)> = asset_statement
+                .query_row(params![row.asset_id, row.content_hash], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+                .optional()?;
+            let Some((original_name, width, height)) = asset else {
+                continue;
+            };
+            let target = match targets.entry(row.target_id.clone()) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let info = match self.read_character_target(&c, &row.target_id) {
+                        Ok(target) => Some(TargetInfo {
+                            name: target.display_name.clone(),
+                            enabled: target.enabled,
+                            fingerprint: target.fingerprint.clone(),
+                            reference_asset_ids: target
+                                .usable_references()
+                                .filter_map(|r| r.asset_id.clone())
+                                .collect(),
+                        }),
+                        Err(Error::NotFound) => None,
+                        Err(error) => return Err(error),
+                    };
+                    entry.insert(info)
+                }
+            };
+            let Some(target) = target.as_ref().filter(|t| t.enabled) else {
+                continue;
+            };
+            counts.pending += 1;
+            origin_counts.pending += 1;
+            pending_seen += 1;
+            if pending_seen <= query.offset {
+                continue;
+            }
+            if page.items.len() as u32 >= query.limit {
+                if page.next_offset.is_none() {
+                    page.next_offset = Some(query.offset + query.limit);
+                }
+                continue;
+            }
+            page.items.push(ShadowReviewItem {
+                asset_id: row.asset_id,
+                content_hash: row.content_hash,
+                original_name,
+                width: u32::try_from(width).unwrap_or(0),
+                height: u32::try_from(height).unwrap_or(0),
+                target_id: row.target_id,
+                target_name: target.name.clone(),
+                target_fingerprint: target.fingerprint.clone(),
+                reference_asset_ids: target.reference_asset_ids.iter().take(4).cloned().collect(),
+                verdict: row.verdict,
+                origin: row.origin,
+                knn3: row.knn3,
+                native_outcome: row.native_outcome,
+                scored_at: row.scored_at,
+            });
+        }
+        Ok(page)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::characters::{tests::Fixture, DecisionKind, DecisionRequest, Target};
+    use super::*;
+
+    fn insert(root: &Path, rows: &[(&str, &str, &str, f64, &str, &str, &str)]) {
+        super::super::character_shadow::Cache::open(root).unwrap();
+        let c = Connection::open(root.join(".cache/characters/s36_shadow.sqlite")).unwrap();
+        for (asset, target, verdict, knn3, version, outcome, scored_at) in rows {
+            c.execute(
+                "INSERT OR REPLACE INTO scores(asset_id,content_hash,target_id,knn3,verdict,policy_version,feature_id,native_outcome,native_at,scored_at,prior_manual_rejections)
+                 VALUES(?1,?2,?3,?4,?5,?6,'feature',?7,?8,?8,100)",
+                params![asset, content_hash(asset), target, knn3, verdict, version, outcome, scored_at],
+            )
+            .unwrap();
+        }
+    }
+
+    fn content_hash(asset: &str) -> String {
+        use sha2::Digest;
+        sha2::Sha256::digest(asset.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// One more series-level image so two pending pairs can be judged manually.
+    fn series_asset(f: &Fixture, id: &str) {
+        let original = format!("assets/{id}.png");
+        let thumbnail = format!("thumbnails/{id}.webp");
+        std::fs::write(f.temp.path().join(&original), id.as_bytes()).unwrap();
+        std::fs::write(f.temp.path().join(&thumbnail), id.as_bytes()).unwrap();
+        let c = f.library.connection().unwrap();
+        c.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status)
+            VALUES(?1,?2,'image',?1,?3,?4,7,3,2,'2026-09-08','normal')", params![id, content_hash(id), original, thumbnail]).unwrap();
+        c.execute(
+            "INSERT INTO asset_classifications VALUES(?1,?2)",
+            params![id, f.series],
+        )
+        .unwrap();
+    }
+
+    fn decide(f: &Fixture, target: &Target, asset: &str, decision: DecisionKind) {
+        f.library
+            .record_character_decisions(DecisionRequest {
+                target_id: target.id.clone(),
+                expected_fingerprint: target.fingerprint.clone(),
+                asset_ids: vec![asset.into()],
+                decision,
+                baseline_fingerprint: None,
+                scan_id: None,
+            })
+            .unwrap();
+    }
+
+    fn page(f: &Fixture, offset: u32, limit: u32) -> ShadowReviewPage {
+        f.library
+            .character_shadow_review_page(ShadowReviewQuery { offset, limit })
+            .unwrap()
+    }
+
+    #[test]
+    fn character_shadow_review_missing_cache_is_empty() {
+        let f = Fixture::new();
+        let page = page(&f, 0, 50);
+        assert!(page.items.is_empty());
+        assert_eq!(page.policy_version, None);
+        assert_eq!(page.summary, ShadowReviewSummary::default());
+        assert!(!f
+            .temp
+            .path()
+            .join(".cache/characters/s36_shadow.sqlite")
+            .exists());
+        assert!(f
+            .library
+            .character_shadow_review_page(ShadowReviewQuery {
+                offset: 0,
+                limit: 0
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn character_shadow_review_filters_orders_and_counts() {
+        let f = Fixture::new();
+        let target = f.ready("Shadow");
+        let other = f.ready("Other");
+        let disabled = f.ready("Disabled");
+        f.library
+            .save_character_target(super::super::characters::TargetDraft {
+                id: Some(disabled.id.clone()),
+                expected_revision: Some(disabled.revision),
+                series_classification_id: disabled.series_classification_id.clone(),
+                linked_classification_id: disabled.linked_classification_id.clone(),
+                display_name: disabled.display_name.clone(),
+                description: String::new(),
+                thumbnail_asset_id: None,
+                enabled: false,
+            })
+            .unwrap();
+        let root = f.temp.path();
+        series_asset(&f, "asset-8");
+        insert(
+            root,
+            &[
+                (
+                    "asset-5",
+                    &target.id,
+                    "recommended",
+                    0.14,
+                    "v1",
+                    "recommended",
+                    "2026-09-23T01:00:00Z",
+                ),
+                (
+                    "asset-8",
+                    &target.id,
+                    "automatic",
+                    0.12,
+                    "v1",
+                    "none",
+                    "2026-09-23T01:00:00Z",
+                ),
+                (
+                    "asset-5",
+                    &other.id,
+                    "automatic",
+                    0.10,
+                    "v1",
+                    "accepted_automatic",
+                    "2026-09-23T01:00:00Z",
+                ),
+                (
+                    "asset-6",
+                    &other.id,
+                    "none",
+                    0.30,
+                    "v1",
+                    "none",
+                    "2026-09-23T01:00:00Z",
+                ),
+                (
+                    "asset-5",
+                    &disabled.id,
+                    "automatic",
+                    0.05,
+                    "v1",
+                    "none",
+                    "2026-09-23T01:00:00Z",
+                ),
+                (
+                    "asset-6",
+                    "missing-target",
+                    "automatic",
+                    0.05,
+                    "v1",
+                    "none",
+                    "2026-09-23T01:00:00Z",
+                ),
+                (
+                    "asset-7",
+                    &target.id,
+                    "automatic",
+                    0.05,
+                    "v1",
+                    "none",
+                    "2026-09-23T01:00:00Z",
+                ),
+                (
+                    "asset-0",
+                    &target.id,
+                    "automatic",
+                    0.01,
+                    "v0",
+                    "none",
+                    "2026-09-22T00:00:00Z",
+                ),
+            ],
+        );
+        // asset-7 does not exist; the other target's asset-5 row gets a stale hash.
+        let c = Connection::open(root.join(".cache/characters/s36_shadow.sqlite")).unwrap();
+        c.execute(
+            "UPDATE scores SET content_hash='f' WHERE asset_id='asset-5' AND target_id=?1",
+            [&other.id],
+        )
+        .unwrap();
+        drop(c);
+
+        let first = page(&f, 0, 50);
+        assert_eq!(first.policy_version.as_deref(), Some("v1"));
+        let pairs: Vec<(&str, &str, &str)> = first
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    i.asset_id.as_str(),
+                    i.target_id.as_str(),
+                    i.verdict.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("asset-8", target.id.as_str(), "automatic"),
+                ("asset-5", target.id.as_str(), "recommended"),
+            ]
+        );
+        assert_eq!(first.items[0].target_name, "Shadow");
+        assert_eq!(first.items[0].target_fingerprint, target.fingerprint);
+        assert_eq!(first.items[0].reference_asset_ids.len(), 4);
+        assert_eq!(first.items[0].knn3, Some(0.12));
+        assert_eq!(first.items[0].native_outcome, "none");
+        assert_eq!(first.items[0].original_name, "asset-8");
+        assert_eq!((first.items[0].width, first.items[0].height), (3, 2));
+        assert_eq!(first.next_offset, None);
+        assert_eq!(
+            first.summary.automatic,
+            VerdictCounts {
+                pending: 1,
+                accepted: 0,
+                rejected: 0
+            }
+        );
+        assert_eq!(
+            first.summary.recommended,
+            VerdictCounts {
+                pending: 1,
+                accepted: 0,
+                rejected: 0
+            }
+        );
+
+        // Pagination by offset over the pending list.
+        let second = page(&f, 0, 1);
+        assert_eq!(second.items.len(), 1);
+        assert_eq!(second.items[0].asset_id, "asset-8");
+        assert_eq!(second.next_offset, Some(1));
+        assert_eq!(second.summary.automatic.pending, 1);
+        let third = page(&f, 1, 1);
+        assert_eq!(third.items[0].asset_id, "asset-5");
+        assert_eq!(third.next_offset, None);
+
+        // A manual decision after scoring removes the pair and counts as reviewed.
+        decide(&f, &target, "asset-8", DecisionKind::Accepted);
+        decide(&f, &target, "asset-5", DecisionKind::Rejected);
+        let reviewed = page(&f, 0, 50);
+        assert!(reviewed.items.is_empty());
+        assert_eq!(
+            reviewed.summary.automatic,
+            VerdictCounts {
+                pending: 0,
+                accepted: 1,
+                rejected: 0
+            }
+        );
+        assert_eq!(
+            reviewed.summary.recommended,
+            VerdictCounts {
+                pending: 0,
+                accepted: 0,
+                rejected: 1
+            }
+        );
+
+        // Clearing the decision returns the pair to the queue.
+        decide(&f, &target, "asset-5", DecisionKind::Cleared);
+        let cleared = page(&f, 0, 50);
+        assert_eq!(cleared.items.len(), 1);
+        assert_eq!(cleared.items[0].asset_id, "asset-5");
+        assert_eq!(
+            cleared.summary.recommended,
+            VerdictCounts {
+                pending: 1,
+                accepted: 0,
+                rejected: 0
+            }
+        );
+
+        // A decision made before the shadow row was scored neither pends nor counts.
+        let c = Connection::open(root.join(".cache/characters/s36_shadow.sqlite")).unwrap();
+        c.execute(
+            "UPDATE scores SET scored_at='2099-01-01T00:00:00Z' WHERE asset_id='asset-8' AND target_id=?1",
+            [&target.id],
+        )
+        .unwrap();
+        drop(c);
+        let earlier = page(&f, 0, 50);
+        assert_eq!(earlier.summary.automatic, VerdictCounts::default());
+    }
+    #[test]
+    fn character_shadow_review_stable_shuffle_pages_and_origin_counts() {
+        use sha2::{Digest, Sha256};
+        let f = Fixture::new();
+        let target = f.ready("Shuffle");
+        for i in 8..20 {
+            let id = format!("asset-{i}");
+            series_asset(&f, &id);
+            insert(
+                f.temp.path(),
+                &[(
+                    &id,
+                    &target.id,
+                    if i < 17 { "automatic" } else { "recommended" },
+                    i as f64 / 100.0,
+                    "v1",
+                    "none",
+                    "2020-01-01T00:00:00Z",
+                )],
+            );
+        }
+        let cache =
+            Connection::open(f.temp.path().join(".cache/characters/s36_shadow.sqlite")).unwrap();
+        cache
+            .execute(
+                "UPDATE scores SET origin='backfill' WHERE asset_id IN ('asset-8','asset-18')",
+                [],
+            )
+            .unwrap();
+        let full = page(&f, 0, 50);
+        let mut expected = (8..20).map(|i| format!("asset-{i}")).collect::<Vec<_>>();
+        expected.sort_by_key(|id| {
+            (
+                id[6..].parse::<u32>().unwrap() >= 17,
+                Sha256::digest(format!("v1|{id}|{}", target.id)).to_vec(),
+            )
+        });
+        assert_eq!(
+            full.items
+                .iter()
+                .map(|i| i.asset_id.clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let parts = (0..4)
+            .flat_map(|i| page(&f, i * 3, 3).items.into_iter().map(|row| row.asset_id))
+            .collect::<Vec<_>>();
+        assert_eq!(parts, expected);
+        // Scores changing within their tier cannot change the review order.
+        cache.execute("UPDATE scores SET knn3=1-knn3", []).unwrap();
+        assert_eq!(
+            page(&f, 0, 50)
+                .items
+                .iter()
+                .map(|i| i.asset_id.clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(full.summary.by_origin["backfill"].automatic.pending, 1);
+        assert_eq!(full.summary.by_origin["live"].automatic.pending, 8);
+        decide(&f, &target, "asset-8", DecisionKind::Accepted);
+        decide(&f, &target, "asset-18", DecisionKind::Rejected);
+        let reviewed = page(&f, 0, 50);
+        assert_eq!(reviewed.summary.by_origin["backfill"].automatic.accepted, 1);
+        assert_eq!(
+            reviewed.summary.by_origin["backfill"].recommended.rejected,
+            1
+        );
+        assert_eq!(reviewed.summary.by_origin["live"].automatic.accepted, 0);
+    }
+    #[test]
+    fn character_shadow_review_legacy_origin_is_live_without_migration() {
+        let f = Fixture::new();
+        let target = f.ready("Legacy");
+        insert(
+            f.temp.path(),
+            &[(
+                "asset-5",
+                &target.id,
+                "automatic",
+                0.1,
+                "v1",
+                "none",
+                "2020-01-01T00:00:00Z",
+            )],
+        );
+        let cache =
+            Connection::open(f.temp.path().join(".cache/characters/s36_shadow.sqlite")).unwrap();
+        cache
+            .execute_batch("ALTER TABLE scores DROP COLUMN origin; PRAGMA user_version=0;")
+            .unwrap();
+        let page = page(&f, 0, 50);
+        assert_eq!(page.items[0].origin, "live");
+        assert_eq!(page.summary.by_origin["live"].automatic.pending, 1);
+        assert!(!super::super::character_shadow::cache_has_origin(&cache).unwrap());
+    }
+}

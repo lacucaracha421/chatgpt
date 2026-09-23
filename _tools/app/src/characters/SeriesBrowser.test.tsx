@@ -687,3 +687,17 @@ it("skips region inspection entirely when the host does not expose it", async ()
   expect(within(panel).queryByRole("region", { name: "인물 영역 확인" })).not.toBeInTheDocument();
   expect(mounted.api.inspectReferenceRegions).toBeUndefined();
 });
+
+it("opens the S36 review from the series gallery heading", async () => {
+  const { shadowReviewApi, emptyShadowSummary } = await import("./shadowReviewApi");
+  vi.spyOn(shadowReviewApi, "status").mockResolvedValue({ running: false, preparing: false, total: 0, scored: 0, skipped: 0, cancelled: false, error: null });
+  const page = vi.spyOn(shadowReviewApi, "page").mockResolvedValue({ items: [], nextOffset: null, policyVersion: null, summary: emptyShadowSummary() });
+  await mount(undefined);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "S36 확인" }));
+  const dialog = await screen.findByRole("dialog", { name: "S36 확인" });
+  expect(await within(dialog).findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
+  expect(page).toHaveBeenCalledWith({ offset: 0, limit: 40 });
+  await user.click(within(dialog).getByRole("button", { name: "S36 확인 닫기" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "S36 확인" })).not.toBeInTheDocument());
+});

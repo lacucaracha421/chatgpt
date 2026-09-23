@@ -92,6 +92,12 @@ pub(super) struct Engine {
     training: Option<AugmentationTraining>,
     shadow: std::collections::VecDeque<super::character_shadow::Pending>,
 }
+#[cfg(test)]
+impl Engine {
+    pub(super) fn shadow_fixture(config: RuntimeConfig) -> Self {
+        Self { running: true, config: Some(config), ..Self::default() }
+    }
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveWork {
@@ -169,12 +175,14 @@ impl Library {
             }
             let next = engine.next_config.take();
             drop(engine);
+            library.character_shadow_backfill_cancel();
             if let Some(config) = next {
                 library.start_character_incremental(config);
             }
         });
     }
     pub(crate) fn stop_character_incremental(&self) {
+        self.character_shadow_backfill_cancel();
         let mut engine = self
             .character_incremental
             .lock()
@@ -183,6 +191,14 @@ impl Library {
         engine.stop.store(true, Ordering::Release);
         engine.prepared_references = None;
         engine.training = None;
+    }
+    pub(super) fn character_shadow_backfill_available(&self) -> Result<()> {
+        let engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !engine.running || engine.stop.load(Ordering::Acquire)
+            || !engine.config.as_ref().is_some_and(|config| config.shadow_model.is_some()) {
+            return Err(Error::Invalid("분석 환경과 S36 시험 채점을 켠 뒤 다시 시도해 주세요."));
+        }
+        Ok(())
     }
     pub fn character_incremental_status(&self) -> Result<Status> {
         let (running, work_active, persistent_error, mut active_work) = {
@@ -264,7 +280,8 @@ impl Library {
                     {
                         return Ok(true);
                     }
-                    return Ok(self.advance_character_shadow(&config, stop.clone()));
+                    if self.advance_character_shadow(&config, stop.clone()) { return Ok(true); }
+                    return Ok(self.advance_character_shadow_backfill(&config, stop.clone()));
                 };
                 if self.supersede_invalid_reference_refresh_job(&job)? {
                     return Ok(true);

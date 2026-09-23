@@ -300,6 +300,42 @@ pub async fn character_review_pending_map(
         .map_err(Into::into)
 }
 
+#[tauri::command]
+pub async fn character_shadow_backfill_start(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_shadow_backfill::Status, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_shadow_backfill_start())
+        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn character_shadow_backfill_status(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_shadow_backfill::Status, CommandError> {
+    Ok(current_required(state)?.character_shadow_backfill_status())
+}
+
+#[tauri::command]
+pub fn character_shadow_backfill_cancel(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_shadow_backfill::Status, CommandError> {
+    Ok(current_required(state)?.character_shadow_backfill_cancel())
+}
+
+/// Read-only feed for the S36 review screen; judgments use `record_character_decisions`.
+#[tauri::command]
+pub async fn character_shadow_review_page(
+    query: crate::library::character_shadow_review::ShadowReviewQuery,
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_shadow_review::ShadowReviewPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_shadow_review_page(query))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
 impl From<Error> for CommandError {
     fn from(error: Error) -> Self {
         let code = match &error {
