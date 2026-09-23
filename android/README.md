@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.6.9 (25)**, declared in [AndroidManifest.xml](AndroidManifest.xml). The subtle tab fade and portrait character-folder strip/collapse improvements are installed in place on Galaxy Tab S11 with the existing installation certificate. The user confirmed checking the update; no specific exhaustive device acceptance or frame-level latency measurement is inferred from that confirmation. Manual character exclusion is deployed and activated; a user-submitted Galaxy Tab correction was verified through server reflection and Linux PC acknowledgement. See the delivery checkpoints below.
+Current source and installed version: **0.6.10 (26)**, declared in [AndroidManifest.xml](AndroidManifest.xml). Native media-ticket scheduling optimizations are installed in place on Galaxy Tab S11 with the existing certificate. Installed APK hash and startup were verified; device performance was not measured. The matching server optimizations were deployed and HTTP-smoke-verified on 2026-09-23; see `docs/agents/cloud-capture.md`. Manual character exclusion remains deployed and activated; see the delivery checkpoints below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,76 @@ Current source version: **0.6.9 (25)**, declared in [AndroidManifest.xml](Androi
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.6.10 — Media-ticket optimization, installed (2026-09-23)
+
+Current source, built APK and Galaxy Tab S11 installation are **0.6.10 (26)**.
+The native scheduling change is independent of the server optimizations, which were
+subsequently deployed on 2026-09-23.
+
+- Packages the existing `MediaRepository` / `TicketBatcher` optimization changes
+  described below; no native implementation or build-script changes were made
+  during release preparation. Settings and its version assertion now say 0.6.10.
+- From `_tools/app/`, the version-targeted check passed (1 test, 7 intentionally
+  skipped), followed by the mobile TypeScript/Vite build:
+
+  ```sh
+  npm run mobile:test -- mobile-client/Settings.test.tsx -t 'reports the declared Android source version rather than a stale literal'
+  npm run mobile:build
+  ```
+
+- From the repository root, the existing builder completed with the existing
+  JDK 17, SDK 35 and unchanged ignored `android/build/debug.keystore`:
+
+  ```sh
+  python3 android/build.py --sdk-root /home/laku/.local/lakomics-android-tools/android-sdk --java-home /home/laku/.local/lakomics-android-tools/jdk17
+  ```
+
+  All builder JVM checks passed, including the previously verified 605 assertions
+  across TicketBatcher, MediaTransfer, ThumbnailCache and NetworkPolicy. Native
+  compilation passed; existing Java 8 bootstrap-classpath/deprecated-API warnings
+  remain. The Windows builder was not run.
+- APK: `android/build/lakomics-mobile-0.6.10-release.apk`, **1,254,820 bytes**.
+  SHA-256: `32c4f8516a4f2655ccbf2d39b90879046905c09b95242d4640b0fa4df5fea3e2`.
+- Packaged manifest verified: `com.lakomics.mobile`, version 0.6.10 (26), min SDK 26,
+  target/compile SDK 35 and `debuggable=false`. ZIP alignment and v2/v3 signatures
+  passed; all 12 bundled assets byte-match `android/assets`, with portable ZIP paths.
+- The single signer matches the existing 0.6.9 APK. Certificate SHA-256:
+  `8e7bd2ce6cfc8b19c9d9aa9e86050a41f8a7d2a51d318d3f3f65eb57e2e5f4f7`.
+  This remains the existing personal-install development certificate, not a new
+  store-distribution signing identity.
+- Authorized `adb install -r` on Galaxy Tab S11 (`SM-X730`,
+  `100.118.150.55:39093`) succeeded. Version is 0.6.10 (26), first installation
+  remains `2026-09-08 17:56:50`, and the installed base APK hash matches the artifact.
+  Cold activity launch returned `Status: ok` (369 ms activity launch, not media
+  latency); the process remained running and the sampled AndroidRuntime error log
+  was empty. No uninstall, app-data reset, cache clear or provider-setting change
+  occurred. Media rendering/performance and Picker/SAF acceptance were not measured.
+- The initial server SSH check awaited Tailscale authentication. After the user
+  authenticated, the server rollout completed with 371 isolated tests and live
+  read/ticket/download/authentication checks. API/proxy recovery and backup evidence
+  are recorded in `docs/agents/cloud-capture.md`. No further device interaction was
+  needed for the server rollout. Command output is in the task transcript.
+
+## Media ticket scheduling — shipped in 0.6.10 (2026-09-23)
+
+The implementation checks below preceded the release build and installation above.
+
+- Asset tickets share in-flight requests by account/cache generation, asset and
+  variant. Canceled queued consumers are removed before dispatch; one consumer's
+  cancellation cannot cancel another consumer's shared HTTP request.
+- Cacheable browser images take the existing per-file fill lock before requesting
+  a ticket, so overlapping callers recheck the completed disk cache first. Completed
+  or failed tickets are not retained; a transfer retry gets a fresh ticket.
+- The 12 ms batching window, 50-item batches, single ticket worker and four-download
+  limit remain. Pending ticket entries and consumers are bounded to 128. Connection
+  replacement/cache clear invalidates pending tickets and cancels shared HTTP.
+- JVM checks passed: TicketBatcher 192, MediaTransfer 22, ThumbnailCache 19 and
+  NetworkPolicy 372 assertions. All native Java sources compiled against SDK 35;
+  existing Java 8 bootstrap/deprecated-API warnings remain. Both platform builders
+  register the new test, but the Windows builder was not executed.
+- No live media-performance measurement was performed. Catalog/Collection-specific
+  artwork ticket paths remain separate from Asset batch scheduling.
 
 ## 0.6.9 — Subtle tab fade and collapsible character strip (2026-09-23)
 

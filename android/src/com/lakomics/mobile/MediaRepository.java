@@ -27,7 +27,7 @@ final class MediaRepository {
  private final Set<CancellationSignal> active=ConcurrentHashMap.newKeySet();
  private final Map<String,LockEntry> locks=new HashMap<>();
  private static final class LockEntry{final ReentrantLock lock=new ReentrantLock();int users;}
- private static final class Scope{String key;long generation;}
+ private static final class Scope{String key,ticketGroup;long generation;JSONObject connection;}
  private MediaRepository(Context context)throws IOException{
   settings=new SecureSettings(context);client=new CloudClient(settings);
   cache=new ThumbnailCache(new File(context.getCacheDir(),"thumbnail-media"));
@@ -42,34 +42,38 @@ final class MediaRepository {
  private Scope scopedIdentity(String value)throws Exception{
   synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
    JSONObject connection=settings.read();if(!connection.has("token"))throw new IllegalStateException();
-   Scope scope=new Scope();String identity=connection.getString("endpoint")+"\n"+connection.getString("token")+"\n"+value;
-   scope.key=ThumbnailCache.key(identity);scope.generation=cache.generation();return scope;
+   Scope scope=new Scope();String account=connection.getString("endpoint")+"\n"+connection.getString("token");
+   scope.key=ThumbnailCache.key(account+"\n"+value);scope.generation=cache.generation();scope.connection=connection;
+   // Every connection replacement clears the cache, including same-credential reconfiguration.
+   scope.ticketGroup=scope.generation+"/"+ThumbnailCache.key(account);return scope;
   }
  }
  JSONObject status()throws Exception{long[] s=cache.status();return new JSONObject().put("bytes",s[0]).put("count",s[1]).put("limit",s[2]);}
- void clear()throws IOException{for(CancellationSignal signal:active)signal.cancel();cache.clear();}
+ void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache.clear();}finally{tickets.clear();}}}
  InputStream stream(String key,long generation)throws IOException{return cache.open(key,generation);}
- private static final class TicketWaiter {String id,variant;JSONObject connection;CompletableFuture<JSONObject> result=new CompletableFuture<>();}
- private final List<TicketWaiter> ticketQueue=new ArrayList<>();
  private final ScheduledExecutorService ticketWorker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
- private JSONObject ticket(String id,String variant,CancellationSignal signal)throws Exception{
-  TicketWaiter waiter=new TicketWaiter();waiter.id=id;waiter.variant=variant;waiter.connection=settings.read();
-  synchronized(ticketQueue){ticketQueue.add(waiter);if(ticketQueue.size()==1)ticketWorker.schedule(this::flushTickets,12,TimeUnit.MILLISECONDS);}
-  while(true){if(signal!=null)signal.throwIfCanceled();try{return waiter.result.get(100,TimeUnit.MILLISECONDS);}catch(TimeoutException ignored){}catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IOException("Media ticket unavailable");}}
+ private final TicketBatcher<Scope,JSONObject> tickets=new TicketBatcher<>(ticketWorker,this::fetchTickets);
+ private JSONObject ticket(String id,String variant,Scope scope,CancellationSignal signal)throws Exception{
+  try{
+   TicketBatcher<Scope,JSONObject>.Waiter waiter;
+   synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
+    if(scope.generation!=cache.generation())throw new IOException("Cache invalidated");
+    waiter=tickets.submit(scope.ticketGroup,scope,id,variant,()->signal!=null&&signal.isCanceled() || scope.generation!=cache.generation());
+   }
+   return waiter.await();
+  }catch(CancellationException canceled){if(signal!=null)signal.throwIfCanceled();throw new IOException("Cache invalidated");}
  }
- private void flushTickets(){
-  List<TicketWaiter> batch=new ArrayList<>();synchronized(ticketQueue){batch.addAll(ticketQueue);ticketQueue.clear();}
-  // Configuration can change during the short batching window. Never mix account credentials.
-  Map<String,List<TicketWaiter>> groups=new LinkedHashMap<>();
-  for(TicketWaiter waiter:batch)groups.computeIfAbsent(waiter.connection.toString(),key->new ArrayList<>()).add(waiter);
-  for(List<TicketWaiter> group:groups.values())for(int start=0;start<group.size();start+=50){
-   List<TicketWaiter> part=group.subList(start,Math.min(start+50,group.size()));
-   try{
-    JSONArray requests=new JSONArray();for(TicketWaiter waiter:part)requests.put(new JSONObject().put("asset_id",waiter.id).put("variant",waiter.variant));
-    JSONArray results=client.apiFor(part.get(0).connection,"/v1/library/media-tickets","POST",new JSONObject().put("items",requests),new CancellationSignal()).getJSONArray("items");
-    for(TicketWaiter waiter:part){JSONObject match=null;for(int i=0;i<results.length();i++){JSONObject result=results.getJSONObject(i);if(result.optString("asset_id").equals(waiter.id)&&result.optString("variant").equals(waiter.variant)){match=result;break;}}if(match!=null&&match.optBoolean("ok"))waiter.result.complete(match);else waiter.result.completeExceptionally(new IOException("Media unavailable"));}
-   }catch(Exception failure){for(TicketWaiter waiter:part)waiter.result.completeExceptionally(failure);}
-  }
+ private List<JSONObject> fetchTickets(Scope scope,List<TicketBatcher.Item> items)throws Exception{
+  // Only account/cache invalidation cancels shared HTTP, never one consumer leaving.
+  CancellationSignal signal=new CancellationSignal();
+  synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){if(scope.generation!=cache.generation())throw new IOException("Cache invalidated");active.add(signal);}
+  try{
+   JSONArray requests=new JSONArray();for(TicketBatcher.Item item:items)requests.put(new JSONObject().put("asset_id",item.id).put("variant",item.variant));
+   JSONArray results=client.apiFor(scope.connection,"/v1/library/media-tickets","POST",new JSONObject().put("items",requests),signal).getJSONArray("items");
+   List<JSONObject> matches=new ArrayList<>();
+   for(TicketBatcher.Item item:items){JSONObject match=null;for(int i=0;i<results.length();i++){JSONObject result=results.getJSONObject(i);if(result.optString("asset_id").equals(item.id)&&result.optString("variant").equals(item.variant)){if(result.optBoolean("ok"))match=result;break;}}matches.add(match);}
+   return matches;
+  }finally{active.remove(signal);}
  }
  static boolean imageMime(String mime){return mime!=null && mime.matches("image/(jpeg|png|webp|gif|avif|heic|heif|bmp)");}
  private JSONObject local(Scope scope,String mime)throws Exception{
@@ -79,13 +83,20 @@ final class MediaRepository {
   return new JSONObject().put("url","https://app.lakomics.local/media-cache/"+scope.generation+"/"+scope.key+"?mime="+Uri.encode(mime)).put("expires_in",240);
  }
  JSONObject browser(String id,String variant,String mime,CancellationSignal signal)throws Exception{
+  if(signal==null)signal=new CancellationSignal();signal.throwIfCanceled();
   Scope scope=scope(id,variant);
-  if(variant.equals("original") && !imageMime(mime))return ticket(id,variant,signal);
-  try{cache.file(scope.key,scope.generation);return local(scope,variant.equals("thumbnail")?"image/webp":mime);}catch(FileNotFoundException ignored){}
-  JSONObject first=ticket(id,variant,signal);
-  if(variant.equals("original") && (!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>MAX_VIEW_IMAGE))return first;
-  fill(id,variant,scope,signal,first);
-  return local(scope,variant.equals("thumbnail")?"image/webp":first.optString("content_type",mime));
+  if(variant.equals("original") && !imageMime(mime))return ticket(id,variant,scope,signal);
+  // Hold the existing reentrant fill lock before requesting a ticket: a caller
+  // arriving during another image's download must recheck the cache, not issue a ticket.
+  LockEntry entry=retainLock(scope.key);boolean locked=false;
+  try{
+   lock(entry,signal);locked=true;signal.throwIfCanceled();
+   try{cache.file(scope.key,scope.generation);return local(scope,variant.equals("thumbnail")?"image/webp":mime);}catch(FileNotFoundException ignored){}
+   JSONObject first=ticket(id,variant,scope,signal);
+   if(variant.equals("original") && (!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>MAX_VIEW_IMAGE))return first;
+   fill(id,variant,scope,signal,first);signal.throwIfCanceled();
+   return local(scope,variant.equals("thumbnail")?"image/webp":first.optString("content_type",mime));
+  }finally{releaseLock(scope.key,entry,locked);}
  }
  private static boolean retryable(Exception error){
   if(error instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)error).status;return status==408 || status==429 || status>=500 || status==403;}
@@ -93,14 +104,20 @@ final class MediaRepository {
  }
  private interface TicketSource {JSONObject read()throws Exception;}
  private void fill(String id,String variant,Scope scope,CancellationSignal signal,JSONObject first)throws Exception{
-  fillFrom(variant,scope,signal,first,()->ticket(id,variant,signal));
+  fillFrom(variant,scope,signal,first,()->ticket(id,variant,scope,signal));
  }
+ private LockEntry retainLock(String key){synchronized(locks){LockEntry entry=locks.get(key);if(entry==null){entry=new LockEntry();locks.put(key,entry);}entry.users++;return entry;}}
+ private void lock(LockEntry entry,CancellationSignal signal)throws Exception{
+  long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(180);
+  while(!entry.lock.tryLock(100,TimeUnit.MILLISECONDS)){signal.throwIfCanceled();if(System.nanoTime()>deadline)throw new IOException("Media busy");}
+ }
+ private void releaseLock(String key,LockEntry entry,boolean locked){if(locked)entry.lock.unlock();synchronized(locks){if(--entry.users==0)locks.remove(key);}}
  private void fillFrom(String variant,Scope scope,CancellationSignal signal,JSONObject first,TicketSource source)throws Exception{
-  LockEntry entry;synchronized(locks){entry=locks.get(scope.key);if(entry==null){entry=new LockEntry();locks.put(scope.key,entry);}entry.users++;}
+  LockEntry entry=retainLock(scope.key);
   boolean locked=false,permit=false;active.add(signal);
   try{
    long deadline=System.currentTimeMillis()+180000;
-   while(!(locked=entry.lock.tryLock(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}
+   lock(entry,signal);locked=true;
    signal.throwIfCanceled();
    try{cache.file(scope.key,scope.generation);return;}catch(FileNotFoundException ignored){}
    while(!(permit=transfers.tryAcquire(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}
@@ -116,7 +133,7 @@ final class MediaRepository {
      catch(Exception failure){signal.throwIfCanceled();if(attempt>=1 || !retryable(failure))throw failure;current=source.read();}
     }
    });
-  }finally{active.remove(signal);if(permit)transfers.release();if(locked)entry.lock.unlock();synchronized(locks){if(--entry.users==0)locks.remove(scope.key);}}
+  }finally{active.remove(signal);if(permit)transfers.release();releaseLock(scope.key,entry,locked);}
  }
  private String cachedImageMime(Scope scope)throws Exception{
   try(InputStream raw=cache.open(scope.key,scope.generation);BufferedInputStream input=new BufferedInputStream(raw)){

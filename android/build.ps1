@@ -33,6 +33,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.MediaTransferTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests (Join-Path $PSScriptRoot 'src/com/lakomics/mobile/TicketBatcher.java') (Join-Path $PSScriptRoot 'tests/TicketBatcherTest.java')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.TicketBatcherTest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.TemporaryImagePolicyTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.ClipboardPolicyTest

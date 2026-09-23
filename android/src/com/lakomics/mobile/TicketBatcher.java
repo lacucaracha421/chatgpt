@@ -1,0 +1,112 @@
+package com.lakomics.mobile;
+
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.BooleanSupplier;
+
+/** Account/generation-scoped, in-flight ticket sharing; completed tickets are not cached. */
+final class TicketBatcher<C,T> {
+ static final int MAX_PENDING=128, MAX_BATCH=50;
+ static final long DELAY_MILLIS=12;
+ static final class Item {
+  final String id,variant;
+  Item(String id,String variant){this.id=id;this.variant=variant;}
+ }
+ interface Transport<C,T> {List<T> fetch(C connection,List<Item> items)throws Exception;}
+ private final ScheduledExecutorService worker;
+ private final Transport<C,T> transport;
+ private final Map<String,Pending> pending=new LinkedHashMap<>();
+ private int consumers;
+ private boolean scheduled;
+ private final class Pending {
+  final String key,scope;
+  final C connection;
+  final Item item;
+  final List<Waiter> waiters=new ArrayList<>();
+  boolean dispatched;
+  Pending(String key,String scope,C connection,Item item){this.key=key;this.scope=scope;this.connection=connection;this.item=item;}
+ }
+ final class Waiter implements AutoCloseable {
+  private final Pending owner;
+  private final BooleanSupplier canceled;
+  private final CompletableFuture<T> result=new CompletableFuture<>();
+  private Waiter(Pending owner,BooleanSupplier canceled){this.owner=owner;this.canceled=canceled;}
+  T await()throws Exception{
+   try{
+    while(true){
+     if(canceled.getAsBoolean())throw new CancellationException();
+     try{T value=result.get(100,TimeUnit.MILLISECONDS);if(canceled.getAsBoolean())throw new CancellationException();return value;}
+     catch(TimeoutException ignored){}
+     catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IOException("Media ticket unavailable",cause);}
+    }
+   }finally{close();}
+  }
+  @Override public void close(){synchronized(TicketBatcher.this){detach(this);if(owner.waiters.isEmpty()&&!owner.dispatched)pending.remove(owner.key,owner);}}
+ }
+ TicketBatcher(ScheduledExecutorService worker,Transport<C,T> transport){this.worker=worker;this.transport=transport;}
+ synchronized Waiter submit(String scope,C connection,String id,String variant,BooleanSupplier canceled)throws IOException{
+  if(canceled.getAsBoolean())throw new CancellationException();
+  prune();
+  String key=scope+"\n"+id+"\n"+variant;
+  Pending entry=pending.get(key);
+  if(consumers>=MAX_PENDING || entry==null&&pending.size()>=MAX_PENDING)throw new IOException("Media tickets busy");
+  if(entry==null){entry=new Pending(key,scope,connection,new Item(id,variant));pending.put(key,entry);}
+  Waiter waiter=new Waiter(entry,canceled);entry.waiters.add(waiter);consumers++;
+  if(!scheduled){
+   scheduled=true;
+   try{worker.schedule(this::flush,DELAY_MILLIS,TimeUnit.MILLISECONDS);}
+   catch(RejectedExecutionException failure){scheduled=false;clear();throw new IOException("Media tickets unavailable",failure);}
+  }
+  return waiter;
+ }
+ private void detach(Waiter waiter){if(waiter.owner.waiters.remove(waiter)){consumers--;waiter.result.cancel(false);}}
+ private void prune(){
+  Iterator<Pending> entries=pending.values().iterator();
+  while(entries.hasNext()){
+   Pending entry=entries.next();
+   for(Waiter waiter:new ArrayList<>(entry.waiters))if(waiter.canceled.getAsBoolean())detach(waiter);
+   // Keep a dispatched key joinable until its HTTP response, even if all old callers left.
+   if(entry.waiters.isEmpty()&&!entry.dispatched)entries.remove();
+  }
+ }
+ synchronized void clear(){
+  for(Pending entry:pending.values())for(Waiter waiter:entry.waiters)waiter.result.completeExceptionally(new IOException("Media tickets invalidated"));
+  for(Pending entry:pending.values())entry.waiters.clear();
+  pending.clear();consumers=0;
+ }
+ private void flush(){
+  while(true){
+   List<Pending> batch=new ArrayList<>();
+   synchronized(this){
+    prune();
+    String scope=null;
+    for(Pending entry:pending.values())if(!entry.dispatched){
+     if(scope==null)scope=entry.scope;
+     if(scope.equals(entry.scope)){entry.dispatched=true;batch.add(entry);if(batch.size()==MAX_BATCH)break;}
+    }
+    if(batch.isEmpty()){scheduled=false;return;}
+   }
+   List<T> results=null;Exception failure=null;
+   try{
+    List<Item> items=new ArrayList<>();for(Pending entry:batch)items.add(entry.item);
+    results=transport.fetch(batch.get(0).connection,Collections.unmodifiableList(items));
+    if(results.size()!=batch.size())throw new IOException("Invalid media ticket response");
+   }catch(Exception error){failure=error;}
+   synchronized(this){
+    for(int i=0;i<batch.size();i++){
+     Pending entry=batch.get(i);
+     if(!pending.remove(entry.key,entry))continue;
+     T value=failure==null?results.get(i):null;
+     for(Waiter waiter:entry.waiters){
+      if(waiter.canceled.getAsBoolean())waiter.result.cancel(false);
+      else if(failure!=null)waiter.result.completeExceptionally(failure);
+      else if(value==null)waiter.result.completeExceptionally(new IOException("Media unavailable"));
+      else waiter.result.complete(value);
+     }
+     consumers-=entry.waiters.size();entry.waiters.clear();
+    }
+   }
+  }
+ }
+}
