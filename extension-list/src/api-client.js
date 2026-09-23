@@ -27,7 +27,7 @@
     const stored = await chrome.storage.local.get([CONNECTION_KEY]);
     const value = stored[CONNECTION_KEY];
     if (!value || !normalizeOrigin(value.origin) || typeof value.token !== "string" || value.token.length < 20) return null;
-    return { origin: normalizeOrigin(value.origin), token: value.token, clientId: value.clientId || null };
+    return { origin: normalizeOrigin(value.origin), token: value.token, clientId: value.clientId || null, pairedAt: Number(value.pairedAt) || 0 };
   }
 
   async function writeConnection(value) {
@@ -68,9 +68,9 @@
     if (!parsed) return { ok: false, code: "invalid_pairing" };
     const response = await rawRequest(parsed.origin, "/v1/extension/pair", { method: "POST", body: { secret: parsed.secret } });
     if (!response.ok || typeof response.data?.clientToken !== "string") {
-      return { ok: false, code: response.status === 410 ? "pairing_expired" : response.status === 0 ? response.code : "pairing_failed" };
+      return { ok: false, code: response.status === 410 ? "pairing_expired" : response.status === 0 ? response.code : "pairing_failed", httpStatus: response.status };
     }
-    const connection = { origin: normalizeOrigin(response.data.serverOrigin || parsed.origin), token: response.data.clientToken, clientId: response.data.clientId || null };
+    const connection = { origin: normalizeOrigin(response.data.serverOrigin || parsed.origin), token: response.data.clientToken, clientId: response.data.clientId || null, pairedAt: Date.now() };
     if (!connection.origin) return { ok: false, code: "pairing_failed" };
     await writeConnection(connection);
     return { ok: true, connection, bootstrap: { profile: response.data.profile, classifications: response.data.classifications } };

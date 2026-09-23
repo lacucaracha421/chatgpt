@@ -23,7 +23,7 @@ importScripts("classification-tree.js", "api-client.js", "profile-store.js", "sa
       case "settings:get": {
         const connection = await globalThis.LakomicsListApi.readConnection();
         const state = await globalThis.LakomicsProfileStore.readState();
-        return { ok: true, paired: Boolean(connection), origin: connection?.origin ?? null, clientId: connection?.clientId ?? null, state };
+        return { ok: true, paired: Boolean(connection), origin: connection?.origin ?? null, clientId: connection?.clientId ?? null, pairedAt: connection?.pairedAt ?? 0, state };
       }
       case "collector:state": {
         const result = await globalThis.LakomicsProfileStore.getState();

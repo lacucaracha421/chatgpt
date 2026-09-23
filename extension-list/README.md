@@ -190,7 +190,11 @@ In PC Lakomics, open Settings → Cloud → PC extension connection. This create
 copies a short-lived pairing link. Open the Lakomics extension icon in the PC
 browser, paste into Connection link, and press Connect. The PC panel also offers
 Copy link and Reissue if needed. Tablet QR connection remains a separate button.
-Both methods use the existing pairing endpoint and session/profile contract;
+The QR result page names the cause of a failure (expired or used link, server
+unreachable, extension not responding, server rejection with its HTTP status). If
+the worker saved a connection during this attempt but the page saw a failure (the
+page ran twice, so the one-time link was already used, or the reply was lost), the
+page shows 연결됨. Both methods use the existing pairing endpoint and session/profile contract;
 no server deployment, extra browser permission, or new credential type is needed.
 
 ## X recommendation gallery
