@@ -23,7 +23,7 @@ final class MediaRepository {
  private final SecureSettings settings;
  private final CloudClient client;
  private final ThumbnailCache cache;
- private final Semaphore transfers=new Semaphore(4,true);
+ private final Semaphore transfers=new Semaphore(8,true);
  private final Set<CancellationSignal> active=ConcurrentHashMap.newKeySet();
  private final Map<String,LockEntry> locks=new HashMap<>();
  private static final class LockEntry{final ReentrantLock lock=new ReentrantLock();int users;}

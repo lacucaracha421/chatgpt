@@ -53,27 +53,47 @@ export async function prepareAssets(items: Asset[], signal?: AbortSignal): Promi
   }, signal);
 }
 
-// Visible tiles share a small queue; scrolled-away work must not crowd native API workers.
+// Visible tiles share one queue. An uncached thumbnail costs a storage round trip of about
+// 1.5–2 s on the tablet (latency, not bytes), so throughput comes from parallel requests;
+// native still bounds real transfers separately. Prefetch uses only capacity visible
+// tiles leave idle, and never decodes.
+const THUMBNAIL_LIMIT = 10;
 let activeThumbnails = 0;
 const thumbnailQueue: (() => void)[] = [];
+const prefetchQueue: (() => void)[] = [];
+function pump() {
+  while (activeThumbnails < THUMBNAIL_LIMIT && (thumbnailQueue.length || prefetchQueue.length))
+    (thumbnailQueue.shift() ?? prefetchQueue.shift())!();
+}
+function enqueue(queue: (() => void)[], work: () => Promise<unknown>, signal: AbortSignal, reject: (reason: unknown) => void) {
+  const cancel = () => {
+    const index = queue.indexOf(start);
+    if (index >= 0) queue.splice(index, 1);
+    reject(new DOMException('Cancelled', 'AbortError'));
+  };
+  const start = () => {
+    if (signal.aborted) { cancel(); return; }
+    activeThumbnails++;
+    void work().finally(() => { signal.removeEventListener('abort', cancel); activeThumbnails--; pump(); });
+  };
+  if (signal.aborted) { cancel(); return; }
+  signal.addEventListener('abort', cancel, {once:true});
+  queue.push(start); pump();
+}
 export function loadThumbnail(asset: Asset, signal: AbortSignal): Promise<Asset> {
   return new Promise((resolve, reject) => {
-    const cancel = () => {
-      const index = thumbnailQueue.indexOf(start);
-      if (index >= 0) thumbnailQueue.splice(index, 1);
-      reject(new DOMException('Cancelled', 'AbortError'));
-    };
-    const start = () => {
-      if (signal.aborted) { cancel(); return; }
-      activeThumbnails++;
-      void prepareAssets([asset], signal).then(items => resolve(items[0]), reject).finally(() => {
-        signal.removeEventListener('abort', cancel);
-        activeThumbnails--;
-        while (activeThumbnails < 4 && thumbnailQueue.length) thumbnailQueue.shift()!();
-      });
-    };
-    if (signal.aborted) { cancel(); return; }
-    signal.addEventListener('abort', cancel, {once:true});
-    if (activeThumbnails < 4) start(); else thumbnailQueue.push(start);
+    enqueue(thumbnailQueue, () => prepareAssets([asset], signal).then(items => resolve(items[0]), reject), signal, reject);
   });
+}
+/**
+ * Warm the native thumbnail cache for assets about to scroll into view. Only the ticket is
+ * requested — native fills its disk cache before answering — so a later visible load is a
+ * local read. Cached thumbnails return at once; failures are ignored.
+ */
+export function prefetchThumbnails(assets: Asset[], signal: AbortSignal) {
+  for (const asset of assets) {
+    if (asset.pending || asset.preview || asset.thumbnail_available === false) continue;
+    // Scrolling on drops queued work only; a started download finishes into the cache.
+    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail').catch(() => undefined), signal, () => {});
+  }
 }

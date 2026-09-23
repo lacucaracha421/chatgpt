@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source and installed version: **0.7.3 (30)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source and installed version: **0.7.4 (31)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,26 @@ Current source and installed version: **0.7.3 (30)**, declared in [AndroidManife
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.7.4 — Faster uncached thumbnails, installed (2026-09-23)
+
+Measured on Galaxy Tab S11 through temporary WebView remote debugging (disabled again
+in the shipped 0.7.4 build; the device shows no devtools socket for the app). Cached
+thumbnails were already fast (4–30 ms each, a screen in 0.2–0.5 s). An uncached
+thumbnail spent about 1.5–2 s in the native `thumbnail` operation (ticket plus R2
+download) while the ticket API itself took about 0.07–0.1 s, and the web layer ran only
+four at once, so an uncached screen of 20–27 tiles took 13–17 s. The suspected double
+fetch did not occur.
+
+- Visible thumbnails now run ten at a time and native transfers eight; a low-priority
+  prefetch warms about two screens below the rendered rows through the native cache
+  without decoding, yielding to visible tiles. Scrolling on drops queued prefetches but
+  lets started downloads finish.
+- One steady scroll pass afterwards: the first uncached screen filled in 1.8 s and the
+  following screens in 0.17–0.25 s. This is a single run, not a repeated benchmark.
+- APK SHA-256 `a3c11ff8c228d4e34b9b5d95e59c095abe5bd6ce6e8f20655a48c5fbf5a794c8`,
+  existing signer, installed in place with verified version, hash, cold start and an
+  empty crash log. Mobile suite 411/412 with the known intermittent `Catalog.test.tsx`.
 
 ## 0.7 — Browse-first Library and Collections, installed (2026-09-23)
 
@@ -40,8 +60,9 @@ or data reset; each install verified version, installed-APK hash, cold start
 - Checks: mobile suite 411 tests, with two known intermittent `Catalog.test.tsx`
   cases (unchanged code; they also failed in the pre-change baseline); PC collection
   renderer tests 46/46; TypeScript/Vite build. Browser fixtures were rendered in
-  portrait and landscape. Touch feel, pinch, native Back and 3D performance on the
-  tablet are user-observed, not measured.
+  portrait and landscape. The user then tried 0.7.3 on the tablet and reported it
+  working normally (2026-09-23); touch feel, pinch, native Back and 3D performance
+  are user-observed, not measured.
 
 ## 0.6.10 — Media-ticket optimization, installed (2026-09-23)
 

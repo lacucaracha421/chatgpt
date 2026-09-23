@@ -4,7 +4,7 @@ import {useVirtualizer} from '@tanstack/react-virtual';
 import {PlayIcon, PhotoIcon} from '@heroicons/react/24/outline';
 import type {Asset} from './types';
 import {dateLabel, justifiedRows, rowHeight} from './model';
-import {invalidateTicket, loadThumbnail, mediaTicket} from './media';
+import {invalidateTicket, loadThumbnail, mediaTicket, prefetchThumbnails} from './media';
 
 function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean}) {
   const [preview, setPreview] = useState(asset.preview);
@@ -64,6 +64,20 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     const observer = new ResizeObserver(() => {if (element.clientWidth > 32) setWidth(element.clientWidth - 32);});
     observer.observe(element); return () => observer.disconnect();
   }, []);
+  // Warm roughly two screens below what is rendered; a new position replaces the old batch.
+  const virtualRows = virtualizer.getVirtualItems();
+  const lastRow = virtualRows.length ? virtualRows[virtualRows.length - 1].index : -1;
+  useEffect(() => {
+    const element = parent.current;
+    if (paused || lastRow < 0 || !element || element.clientHeight <= 0) return;
+    const controller = new AbortController(), ahead: Asset[] = [];
+    let height = 0;
+    for (let index = lastRow + 1; index < rows.length && height < element.clientHeight * 2; index++) {
+      height += rows[index].height; ahead.push(...rows[index].items.map(item => item.asset));
+    }
+    prefetchThumbnails(ahead, controller.signal);
+    return () => controller.abort();
+  }, [lastRow, rows, paused]);
   const checkEnd = () => {const element = parent.current; if (!paused && element && element.clientHeight > 0 && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
   useEffect(checkEnd, [items.length, onNearEnd, paused]);
   return <div className="gallery-scroll" ref={parent} onScroll={event => {if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
