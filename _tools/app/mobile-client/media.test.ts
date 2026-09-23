@@ -37,24 +37,28 @@ it('bounds thumbnail work, displays a fast image independently, and cancels obso
   expect(results[10].status).toBe('rejected');
 });
 
-it('prefetches only with idle capacity, never decodes, and drops queued work when scrolled on',async()=>{
+it('keeps background work to three slots and behind waiting visible tiles',async()=>{
   const decoded=vi.fn();
   vi.stubGlobal('Image',class {naturalWidth=600;naturalHeight=900;onload:(()=>void)|null=null;onerror:(()=>void)|null=null;set src(value:string){if(value){decoded(value);queueMicrotask(()=>this.onload?.());}}decode(){return Promise.resolve();}});
   const complete=new Map<string,()=>void>();
   mocks.native.mockImplementation((_op:string,payload:{assetId:string})=>new Promise(resolve=>complete.set(payload.assetId,()=>resolve({url:`https://example.invalid/${payload.assetId}`,expires_in:240}))));
-  const visible=Array.from({length:10},(_,i)=>new AbortController());
+  // Twelve visible tiles: ten run, two wait.
+  const visible=Array.from({length:12},()=>new AbortController());
   visible.forEach((controller,i)=>void loadThumbnail({id:`v${i}`,kind:'image'},controller.signal).catch(()=>{}));
   const ahead=new AbortController();
-  prefetchThumbnails(Array.from({length:3},(_,i)=>({id:`p${i}`,kind:'image'})),ahead.signal);
-  // Every slot is busy with visible tiles, so nothing ahead has started.
-  expect([...complete.keys()].filter(key=>key.startsWith('p'))).toEqual([]);
-  complete.get('v0')!();
-  await vi.waitFor(()=>expect(complete.has('p0')).toBe(true));
-  // Scrolling on drops the queued rest but lets the started download finish into the cache.
+  prefetchThumbnails(Array.from({length:5},(_,i)=>({id:`p${i}`,kind:'image'})),ahead.signal);
+  const started=()=>[...complete.keys()].filter(key=>key.startsWith('p'));
+  // Visible tiles are still waiting, so background work has not started.
+  expect(started()).toEqual([]);
+  complete.get('v0')!();complete.get('v1')!();
+  await vi.waitFor(()=>expect(complete.has('v11')).toBe(true));
+  // With no visible tile waiting, at most three background loads run beside the visible ones.
+  await vi.waitFor(()=>expect(started()).toEqual(['p0','p1','p2']));
+  // Scrolling on drops the queued rest but lets started downloads finish into the cache.
   ahead.abort();
-  complete.get('v1')!();complete.get('p0')!();
+  complete.get('p0')!();
   await new Promise(resolve=>setTimeout(resolve,0));
-  expect(complete.has('p1')).toBe(false);
+  expect(started()).toEqual(['p0','p1','p2']);
   expect(decoded.mock.calls.some(([url])=>String(url).includes('/p'))).toBe(false);
   visible.forEach(controller=>controller.abort());
 });

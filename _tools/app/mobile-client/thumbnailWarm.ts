@@ -19,6 +19,8 @@ export type WarmState = {status:'off'|'waiting'|'running'|'metered'|'done'|'erro
 type Saved = {scope:string; cursor:string|null; warmed:number; completedAt:number|null};
 const PROGRESS_KEY = 'lakomics.mobile.thumbnailWarm', OFF_KEY = 'lakomics.mobile.thumbnailWarmOff';
 const WARM_PAGE = 100, REPEAT_AFTER = 24 * 60 * 60 * 1000, RETRY_AFTER = 60_000;
+// Let the first screen load before background work starts after launch or return.
+const START_DELAY = 5_000;
 const EVENT = 'lakomics-thumbnail-warm';
 
 function read<T>(key:string):T|null { try {const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : null;} catch {return null;} }
@@ -74,25 +76,29 @@ async function pass(scope:string, signal:AbortSignal) {
  */
 export function startThumbnailWarm(scope:string) {
   let controller:AbortController|null = null, timer = 0, stopped = false;
-  const halt = () => { controller?.abort(); controller = null; clearTimeout(timer); };
+  const halt = () => { controller?.abort(); controller = null; clearTimeout(timer); timer = 0; };
   const evaluate = () => {
     if (stopped) return;
     const progress = saved(scope);
     if (!warmEnabled()) { halt(); publish({status:'off', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
     if (meteredConnection()) { halt(); publish({status:'metered', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
     if (document.visibilityState === 'hidden') { halt(); publish({status:'waiting', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
-    if (controller) return;
+    if (controller || timer) return;
+    timer = window.setTimeout(() => { timer = 0; begin(); }, START_DELAY);
+  };
+  const begin = () => {
+    if (stopped || controller || !warmEnabled() || meteredConnection() || document.visibilityState === 'hidden') return;
     const current = controller = new AbortController();
     void pass(scope, current.signal).then(() => {
       if (controller !== current) return;
       controller = null;
       // A finished pass checks again after the repeat interval while the app stays open.
-      timer = window.setTimeout(evaluate, REPEAT_AFTER);
+      timer = window.setTimeout(() => { timer = 0; evaluate(); }, REPEAT_AFTER);
     }, () => {
       if (controller !== current || current.signal.aborted) return;
       controller = null; const progress = saved(scope);
       publish({status:'error', warmed:progress.warmed, completedAt:progress.completedAt});
-      timer = window.setTimeout(evaluate, RETRY_AFTER);
+      timer = window.setTimeout(() => { timer = 0; evaluate(); }, RETRY_AFTER);
     });
   };
   const toggle = () => { halt(); evaluate(); };

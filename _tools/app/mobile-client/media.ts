@@ -54,16 +54,17 @@ export async function prepareAssets(items: Asset[], signal?: AbortSignal): Promi
 }
 
 // Visible tiles share one queue. An uncached thumbnail costs a storage round trip of about
-// 1.5–2 s on the tablet (latency, not bytes), so throughput comes from parallel requests;
-// native still bounds real transfers separately. Prefetch uses only capacity visible
-// tiles leave idle, and never decodes.
-const THUMBNAIL_LIMIT = 10;
-let activeThumbnails = 0;
+// 1.5–2.5 s on the tablet (latency, not bytes), so throughput comes from parallel requests;
+// native still bounds real transfers separately. Prefetch and the Library warm-up never
+// decode and never hold more than PREFETCH_LIMIT slots, so a newly visible tile always has
+// free capacity instead of waiting behind slow background downloads.
+const THUMBNAIL_LIMIT = 10, PREFETCH_LIMIT = 3;
+let activeThumbnails = 0, activePrefetch = 0;
 const thumbnailQueue: (() => void)[] = [];
 const prefetchQueue: (() => void)[] = [];
 function pump() {
-  while (activeThumbnails < THUMBNAIL_LIMIT && (thumbnailQueue.length || prefetchQueue.length))
-    (thumbnailQueue.shift() ?? prefetchQueue.shift())!();
+  while (activeThumbnails < THUMBNAIL_LIMIT && thumbnailQueue.length) thumbnailQueue.shift()!();
+  while (activePrefetch < PREFETCH_LIMIT && !thumbnailQueue.length && prefetchQueue.length) prefetchQueue.shift()!();
 }
 function enqueue(queue: (() => void)[], work: () => Promise<unknown>, signal: AbortSignal, reject: (reason: unknown) => void) {
   const cancel = () => {
@@ -71,10 +72,15 @@ function enqueue(queue: (() => void)[], work: () => Promise<unknown>, signal: Ab
     if (index >= 0) queue.splice(index, 1);
     reject(new DOMException('Cancelled', 'AbortError'));
   };
+  const background = queue === prefetchQueue;
   const start = () => {
     if (signal.aborted) { cancel(); return; }
-    activeThumbnails++;
-    void work().finally(() => { signal.removeEventListener('abort', cancel); activeThumbnails--; pump(); });
+    if (background) activePrefetch++; else activeThumbnails++;
+    void work().finally(() => {
+      signal.removeEventListener('abort', cancel);
+      if (background) activePrefetch--; else activeThumbnails--;
+      pump();
+    });
   };
   if (signal.aborted) { cancel(); return; }
   signal.addEventListener('abort', cancel, {once:true});

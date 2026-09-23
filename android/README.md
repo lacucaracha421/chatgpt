@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source and installed version: **0.7.6 (33)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source and installed version: **0.7.7 (34)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,19 @@ Current source and installed version: **0.7.6 (33)**, declared in [AndroidManife
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.7.7 — Background thumbnails yield to visible ones, installed (2026-09-23)
+
+The user noticed slower first image loading after 0.7.5. The warm-up and prefetch could
+occupy all ten thumbnail slots with ~2.4 s uncached downloads, so a newly visible tile
+waited behind them. Background work (prefetch and Library warm-up) now has its own limit
+of three slots and starts only when no visible tile is waiting; visible tiles keep ten.
+The warm-up also starts five seconds after launch or return so the first screen loads
+first, and its retry/repeat timers can restart it again. The full warm-up therefore
+takes longer (estimated two to three times). APK SHA-256
+`ac76ccee09ca0b67785c8685f32f0e6d41c15aa8c46eb3178fcf94c0f684e7ca`, installed in place with
+verified version, cold start, no app devtools socket and an empty crash log. Mobile
+suite 415/415. The first-load improvement has not been measured on the device.
 
 ## 0.7.5–0.7.6 — Library thumbnail warm-up, installed (2026-09-23)
 
