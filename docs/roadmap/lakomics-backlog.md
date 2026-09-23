@@ -4,10 +4,13 @@ Living source of truth for **active** Lakomics work only. Completed, superseded,
 
 Reconciled 2026-09-20 after the user separated completed server-authority rollouts from remaining client cleanup, accepted current media delivery, and closed the current character-accuracy improvement pass. See the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-20--authority-scope-split-and-product-acceptance). This is a scope/status reconciliation, not a new deployment or Windows full-system audit.
 
+Updated 2026-09-23 (evening): the Android 0.7 browse-first redesign, thumbnail loading work (0.7.4–0.7.6) and the in-range dependency update are archived in the [2026-09-23 evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-23-evening--mobile-07-thumbnails-and-dependencies). `CHAR-AUTO-007` reached stage 2d (shadow scoring); stage 3 now waits for reviewed shadow evidence.
+
 ## Current priority
 
-1. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
-2. **WORKS-001** — small Film polish: cast/director, release information, and related works.
+1. **CHAR-AUTO-007** — collect S36 shadow verdicts and review them in the S36 review screen (stage 4 brought forward) until the automatic tier has enough manual judgments to decide the stage 3 publication switch.
+2. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
+3. **WORKS-001** — small Film polish: cast/director, release information, and related works.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
@@ -253,7 +256,7 @@ The following initial plan is retained as context; the implementation checkpoint
 
 ## MOBILE-UX-001 — Portrait real-use follow-up
 
-Status: `PARTIAL` — the first portrait APK and server image thumbnails are delivered and user-confirmed. Catalog/sidebar/settings/Collection cleanup is deployed. Current client is APK 0.6.6 (22), installed in place on S11 with portrait gallery/filter-state rendering observed; exhaustive touch acceptance remains pending. Video/GIF thumbnails and source dimensions are deployed after authorized tool installation and host verification; the user confirmed new thumbnail generation. Historical metadata repair is complete. The later filter/hourly-refresh/poster-v2 batch is deployed; live API checks and APK installation/startup passed, with first-hourly-job and fresh-video acceptance still open. Catalog refresh/duplicate, 3D and classification-capacity findings are recorded below; they do not authorize those feature migrations.
+Status: `PARTIAL` — the 0.7 browse-first redesign replaced the PC-style Library drawer and Collections toolbar; the user tried 0.7.3 on the Galaxy Tab and reported it working normally, and 0.7.6 (33) is installed. See the [2026-09-23 evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-23-evening--mobile-07-thumbnails-and-dependencies) and `android/README.md`. Remaining: a landscape two-pane Library (deferred by design; landscape currently reuses the single-column drill-down), a Catalog and Notes redesign on the same principles, a 3-column root card option if 2 columns feel large, and the older items below that the redesign did not address (dimension/duplicate-check evaluations, 3D model files, classification capacity). The dated records below are history.
 
 2026-09-19 Galaxy Tab feedback after the first portrait UI pass. These are user-reported observations and requested improvements, not independently reproduced defects or confirmed root causes. Keep portrait as the priority; landscape redesign remains later.
 
@@ -607,6 +610,26 @@ The API restarted successfully, health returned HTTP 200 and the worker lock was
 
 Remaining acceptance: verify a new live capture with the PC off; verify real tablet copy, nested Back, icons, framing and category filtering. Server dimension API execution and rollout, and any existing-row metadata update, are separate gates. Browser fixtures and successful packaging do not prove live synchronization.
 
+# Mobile media / development tooling (2026-09-23)
+
+## MOBILE-PERF-002 — First-view thumbnail latency
+
+Status: `HOLD` — the client-side warm-up covers everyday browsing.
+
+On the tablet an uncached thumbnail takes about 1.5–2.4 s: the Tokyo API answers a ticket in about 0.07–0.1 s and the nearest Cloudflare edge (ICN) is 3 ms away, so the time is R2 storage response latency. 0.7.4 parallelised and prefetched; 0.7.6 warms the whole Library into the native cache (about 200 thumbnails/min). Remaining slow cases are newly captured images and a cleared cache. Options if they matter: serve thumbnails from the Tokyo server's disk (13 GB free on 2026-09-23; ~360 MB for the current library) in batched requests, or move derived thumbnails to an APAC-hinted bucket. Both need server work, a copy of production thumbnails and deployment approval.
+
+## DEV-TEST-001 — Rust test suite runtime
+
+Status: `TODO` — optional.
+
+`cargo test --lib -- --skip character_` takes about 4–5 minutes of run time plus about a minute to link a 574 MB debug test binary. Ignoring the three realistic-scale tests that exceeded 60 s did not help: alone they take 34 s and 10 s, so the wall time is aggregate CPU contention across ~1,280 tests on 12 threads. Measure per-test time (for example with `cargo-nextest`, which needs installation approval) before changing anything; a lighter test debuginfo profile is a separate link-time option.
+
+## DEPS-001 — Vitest 5
+
+Status: `HOLD` — until `@testing-library/jest-dom` ships Vitest 5 matcher types.
+
+Vitest 5 changes assertion types to `Assertion<R, T>`; jest-dom 7.0.1 still augments the old shape, so its matchers lose their types and the desktop `tsc` build (which type-checks tests) would fail. Runtime behaviour is unaffected. Our tests use none of the removed APIs; set `clearMocks: false` if call history across tests turns out to matter. Other dependencies were updated in range on 2026-09-23.
+
 # Character classification
 
 The character UI/management workflow and current accuracy-improvement pass are accepted and archived. [CHAR-AUTO-001](lakomics-completed.md#char-auto-001--current-accuracy-improvement-pass) retains the implementation evidence, delivery limits and policy for case-driven follow-up. Batch-classification visibility remains a separate verification item below.
@@ -845,9 +868,10 @@ Implementation exists. Remaining scope is targeted real X/Titanium/Galaxy accept
 
 This is guidance, not authorization to start or mutate production data.
 
-1. `CLOUD-POST-001` only the residual publication/compatibility scope, when its consumer and ownership prerequisites are met; do not repeat completed authority rollouts.
-2. `WORKS-001` small Film polish.
-3. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
-4. `SIMILARITY-002B` transform matching when useful.
+1. `CHAR-AUTO-007` shadow review until stage 3 can be decided.
+2. `CLOUD-POST-001` only the residual publication/compatibility scope, when its consumer and ownership prerequisites are met; do not repeat completed authority rollouts.
+3. `WORKS-001` small Film polish.
+4. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
+5. `SIMILARITY-002B` transform matching when useful.
 
 Verification-only items (`CLOUD-INGEST-002`, `CHAR-AUTO-006`, `EXT-011`, `EXT-012`) may be closed opportunistically when the user naturally exercises them. `CLOUD-UI-001` was already closed on 2026-09-16 and must not be selected again. HOLD items should not be promoted without a new product reason.

@@ -2,6 +2,15 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-23 (evening) — Mobile 0.7, thumbnails and dependencies
+
+Delivered and pushed on 2026-09-23 (`e54f3c5`, `623c517`, `b5a84bd`, `8582573`, prototypes `fb22d6c`). Device evidence and hashes are in `android/README.md`.
+
+- **Android 0.7 browse-first redesign (0.7.0–0.7.3):** drill-down Library with segments, folder·character search, text-only recent folders, cover cards and albums as ordinary scopes; Collections with segments (AV waits for the PC), collapsed Showcase, chips, continuous scrolling and a turnable 3D cover viewer. The user tried 0.7.3 on the tablet and reported it working normally.
+- **Thumbnail loading (0.7.4–0.7.6):** measured on the tablet (uncached ≈1.5–2.4 s each, R2 latency); ten visible loads and eight native transfers, prefetch ahead, and a Library-wide warm-up with a one-year cache age. First-view latency options remain in `MOBILE-PERF-002`.
+- **Dependencies:** npm and Cargo lockfiles updated within existing ranges; Vitest 5 deferred (`DEPS-001`).
+- **CHAR-AUTO-007 progress (not a closure):** stages 2b–2d delivered (`7f9d7be`, `d8546db`); the item stays active in the backlog.
+
 ## Closure checkpoint — 2026-09-23 — Similarity discovery and mobile tab switching
 
 The user confirmed both items complete. This records that closure; it is not a new deployment or production-library audit.
