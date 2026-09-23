@@ -1,3 +1,5 @@
+import { displayGenres } from "./displayGenres";
+import { displayDate } from "../shared/displayDate";
 import { useState } from "react";
 import type { CollectionSummary, TmdbSeriesData } from "../library/types";
 import { SeriesSeasons } from "./SeriesSeasons";
@@ -44,12 +46,12 @@ export function MovieCollectionDetail({
   const [failedBackdrop, setFailedBackdrop] = useState<string | null>(null);
   const backdropVisible = Boolean(backdropUrl) && backdropUrl !== failedBackdrop && !privacyMode;
   const facts = [
-    ...(series ? ["시리즈", series.status, series.lastAirDate ? `최근 방영 ${series.lastAirDate}` : null] : []),
-    collection.releaseDate,
+    ...(series ? ["시리즈", series.status, series.lastAirDate ? `최근 방영 ${displayDate(series.lastAirDate)}` : null] : []),
+    displayDate(collection.releaseDate),
     collection.runtimeMinutes ? `${collection.runtimeMinutes}분` : null,
     collection.director,
     collection.productionCompany,
-    collection.genres,
+    displayGenres(collection.genres),
   ].filter((value): value is string => Boolean(value?.trim()));
 
   return (

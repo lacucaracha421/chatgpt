@@ -1,4 +1,4 @@
-import { ArrowDownTrayIcon, ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowPathIcon, CircleStackIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -494,8 +494,9 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     <ViewToolbar
       title="망가"
-      titleAccessory={status?.installed && <span className="online-catalog__updated-at" aria-description="카탈로그 DB의 가장 최근 갱신 완료 시각 (현지 시간)">
-        {latestUpdate ? <time dateTime={latestUpdate} aria-label="최근 DB 갱신">{new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(latestUpdate))}</time> : "갱신 기록 없음"}
+      titleAccessory={status?.installed && <span className="online-catalog__updated-at" aria-description="카탈로그 데이터베이스 갱신 시각 (현지 시간)">
+        <CircleStackIcon aria-hidden="true" />
+        {latestUpdate ? <time dateTime={latestUpdate} aria-label="최근 DB 갱신" aria-description="카탈로그 데이터베이스 갱신 시각 (현지 시간)">{new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(latestUpdate))}</time> : "갱신 기록 없음"}
       </span>}
       ariaLabel="온라인 망가 도구"
       chrome={{

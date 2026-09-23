@@ -8,6 +8,7 @@ import { ChromeQueryBadge } from "./ChromeSearch";
 type ViewToolbarProps = {
   title: string;
   titleContent?: ReactNode;
+  leadingAction?: ReactNode;
   titleAccessory?: ReactNode;
   ariaLabel?: string;
   children?: ReactNode;
@@ -15,7 +16,7 @@ type ViewToolbarProps = {
   chrome?: ViewChromeSpec;
 };
 
-export function ViewToolbar({ title, titleContent, titleAccessory, ariaLabel, children, actions, chrome }: ViewToolbarProps) {
+export function ViewToolbar({ title, titleContent, leadingAction, titleAccessory, ariaLabel, children, actions, chrome }: ViewToolbarProps) {
   const workspace = useWorkspaceChrome();
   const place = (header: ReactNode) => workspace?.targets.header ? createPortal(header, workspace.targets.header) : header;
   if (workspace && chrome) {
@@ -23,6 +24,7 @@ export function ViewToolbar({ title, titleContent, titleAccessory, ariaLabel, ch
       <ChromeContribution title={title} spec={chrome} />
       {place(<header className="view-toolbar view-toolbar--context" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
         <span className="chrome-location-mark" aria-hidden="true" />
+        {leadingAction}
         <h2 aria-description={title}>{titleContent ?? title}</h2>
         {titleAccessory}
         <ChromeQueryBadge search={chrome.search} />
@@ -32,6 +34,7 @@ export function ViewToolbar({ title, titleContent, titleAccessory, ariaLabel, ch
   }
   return place(
     <header className="view-toolbar" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
+      {leadingAction}
       <h2>{titleContent ?? title}</h2>
       {titleAccessory}
       {children && <div className="view-toolbar__content">{children}</div>}

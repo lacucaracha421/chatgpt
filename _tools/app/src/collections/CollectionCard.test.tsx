@@ -6,11 +6,12 @@ vi.mock("./physical/collectibleRuntime", () => ({
 }));
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
 import { CollectionCard } from "./CollectionCard";
 
-afterEach(cleanup);
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 8, 23)); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 const sample: CollectionSummary = {
   id: "c1",
@@ -46,21 +47,21 @@ const sample: CollectionSummary = {
 it("shows series season premiere range and a single date for one season", () => {
   const props = { coverUrl: null, onClick: vi.fn(), selected: false };
   const { rerender } = render(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2024-05-05"] }} />);
-  expect(screen.getByText("16.1.14~24.5.5")).toBeInTheDocument();
+  expect(screen.getByText("2016.01.14–2024.05.05")).toBeInTheDocument();
   rerender(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2016-01-14"] }} />);
-  expect(screen.getByText("16.1.14")).toBeInTheDocument();
+  expect(screen.getByText("2016.01.14")).toBeInTheDocument();
 });
 
 describe("CollectionCard", () => {
   it("shows a compact movie release date on a separate line after the studio", () => {
     render(<CollectionCard collection={{ ...sample, type: "movie", productionCompany: "MAPPA", releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    const date = screen.getByText("26.10.1");
+    const date = screen.getByText("10.01");
     expect(date).toHaveAttribute("datetime", "2026-10-01");
     expect(screen.getByText("MAPPA").nextElementSibling).toBe(date);
   });
   it.each(["game", "manga"] as const)("shows the %s release date or the known year", (type) => {
     const view = render(<CollectionCard collection={{ ...sample, type, releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(screen.getByText("26.10.1")).toHaveAttribute("datetime", "2026-10-01");
+    expect(screen.getByText("10.01")).toHaveAttribute("datetime", "2026-10-01");
     view.rerender(<CollectionCard collection={{ ...sample, type, releaseDate: null, year: 2019 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
     expect(screen.getByText("2019")).toHaveAttribute("datetime", "2019");
   });

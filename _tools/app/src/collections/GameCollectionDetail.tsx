@@ -1,3 +1,5 @@
+import { displayGenres } from "./displayGenres";
+import { displayDate } from "../shared/displayDate";
 import { GameCase } from "./GameCase";
 import { useState, type PointerEvent } from "react";
 import type { CollectionSummary, WorkArtworkSummary } from "../library/types";
@@ -63,9 +65,9 @@ export function GameCollectionDetail({
   const metadata: Array<[string, string]> = [
     ["개발사", collection.developer],
     ["배급사", collection.publisher],
-    ["최초 출시일", collection.releaseDate],
+    ["최초 출시일", displayDate(collection.releaseDate)],
     ["플랫폼", collection.platforms],
-    ["장르", collection.genres],
+    ["장르", displayGenres(collection.genres)],
     ["내 평점", collection.myScore === null ? null : `${collection.myScore}/5`],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]?.trim()));
 

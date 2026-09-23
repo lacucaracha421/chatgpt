@@ -460,7 +460,7 @@ export function ClassificationSidebar({
         </Button>
       </div>}
       {!embedded && <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
-        <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="저장소" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
+        <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="전체" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
         <QuickViewButton icon={<CalendarIcon aria-hidden="true" />} label="다시보기" selected={view.kind === "revisit" || view.kind === "creator"} onClick={() => onViewChange({ kind: "revisit" })} />
         {!embedded && <><QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />

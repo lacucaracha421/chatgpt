@@ -57,7 +57,7 @@ it("keeps the titlebar as location and status only, with view controls in the se
   const user = userEvent.setup();
   renderChrome(<AssetToolbar {...baseProps} />);
 
-  expect(screen.getByRole("heading", { name: "저장소" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "전체" })).toBeVisible();
   expect(screen.queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /미디어 필터/ })).not.toBeInTheDocument();
   // 선택 명령은 상단바가 아니라 SelectionBar가 담당한다.

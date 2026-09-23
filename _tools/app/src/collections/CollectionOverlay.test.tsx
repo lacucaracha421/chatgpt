@@ -208,6 +208,11 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.getByRole("heading", { name: "컬렉션을 찾을 수 없습니다." })).toBeInTheDocument();
     expect(screen.queryByText("표지가 없습니다.")).not.toBeInTheDocument();
     expect(listCollectionCovers).not.toHaveBeenCalled();
+    const back = screen.getByRole("button", { name: "컬렉션으로 돌아가기" });
+    expect(back.nextElementSibling).toBe(screen.getByRole("heading", { name: "컬렉션" }));
+    await userEvent.click(back);
+    expect(onExit).toHaveBeenCalledTimes(1);
+    onExit.mockClear();
     await userEvent.keyboard("{Escape}");
     expect(onExit).toHaveBeenCalledTimes(1);
     expect(appBack).not.toHaveBeenCalled();

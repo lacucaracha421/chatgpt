@@ -85,6 +85,8 @@ describe("OnlineCatalogBrowser", () => {
     renderBrowser(gateway);
     const time = await screen.findByLabelText("최근 DB 갱신");
     expect(time).toHaveAttribute("datetime", "2026-09-06T02:30:00Z");
+    expect(time).toHaveAttribute("aria-description", "카탈로그 데이터베이스 갱신 시각 (현지 시간)");
+    expect(time.previousElementSibling?.tagName.toLowerCase()).toBe("svg");
     expect(time.closest(".view-toolbar")).toContainElement(screen.getByRole("heading", { name: "망가" }));
   });
   it("keeps bookmark flags and pagination stable until the refreshed page arrives", async () => {
@@ -460,7 +462,9 @@ describe("OnlineCatalogBrowser", () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
 
-    const cover = await screen.findByRole("img", { name: "오래된 제독 표지" });
+    const cover = await screen.findByAltText("오래된 제독 표지");
+    fireEvent.load(cover);
+    expect(screen.getByRole("img", { name: "오래된 제독 표지" })).toBeVisible();
     const card = cover.closest("article")!;
     expect(cover).toHaveAttribute("src", work.thumbnailUrl);
     expect(within(card).getByText("오래된 제독")).not.toHaveAttribute("title");

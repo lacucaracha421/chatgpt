@@ -1,3 +1,4 @@
+import { displayDate } from "../shared/displayDate";
 import { useEffect, useState } from "react";
 import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -41,7 +42,7 @@ export function AvCollectionDetail({ collection, scope, api = avGateway, onChang
         {covers?.frontId && !privacyMode ? <GameCase src={workArtworkUrl(covers.frontId)} alt={`${collection.name} 앞표지`} scope={scope} revision={covers.revision} large /> : <span>{privacyMode ? "비공개 모드" : "표지 없음"}</span>}
       </button>
       <div><h2>{collection.name}</h2>{collection.originalTitle && <p>{collection.originalTitle}</p>}
-        <p>{[details?.productCode, collection.releaseDate, collection.productionCompany, details?.label, details?.series].filter(Boolean).join(" · ")}</p>
+        <p>{[details?.productCode, displayDate(collection.releaseDate), collection.productionCompany, details?.label, details?.series].filter(Boolean).join(" · ")}</p>
         {details && <Button onClick={() => setPanel("info")}>AV 정보 편집</Button>}
         {covers && <Button onClick={() => setPanel("artwork")}>표지 등록</Button>}
       </div>

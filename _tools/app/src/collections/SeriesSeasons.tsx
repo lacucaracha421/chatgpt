@@ -1,3 +1,4 @@
+import { displayDate } from "../shared/displayDate";
 import { useState } from "react";
 import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import type { TmdbSeriesData } from "../library/types";
@@ -31,12 +32,12 @@ export function SeriesSeasons({ series }: { series: TmdbSeriesData }) {
         </button>)}
       </div>
       {selected && <section className="series-seasons__detail" aria-label={`${selected.name} 에피소드`}>
-        <h3>{selected.name} {selected.airDate && <small>{selected.airDate}</small>}</h3>
+        <h3>{selected.name} {selected.airDate && <small>{displayDate(selected.airDate)}</small>}</h3>
         {selected.overview && <p>{selected.overview}</p>}
         {selected.episodes.length === 0 ? <p>등록된 에피소드가 없습니다.</p> : <ol className="series-seasons__episodes">
           {selected.episodes.slice(currentPage * 50, (currentPage + 1) * 50).map((episode) => <li key={episode.id}>
             <span className="series-seasons__number">{episode.episodeNumber}</span>
-            <details><summary>{episode.name}<small>{[episode.airDate, episode.runtimeMinutes ? `${episode.runtimeMinutes}분` : null].filter(Boolean).join(" · ")}</small></summary>
+            <details><summary>{episode.name}<small>{[displayDate(episode.airDate), episode.runtimeMinutes ? `${episode.runtimeMinutes}분` : null].filter(Boolean).join(" · ")}</small></summary>
               <p>{episode.overview || "줄거리 정보가 없습니다."}</p>
             </details>
           </li>)}

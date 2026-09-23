@@ -5,7 +5,7 @@ import { PrivacyProvider } from "../privacy/PrivacyContext";
 import type { TmdbSeason, TmdbSeriesData } from "../library/types";
 import { SeriesSeasons } from "./SeriesSeasons";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 function season(id: number, seasonNumber: number, count: number): TmdbSeason {
   return { id, seasonNumber, name: `시즌 ${seasonNumber}`, overview: null, airDate: null,
@@ -14,6 +14,14 @@ function season(id: number, seasonNumber: number, count: number): TmdbSeason {
   };
 }
 const series: TmdbSeriesData = { status: "Ended", lastAirDate: null, cast: ["출연자"], seasons: [season(1, 0, 1), season(2, 1, 52), season(3, 2, 2)] };
+
+it("formats season and episode air dates with the shared date rule", () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 23));
+  render(<SeriesSeasons series={{ ...series, seasons: [{ ...season(2, 1, 1), airDate: "2025-12-31" }] }} />);
+  expect(screen.getByText("2025.12.31")).toBeInTheDocument();
+  expect(screen.getByText("01.01 · 24분")).toBeInTheDocument();
+});
 
 it("uses cached posters and bounded episode pages, resetting selection on season changes", async () => {
   const user = userEvent.setup();

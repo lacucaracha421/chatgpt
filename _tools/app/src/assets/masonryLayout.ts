@@ -1,3 +1,4 @@
+import { displayDate } from "../shared/displayDate";
 import type { AssetSummary } from "../library/types";
 
 export type GalleryLayout = "masonry" | "justified";
@@ -18,10 +19,10 @@ export function collectedDate(value: string | null | undefined) {
   const date = value ? new Date(value) : null;
   if (!date || !Number.isFinite(date.getTime())) return { key: "unknown", label: "수집일 미상", time: "—", full: "수집 시각 없음" };
   const key = dateKey(date);
-  return { key, label: key, time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, full: fullDateFormat.format(date) };
+  return { key, label: displayDate(date), time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, full: fullDateFormat.format(date) };
 }
 
-export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, captions: boolean, groupDates: boolean) {
+export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, captions: boolean, groupDates: boolean, fullDateHeadings = false) {
   const tiles: MasonryTile[] = [];
   const headings: Array<{ key: string; label: string; top: number; left: number; width: number }> = [];
   if (width <= 0 || targetWidth <= 0) return { tiles, headings, height: 0 };
@@ -46,7 +47,7 @@ export function buildMasonryLayout(items: AssetSummary[], width: number, targetW
     }
     const left = usedColumns * (tileWidth + gap);
     if (groupDates) headings.push({
-      key: group.items[0].id, label: group.key === "unknown" ? "수집일 미상" : group.key,
+      key: group.items[0].id, label: fullDateHeadings ? group.key === "unknown" ? "수집일 미상" : group.key : collectedDate(group.items[0].collectedAt).label,
       top: rowTop, left, width: span * (tileWidth + gap) - gap,
     });
     const bottoms = Array<number>(span).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));

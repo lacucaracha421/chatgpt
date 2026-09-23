@@ -666,15 +666,15 @@ describe("AssetBrowser", () => {
     expect(vi.mocked(gateway.listAssets).mock.calls).not.toContainEqual([expect.objectContaining({ sort: "oldest", after: { token: "old-cursor" } })]);
   });
 
-  it("loads only the selected local day from 다시보기", async () => {
+  it.each(["justified", "masonry"] as const)("loads only the selected local day from 다시보기 in %s layout", async (layout) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 7, 15, 12));
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });
     vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-08-06", count: 1 }]);
-    render(
+    const { container } = render(
       <LibraryProvider gateway={gateway}>
-        {withWorkspaceChrome(<AssetBrowser galleryLayout="justified" view={{ kind: "revisit" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />)}
+        {withWorkspaceChrome(<AssetBrowser galleryLayout={layout} view={{ kind: "revisit" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />)}
       </LibraryProvider>,
     );
 
@@ -691,6 +691,9 @@ describe("AssetBrowser", () => {
       sort: "newest",
       after: null,
     })));
+    if (layout === "masonry") {
+      await waitFor(() => expect(container.querySelector(".asset-gallery__date")).toHaveTextContent(/^2026\.\d{2}\.\d{2}$/));
+    }
   });
 
   it("preserves selection and detail through refresh when the asset remains", async () => {

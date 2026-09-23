@@ -99,7 +99,9 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
 
   return <>
     <div className="series-gallery-heading character-group-heading">
-      <h3 aria-label={current ? `그룹 · ${current.name}` : folderCards?.length ? "캐릭터 · 폴더" : "캐릭터"}>{current ? `그룹 · ${current.name}` : folderCards?.length ? "캐릭터 · 폴더" : "캐릭터"}<small aria-hidden="true">{current ? visibleMembers.length : members.length + (folderCards?.length ?? 0)}</small></h3>
+      <h3 aria-label={current ? `그룹 · ${current.name}` : undefined}>{current ? <>{`그룹 · ${current.name}`}<small aria-hidden="true">{visibleMembers.length}</small></> : <>
+        {groups.length > 0 && <>그룹 {groups.length.toLocaleString()} · </>}캐릭터 {members.length.toLocaleString()}{rootFolders.length > 0 && <> · 폴더 {rootFolders.length.toLocaleString()}</>}
+      </>}</h3>
       {current ? <>
         <Button size="sm" variant="ghost" onClick={() => onOpenGroup?.(null)}>시리즈로</Button>
         <Button size="sm" variant="ghost" onClick={() => setDraft({ ...current, targetIds: [...current.targetIds] })}>그룹 편집</Button>

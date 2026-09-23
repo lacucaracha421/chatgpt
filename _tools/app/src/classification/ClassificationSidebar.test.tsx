@@ -345,7 +345,7 @@ describe("ClassificationSidebar", () => {
 
     const quickViews = screen.getByRole("navigation", { name: "빠른 보기" });
     expect(within(quickViews).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "저장소",
+      "전체",
       "미분류",
       "다시보기",
       "망가",
@@ -354,7 +354,7 @@ describe("ClassificationSidebar", () => {
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
     await user.click(screen.getByRole("button", { name: "다시보기" }));
-    await user.click(screen.getByRole("button", { name: "저장소" }));
+    await user.click(screen.getByRole("button", { name: "전체" }));
 
     expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "unsorted" });
     expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "revisit" });
@@ -373,7 +373,7 @@ describe("ClassificationSidebar", () => {
   it("keeps compact selection surfaces inside full interaction rows", () => {
     renderSidebar();
 
-    const storage = screen.getByRole("button", { name: "저장소" });
+    const storage = screen.getByRole("button", { name: "전체" });
     expect(storage).toHaveAttribute("aria-current", "page");
     expect(storage.querySelector(":scope > .classification-sidebar__quick-view-surface")).not.toBeNull();
 
@@ -949,7 +949,7 @@ describe("ClassificationSidebar", () => {
     const footer = sidebar.querySelector(".classification-sidebar__footer") as HTMLElement;
 
     expect(within(footer).getAllByRole("button").map((button) => button.textContent)).toEqual(["유사 검토12", "휴지통", "설정"]);
-    await user.click(screen.getByRole("button", { name: "저장소" }));
+    await user.click(screen.getByRole("button", { name: "전체" }));
     expect(onClearAssetSelection).not.toHaveBeenCalled();
 
     fireEvent.click(sidebar);

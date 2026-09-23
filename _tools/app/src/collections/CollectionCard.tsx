@@ -1,3 +1,4 @@
+import { displayDate, displayDateRange } from "../shared/displayDate";
 import { GameCase } from "./GameCase";
 import { useState, type ButtonHTMLAttributes } from "react";
 import { PhysicalCover } from "./physical/PhysicalCover";
@@ -32,13 +33,10 @@ export function CollectionCard({
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
   const { privacyMode } = usePrivacy();
   const visibleCoverUrl = coverUrl && coverUrl !== failedCoverUrl ? coverUrl : null;
-  const release = /^(\d{4})-(\d{2})-(\d{2})$/.exec(collection.releaseDate ?? "");
-  const releaseLabel = release
-    ? `${release[1].slice(-2)}.${Number(release[2])}.${Number(release[3])}`
-    : collection.year ? String(collection.year) : null;
-  const shortDate = (date: string) => { const [year, month, day] = date.split("-"); return `${year.slice(-2)}.${Number(month)}.${Number(day)}`; };
+  const release = collection.releaseDate || (collection.year ? String(collection.year) : null);
+  const releaseLabel = displayDate(release);
   const seasonRange = collection.type === "movie" ? collection.seasonDateRange : null;
-  const seasonLabel = seasonRange ? seasonRange[0] === seasonRange[1] ? shortDate(seasonRange[0]) : `${shortDate(seasonRange[0])}~${shortDate(seasonRange[1])}` : null;
+  const seasonLabel = seasonRange ? displayDateRange(...seasonRange) : null;
 
   return (
     <button
@@ -75,7 +73,7 @@ export function CollectionCard({
       <span className="collection-card__meta">
         <span className="collection-card__name" aria-description={collection.name}>{collection.name}</span>
         <span className="collection-card__credit" aria-description={collectionCredit(collection) || undefined}>{collectionCredit(collection)}</span>
-        {seasonLabel ? <span className="collection-card__credit" aria-description="첫 시즌 시작일 ~ 마지막 시즌 시작일">{seasonLabel}</span> : releaseLabel && <time className="collection-card__credit" dateTime={release ? collection.releaseDate! : releaseLabel}>{releaseLabel}</time>}
+        {seasonLabel ? <span className="collection-card__credit" aria-description="첫 시즌 시작일 ~ 마지막 시즌 시작일">{seasonLabel}</span> : releaseLabel && <time className="collection-card__credit" dateTime={release ?? undefined}>{releaseLabel}</time>}
       </span>
     </button>
   );

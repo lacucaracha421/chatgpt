@@ -4,8 +4,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { CollectionSummary } from "../library/types";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { MovieCollectionDetail } from "./MovieCollectionDetail";
+import { CollectionInfoPanel } from "./CollectionInfoPanel";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 const movie: CollectionSummary = {
   id: "movie-1",
@@ -71,7 +72,20 @@ it("renders a backdrop-led flat-poster movie detail with available metadata", ()
   for (const value of ["Perfect Blue", "TMDB 84", "내 평점 4.5", "현실과 환상의 경계가 무너진다."]) {
     expect(screen.getByText(value)).toBeVisible();
   }
-  expect(document.querySelector(".movie-collection-detail__facts")).toHaveTextContent("1997-07-12 · 81분 · 곤 사토시 · 매드하우스 · 애니메이션 · 스릴러");
+  expect(document.querySelector(".movie-collection-detail__facts")).toHaveTextContent("1997.07.12 · 81분 · 곤 사토시 · 매드하우스 · 애니메이션 · 스릴러");
+});
+
+it("formats release and air dates and translates stored TV genres in detail and info", () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 23));
+  const collection = { ...movie, releaseDate: "2026-09-19", genres: "Action & Adventure · 애니메이션" };
+  renderDetail({ collection, series: { status: "Ended", lastAirDate: "2025-12-31", seasons: [], cast: [] } });
+  expect(document.querySelector(".movie-collection-detail__facts")).toHaveTextContent("최근 방영 2025.12.31 · 09.19");
+  expect(document.querySelector(".movie-collection-detail__facts")).toHaveTextContent("액션 & 모험 · 애니메이션");
+  cleanup();
+  render(<CollectionInfoPanel collection={collection} />);
+  expect(screen.getByText("09.19")).toBeInTheDocument();
+  expect(screen.getByText("액션 & 모험 · 애니메이션")).toBeInTheDocument();
 });
 
 it("drops the backdrop image, poster, and skeleton in privacy mode", () => {

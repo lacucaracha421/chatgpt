@@ -706,14 +706,16 @@ From a 2026-09-23 review of the design documents against real-app screenshots on
 2. **Fixed 2026-09-23:** Settings: `캐릭터 누락 보완` stayed at `확인 중...` because every Settings open re-hashed the ~150 MB S36 model; successful verification is now cached in-process by path, length and modification time.
 3. **Fixed 2026-09-23:** TV detail: season selection uses a white outline box instead of the documented selection language.
 4. **Fixed 2026-09-23:** TV detail: season synopsis spans the full content width; limit it to the same reading measure as the work synopsis.
-5. **Band fixed 2026-09-23:** Character series view: an empty band sat above `캐릭터 N`. Open: the count (characters inside groups) disagrees with the visible card count.
-6. **Edition label fixed 2026-09-23:** Manga catalog: `1개 판본` repeated on almost every card; the edition button now appears only for 2 or more. Open: covers still loading show an empty dark box with no loading cue.
-7. Work detail: the detail-close X sits directly beside the window-close X. *decision*
-8. Collection index: two simultaneous ivory selections (라이브러리/쇼케이스 and 작품 유형); consider a weaker second-level treatment. *decision*
-9. Date formats differ across screens (`25.9.19`, `1997`, `2025-09-19`, `2026.09.23`). *decision: one format rule*
-10. Mixed-language TMDB genres (`Action & Adventure · 애니메이션`), `전체` index selection vs `저장소` title, and an unexplained timestamp beside the Manga title.
-11. Gallery captions: most show `작가 미상`; consider an emptier or dimmer missing-creator treatment. *decision*
-12. TV detail hero crops the backdrop to its top edge (legs only on 코노스바); review the backdrop focal position.
+5. **Fixed 2026-09-23:** Character series view: removed the empty band; the overview now separates group, total character (including grouped members), and ordinary-folder counts. Group detail headings stay unchanged.
+6. **Fixed 2026-09-23:** Manga catalog: the edition button appears only for 2 or more editions; covers show a static neutral loading icon without motion or layout shift, then the image or the existing failure state.
+7. **Fixed 2026-09-23:** Work detail: a back chevron to the left of the title replaces the detail-close X beside window controls, preserving the existing exit and Escape/back handlers.
+8. **Fixed 2026-09-23:** Collection index: two simultaneous ivory selections; resolved by the N4 selection treatment (parent level tinted, most specific level keeps the slab).
+9. **Fixed 2026-09-23:** Collection cards/info/details, TV seasons/episodes and Asset date headings share the viewer-local current-year rule: `MM.DD`, otherwise `YYYY.MM.DD`; year-only values keep `YYYY`, month-only values keep `YYYY.MM`, and ranges use `–`. Invalid input passes through unchanged. Stored values, grouping/sorting, caption times and Revisit date headings stay unchanged.
+10. **Fixed 2026-09-23:** Collection genre displays translate the eight exact TV-only English genre names; the whole Asset library uses `전체` in index and title. The Manga catalog DB update timestamp has a muted database icon and accessible description; its full local date/time remains explicit.
+11. **Fixed 2026-09-23:** Gallery captions leave unknown creators empty while retaining the right-aligned time and accessible collected-time description.
+12. **Dropped 2026-09-23:** the "cropped TV backdrop" was a scrolled screenshot, not a defect.
+
+Native visual acceptance of items 5–7 and 9–11 remains pending.
 
 Documentation follow-up: move feature/domain rules and verification logs out of `docs/agents/pc-design-reference.md`, record the resulting date/selection/toggle rules there, and point color values at `tokens.css`.
 

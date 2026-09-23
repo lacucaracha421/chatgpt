@@ -1,3 +1,5 @@
+import { displayGenres } from "./displayGenres";
+import { displayDate } from "../shared/displayDate";
 import type { CollectionSummary } from "../library/types";
 
 type CollectionInfoPanelProps = {
@@ -11,7 +13,7 @@ export function CollectionInfoPanel({ collection, compact = false }: CollectionI
   if (collection.author) rows.push(["작가", collection.author]);
   if (collection.developer) rows.push(["개발사", collection.developer]);
   if (collection.publisher) rows.push([collection.type === "game" ? "배급사" : "출판사", collection.publisher]);
-  if (collection.releaseDate) rows.push(["발매일", collection.releaseDate]);
+  if (collection.releaseDate) rows.push(["발매일", displayDate(collection.releaseDate)]);
   else if (collection.year !== null && collection.year !== undefined) rows.push(["연도", String(collection.year)]);
   if (collection.director) rows.push(["감독", collection.director]);
   if (collection.productionCompany) rows.push(["제작사", collection.productionCompany]);
@@ -19,7 +21,7 @@ export function CollectionInfoPanel({ collection, compact = false }: CollectionI
   if (collection.runtimeMinutes) rows.push(["상영 시간", `${collection.runtimeMinutes}분`]);
   if (collection.myScore != null) rows.push(["내 평점", `${collection.myScore}/5`]);
   if (collection.externalScore != null) rows.push([collection.type === "game" ? "IGDB 평점" : collection.type === "movie" ? "TMDB 평점" : "외부 평점", String(collection.externalScore)]);
-  if (collection.genres) rows.push(["장르", collection.genres]);
+  if (collection.genres) rows.push(["장르", displayGenres(collection.genres)]);
   if (showDescription && collection.description?.trim()) rows.push(["설명", collection.description]);
 
   return (

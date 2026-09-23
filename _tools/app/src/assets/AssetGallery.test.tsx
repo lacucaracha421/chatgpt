@@ -16,6 +16,26 @@ afterEach(() => {
 });
 
 describe("AssetGallery", () => {
+  it("keeps full date headings when requested by the revisit view", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 23));
+    const items = [{ ...asset(0), collectedAt: new Date(2026, 8, 23, 12).toISOString() }];
+    const { container, rerender } = render(<AssetGallery layout="masonry" items={items} />);
+    expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("09.23");
+    rerender(<AssetGallery layout="masonry" items={items} fullDateHeadings />);
+    expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("2026.09.23");
+  });
+
+  it("leaves the missing creator caption empty while retaining time and its description", () => {
+    const { container } = render(<AssetGallery layout="masonry" items={[asset(0)]} metadataVisible />);
+    const caption = container.querySelector(".asset-gallery__metadata")!;
+    expect(caption.querySelector("span")).toBeEmptyDOMElement();
+    expect(caption.querySelector("time")).toHaveAttribute("datetime", asset(0).collectedAt);
+    expect(caption.querySelector("time")?.textContent).toMatch(/^\d{2}:\d{2}$/);
+    expect(screen.queryByText("작가 미상")).not.toBeInTheDocument();
+    expect(screen.getByRole("option")).not.toHaveAttribute("aria-description", expect.stringContaining("작가 미상"));
+  });
+
   it("restores masonry scope offsets without replacing its scroll container", async () => {
     const items = Array.from({ length: 120 }, (_, index) => asset(index));
     const { container, rerender } = render(<AssetGallery layout="masonry" scopeKey="a" items={items} />);
