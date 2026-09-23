@@ -151,6 +151,7 @@
       for (const target of [...motions.keys()]) stopMotion(target);
       if (pointer) { try { $(".arc").releasePointerCapture?.(pointer.id); } catch {} pointer = null; }
       window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", onPageScroll);
       window.visualViewport?.removeEventListener("resize", position);
       window.visualViewport?.removeEventListener("scroll", position);
     }
@@ -182,6 +183,13 @@
       onClose?.(result);
     }
     function cancel() { if (editing || available()) close(); }
+    // Scrolling the page well away from where the menu opened dismisses it, like an
+    // outside tap; the menu's own dial wheel never scrolls the page.
+    const openScrollY = window.scrollY || 0;
+    function onPageScroll() {
+      if (editing || disposed) return;
+      if (Math.abs((window.scrollY || 0) - openScrollY) >= Math.max(120, window.innerHeight * .25)) cancel();
+    }
     function focusFirst() { $(".sector:not(:disabled):not([aria-hidden=true])")?.focus({ preventScroll: true }); }
     function back() {
       if (!available() || history.length < 2) return;
@@ -823,6 +831,9 @@
       $(".hide-folder").onclick = () => void edit(() => onHide?.(destination().id), ".back");
     }
     $(".root-next").onclick = nextPage;
+    // A fresh press outside the panel starts a new interaction. A cancelled dial or
+    // center gesture leaves no click behind, so its suppression must not swallow it.
+    backdrop.addEventListener("pointerdown", event => { if (!panel.contains(event.target)) suppressClick = false; });
     backdrop.addEventListener("click", event => {
       if (editing || !available() || suppressClick || event.target.closest?.("button,.notice")) return;
       const bounds = $(".arc").getBoundingClientRect();
@@ -990,6 +1001,7 @@
       motion(panel, [{ opacity: 0, transform: `translateX(${side === "right" ? 8 : -8}px)` }, { opacity: 1, transform: "translateX(0)" }], 140);
     }
     window.addEventListener("resize", position);
+    if (!editing) window.addEventListener("scroll", onPageScroll, { passive: true });
     window.visualViewport?.addEventListener("resize", position);
     window.visualViewport?.addEventListener("scroll", position);
     return { host, close: cancel, dispose, update, get tree() { return tree; }, unlockInput: () => setLocked(false), lockInput: () => setLocked(true) };

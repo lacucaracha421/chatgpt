@@ -1551,3 +1551,34 @@ test('reduced-motion notches reveal each step instantly and commit after the ful
   advance(112); centerWheel(view, 53); advance(112); centerWheel(view, 53);
   advance(116); assert.equal(calls, 0); advance(4); assert.equal(calls, 1); assert.equal(animations.length, 0);
 }));
+
+test('scrolling the page well away from where the menu opened closes it; a small scroll does not', () => {
+  let closes = 0;
+  Object.defineProperty(dom.window, 'scrollY', { configurable: true, value: 0 });
+  const view = mount({ onClose: () => closes++ });
+  const scrollTo = y => { Object.defineProperty(dom.window, 'scrollY', { configurable: true, value: y }); dom.window.dispatchEvent(new dom.window.Event('scroll')); };
+  scrollTo(100);
+  assert.equal(closes, 0); assert.ok(view.host.isConnected);
+  scrollTo(Math.max(120, dom.window.innerHeight * .25) + 1);
+  assert.equal(closes, 1); assert.equal(view.host.isConnected, false);
+  scrollTo(2000);
+  assert.equal(closes, 1, 'a closed menu ignores later scrolls');
+  Object.defineProperty(dom.window, 'scrollY', { configurable: true, value: 0 });
+});
+
+test('an outside tap still closes the menu after a dial gesture was cancelled without a click', () => {
+  let closes = 0;
+  const view = mount({ onClose: () => closes++ });
+  const press = (type, target, x = 150, id = 91) => {
+    const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 200, button: 0 });
+    Object.defineProperties(event, { pointerId: { value: id }, pointerType: { value: 'touch' } });
+    target.dispatchEvent(event);
+  };
+  // The browser takes the touch over (e.g. for scrolling): pointercancel, no click.
+  press('pointerdown', view.$('.arc')); press('pointercancel', view.$('.arc'));
+  assert.equal(closes, 0);
+  const backdrop = view.$('.backdrop');
+  press('pointerdown', backdrop, 5, 92);
+  backdrop.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true, clientX: 5, clientY: 200 }));
+  assert.equal(closes, 1);
+});
