@@ -3,6 +3,8 @@ import os
 import boto3
 from botocore.config import Config
 
+import head_cache
+
 R2_ENDPOINT = os.environ["R2_ENDPOINT"]
 R2_ACCESS_KEY_ID = os.environ["R2_ACCESS_KEY_ID"]
 R2_SECRET_ACCESS_KEY = os.environ["R2_SECRET_ACCESS_KEY"]
@@ -35,6 +37,7 @@ def thumbnail_storage_client():
 
 
 def presign_put(object_key: str, content_type: str, expires_in: int = 600) -> str:
+    head_cache.ticket_heads.invalidate(_s3, R2_BUCKET, object_key)
     return _s3.generate_presigned_url(
         "put_object",
         Params={

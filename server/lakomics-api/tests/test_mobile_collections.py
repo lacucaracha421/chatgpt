@@ -10,6 +10,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.test_capture_api_stub import fake_s3
 import app as api_app
+import head_cache
 from fastapi.testclient import TestClient
 
 AUTH = {"Authorization": "Bearer collections-test"}
@@ -26,6 +27,15 @@ def blob(data=b"image"):
 
 class MobileCollectionsTests(unittest.TestCase):
     def setUp(self):
+        self.clock = 0.0
+        cache = head_cache.HeadMetadataCache(clock=lambda: self.clock)
+        self.cache_patch = mock.patch.object(head_cache, "ticket_heads", cache)
+        self.cache_patch.start()
+        self.addCleanup(self.cache_patch.stop)
+        endpoint_patch = mock.patch.object(fake_s3, "meta", mock.Mock(
+            endpoint_url="https://" + "a" * 32 + ".r2.cloudflarestorage.com"), create=True)
+        endpoint_patch.start()
+        self.addCleanup(endpoint_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.old_path, self.old_token = api_app.DB_PATH, api_app.API_TOKEN
         api_app.DB_PATH = Path(self.temp.name) / "fixture.sqlite"
@@ -103,6 +113,74 @@ class MobileCollectionsTests(unittest.TestCase):
         fake_s3.objects.clear()
         self.assertEqual(self.client.post("/v1/collections/work/artworks/cover/media-ticket", headers=AUTH, json={"variant":"original"}).status_code, 404)
         self.assertEqual(self.client.post("/v1/collections/artworks/check", headers=AUTH, json={"items":[request]}).json(), {"missing":[request["sha256"]]})
+
+    def test_ticket_cache_hits_still_require_auth_and_published_membership(self):
+        item, media = self.with_art()
+        fake_s3.objects[media["objectKey"]] = {"body": b"image", "content_type": "image/webp"}
+        revision = self.publish([item]).json()["revision"]
+        path = "/v1/collections/work/artworks/cover/media-ticket"
+        with mock.patch.object(fake_s3, "head_object", wraps=fake_s3.head_object) as head:
+            for _ in range(2):
+                self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 200)
+            self.assertEqual(head.call_count, 1)
+            self.assertEqual(self.client.post(path, json={}).status_code, 401)
+            self.assertEqual(self.publish([], revision).status_code, 200)
+            self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 404)
+            self.assertEqual(head.call_count, 1)
+
+    def test_expired_missing_ticket_invalidates_receipt_and_recovers_immediately(self):
+        item, media = self.with_art()
+        stored = {"body": b"image", "content_type": "image/webp"}
+        fake_s3.objects[media["objectKey"]] = stored
+        self.assertEqual(self.publish([item]).status_code, 200)
+        path = "/v1/collections/work/artworks/cover/media-ticket"
+        self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 200)
+        fake_s3.objects.clear()
+        self.clock = 30
+        self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 404)
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM mobile_collection_artwork").fetchone()[0], 0)
+        fake_s3.objects[media["objectKey"]] = stored
+        self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 200)
+
+    def test_prepare_missing_invalidates_warm_ticket_and_receipt(self):
+        item, media = self.with_art()
+        fake_s3.objects[media["objectKey"]] = {"body": b"image", "content_type": "image/webp"}
+        self.assertEqual(self.publish([item]).status_code, 200)
+        path = "/v1/collections/work/artworks/cover/media-ticket"
+        self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 200)
+        fake_s3.objects.clear()
+        body = {k: v for k, v in media.items() if k != "objectKey"}
+        prepared = self.client.post("/v1/collections/artworks/prepare", headers=AUTH, json=body)
+        self.assertIsNotNone(prepared.json()["uploadUrl"])
+        self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 404)
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM mobile_collection_artwork").fetchone()[0], 0)
+
+    def test_manifest_change_rechecks_and_mismatch_is_not_sticky(self):
+        item, media = self.with_art()
+        fake_s3.objects[media["objectKey"]] = {"body": b"image", "content_type": "image/webp"}
+        self.assertEqual(self.publish([item]).status_code, 200)
+        path = "/v1/collections/work/artworks/cover/media-ticket"
+        self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 200)
+        # Isolate a changed current manifest from the separately tested publisher.
+        with api_app.get_db() as db:
+            db.execute("UPDATE mobile_collections SET payload=json_set(payload,'$.artworks[0].thumbnail.sizeBytes',6)")
+            db.commit()
+        with mock.patch.object(fake_s3, "head_object", wraps=fake_s3.head_object) as head:
+            self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 409)
+            fake_s3.objects[media["objectKey"]]["body"] = b"image!"
+            self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 200)
+            self.assertEqual(head.call_count, 2)
+
+    def test_ticket_storage_error_is_not_cached(self):
+        item, media = self.with_art()
+        fake_s3.objects[media["objectKey"]] = {"body": b"image", "content_type": "image/webp"}
+        self.assertEqual(self.publish([item]).status_code, 200)
+        path = "/v1/collections/work/artworks/cover/media-ticket"
+        with mock.patch.object(fake_s3, "head_object", side_effect=RuntimeError("offline")):
+            self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 502)
+        self.assertEqual(self.client.post(path, headers=AUTH, json={}).status_code, 200)
 
     def test_prepare_reuses_confirmed_bytes_and_rejects_wrong_lengths(self):
         media = blob()

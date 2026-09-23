@@ -57,6 +57,8 @@ import threading
 import time
 from pathlib import Path
 
+import head_cache
+
 LOG = logging.getLogger("lakomics.image-thumbnails")
 
 TABLE = "image_thumbnail_jobs"
@@ -99,7 +101,7 @@ DOWNLOAD_TIMEOUT_SECONDS = 60.0
 #: deadlock risk, so it is deliberately not used.
 ENCODE_TIMEOUT_SECONDS = 20.0
 
-DERIVED_PREFIX = "derived/image-thumbnails/v1"
+DERIVED_PREFIX = "derived/image-thumbnails/v2"
 DERIVED_CONTENT_TYPE = "image/webp"
 
 IMAGE_KIND = "image"
@@ -178,7 +180,7 @@ def install(db) -> None:
 
 
 def derived_key(sha256: str, kind: str = IMAGE_KIND) -> str:
-    """Preserve existing image keys; separate new media recipes by decoder kind."""
+    """Keys for future encodes; published keys are never rewritten on recipe changes."""
     if kind == IMAGE_KIND:
         return f"{DERIVED_PREFIX}/{sha256}.webp"
     version = "v2" if kind == "video" else "v1"
@@ -758,6 +760,7 @@ class ImageThumbnailWorker:
                                ContentType=DERIVED_CONTENT_TYPE)
         except Exception:
             raise _TransientError(E_RETRY["storageWriteFailed"])
+        head_cache.ticket_heads.invalidate(self.s3, self.bucket, key)
         # Re-check every condition in the publication transaction: the Asset may have
         # been trashed, deleted, replaced or thumbnailed while we downloaded and encoded.
         # On any of those the artifact is dropped, not published — and never deleted from

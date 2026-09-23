@@ -38,7 +38,7 @@ The server exposes pending-list, per-capture download, acknowledge/imported, and
 
 Current server limits are 50 MiB for images and 512 MiB by default for videos (video limit is environment-configurable).
 
-## Server-owned media thumbnails (source updated 2026-09-20)
+## Server-owned media thumbnails (deployed update 2026-09-23)
 
 When Asset authority is active, a new Capture is promoted directly to a committed
 server Asset. This path is distinct from the legacy PC-mediated inbox described
@@ -47,6 +47,12 @@ new image/GIF/video Asset with `import_source='capture'`; startup upgrades the
 INSERT trigger but never scans old Assets or requeues terminal jobs.
 A single lock-protected background worker downloads the original from R2, verifies
 its size/digest, and invokes `image_thumbnail_encode.py` in a separate process.
+Deployed 2026-09-23: after a Capture transaction commits a newly
+promoted Asset, the API signals the existing worker's local event. Failed transactions
+and duplicate promotions do not signal it. The five-second poll remains: with multiple
+API processes, only the
+process holding the worker lock can react to its own event; other processes' jobs
+are discovered by polling. No startup scan, backfill or cross-process notifier is added.
 
 - Deployment prerequisites: the application's nullable `width`, `height` and
   `duration_ms` migration must run before worker installation; Pillow is required
@@ -58,6 +64,14 @@ its size/digest, and invokes `image_thumbnail_encode.py` in a separate process.
   aspect ratio, EXIF orientation and transparency, without upscaling. GIF uses
   Pillow's first frame without traversing the animation; its total duration stays
   unknown. Animated PNG/WebP and unsupported formats remain rejected.
+  Deployed 2026-09-23: JPEG checks the original pixel budget
+  before requesting decoder-assisted downsampling toward twice the final edge.
+  Strict truncation rejection, all EXIF pixel transforms and original display
+  dimensions are retained. Final Lanczos sizing uses original dimensions and the
+  orientation-adjusted fractional decoder box, avoiding odd-size padding drift.
+  PNG, WebP, GIF and video decoding are unchanged. The synthetic-only benchmark
+  `server/lakomics-api/tests/jpeg_thumbnail_benchmark.py` compares full decode and
+  draft in fresh subprocesses; its pixel metrics are not perceptual acceptance.
 - MP4/MOV and WebM/Matroska produce one static poster frame through bounded tools.
   Header-based demuxer selection also works on extensionless temporary files;
   network protocols and playlists are excluded, and MOV external data references
@@ -77,14 +91,18 @@ its size/digest, and invokes `image_thumbnail_encode.py` in a separate process.
   backoff; terminal failures remain inspectable in `image_thumbnail_jobs`.
   Missing decoder tools are terminal `encodeToolUnavailable`; the next eligible
   job can proceed. Provisioning tools later does not retry old terminal jobs.
-- Existing image keys stay `derived/image-thumbnails/v1/{sha256}.webp`; GIF keeps
-  `derived/media-thumbnails/v1/gif/{sha256}.webp`. The later-video recipe uses
+- Existing image keys stay `derived/image-thumbnails/v1/{sha256}.webp`; future
+  still-image encodes use `derived/image-thumbnails/v2/{sha256}.webp` for the JPEG
+  decoder change deployed on 2026-09-23. Both image recipes remain eligible
+  for ticket HEAD caching. No existing key is replaced and no requeue or backfill
+  is performed. GIF keeps `derived/media-thumbnails/v1/gif/{sha256}.webp`.
+  The later-video recipe uses
   `derived/media-thumbnails/v2/video/{sha256}.webp`: accurate seek at 10% duration,
   clamped to 0.5–3 seconds and capped at half-duration for short clips. Unknown
   duration uses 0.5 seconds; only a successful decode with no frame retries at zero.
   Decode failures/timeouts do not retry at zero. This reduces opening-black posters
   without brightness analysis; existing poster keys are not automatically replaced.
-  Recipe v2 was deployed in the authorized 0.6.6 rollout on 2026-09-20. Originals are
+  Video recipe v2 was deployed in the authorized 0.6.6 rollout on 2026-09-20. Originals are
   never overwritten. Publication rechecks visibility, digest, source fields and
   missing-thumbnail state, then atomically sets `thumbnail_key` and missing source
   dimensions/duration from a strictly validated, maximum-4-KiB sidecar. Dimensions
@@ -116,6 +134,80 @@ manifests remain under `/home/linuxuser/lakomics-metadata-repair-20260920-kchr7f
 No API source deployment or APK installation occurred during that metadata repair.
 Rollback sources and the checked pre-deployment SQLite backup are retained under
 `/home/linuxuser/lakomics-media-release-20260920-uazynrio/rollback`.
+
+## Ticket HEAD metadata cache (deployed 2026-09-23)
+
+Library thumbnail and Collection artwork tickets reuse successful R2 HEAD metadata
+for at most 30 seconds in a process-local, thread-safe 512-entry LRU cache. Eligibility
+is limited to exact content-addressed Collection keys (`work-artwork/mobile/{sha256}`)
+and the image-v1/v2, GIF-v1 and video-v2 derived thumbnail recipes above. Ordinary Asset
+originals, `library/{id}/thumbnail`, inbox, legacy artwork and backup keys still HEAD
+on every request: a database digest does not make those overwriteable keys immutable.
+
+Each request still checks authentication and current publication/Asset visibility,
+including tombstones, before consulting the cache. The account-scoped R2 endpoint,
+bucket, key and current metadata identity must match. Lookup and invalidation share
+an opaque hash of boto's `meta.endpoint_url`, so distinct clients for the same endpoint
+invalidate together without retaining URLs or credentials in the cache. Clients without
+a usable endpoint bypass caching. Collection size/type validation still runs on hits.
+Only content type and length are cached, never signed URLs or authorization. Ticket response and
+presign contracts and the maximum-eight batch HEAD concurrency are unchanged.
+
+Upload preparation/confirmation and unconfirmed snapshot checks always use fresh
+HEADs and invalidate local ticket metadata. PUT signing and successful derived
+thumbnail writes also invalidate it. Misses, storage errors and manifest mismatches
+are not retained; an observed missing Collection object still removes its publication
+receipt. Hits do not extend the TTL. Out-of-band storage deletion/overwrite and writes
+in another API process can remain unseen until TTL expiry; the cache is not shared
+across processes, and it does not change already issued signed URL lifetimes.
+The 2026-09-23 deployment inspection found one Uvicorn API process, with no explicit
+multi-worker configuration. This is an observed deployment state, not a topology guarantee.
+
+Local verification used an ignored `.venv` with Python 3.14.4, FastAPI 0.141.1,
+Pydantic 2.13.5, HTTPX 0.28.1, boto3 1.43.100 and the pinned Pillow 12.3.0.
+Ticket/Collection/Capture/API/JPEG regressions passed 172 tests; cache/worker/full
+encoder regressions passed another 199 tests. Fixtures use temporary databases and
+fake storage, not production data. The existing HTTPX TestClient deprecation warning
+remains; no dependency declarations or deployed packages were changed. Synthetic
+benchmarks also ran with Pillow 12.3.0/libjpeg-turbo 3.1.4.1; neither those measurements
+nor local API tests establish production latency, deployment or real-image visual quality.
+
+## Media optimization rollout — 2026-09-23
+
+After explicit authorization and Tailscale SSH authentication, the six candidate
+modules (`app.py`, `r2.py`, `mobile_collections.py`, `image_thumbnails.py`,
+`image_thumbnail_encode.py`, new `head_cache.py`) were deployed with baseline and
+candidate hash guards. Unrelated maintenance scripts were excluded after runtime
+reference checks and left unchanged. No dependencies or service units were changed.
+
+- Production Python 3.14.4/Pillow 12.3.0 and its existing API dependencies passed all
+  371 targeted tests in an isolated stage, with zero skips. The stage had no
+  production environment file or database. Candidate/test hashes were rechecked
+  before reusing this evidence for the final attempt.
+- The initial API stop also stopped the existing proxy through its `Requires`
+  dependency. HTTPS returned 502 and candidate sources were rolled back. The proxy
+  was restored; the final procedure waits for API readiness, starts the proxy,
+  then checks HTTPS on both deployment and rollback. A stopped proxy's exit-143
+  state is accepted only with PID zero and an empty cgroup. No database was restored.
+- Final API and proxy states were active/running with `NRestarts=0`. Direct, local
+  proxy and HTTPS health passed. Authenticated Library/capability reads, single/batch
+  Asset tickets and Collection tickets passed; existing thumbnails downloaded and
+  decoded, with the Collection SHA-256 matching its manifest. Unauthenticated reads
+  and ticket requests returned 401. All six deployed hashes match the candidates.
+- The successful attempt preserved the full logical database fingerprint. Asset
+  count remained 9,099, thumbnail jobs 128 completed (none queued/running), Collections
+  342 and catalog publications 64. Production and backup SQLite `quick_check` passed.
+  No historical thumbnail regeneration, requeue, backfill or forced capture occurred.
+- Rollback sources and evidence remain under
+  `/home/linuxuser/lakomics-media-0610-pkkwe8o0/`; the fresh pre-final-attempt backup is
+  `rollback/lakomics-attempt3.sqlite3` (SHA-256
+  `87ea5307fa6e47fc4867cae20eda52ae0026c1ac3d1f8f1e9a66614c9bb329d1`).
+  Local task artifacts are in ignored `android/build/media-0610-deploy/`.
+- Android 0.6.10 (26) was already installed with matching APK hash and verified startup;
+  see `android/README.md`. No further device interaction occurred during this rollout.
+  New JPEG-v2 generation and worker wake have isolated-test coverage, not a new
+  mutating production Capture acceptance check. Real-gallery latency/visual quality
+  remain unmeasured; one-off smoke timings are not a performance benchmark.
 
 ## Current desktop inbound behavior
 

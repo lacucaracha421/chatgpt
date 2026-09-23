@@ -26,6 +26,7 @@ import asset_visibility
 import authority
 import classification_authority
 import classification_snapshot
+import head_cache
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
@@ -1136,6 +1137,7 @@ def create_capture(
     digest = getattr(stored, "sha256", None)
     stored_media_type = "animated_gif" if content_type == "image/gif" else capture.media_type
     ts = now_iso()
+    asset_created = False
 
     try:
         with get_db() as db:
@@ -1177,7 +1179,7 @@ def create_capture(
                 if digest is None:
                     raise HTTPException(422, detail={"code": "captureDigestUnavailable"})
                 try:
-                    asset_authority.promote_capture(
+                    _, asset_created = asset_authority.promote_capture(
                         db, library_id=active["libraryId"], capture_id=capture_id,
                         kind="gif" if stored_media_type == "animated_gif" else stored_media_type,
                         object_key=object_key, content_type=content_type, size_bytes=size_bytes,
@@ -1217,6 +1219,12 @@ def create_capture(
             }
 
         raise HTTPException(status_code=409, detail="Capture conflict")
+
+    # The trigger's durable job is visible only after the capture transaction commits.
+    # This event is process-local; the lock-owning worker still polls for other writers.
+    worker = _image_thumbnail_worker
+    if asset_created and worker is not None:
+        worker.wake()
 
     return {
         "ok": True,
@@ -2444,6 +2452,16 @@ def list_mobile_revisit_creator_assets(
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
+def _ticket_head(asset, variant, object_key):
+    # Authorization and live visibility have already been checked for this request.
+    # Original/legacy keys remain mutable; a digest in the row alone is not enough.
+    identity = None
+    if variant == "thumbnail":
+        identity = tuple(asset[field] for field in (
+            "sha256", "content_type", "size_bytes", "metadata_revision", "updated_at"))
+    return head_cache.ticket_heads.head(_s3, R2_BUCKET, object_key, identity=identity)
+
+
 @app.post("/v1/library/assets/{asset_id}/media-ticket")
 def create_mobile_media_ticket(
     asset_id: str,
@@ -2463,7 +2481,7 @@ def create_mobile_media_ticket(
     if not object_key:
         raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
     try:
-        metadata = _s3.head_object(Bucket=R2_BUCKET, Key=object_key)
+        metadata = _ticket_head(asset, request.variant, object_key)
     except ClientError as exc:
         code = str(exc.response.get("Error", {}).get("Code", ""))
         if code in ("404", "NoSuchKey", "NotFound"):
@@ -2536,7 +2554,7 @@ def create_mobile_media_tickets(
         if not object_key:
             return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "unavailable"}
         try:
-            metadata = _s3.head_object(Bucket=R2_BUCKET, Key=object_key)
+            metadata = _ticket_head(asset, variant, object_key)
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             if code in ("404", "NoSuchKey", "NotFound"):

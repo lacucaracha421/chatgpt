@@ -383,8 +383,9 @@ def _still_thumbnail(input_path, kind):
     the whole preview: nothing here seeks, walks the frame list or reads a frame count
     on the GIF path, and no duration is claimed for it at all.
     """
-    from PIL import Image
+    from PIL import Image, ImageFile
 
+    ImageFile.LOAD_TRUNCATED_IMAGES = False
     # Pillow only *warns* between MAX_IMAGE_PIXELS and twice it, and warns rather than
     # raises at all while the warning filter is permissive. Turning the class into an
     # error is what makes the ceiling hard; ``_check_pixel_budget`` below is the second
@@ -409,6 +410,29 @@ def _still_thumbnail(input_path, kind):
                 # this worker exists to avoid. A GIF is the format whose whole point is
                 # that it may animate, and its first frame is the agreed preview.
                 _reject_animated(image)
+            source_size = source_box = None
+            if image.format == "JPEG":
+                width, height = image.size
+                orientation = image.getexif().get(274)
+                if orientation in (5, 6, 7, 8):
+                    width, height = height, width
+                source_size = (width, height)
+                # Reduced JPEG decoding avoids the full-size pixel allocation. Keep
+                # ~2x the final edge for Lanczos; draft rounds decoder dimensions, so
+                # neither output geometry nor source metadata may use its new size.
+                scale = min(1, 2 * MAX_EDGE / max(image.size))
+                draft = image.draft(image.mode, (image.width * scale, image.height * scale))
+                if draft is not None:
+                    # The fractional box excludes draft's padded right/bottom edge.
+                    # Move that box with the same EXIF transform as the pixels.
+                    _, (_, _, right, bottom) = draft
+                    decoded_width, decoded_height = image.size
+                    if orientation in (5, 6, 7, 8):
+                        right, bottom = bottom, right
+                        decoded_width, decoded_height = decoded_height, decoded_width
+                    left = decoded_width - right if orientation in (2, 3, 6, 7) else 0
+                    top = decoded_height - bottom if orientation in (3, 4, 7, 8) else 0
+                    source_box = (left, top, left + right, top + bottom)
             # A freshly opened image is already on frame 0, and seeking to it is what
             # would force Pillow to decode every frame in between. The frame count is
             # likewise never read here: on a GIF that would traverse the whole file.
@@ -417,10 +441,10 @@ def _still_thumbnail(input_path, kind):
             image.load()
             frame = _transposed(image)
             _check_pixel_budget(frame.width, frame.height)
-            # Measured on the transposed frame, because that is the orientation the
-            # source is *displayed* in: a 40x20 file tagged "rotate 90" is a 20x40 image.
-            width, height = frame.width, frame.height
-            thumbnail = _scaled(frame)
+            # Display dimensions come from the original JPEG header, not its draft
+            # frame; other formats still have their full-size transposed frame here.
+            width, height = source_size or frame.size
+            thumbnail = _scaled(frame, source_size, source_box)
             sink = io.BytesIO()
             thumbnail.save(sink, format="WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
             payload = sink.getvalue()
@@ -986,15 +1010,16 @@ def _carries_transparency(image):
     return False
 
 
-def _scaled(image):
+def _scaled(image, source_size=None, source_box=None):
     from PIL import Image
 
-    longest = max(image.width, image.height)
+    width, height = source_size or image.size
+    longest = max(width, height)
     if longest <= MAX_EDGE:
         return image
     scale = MAX_EDGE / longest
-    target = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
-    return image.resize(target, Image.Resampling.LANCZOS)
+    target = (max(1, round(width * scale)), max(1, round(height * scale)))
+    return image.resize(target, Image.Resampling.LANCZOS, box=source_box)
 
 
 if __name__ == "__main__":

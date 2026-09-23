@@ -630,7 +630,7 @@ class WorkerRunTests(Fixture):
         worker = self.worker()
         self.assertTrue(worker.run_once())
         key = self.thumbnail_key(ASSET_IMAGE)
-        self.assertEqual(key, f"derived/image-thumbnails/v1/{digest}.webp")
+        self.assertEqual(key, f"derived/image-thumbnails/v2/{digest}.webp")
         self.assertIn(key, self.s3.puts)
         self.assertEqual(self.s3.objects[key]["content_type"], "image/webp")
         assert Image is not None
@@ -642,6 +642,15 @@ class WorkerRunTests(Fixture):
         # The original object is untouched: a derived key never replaces a source.
         self.assertIn(f"images/inbox/{ASSET_IMAGE}/original", self.s3.objects)
         self.assertEqual(self.s3.puts, [key])
+
+    def test_image_recipe_upgrade_preserves_published_v1_without_requeue(self):
+        key = "derived/image-thumbnails/v1/" + "a" * 64 + ".webp"
+        self.seed(ASSET_IMAGE, png_bytes(), thumbnail_key=key)
+        worker_module.install(self.db)
+        self.assertEqual(self.jobs(), [])
+        self.assertFalse(self.worker().run_once())
+        self.assertEqual(self.thumbnail_key(ASSET_IMAGE), key)
+        self.assertEqual(self.s3.puts, [])
 
     def test_running_twice_does_not_reencode_a_done_job(self):
         self.seed(ASSET_IMAGE, png_bytes())
@@ -810,7 +819,7 @@ class WorkerRunTests(Fixture):
         self.db.commit()
         self.assertTrue(worker.run_once())
         self.assertEqual(self.thumbnail_key(ASSET_IMAGE),
-                         f"derived/image-thumbnails/v1/{digest}.webp")
+                         f"derived/image-thumbnails/v2/{digest}.webp")
 
     def test_a_trashed_asset_is_not_published(self):
         self.seed(ASSET_IMAGE, png_bytes())
@@ -870,7 +879,7 @@ class WorkerRunTests(Fixture):
         worker.run_once()
         worker.run_once()
         self.assertEqual(self.s3.puts,
-                         [f"derived/image-thumbnails/v1/{digest}.webp"] * 2)
+                         [f"derived/image-thumbnails/v2/{digest}.webp"] * 2)
         self.assertEqual(self.thumbnail_key(ASSET_IMAGE), self.thumbnail_key(ASSET_VIDEO))
 
     def test_a_timed_out_encoder_is_transient_and_leaves_no_artifact(self):
@@ -1095,7 +1104,7 @@ class WorkerLifecycleTests(Fixture):
         finally:
             worker.stop()
         self.assertEqual(self.thumbnail_key(ASSET_IMAGE),
-                         f"derived/image-thumbnails/v1/{digest}.webp")
+                         f"derived/image-thumbnails/v2/{digest}.webp")
         self.assertEqual(self.jobs(ASSET_IMAGE)[0]["state"], "done")
 
 

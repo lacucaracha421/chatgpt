@@ -12,6 +12,8 @@ from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+import head_cache
+
 MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024
 MAX_ARTWORK_BYTES = 16 * 1024 * 1024
 MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
@@ -176,9 +178,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         row = db.execute("SELECT revision,published_at FROM mobile_collection_replica WHERE singleton=1").fetchone()
         return (row["revision"], row["published_at"]) if row else (None, None)
 
-    def head(blob: ArtworkUpload):
+    def head(blob: ArtworkUpload, *, ticket=False):
+        key, storage_bucket = artwork_key(blob.sha256), bucket()
         try:
-            metadata = storage().head_object(Bucket=bucket(), Key=artwork_key(blob.sha256))
+            client = storage()
+            metadata = head_cache.ticket_heads.head(
+                client, storage_bucket, key,
+                identity=(blob.sizeBytes, blob.contentType) if ticket else None)
         except ClientError as exc:
             if str(exc.response.get("Error", {}).get("Code", "")) in ("404", "NoSuchKey", "NotFound"):
                 return False
@@ -186,6 +192,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         except Exception as exc:
             raise HTTPException(502, "Artwork storage unavailable") from exc
         if metadata.get("ContentLength") != blob.sizeBytes or metadata.get("ContentType") != blob.contentType:
+            head_cache.ticket_heads.invalidate(client, storage_bucket, key)
             raise HTTPException(409, "Stored artwork does not match its manifest")
         return True
 
@@ -376,7 +383,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         if art is None or art[body.variant] is None:
             raise HTTPException(404, "Artwork variant unavailable")
         blob = ArtworkBlob.model_validate(art[body.variant])
-        if not head(blob):
+        if not head(blob, ticket=True):
             with get_db() as db:
                 db.execute("DELETE FROM mobile_collection_artwork WHERE sha256=?", [blob.sha256])
                 db.commit()
