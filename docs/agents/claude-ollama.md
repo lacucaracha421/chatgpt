@@ -34,7 +34,7 @@ Use these built-in commands when behavior or configuration looks wrong:
 - `/doctor` reports installation, settings, and skill-description problems.
 - `/status` shows active model and configuration sources.
 
-`CLAUDE.md` imports the shared repository policy and a lightweight skill selector. Clear authorized work does not require a new approval or skill chain. Support claims with inspected, still-valid evidence under `AGENTS.md`; do not rerun checks merely because a session or task ended. Current repository docs override stale project-memory pointers.
+`CLAUDE.md` imports the shared repository policy and adds brief Claude-specific skill and delegation notes; the `using-superpowers` skill remains available on demand rather than always loaded. Clear authorized work does not require a new approval or skill chain. Support claims with inspected, still-valid evidence under `AGENTS.md`; do not rerun checks merely because a session or task ended. Current repository docs override stale project-memory pointers.
 
 ## Troubleshooting
 
