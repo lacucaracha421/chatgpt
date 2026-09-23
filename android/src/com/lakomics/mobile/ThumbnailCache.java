@@ -18,6 +18,12 @@ final class ThumbnailCache {
  private final long limit;
  private long generation;
  private long reserved;
+ // Totals of cached entries. One directory scan builds them; writes and removals keep
+ // them current, and an hourly rescan applies the age limit. Scanning ~10k files on
+ // every write made each download wait over a second behind the cache lock.
+ private long bytes=-1,count;
+ private long sweptAt;
+ private static final long SWEEP_EVERY=60L*60*1000;
  ThumbnailCache(File directory)throws IOException{this(directory,LIMIT);}
  ThumbnailCache(File directory,long limit)throws IOException{
   this.directory=directory;this.limit=limit;
@@ -33,21 +39,37 @@ final class ThumbnailCache {
  private File[] files(){File[] files=directory.listFiles();return files==null?new File[0]:files;}
  private File entry(String key)throws IOException{if(!key.matches("[a-f0-9]{64}"))throw new IOException("Invalid cache key");return new File(directory,key);}
  private void check(long expected)throws IOException{if(expected!=generation)throw new IOException("Cache invalidated");}
- synchronized long[] status(){trim(0);long bytes=0,count=0;for(File file:files())if(file.getName().matches("[a-f0-9]{64}")){bytes+=file.length();count++;}return new long[]{bytes,count,limit};}
+ // Settings asks rarely, so it gets an exact rescan (including the age limit).
+ synchronized long[] status(){index(true);return new long[]{bytes,count,limit};}
+ private void index(boolean force){
+  long now=System.currentTimeMillis();
+  if(!force && bytes>=0 && now-sweptAt<SWEEP_EVERY)return;
+  long total=0,entries=0;
+  for(File file:files())if(file.getName().matches("[a-f0-9]{64}")){
+   if(now-file.lastModified()>MAX_AGE && file.delete())continue;
+   total+=file.length();entries++;
+  }
+  bytes=total;count=entries;sweptAt=now;
+ }
  synchronized void clear()throws IOException{
   generation++;
   boolean failed=false;
   for(File file:files())if(file.isFile() && !file.delete())failed=true;
+  bytes=-1;index(true);
   if(failed)throw new IOException("Cache clear incomplete");
  }
  private void trim(long incoming){
-  File[] files=files();Arrays.sort(files,Comparator.comparingLong(File::lastModified));
-  long total=0,now=System.currentTimeMillis();
-  for(File file:files)if(file.getName().matches("[a-f0-9]{64}")){
-   if(now-file.lastModified()>MAX_AGE)file.delete();
-   if(file.exists())total+=file.length();
+  index(false);
+  if(bytes+incoming<=limit)return;
+  // Least recently used first; read each timestamp once instead of inside the comparator.
+  File[] files=files();long[] used=new long[files.length];Integer[] order=new Integer[files.length];
+  for(int i=0;i<files.length;i++){used[i]=files[i].lastModified();order[i]=i;}
+  Arrays.sort(order,Comparator.comparingLong(i->used[i]));
+  for(int i:order){
+   if(bytes+incoming<=limit)break;
+   File file=files[i];if(!file.getName().matches("[a-f0-9]{64}"))continue;
+   long length=file.length();if(file.delete()){bytes-=length;count--;}
   }
-  for(File file:files)if(total+incoming>limit && file.exists() && file.getName().matches("[a-f0-9]{64}")){long length=file.length();if(file.delete())total-=length;}
  }
  void obtain(String key,long expected,Download download)throws Exception{
   obtain(key,expected,Math.min(MAX_FILE,limit),download);
@@ -59,7 +81,7 @@ final class ThumbnailCache {
    if(cached.isFile() && System.currentTimeMillis()-cached.lastModified()<=MAX_AGE){cached.setLastModified(System.currentTimeMillis());return;}
    if(maximum<=0 || maximum>limit)throw new IOException("Media exceeds cache limit");
    trim(reserved+maximum);
-   if(status()[0]+reserved+maximum>limit)throw new IOException("Cache capacity busy");
+   if(bytes+reserved+maximum>limit)throw new IOException("Cache capacity busy");
    temporary=File.createTempFile("incoming-",".part",directory);reserved+=maximum;
   }
   try{
@@ -68,10 +90,11 @@ final class ThumbnailCache {
     check(expected);
     long size=temporary.length();if(size<=0 || size>maximum || size>limit)throw new IOException("Media exceeds cache limit");
     File cached=entry(key);
-    if(cached.isFile() && !cached.delete())throw new IOException("Cache replace failed");
+    if(cached.isFile()){long previous=cached.length();if(!cached.delete())throw new IOException("Cache replace failed");bytes-=previous;count--;}
     trim(size);
-    if(status()[0]+size>limit)throw new IOException("Cache capacity unavailable");
+    if(bytes+size>limit)throw new IOException("Cache capacity unavailable");
     if(!temporary.renameTo(cached))throw new IOException("Cache write failed");
+    bytes+=size;count++;
    }
   }finally{synchronized(this){temporary.delete();reserved-=maximum;}}
  }
@@ -85,5 +108,5 @@ final class ThumbnailCache {
   if(System.currentTimeMillis()-file.lastModified()>MAX_AGE)throw new FileNotFoundException();
   InputStream stream=new FileInputStream(file);file.setLastModified(System.currentTimeMillis());return stream;
  }
- synchronized void remove(String key,long expected)throws IOException{check(expected);File file=entry(key);if(file.exists()&&!file.delete())throw new IOException("Cache remove failed");}
+ synchronized void remove(String key,long expected)throws IOException{check(expected);index(false);File file=entry(key);if(file.exists()){long length=file.length();if(!file.delete())throw new IOException("Cache remove failed");bytes-=length;count--;}}
 }

@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source and installed version: **0.7.8 (35)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source and installed version: **0.7.9 (36)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,18 @@ Current source and installed version: **0.7.8 (35)**, declared in [AndroidManife
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.7.9 — The media cache no longer rescans itself on every write (2026-09-24)
+
+The user noticed the viewer took long to swap a thumbnail for the original. Device timing
+showed the ticket (~0.2 s) and the download (~0.1–0.2 s) were fast, but storing the file
+took ~1.6 s: every cache write listed and sorted the whole cache directory about five
+times, and after the Library warm-up the cache held ~8,500 files (uncached thumbnails
+waited 3–4 s the same way). The cache now builds its size totals with one scan, keeps
+them current on each write and removal, rescans hourly for the age limit (and exactly
+when Settings shows the cache), and evicts least-recently-used files only when a write
+would exceed the limit. Measured on the tablet: first view of an uncached original fell
+from ~2.0–2.4 s to ~0.5–1.4 s; prefetched neighbours show in ~40 ms.
 
 ## 0.7.8 — Catalog and Notes follow the mobile layout (2026-09-23)
 
