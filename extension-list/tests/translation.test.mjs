@@ -104,9 +104,48 @@ test('off or cache clear rejects in-flight results without repopulating the cach
   }
 });
 
-test('bad placeholder output is rejected rather than cached',async()=>{
+test('duplicated or unknown placeholders are rejected rather than cached',async()=>{
+  for(const content of ['안녕 [[LINK_0]] [[LINK_0]]','안녕 [[LINK_1]]']){
+    const f=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content}}]})}));
+    assert.equal((await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'})).code,'invalid_translation');
+    assert.deepEqual(f.memory['lakomics:translation-cache:v2']||[],[]);
+  }
+});
+
+test('a dropped placeholder is accepted so the page can re-attach the link',async()=>{
   const f=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'링크 없음'}}]})}));
-  assert.equal((await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'})).code,'invalid_translation');
+  const result=await f.handle({type:'translation:request',text:'Hello [[LINK_0]]'});
+  assert.equal(result.ok,true); assert.equal(result.text,'링크 없음');
+});
+
+test('output without Korean is a silent no-translation result, cached, while untranslated Kana stays invalid',async()=>{
+  const f=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'Blue Archive www'}}]})}));
+  const first=await f.handle({type:'translation:request',text:'Blue Archive www'});
+  assert.equal(first.ok,true); assert.equal(first.text,null); assert.equal(first.untranslated,true);
+  const again=await f.handle({type:'translation:request',text:'Blue Archive www'});
+  assert.equal(again.text,null); assert.equal(f.calls.length,1);
+  const kana=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'ブルアカ最高'}}]})}));
+  assert.equal((await kana.handle({type:'translation:request',text:'ブルアカ最高'})).code,'invalid_translation');
+});
+
+test('single and batch requests time out at 12 and 18 seconds',async()=>{
+  const delays=[], memory=structuredClone(legacy);
+  const context=vm.createContext({ AbortController, clearTimeout,
+    setTimeout:(callback,delay)=>{ delays.push(delay); return setTimeout(callback,delay>=12000?0:delay); },
+    chrome:{storage:{local:{async get(){return structuredClone(memory);},async set(v){Object.assign(memory,structuredClone(v));},async remove(){}}}},
+    fetch:(url,init)=>new Promise((resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new Error('aborted')))),
+  });
+  vm.runInContext(service,context);
+  assert.equal((await context.LakomicsTranslation.handle({type:'translation:request',text:'Slow post'})).code,'timeout');
+  assert.equal((await context.LakomicsTranslation.handle({type:'translation:request-batch',items:[{id:'1',text:'Slow a'},{id:'2',text:'Slow b'}]})).code,'timeout');
+  assert.deepEqual(delays.filter(delay=>delay>=12000),[12000,12000,18000,18000]);
+});
+
+test('Gemini 3.5 Flash Lite is offered while 3.1 Flash Lite stays the default',async()=>{
+  const f=fixture({});
+  const settings=await f.handle({type:'translation:settings'});
+  assert.equal(settings.model,'google/gemini-3.1-flash-lite');
+  assert.ok(settings.models.some(model=>model.id==='google/gemini-3.5-flash-lite'&&model.label==='Gemini 3.5 Flash Lite'));
 });
 
 test('source snapshots preserve emoji, line breaks and safe clickable links without rendering model HTML',()=>{
@@ -152,10 +191,10 @@ test('batch request translates four items in one structured OpenRouter call',asy
   assert.equal(body.model,'google/gemini-3.1-flash-lite'); assert.equal(body.response_format.type,'json_schema'); assert.equal(body.provider.require_parameters,true);
 });
 
-test('placeholder validation rejects reordered links',async()=>{
+test('placeholder validation accepts reordered links',async()=>{
   const f=fixture(legacy,async()=>({ok:true,json:async()=>({choices:[{message:{content:'안녕 [[LINK_1]] 그리고 [[LINK_0]]'}}]})}));
   const result=await f.handle({type:'translation:request',text:'Hello [[LINK_0]] and [[LINK_1]]'});
-  assert.equal(result.code,'invalid_translation');
+  assert.equal(result.ok,true); assert.equal(result.text,'안녕 [[LINK_1]] 그리고 [[LINK_0]]');
 });
 
 test('background scheduler allows two translations in flight',async()=>{
@@ -310,7 +349,7 @@ test('repeated unrelated DOM changes cause zero retries of an unchanged failed p
   }
   assert.equal(requests,1,'unrelated DOM changes must not re-run an unchanged failed post');
   assert.equal(w.document.querySelector('.lakomics-translation').dataset.error,'true');
-  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 실패 · 자동 번역을 껐다 켜면 재시도'); w.close();
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 실패 · 다시 보이면 재시도'); w.close();
 });
 
 test('a post edited after a failure is translated again with a fresh attempt',async()=>{
@@ -377,7 +416,7 @@ test('initial intersection delivery and DOM changes during a request cannot retr
   assert.equal(requests,1); w.close();
 });
 
-test('permanent translation failures stay parked through viewport re-entry',async()=>{
+test('a non-transient failure retries once on viewport re-entry, then stays parked',async()=>{
   let requests=0, observer;
   const w=translationWindow('<div data-testid="tweetText" lang="en">Invalid post</div>',message=>{
     if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
@@ -392,7 +431,8 @@ test('permanent translation failures stay parked through viewport re-entry',asyn
     observer.cb([{isIntersecting:true,target:element}]);
     await clock.advance(400);
   }
-  assert.equal(requests,1); w.close();
+  assert.equal(requests,2);
+  assert.equal(w.document.querySelector('.lakomics-translation').textContent,'번역 실패 · 자동 번역을 껐다 켜면 재시도'); w.close();
 });
 
 test('content rate-limit cooldown survives DOM churn and re-entry and eventually stops',async()=>{
@@ -542,4 +582,66 @@ test('first visible tweet uses a single fast lane while the next batch starts co
   w.eval(content); await clock.advance(40);
   assert.equal(singleCalls,1); assert.equal(batchCalls,1); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,1);
   releaseBatch(); await clock.advance(30); assert.equal(w.document.querySelectorAll('.lakomics-translation').length,5); w.close();
+});
+test('a no-translation result shows no card and is not requested again',async()=>{
+  let requests=0;
+  const w=translationWindow('<div data-testid="tweetText" lang="en">Blue Archive</div>',message=>{
+    if(message.type==='translation:settings') return {ok:true,enabled:true,hasApiKey:true};
+    requests+=1; return {ok:true,text:null,untranslated:true};
+  });
+  const element=w.document.querySelector('div'), clock=fakeTimers(w);
+  element.getBoundingClientRect=()=>({width:300,height:60,top:10,bottom:70});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.eval(content); await clock.advance(400);
+  for(let round=0;round<3;round+=1){ w.document.body.append(w.document.createElement('div')); await clock.advance(400); }
+  assert.equal(requests,1); assert.equal(w.document.querySelector('.lakomics-translation'),null);
+  assert.equal(w.document.querySelector('#lakomics-translation-controls').shadowRoot.querySelector('#status').textContent,''); w.close();
+});
+
+test('a link the translation dropped is re-attached at the end and stays clickable',()=>{
+  const dom=new JSDOM('<div data-testid="tweetText">Hi <a href="https://x.com/hashtag/tag">#tag</a> and <a href="https://example.com/">site</a></div>',{url:'https://x.com',runScripts:'outside-only'});
+  const w=dom.window; w.__LAKOMICS_TEST__=true; w.IntersectionObserver=class{}; w.eval(content);
+  const api=w.LakomicsTranslateContent, element=w.document.querySelector('div'), snapshot=api.source(element);
+  api.render(element,snapshot,'[[LINK_1]] 안녕');
+  const card=w.document.querySelector('.lakomics-translation');
+  assert.equal(card.textContent,'site 안녕 #tag');
+  assert.deepEqual([...card.querySelectorAll('a')].map(a=>a.href),['https://example.com/','https://x.com/hashtag/tag']); w.close();
+});
+
+test('a slow batch does not hold the other slot: the next group starts as soon as a slot frees',async()=>{
+  const html=Array.from({length:9},(_,i)=>`<div data-testid="tweetText" lang="en">Slot post ${i}</div>`).join('');
+  const dom=new JSDOM(html,{url:'https://x.com',runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(dom.window);
+  let singles=0; const batches=[];
+  for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:35,top:5+i*40,bottom:40+i*40});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
+    else if(message.type==='translation:request'){singles+=1; w.setTimeout(()=>callback({ok:true,text:'빠른 번역'}),50);}
+    else if(message.type==='translation:request-batch'){batches.push(()=>callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:`번역 ${item.id}`}))}));}
+  }},storage:{onChanged:{addListener(){}}}};
+  w.eval(content); await clock.advance(100);
+  // The fast lane finished while the first batch is still out: the freed slot already
+  // carries the next batch instead of waiting for the slow one.
+  assert.equal(singles,1); assert.equal(batches.length,2);
+  batches.forEach(release=>release()); await clock.advance(50);
+  assert.equal(w.document.querySelectorAll('.lakomics-translation').length,9); w.close();
+});
+
+test('posts scrolled into view send the one nearest the centre alone first',async()=>{
+  const dom=new JSDOM('<div data-testid="tweetText" lang="en">First screen post</div>',{url:'https://x.com',runScripts:'outside-only'});
+  const w=dom.window, clock=fakeTimers(dom.window), sent=[]; let observer;
+  const first=w.document.querySelector('div'); first.getBoundingClientRect=()=>({width:300,height:40,top:350,bottom:390});
+  w.IntersectionObserver=class{constructor(cb){observer={cb};} observe(){} unobserve(){}};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') callback({ok:true,enabled:true,hasApiKey:true});
+    else if(message.type==='translation:request'){sent.push(['single',message.text]); callback({ok:true,text:'단독 번역'});}
+    else if(message.type==='translation:request-batch'){sent.push(['batch',message.items.map(item=>item.text)]); callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'묶음 번역'}))});}
+  }},storage:{onChanged:{addListener(){}}}};
+  w.eval(content); await clock.advance(200);
+  first.getBoundingClientRect=()=>({width:300,height:40,top:-200,bottom:-160});
+  const added=['Edge post','Centre post','Lower post'].map((text,i)=>{const el=w.document.createElement('div'); el.dataset.testid='tweetText'; el.lang='en'; el.textContent=text; const top=[20,360,700][i]; el.getBoundingClientRect=()=>({width:300,height:40,top,bottom:top+40}); w.document.body.append(el); return el;});
+  observer.cb(added.map(target=>({isIntersecting:true,target})));
+  await clock.advance(400);
+  assert.deepEqual(sent.slice(1)[0],['single','Centre post']);
+  assert.equal(sent.slice(1).length,2); w.close();
 });

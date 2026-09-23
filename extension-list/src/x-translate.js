@@ -8,9 +8,12 @@
   const MAX_FAILURES = 3;
   const RETRY_DELAY_CAP_MS = 60000;
   const RETRY_DELAY_DEFAULT_MS = 1500;
-  let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true;
+  const MAX_IN_FLIGHT = 2;
+  let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true, inFlight = 0;
   let initialSettings = null;
-  const pending = new Set(), observed = new Set();
+  // requested holds elements whose request (or queued fallback) is outstanding, so the
+  // other slot never sends the same post twice.
+  const pending = new Set(), observed = new Set(), requested = new Set(), fallbacks = [];
   let completed = new WeakMap(), failures = new WeakMap(), outsideViewport = new WeakSet(), intersection, ui;
   const rendered = new Map();
 
@@ -95,16 +98,27 @@
       anchor.rel = "noopener noreferrer";
       node.append(anchor);
     }
+    // A translation may drop a hashtag or link; keep it clickable at the end.
+    if (!error) for (const link of snapshot.links) {
+      if (text.includes(link.token)) continue;
+      let url;
+      try { url = new URL(link.href); } catch {}
+      node.append(document.createTextNode(" "));
+      if (!url || !["http:", "https:"].includes(url.protocol)) { node.append(document.createTextNode(link.label)); continue; }
+      const anchor = document.createElement("a");
+      anchor.href = url.href; anchor.textContent = link.label; anchor.rel = "noopener noreferrer";
+      node.append(anchor);
+    }
     element.after(node);
     rendered.set(element, node);
   }
-  function failure(code) {
+  function failure(code, retryable = false) {
     if (code === "http_401" || code === "api_key_missing") return "번역 API 키를 확인하세요";
     if (code === "http_402") return "OpenRouter 잔액을 확인하세요";
     if (code === "http_403") return "OpenRouter API 접근 권한을 확인하세요";
     if (code === "http_429") return "번역 요청 한도 · 잠시 후 자동 재시도";
     if (isTransientFailure(code)) return "번역 연결 실패 · 다시 보이면 재시도";
-    return "번역 실패 · 자동 번역을 껐다 켜면 재시도";
+    return retryable ? "번역 실패 · 다시 보이면 재시도" : "번역 실패 · 자동 번역을 껐다 켜면 재시도";
   }
   function setNotice(text = "", kind = "") {
     if (!ui) return;
@@ -133,11 +147,11 @@
     if (!enabled || !hasApiKey || blocked) return;
     if (immediate) {
       if (timer !== null) { clearTimeout(timer); timer = null; }
-      void drain();
+      drain();
       return;
     }
     if (timer !== null) return;
-    timer = setTimeout(() => { timer = null; void drain(); }, 120);
+    timer = setTimeout(() => { timer = null; drain(); }, 120);
   }
   function current(candidate, requestEpoch) {
     return requestEpoch === epoch && enabled && !blocked && candidate.element.isConnected
@@ -154,6 +168,9 @@
     let chars = 0;
     for (const element of elements) {
       if (batch.length >= limit) break;
+      // Keep an in-flight post queued: if its text changes meanwhile, the stale answer
+      // is dropped and the new text is requested once the slot frees.
+      if (requested.has(element)) continue;
       pending.delete(element);
       const snapshot = source(element);
       // DOM scans must not bypass a cooldown or retry an unchanged failed post.
@@ -218,35 +235,36 @@
       requeueLater(candidates, result?.retryAfterMs, requestEpoch);
       return "cooldown";
     }
-    setNotice(failure(code), "warning");
+    let notice = "";
     for (const candidate of candidates) {
       if (!current(candidate, requestEpoch)) continue;
       const record = failuresFor(candidate.element, candidate.snapshot.signature);
-      failures.set(candidate.element, { signature: candidate.snapshot.signature, code, attempts: (record?.attempts || 0) + 1, nextAttemptAt: Infinity });
-      render(candidate.element, candidate.snapshot, failure(code), true);
+      const attempts = (record?.attempts || 0) + 1;
+      // Transient failures retry whenever the post re-enters the viewport; any other
+      // failure gets one such retry before it is parked until translation is reset.
+      const retryOnReentry = !isTransientFailure(code) && attempts < 2;
+      failures.set(candidate.element, { signature: candidate.snapshot.signature, code, attempts, nextAttemptAt: Infinity, retryOnReentry });
+      notice = failure(code, retryOnReentry);
+      render(candidate.element, candidate.snapshot, notice, true);
     }
+    setNotice(notice || failure(code), "warning");
     return "failed";
   }
-  async function handleItem(candidate, item, requestEpoch) {
+  function accept(candidate, text) {
+    // null means the model found nothing to translate (names, Latin terms): no card.
+    if (text === null) removeResult(candidate.element);
+    else render(candidate.element, candidate.snapshot, text);
+    completed.set(candidate.element, candidate.snapshot.signature);
+    failures.delete(candidate.element);
+    setNotice("", "");
+  }
+  function handleItem(candidate, item, requestEpoch) {
     if (!current(candidate, requestEpoch)) return;
-    if (item?.ok) {
-      render(candidate.element, candidate.snapshot, item.text);
-      completed.set(candidate.element, candidate.snapshot.signature);
-      failures.delete(candidate.element);
-      setNotice("", "");
-      return;
-    }
-    if (item?.code === "invalid_translation") {
-      const fallback = await send({ type: "translation:request", text: candidate.snapshot.text });
-      if (!current(candidate, requestEpoch)) return;
-      if (fallback?.ok) {
-        render(candidate.element, candidate.snapshot, fallback.text);
-        completed.set(candidate.element, candidate.snapshot.signature);
-        failures.delete(candidate.element);
-        setNotice("", "");
-        return;
-      }
-      handleTopFailure([candidate], fallback, requestEpoch);
+    if (item?.ok) { accept(candidate, item.text); return; }
+    if (item?.code === "invalid_translation" && !candidate.single) {
+      // Re-ask alone in its own slot turn, without holding up other groups.
+      requested.add(candidate.element);
+      fallbacks.push({ candidate, requestEpoch });
       return;
     }
     handleTopFailure([candidate], item || { code: "invalid_translation" }, requestEpoch);
@@ -258,47 +276,46 @@
     }
     return send({ type: "translation:request-batch", items: batch.map(candidate => ({ id: candidate.id, text: candidate.snapshot.text })) });
   }
-  async function drain() {
-    if (running || !enabled || !hasApiKey || blocked) return;
-    running = true;
-    updateControlState();
-    let continueImmediately = true;
-    try {
-      while (enabled && hasApiKey && !blocked) {
-        const wave = [];
-        if (fastLanePending) {
-          const fast = collectBatch(1, true);
-          if (fast.length) {
-            wave.push({ batch: fast, requestEpoch: epoch });
-            fastLanePending = false;
-          }
-        }
-        for (let slot = wave.length; slot < 2; slot += 1) {
-          const batch = collectBatch();
-          if (!batch.length) break;
-          wave.push({ batch, requestEpoch: epoch });
-        }
-        if (!wave.length) break;
-        const failures = await Promise.all(wave.map(async ({ batch, requestEpoch }) => {
-          const result = await requestGroup(batch);
-          if (requestEpoch !== epoch || !enabled) return false;
-          if (!result?.ok) {
-            handleTopFailure(batch, result || { code: "worker_failed" }, requestEpoch);
-            return true;
-          }
-          const items = new Map((result.items || []).map(item => [item.id, item]));
-          for (const candidate of batch) await handleItem(candidate, items.get(candidate.id), requestEpoch);
-          return false;
-        }));
-        if (failures.some(Boolean)) {
-          continueImmediately = false;
-          break;
-        }
+  async function runGroup(batch, requestEpoch) {
+    const result = await requestGroup(batch);
+    for (const candidate of batch) requested.delete(candidate.element);
+    if (requestEpoch !== epoch || !enabled) return;
+    if (!result?.ok) { handleTopFailure(batch, result || { code: "worker_failed" }, requestEpoch); return; }
+    const items = new Map((result.items || []).map(item => [item.id, item]));
+    for (const candidate of batch) handleItem(candidate, items.get(candidate.id), requestEpoch);
+  }
+  async function runFallback({ candidate, requestEpoch }) {
+    const result = await send({ type: "translation:request", text: candidate.snapshot.text });
+    requested.delete(candidate.element);
+    if (!current(candidate, requestEpoch)) return;
+    if (result?.ok) accept(candidate, result.text);
+    else handleTopFailure([candidate], result || { code: "worker_failed" }, requestEpoch);
+  }
+  // Two continuous slots: whenever one frees, the next queued fallback or group starts
+  // at once. After new posts come into view, the one nearest the viewport centre goes
+  // alone first so the post being read appears first.
+  function drain() {
+    while (inFlight < MAX_IN_FLIGHT && enabled && hasApiKey && !blocked) {
+      const requestEpoch = epoch;
+      let work = null;
+      while (!work && fallbacks.length) {
+        const fallback = fallbacks.shift();
+        if (current(fallback.candidate, fallback.requestEpoch)) work = () => runFallback(fallback);
+        else requested.delete(fallback.candidate.element);
       }
-    } finally {
-      running = false;
-      updateControlState();
-      if (continueImmediately && pending.size) schedule();
+      if (!work) {
+        let batch = [];
+        if (fastLanePending) { batch = collectBatch(1, true); fastLanePending = false; }
+        if (!batch.length) batch = collectBatch();
+        if (!batch.length) break;
+        for (const candidate of batch) requested.add(candidate.element);
+        work = () => runGroup(batch, requestEpoch);
+      }
+      inFlight += 1; running = true; updateControlState();
+      void Promise.resolve().then(work).catch(() => {}).finally(() => {
+        inFlight -= 1; running = inFlight > 0; updateControlState();
+        drain();
+      });
     }
   }
   function scan(immediate = false) {
@@ -326,7 +343,9 @@
         failures.delete(element);
         removeResult(element);
       }
-      if (visible(element)) pending.add(element);
+      if (visible(element) && !pending.has(element) && !requested.has(element) && completed.get(element) !== snapshot.signature && !failures.has(element)) {
+        pending.add(element); fastLanePending = true;
+      } else if (visible(element)) pending.add(element);
     }
     applyTheme();
     schedule(immediate);
@@ -334,7 +353,7 @@
   function reset() {
     epoch += 1;
     fastLanePending = true;
-    pending.clear();
+    pending.clear(); requested.clear(); fallbacks.length = 0;
     completed = new WeakMap();
     failures = new WeakMap();
     outsideViewport = new WeakSet();
@@ -435,8 +454,13 @@
     intersection = new IntersectionObserver(entries => {
       for (const entry of entries) {
         if (!entry.isIntersecting) { outsideViewport.add(entry.target); continue; }
-        if (outsideViewport.has(entry.target) && isTransientFailure(failures.get(entry.target)?.code)) failures.delete(entry.target);
+        const record = failures.get(entry.target);
+        if (outsideViewport.has(entry.target) && record) {
+          if (isTransientFailure(record.code)) failures.delete(entry.target);
+          else if (record.retryOnReentry) { record.retryOnReentry = false; record.nextAttemptAt = 0; }
+        }
         outsideViewport.delete(entry.target);
+        if (!pending.has(entry.target) && !requested.has(entry.target) && !completed.has(entry.target)) fastLanePending = true;
         pending.add(entry.target);
       }
       schedule();

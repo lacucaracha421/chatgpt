@@ -238,7 +238,8 @@ Like failure is reported separately from successful media capture. X can change
 this private web endpoint; a fixture success does not establish live acceptance.
 
 AI translation uses OpenRouter into Korean, with `google/gemini-3.1-flash-lite`
-as the default and `google/gemma-4-26b-a4b-it` as an optional model. Options
+as the default and `google/gemini-3.5-flash-lite` and `google/gemma-4-26b-a4b-it`
+as optional models. Options
 retain an API key, model selection, one automatic on/off switch and Clear cache.
 Changing models clears the shared translation cache so results from different
 models are not mixed. On X, a
@@ -249,17 +250,23 @@ locally; retired provider settings and pre-3.1 translation caches are removed.
 Keys stay in extension storage and the worker: they are never returned to X
 content scripts or synced with the server profile. The worker is warmed as soon as
 the content script starts, and the first visible scan bypasses the normal debounce.
-The tweet nearest the viewport center gets a single fast-lane request whose result
-renders immediately, while the second request slot translates up to four more posts
-in parallel. Later work remains grouped up to four per model call, with at most two
-model calls in flight. Links, hashtags, mentions,
-emoji and explicit line breaks are retained; link placeholders must stay in their
-original order. Results use text nodes, not model HTML. Translation cards use
-X-aware light/dim/lights-out contrast with blue link accents. Network, timeout and
-server failures retry once. Unchanged failures are not re-requested by unrelated
-page mutations; transient failures can retry after leaving and re-entering the
-viewport. Other failures remain parked until the post changes or translation is
-reset. Short Han/Kana posts remain eligible even below three letters.
+Two request slots run continuously: whenever one frees, the next group starts
+without waiting for the other. After new posts come into view, the one nearest the
+viewport center is sent alone first so it renders first; other work is grouped up
+to four per model call, with at most two model calls in flight. A batch item whose
+output is invalid is re-asked alone in its own slot turn without blocking others.
+Single requests time out after 12 seconds and batches after 18 seconds. Links,
+hashtags, mentions, emoji and explicit line breaks are retained; the translation may
+move link placeholders (Korean word order), and a link it drops is re-attached at
+the end of the card, while unknown or duplicated placeholders are invalid. A valid
+answer without Korean (names, Latin terms, "www") means nothing to translate: no
+card is shown and the result is cached. Results use text nodes, not model HTML.
+Translation cards use X-aware light/dim/lights-out contrast with blue link accents.
+Network, timeout and server failures retry once. Unchanged failures are not
+re-requested by unrelated page mutations; transient failures can retry after leaving
+and re-entering the viewport. Other failures get one such re-entry retry
+("번역 실패 · 다시 보이면 재시도"), then remain parked until the post changes or
+translation is reset. Short Han/Kana posts remain eligible even below three letters.
 429 responses honor a bounded cooldown (1.5 seconds if `Retry-After` is missing
 or invalid), without treating the API key as missing. Each unchanged post stops
 automatic retries after three rate-limited content requests; each worker request
