@@ -1,7 +1,9 @@
 (() => {
   "use strict";
   const REQUEST = "lakomics:x-video:request", RESPONSE = "lakomics:x-video:response";
-  const MAX_POSTS = 200, MAX_MEDIA = 16, MAX_JSON_CHARS = 2_000_000, MAX_NODES = 20000;
+  // A reply-heavy TweetDetail response easily holds tens of thousands of nodes, and a
+  // quoted post can sit anywhere in it; the bounds leave room for that.
+  const MAX_POSTS = 200, MAX_MEDIA = 16, MAX_JSON_CHARS = 6_000_000, MAX_NODES = 300000;
   const mediaByPost = new Map();
 
   function progressiveUrl(value) {
@@ -12,9 +14,10 @@
         && !url.username && !url.password && !url.hash && /\.mp4$/i.test(url.pathname) ? url.href : null;
     } catch { return null; }
   }
-  function bestVariant(media, postId) {
-    if (!["video", "animated_gif"].includes(media?.type)
-      || (media.source_status_id_str && media.source_status_id_str !== postId)) return null;
+  // Media re-shared from another post ("From @user") still plays in this post, so it is
+  // this post's media at this ordinal; the bytes are the same video either way.
+  function bestVariant(media) {
+    if (!["video", "animated_gif"].includes(media?.type)) return null;
     return (Array.isArray(media.video_info?.variants) ? media.video_info.variants : [])
       .filter(item => item?.content_type === "video/mp4" && progressiveUrl(item.url))
       .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0))
@@ -28,22 +31,21 @@
       || (legacy?.id_str && legacy.id_str !== id)
       || !Array.isArray(media) || !media.length || media.length > MAX_MEDIA) return;
     // Keep photo and unavailable entries as holes: the URL ordinal counts all media.
-    const urls = media.map(item => bestVariant(item, id));
+    const urls = media.map(item => bestVariant(item));
     mediaByPost.delete(id);
     mediaByPost.set(id, urls);
     while (mediaByPost.size > MAX_POSTS) mediaByPost.delete(mediaByPost.keys().next().value);
   }
   function ingest(data) {
-    const stack = [data];
-    let remaining = MAX_NODES;
     // Tweets can sit inside timeline entries, quote/retweet results or visibility
     // wrappers. Only a tweet's own rest_id + legacy media pair establishes identity.
-    while (stack.length && remaining-- > 0) {
-      const node = stack.pop();
-      if (!node || typeof node !== "object") continue;
+    // Breadth-first, so a bound can never skip a whole early entry.
+    const queue = [data];
+    for (let index = 0; index < queue.length && index < MAX_NODES; index += 1) {
+      const node = queue[index];
       remember(node);
       for (const value of Object.values(node)) {
-        if (value && typeof value === "object" && stack.length < MAX_NODES) stack.push(value);
+        if (value && typeof value === "object" && queue.length < MAX_NODES) queue.push(value);
       }
     }
   }

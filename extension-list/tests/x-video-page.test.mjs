@@ -70,14 +70,37 @@ test('nested quote and visibility results keep their own exact post identity', a
   assert.equal((await w.LakomicsXVideo.resolve(candidate)).mediaUrl, LOW);
 });
 
-test('conflicting identity, borrowed retweet media and unavailable earlier variants never shift selection', () => {
+test('conflicting identity and unavailable earlier variants never shift selection', () => {
   const w = fixture();
   const mismatch = tweet(ID, [video()]); mismatch.legacy.id_str = QUOTE_ID;
   ingest(w, mismatch);
   assert.equal(w.LakomicsXVideoPage.lookup(ID, 1), null);
-  ingest(w, tweet(ID, [{ ...video(), source_status_id_str: QUOTE_ID }, video([variant(LOW)])]));
+  ingest(w, tweet(ID, [{ type: 'video', video_info: { variants: [variant('https://video.twimg.com/1/pl/a.m3u8', 1, 'application/x-mpegURL')] } }, video([variant(LOW)])]));
   assert.equal(w.LakomicsXVideoPage.lookup(ID, 1), null);
   assert.equal(w.LakomicsXVideoPage.lookup(ID, 2), LOW);
+});
+
+test('a quoted post whose video was re-shared from another post resolves at its own ordinal', async () => {
+  const w = fixture();
+  const outer = tweet(ID, [video([variant(LOW)])]);
+  outer.quoted_status_result = { result: tweet(QUOTE_ID, [{ ...video(), source_status_id_str: '1999999999999999999' }]) };
+  ingest(w, { data: { tweetResult: { result: outer } } });
+  assert.equal(w.LakomicsXVideoPage.lookup(QUOTE_ID, 1), HIGH);
+  const quoted = { ...candidate, postId: QUOTE_ID, sourceUrl: 'https://x.com/quoted/status/' + QUOTE_ID + '/video/1' };
+  assert.equal((await w.LakomicsXVideo.resolve(quoted)).mediaUrl, HIGH);
+});
+
+test('a quoted post deep inside a reply-heavy response is still found', () => {
+  const w = fixture();
+  const replies = Array.from({ length: 400 }, (_, i) => ({ content: { itemContent: { tweet_results: { result: {
+    ...tweet(String(3000000000000000000n + BigInt(i)), [{ type: 'photo' }]),
+    core: { user_results: { result: { legacy: Object.fromEntries(Array.from({ length: 60 }, (_, k) => ['field' + k, { value: k }])) } } } } } } } }));
+  const outer = tweet(ID, [{ type: 'photo' }]);
+  outer.quoted_status_result = { result: tweet(QUOTE_ID, [video()]) };
+  const body = { data: { threaded_conversation_with_injections_v2: { instructions: [{ entries: [
+    { content: { itemContent: { tweet_results: { result: outer } } } }, ...replies] }] } } };
+  ingest(w, body);
+  assert.equal(w.LakomicsXVideoPage.lookup(QUOTE_ID, 1), HIGH);
 });
 
 test('unsafe, manifest and still-image URLs cannot become a page video', () => {

@@ -199,7 +199,10 @@ a small page-world observer for the matching progressive MP4 from GraphQL
 responses X has already received. It observes fetch/XHR response copies from
 same-origin X GraphQL endpoints without reading cookies or request headers, making
 extra network requests, or consuming X's original response. The in-memory cache
-retains at most 200 post IDs and their all-media-indexed URLs, not raw tweets. Only
+retains at most 200 post IDs and their all-media-indexed URLs, not raw tweets. Responses up to
+6 MB are scanned breadth-first (up to 300,000 nodes) so a quoted post deep in a
+reply-heavy TweetDetail is still found, and a video re-shared from another post
+("From @user") counts as the quoting post's own media at its ordinal. Only
 the requested ID, ordinal and validated `video.twimg.com` MP4 cross the bridge;
 a page reply never triggers a capture or download by itself. Both permanent saves
 and PC temporary downloads use this lookup on explicit save, and navigation
