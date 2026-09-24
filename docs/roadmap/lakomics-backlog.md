@@ -123,7 +123,7 @@ Acceptance: a supported edit can be made with PC off, survives offline retry/res
 
 ## MOBILE-BUG-002 — Mobile Catalog search does nothing
 
-Status: `VERIFY` — fixed in `7d2bfa6` (search submits, newest first, autocomplete; in APK 0.8.1); tablet confirmation pending.
+Status: `DONE` — fixed in `7d2bfa6`; accepted on the tablet 2026-09-24 (archive with the next reconciliation).
 
 Search in the Android Catalog does not work. Reproduce first on the current APK: record the query, whether any request reaches the server (`searchMode=mobile` search-page path), the response, and whether the UI ignores it. Then fix the failing layer and verify search together with category inclusion, excluded tags and paging.
 
@@ -142,7 +142,7 @@ Global cross-device deletion remains intentionally deferred. Require tombstones,
 
 ## VAULT-ENC-001 — Lakomics-encrypted Private Vault (ADR-0039)
 
-Status: `VERIFY` — stages 1–3 implemented (`cc917f6`, `590af74`, `bbf8502`); stage 4 native acceptance remains (Linux USB; Windows waits for WIN-SYNC-001).
+Status: `VERIFY` — stages 1–3 implemented (`cc917f6`, `590af74`, `bbf8502`); Linux native acceptance (real USB) confirmed by the user 2026-09-24; Windows acceptance waits for WIN-SYNC-001.
 
 Replace VeraCrypt with Lakomics' own per-file encryption so a USB plugged into another computer shows nothing readable. The user copies the VeraCrypt contents (including `.lakomics/`) to the trusted PC, formats the 64 GB USB as exFAT, then imports.
 
@@ -202,9 +202,15 @@ Collector (`extension-list/`):
 
 NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
 
+## PERF-ALL-001 — Whole-app benchmark and optimization pass
+
+Status: `TODO` — requested 2026-09-24 for later ("벤치마크 빡세게").
+
+Apply `docs/agents/implementation.md` → "Performance work" across Lakomics, one user-visible path at a time: measure on the real platform first, gate with deterministic metrics (render/commit counts, query counts, bytes, request counts, instruction counts), confirm each metric tracks real latency, then lock wins with tighten-only thresholds. Candidate paths: PC Library open/scroll and viewer, character and similarity screens, Collections/Works; Android Library/viewer (instrumentation `LakomicsPerf` + `android/tools/perf_summary.py` exists), Catalog, cold start; Cloud API hot endpoints (`tools/poll_benchmark.py` exists) and idle request volume per client; Rust indexing/ingest. Start by listing the paths with their current numbers, then pick the worst.
+
 ## MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
 
-Status: `VERIFY` — slices 1–4 implemented (`dc55ffd`, `90a0811`, `00fbc8c`, `4363e33`, `ce2827f`), server deployed at `ce2827f` and APK 0.8.1 installed; tablet acceptance of each slice pending.
+Status: `DONE` — slices 1–4 implemented and deployed (APK 0.8.x); accepted on the tablet 2026-09-24 (archive with the next reconciliation).
 
 The user chose these desktop features for Android, in this suggested order (smallest and safest first):
 1. **Film details** (read-only): show `WORKS-001` cast, release info and related works in mobile Collections. Publish the Film snapshot block alongside the TV `series` block (`src-tauri/src/cloud/collections.rs`, `committed_series`), then render it; local related works open the local work.
@@ -220,10 +226,10 @@ User-requested notes for later work, not an implementation start or priority cha
 
 ## Mobile app
 
-- **Collection 3D model viewer:** view actual 3D models in Collection, rather than merely giving covers a 3D presentation. This clarifies the earlier `MOBILE-UX-001` 3D feasibility question; renderer and supported formats remain undecided.
+- **(Closed 2026-09-24: current physical-cover 3D is enough) Collection 3D model viewer:** view actual 3D models in Collection, rather than merely giving covers a 3D presentation. This clarifies the earlier `MOBILE-UX-001` 3D feasibility question; renderer and supported formats remain undecided.
 - **New-release notifications:** add notifications for new releases. Follow targets and notification delivery details remain to be defined.
-- **Asset duplicate checking:** make duplicate checking available in the mobile Asset Library. Build on the completed desktop `SIMILARITY-004` discovery where relevant; keep this distinct from Catalog edition duplicates.
-- **Manga Catalog duplicate-edition checking:** check for duplicate editions in the mobile Manga Catalog. Continue the existing `MOBILE-UX-001` Catalog duplicate-check evaluation.
+- **(Partly covered: mobile reviews PC-discovered similarity pairs, MOBILE-PARITY-001 slice 3; on-device discovery not built) Asset duplicate checking:** make duplicate checking available in the mobile Asset Library. Build on the completed desktop `SIMILARITY-004` discovery where relevant; keep this distinct from Catalog edition duplicates.
+- **Manga Catalog duplicate-edition checking — decided 2026-09-24, queued after vault A1 / file exchange / notes v2 (can run in parallel with mobile work since it is mostly PC + server):** keep the full comparison on the PC — the PC computes duplicate-edition candidates with the existing `catalog_review.rs` rules (title match, artist/group overlap, page count, category, language) and publishes them with the catalog; the server does not recompute the whole catalog (VPS: 1 CPU, 1.6 GB RAM, ~131k works). The server only checks works it adds itself during hourly refresh (indexed title lookup, milliseconds each). Review decisions (hide/keep) are server-owned so PC and mobile share them; mobile gets a review screen that reads the precomputed list; the PC applies the decisions. Works with the PC off for already-published candidates and server-added works.
 - **Asset Library multi-select move:** select multiple assets and move them together. Coordinate with `MOBILE-WRITE-002`; the destination and move semantics remain to be defined.
 
 ## Shared — Desktop and mobile
@@ -235,9 +241,9 @@ User-requested notes for later work, not an implementation start or priority cha
 
 These follow-ups apply to the active collector in `extension-list/` and relate to `EXT-011` / `EXT-012` (both closed 2026-09-23 and archived); they remain pending requests of their own.
 
-- **Animation polish:** refine the semicircle menu's entrance and roulette-spinning animations for a more professional presentation.
-- **Selection feedback:** improve the extension menu's visual selection effects.
-- **Twitter/X GIF downloads:** support downloading GIF media from Twitter/X posts.
+- **(Done, user-confirmed 2026-09-24) Animation polish:** refine the semicircle menu's entrance and roulette-spinning animations for a more professional presentation.
+- **(Done, user-confirmed 2026-09-24) Selection feedback:** improve the extension menu's visual selection effects.
+- **(Done, user-confirmed 2026-09-24) Twitter/X GIF downloads:** support downloading GIF media from Twitter/X posts.
 
 ## Suggested implementation sequence — retained for later selection
 
@@ -253,11 +259,11 @@ Mobile tab switching and `SIMILARITY-004` from the original sequence were comple
 
 Other follow-up candidates, without a fixed order:
 
-- **Twitter/X GIF downloads:** inspect the current extraction/save path and add the missing support.
+- **(Done, user-confirmed 2026-09-24) Twitter/X GIF downloads:** inspect the current extraction/save path and add the missing support.
 - **New-release notifications:** define followed artists/works and in-app versus Android notification delivery separately from Catalog refresh.
 - **Mobile Asset duplicate review:** expose candidate inspection and decisions separately from the discovery operation above.
 - **Mobile Manga Catalog edition review:** define candidate/evidence sharing and decision authority; published edition groups alone are not pending review candidates. Keep this separate from Asset duplicate review.
-- **Collection 3D model viewer:** decide supported model formats, touch interaction and device performance limits; this is not the existing physical-cover renderer.
+- **(Closed 2026-09-24) Collection 3D model viewer:** decide supported model formats, touch interaction and device performance limits; this is not the existing physical-cover renderer.
 - **Multi-person character competition:** collect concrete mistakes and improve the affected arbitration cases without reopening the entire accepted classification pass.
 - **Film Collection polish (`WORKS-001`):** implemented on desktop and mobile 2026-09-24; remaining is in-app acceptance.
 - **AV metadata and cover acquisition (`LONG-001`):** fetch candidates and let the user choose artwork without silently replacing manual choices.
