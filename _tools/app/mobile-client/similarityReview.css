@@ -1,5 +1,5 @@
 /* Full-screen similarity review. Shares the bar, empty state and snackbar of characterReview.css. */
-.similarity-overlay { position:fixed; inset:0; z-index:180; display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; background:var(--color-bg); color:var(--color-text); padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); overflow:hidden; }
+.similarity-overlay { position:fixed; inset:0; z-index:180; display:flex; flex-direction:column; background:var(--color-bg); color:var(--color-text); padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); overflow:hidden; }
 .similarity-overlay .review-bar > .review-title { flex:1; }
 .similarity-body { display:flex; flex-direction:column; gap:8px; min-height:0; padding:0 var(--mobile-gutter, 16px); }
 .similarity-panes { flex:1; min-height:0; display:grid; grid-template-rows:1fr 1fr; gap:6px; }
@@ -35,3 +35,8 @@
 @media (orientation: landscape) and (min-width: 700px) {
   .similarity-panes { grid-template-rows:none; grid-template-columns:1fr 1fr; }
 }
+
+/* Column layout: bar, optional notice and actions keep their height; only the body flexes, so a tall image can never push the buttons off screen. */
+.similarity-overlay > * { flex:none; }
+.similarity-overlay > .similarity-body { flex:1 1 0; min-height:0; }
+.similarity-overlay > .review-empty { flex:1 1 0; min-height:0; display:flex; flex-direction:column; justify-content:center; }

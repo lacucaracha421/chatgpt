@@ -4,6 +4,7 @@ import {PinIcon} from './PinIcon';
 import {Button,IconButton} from './ui';
 import {usePullToRefresh} from './usePullToRefresh';
 import {native,errorText} from './transport';
+import {useLevelMotion} from './motion';
 import './notes.css';
 export type MobileNote={id:string;title:string;body:string;pinned:boolean;deleted:boolean;createdAt:string;updatedAt:string;localRevision:number;pending:boolean;conflict:boolean};
 type NotesState={unlocked:boolean;notes:MobileNote[];lastSyncedAt?:string|null};
@@ -56,7 +57,10 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   const pull=usePullToRefresh(list,()=>void sync(),syncing,!active||!state.unlocked||!!selected);
   const card=(note:MobileNote)=><button key={note.id} className="note-card" onClick={()=>void open(note)}><strong className={note.title?undefined:'is-untitled'}>{note.title||'제목 없음'}</strong>{note.body&&<span>{note.body.slice(0,240)}</span>}<small>{note.conflict&&<em>충돌 사본</em>}{note.conflict&&' · '}{relativeTime(note.updatedAt)}{note.pending&&<> · <i aria-hidden="true"/>동기화 대기</>}</small></button>;
   const editing=selected&&draft;
-  return <section className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none'}} aria-label="메모">
+  // The editor and the trash are one level below the list; Back returns from the left.
+  const section=useRef<HTMLElement>(null);
+  useLevelMotion(section,active&&loaded&&state.unlocked?(editing?'edit':trash?'trash':'list'):null,(editing?1:0)+(trash?1:0));
+  return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none'}} aria-label="메모">
     {!loaded?<p className="hint notes-loading">메모를 불러오는 중…</p>:!state.unlocked?<>
       <header className="notes-top"><h1>메모</h1></header>
       <form className="notes-unlock" onSubmit={event=>{event.preventDefault();setError('');void native<NotesState>('notesUnlock',{key}).then(next=>{setKey('');accept(next);}).catch(reason=>setError(errorText(reason)));}}><h2>메모 연결</h2><p>PC 메모에서 사용하는 복구 키를 한 번 입력하세요.</p><input type="password" aria-label="메모 복구 키" value={key} autoComplete="off" spellCheck={false} autoCapitalize="none" onChange={event=>setKey(event.target.value)}/><Button type="submit" variant="primary" disabled={key.trim().length!==64}>메모 열기</Button></form>

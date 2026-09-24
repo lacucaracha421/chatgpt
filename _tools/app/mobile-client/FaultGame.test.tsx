@@ -86,23 +86,26 @@ describe('FAULT photo loading',()=>{
     const fetch=vi.fn(async(url:string)=>url.includes('/bad')?new Response('',{status:404}):url.includes('/bare')?new Response(bytes()):new Response(bytes(),{headers:{'content-type':'image/jpeg'}}));
     vi.stubGlobal('fetch',fetch);
     const items=[image('bad'),image('bare',{content_type:'image/png'}),image('video',{kind:'video'}),...Array.from({length:30},(_,i)=>image(`ok${i}`))];
-    const photos=await loadFaultPhotos(items,undefined,()=>0);
+    const photos=await loadFaultPhotos(items,undefined,undefined,()=>0);
     expect(mocks.mediaTicket).toHaveBeenCalledTimes(24);
     expect(mocks.mediaTicket.mock.calls.every(([,variant])=>variant==='original')).toBe(true);
     expect(photos).toHaveLength(23);expect(photos.every(photo=>!!photo.blob?.size&&!!photo.blob.type)).toBe(true);
     expect(photos.some(photo=>photo.id==='bad')).toBe(false);
-    const all=await loadFaultPhotos([image('bad'),image('bare',{content_type:'image/png'})],undefined,()=>0);
+    const all=await loadFaultPhotos([image('bad'),image('bare',{content_type:'image/png'})],undefined,undefined,()=>0);
     expect(all).toHaveLength(1);expect(all[0].id).toBe('bare');expect(all[0].blob?.type).toBe('image/png');
   });
   it('shows the loading state, hands over photos when the game is ready, and closes from the game',async()=>{
     vi.stubGlobal('fetch',vi.fn(async()=>new Response(new Uint8Array([1,2]),{headers:{'content-type':'image/jpeg'}})));
     const onClose=vi.fn();render(<FaultGame items={[image('a')]} onClose={onClose}/>);
     const frame=screen.getByTitle('FAULT — REVEAL') as HTMLIFrameElement;
-    expect(frame.getAttribute('src')).toMatch(/#host=lakomics$/);expect(screen.getByRole('status').textContent).toContain('사진을 준비하고 있습니다');
+    expect(frame.getAttribute('src')).toMatch(/#host=lakomics$/);expect(screen.getByRole('status').textContent).toMatch(/사진 불러오는 중 \d \/ 1|사진을 준비하고 있습니다/);
     const post=vi.spyOn(frame.contentWindow!,'postMessage').mockImplementation(()=>{});
     act(()=>{window.dispatchEvent(new MessageEvent('message',{data:{type:'lakomics-fault-ready'},origin,source:frame.contentWindow}));});
     await waitFor(()=>expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0][0]).toMatchObject({type:'lakomics-fault-photos',version:1,photos:[{id:'a'}]});
+    // The cover stays until the game reports the photos are converted and on screen.
+    await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('게임에 사진을 넣고 있습니다'));
+    act(()=>{window.dispatchEvent(new MessageEvent('message',{data:{type:'lakomics-fault-loaded',count:1},origin,source:frame.contentWindow}));});
     await waitFor(()=>expect(screen.queryByRole('status')).toBeNull());
     act(()=>{window.dispatchEvent(new MessageEvent('message',{data:{type:'lakomics-fault-close'},origin,source:frame.contentWindow}));});
     expect(onClose).toHaveBeenCalledTimes(1);

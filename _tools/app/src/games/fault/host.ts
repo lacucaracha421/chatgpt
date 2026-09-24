@@ -5,6 +5,7 @@
  * Protocol v1 (all messages are same-origin `postMessage`s):
  *   game → host  {type:'lakomics-fault-ready'}   once the game listens for photos
  *   host → game  {type:'lakomics-fault-photos', version:1, photos:[{id, blob|url, name?}]} (1–24)
+ *   game → host  {type:'lakomics-fault-loaded', count}   once the photos are converted and on screen
  *   game → host  {type:'lakomics-fault-close'}   when the user leaves through the game's 닫기 control
  * The photos are used for that session only; the game never stores them.
  */
@@ -19,7 +20,7 @@ export const FAULT_IMAGE_TYPE = /^image\/(jpeg|png|webp|gif|avif|bmp|x-ms-bmp)$/
 
 export interface FaultPhoto { id: string; blob?: Blob; url?: string; name?: string }
 export interface FaultPhotosMessage { type: 'lakomics-fault-photos'; version: typeof FAULT_PROTOCOL_VERSION; photos: FaultPhoto[] }
-export type FaultGameEvent = 'lakomics-fault-ready' | 'lakomics-fault-close';
+export type FaultGameEvent = 'lakomics-fault-ready' | 'lakomics-fault-loaded' | 'lakomics-fault-close';
 
 export function faultGameUrl(): string { return `${faultHtmlUrl}#host=lakomics`; }
 
@@ -52,7 +53,7 @@ export function photosMessage(photos: readonly FaultPhoto[]): FaultPhotosMessage
 export function readGameEvent(event: MessageEvent, game: Window | null, origin: string): FaultGameEvent | null {
   if (!game || event.source !== game || event.origin !== origin) return null;
   const type = (event.data as {type?: unknown} | null)?.type;
-  return type === 'lakomics-fault-ready' || type === 'lakomics-fault-close' ? type : null;
+  return type === 'lakomics-fault-ready' || type === 'lakomics-fault-loaded' || type === 'lakomics-fault-close' ? type : null;
 }
 
 export interface FaultLink {
@@ -65,7 +66,7 @@ export interface FaultLink {
  * Wire one embedded game window. Readiness and photo loading may finish in either order;
  * the photos are posted exactly once and the host drops its reference afterwards.
  */
-export function connectFaultFrame({game, onClose, host = window, origin = host.location.origin}: {game(): Window | null; onClose(): void; host?: Window; origin?: string}): FaultLink {
+export function connectFaultFrame({game, onClose, onLoaded, host = window, origin = host.location.origin}: {game(): Window | null; onClose(): void; onLoaded?(): void; host?: Window; origin?: string}): FaultLink {
   let ready = false, sent = false, disposed = false, pending: FaultPhotosMessage | null = null;
   const send = () => {
     const target = game();
@@ -75,6 +76,7 @@ export function connectFaultFrame({game, onClose, host = window, origin = host.l
   const listen = (event: MessageEvent) => {
     const type = readGameEvent(event, game(), origin);
     if (type === 'lakomics-fault-ready') { ready = true; send(); }
+    else if (type === 'lakomics-fault-loaded' && !disposed) onLoaded?.();
     else if (type === 'lakomics-fault-close' && !disposed) onClose();
   };
   host.addEventListener('message', listen);

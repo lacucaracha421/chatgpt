@@ -40,7 +40,7 @@ h1,h2,h3,p { margin:0; }
   .app-body[data-active-tab="catalog"] > .mobile-catalog,
   .app-body[data-active-tab="notes"] > .mobile-notes { animation:mobile-tab-enter 100ms ease-out; }
 }
-.library-main { flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; }
+.library-main { flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; position:relative; }
 .home-context { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:30px var(--mobile-gutter) 22px; }
 .home-title h1 { font-size:30px; font-weight:450; letter-spacing:-1.2px; margin-top:5px; }
 .continue { background:none; border:0; border-left:1px solid var(--color-border); display:flex; align-items:center; gap:14px; padding:7px 0 7px 22px; text-align:left; min-height:54px; }
@@ -80,7 +80,12 @@ h1,h2,h3,p { margin:0; }
 .bottom-nav button { display:flex; align-items:center; justify-content:center; gap:12px; width:180px; min-height:48px; border:0; border-radius:var(--radius-selection); background:transparent; color:var(--color-muted); }
 .bottom-nav button.active { background:var(--color-accent); color:var(--color-on-accent); }
 .bottom-nav button.active::after { content:''; width:5px; height:5px; background:currentColor; align-self:flex-start; margin:6px -10px 0 0; }
-.loading-line { height:2px; min-height:2px; background:var(--color-accent); opacity:.7; animation:breathe 1.5s ease-in-out infinite; }
+/* A thin progress line that never takes space: its negative margin cancels its own height, so
+   appearing and disappearing cannot move the content below it. It also waits a moment before
+   showing, so a quick (cached) navigation does not flash it. */
+.loading-line { position:relative; z-index:4; height:2px; min-height:2px; margin-bottom:-2px; flex-shrink:0; background:var(--color-accent); opacity:.7; pointer-events:none; animation:loading-line-wait 160ms step-end, breathe 1.5s ease-in-out 160ms infinite; }
+.loading-line.is-bottom { margin:-2px 0 0; }
+@keyframes loading-line-wait { from { opacity:0; } }
 @keyframes breathe {50%{opacity:.25}}
 .inline-error { display:flex; align-items:center; justify-content:space-between; padding:8px 24px; gap:12px; font-size:13px; background:var(--color-surface); }
 .error-message { color:var(--color-danger); padding:10px 0; font-size:13px; }

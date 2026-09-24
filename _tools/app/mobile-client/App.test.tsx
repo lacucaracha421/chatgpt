@@ -461,3 +461,24 @@ describe('server list generation',()=>{
     await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length).toBe(reads+1));
   });
 });
+it('keeps the Library root mounted behind an open folder, so Back returns to the same search without rebuilding it',async()=>{
+  render(<App/>);
+  await screen.findByRole('button',{name:/^분류 B, /});
+  fireEvent.change(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}),{target:{value:'분류'}});
+  fireEvent.click(await screen.findByRole('button',{name:/^분류 B, /}));
+  await screen.findByRole('heading',{name:'분류 B'});
+  // Hidden, not unmounted: it is out of the accessibility tree while the folder is shown.
+  expect(screen.queryByRole('searchbox',{name:'폴더·캐릭터 찾기'})).toBeNull();
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  await screen.findByRole('heading',{name:'라이브러리'});
+  expect((screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}) as HTMLInputElement).value).toBe('분류');
+});
+it('shows a failed load over the bottom of the content instead of inserting it above the list',async()=>{
+  render(<App/>);
+  const folder=await screen.findByRole('button',{name:/^분류 B, /});
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string)=>{if(path.includes('classification_id=b'))throw new Error('offline');return original(path);});
+  fireEvent.click(folder);
+  const alert=await screen.findByRole('alert');
+  expect(alert.parentElement?.className).toBe('floating-notices');
+});

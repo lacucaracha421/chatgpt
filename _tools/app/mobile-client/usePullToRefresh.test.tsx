@@ -23,3 +23,12 @@ it('does not pull when hidden or when two fingers are used',()=>{
  view.rerender(<Harness refresh={refresh}/>);fireEvent.touchStart(host,{touches:[{clientX:0,clientY:0},{clientX:20,clientY:0}]});fireEvent.touchMove(host,{touches:[{clientX:0,clientY:200}]});fireEvent.touchEnd(host);
  expect(refresh).not.toHaveBeenCalled();
 });
+it('floats the indicator without taking space, and does not announce loads it did not start',()=>{
+ const refresh=vi.fn();const view=render(<Harness refresh={refresh}/>);const host=screen.getByTestId('scroll');
+ const anchor=host.querySelector<HTMLElement>('.pull-refresh')!;
+ view.rerender(<Harness refresh={refresh} busy/>);
+ // Opening a folder or a background re-read is busy too, but it is not a pull-started refresh.
+ expect(screen.queryByText('새로고침 중')).toBeNull();expect(anchor.style.height).toBe('');
+ view.rerender(<Harness refresh={refresh}/>);pull(host);
+ expect(anchor.style.height).toBe('');expect(anchor.querySelector('.pull-refresh__pill')).not.toBeNull();
+});

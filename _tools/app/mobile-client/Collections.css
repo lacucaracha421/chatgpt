@@ -158,3 +158,5 @@
 .collection-memo-counter.is-over{color:var(--color-danger, #d98a8a)}
 .collection-memo-choice .collection-memo-text{max-height:24dvh;overflow:auto;padding:8px 10px;border:1px solid var(--color-border);border-radius:var(--radius-sm)}
 .collection-memo-sheet,.collection-memo-choice{display:flex;flex-direction:column;gap:6px}
+/* The Showcase shelf keeps a card's height while it loads, so opening it does not settle twice. */
+.collection-shelf>p[role=status]{display:flex;align-items:center;min-height:252px}

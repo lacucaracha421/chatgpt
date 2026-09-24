@@ -3,7 +3,8 @@ import {CollectionMetadata} from './CollectionMetadata';
 import {CollectionPersonal,type PersonalSheet} from './CollectionPersonal';
 import {useCollectionEdits} from './useCollectionEdits';
 import {FilmDetails} from './FilmDetails';
-import {useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
+import {useLevelMotion} from './motion';
 import {ArrowLeftIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, StarIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
@@ -292,7 +293,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[volumeLimit,setVolumeLimit]=useState(96),[overview,setOverview]=useState(false);
   // The viewer opens covers in their physical form; the choice holds while browsing.
   const [coverMode,setCoverMode]=useState<'3d'|'flat'>('3d');
-  const listRef=useRef<HTMLDivElement>(null),showcaseRef=useRef<HTMLDivElement>(null),detailRef=useRef<HTMLDivElement>(null);
+  const sectionRef=useRef<HTMLElement>(null),listRef=useRef<HTMLDivElement>(null),showcaseRef=useRef<HTMLDivElement>(null),detailRef=useRef<HTMLDivElement>(null);
   const listScroll=useRef(0);
   const live=active&&!paused&&tab!=='av';
   const filtered=!!search||filters.rating!=='all';
@@ -327,8 +328,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
     return()=>controller.abort();
   },[active,paused,selected,detailKey]);
   usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;setRefresh(n=>n+1);setDetailRefresh(n=>n+1);});
-  // Restore the list position when its committed query is shown again.
-  useEffect(()=>{if(!selected&&!showcaseAll&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,main.committed,active]);
+  // Restore the list position when its committed query is shown again, before it is painted.
+  useLayoutEffect(()=>{if(!selected&&!showcaseAll&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,main.committed,active]);
 
   const back=useCallback(()=>{
     if(coverIndex!==null){setCoverIndex(null);return true;}
@@ -368,7 +369,9 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{main.legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>;
 
-  return <section className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
+  // Opening a work or the whole Showcase is one level deeper; Back returns from the left.
+  useLevelMotion(sectionRef,active?`${selected??''}|${showcaseAll}`:null,(selected?1:0)+(showcaseAll?1:0));
+  return <section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {header}
     <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}

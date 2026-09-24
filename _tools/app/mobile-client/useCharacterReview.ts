@@ -62,6 +62,7 @@ export function useCharacterReviewCount(enabled: boolean, target: string | null,
     window.addEventListener(CHARACTER_REVIEW_EVENT, read);
     return () => { clearTimeout(timer); window.removeEventListener(CHARACTER_REVIEW_EVENT, read); };
   }, [enabled]);
-  if (!enabled || !total || total.key !== key) return null;
+  // A pause keeps the last known count so the row does not vanish and return; it is re-read on return.
+  if (!total || total.key !== key) return null;
   return Math.max(0, total.value - total.queued);
 }

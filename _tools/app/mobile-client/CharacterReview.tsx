@@ -213,6 +213,15 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
   const info = current ? targets[current.targetId] : undefined;
   const pending = (counts?.pendingPc ?? 0) + queued;
   const lastUndo = undo[undo.length - 1];
+  // The confirmation shows briefly after each decision; afterwards undo stays in the top bar
+  // so nothing lingers over the 아님 · 건너뛰기 · 맞음 buttons.
+  const [snackVisible, setSnackVisible] = useState(false);
+  useEffect(() => {
+    if (!undo.length){ setSnackVisible(false); return; }
+    setSnackVisible(true);
+    const timer = setTimeout(() => setSnackVisible(false), 2500);
+    return () => clearTimeout(timer);
+  }, [undo.length, lastUndo]);
   const title = target ? `${target.name} 검토` : '캐릭터 검토';
   const {width} = size();
   return <div className="review-overlay" role="dialog" aria-modal="true" aria-label={title}>
@@ -221,6 +230,7 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
       <div className="review-title"><h1>{title}</h1>
         {state.phase === 'ready' && state.ready && <p className="numeric" aria-live="polite">{reviewed} / {total}{pending > 0 && ` · PC 반영 대기 ${pending}`}{(counts?.skipped ?? 0) > 0 && ` · PC가 건너뜀 ${counts!.skipped}`}</p>}
       </div>
+      {undo.length > 0 && !snackVisible && <IconButton label="마지막 판단 되돌리기" icon={ArrowUturnLeftIcon} onClick={revert}/>}
     </header>
     {notice && <p className="error-message review-notice" role="alert">{notice}</p>}
     {state.phase === 'loading' && <div className="loading-line" role="status" aria-label="검토 목록 불러오는 중"/>}
@@ -259,7 +269,7 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
       <Button variant="ghost" disabled={!current} onClick={() => act('skipped')}><ChevronDoubleUpIcon aria-hidden="true"/>건너뛰기</Button>
       <Button variant="primary" disabled={!current} onClick={() => act('accepted')}><CheckIcon aria-hidden="true"/>맞음</Button>
     </footer>}
-    {lastUndo && <div className="review-snackbar" role="status">
+    {lastUndo && snackVisible && <div className="review-snackbar" role="status">
       <span>{lastUndo.action === 'accepted' ? '맞음으로 저장' : lastUndo.action === 'rejected' ? '아님으로 저장' : '건너뜀'}</span>
       <Button variant="ghost" onClick={revert}><ArrowUturnLeftIcon aria-hidden="true"/>되돌리기</Button>
     </div>}

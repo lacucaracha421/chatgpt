@@ -1814,7 +1814,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    audioState:audio.ctx?audio.ctx.state:'not-created',voices:audio.voices.size,compression:audio.compressor?.reduction||0,...renderer.diagnostics()})};
  // [Lakomics host mode] Protocol v1: post {type:'lakomics-fault-ready'} once listening, accept one
  // {type:'lakomics-fault-photos',version:1,photos:[{id,blob|url,name?}]} (1-24) from the same-origin
- // parent, and post {type:'lakomics-fault-close'} from the close control.
+ // parent, post {type:'lakomics-fault-loaded',count} once they are converted and shown, and post
+ // {type:'lakomics-fault-close'} from the close control.
  function hostBoot(){
   let received=false;
   window.addEventListener('message',async e=>{
@@ -1832,7 +1833,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
     if(!added.length)throw new Error('사진을 읽지 못했습니다.');
     deck.add(added);await setBackground(deck.current().blob);
    }catch(error){toast(error&&/[가-힣]/.test(error.message)?error.message:'사진을 읽지 못했습니다.');}
-   finally{loadingImage=false;booting=false;shell.classList.remove('loading','booting');syncSettings();updateHome();updateUI();renderer.draw();}
+   finally{loadingImage=false;booting=false;shell.classList.remove('loading','booting');syncSettings();updateHome();updateUI();renderer.draw();
+    window.parent.postMessage({type:'lakomics-fault-loaded',count:added.length},location.origin);}
   });
   window.parent.postMessage({type:'lakomics-fault-ready'},location.origin);
  }

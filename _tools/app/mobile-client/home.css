@@ -28,6 +28,7 @@
 .home-revisit-caption { display:grid; grid-template-columns:1fr 20px; padding:7px 0; gap:2px; }
 .home-revisit-caption strong { font-size:14px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .home-revisit-caption svg { grid-column:2; grid-row:1 / 3; align-self:center; width:17px; }
-.home-empty { padding:32px 0; color:var(--color-muted); }
+/* Holds the strip's height while the first recent items load, so they do not push the page. */
+.home-empty { display:flex; align-items:center; min-height:calc(clamp(158px,21vw,220px) + 44px); padding:0; color:var(--color-muted); }
 @media(max-width:1000px) { .home-folder-grid,.home-revisit-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .home-cover-group { height:170px; } }
 @media(max-width:480px) { .home-scroll { padding-inline:var(--mobile-gutter); } .home-folder-grid,.home-revisit-grid { gap:10px; } .home-cover-group { height:132px; } .home-folder-caption { gap:6px; } .home-folder-caption > svg { display:none; }  }

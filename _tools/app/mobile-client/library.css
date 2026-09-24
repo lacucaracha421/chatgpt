@@ -1,5 +1,8 @@
-.library-root-header { padding:18px var(--mobile-gutter) 8px; flex-shrink:0; }
-.library-root-header h1 { font-size:28px; font-weight:600; }
+/* Same bar height and title size as the Collections, Catalog and Notes bars, so switching
+   bottom tabs does not move the content up or down. */
+.library-root { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
+.library-root-header { display:flex; align-items:center; gap:6px; min-height:var(--mobile-header); padding:0 calc(var(--mobile-gutter) - 10px) 0 var(--mobile-gutter); flex-shrink:0; }
+.library-root-header h1 { font-size:22px; font-weight:600; line-height:1.2; }
 .library-root-scroll { flex:1; min-height:0; overflow:auto; overscroll-behavior-y:contain; padding:0 var(--mobile-gutter) 24px; }
 .library-root-scroll h2,.folder-intro h2 { font-size:15px; font-weight:500; margin:24px 0 12px; }
 .library-segments { display:flex; gap:4px; margin:8px 0 16px; background:var(--color-surface); padding:3px; border-radius:3px; }
@@ -50,8 +53,14 @@
 .radio-dot { width:18px; height:18px; border:1px solid var(--color-muted); border-radius:50%; }
 .sheet-option[aria-checked="true"] .radio-dot { border:5px solid var(--color-text); }
 .library-sheet>.ui-button { margin-top:12px; }
-.pull-refresh { display:flex; align-items:center; justify-content:center; gap:8px; overflow:hidden; color:var(--color-muted); font-size:12px; }
-.pull-refresh svg { width:16px; }
+/* Pull to refresh: a zero-height sticky anchor with a floating pill, so the list never moves. */
+.pull-refresh { position:sticky; top:0; z-index:6; height:0; overflow:visible; pointer-events:none; }
+.pull-refresh__pill { position:absolute; left:50%; top:0; display:flex; align-items:center; gap:8px; min-height:36px; padding:0 14px 0 12px; white-space:nowrap; color:var(--color-text); font-size:12px; background:var(--color-sidebar); border:1px solid var(--color-border); border-radius:18px; box-shadow:0 4px 14px #0007; }
+.pull-refresh__pill svg { width:16px; height:16px; color:var(--color-muted); }
+.pull-refresh__pill.is-ready svg { color:var(--color-accent); }
+.pull-refresh__pill.is-refreshing { transition:transform var(--motion-standard) var(--ease-standard); }
+.pull-refresh__pill.is-refreshing svg { color:var(--color-accent); animation:pull-spin .9s linear infinite; }
+@keyframes pull-spin { to { transform:rotate(360deg); } }
 .library-main button:focus-visible,.library-search input:focus-visible,.sheet-option:focus-visible { outline:2px solid var(--color-text); outline-offset:2px; }
 /* Character, group and folder cards share one row, so they share one cover shape. */
 .character-browser .character-card .character-card-image { height:auto; aspect-ratio:3/4; }
@@ -65,3 +74,27 @@
 
 .album-result-cover { width:48px; height:56px; flex-shrink:0; overflow:hidden; }
 .album-result-cover .home-cover-group { height:100%; }
+
+/* Motion and stability.
+   Status and error rows float over the bottom of the content instead of being inserted above
+   it, so a failed or pending load never shifts the list. */
+.floating-notices { position:absolute; left:12px; right:12px; bottom:12px; z-index:8; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+.floating-notices:empty { display:none; }
+.floating-notices>* { pointer-events:auto; margin:0; border:1px solid var(--color-border); border-radius:var(--radius-sm); box-shadow:0 6px 18px #0008; }
+.floating-notices>.error-message { padding:10px 16px; background:var(--color-surface); }
+.floating-notices>.inline-error { padding:6px 6px 6px 16px; }
+/* The previous level stays on screen, quieted, while a character folder loads. */
+.gallery-scroll.is-stale { opacity:.45; pointer-events:none; transition:opacity var(--motion-standard) var(--ease-standard); }
+@media (prefers-reduced-motion:no-preference) {
+  .floating-notices>* { animation:notice-enter 160ms var(--ease-standard); }
+  .ui-dialog__overlay { animation:overlay-enter 160ms ease-out; }
+  .ui-dialog:has(>.library-sheet) { animation:sheet-enter 200ms var(--ease-standard); }
+  .ui-dialog:has(.classification-index) { animation:drawer-enter 200ms var(--ease-standard); }
+}
+@keyframes notice-enter { from { opacity:0; transform:translateY(6px); } }
+@keyframes overlay-enter { from { opacity:0; } }
+@keyframes sheet-enter { from { transform:translate(-50%,24px); opacity:.4; } }
+@keyframes drawer-enter { from { transform:translateX(-24px); opacity:.4; } }
+/* Pressed feedback, so a tap that starts a network load is acknowledged at once. */
+.library-folder:active .home-cover-group, .library-result:active, .library-all:active, .home-folder:active .home-cover-group { opacity:.8; }
+.bottom-nav button:not(.active):active { color:var(--color-text); }

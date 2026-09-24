@@ -40,6 +40,7 @@ import {Settings} from './Settings';
 import {CharacterBrowser} from './CharacterBrowser';
 import {FaultGame} from './FaultGame';
 import {faultCandidates} from '../src/games/fault/host';
+import {useLevelMotion,useScrollMemory} from './motion';
 
 const HOME: View = {tab:'home', title:'최근 저장'};
 const LIBRARY = LIBRARY_ROOT;
@@ -106,6 +107,7 @@ export function App() {
   const entriesRef=useRef(entries);entriesRef.current=entries;
   const {tree:albumTree,error:albumError}=useAlbumTree(status.configured&&area==='assets'&&!settings&&!viewer&&page.view.tab==='library'&&(librarySegment==='albums'||!!page.view.album),indexRevision,status.endpoint);
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
+  const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
   const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, similarity}); latest.current = {page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, similarity};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]; filters:AssetFiltersValue}>({view:LIBRARY,cursor:null,previous:[],filters:{...EMPTY_FILTERS}});
@@ -480,23 +482,45 @@ export function App() {
   const reviewLibrary=characterReviewLibrary(characterIndex);
   const closeReview=()=>{setReview(null);setReviewClosed(n=>n+1);};
   const intro=<>{filterable&&!sameFilters(filters,page.filters)&&<p className="hint">필터 적용 대기</p>}{!!childEntries.length&&<section className="folder-intro"><h2>폴더 {childEntries.length}</h2><FolderCards strip items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{filterable&&<FilterChips value={filters} applied={page.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/ >}{!page.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{busy?'라이브러리를 불러오고 있습니다':hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':'아직 자산이 없습니다'}</h2></div>}</>;
+  // A drill-down level is a committed Library place; its depth decides the entrance direction.
+  // Home, other tabs and filter changes are not levels, so they never slide.
+  const levelDepth=(view:View)=>{
+    if(view.root)return 0;
+    if(view.album)return 1+(albumTree?albumAncestors(albumTree.albums,view.album.id).length:0);
+    const entry=view.characters?entries.find(item=>item.characterNode===view.characterNode):currentEntry;
+    return 1+(entry?ancestorsOf(entries,entry.id).length:0);
+  };
+  const libraryLevel=status.configured&&area==='assets'&&page.view.tab==='library'&&page.version>0;
+  useLevelMotion(mainRef,libraryLevel?viewKey(page.view):null,libraryLevel?levelDepth(page.view):0);
+  // Retained tabs lose their scrollers' offsets while hidden; put them back on return.
+  useScrollMemory(appRef,`${area}:${page.view.root?'root':page.view.characters?'characters':page.view.tab}`);
+  const rootShown=area==='assets'&&!!page.view.root&&!page.view.characters;
+  // While hidden, the root keeps the covers and count of its own last page, not the open folder's.
+  const rootPage=useRef<{items:Asset[];total?:number}>({items:[]});
+  if(page.view.root)rootPage.current={items:visibleItems,total:page.version&&!page.has_more?visibleItems.length:undefined};
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
-  return <div className="mobile-app">
+  return <div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
     {!(status.configured&&(area!=='assets'||page.view.tab==='library'))&&<header className="app-header"><div className="home-brand"><Mark/><span>LAKOMICS</span></div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div></header>}
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area}>
-      <main className="library-main" style={{display:area!=='assets'?'none':undefined}}>
+      <main className="library-main" ref={mainRef} style={{display:area!=='assets'?'none':undefined}}>
         {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2><IconButton label="새로고침" icon={ArrowPathIcon} disabled={busy} onClick={refresh}/></div></HeaderTools>}
         {page.view.tab==='library'&&!page.view.root&&!page.view.characters&&<LibraryHeader title={page.view.title} count={hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`} crumbs={crumbs} onBack={()=>window.dispatchEvent(new Event('lakomics-back'))} onOptions={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}}/>}
-        {indexError&&page.view.root&&<p className="error-message">{indexError}</p>}
-        {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 해제</Button></div>}
         {busy && <div className="loading-line" role="status" aria-label="목록 불러오는 중"/>}
-        {error && <div className="inline-error" role="alert"><span>{error}</span><Button onClick={() => {const intent = lastIntent.current; void load(intent.view,intent.cursor,intent.previous,0,false,intent.filters);}}>다시 시도</Button></div>}
-        {page.view.characters ? null : page.view.root ? <LibraryRoot entries={entries} characters={characterIndex} recentFolders={recentFolders} items={visibleItems} total={page.version&&!page.has_more?visibleItems.length:undefined} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:()=>setReview({target:null})}:undefined} similarity={{enabled:true,refreshKey:similarityClosed,onOpen:()=>setSimilarity(true)}}/> : page.view.tab === 'home' ? <Home items={visibleItems} classifications={classifications} recentFolders={recentFolders} revisit={revisit} captures={captures} busy={busy} paused={area !== 'assets' || settings || !!viewer} secondaryError={secondaryError} revision={page.version} onSelect={select} onOpen={openCurrent} onPending={() => setViewer({items:captures,index:0,pending:true})}/> : <>
+        {/* The Library root stays mounted while a folder is open, so going back shows its folders,
+            covers and position at once instead of rebuilding them. */}
+        <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} recentFolders={recentFolders} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:()=>setReview({target:null})}:undefined} similarity={{enabled:true,refreshKey:similarityClosed,onOpen:()=>setSimilarity(true)}}/>
+        {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? <Home items={visibleItems} classifications={classifications} recentFolders={recentFolders} revisit={revisit} captures={captures} busy={busy} paused={area !== 'assets' || settings || !!viewer} secondaryError={secondaryError} revision={page.version} onSelect={select} onOpen={openCurrent} onPending={() => setViewer({items:captures,index:0,pending:true})}/> : <>
         <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused}/>
-        {loadingMore && <div className="loading-line" role="status" aria-label="다음 자산을 불러오는 중"/>}{moreError && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
+        {loadingMore && <div className="loading-line is-bottom" role="status" aria-label="다음 자산을 불러오는 중"/>}
         </>}
         {charactersVisited && <CharacterBrowser entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault||!!review} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={restoreBeforeCharacter} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:target=>setReview({target})}:undefined}/>}
+        <div className="floating-notices">
+          {indexError&&rootShown&&<p className="error-message">{indexError}</p>}
+          {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 해제</Button></div>}
+          {error && <div className="inline-error" role="alert"><span>{error}</span><Button onClick={() => {const intent = lastIntent.current; void load(intent.view,intent.cursor,intent.previous,0,false,intent.filters);}}>다시 시도</Button></div>}
+          {moreError && !page.view.root && !page.view.characters && page.view.tab!=='home' && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
+        </div>
       </main>
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack}/>}

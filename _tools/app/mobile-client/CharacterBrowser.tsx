@@ -13,6 +13,7 @@ import {ASSET_FILTER_VERSION,EMPTY_FILTERS,filterKey,filterVersionOf,hasActiveFi
 import {filterSummary} from './AssetFilters';
 import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import {CharacterReviewChip} from './CharacterReview';
+import {useLevelMotion} from './motion';
 import './characters.css';
 
 /**
@@ -250,6 +251,20 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
   let parent=node?.parentId;
   while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
   const folderStrip=!landscape&&!!node;
+  // While the next folder loads, the previous one stays on screen, quieted, instead of blanking;
+  // once it commits the new level slides in from the side it was entered from.
+  const lastPage=useRef<CharacterPage|undefined>(undefined);
+  const level=useRef<{key:string;depth:number}|null>(null);
+  if(!active){lastPage.current=undefined;level.current=null;}
+  else if(page)lastPage.current=page;
+  if(active&&committed&&index){
+    let depth=committed.node?1:0,up=index.nodes.find(n=>n.id===committed.node)?.parentId;const seen=new Set<string>();
+    while(up&&!seen.has(up)){seen.add(up);depth++;up=index.nodes.find(n=>n.id===up)?.parentId;}
+    level.current={key:`${committed.node}:${committed.filter}`,depth};
+  }
+  useLevelMotion(host,level.current?.key??null,level.current?.depth??0);
+  const stale=!page&&busy&&!error&&!!where.node&&!!lastPage.current;
+  const galleryItems=page?.items??(stale?lastPage.current!.items:[]);
   const foldable=folderStrip&&children.length>0;
   const filterControls=(node?.kind==='series'||foldable)&&<div className="character-filters">{node?.kind==='series'&&(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}{foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>}</div>;
   const overview=<>
@@ -270,8 +285,8 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
   </>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     <LibraryHeader title={node?.name??'시리즈'} count={page?.totalCount??scope?.totalCount} crumbs={[...crumbs,...ancestors.map(ancestor=>({id:ancestor.id,name:ancestor.name,onSelect:()=>{drilled.current=ancestor.id!==appliedInitialNode.current&&!!ancestor.parentId;navigate({node:ancestor.id,filter:'all',filters:{...EMPTY_FILTERS}});}}))]} onBack={goUp} onOptions={()=>onOptions(page?.items??[])}/>
-    <Gallery items={page?.items??[]} intro={<>{overview}{where.node&&<FilterChips value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>
-    {more&&<div className="loading-line" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
+    <Gallery items={galleryItems} stale={stale} intro={<>{overview}{where.node&&<FilterChips value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>
+    {more&&<div className="loading-line is-bottom" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
   </section>;
 }

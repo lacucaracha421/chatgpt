@@ -29,7 +29,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: As
   </button>;
 }
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, intro, onRefresh, busy=false}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean}) {
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, intro, onRefresh, busy=false, stale=false}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean}) {
   const parent = useRef<HTMLDivElement>(null);
   const pull=usePullToRefresh(parent,onRefresh,busy,paused);
   const introduction=useRef<HTMLDivElement>(null);
@@ -39,7 +39,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     if(!element){setIntroHeight(0);return;}
     const measure=()=>{if(parent.current?.clientWidth)setIntroHeight(element.getBoundingClientRect().height);};
     measure();const observer=new ResizeObserver(measure);observer.observe(element);return()=>observer.disconnect();
-  },[intro!=null,onRefresh!=null,busy]);
+  },[intro!=null]);
   const [width, setWidth] = useState(600);
   const rows = useMemo(() => justifiedRows(items, width, rowHeight(density, width)), [items, width, density]);
   const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, estimateSize: i => rows[i].height + 10, overscan: 2,scrollMargin:introHeight});
@@ -80,8 +80,10 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   }, [lastRow, rows, paused]);
   const checkEnd = () => {const element = parent.current; if (!paused && element && element.clientHeight > 0 && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
   useEffect(checkEnd, [items.length, onNearEnd, paused]);
-  return <div className="gallery-scroll" ref={parent} onScroll={event => {if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
-    {(intro!=null||onRefresh)&&<div ref={introduction}>{pull}{intro}</div>}
+  return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onScroll={event => {if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
+    {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
+    {pull}
+    {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => <div className="gallery-row" key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
         {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused}/>) }

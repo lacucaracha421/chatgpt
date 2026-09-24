@@ -68,6 +68,8 @@ export function useSimilarityReviewCount(enabled: boolean, refreshKey: unknown):
     window.addEventListener(SIMILARITY_REVIEW_EVENT, read);
     return () => { clearTimeout(timer); window.removeEventListener(SIMILARITY_REVIEW_EVENT, read); };
   }, [enabled]);
-  if (!enabled || !total) return null;
+  // A pause (a dialog, the viewer or another tab over the Library) keeps the last known count
+  // instead of removing the row, which would move everything below it; it is re-read on return.
+  if (!total) return null;
   return Math.max(0, total.value - total.queued);
 }
