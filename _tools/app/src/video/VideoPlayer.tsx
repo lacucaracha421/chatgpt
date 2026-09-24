@@ -1,5 +1,5 @@
 import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/outline";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AssetSummary } from "../library/types";
 import { playbackUrl, scrubFrameUrl, vaultPlaybackUrl } from "../assets/mediaUrl";
@@ -7,6 +7,11 @@ import { Button } from "../shared/ui/Button";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
 const CONTROLS_IDLE_MS = 1_800;
+/** Seconds moved by one Left/Right arrow press. */
+export const VIDEO_SEEK_STEP_SECONDS = 5;
+
+/** Lets a host (the asset viewer) route arrow keys to the player while focus sits elsewhere. */
+export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void };
 
 type PlaybackUrlResolver = (assetId: string) => Promise<string>;
 
@@ -16,7 +21,7 @@ const resolveInternalVaultPlaybackUrl: PlaybackUrlResolver = (itemId) =>
   invoke<string>("get_internal_vault_playback_url", { itemId });
 
 /** `vault` plays an encrypted Private Vault item: no scrub frames, vault routes only. */
-export function VideoPlayer({ asset, source: mediaSource = "library", resolvePlaybackUrl }: { asset: VideoAsset; source?: "library" | "vault"; resolvePlaybackUrl?: PlaybackUrlResolver }) {
+export function VideoPlayer({ asset, source: mediaSource = "library", resolvePlaybackUrl, ref }: { asset: VideoAsset; source?: "library" | "vault"; resolvePlaybackUrl?: PlaybackUrlResolver; ref?: Ref<VideoPlayerHandle> }) {
   const vault = mediaSource === "vault";
   const protocolUrl = vault ? vaultPlaybackUrl : playbackUrl;
   const resolveHttpUrl = resolvePlaybackUrl ?? (vault ? resolveInternalVaultPlaybackUrl : resolveInternalPlaybackUrl);
@@ -108,6 +113,17 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
     : 0;
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : storedDuration;
   const timelineAvailable = safeDuration > 0;
+  const seekBy = (deltaSeconds: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : safeDuration;
+    const from = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const next = Math.max(0, limit > 0 ? Math.min(limit, from + deltaSeconds) : from + deltaSeconds);
+    video.currentTime = next;
+    setCurrentTime(next);
+    scheduleIdle();
+  };
+  useImperativeHandle(ref, () => ({ seekBy }));
   const hoverTime = hoverRatio === null || !timelineAvailable ? 0 : hoverRatio * safeDuration;
   const hoverFrame = timelineAvailable && hoverRatio !== null
     ? Math.round(hoverRatio * Math.max(0, asset.media.scrubFrameCount - 1))
@@ -125,6 +141,13 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
       if ((event.key === " " || event.code === "Space") && !ownsKeyboard(event.target)) {
         event.preventDefault();
         togglePlayback();
+      }
+      if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        // Arrows belong to the player here: never let a host viewer also treat them as previous/next.
+        event.stopPropagation();
+        if (consumesArrows(event.target)) return;
+        event.preventDefault();
+        seekBy(event.key === "ArrowLeft" ? -VIDEO_SEEK_STEP_SECONDS : VIDEO_SEEK_STEP_SECONDS);
       }
     }}
   >
@@ -196,6 +219,11 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
 
 function ownsKeyboard(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest("button,input,select,textarea,[contenteditable=true]"));
+}
+
+/** Native sliders and text fields move their own value with arrows. */
+function consumesArrows(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("input,select,textarea,[contenteditable=true]"));
 }
 
 function formatTime(seconds: number) {

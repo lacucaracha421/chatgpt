@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
-import { AssetViewer } from "./AssetViewer";
+import { AssetViewer, VIEWER_CHROME_IDLE_MS } from "./AssetViewer";
 
 afterEach(() => {
   cleanup();
@@ -122,6 +122,88 @@ it("shows a failure placeholder instead of a stale image when preload fails", as
   rerender(<AssetViewer items={items} activeId="c" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
   await waitFor(() => expect(screen.getByRole("img", { name: "c.png" })).toBeInTheDocument());
   expect(screen.queryByText("이미지를 불러오지 못했습니다")).not.toBeInTheDocument();
+});
+
+it("seeks a video with Left/Right while the on-screen arrows still change assets", () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  const onActiveIdChange = vi.fn();
+  render(<AssetViewer items={[asset("a", "a.png"), videoAsset("v", "v.webm"), asset("c", "c.png")]} activeId="v" onActiveIdChange={onActiveIdChange} onClose={vi.fn()} />);
+  const dialog = screen.getByRole("dialog", { name: "v.webm" });
+  const video = screen.getByLabelText("v.webm 영상");
+  Object.defineProperty(video, "currentTime", { configurable: true, writable: true, value: 10 });
+
+  fireEvent.keyDown(dialog, { key: "ArrowRight" });
+  expect(video).toHaveProperty("currentTime", 15);
+  fireEvent.keyDown(dialog, { key: "ArrowLeft" });
+  fireEvent.keyDown(dialog, { key: "ArrowLeft" });
+  expect(video).toHaveProperty("currentTime", 5);
+  expect(onActiveIdChange).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "다음 자산" }));
+  expect(onActiveIdChange).toHaveBeenCalledWith("c");
+});
+
+it("keeps Left/Right as previous/next for a video hidden by privacy mode", () => {
+  const onActiveIdChange = vi.fn();
+  render(<AssetViewer items={[asset("a", "a.png"), videoAsset("v", "v.webm")]} activeId="v" onActiveIdChange={onActiveIdChange} onClose={vi.fn()} privacyMode />);
+
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowLeft" });
+
+  expect(onActiveIdChange).toHaveBeenCalledWith("a");
+});
+
+it("fades the title, arrows and actions after idle and restores them on pointer or key activity", () => {
+  vi.useFakeTimers();
+  try {
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+    const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
+    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS - 1));
+    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+    act(() => vi.advanceTimersByTime(1));
+    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
+    expect(viewer).toHaveClass("asset-viewer--chrome-hidden");
+
+    fireEvent.pointerMove(viewer);
+    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
+    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "f" });
+    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the chrome visible while the pointer rests on the controls or Tab focus is inside them", () => {
+  vi.useFakeTimers();
+  try {
+    render(<AssetViewer items={[asset("a", "a.png"), asset("b", "b.png")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+    const viewer = document.querySelector<HTMLElement>(".asset-viewer")!;
+    const controls = document.querySelector<HTMLElement>(".asset-viewer__controls")!;
+
+    fireEvent.pointerEnter(controls);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+    fireEvent.pointerLeave(controls);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
+    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
+
+    const close = screen.getByRole("button", { name: "감상 화면 닫기" });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
+    act(() => close.focus());
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS * 2));
+    expect(viewer).toHaveAttribute("data-chrome-visible", "true");
+
+    fireEvent.pointerMove(viewer);
+    act(() => vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS));
+    expect(viewer).toHaveAttribute("data-chrome-visible", "false");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 function asset(id: string, originalName: string): AssetSummary {

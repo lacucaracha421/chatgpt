@@ -107,6 +107,54 @@ describe("VideoPlayer", () => {
     expect(video).toHaveProperty("currentTime", 25);
   });
 
+  it("seeks 5 seconds with Left/Right, clamped to the media bounds", () => {
+    const outer = vi.fn();
+    render(<div onKeyDown={outer}><VideoPlayer asset={videoAsset()} /></div>);
+    const video = screen.getByLabelText("sample.webm 영상");
+    const player = screen.getByTestId("video-player");
+    setMediaNumber(video, "duration", 12);
+    fireEvent.durationChange(video);
+    setMediaNumber(video, "currentTime", 3);
+
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    expect(video).toHaveProperty("currentTime", 8);
+    fireEvent.keyDown(player, { key: "ArrowRight" });
+    expect(video).toHaveProperty("currentTime", 12);
+    expect(screen.getByText("0:12 / 0:12")).toBeInTheDocument();
+    fireEvent.keyDown(player, { key: "ArrowLeft" });
+    expect(video).toHaveProperty("currentTime", 7);
+    fireEvent.keyDown(player, { key: "ArrowLeft" });
+    fireEvent.keyDown(player, { key: "ArrowLeft" });
+    expect(video).toHaveProperty("currentTime", 0);
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  it("leaves arrows to a focused slider without seeking or reaching the host", () => {
+    const outer = vi.fn();
+    render(<div onKeyDown={outer}><VideoPlayer asset={videoAsset()} /></div>);
+    const video = screen.getByLabelText("sample.webm 영상");
+    setMediaNumber(video, "currentTime", 20);
+
+    fireEvent.keyDown(screen.getByRole("slider", { name: "음량" }), { key: "ArrowRight" });
+
+    expect(video).toHaveProperty("currentTime", 20);
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  it("shows hidden controls again when seeking from the keyboard", () => {
+    vi.useFakeTimers();
+    render(<VideoPlayer asset={videoAsset()} />);
+    const video = screen.getByLabelText("sample.webm 영상");
+    const player = screen.getByTestId("video-player");
+    fireEvent.play(video);
+    act(() => vi.advanceTimersByTime(1_800));
+    expect(player).toHaveAttribute("data-controls-visible", "false");
+
+    fireEvent.keyDown(player, { key: "ArrowLeft" });
+
+    expect(player).toHaveAttribute("data-controls-visible", "true");
+  });
+
   it("lets the timeline consume the available control width", () => {
     render(<VideoPlayer asset={videoAsset()} />);
 

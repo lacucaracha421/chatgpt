@@ -2419,6 +2419,37 @@ textarea:focus-visible {
   pointer-events: auto;
 }
 
+.asset-viewer__chrome { display: contents; }
+
+.asset-viewer__identity,
+.asset-viewer__navigation,
+.asset-viewer__controls {
+  opacity: 1;
+  transition: opacity 150ms ease;
+}
+
+.asset-viewer--chrome-hidden { cursor: none; }
+
+.asset-viewer--chrome-hidden .asset-viewer__identity,
+.asset-viewer--chrome-hidden .asset-viewer__navigation,
+.asset-viewer--chrome-hidden .asset-viewer__controls {
+  opacity: 0;
+}
+
+.asset-viewer--chrome-hidden .asset-viewer__controls,
+.asset-viewer--chrome-hidden .asset-viewer__navigation .ui-button {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-viewer__identity,
+  .asset-viewer__navigation,
+  .asset-viewer__controls,
+  .video-player__controls {
+    transition: none;
+  }
+}
+
 .asset-viewer__favorite[aria-pressed="true"] { color: var(--color-accent); background: var(--color-selected); }
 
 .asset-viewer__media {
