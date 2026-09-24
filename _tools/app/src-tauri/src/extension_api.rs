@@ -1152,7 +1152,7 @@ mod tests {
         image::RgbImage::from_pixel(8, 6, image::Rgb([1, 2, 3])).save(source.join("picture.png")).unwrap();
         library.create_encrypted_vault(&vault, "correct horse", false).unwrap();
         library.import_into_encrypted_vault(&source, &mut |_| {}).unwrap();
-        let id_of = |kind| library.list_encrypted_vault_items(EncryptedVaultQuery { kind: Some(kind), offset: 0, limit: 1 }).unwrap().items[0].id.clone();
+        let id_of = |kind| library.list_encrypted_vault_items(EncryptedVaultQuery { kind: Some(kind), offset: 0, limit: 1, trashed: false }).unwrap().items[0].id.clone();
         let video_id = id_of(EncryptedVaultItemKind::Video);
         let image_id = id_of(EncryptedVaultItemKind::Image);
         fn has(response: &InternalPlaybackResponse, name: &'static str, value: &str) -> bool { response.headers().iter().any(|h| h.field.equiv(name) && h.value.as_str() == value) }

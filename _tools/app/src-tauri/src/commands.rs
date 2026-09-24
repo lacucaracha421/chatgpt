@@ -3045,6 +3045,98 @@ pub async fn set_encrypted_vault_title(
 }
 
 #[tauri::command]
+pub async fn import_files_into_encrypted_vault(
+    files: Vec<String>,
+    on_progress: tauri::ipc::Channel<crate::library::models::EncryptedVaultImportProgress>,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultImportReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let files = files.into_iter().map(std::path::PathBuf::from).collect::<Vec<_>>();
+        library.import_files_into_encrypted_vault(&files, &mut |progress| {
+            let _ = on_progress.send(progress.clone());
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn trash_encrypted_vault_items(
+    item_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.trash_encrypted_vault_items(&item_ids))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn restore_encrypted_vault_items(
+    item_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.restore_encrypted_vault_items(&item_ids))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Permanently deletes the given items; only items already in the vault trash qualify.
+#[tauri::command]
+pub async fn delete_encrypted_vault_items(
+    item_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.delete_encrypted_vault_items(&item_ids))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn empty_encrypted_vault_trash(
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.empty_encrypted_vault_trash())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn export_encrypted_vault_items(
+    item_ids: Vec<String>,
+    destination: String,
+    on_progress: tauri::ipc::Channel<crate::library::models::EncryptedVaultExportProgress>,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultExportProgress, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.export_encrypted_vault_items(&item_ids, std::path::Path::new(&destination), &mut |progress| {
+            let _ = on_progress.send(progress.clone());
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+/// The current or last Private Vault export, so the UI can reattach to it.
+#[tauri::command]
+pub fn encrypted_vault_export_status(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::models::EncryptedVaultExportJob>, CommandError> {
+    Ok(current_required(state)?.encrypted_vault_export_job())
+}
+
+#[tauri::command]
 pub fn preview_encrypted_vault_sidecar_cleanup(
     state: State<'_, AppState>,
 ) -> Result<crate::library::models::EncryptedVaultSidecarCleanupPreview, CommandError> {

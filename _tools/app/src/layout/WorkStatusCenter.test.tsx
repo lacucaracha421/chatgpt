@@ -5,12 +5,14 @@ import { dismissPublication, startPublication } from "../library/publicationJobs
 import { WorkStatusCenter } from "./WorkStatusCenter";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
 import { resetVaultImportJob, startVaultImport } from "../external-vault/vaultImportJob";
+import { resetVaultExportJob, startVaultExport } from "../external-vault/vaultExportJob";
 
 afterEach(() => {
   cleanup();
   dismissPublication("catalog");
   dismissPublication("collections");
   resetVaultImportJob();
+  resetVaultExportJob();
 });
 
 const idleCharacterAutomation = {
@@ -136,4 +138,28 @@ it("shows a running Private Vault import on the 비밀 rail item and in the work
   expect(screen.getByRole("status", { name: "비밀 보관함 가져오기" })).toHaveTextContent("완료 · 가져옴 19개 · 실패 1개");
   await user.click(screen.getByRole("button", { name: "닫기" }));
   expect(screen.queryByRole("status", { name: "비밀 보관함 가져오기" })).not.toBeInTheDocument();
+});
+
+it("shows a running Private Vault export on the 비밀 rail item and in the work center", async () => {
+  const user = userEvent.setup();
+  let progress!: (value: { processed: number; total: number; exported: number; failed: number }) => void;
+  let finish!: (value: unknown) => void;
+  const exportEncryptedVaultItems = vi.fn((_ids: string[], _folder: string, onProgress?: typeof progress) => {
+    progress = onProgress!;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  void startVaultExport({ exportEncryptedVaultItems } as any, ["a", "b"], "/home/me/out");
+  render(<WorkspaceNavigation view={{ kind: "notes" }}
+    collectionType="game" width={208} onWidthChange={vi.fn()} onNavigate={vi.fn()}
+    assetNavigation={null} reviewCount={0} trashCount={0} privateVaultAvailable
+    renderManagement={(items) => <WorkStatusCenter characterAutomation={idleCharacterAutomation}
+      progress={null} managementItems={items} />} />);
+  act(() => progress({ processed: 1, total: 2, exported: 1, failed: 0 }));
+
+  const rail = screen.getByRole("navigation", { name: "주요 영역" });
+  expect(within(rail).getByRole("button", { name: "비밀" })).toHaveAccessibleDescription("내보내는 중 1 / 2");
+  await user.click(within(rail).getByRole("button", { name: "라이브러리 관리" }));
+  expect(screen.getByRole("status", { name: "비밀 보관함 내보내기" })).toHaveTextContent("내보내는 중 1 / 2");
+  await act(async () => finish({ processed: 2, total: 2, exported: 1, failed: 1 }));
+  expect(screen.getByRole("status", { name: "비밀 보관함 내보내기" })).toHaveTextContent("완료 · 내보냄 1개 · 실패 1개");
 });

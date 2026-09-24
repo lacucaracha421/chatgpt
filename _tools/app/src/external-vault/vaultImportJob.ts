@@ -16,7 +16,8 @@ export type VaultImportJob = {
   error: string | null;
 };
 type Snapshot = { job: VaultImportJob | null; /** Increases whenever an import ends. */ completions: number };
-type Gateway = Pick<LibraryGateway, "importIntoEncryptedVault" | "getEncryptedVaultImportStatus">;
+type Gateway = Pick<LibraryGateway, "importIntoEncryptedVault" | "importFilesIntoEncryptedVault" | "getEncryptedVaultImportStatus">;
+type Runner = (onProgress: (progress: EncryptedVaultImportProgress) => void) => Promise<EncryptedVaultImportReport>;
 
 export const VAULT_IMPORT_POLL_MS = 1_000;
 const listeners = new Set<() => void>();
@@ -47,11 +48,23 @@ export function dismissVaultImport() { if (snapshot.job && !snapshot.job.running
 
 /** Starts an import of `folder`. While one runs (here or in the backend) it shows that job instead. */
 export async function startVaultImport(gateway: Gateway, folder: string) {
-  if (snapshot.job?.running || !gateway.importIntoEncryptedVault) return;
+  const importFolder = gateway.importIntoEncryptedVault;
+  await runImport(gateway, importFolder && ((onProgress) => importFolder(folder, onProgress)));
+}
+
+/** 파일 추가: the same import job for individually chosen files. */
+export async function startVaultFileImport(gateway: Gateway, files: string[]) {
+  const importFiles = gateway.importFilesIntoEncryptedVault;
+  if (files.length === 0) return;
+  await runImport(gateway, importFiles && ((onProgress) => importFiles(files, onProgress)));
+}
+
+async function runImport(gateway: Gateway, run: Runner | undefined) {
+  if (snapshot.job?.running || !run) return;
   ownCall = true;
   setJob({ running: true, progress: null, report: null, error: null });
   try {
-    const report = await gateway.importIntoEncryptedVault(folder, (progress) => {
+    const report = await run((progress) => {
       if (snapshot.job?.running) setJob({ ...snapshot.job, progress });
     });
     ownCall = false;

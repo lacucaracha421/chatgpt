@@ -70,6 +70,31 @@ pub(super) fn media_files(root: &Path) -> Result<(Vec<(PathBuf, String, VaultMed
     Ok((files, unreadable))
 }
 
+/// Individually chosen files as import entries, each keyed by its file name. Folders,
+/// symlinks, unreadable or unsupported files and names that are not UTF-8 are counted in
+/// the second value instead (the user picked them, so they are reported as failed).
+pub(super) fn chosen_media_files(
+    paths: &[PathBuf],
+) -> (Vec<(PathBuf, String, VaultMediaKind)>, u64) {
+    let mut files = Vec::new();
+    let mut rejected = 0_u64;
+    for path in paths {
+        let entry = fs::symlink_metadata(path)
+            .ok()
+            .filter(|metadata| metadata.is_file())
+            .and_then(|_| {
+                let name = path.file_name()?.to_str()?.to_owned();
+                Some((path.clone(), name, media_kind(path)?))
+            });
+        match entry {
+            Some(entry) => files.push(entry),
+            None => rejected += 1,
+        }
+    }
+    files.sort_by(|left, right| left.1.cmp(&right.1));
+    (files, rejected)
+}
+
 fn ignored_directory(name: &std::ffi::OsStr) -> bool {
     let Some(name) = name.to_str() else { return true; };
     name == ".lakomics"
@@ -104,7 +129,7 @@ fn relative_key(root: &Path, path: &Path) -> Option<String> {
 mod tests {
     use std::fs;
 
-    use super::{media_files, VaultMediaKind};
+    use super::{chosen_media_files, media_files, VaultMediaKind};
 
     #[test]
     fn media_files_skip_metadata_trash_and_unsupported_files() {
@@ -134,6 +159,35 @@ mod tests {
                 ("anim.gif", VaultMediaKind::Gif),
                 ("clip.MP4", VaultMediaKind::Video),
                 ("nested/a.png", VaultMediaKind::Image),
+            ]
+        );
+    }
+
+    #[test]
+    fn chosen_files_are_keyed_by_file_name_and_unsupported_ones_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::create_dir_all(root.join("x/y")).unwrap();
+        fs::write(root.join("x/y/b.PNG"), b"image").unwrap();
+        fs::write(root.join("a.mp4"), b"video").unwrap();
+        fs::write(root.join("notes.txt"), b"text").unwrap();
+        let (files, rejected) = chosen_media_files(&[
+            root.join("x/y/b.PNG"),
+            root.join("a.mp4"),
+            root.join("notes.txt"),
+            root.join("x"),
+            root.join("missing.png"),
+        ]);
+        assert_eq!(rejected, 3);
+        let found = files
+            .iter()
+            .map(|(_, relative, kind)| (relative.as_str(), *kind))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            found,
+            vec![
+                ("a.mp4", VaultMediaKind::Video),
+                ("b.PNG", VaultMediaKind::Image)
             ]
         );
     }

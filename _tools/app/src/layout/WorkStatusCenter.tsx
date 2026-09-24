@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { AssetBrowserStatus } from "../assets/AssetBrowser";
 import { CharacterAutomationStatus } from "../characters/CharacterAutomationStatus";
-import { VaultImportStatus } from "../external-vault/VaultImportStatus";
+import { VaultExportStatus, VaultImportStatus } from "../external-vault/VaultImportStatus";
+import { useVaultExportJob } from "../external-vault/vaultExportJob";
 import { useVaultImportJob } from "../external-vault/vaultImportJob";
 import type { useCharacterAutomation } from "../characters/useCharacterAutomation";
 import type { DropProgress } from "../ingestion/useFileDrop";
@@ -36,6 +37,7 @@ export function WorkStatusCenter({
   const [open, setOpen] = useState(false);
   const publicationJobs = Object.values(usePublicationJobs()).filter(Boolean);
   const vaultImport = useVaultImportJob().job;
+  const vaultExport = useVaultExportJob();
   const freshCharacterWork = Boolean(characterAutomation.activeWork && (characterAutomation.activeWork.freshRemaining > 0
     || (characterAutomation.activeWork.active && characterAutomation.activeWork.cause !== "reconsideration")));
   const characterFailures = (characterAutomation.historyRefreshes ?? []).filter(refresh => refresh.state === "failed").length;
@@ -45,16 +47,18 @@ export function WorkStatusCenter({
   const libraryVisible = Boolean(progress || similarityIndex?.running || similarityIndex?.failed || similarityIndex?.message);
   const activeCount = publicationJobs.filter((job) => job.running).length
     + Number(Boolean(vaultImport?.running))
+    + Number(Boolean(vaultExport?.running))
     + Number(characterAutomation.historyRefreshActive)
     + Number(freshCharacterWork)
     + Number(progress !== null)
     + Number(Boolean(similarityIndex?.running));
   const problemCount = publicationJobs.filter((job) => job.error).length
     + Number(Boolean(vaultImport?.error))
+    + Number(Boolean(vaultExport?.error))
     + Number(Boolean(characterAutomation.persistentError))
     + characterFailures
     + Number(Boolean(similarityIndex?.failed || similarityIndex?.message));
-  const visibleCount = publicationJobs.length + Number(Boolean(vaultImport)) + Number(characterVisible) + Number(libraryVisible);
+  const visibleCount = publicationJobs.length + Number(Boolean(vaultImport)) + Number(Boolean(vaultExport)) + Number(characterVisible) + Number(libraryVisible);
   const state = problemCount > 0 ? "attention" : activeCount > 0 ? "active" : visibleCount > 0 ? "available" : "idle";
   const label = problemCount > 0
     ? `작업 센터 · 문제 ${problemCount}개`
@@ -88,6 +92,7 @@ export function WorkStatusCenter({
         : <>
           <PublicationStatus />
           <VaultImportStatus />
+          <VaultExportStatus />
           <CharacterAutomationStatus state={characterAutomation} />
           <StatusBar status={browserStatus} progress={progress} dropEnabled={dropEnabled} similarityIndex={similarityIndex} />
         </>}

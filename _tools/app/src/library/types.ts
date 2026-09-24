@@ -735,7 +735,11 @@ export type EncryptedVaultStatus = {
   vaultId: string | null;
   root: string | null;
   itemCount: number | null;
+  /** Items in the vault trash; set only while unlocked. */
+  trashedCount?: number | null;
   remembered: boolean;
+  /** Opened from the backup index: permanent deletion is refused in this session. */
+  backupIndex?: boolean;
 };
 
 export type EncryptedVaultSecret = { kind: "password" | "recoveryKey"; value: string };
@@ -745,7 +749,8 @@ export type CreatedEncryptedVault = { status: EncryptedVaultStatus; recoveryKey:
 
 export type EncryptedVaultItemKind = "image" | "video";
 
-export type EncryptedVaultQuery = { kind: EncryptedVaultItemKind | null; offset: number; limit: number };
+/** `trashed`: list the vault trash instead of the gallery. */
+export type EncryptedVaultQuery = { kind: EncryptedVaultItemKind | null; offset: number; limit: number; trashed?: boolean };
 
 export type EncryptedVaultItem = {
   id: string;
@@ -757,6 +762,8 @@ export type EncryptedVaultItem = {
   originalFileName: string;
   importedAt: string;
   hasThumbnail: boolean;
+  /** Set while the item is in the vault trash. */
+  trashedAt?: string | null;
 };
 
 export type EncryptedVaultItemPage = { items: EncryptedVaultItem[]; totalCount: number; nextOffset: number | null };
@@ -790,6 +797,11 @@ export type EncryptedVaultImportJob = {
   report: EncryptedVaultImportReport | null;
   error: string | null;
 };
+
+export type EncryptedVaultExportProgress = { processed: number; total: number; exported: number; failed: number };
+
+/** The app-level vault export (current or last of this app session). `error` is a command error code. */
+export type EncryptedVaultExportJob = { id: number; running: boolean; progress: EncryptedVaultExportProgress; error: string | null };
 
 export type ImportSource =
   | "direct"
@@ -1307,6 +1319,14 @@ export interface LibraryGateway {
   changeEncryptedVaultPassword?(current: EncryptedVaultSecret, newPassword: string): Promise<void>;
   importIntoEncryptedVault?(sourceFolder: string, onProgress?: (progress: EncryptedVaultImportProgress) => void): Promise<EncryptedVaultImportReport>;
   getEncryptedVaultImportStatus?(): Promise<EncryptedVaultImportJob | null>;
+  importFilesIntoEncryptedVault?(files: string[], onProgress?: (progress: EncryptedVaultImportProgress) => void): Promise<EncryptedVaultImportReport>;
+  trashEncryptedVaultItems?(itemIds: string[]): Promise<number>;
+  restoreEncryptedVaultItems?(itemIds: string[]): Promise<number>;
+  /** Permanently deletes items that are already in the vault trash. */
+  deleteEncryptedVaultItems?(itemIds: string[]): Promise<number>;
+  emptyEncryptedVaultTrash?(): Promise<number>;
+  exportEncryptedVaultItems?(itemIds: string[], destination: string, onProgress?: (progress: EncryptedVaultExportProgress) => void): Promise<EncryptedVaultExportProgress>;
+  getEncryptedVaultExportStatus?(): Promise<EncryptedVaultExportJob | null>;
   listEncryptedVaultItems?(query: EncryptedVaultQuery): Promise<EncryptedVaultItemPage>;
   setEncryptedVaultTitle?(itemId: string, title: string | null): Promise<void>;
   previewEncryptedVaultSidecarCleanup?(): Promise<EncryptedVaultSidecarCleanupPreview>;

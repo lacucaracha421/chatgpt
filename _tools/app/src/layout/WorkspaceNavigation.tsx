@@ -3,6 +3,7 @@ import { useRef, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
+import { useVaultExportJob, vaultExportProgressText } from "../external-vault/vaultExportJob";
 import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
 import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
@@ -34,7 +35,9 @@ type Props = {
 export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, privateVaultAvailable = false, onImportFiles, renderManagement }: Props) {
   const chrome = useWorkspaceChrome();
   const vaultImport = useVaultImportJob().job;
-  const vaultImportText = vaultImport?.running ? vaultImportProgressText(vaultImport) : undefined;
+  const vaultExport = useVaultExportJob();
+  const vaultImportText = vaultImport?.running ? vaultImportProgressText(vaultImport)
+    : vaultExport?.running ? vaultExportProgressText(vaultExport) : undefined;
   const area = workspaceArea(view);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
   const collectionList = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);

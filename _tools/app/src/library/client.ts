@@ -54,6 +54,8 @@ import type {
   MetadataImportPlan,
   PurgeSummary,
   CreatedEncryptedVault,
+  EncryptedVaultExportJob,
+  EncryptedVaultExportProgress,
   EncryptedVaultImportJob,
   EncryptedVaultImportProgress,
   EncryptedVaultImportReport,
@@ -500,6 +502,21 @@ export const libraryGateway: LibraryGateway = {
     return invoke<EncryptedVaultImportReport>("import_into_encrypted_vault", { sourceFolder, onProgress: channel });
   },
   getEncryptedVaultImportStatus: () => invoke<EncryptedVaultImportJob | null>("encrypted_vault_import_status"),
+  importFilesIntoEncryptedVault: (files, onProgress) => {
+    const channel = new Channel<EncryptedVaultImportProgress>();
+    channel.onmessage = (progress) => onProgress?.(progress);
+    return invoke<EncryptedVaultImportReport>("import_files_into_encrypted_vault", { files, onProgress: channel });
+  },
+  trashEncryptedVaultItems: (itemIds) => invoke<number>("trash_encrypted_vault_items", { itemIds }),
+  restoreEncryptedVaultItems: (itemIds) => invoke<number>("restore_encrypted_vault_items", { itemIds }),
+  deleteEncryptedVaultItems: (itemIds) => invoke<number>("delete_encrypted_vault_items", { itemIds }),
+  emptyEncryptedVaultTrash: () => invoke<number>("empty_encrypted_vault_trash"),
+  exportEncryptedVaultItems: (itemIds, destination, onProgress) => {
+    const channel = new Channel<EncryptedVaultExportProgress>();
+    channel.onmessage = (progress) => onProgress?.(progress);
+    return invoke<EncryptedVaultExportProgress>("export_encrypted_vault_items", { itemIds, destination, onProgress: channel });
+  },
+  getEncryptedVaultExportStatus: () => invoke<EncryptedVaultExportJob | null>("encrypted_vault_export_status"),
   listEncryptedVaultItems: (query) => invoke<EncryptedVaultItemPage>("list_encrypted_vault_items", { query }),
   setEncryptedVaultTitle: (itemId, title) => invoke<void>("set_encrypted_vault_title", { itemId, title }),
   previewEncryptedVaultSidecarCleanup: () =>

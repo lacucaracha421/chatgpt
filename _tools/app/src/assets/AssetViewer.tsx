@@ -1,4 +1,4 @@
-import { ChevronLeftIcon, ChevronRightIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ChevronLeftIcon, ChevronRightIcon, StarIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 import type { AssetSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
@@ -9,7 +9,7 @@ import { StableImage } from "../shared/ui/StableImage";
 import { VideoPlayer } from "../video/VideoPlayer";
 import { assetUrl, vaultAssetUrl } from "./mediaUrl";
 
-export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAssetOpened, onToggleFavorite, onTrash, privacyMode = false, mediaSource = "library" }: { items: AssetSummary[]; activeId: string | null; onActiveIdChange: (id: string) => void; onClose: () => void; onAssetOpened?: (asset: AssetSummary) => void | Promise<void>; onToggleFavorite?: (asset: AssetSummary) => void; onTrash?: (asset: AssetSummary) => void; privacyMode?: boolean; /** `vault`: encrypted Private Vault item routes. */ mediaSource?: "library" | "vault" }) {
+export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAssetOpened, onToggleFavorite, onTrash, onExport, privacyMode = false, mediaSource = "library" }: { items: AssetSummary[]; activeId: string | null; onActiveIdChange: (id: string) => void; onClose: () => void; onAssetOpened?: (asset: AssetSummary) => void | Promise<void>; onToggleFavorite?: (asset: AssetSummary) => void; onTrash?: (asset: AssetSummary) => void; /** Saves a copy of the asset to a chosen PC folder (Private Vault). */ onExport?: (asset: AssetSummary) => void; privacyMode?: boolean; /** `vault`: encrypted Private Vault item routes. */ mediaSource?: "library" | "vault" }) {
   const index = items.findIndex((item) => item.id === activeId);
   const asset = items[index];
   const [imageFailed, setImageFailed] = useState(false);
@@ -58,6 +58,7 @@ export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAsse
       </div>
       <div className="asset-viewer__controls">
         {onToggleFavorite && <Button className="asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "즐겨찾기 끄기" : "즐겨찾기 켜기"} aria-pressed={asset.favorite} onClick={() => onToggleFavorite(asset)}><StarIcon aria-hidden="true" /></Button>}
+        {onExport && <Button size="icon" variant="ghost" aria-label="내보내기" aria-description="PC 폴더로 내보내기" onClick={() => onExport(asset)}><ArrowDownTrayIcon aria-hidden="true" /></Button>}
         {onTrash && <Button size="icon" variant="danger" aria-label="휴지통으로 이동" onClick={() => onTrash(asset)}><TrashIcon aria-hidden="true" /></Button>}
         <Button size="icon" variant="ghost" aria-label="감상 화면 닫기" aria-description="감상 화면 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </div>

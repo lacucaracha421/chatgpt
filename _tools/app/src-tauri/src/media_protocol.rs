@@ -1512,6 +1512,7 @@ mod encrypted_vault_tests {
                     kind: Some(kind),
                     offset: 0,
                     limit: 1,
+                    trashed: false,
                 })
                 .unwrap()
                 .items[0]

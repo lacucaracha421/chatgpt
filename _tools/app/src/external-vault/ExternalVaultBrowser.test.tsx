@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -6,19 +6,26 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { open } from "@tauri-apps/plugin-dialog";
 import type { EncryptedVaultItemPage, EncryptedVaultStatus, LibraryGateway } from "../library/types";
 import { ExternalVaultBrowser } from "./ExternalVaultBrowser";
+import { resetVaultExportJob } from "./vaultExportJob";
 import { resetVaultImportJob } from "./vaultImportJob";
 
 vi.mock("../assets/AssetGallery", () => ({
-  AssetGallery: ({ items, onOpen, onSelectionGesture, metadataVisible, mediaSource }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
-    {items.map((item: any) => <button key={item.id} onClick={() => onSelectionGesture?.(item, {})} onDoubleClick={() => onOpen?.(item)}>{item.title || item.originalName}</button>)}
+  AssetGallery: ({ items, onOpen, onSelectionGesture, onDeleteSelection, selectedAssetIds, metadataVisible, mediaSource }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
+    {items.map((item: any) => <button key={item.id} data-asset-id={item.id} data-selected={String(Boolean(selectedAssetIds?.has(item.id)))}
+      onClick={(event) => onSelectionGesture?.(item, { toggle: event.ctrlKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(item)}>{item.title || item.originalName}</button>)}
+    <button onClick={() => onDeleteSelection?.()}>delete key</button>
   </div>,
 }));
 vi.mock("../assets/AssetViewer", () => ({
-  AssetViewer: ({ activeId, onClose, mediaSource, onAssetOpened }: any) => activeId ? <div aria-label="vault viewer" data-media-source={mediaSource} data-records={String(Boolean(onAssetOpened))}><button onClick={onClose}>close</button></div> : null,
+  AssetViewer: ({ items, activeId, onClose, mediaSource, onAssetOpened, onTrash, onExport }: any) => activeId ? <div aria-label="vault viewer" data-media-source={mediaSource} data-records={String(Boolean(onAssetOpened))} data-active={activeId}>
+    <button onClick={onClose}>close</button>
+    {onTrash && <button onClick={() => onTrash(items.find((item: any) => item.id === activeId))}>viewer trash</button>}
+    {onExport && <button onClick={() => onExport(items.find((item: any) => item.id === activeId))}>viewer export</button>}
+  </div> : null,
 }));
 
 beforeEach(() => vi.mocked(open).mockReset());
-afterEach(() => { cleanup(); resetVaultImportJob(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); resetVaultImportJob(); resetVaultExportJob(); vi.useRealTimers(); });
 
 const unlocked: EncryptedVaultStatus = { state: "unlocked", vaultId: "v", root: "/media/usb", itemCount: 2, remembered: true };
 const locked: EncryptedVaultStatus = { ...unlocked, state: "locked", itemCount: null, remembered: false };
@@ -38,6 +45,12 @@ function vaultGateway() {
     unlockEncryptedVault: vi.fn().mockResolvedValue(unlocked),
     lockEncryptedVault: vi.fn().mockResolvedValue(locked),
     importIntoEncryptedVault: vi.fn(),
+    importFilesIntoEncryptedVault: vi.fn(),
+    trashEncryptedVaultItems: vi.fn().mockImplementation((ids: string[]) => Promise.resolve(ids.length)),
+    restoreEncryptedVaultItems: vi.fn().mockImplementation((ids: string[]) => Promise.resolve(ids.length)),
+    deleteEncryptedVaultItems: vi.fn().mockImplementation((ids: string[]) => Promise.resolve(ids.length)),
+    emptyEncryptedVaultTrash: vi.fn().mockResolvedValue(2),
+    exportEncryptedVaultItems: vi.fn(),
     recordAssetOpened: vi.fn(),
     recordAssetsExposed: vi.fn(),
   } as unknown as LibraryGateway;
@@ -199,4 +212,133 @@ it("reports an import stopped by a lock and lets it be dismissed", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("비밀 보관함이 잠겨 가져오기를 멈췄습니다. 다시 가져오면 이어서 진행합니다.");
   await userEvent.click(screen.getByRole("button", { name: "닫기" }));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+const withTrash: EncryptedVaultStatus = { ...unlocked, trashedCount: 2, backupIndex: false };
+
+it("selects several items and moves them to the vault trash, with undo", async () => {
+  const gateway = vaultGateway();
+  const onContentChanged = vi.fn();
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} onContentChanged={onContentChanged} />);
+  const first = await screen.findByRole("button", { name: "secret.png" });
+  expect(screen.queryByRole("button", { name: "휴지통으로" })).not.toBeInTheDocument();
+  await userEvent.click(first);
+  fireEvent.click(screen.getByRole("button", { name: "내 영상" }), { ctrlKey: true });
+  expect(screen.getByRole("button", { name: "내 영상" })).toHaveAttribute("data-selected", "true");
+  expect(screen.getByRole("button", { name: "제목 변경" })).toBeDisabled();
+
+  await userEvent.click(screen.getByRole("button", { name: "휴지통으로" }));
+  await waitFor(() => expect(gateway.trashEncryptedVaultItems).toHaveBeenCalledWith(["a", "v"]));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "secret.png" })).not.toBeInTheDocument());
+  expect(onContentChanged).toHaveBeenCalled();
+  expect(await screen.findByText("2개를 휴지통으로 옮겼습니다.")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "실행 취소" }));
+  await waitFor(() => expect(gateway.restoreEncryptedVaultItems).toHaveBeenCalledWith(["a", "v"]));
+  expect(await screen.findByRole("button", { name: "secret.png" })).toBeInTheDocument();
+});
+
+it("exports the selection or the viewed item to a chosen PC folder with progress", async () => {
+  const gateway = vaultGateway();
+  let report!: (progress: unknown) => void;
+  let finish!: (value: unknown) => void;
+  vi.mocked(gateway.exportEncryptedVaultItems!).mockImplementation((_ids, _folder, onProgress) => {
+    report = onProgress as (progress: unknown) => void;
+    return new Promise((resolve) => { finish = resolve; }) as never;
+  });
+  vi.mocked(open).mockResolvedValue("/home/me/exported");
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
+  await userEvent.click(screen.getByRole("button", { name: "내보내기 1개" }));
+  await waitFor(() => expect(gateway.exportEncryptedVaultItems).toHaveBeenCalledWith(["a"], "/home/me/exported", expect.any(Function)));
+  expect(vi.mocked(open).mock.calls[0]![0]).toMatchObject({ directory: true });
+  report({ processed: 0, total: 1, exported: 0, failed: 0 });
+  expect(await screen.findByText("내보내는 중 0 / 1")).toBeInTheDocument();
+  finish({ processed: 1, total: 1, exported: 1, failed: 0 });
+  expect(await screen.findByText("내보내기 완료 · 내보냄 1개")).toBeInTheDocument();
+
+  vi.mocked(gateway.exportEncryptedVaultItems!).mockResolvedValue({ processed: 1, total: 1, exported: 1, failed: 0 });
+  fireEvent.doubleClick(screen.getByRole("button", { name: "내 영상" }));
+  await userEvent.click(screen.getByRole("button", { name: "viewer export" }));
+  await waitFor(() => expect(gateway.exportEncryptedVaultItems).toHaveBeenLastCalledWith(["v"], "/home/me/exported", expect.any(Function)));
+});
+
+it("explains an export refused inside the vault USB", async () => {
+  const gateway = vaultGateway();
+  vi.mocked(gateway.exportEncryptedVaultItems!).mockRejectedValue({ code: "encrypted_vault_invalid_root", message: "x" });
+  vi.mocked(open).mockResolvedValue("/media/usb/photos");
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
+  await userEvent.click(screen.getByRole("button", { name: "내보내기 1개" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("비밀 보관함 USB 안으로는 내보낼 수 없습니다.");
+});
+
+it("moves the viewed item to the trash and shows the next one", async () => {
+  const gateway = vaultGateway();
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  fireEvent.doubleClick(await screen.findByRole("button", { name: "secret.png" }));
+  await userEvent.click(screen.getByRole("button", { name: "viewer trash" }));
+  await waitFor(() => expect(gateway.trashEncryptedVaultItems).toHaveBeenCalledWith(["a"]));
+  await waitFor(() => expect(screen.getByLabelText("vault viewer")).toHaveAttribute("data-active", "v"));
+});
+
+it("adds individually chosen files through the import job", async () => {
+  const gateway = vaultGateway();
+  vi.mocked(gateway.importFilesIntoEncryptedVault!).mockResolvedValue({ total: 2, imported: 2, skipped: 0, failed: 0, withoutThumbnail: 0, legacyTitles: 0, legacyThumbnails: 0 });
+  vi.mocked(open).mockResolvedValue(["/home/me/a.png", "/home/me/b.mp4"] as never);
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "파일 추가" }));
+  await waitFor(() => expect(gateway.importFilesIntoEncryptedVault).toHaveBeenCalledWith(["/home/me/a.png", "/home/me/b.mp4"], expect.any(Function)));
+  expect(vi.mocked(open).mock.calls[0]![0]).toMatchObject({ directory: false, multiple: true });
+  expect(await screen.findByRole("dialog", { name: "가져오기 완료" })).toHaveTextContent("가져옴2개");
+});
+
+it("shows the trash with restore, and confirms permanent deletion inside the page", async () => {
+  const gateway = vaultGateway();
+  const confirmSpy = vi.spyOn(window, "confirm");
+  const onContentChanged = vi.fn();
+  render(<ExternalVaultBrowser gateway={gateway} status={withTrash} onStatusChange={vi.fn()} onContentChanged={onContentChanged} />);
+  await userEvent.click(await screen.findByRole("button", { name: "휴지통 2" }));
+  await waitFor(() => expect(gateway.listEncryptedVaultItems).toHaveBeenLastCalledWith({ kind: null, offset: 0, limit: 80, trashed: true }));
+  expect(screen.queryByRole("button", { name: "파일 추가" })).not.toBeInTheDocument();
+
+  await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
+  await userEvent.click(screen.getByRole("button", { name: "복원 1개" }));
+  await waitFor(() => expect(gateway.restoreEncryptedVaultItems).toHaveBeenCalledWith(["a"]));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "secret.png" })).not.toBeInTheDocument());
+
+  await userEvent.click(screen.getByRole("button", { name: "내 영상" }));
+  await userEvent.click(screen.getByRole("button", { name: "영구 삭제 1개" }));
+  const dialog = await screen.findByRole("dialog", { name: "영구 삭제" });
+  expect(dialog).toHaveTextContent("선택한 1개를 USB에서 영구 삭제합니다. 되돌릴 수 없습니다.");
+  expect(gateway.deleteEncryptedVaultItems).not.toHaveBeenCalled();
+  await userEvent.click(within(dialog).getByRole("button", { name: "영구 삭제" }));
+  await waitFor(() => expect(gateway.deleteEncryptedVaultItems).toHaveBeenCalledWith(["v"]));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+  await userEvent.click(screen.getByRole("button", { name: "휴지통 비우기" }));
+  const empty = await screen.findByRole("dialog", { name: "휴지통 비우기" });
+  expect(empty).toHaveTextContent("휴지통의 2개를 USB에서 영구 삭제합니다.");
+  await userEvent.click(within(empty).getByRole("button", { name: "취소" }));
+  expect(gateway.emptyEncryptedVaultTrash).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "휴지통 비우기" }));
+  await userEvent.click(within(await screen.findByRole("dialog", { name: "휴지통 비우기" })).getByRole("button", { name: "영구 삭제" }));
+  await waitFor(() => expect(gateway.emptyEncryptedVaultTrash).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText("2개를 영구 삭제했습니다.")).toBeInTheDocument();
+  expect(onContentChanged).toHaveBeenCalled();
+  expect(confirmSpy).not.toHaveBeenCalled();
+  confirmSpy.mockRestore();
+});
+
+it("offers only restore when the vault opened from its backup index", async () => {
+  const gateway = vaultGateway();
+  render(<ExternalVaultBrowser gateway={gateway} status={{ ...withTrash, backupIndex: true }} onStatusChange={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "휴지통 2" }));
+  await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
+  expect(screen.getByRole("button", { name: "영구 삭제 1개" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "휴지통 비우기" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "복원 1개" })).toBeEnabled();
+  await userEvent.click(screen.getByRole("button", { name: "delete key" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByText(/백업본으로 열었습니다/)).toBeInTheDocument();
 });

@@ -1,5 +1,6 @@
 //! Runtime of the encrypted Private Vault (ADR-0039, stage 2a): discovery, lock state,
 //! remembered keys, import, listing and decrypted media for the app media protocol.
+//! Trash, permanent deletion and export live in the child module `files`.
 //!
 //! State model:
 //! - `RuntimeState` (one short-lived mutex) holds the cached vault location, the unlocked
@@ -40,14 +41,19 @@ use super::{
 use crate::library::{
     error::LibraryError,
     models::{
-        CreatedEncryptedVault, EncryptedVaultImportJob, EncryptedVaultImportProgress,
-        EncryptedVaultImportReport, EncryptedVaultItemKind, EncryptedVaultItemPage,
-        EncryptedVaultItemSummary, EncryptedVaultQuery, EncryptedVaultSecretInput,
-        EncryptedVaultSidecarCleanupPreview, EncryptedVaultSidecarCleanupResult,
-        EncryptedVaultState, EncryptedVaultStatus,
+        CreatedEncryptedVault, EncryptedVaultExportJob, EncryptedVaultImportJob,
+        EncryptedVaultImportProgress, EncryptedVaultImportReport, EncryptedVaultItemKind,
+        EncryptedVaultItemPage, EncryptedVaultItemSummary, EncryptedVaultQuery,
+        EncryptedVaultSecretInput, EncryptedVaultSidecarCleanupPreview,
+        EncryptedVaultSidecarCleanupResult, EncryptedVaultState, EncryptedVaultStatus,
     },
     Library,
 };
+
+/// Stage 3: vault trash, permanent deletion and export (a child module, so it shares the
+/// runtime's private session state and write lock).
+#[path = "encrypted_files.rs"]
+mod files;
 
 const MAX_TITLE_CHARS: usize = 200;
 const MAX_PAGE_SIZE: u32 = 500;
@@ -216,7 +222,16 @@ impl RuntimeState {
                         .filter(|item| item.trashed_at.is_none())
                         .count() as u64,
                 ),
+                trashed_count: Some(
+                    session
+                        .index
+                        .items
+                        .iter()
+                        .filter(|item| item.trashed_at.is_some())
+                        .count() as u64,
+                ),
                 remembered: self.remembered(vault_id),
+                backup_index: session.from_backup_index,
             };
         }
         match &self.located {
@@ -225,14 +240,18 @@ impl RuntimeState {
                 vault_id: Some(located.vault_id.to_string()),
                 root: Some(located.root.to_string_lossy().into_owned()),
                 item_count: None,
+                trashed_count: None,
                 remembered: self.remembered(located.vault_id),
+                backup_index: false,
             },
             None => EncryptedVaultStatus {
                 state: EncryptedVaultState::Absent,
                 vault_id: None,
                 root: None,
                 item_count: None,
+                trashed_count: None,
                 remembered: false,
+                backup_index: false,
             },
         }
     }
@@ -255,6 +274,8 @@ pub(crate) struct EncryptedVaultRuntime {
     write_lock: Mutex<()>,
     /// The current or last import of this app session; at most one runs at a time.
     import_job: Mutex<Option<EncryptedVaultImportJob>>,
+    /// The current or last export of this app session; at most one runs at a time.
+    export_job: Mutex<Option<EncryptedVaultExportJob>>,
     env: Environment,
 }
 
@@ -264,6 +285,7 @@ impl Default for EncryptedVaultRuntime {
             state: Mutex::default(),
             write_lock: Mutex::default(),
             import_job: Mutex::default(),
+            export_job: Mutex::default(),
             env: Environment::default(),
         }
     }
@@ -288,6 +310,12 @@ impl EncryptedVaultRuntime {
 
     fn import_job(&self) -> MutexGuard<'_, Option<EncryptedVaultImportJob>> {
         self.import_job
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn export_job(&self) -> MutexGuard<'_, Option<EncryptedVaultExportJob>> {
+        self.export_job
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
@@ -576,6 +604,13 @@ fn sidecar_image_matches(index: &VaultIndex) -> Vec<(usize, usize)> {
         .collect()
 }
 
+enum ImportSource<'a> {
+    /// Every supported file under a folder, relative paths kept.
+    Folder(&'a Path),
+    /// Individually chosen files, each at the top level under its file name.
+    Files(&'a [PathBuf]),
+}
+
 struct LegacyEntry {
     title: Option<String>,
     custom_thumbnail: Option<String>,
@@ -755,7 +790,7 @@ impl Library {
         let limit = query.limit.clamp(1, MAX_PAGE_SIZE) as u64;
         let matching = || {
             session.index.items.iter().rev().filter(|item| {
-                item.trashed_at.is_none()
+                item.trashed_at.is_some() == query.trashed
                     && query.kind.is_none_or(|kind| item_kind(item.kind) == kind)
             })
         };
@@ -774,6 +809,7 @@ impl Library {
                 imported_at: item.imported_at.clone(),
                 has_thumbnail: item.thumbnail_object_id.is_some()
                     || item.poster_object_id.is_some(),
+                trashed_at: item.trashed_at.clone(),
             })
             .collect::<Vec<_>>();
         let end = query.offset.saturating_add(items.len() as u64);
@@ -823,7 +859,8 @@ impl Library {
     }
 
     /// Resolves a vault item for the media protocol from memory only: no discovery, no status
-    /// and no disk access except opening the one encrypted object.
+    /// and no disk access except opening the one encrypted object. Trashed items are served
+    /// too, so the vault trash view can show what it would delete.
     pub(crate) fn encrypted_vault_media(
         &self,
         item_id: &str,
@@ -839,7 +876,7 @@ impl Library {
                 .index
                 .items
                 .iter()
-                .find(|item| item.id == item_id && item.trashed_at.is_none())
+                .find(|item| item.id == item_id)
                 .ok_or(LibraryError::AssetNotFound)?;
             let video = item.kind == VaultItemKind::Video;
             let (object_id, mime) = match variant {
@@ -888,6 +925,26 @@ impl Library {
         source: &Path,
         progress: &mut dyn FnMut(&EncryptedVaultImportProgress),
     ) -> Result<EncryptedVaultImportReport, LibraryError> {
+        self.run_import_job(ImportSource::Folder(source), progress)
+    }
+
+    /// Encrypts the chosen files (not folders) into the unlocked vault: the same job,
+    /// dedupe, sidecar and thumbnail rules as a folder import. Each file's relative path
+    /// is its file name, so a `<video>_thumb.<image>` picked with its video (or next to a
+    /// video already at the vault's top level) becomes that video's thumbnail.
+    pub fn import_files_into_encrypted_vault(
+        &self,
+        files: &[PathBuf],
+        progress: &mut dyn FnMut(&EncryptedVaultImportProgress),
+    ) -> Result<EncryptedVaultImportReport, LibraryError> {
+        self.run_import_job(ImportSource::Files(files), progress)
+    }
+
+    fn run_import_job(
+        &self,
+        source: ImportSource<'_>,
+        progress: &mut dyn FnMut(&EncryptedVaultImportProgress),
+    ) -> Result<EncryptedVaultImportReport, LibraryError> {
         let runtime = &*self.encrypted_vault;
         {
             let mut job = runtime.import_job();
@@ -923,7 +980,7 @@ impl Library {
 
     fn run_encrypted_import(
         &self,
-        source: &Path,
+        source: ImportSource<'_>,
         progress: &mut dyn FnMut(&EncryptedVaultImportProgress),
     ) -> Result<EncryptedVaultImportReport, LibraryError> {
         let runtime = &*self.encrypted_vault;
@@ -933,8 +990,15 @@ impl Library {
                 .session
                 .as_ref()
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
+            // Trashed items do not count as present: adding a file again brings it back as
+            // a new item, and emptying the trash never loses it.
             let mut existing = KnownFiles::new();
-            for item in &session.index.items {
+            for item in session
+                .index
+                .items
+                .iter()
+                .filter(|item| item.trashed_at.is_none())
+            {
                 existing
                     .entry((item.original_relative_path.clone(), item.byte_size))
                     .or_default()
@@ -957,13 +1021,22 @@ impl Library {
                 videos,
             )
         };
-        let source = fs::canonicalize(source)
-            .ok()
-            .filter(|path| path.is_dir())
-            .ok_or(LibraryError::EncryptedVaultFolderUnavailable)?;
-        let (files, unreadable) = scan::media_files(&source)
-            .map_err(|_| LibraryError::EncryptedVaultFolderUnavailable)?;
-        let legacy = read_legacy_index(&source);
+        let (source, files, unreadable, legacy) = match source {
+            ImportSource::Folder(source) => {
+                let source = fs::canonicalize(source)
+                    .ok()
+                    .filter(|path| path.is_dir())
+                    .ok_or(LibraryError::EncryptedVaultFolderUnavailable)?;
+                let (files, unreadable) = scan::media_files(&source)
+                    .map_err(|_| LibraryError::EncryptedVaultFolderUnavailable)?;
+                let legacy = read_legacy_index(&source);
+                (source, files, unreadable, legacy)
+            }
+            ImportSource::Files(paths) => {
+                let (files, unreadable) = scan::chosen_media_files(paths);
+                (PathBuf::new(), files, unreadable, HashMap::new())
+            }
+        };
         for (_, relative_path, media_kind) in &files {
             if *media_kind == VaultMediaKind::Video {
                 videos.insert(relative_path);
@@ -1797,6 +1870,7 @@ mod tests {
             kind,
             offset,
             limit,
+            trashed: false,
         }
     }
 

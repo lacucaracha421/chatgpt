@@ -1329,7 +1329,12 @@ pub struct EncryptedVaultStatus {
     pub root: Option<String>,
     /// Only when unlocked; trashed items are not counted.
     pub item_count: Option<u64>,
+    /// Only when unlocked: items in the vault trash.
+    pub trashed_count: Option<u64>,
     pub remembered: bool,
+    /// The unlocked index came from its backup generation (`index.prev.bin`): this session
+    /// never deletes anything, so permanent deletion is refused.
+    pub backup_index: bool,
 }
 
 /// Returned only by vault creation: the recovery key is never shown again.
@@ -1386,6 +1391,9 @@ pub struct EncryptedVaultQuery {
     pub kind: Option<EncryptedVaultItemKind>,
     pub offset: u64,
     pub limit: u32,
+    /// Lists the vault trash instead of the gallery.
+    #[serde(default)]
+    pub trashed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1400,6 +1408,8 @@ pub struct EncryptedVaultItemSummary {
     pub original_file_name: String,
     pub imported_at: String,
     pub has_thumbnail: bool,
+    /// Set while the item is in the vault trash.
+    pub trashed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1468,6 +1478,27 @@ pub struct EncryptedVaultImportJob {
     pub progress: EncryptedVaultImportProgress,
     pub report: Option<EncryptedVaultImportReport>,
     /// Command error code when the import stopped (e.g. `encrypted_vault_locked`).
+    pub error: Option<String>,
+}
+
+/// Progress and final result of a Private Vault export to a PC folder.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultExportProgress {
+    pub processed: u64,
+    pub total: u64,
+    pub exported: u64,
+    pub failed: u64,
+}
+
+/// The app-level Private Vault export, like `EncryptedVaultImportJob`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultExportJob {
+    pub id: u64,
+    pub running: bool,
+    pub progress: EncryptedVaultExportProgress,
+    /// Command error code when the export stopped.
     pub error: Option<String>,
 }
 
