@@ -1,0 +1,6 @@
+/* FAULT game host: covers the whole app, including the bottom navigation and open dialogs. */
+.fault-overlay { position:fixed; inset:0; z-index:200; background:#000; }
+.fault-frame { display:block; width:100%; height:100%; border:0; }
+.fault-status { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:0 var(--mobile-gutter, 16px); background:#000; color:var(--color-muted); font-size:13px; text-align:center; }
+.fault-status p { margin:0; }
+.fault-status .loading-line { width:120px; }

@@ -271,3 +271,11 @@ it('keeps an internal level on tab return but resets an explicit re-entry to its
   await screen.findByRole('heading',{name:'Series'});
   expect(backRef.current?.()).toBe(false);
 });
+
+it('hands the visible scope items to the options menu so the host can offer FAULT',async()=>{
+  const onOptions=vi.fn();
+  render(<CharacterBrowser {...props} onOptions={onOptions}/>);
+  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(onOptions).toHaveBeenLastCalledWith([]);
+  fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));await screen.findByText('asset-2');
+  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(onOptions).toHaveBeenLastCalledWith(page().items);
+});

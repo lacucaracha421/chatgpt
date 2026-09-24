@@ -5,7 +5,7 @@ import {usePublicationCheck} from './usePublicationCheck';
 import {validCharacterIndex,type CharacterIndex} from './characterModel';
 import type {ViewerCharacterContext} from './Viewer';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
+import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, ChevronRightIcon, PlayIcon} from '@heroicons/react/24/outline';
 
 import {Button, IconButton, Mark} from './ui';
 import {api, errorText, native} from './transport';
@@ -32,6 +32,8 @@ import {readRecentFolders, rememberFolder, RECENT_FOLDERS_KEY} from './homeModel
 import {Viewer} from './Viewer';
 import {Settings} from './Settings';
 import {CharacterBrowser} from './CharacterBrowser';
+import {FaultGame} from './FaultGame';
+import {faultCandidates} from '../src/games/fault/host';
 
 const HOME: View = {tab:'home', title:'최근 저장'};
 const LIBRARY = LIBRARY_ROOT;
@@ -60,6 +62,9 @@ export function App() {
   useCollectionEditBackgroundFlush(status.configured);
   const [checking, setChecking] = useState(true), [settings, setSettings] = useState(false);
   const [viewSettings, setViewSettings] = useState(false);
+  // The album or character scope the options sheet was opened from, and the FAULT game launched from it.
+  const [optionsScope, setOptionsScope] = useState<Asset[]>([]);
+  const [fault, setFault] = useState<Asset[] | null>(null);
   // The committed query's filters. Owned here rather than inside a gallery so that a
   // filter change is an ordinary navigation: it commits a new page and Back returns to
   // the previous view instead of silently mutating the one on screen.
@@ -82,7 +87,7 @@ export function App() {
   const {tree:albumTree,error:albumError}=useAlbumTree(status.configured&&area==='assets'&&!settings&&!viewer&&page.view.tab==='library'&&(librarySegment==='albums'||!!page.view.album),indexRevision,status.endpoint);
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
-  const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion}); latest.current = {page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion};
+  const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault}); latest.current = {page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]; filters:AssetFiltersValue}>({view:LIBRARY,cursor:null,previous:[],filters:{...EMPTY_FILTERS}});
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
   // Committed classification or root to restore after leaving character browsing.
@@ -319,8 +324,10 @@ export function App() {
     const visible = () => {if (document.visibilityState === 'visible' && latest.current.status.configured && latest.current.page.view.tab === 'home') void refreshSecondary();};
     const back = () => {
       const state = latest.current;
+      // The FAULT game covers everything, so it closes before any surface beneath it.
+      if (state.fault) setFault(null);
       // The filter dialog is the innermost surface, so it closes first and consumes the press.
-      if (state.filtersOpen) setFiltersOpen(null);
+      else if (state.filtersOpen) setFiltersOpen(null);
       else if (state.viewSettings) setViewSettings(false);
       else if (state.settings) setSettings(false);
       else if (state.viewer && viewerBack.current?.()) { /* Viewer overlay consumed back. */ }
@@ -443,7 +450,7 @@ export function App() {
   const seriesNode=characterIndex?.nodes.find(node=>node.id===focusedCharacter);
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'라이브러리',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
-  const paused=area!=='assets'||settings||!!viewer;
+  const paused=area!=='assets'||settings||!!viewer||!!fault;
   const intro=<>{filterable&&!sameFilters(filters,page.filters)&&<p className="hint">필터 적용 대기</p>}{!!childEntries.length&&<section className="folder-intro"><h2>폴더 {childEntries.length}</h2><FolderCards strip items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{filterable&&<FilterChips value={filters} applied={page.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/ >}{!page.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{busy?'라이브러리를 불러오고 있습니다':hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':'아직 자산이 없습니다'}</h2></div>}</>;
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
   return <div className="mobile-app">
@@ -452,7 +459,7 @@ export function App() {
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area}>
       <main className="library-main" style={{display:area!=='assets'?'none':undefined}}>
         {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2><IconButton label="새로고침" icon={ArrowPathIcon} disabled={busy} onClick={refresh}/></div></HeaderTools>}
-        {page.view.tab==='library'&&!page.view.root&&!page.view.characters&&<LibraryHeader title={page.view.title} count={hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`} crumbs={crumbs} onBack={()=>window.dispatchEvent(new Event('lakomics-back'))} onOptions={()=>setViewSettings(true)}/>}
+        {page.view.tab==='library'&&!page.view.root&&!page.view.characters&&<LibraryHeader title={page.view.title} count={hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`} crumbs={crumbs} onBack={()=>window.dispatchEvent(new Event('lakomics-back'))} onOptions={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}}/>}
         {indexError&&page.view.root&&<p className="error-message">{indexError}</p>}
         {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 해제</Button></div>}
         {busy && <div className="loading-line" role="status" aria-label="목록 불러오는 중"/>}
@@ -461,15 +468,16 @@ export function App() {
         <Gallery items={page.items} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused}/>
         {loadingMore && <div className="loading-line" role="status" aria-label="다음 자산을 불러오는 중"/>}{moreError && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </>}
-        {charactersVisited && <CharacterBrowser entryKey={characterEntry} crumbs={characterCrumbs} onOptions={()=>setViewSettings(true)} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={restoreBeforeCharacter}/>}
+        {charactersVisited && <CharacterBrowser entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={restoreBeforeCharacter}/>}
       </main>
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={openHome}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={openLibrary}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}
-    {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}><p>썸네일 크기</p><div role="radiogroup" aria-label="썸네일 크기">{DENSITIES.map((label,value)=><button className="sheet-option" role="radio" key={label} aria-checked={density===value} onClick={()=>{setDensity(value);store('lakomics.mobile.density',value);setViewSettings(false);}}>{label}<span className="radio-dot"/></button>)}</div></BottomSheet>}
+    {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}><p>썸네일 크기</p><div role="radiogroup" aria-label="썸네일 크기">{DENSITIES.map((label,value)=><button className="sheet-option" role="radio" key={label} aria-checked={density===value} onClick={()=>{setDensity(value);store('lakomics.mobile.density',value);setViewSettings(false);}}>{label}<span className="radio-dot"/></button>)}</div>{faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
     {settings && <Settings onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
+    {fault && <FaultGame items={fault} onClose={() => setFault(null)}/>}
     {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)}/>}
   </div>;
 }
