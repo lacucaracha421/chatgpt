@@ -49,6 +49,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "album_authority.register_album_authority.<locals>.<lambda>",
             "classification_authority.register_classification_authority.<locals>.<lambda>",
             "asset_authority.register_asset_authority.<locals>.<lambda>",
+            "extension_settings.register.<locals>.startup",
             "app.startup_image_thumbnails",
         ]
         expected_shutdown = [

@@ -39,7 +39,7 @@ def _library_identity(domains):
     return libraries[0] if libraries else None
 
 
-def register_sync_status(app, get_db, require_client):
+def register_sync_status(app, get_db, require_client, exchange_status=None):
     def startup():
         authority.startup(get_db)
 
@@ -48,21 +48,26 @@ def register_sync_status(app, get_db, require_client):
     @app.get(PREFIX + "/status")
     def sync_status(authorization: str | None = Header(default=None),
                     if_none_match: str | None = Header(default=None)):
-        require_client(authorization)
+        principal = require_client(authorization)
+        exchange = None
         with get_db() as db:
             db.execute("BEGIN")
             try:
                 domains = authority.active_domains(db)
+                # File exchange arrivals ride on this poll instead of a poll of their own.
+                if exchange_status is not None:
+                    exchange = exchange_status(db, principal)
             finally:
                 db.rollback()
         # This is the most polled document on the server. Between commands it does not
         # change, so a client that sends the previous ETag back gets 304 and can skip
         # every per-domain change-feed poll until the aggregate moves.
-        return conditional.json_response(
-            {"protocolVersion": authority.PROTOCOL_VERSION,
-             "active": bool(domains),
-             "libraryId": _library_identity(domains),
-             "domains": _active_view(domains)},
-            if_none_match)
+        payload = {"protocolVersion": authority.PROTOCOL_VERSION,
+                   "active": bool(domains),
+                   "libraryId": _library_identity(domains),
+                   "domains": _active_view(domains)}
+        if exchange is not None:
+            payload["exchange"] = exchange
+        return conditional.json_response(payload, if_none_match)
 
     return startup

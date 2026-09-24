@@ -3206,7 +3206,22 @@ startup_mobile_characters = register_characters(
 # modules so the same startup ordering still creates `authority_domains` first.
 from sync_status import register_sync_status
 
-startup_sync_status = register_sync_status(app, get_db, require_client)
+# File exchange (보내기/받기, docs/research/file-exchange-design-20260924.md): separate
+# from the Library, own R2 prefix `exchange/`. Off until the PC and Android clients ship.
+EXCHANGE_ENABLED = os.environ.get("LAKOMICS_EXCHANGE_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+if EXCHANGE_ENABLED:
+    import file_exchange
+    from r2 import presign_put as _exchange_presign_put
+
+    startup_file_exchange = file_exchange.register(
+        app, get_db, require_client, lambda: _s3, lambda: R2_BUCKET, _exchange_presign_put)
+    _exchange_sweeper = file_exchange.ExchangeSweeper(get_db, lambda: _s3, lambda: R2_BUCKET)
+    lifecycle(app).on_startup(_exchange_sweeper.start)
+    lifecycle(app).on_shutdown(_exchange_sweeper.stop)
+
+startup_sync_status = register_sync_status(
+    app, get_db, require_client,
+    exchange_status=file_exchange.status if EXCHANGE_ENABLED else None)
 
 # Album authority. Startup only creates empty tables: the domain stays PC-owned
 # until a publisher activates its epoch through the activation route, which no
@@ -3239,6 +3254,12 @@ from asset_authority import register_asset_authority
 
 startup_asset_authority = register_asset_authority(
     app, get_db, require_client, require_publisher)
+
+# Collector semicircle-menu order and hidden folders, so a reinstall restores them.
+from extension_settings import register as register_extension_settings
+
+startup_extension_settings = register_extension_settings(
+    app, get_db, require_admin_or_extension, resolve_scope=lambda _principal: "primary-library")
 
 
 # Install after the visibility/authority schemas. No historical Assets are enqueued.
