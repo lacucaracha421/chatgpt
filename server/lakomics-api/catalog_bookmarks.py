@@ -153,12 +153,11 @@ def shadow_ddl(table):
  PRIMARY KEY(provider,work_id)) WITHOUT ROWID"""
 
 
-def snapshot_from(connection):
-    """Coherent authority snapshot from an already-open connection.
+def authority_summary(connection):
+    """The authority identity and cursor from an already-open connection, or None.
 
-    Used inside the publication commit transaction: it must not open another
-    connection or issue a nested BEGIN, because that would read a different
-    revision than the transaction about to commit.
+    The same checks as :func:`snapshot_from` without loading the bookmark rows: a
+    status poll needs to know *where* the authority is, not what it contains.
     """
     rows = connection.execute(
         "SELECT library_id,epoch,contract_version,change_cursor FROM authority_domains WHERE domain=?",
@@ -170,12 +169,24 @@ def snapshot_from(connection):
     row = rows[0]
     if row[2] != CONTRACT_VERSION:
         raise HTTPException(503, "Catalog bookmark authority contract is unsupported")
+    return {"libraryId": row[0], "epoch": row[1], "contractVersion": row[2], "cursor": row[3]}
+
+
+def snapshot_from(connection):
+    """Coherent authority snapshot from an already-open connection.
+
+    Used inside the publication commit transaction: it must not open another
+    connection or issue a nested BEGIN, because that would read a different
+    revision than the transaction about to commit.
+    """
+    summary = authority_summary(connection)
+    if summary is None:
+        return None
     bookmarks = [(item[0], item[1], item[2]) for item in connection.execute(
         "SELECT provider,work_id,created_at FROM catalog_bookmark_state"
         " WHERE library_id=? AND desired_state=1 ORDER BY provider,work_id",
-        [row[0]])]
-    return {"libraryId": row[0], "epoch": row[1], "contractVersion": row[2],
-            "cursor": row[3], "bookmarks": bookmarks}
+        [summary["libraryId"]])]
+    return {**summary, "bookmarks": bookmarks}
 
 
 def signature(snapshot):

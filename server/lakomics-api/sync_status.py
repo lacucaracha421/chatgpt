@@ -10,6 +10,7 @@ authority row exists it reports zero active domains, which is exactly the state 
 pre-cutover client must see.
 """
 import authority
+import conditional
 from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException
 
@@ -45,7 +46,8 @@ def register_sync_status(app, get_db, require_client):
     lifecycle(app).on_startup(startup)
 
     @app.get(PREFIX + "/status")
-    def sync_status(authorization: str | None = Header(default=None)):
+    def sync_status(authorization: str | None = Header(default=None),
+                    if_none_match: str | None = Header(default=None)):
         require_client(authorization)
         with get_db() as db:
             db.execute("BEGIN")
@@ -53,9 +55,14 @@ def register_sync_status(app, get_db, require_client):
                 domains = authority.active_domains(db)
             finally:
                 db.rollback()
-        return {"protocolVersion": authority.PROTOCOL_VERSION,
-                "active": bool(domains),
-                "libraryId": _library_identity(domains),
-                "domains": _active_view(domains)}
+        # This is the most polled document on the server. Between commands it does not
+        # change, so a client that sends the previous ETag back gets 304 and can skip
+        # every per-domain change-feed poll until the aggregate moves.
+        return conditional.json_response(
+            {"protocolVersion": authority.PROTOCOL_VERSION,
+             "active": bool(domains),
+             "libraryId": _library_identity(domains),
+             "domains": _active_view(domains)},
+            if_none_match)
 
     return startup

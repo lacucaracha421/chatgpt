@@ -16,6 +16,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 import api_auth
 import catalog_bookmarks
+import conditional
 import mobile_catalog_replica as replica
 import mobile_catalog_suggestions as suggestions
 from mobile_catalog_query import (QueryError, mobile_query_text, freeze_query, count_groups, search_groups, detail,
@@ -240,13 +241,21 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         raise HTTPException(503, "Catalog snapshot is temporarily unavailable") from exc
 
     @app.get(PREFIX + "/status")
-    def status(authorization: str | None = Header(default=None)):
+    def status(authorization: str | None = Header(default=None),
+               if_none_match: str | None = Header(default=None)):
         require_client(authorization)
-        authority = catalog_bookmarks.load(get_db)
+        # One read transaction for the authority identity and the publication: this is
+        # polled continuously, so it must not load the bookmark rows (`load` does, for
+        # publication) nor open a second connection for them.
         with get_db() as db:
-            current = replica.current(db)
-            manifest = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [current["content_digest"]]).fetchone() if current else None
-            return {"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None, "displayPreferencesVersion": 1, "suggestions": True}}
+            db.execute("BEGIN")
+            try:
+                authority = catalog_bookmarks.authority_summary(db)
+                current = replica.current(db)
+                manifest = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [current["content_digest"]]).fetchone() if current else None
+            finally:
+                db.rollback()
+        return conditional.json_response({"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None, "displayPreferencesVersion": 1, "suggestions": True}}, if_none_match)
 
     @app.post(PREFIX + "/bookmark-authority/activate")
     async def activate(request: Request, authorization: str | None = Header(default=None)):
@@ -388,7 +397,8 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
 
     @app.get(PREFIX + "/bookmarks/changes")
     async def bookmark_changes(request: Request, libraryId: str, epoch: int, after: int = 0, limit: int = 100,
-                               authorization: str | None = Header(default=None)):
+                               authorization: str | None = Header(default=None),
+                               if_none_match: str | None = Header(default=None)):
         require_client(authorization)
         if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit"}:
             replica.fail(422)
@@ -398,25 +408,32 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
             replica.fail(422)
         def run():
             with get_db() as db:
-                row = authority_read(db, libraryId, epoch)
-                cursor = row["change_cursor"]
-                if after > cursor:
-                    # A cursor beyond the server is authority skew (an older server
-                    # state), not retention: a fresh baseline resolves both, but the
-                    # distinction matters for the client's error surface.
-                    replica.fail(409, "Change cursor is beyond the authority cursor")
-                # Retention floor: a cursor at or below the pruned floor has a real
-                # gap behind it. Reporting it as "no changes" would silently drop
-                # every mutation in that window, so it is an explicit expiry the
-                # client must resolve with a fresh baseline.
-                if after < catalog_bookmarks.pruned_through(db, libraryId, epoch):
-                    raise catalog_bookmarks.expired_cursor(row)
-                items = catalog_bookmarks.change_items(db, libraryId, epoch, after, limit)
+                # Identity, cursor, retention floor and rows from one snapshot, like the
+                # other domain feeds: read as separate autocommit statements a command
+                # committing in between would advertise an older cursor with newer rows.
+                db.execute("BEGIN")
+                try:
+                    row = authority_read(db, libraryId, epoch)
+                    cursor = row["change_cursor"]
+                    if after > cursor:
+                        # A cursor beyond the server is authority skew (an older server
+                        # state), not retention: a fresh baseline resolves both, but the
+                        # distinction matters for the client's error surface.
+                        replica.fail(409, "Change cursor is beyond the authority cursor")
+                    # Retention floor: a cursor at or below the pruned floor has a real
+                    # gap behind it. Reporting it as "no changes" would silently drop
+                    # every mutation in that window, so it is an explicit expiry the
+                    # client must resolve with a fresh baseline.
+                    if after < catalog_bookmarks.pruned_through(db, libraryId, epoch):
+                        raise catalog_bookmarks.expired_cursor(row)
+                    items = catalog_bookmarks.change_items(db, libraryId, epoch, after, limit)
+                finally:
+                    db.rollback()
                 next_after = items[-1]["sequence"] if items else after
                 return {"libraryId": row["library_id"], "epoch": row["epoch"],
                         "contractVersion": row["contract_version"], "cursor": cursor,
                         "items": items, "nextAfter": next_after, "hasMore": next_after < cursor}
-        return await run_in_threadpool(run)
+        return conditional.json_response(await run_in_threadpool(run), if_none_match)
 
     @app.put(PREFIX + "/bookmarks/{provider}/{work_id}")
     async def bookmark_command(provider: str, work_id: str, request: Request,

@@ -46,6 +46,7 @@ from app_lifecycle import lifecycle
 from fastapi import HTTPException
 
 import authority
+import conditional
 import classification_authority
 
 DOMAIN = "assets"
@@ -1159,7 +1160,8 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
     @app.get(PREFIX + "/changes")
     async def asset_changes(request: Request, libraryId: str, epoch: int,
                             after: int = 0, limit: int = DEFAULT_CHANGE_PAGE,
-                            authorization: str | None = Header(default=None)):
+                            authorization: str | None = Header(default=None),
+                            if_none_match: str | None = Header(default=None)):
         require_client(authorization)
         if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit"}:
             fail()
@@ -1192,7 +1194,7 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
                             "hasMore": next_after < cursor}
                 finally:
                     db.rollback()
-        return await run_in_threadpool(run)
+        return conditional.json_response(await run_in_threadpool(run), if_none_match)
 
     @app.get(PREFIX + "/baseline")
     async def asset_baseline(request: Request, libraryId: str, epoch: int,

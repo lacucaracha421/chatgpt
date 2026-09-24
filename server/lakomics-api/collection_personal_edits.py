@@ -104,7 +104,9 @@ def current_value(field, payload):
         return None if value is None else float(value)
     if field == "showcase":
         return bool(value)
-    return value or None
+    # Normalized like the command's `expected`, so a published memo with surrounding
+    # whitespace cannot conflict with every edit that echoes it back trimmed.
+    return (value.strip() if isinstance(value, str) else value) or None
 
 
 def state(db):

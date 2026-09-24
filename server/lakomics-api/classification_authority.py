@@ -138,6 +138,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import conditional
 import asset_visibility
 
 DOMAIN = "classifications"
@@ -1488,7 +1489,8 @@ def register_classification_authority(app, get_db, require_client, require_publi
     @app.get(PREFIX + "/changes")
     async def classification_changes(request: Request, libraryId: str, epoch: int,
                                      after: int = 0, limit: int = 100,
-                                     authorization: str | None = Header(default=None)):
+                                     authorization: str | None = Header(default=None),
+                                     if_none_match: str | None = Header(default=None)):
         require_client(authorization)
         if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit"}:
             fail(422, "invalidClassificationCommand", "분류 변경 요청이 올바르지 않습니다.")
@@ -1534,7 +1536,7 @@ def register_classification_authority(app, get_db, require_client, require_publi
                             "items": items, "nextAfter": next_after, "hasMore": next_after < cursor}
                 finally:
                     db.rollback()
-        return await run_in_threadpool(run)
+        return conditional.json_response(await run_in_threadpool(run), if_none_match)
 
     @app.put(PREFIX + "/commands")
     async def classification_command(request: Request,
