@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Concept C · Quiet chrome</title>
+<link rel="stylesheet" href="proto.css">
+<style>
+  .stackcol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { height: var(--titlebar); flex: none; display: flex; align-items: center; background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); }
+  .topbar .area { width: var(--index); flex: none; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 16px; height: 100%; }
+  .topbar .area .title { flex: 1; font-size: 15px; font-weight: 500; color: var(--color-muted); }
+  .topbar .locwrap { display: flex; align-items: center; gap: 6px; padding-left: 18px; min-width: 0; }
+  .body { flex: 1; min-height: 0; display: flex; }
+  .body .index { border-top: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border-radius: 4px; color: var(--color-muted); font-size: 13px; }
+  .pill.open { background: var(--color-surface-hover); color: var(--color-text); }
+  .pill .spin { width: 12px; height: 12px; border: 1.5px solid var(--color-border-strong); border-top-color: var(--color-accent); border-radius: 50%; }
+  .selbar { left: 50%; bottom: 26px; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 8px 0 16px; }
+  .selbar .count { font-size: 15px; font-weight: 600; margin-right: 10px; }
+  .selbar .sep { width: 1px; height: 22px; background: var(--color-border-strong); margin: 0 6px; }
+  .selbar .btn { border-color: transparent; background: transparent; }
+  .drawer { right: 10px; top: 52px; width: 380px; bottom: 10px; padding: 0; display: flex; flex-direction: column; }
+  .drawer header { display: flex; align-items: center; height: 48px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--color-border); font-weight: 600; }
+  .drawer header .icon-btn { margin-left: auto; }
+  .drawer .blk { padding: 14px 18px; border-bottom: 1px solid var(--color-border); }
+  .drawer .blk > span { display: block; font-size: 12px; color: var(--color-muted); margin-bottom: 8px; }
+  .job { margin-bottom: 12px; }
+  .job:last-child { margin-bottom: 0; }
+  .job .top { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .job .top .r { margin-left: auto; color: var(--color-muted); font: 500 13px var(--font-numeric); }
+  .job .sub { font-size: 12px; color: var(--color-muted); margin-top: 2px; }
+  .bar { height: 3px; background: var(--color-border); margin-top: 7px; }
+  .bar i { display: block; height: 100%; background: var(--color-accent); }
+  .qrow { display: flex; align-items: center; gap: 10px; height: 34px; font-size: 14px; }
+  .qrow .n { margin-left: auto; font: 600 15px var(--font-numeric); }
+  .qrow .i { color: var(--color-muted); }
+  .mb-grid { display: grid; grid-template-columns: repeat(7, 150px); justify-content: space-between; row-gap: 26px; padding: 26px 30px; }
+  .mb { width: 150px; }
+  .mb .cv { position: relative; height: 214px; box-shadow: 0 3px 4px rgba(0,0,0,.28), 2px 0 0 #6f6d69, 3px 1px 0 #3c3b39; }
+  .mb .cv .art { width: 100%; height: 100%; border-radius: 1px; }
+  .mb .cv .newv { position: absolute; left: 0; top: 10px; padding: 2px 6px; background: var(--color-accent); color: var(--color-on-accent); font: 600 11px var(--font-ui); }
+  .mb .tt { margin-top: 10px; font-size: 14px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mb .au { display: flex; justify-content: space-between; font-size: 12px; color: var(--color-muted); margin-top: 2px; }
+  .mb .au .num { font-size: 13px; }
+  .segc { display: flex; gap: 0; margin-bottom: 4px; }
+  .segc button { flex: 1; height: 30px; font-size: 14px; color: var(--color-muted); border: 1px solid var(--color-border); }
+  .segc button[aria-current] { background: var(--color-selection-context); color: var(--color-selection-context-text); }
+  .selectrow { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 10px; margin: 2px 0 8px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+</style>
+<script src="proto.js"></script>
+<script>
+window.build = () => {
+  const groups = { maxCols: 6, list: [
+    { date: "9. 24", day: "오늘", count: 9, cols: 4 }, { date: "9. 23", day: "화", count: 3, cols: 2 },
+    { date: "9. 21", day: "일", count: 14, cols: 6 } ] };
+  masonry(document.getElementById("lib1"), { seed: 55, colWidth: 200, groups, selected: [1, 2, 4, 7] });
+  masonry(document.getElementById("lib2"), { seed: 55, colWidth: 200, groups });
+  const titles = [["달빛 서점","Kanade","7/12",0],["고양이와 마법사","mori haru","5/5",0],["푸른 선로","Tsubaki","3/9",1],["별을 줍는 아이","Aoi Sera","2/2",0],["안개 도시 기록","okami t","11/14",1],["여름의 끝에서","sio","1/3",0],["종이비행기 우체국","Lumi","4/4",0],
+    ["세 번째 계절","harune","6/8",0],["유리 정원","rin","2/6",0],["밤의 도서관","sakuya m","9/9",0],["작은 등대","nabe","3/4",1],["바다 아래 교실","kiyo","1/1",0],["은빛 기차","yuu","5/7",0],["구름 제과점","hoshino k","2/5",0],
+    ["첫눈 편지","tt ren","8/8",0],["하늘섬 탐험기","PAPERMOON","3/10",0],["시계탑 아래","Lumi","4/6",0],["꽃잎 수집가","Kanade","2/3",0],["마녀의 휴일","sio","6/6",0],["별자리 카페","harune","1/4",0],["물빛 약국","nabe","5/9",0]];
+  document.getElementById("books").innerHTML = titles.map(([t,a,o,n],i) => `<div class="mb"><div class="cv"><div class="art" data-art="${600+i*7}"></div>${n?'<span class="newv">신간</span>':''}</div><div class="tt">${t}</div><div class="au"><span>${a}</span><span class="num">${o}</span></div></div>`).join("");
+};
+</script>
+</head>
+<body>
+
+<!-- ============ C1 LIBRARY (selection context) ============ -->
+<section class="screen" id="library">
+<div class="win">
+  <nav class="rail">
+    <span class="mark"><img src="../../../_tools/app/src/brand/lakomics-mark.svg" alt=""></span>
+    <button class="rail-item" aria-current="page"><i data-i="stack"></i>에셋</button>
+    <button class="rail-item"><i data-i="book"></i>컬렉션</button>
+    <button class="rail-item"><i data-i="photo"></i>망가</button>
+    <button class="rail-item"><i data-i="calendar"></i>다시보기</button>
+    <button class="rail-item"><i data-i="note"></i>메모</button>
+    <button class="rail-item"><i data-i="lock"></i>비밀</button>
+    <div class="rail-tail"><button class="rail-item"><i data-i="dots"></i>관리</button></div>
+  </nav>
+  <div class="stackcol">
+    <div class="topbar">
+      <div class="area"><span class="title">에셋</span><button class="icon-btn"><i data-i="import"></i></button></div>
+      <div class="locwrap"><span class="loc-mark"></span><span class="loc">전체</span><span class="loc-meta num">12,480</span></div>
+      <div class="tb-right"><button class="pill"><span class="spin"></span>작업 2</button><button class="icon-btn"><i data-i="adjust"></i></button><span data-winctl></span></div>
+    </div>
+    <div class="body">
+      <aside class="index">
+        <div class="index-scroll">
+          <button class="link" aria-current="page"><i data-i="stack" class="sm"></i>전체<span class="count">12,480</span></button>
+          <button class="link"><i data-i="star" class="sm"></i>즐겨찾기<span class="count">316</span></button>
+          <div class="sec">폴더<span class="rule"></span><button class="icon-btn"><i data-i="plus" class="sm"></i></button></div>
+          <button class="link"><span class="tw"></span><i data-i="folder" class="sm"></i>일러스트<span class="count">8,902</span></button>
+          <button class="link depth1"><span class="tw closed"></span><i data-i="users" class="sm"></i>블루 오션<span class="count">1,204</span></button>
+          <button class="link depth1"><span class="tw closed"></span><i data-i="users" class="sm"></i>별빛 학원<span class="count">866</span></button>
+          <button class="link depth1"><i data-i="folder" class="sm"></i>풍경<span class="count">2,315</span></button>
+          <button class="link depth1"><i data-i="folder" class="sm"></i>배경 참고<span class="count">740</span></button>
+          <button class="link"><span class="tw closed"></span><i data-i="folder" class="sm"></i>사진<span class="count">2,106</span></button>
+          <button class="link"><span class="tw closed"></span><i data-i="folder" class="sm"></i>스크랩<span class="count">1,024</span></button>
+          <button class="link"><i data-i="folder" class="sm"></i>영상<span class="count">448</span></button>
+          <div class="sec">앨범<span class="rule"></span><button class="icon-btn"><i data-i="plus" class="sm"></i></button></div>
+          <button class="link"><i data-i="album" class="sm"></i>배경화면 후보<span class="count">58</span></button>
+          <button class="link"><i data-i="album" class="sm"></i>2026 여름<span class="count">213</span></button>
+          <button class="link"><i data-i="album" class="sm"></i>색감 참고<span class="count">97</span></button>
+        </div>
+      </aside>
+      <main class="main"><div class="content pad"><div id="lib1"></div></div></main>
+    </div>
+  </div>
+  <div class="float selbar"><span class="count"><span class="num">4</span>장 선택</span>
+    <button class="btn"><i data-i="album" class="sm"></i>앨범에 추가</button><button class="btn"><i data-i="folder" class="sm"></i>폴더로 이동</button><button class="btn"><i data-i="heart" class="sm"></i>좋아요</button>
+    <span class="sep"></span><button class="btn"><i data-i="trash" class="sm"></i>휴지통</button><button class="btn"><i data-i="dots" class="sm"></i></button><button class="icon-btn"><i data-i="x" class="sm"></i></button></div>
+  <div class="note" data-n="1" style="left:330px;top:130px;width:250px">인덱스 머리와 제목줄을 <b>한 줄</b>로. 창 제어도 여기.</div>
+  <div class="note" data-n="2" style="left:1420px;top:130px;width:200px">가벼운 모드·동기화 문제·작업 = <b>상태 표시 하나</b>.</div>
+  <div class="note" data-n="3" style="left:1150px;top:990px;width:260px">선택 명령은 선택할 때만 떠오르는 막대에.</div>
+</div>
+</section>
+
+<!-- ============ C2 STATUS DRAWER ============ -->
+<section class="screen" id="status">
+<div class="win">
+  <nav class="rail">
+    <span class="mark"><img src="../../../_tools/app/src/brand/lakomics-mark.svg" alt=""></span>
+    <button class="rail-item" aria-current="page"><i data-i="stack"></i>에셋</button>
+    <button class="rail-item"><i data-i="book"></i>컬렉션</button>
+    <button class="rail-item"><i data-i="photo"></i>망가</button>
+    <button class="rail-item"><i data-i="calendar"></i>다시보기</button>
+    <button class="rail-item"><i data-i="note"></i>메모</button>
+    <button class="rail-item"><i data-i="lock"></i>비밀</button>
+    <div class="rail-tail"><button class="rail-item"><i data-i="dots"></i>관리</button></div>
+  </nav>
+  <div class="stackcol">
+    <div class="topbar">
+      <div class="area"><span class="title">에셋</span><button class="icon-btn"><i data-i="import"></i></button></div>
+      <div class="locwrap"><span class="loc-mark"></span><span class="loc">전체</span><span class="loc-meta num">12,480</span></div>
+      <div class="tb-right"><button class="pill open"><span class="spin"></span>작업 2</button><button class="icon-btn"><i data-i="adjust"></i></button><span data-winctl></span></div>
+    </div>
+    <div class="body">
+      <aside class="index">
+        <div class="index-scroll">
+          <button class="link" aria-current="page"><i data-i="stack" class="sm"></i>전체<span class="count">12,480</span></button>
+          <button class="link"><i data-i="star" class="sm"></i>즐겨찾기<span class="count">316</span></button>
+          <div class="sec">폴더<span class="rule"></span><button class="icon-btn"><i data-i="plus" class="sm"></i></button></div>
+          <button class="link"><span class="tw"></span><i data-i="folder" class="sm"></i>일러스트<span class="count">8,902</span></button>
+          <button class="link depth1"><span class="tw closed"></span><i data-i="users" class="sm"></i>블루 오션<span class="count">1,204</span></button>
+          <button class="link depth1"><span class="tw closed"></span><i data-i="users" class="sm"></i>별빛 학원<span class="count">866</span></button>
+          <button class="link depth1"><i data-i="folder" class="sm"></i>풍경<span class="count">2,315</span></button>
+          <button class="link"><span class="tw closed"></span><i data-i="folder" class="sm"></i>사진<span class="count">2,106</span></button>
+          <div class="sec">앨범<span class="rule"></span><button class="icon-btn"><i data-i="plus" class="sm"></i></button></div>
+          <button class="link"><i data-i="album" class="sm"></i>배경화면 후보<span class="count">58</span></button>
+          <button class="link"><i data-i="album" class="sm"></i>2026 여름<span class="count">213</span></button>
+        </div>
+      </aside>
+      <main class="main"><div class="content pad"><div id="lib2"></div></div></main>
+    </div>
+  </div>
+  <div class="float drawer">
+    <header>상태<button class="icon-btn"><i data-i="x" class="sm"></i></button></header>
+    <div class="blk"><div class="qrow" style="height:24px"><span class="dot"></span>모바일과 동기화됨<span style="margin-left:auto;color:var(--color-muted);font-size:13px">3분 전</span></div></div>
+    <div class="blk"><span>진행 중</span>
+      <div class="job"><div class="top"><i data-i="import" class="sm"></i>파일 가져오기<span class="r">12 / 40</span></div><div class="bar"><i style="width:30%"></i></div></div>
+      <div class="job"><div class="top"><i data-i="users" class="sm"></i>캐릭터 자동 분류<span class="r">312 남음</span><button class="icon-btn" style="width:22px;height:22px"><i data-i="pause" class="sm"></i></button></div><div class="sub">블루 오션 · 과거 이미지 갱신 <span class="num">540 / 852</span></div><div class="bar"><i style="width:63%"></i></div></div>
+    </div>
+    <div class="blk"><span>대기</span>
+      <div class="job"><div class="top"><i data-i="similar" class="sm"></i>유사 이미지 준비<span class="r">1,204 남음</span></div><div class="sub">가져오기가 끝나면 시작</div></div>
+    </div>
+    <div class="blk"><span>확인할 것</span>
+      <div class="qrow"><i data-i="similar" class="sm"></i>유사 이미지 검토<span class="n">12</span><i data-i="chev" class="sm"></i></div>
+      <div class="qrow"><i data-i="sparkle" class="sm"></i>캐릭터 후보 · 블루 오션<span class="n">37</span><i data-i="chev" class="sm"></i></div>
+      <div class="qrow"><i data-i="inbox" class="sm"></i>미분류<span class="n">248</span><i data-i="chev" class="sm"></i></div>
+    </div>
+    <div class="blk" style="border-bottom:0"><span>이 PC</span>
+      <div class="qrow"><i data-i="feather" class="sm"></i>가벼운 모드<span style="margin-left:auto"></span><div class="toggle"></div></div>
+      <div class="sub" style="font-size:12px;color:var(--color-muted)">분석·정리를 줄이고 모바일 동기화만 유지</div>
+    </div>
+    <div style="margin-top:auto;padding:12px 18px;border-top:1px solid var(--color-border);display:flex;justify-content:space-between;font-size:13px;color:var(--color-muted)"><span>문제 없음</span><span>작업 기록 ›</span></div>
+  </div>
+  <div class="note" data-n="1" style="left:900px;top:130px;width:260px">현재 흩어진 것: 제목줄 가벼운 모드, 레일 동기화 문제, 관리 메뉴 작업 목록, 하단 작업 트레이 → <b>한 패널</b>.</div>
+</div>
+</section>
+
+<!-- ============ C3 COLLECTIONS ============ -->
+<section class="screen" id="collections">
+<div class="win">
+  <nav class="rail">
+    <span class="mark"><img src="../../../_tools/app/src/brand/lakomics-mark.svg" alt=""></span>
+    <button class="rail-item"><i data-i="stack"></i>에셋</button>
+    <button class="rail-item" aria-current="page"><i data-i="book"></i>컬렉션</button>
+    <button class="rail-item"><i data-i="photo"></i>망가</button>
+    <button class="rail-item"><i data-i="calendar"></i>다시보기</button>
+    <button class="rail-item"><i data-i="note"></i>메모</button>
+    <button class="rail-item"><i data-i="lock"></i>비밀</button>
+    <div class="rail-tail"><button class="rail-item"><i data-i="dots"></i>관리</button></div>
+  </nav>
+  <div class="stackcol">
+    <div class="topbar">
+      <div class="area"><span class="title">컬렉션</span><button class="icon-btn"><i data-i="search"></i></button><button class="icon-btn"><i data-i="plus"></i></button></div>
+      <div class="locwrap"><span class="loc-mark"></span><span class="loc">만화</span><span class="loc-meta"><span class="num">86</span>작품</span></div>
+      <div class="tb-right"><span data-winctl></span></div>
+    </div>
+    <div class="body">
+      <aside class="index">
+        <div class="index-scroll">
+          <div class="segc"><button aria-current="page">라이브러리</button><button>쇼케이스</button></div>
+          <div class="sec">작품 유형<span class="rule"></span></div>
+          <button class="link">게임<span class="count">142</span></button>
+          <button class="link" aria-current="page">만화<span class="count">86</span></button>
+          <button class="link">영화<span class="count">57</span></button>
+          <button class="link">AV<span class="count">20</span></button>
+          <div class="sec">정렬<span class="rule"></span></div>
+          <div class="selectrow">출간일 · 최신순<i data-i="chevdown" class="sm"></i></div>
+          <div class="sec">내 별점<span class="rule"></span></div>
+          <div class="chips"><span class="chip on">전체</span><span class="chip">5</span><span class="chip">4.5</span><span class="chip">4</span><span class="chip">미평가</span></div>
+          <div class="sec">신간<span class="rule"></span></div>
+          <button class="link"><i data-i="bell" class="sm"></i>새 알림<span class="count">3</span></button>
+        </div>
+      </aside>
+      <main class="main"><div class="content"><div class="mb-grid" id="books"></div></div></main>
+    </div>
+  </div>
+  <div class="note" data-n="1" style="left:74px;top:640px;width:210px">MangaDex·Kakao 알림함 두 버튼 → <b>새 알림 한 줄</b>(있을 때만). 공급처는 알림함 안에서.</div>
+  <div class="note" data-n="2" style="left:1110px;top:52px;width:230px">검색·추가는 이 화면이 지원할 때만 보임. <b>비활성 검색 아이콘 없음</b>.</div>
+</div>
+</section>
+
+<!-- ============ C4 SETTINGS ============ -->
+<section class="screen" id="settings">
+<div class="win">
+  <nav class="rail">
+    <span class="mark"><img src="../../../_tools/app/src/brand/lakomics-mark.svg" alt=""></span>
+    <button class="rail-item"><i data-i="stack"></i>에셋</button>
+    <button class="rail-item"><i data-i="book"></i>컬렉션</button>
+    <button class="rail-item"><i data-i="photo"></i>망가</button>
+    <button class="rail-item"><i data-i="calendar"></i>다시보기</button>
+    <button class="rail-item"><i data-i="note"></i>메모</button>
+    <button class="rail-item"><i data-i="lock"></i>비밀</button>
+    <div class="rail-tail"><button class="rail-item" aria-current="page"><i data-i="dots"></i>관리</button></div>
+  </nav>
+  <div class="stackcol">
+    <div class="topbar">
+      <div class="area"><span class="title">설정</span></div>
+      <div class="locwrap"><span class="loc-mark"></span><span class="loc">일반</span></div>
+      <div class="tb-right"><span data-winctl></span></div>
+    </div>
+    <div class="body">
+      <aside class="index">
+        <div class="index-scroll">
+          <button class="link" aria-current="page">일반</button>
+          <button class="link">라이브러리</button>
+          <button class="link">동기화<span class="count"><span class="dot"></span></span></button>
+          <button class="link">연결 서비스</button>
+          <button class="link">온라인 카탈로그</button>
+          <button class="link">정보·단축키</button>
+          <div class="sec">고급<span class="rule"></span></div>
+          <button class="link muted">고급 도구</button>
+        </div>
+      </aside>
+      <main class="main"><div class="content">
+        <div class="set-wrap" style="max-width:820px">
+          <h2>일반</h2>
+          <div class="set-group"><h3>화면</h3>
+            <div class="row"><div class="lbl"><b>화면 배율</b><span>모든 화면과 이미지를 함께 조절</span></div><div class="seg"><span>80</span><span>90</span><span class="on">100</span><span>110</span><span>125</span><span>150</span></div></div>
+            <div class="row"><div class="lbl"><b>비공개 모드</b><span>썸네일을 흐리게 표시</span></div><div class="toggle"></div></div>
+          </div>
+          <div class="set-group"><h3>창과 백그라운드</h3>
+            <div class="row"><div class="lbl"><b>닫기 버튼으로 트레이에 숨기기</b><span>숨겨도 모바일 동기화는 계속</span></div><div class="toggle on"></div></div>
+            <div class="row"><div class="lbl"><b>가벼운 모드 자동 전환</b><span>창이 숨겨진 채 <span class="num">10</span>분이 지나면</span></div><div class="toggle on"></div></div>
+          </div>
+          <div class="set-group"><h3>라이브러리 위치</h3>
+            <div class="row"><div class="lbl"><b>라이브러리 폴더</b><span class="mono">D:\Lakomics</span></div><button class="btn">변경</button></div>
+          </div>
+        </div>
+      </div></main>
+    </div>
+  </div>
+  <div class="note" data-n="1" style="left:1150px;top:130px;width:280px">일반에는 <b>7개 항목</b>만. 캐릭터 분석 3종·S36은 라이브러리/고급으로, 즉시 가벼운 모드 전환은 상태 패널로.</div>
+</div>
+</section>
+</body>
+</html>
