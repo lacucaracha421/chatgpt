@@ -45,6 +45,28 @@ describe("VideoPlayer", () => {
     }
   });
 
+  it("plays encrypted vault items only through the vault routes", async () => {
+    const { rerender } = render(<VideoPlayer asset={videoAsset()} source="vault" />);
+    expect(screen.getByLabelText("sample.webm 영상")).toHaveAttribute("src", "http://lakomics.localhost/vault-playback/video-1");
+
+    const { mockConvertFileSrc, mockIPC, clearMocks } = await import("@tauri-apps/api/mocks");
+    Object.defineProperty(window, "isTauri", { configurable: true, value: true });
+    const calls: Array<[string, unknown]> = [];
+    try {
+      mockConvertFileSrc("linux");
+      mockIPC((command, args) => {
+        calls.push([command, args]);
+        return "http://127.0.0.1:32145/v1/internal/vault-playback/video-2?ticket=session";
+      });
+      rerender(<VideoPlayer asset={{ ...videoAsset(), id: "video-2" }} source="vault" />);
+      await waitFor(() => expect(screen.getByLabelText("sample.webm 영상")).toHaveAttribute("src", "http://127.0.0.1:32145/v1/internal/vault-playback/video-2?ticket=session"));
+      expect(calls).toEqual([["get_internal_vault_playback_url", { itemId: "video-2" }]]);
+    } finally {
+      clearMocks();
+      Reflect.deleteProperty(window, "isTauri");
+    }
+  });
+
   it("keeps its source attached across StrictMode effect checks", () => {
     render(<StrictMode><VideoPlayer asset={videoAsset()} /></StrictMode>);
     expect(screen.getByLabelText("sample.webm 영상")).toHaveAttribute("src", "http://lakomics.localhost/playback/video-1");

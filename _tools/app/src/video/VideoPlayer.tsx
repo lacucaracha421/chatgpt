@@ -2,7 +2,7 @@ import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, Speak
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AssetSummary } from "../library/types";
-import { playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
+import { playbackUrl, scrubFrameUrl, vaultPlaybackUrl } from "../assets/mediaUrl";
 import { Button } from "../shared/ui/Button";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
@@ -12,8 +12,14 @@ type PlaybackUrlResolver = (assetId: string) => Promise<string>;
 
 const resolveInternalPlaybackUrl: PlaybackUrlResolver = (assetId) =>
   invoke<string>("get_internal_playback_url", { assetId });
+const resolveInternalVaultPlaybackUrl: PlaybackUrlResolver = (itemId) =>
+  invoke<string>("get_internal_vault_playback_url", { itemId });
 
-export function VideoPlayer({ asset, resolvePlaybackUrl = resolveInternalPlaybackUrl }: { asset: VideoAsset; resolvePlaybackUrl?: PlaybackUrlResolver }) {
+/** `vault` plays an encrypted Private Vault item: no scrub frames, vault routes only. */
+export function VideoPlayer({ asset, source: mediaSource = "library", resolvePlaybackUrl }: { asset: VideoAsset; source?: "library" | "vault"; resolvePlaybackUrl?: PlaybackUrlResolver }) {
+  const vault = mediaSource === "vault";
+  const protocolUrl = vault ? vaultPlaybackUrl : playbackUrl;
+  const resolveHttpUrl = resolvePlaybackUrl ?? (vault ? resolveInternalVaultPlaybackUrl : resolveInternalPlaybackUrl);
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -27,7 +33,7 @@ export function VideoPlayer({ asset, resolvePlaybackUrl = resolveInternalPlaybac
   const [scrubbing, setScrubbing] = useState(false);
   const [volumeInteracting, setVolumeInteracting] = useState(false);
   const [controlsFocused, setControlsFocused] = useState(false);
-  const [source, setSource] = useState<string | undefined>(() => playbackUrl(asset.id));
+  const [source, setSource] = useState<string | undefined>(() => protocolUrl(asset.id));
   const idleTimerRef = useRef<number | null>(null);
 
   const clearIdleTimer = useCallback(() => {
@@ -65,17 +71,19 @@ export function VideoPlayer({ asset, resolvePlaybackUrl = resolveInternalPlaybac
     setVolumeInteracting(false);
     setControlsFocused(false);
     const video = videoRef.current;
-    const fallback = playbackUrl(asset.id);
+    const fallback = protocolUrl(asset.id);
     let active = true;
     const applySource = (next: string) => {
       if (!active) return;
       setSource(next);
       if (video) video.src = next;
     };
+    // Linux WebKitGTK uses the lakomics: scheme, which does not stream ranged video well;
+    // there the player uses the app's authenticated local HTTP playback URL instead.
     if (fallback.startsWith("lakomics:")) {
       setSource(undefined);
       video?.removeAttribute("src");
-      void resolvePlaybackUrl(asset.id).then(applySource).catch(() => undefined);
+      void resolveHttpUrl(asset.id).then(applySource).catch(() => undefined);
     } else {
       applySource(fallback);
     }
@@ -86,7 +94,7 @@ export function VideoPlayer({ asset, resolvePlaybackUrl = resolveInternalPlaybac
       video.removeAttribute("src");
       video.load();
     };
-  }, [asset.id, asset.media.durationMs, resolvePlaybackUrl]);
+  }, [asset.id, asset.media.durationMs, protocolUrl, resolveHttpUrl]);
 
   const togglePlayback = () => {
     const video = videoRef.current;
@@ -147,7 +155,7 @@ export function VideoPlayer({ asset, resolvePlaybackUrl = resolveInternalPlaybac
       }}
     >
       <div className="video-player__timeline-wrap">
-        {timelineAvailable && hoverRatio !== null && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
+        {timelineAvailable && hoverRatio !== null && !vault && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
         <input
           type="range"
           className="video-player__timeline"

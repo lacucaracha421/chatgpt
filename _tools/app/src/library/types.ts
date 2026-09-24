@@ -724,50 +724,66 @@ export type MediaSummary =
       scrubFrameCount: number;
     };
 
-export type PrivateVaultStatus = {
-  registered: boolean;
-  available: boolean;
+export type EncryptedVaultState = "absent" | "locked" | "unlocked";
+
+/** Encrypted Private Vault (ADR-0039). `itemCount` is set only while unlocked. */
+export type EncryptedVaultStatus = {
+  state: EncryptedVaultState;
   vaultId: string | null;
   root: string | null;
-  assetCount: number;
-  readOnly: boolean;
+  itemCount: number | null;
+  remembered: boolean;
 };
 
-export type PrivateVaultQuery = {
-  mediaKind: "images" | "videos" | null;
-  offset: number;
-  limit: number;
-};
+export type EncryptedVaultSecret = { kind: "password" | "recoveryKey"; value: string };
 
-export type PrivateVaultAssetSummary = {
+/** Returned only by creation: the recovery key is never shown again. */
+export type CreatedEncryptedVault = { status: EncryptedVaultStatus; recoveryKey: string };
+
+export type EncryptedVaultItemKind = "image" | "video";
+
+export type EncryptedVaultQuery = { kind: EncryptedVaultItemKind | null; offset: number; limit: number };
+
+export type EncryptedVaultItem = {
   id: string;
-  title: string | null;
-  originalName: string;
+  kind: EncryptedVaultItemKind;
   byteSize: number;
-  width: number;
-  height: number;
-  modifiedAt: string;
-  media: MediaSummary;
+  width: number | null;
+  height: number | null;
+  title: string | null;
+  originalFileName: string;
+  importedAt: string;
+  hasThumbnail: boolean;
 };
 
-export type PrivateVaultThumbnailCandidate = {
-  timestampMs: number;
-  imageBytes: number[];
-};
+export type EncryptedVaultItemPage = { items: EncryptedVaultItem[]; totalCount: number; nextOffset: number | null };
 
-export type PrivateVaultAssetPage = {
-  items: PrivateVaultAssetSummary[];
-  totalCount: number;
-  nextOffset: number | null;
-};
+export type EncryptedVaultImportProgress = { processed: number; total: number; imported: number; skipped: number; failed: number };
 
-export type PrivateVaultScanReport = {
-  scanned: number;
-  added: number;
-  updated: number;
-  unchanged: number;
-  removed: number;
+export type EncryptedVaultImportReport = {
+  total: number;
+  imported: number;
+  skipped: number;
   failed: number;
+  withoutThumbnail: number;
+  legacyTitles: number;
+  legacyThumbnails: number;
+  /** `<video>_thumb.<image>` files applied as their video's thumbnail instead of separate images (always sent by the backend). */
+  sidecarThumbnails?: number;
+};
+
+/** Image items that are a video's `_thumb` sidecar, imported before the sidecar rule. `examples`: up to 5 file names. */
+export type EncryptedVaultSidecarCleanupPreview = { count: number; examples: string[] };
+
+export type EncryptedVaultSidecarCleanupResult = { movedToVideoThumbnail: number; removed: number };
+
+/** The app-level vault import (current or last of this app session). `error` is a command error code. */
+export type EncryptedVaultImportJob = {
+  id: number;
+  running: boolean;
+  progress: EncryptedVaultImportProgress;
+  report: EncryptedVaultImportReport | null;
+  error: string | null;
 };
 
 export type ImportSource =
@@ -1274,17 +1290,18 @@ export interface LibraryGateway {
   setCollectionShowcase(collectionId: string, showcase: boolean): Promise<CollectionSummary>;
   getAssetCollections(assetId: string): Promise<string[]>;
   patchAssetCollections(patch: AssetCollectionPatch): Promise<void>;
-  getPrivateVaultStatus?(): Promise<PrivateVaultStatus>;
-  registerPrivateVault?(root: string): Promise<PrivateVaultStatus>;
-  unregisterPrivateVault?(): Promise<void>;
-  scanPrivateVault?(): Promise<PrivateVaultScanReport>;
-  listPrivateVaultAssets?(query: PrivateVaultQuery): Promise<PrivateVaultAssetPage>;
-  playPrivateVaultVideo?(assetId: string): Promise<void>;
-  setPrivateVaultTitle?(assetId: string, title: string | null): Promise<void>;
-  listPrivateVaultThumbnailCandidates?(assetId: string): Promise<PrivateVaultThumbnailCandidate[]>;
-  setPrivateVaultThumbnailFromFile?(assetId: string, sourcePath: string): Promise<void>;
-  setPrivateVaultThumbnailFromFrame?(assetId: string, timestampMs: number): Promise<void>;
-  resetPrivateVaultThumbnail?(assetId: string): Promise<void>;
+  getEncryptedVaultStatus?(): Promise<EncryptedVaultStatus>;
+  createEncryptedVault?(root: string, password: string, remember: boolean): Promise<CreatedEncryptedVault>;
+  unlockEncryptedVault?(secret: EncryptedVaultSecret, remember: boolean): Promise<EncryptedVaultStatus>;
+  lockEncryptedVault?(): Promise<EncryptedVaultStatus>;
+  forgetEncryptedVaultKey?(): Promise<EncryptedVaultStatus>;
+  changeEncryptedVaultPassword?(current: EncryptedVaultSecret, newPassword: string): Promise<void>;
+  importIntoEncryptedVault?(sourceFolder: string, onProgress?: (progress: EncryptedVaultImportProgress) => void): Promise<EncryptedVaultImportReport>;
+  getEncryptedVaultImportStatus?(): Promise<EncryptedVaultImportJob | null>;
+  listEncryptedVaultItems?(query: EncryptedVaultQuery): Promise<EncryptedVaultItemPage>;
+  setEncryptedVaultTitle?(itemId: string, title: string | null): Promise<void>;
+  previewEncryptedVaultSidecarCleanup?(): Promise<EncryptedVaultSidecarCleanupPreview>;
+  applyEncryptedVaultSidecarCleanup?(): Promise<EncryptedVaultSidecarCleanupResult>;
   getMangaRoot(): Promise<string | null>;
   /** Manga root saved by another computer (e.g. the other OS) while this PC has none. */
   getOtherMachineMangaRoot?(): Promise<string | null>;

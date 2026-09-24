@@ -1301,62 +1301,159 @@ pub struct LibrarySummary {
     pub root: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PrivateVaultStatus {
-    pub registered: bool,
-    pub available: bool,
+pub enum EncryptedVaultState {
+    Absent,
+    Locked,
+    Unlocked,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultStatus {
+    pub state: EncryptedVaultState,
     pub vault_id: Option<String>,
     pub root: Option<String>,
-    pub asset_count: u64,
-    pub read_only: bool,
+    /// Only when unlocked; trashed items are not counted.
+    pub item_count: Option<u64>,
+    pub remembered: bool,
+}
+
+/// Returned only by vault creation: the recovery key is never shown again.
+#[derive(Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedEncryptedVault {
+    pub status: EncryptedVaultStatus,
+    pub recovery_key: String,
+}
+
+impl fmt::Debug for CreatedEncryptedVault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CreatedEncryptedVault")
+            .field("status", &self.status)
+            .field("recovery_key", &"[redacted]")
+            .finish()
+    }
+}
+
+/// A secret typed by the user: `{ "kind": "password" | "recoveryKey", "value": "..." }`.
+#[derive(Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "camelCase")]
+pub enum EncryptedVaultSecretInput {
+    Password(String),
+    RecoveryKey(String),
+}
+
+impl fmt::Debug for EncryptedVaultSecretInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("EncryptedVaultSecretInput([redacted])")
+    }
+}
+
+impl Drop for EncryptedVaultSecretInput {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        match self {
+            Self::Password(value) | Self::RecoveryKey(value) => value.zeroize(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EncryptedVaultItemKind {
+    Image,
+    Video,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PrivateVaultQuery {
-    pub media_kind: Option<MediaKindFilter>,
+pub struct EncryptedVaultQuery {
+    pub kind: Option<EncryptedVaultItemKind>,
     pub offset: u64,
     pub limit: u32,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PrivateVaultAssetSummary {
+pub struct EncryptedVaultItemSummary {
     pub id: String,
-    pub title: Option<String>,
-    pub original_name: String,
+    pub kind: EncryptedVaultItemKind,
     pub byte_size: u64,
-    pub width: u32,
-    pub height: u32,
-    pub modified_at: String,
-    pub media: MediaSummary,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub title: Option<String>,
+    pub original_file_name: String,
+    pub imported_at: String,
+    pub has_thumbnail: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PrivateVaultThumbnailCandidate {
-    pub timestamp_ms: u64,
-    pub image_bytes: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PrivateVaultAssetPage {
-    pub items: Vec<PrivateVaultAssetSummary>,
+pub struct EncryptedVaultItemPage {
+    pub items: Vec<EncryptedVaultItemSummary>,
     pub total_count: u64,
     pub next_offset: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct PrivateVaultScanReport {
-    pub scanned: u64,
-    pub added: u64,
-    pub updated: u64,
-    pub unchanged: u64,
-    pub removed: u64,
+pub struct EncryptedVaultImportProgress {
+    pub processed: u64,
+    pub total: u64,
+    pub imported: u64,
+    pub skipped: u64,
     pub failed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultImportReport {
+    pub total: u64,
+    pub imported: u64,
+    pub skipped: u64,
+    pub failed: u64,
+    /// Imported items that have no thumbnail (undecodable image, video without FFmpeg).
+    pub without_thumbnail: u64,
+    pub legacy_titles: u64,
+    pub legacy_thumbnails: u64,
+    /// `<video>_thumb.<image>` files applied as their sibling video's custom thumbnail
+    /// instead of being imported as separate images.
+    pub sidecar_thumbnails: u64,
+}
+
+/// Image items that are really a sibling video's `_thumb` sidecar (imported before the
+/// sidecar rule existed). `examples` holds up to five original file names.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultSidecarCleanupPreview {
+    pub count: u64,
+    pub examples: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultSidecarCleanupResult {
+    /// Sidecars that became their video's custom thumbnail.
+    pub moved_to_video_thumbnail: u64,
+    /// Image items removed from the vault list (moved or not).
+    pub removed: u64,
+}
+
+/// The app-level Private Vault import: running with live progress, or finished with a
+/// report or an error code. It survives the view that started it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedVaultImportJob {
+    /// Increases with every import in this app session.
+    pub id: u64,
+    pub running: bool,
+    pub progress: EncryptedVaultImportProgress,
+    pub report: Option<EncryptedVaultImportReport>,
+    /// Command error code when the import stopped (e.g. `encrypted_vault_locked`).
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

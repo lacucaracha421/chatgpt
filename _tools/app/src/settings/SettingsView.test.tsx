@@ -240,14 +240,13 @@ it("groups data import and backup restore under 데이터 관리", async () => {
   }
 });
 
-it("registers and unregisters the secret vault from data settings", async () => {
+it("creates an encrypted vault and requires confirming the recovery key", async () => {
   const gateway = createGateway();
-  const unregistered = { registered: false, available: false, vaultId: null, root: null, assetCount: 0, readOnly: false };
-  const registered = { registered: true, available: true, vaultId: "vault-1", root: "/media/private", assetCount: 12, readOnly: false };
-  gateway.getPrivateVaultStatus = vi.fn().mockResolvedValue(unregistered);
-  gateway.registerPrivateVault = vi.fn().mockResolvedValue(registered);
-  gateway.unregisterPrivateVault = vi.fn().mockResolvedValue(undefined);
-  vi.mocked(open).mockResolvedValue("/media/private" as never);
+  const absent = { state: "absent" as const, vaultId: null, root: null, itemCount: null, remembered: false };
+  const unlocked = { state: "unlocked" as const, vaultId: "vault-1", root: "/media/usb", itemCount: 0, remembered: true };
+  gateway.getEncryptedVaultStatus = vi.fn().mockResolvedValue(absent);
+  gateway.createEncryptedVault = vi.fn().mockResolvedValue({ status: unlocked, recoveryKey: "ab".repeat(32) });
+  vi.mocked(open).mockResolvedValue("/media/usb" as never);
   const onPrivateVaultChanged = vi.fn();
 
   render(<LibraryProvider gateway={gateway}>
@@ -255,16 +254,62 @@ it("registers and unregisters the secret vault from data settings", async () => 
   </LibraryProvider>);
 
   expect(await screen.findByRole("heading", { name: "비밀 보관함", level: 3 })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "비밀 보관함 등록" }));
-  expect(open).toHaveBeenCalledWith({ directory: true, multiple: false });
-  await waitFor(() => expect(gateway.registerPrivateVault).toHaveBeenCalledWith("/media/private"));
-  expect(await screen.findByText("/media/private")).toBeVisible();
-  expect(screen.getByText(/12개/)).toBeVisible();
-  expect(onPrivateVaultChanged).toHaveBeenCalled();
+  expect(await screen.findByText("연결된 보관함 없음")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "새 보관함 만들기" }));
+  await userEvent.click(screen.getByRole("button", { name: "보관할 폴더 선택" }));
+  expect(await screen.findByText("/media/usb")).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "이 PC에서 기억" })).toBeChecked();
+  await userEvent.type(screen.getByLabelText("비밀번호"), "pw1");
+  await userEvent.type(screen.getByLabelText("비밀번호 확인"), "pw2");
+  await userEvent.click(screen.getByRole("button", { name: "만들기" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 서로 다릅니다.");
+  expect(gateway.createEncryptedVault).not.toHaveBeenCalled();
 
-  await userEvent.click(screen.getByRole("button", { name: "비밀 보관함 등록 해제" }));
-  await waitFor(() => expect(gateway.unregisterPrivateVault).toHaveBeenCalled());
-  expect(onPrivateVaultChanged).toHaveBeenCalledTimes(2);
+  await userEvent.clear(screen.getByLabelText("비밀번호 확인"));
+  await userEvent.type(screen.getByLabelText("비밀번호 확인"), "pw1");
+  await userEvent.click(screen.getByRole("button", { name: "만들기" }));
+  await waitFor(() => expect(gateway.createEncryptedVault).toHaveBeenCalledWith("/media/usb", "pw1", true));
+
+  const recovery = await screen.findByRole("group", { name: "비밀 보관함 복구키" });
+  expect(within(recovery).getByLabelText("복구키")).toHaveValue("ab".repeat(32));
+  const next = within(recovery).getByRole("button", { name: "계속" });
+  expect(next).toBeDisabled();
+  await userEvent.click(within(recovery).getByRole("checkbox", { name: "복구키를 안전한 곳에 보관했습니다" }));
+  await userEvent.click(next);
+  expect(screen.queryByRole("group", { name: "비밀 보관함 복구키" })).not.toBeInTheDocument();
+  expect(await screen.findByText("/media/usb")).toBeVisible();
+  expect(screen.getByText(/열림 · 0개 · 이 PC에서 기억함/)).toBeVisible();
+  expect(onPrivateVaultChanged).toHaveBeenCalled();
+});
+
+it("changes the password, forgets the remembered key and locks an open vault", async () => {
+  const gateway = createGateway();
+  const unlocked = { state: "unlocked" as const, vaultId: "vault-1", root: "/media/usb", itemCount: 12, remembered: true };
+  gateway.getEncryptedVaultStatus = vi.fn().mockResolvedValue(unlocked);
+  gateway.changeEncryptedVaultPassword = vi.fn().mockResolvedValue(undefined);
+  gateway.forgetEncryptedVaultKey = vi.fn().mockResolvedValue({ ...unlocked, remembered: false });
+  gateway.lockEncryptedVault = vi.fn().mockResolvedValue({ ...unlocked, state: "locked", itemCount: null, remembered: false });
+
+  render(<LibraryProvider gateway={gateway}>
+    <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="data" />
+  </LibraryProvider>);
+
+  expect(await screen.findByText(/열림 · 12개/)).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "비밀번호 변경" }));
+  await userEvent.type(screen.getByLabelText("현재 비밀번호"), "old");
+  await userEvent.type(screen.getByLabelText("새 비밀번호"), "new");
+  await userEvent.type(screen.getByLabelText("새 비밀번호 확인"), "new");
+  await userEvent.click(screen.getByRole("button", { name: "변경" }));
+  await waitFor(() => expect(gateway.changeEncryptedVaultPassword).toHaveBeenCalledWith({ kind: "password", value: "old" }, "new"));
+
+  await userEvent.click(await screen.findByRole("button", { name: "이 PC에서 기억 해제" }));
+  await waitFor(() => expect(gateway.forgetEncryptedVaultKey).toHaveBeenCalled());
+  expect(screen.queryByRole("button", { name: "이 PC에서 기억 해제" })).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "잠그기" }));
+  await waitFor(() => expect(gateway.lockEncryptedVault).toHaveBeenCalled());
+  expect(await screen.findByText(/잠김/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "비밀번호 변경" })).not.toBeInTheDocument();
 });
 
 it("groups extension diagnostics and shortcuts under 정보", async () => {

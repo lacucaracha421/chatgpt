@@ -55,5 +55,6 @@
 | [0036 Staged server authority](0036-staged-server-authority.md) | **Accepted** | Staged domain cutover pattern; Catalog bookmarks activated first, remaining domains migrate explicitly |
 | [0037 Server Authority v2 replica and command contract](0037-server-authority-v2-replica-and-command-contract.md) | Proposed | Per-domain cursors/epochs, aggregate wake/status, durable PC/Android replicas, fenced recovery and migration order |
 | [0038 Asset lifecycle authority](0038-asset-lifecycle-authority.md) | **Accepted** | Server-owned Asset identity/lifecycle + cloud-first Capture promotion; PC materializes under the same ID, Android/PC replicate lifecycle, mobile invalidates cached views from a list generation. **Activated in production 2026-09-19** (library `e6395585…`, epoch 1) and accepted on a disposable canary Asset. Physical R2 GC remains deferred |
+| [0039 Lakomics encrypts the Private Vault itself](0039-lakomics-encrypted-private-vault.md) | **Accepted** | Replaces VeraCrypt with per-file AES-256-GCM vault objects, encrypted index, password + recovery key, remember-on-this-PC; desktop only |
 
 새 ADR을 추가하거나 기존 결정을 대체할 때 이 인덱스와 해당 ADR의 `Status`/`Supersedes`/`Clarifies` 관계도 같이 갱신합니다.

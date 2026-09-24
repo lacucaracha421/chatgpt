@@ -100,6 +100,47 @@ pub(crate) fn delete_notes_test_key(target: &str) {
     OsCredentialBackend.delete(target).expect("remove isolated Notes test key");
 }
 
+/// OS credential-store target of an encrypted Private Vault master key (ADR-0039).
+fn vault_key_target(vault_id: &str) -> String {
+    format!("Lakomics/PrivateVault/{vault_id}")
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn vault_key(vault_id: &str) -> Result<Option<Vec<u8>>, LibraryError> {
+    OsCredentialBackend
+        .read(&vault_key_target(vault_id))
+        .map_err(map_backend_error)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn set_vault_key(vault_id: &str, value: &[u8]) -> Result<(), LibraryError> {
+    OsCredentialBackend
+        .write(&vault_key_target(vault_id), value)
+        .map_err(map_backend_error)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn delete_vault_key(vault_id: &str) -> Result<(), LibraryError> {
+    OsCredentialBackend
+        .delete(&vault_key_target(vault_id))
+        .map_err(map_backend_error)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn vault_key(_vault_id: &str) -> Result<Option<Vec<u8>>, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn set_vault_key(_vault_id: &str, _value: &[u8]) -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn delete_vault_key(_vault_id: &str) -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
 #[derive(Debug)]
 pub(crate) enum CredentialError {
     System(u32),

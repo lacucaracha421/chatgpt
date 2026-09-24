@@ -1,191 +1,197 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { open } from "@tauri-apps/plugin-dialog";
-
-beforeEach(() => {
-  vi.mocked(open).mockReset();
-  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:frame") });
-  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
-});
-afterEach(() => { cleanup(); vi.useRealTimers(); });
-import type { LibraryGateway, PrivateVaultAssetPage } from "../library/types";
+import type { EncryptedVaultItemPage, EncryptedVaultStatus, LibraryGateway } from "../library/types";
 import { ExternalVaultBrowser } from "./ExternalVaultBrowser";
+import { resetVaultImportJob } from "./vaultImportJob";
 
 vi.mock("../assets/AssetGallery", () => ({
-  AssetGallery: ({ items, onOpen, onSelectionGesture, metadataVisible }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible}>
+  AssetGallery: ({ items, onOpen, onSelectionGesture, metadataVisible, mediaSource }: any) => <div aria-label="vault gallery" data-metadata-visible={metadataVisible} data-media-source={mediaSource}>
     {items.map((item: any) => <button key={item.id} onClick={() => onSelectionGesture?.(item, {})} onDoubleClick={() => onOpen?.(item)}>{item.title || item.originalName}</button>)}
   </div>,
 }));
 vi.mock("../assets/AssetViewer", () => ({
-  AssetViewer: ({ activeId, onClose }: any) => activeId ? <div aria-label="vault viewer"><button onClick={onClose}>close</button></div> : null,
+  AssetViewer: ({ activeId, onClose, mediaSource, onAssetOpened }: any) => activeId ? <div aria-label="vault viewer" data-media-source={mediaSource} data-records={String(Boolean(onAssetOpened))}><button onClick={onClose}>close</button></div> : null,
 }));
 
-it("loads portable assets without recording normal library activity", async () => {
-  const page: PrivateVaultAssetPage = {
-    items: [{ id: "a", title: null, originalName: "secret.png", byteSize: 12, width: 800, height: 600,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "image" } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const gateway = vaultGateway(page);
-  render(<ExternalVaultBrowser gateway={gateway} />);
+beforeEach(() => vi.mocked(open).mockReset());
+afterEach(() => { cleanup(); resetVaultImportJob(); vi.useRealTimers(); });
+
+const unlocked: EncryptedVaultStatus = { state: "unlocked", vaultId: "v", root: "/media/usb", itemCount: 2, remembered: true };
+const locked: EncryptedVaultStatus = { ...unlocked, state: "locked", itemCount: null, remembered: false };
+
+const page: EncryptedVaultItemPage = {
+  items: [
+    { id: "a", kind: "image", byteSize: 12, width: 800, height: 600, title: null, originalFileName: "secret.png", importedAt: "2026-09-24T00:00:00Z", hasThumbnail: true },
+    { id: "v", kind: "video", byteSize: 24, width: null, height: null, title: "내 영상", originalFileName: "clip.mp4", importedAt: "2026-09-24T00:00:00Z", hasThumbnail: false },
+  ],
+  totalCount: 2, nextOffset: null,
+};
+
+function vaultGateway() {
+  return {
+    listEncryptedVaultItems: vi.fn().mockResolvedValue(page),
+    setEncryptedVaultTitle: vi.fn().mockResolvedValue(undefined),
+    unlockEncryptedVault: vi.fn().mockResolvedValue(unlocked),
+    lockEncryptedVault: vi.fn().mockResolvedValue(locked),
+    importIntoEncryptedVault: vi.fn(),
+    recordAssetOpened: vi.fn(),
+    recordAssetsExposed: vi.fn(),
+  } as unknown as LibraryGateway;
+}
+
+it("opens images and videos in the vault viewer without recording library activity", async () => {
+  const gateway = vaultGateway();
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
 
   expect(await screen.findByRole("button", { name: "secret.png" })).toBeInTheDocument();
-  expect(gateway.listPrivateVaultAssets).toHaveBeenCalledWith({ mediaKind: null, offset: 0, limit: 80 });
-  fireEvent.doubleClick(screen.getByRole("button", { name: "secret.png" }));
-  expect(screen.getByLabelText("vault viewer")).toBeInTheDocument();
+  expect(gateway.listEncryptedVaultItems).toHaveBeenCalledWith({ kind: null, offset: 0, limit: 80 });
+  expect(screen.getByLabelText("vault gallery")).toHaveAttribute("data-media-source", "vault");
+  fireEvent.doubleClick(screen.getByRole("button", { name: "내 영상" }));
+  const viewer = screen.getByLabelText("vault viewer");
+  expect(viewer).toHaveAttribute("data-media-source", "vault");
+  expect(viewer).toHaveAttribute("data-records", "false");
   expect(gateway.recordAssetOpened).not.toHaveBeenCalled();
   expect(gateway.recordAssetsExposed).not.toHaveBeenCalled();
 });
 
-it("opens vault videos with the isolated native player", async () => {
-  const page: PrivateVaultAssetPage = {
-    items: [{ id: "v", title: null, originalName: "secret.mp4", byteSize: 24, width: 1920, height: 1080,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "video", durationMs: 1_000, preparationState: "ready", scrubFrameCount: 0 } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const gateway = vaultGateway(page);
-  render(<ExternalVaultBrowser gateway={gateway} />);
-
-  fireEvent.doubleClick(await screen.findByRole("button", { name: "secret.mp4" }));
-
-  await waitFor(() => expect(gateway.playPrivateVaultVideo).toHaveBeenCalledWith("v"));
-  expect(screen.queryByLabelText("vault viewer")).not.toBeInTheDocument();
+it("filters by kind and hides captions in privacy mode", async () => {
+  const gateway = vaultGateway();
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} privacyMode />);
+  expect(await screen.findByLabelText("vault gallery")).toHaveAttribute("data-metadata-visible", "false");
+  await userEvent.click(screen.getByRole("button", { name: "영상" }));
+  await waitFor(() => expect(gateway.listEncryptedVaultItems).toHaveBeenLastCalledWith({ kind: "video", offset: 0, limit: 80 }));
 });
 
-it("shows the actionable native player error", async () => {
-  const page: PrivateVaultAssetPage = {
-    items: [{ id: "v", title: null, originalName: "secret.mp4", byteSize: 24, width: 1920, height: 1080,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "video", durationMs: 1_000, preparationState: "ready", scrubFrameCount: 0 } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const gateway = vaultGateway(page);
-  vi.mocked(gateway.playPrivateVaultVideo!).mockRejectedValue({
-    code: "media_player_unavailable",
-    message: "비밀 영상 재생을 위해 mpv를 설치해 주세요",
+it("renames the selected item", async () => {
+  const gateway = vaultGateway();
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
+  await userEvent.click(screen.getByRole("button", { name: "제목 변경" }));
+  await userEvent.type(screen.getByLabelText("제목"), "내 제목");
+  await userEvent.click(screen.getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(gateway.setEncryptedVaultTitle).toHaveBeenCalledWith("a", "내 제목"));
+});
+
+it("imports a folder with progress and shows the summary", async () => {
+  const gateway = vaultGateway();
+  let finish!: (value: unknown) => void;
+  let report!: (progress: unknown) => void;
+  vi.mocked(gateway.importIntoEncryptedVault!).mockImplementation((_folder, onProgress) => {
+    report = onProgress as (progress: unknown) => void;
+    return new Promise((resolve) => { finish = resolve; }) as never;
   });
-  render(<ExternalVaultBrowser gateway={gateway} />);
+  vi.mocked(open).mockResolvedValue("/home/me/old-vault");
+  const onContentChanged = vi.fn();
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} onContentChanged={onContentChanged} />);
 
-  fireEvent.doubleClick(await screen.findByRole("button", { name: "secret.mp4" }));
+  await userEvent.click(await screen.findByRole("button", { name: "가져오기" }));
+  await waitFor(() => expect(gateway.importIntoEncryptedVault).toHaveBeenCalledWith("/home/me/old-vault", expect.any(Function)));
+  report({ processed: 3, total: 10, imported: 3, skipped: 0, failed: 0 });
+  expect(await screen.findByText("가져오는 중 3 / 10")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "잠그기" })).toBeDisabled();
 
-  expect(await screen.findByRole("alert")).toHaveTextContent("비밀 영상 재생을 위해 mpv를 설치해 주세요");
+  finish({ total: 10, imported: 8, skipped: 1, failed: 1, withoutThumbnail: 0, legacyTitles: 2, legacyThumbnails: 0, sidecarThumbnails: 3 });
+  const dialog = await screen.findByRole("dialog", { name: "가져오기 완료" });
+  expect(dialog).toHaveTextContent("가져옴8개");
+  expect(dialog).toHaveTextContent("영상 썸네일로 적용3개");
+  expect(dialog).toHaveTextContent("이전 보관함 제목2개");
+  expect(dialog).not.toHaveTextContent("이전 보관함 썸네일");
+  expect(onContentChanged).toHaveBeenCalled();
+  expect(gateway.listEncryptedVaultItems).toHaveBeenCalledTimes(2);
 });
 
-it("shows custom title captions and video editing controls after selection", async () => {
-  const page: PrivateVaultAssetPage = {
-    items: [{ id: "v", title: "내 제목", originalName: "secret.mp4", byteSize: 24, width: 1920, height: 1080,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "video", durationMs: 1_000, preparationState: "ready", scrubFrameCount: 0 } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const gateway = vaultGateway(page);
-  render(<ExternalVaultBrowser gateway={gateway} />);
-
-  const card = await screen.findByRole("button", { name: "내 제목" });
-  expect(screen.getByLabelText("vault gallery")).toHaveAttribute("data-metadata-visible", "true");
-  fireEvent.click(card);
-
-  expect(screen.getByRole("button", { name: "제목 변경" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "썸네일 변경" })).toBeEnabled();
+it("locks from the toolbar", async () => {
+  const gateway = vaultGateway();
+  const onStatusChange = vi.fn();
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={onStatusChange} />);
+  await userEvent.click(await screen.findByRole("button", { name: "잠그기" }));
+  await waitFor(() => expect(onStatusChange).toHaveBeenCalledWith(locked));
 });
 
-it("saves a custom video title", async () => {
-  const page: PrivateVaultAssetPage = {
-    items: [{ id: "v", title: null, originalName: "secret.mp4", byteSize: 24, width: 1920, height: 1080,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "video", durationMs: 70_000, preparationState: "ready", scrubFrameCount: 0 } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const gateway = vaultGateway(page);
-  render(<ExternalVaultBrowser gateway={gateway} />);
+it("unlocks with a password, remembering by default, and explains a wrong password", async () => {
+  const gateway = vaultGateway();
+  vi.mocked(gateway.unlockEncryptedVault!)
+    .mockRejectedValueOnce({ code: "encrypted_vault_wrong_secret", message: "비밀번호 또는 복구 키가 맞지 않습니다" })
+    .mockResolvedValueOnce(unlocked);
+  const onStatusChange = vi.fn();
+  render(<ExternalVaultBrowser gateway={gateway} status={locked} onStatusChange={onStatusChange} />);
 
-  fireEvent.click(await screen.findByRole("button", { name: "secret.mp4" }));
-  fireEvent.click(screen.getByRole("button", { name: "제목 변경" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "제목" }), { target: { value: "내 제목" } });
-  fireEvent.click(screen.getByRole("button", { name: "저장" }));
+  expect(gateway.listEncryptedVaultItems).not.toHaveBeenCalled();
+  expect(screen.getByRole("checkbox", { name: "이 PC에서 기억" })).toBeChecked();
+  await userEvent.type(screen.getByLabelText("비밀번호"), "wrong");
+  await userEvent.click(screen.getByRole("button", { name: "열기" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 맞지 않습니다.");
+  expect(screen.getByLabelText("비밀번호")).toHaveValue("wrong");
 
-  await waitFor(() => expect(gateway.setPrivateVaultTitle).toHaveBeenCalledWith("v", "내 제목"));
+  await userEvent.clear(screen.getByLabelText("비밀번호"));
+  await userEvent.type(screen.getByLabelText("비밀번호"), "right");
+  await userEvent.click(screen.getByRole("button", { name: "열기" }));
+  await waitFor(() => expect(onStatusChange).toHaveBeenCalledWith(unlocked));
+  expect(gateway.unlockEncryptedVault).toHaveBeenLastCalledWith({ kind: "password", value: "right" }, true);
 });
 
-it("sets a thumbnail from a chosen image file", async () => {
-  vi.mocked(open).mockResolvedValue("/tmp/cover.png");
-  const page: PrivateVaultAssetPage = {
-    items: [{ id: "v", title: null, originalName: "secret.mp4", byteSize: 24, width: 1920, height: 1080,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "video", durationMs: 70_000, preparationState: "ready", scrubFrameCount: 0 } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const gateway = vaultGateway(page);
-  render(<ExternalVaultBrowser gateway={gateway} />);
-
-  fireEvent.click(await screen.findByRole("button", { name: "secret.mp4" }));
-  fireEvent.click(screen.getByRole("button", { name: "썸네일 변경" }));
-  fireEvent.click(screen.getByRole("button", { name: "이미지 파일 선택" }));
-
-  await waitFor(() => expect(gateway.setPrivateVaultThumbnailFromFile).toHaveBeenCalledWith("v", "/tmp/cover.png"));
+it("can unlock with the recovery key instead", async () => {
+  const gateway = vaultGateway();
+  render(<ExternalVaultBrowser gateway={gateway} status={locked} onStatusChange={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "복구키로 열기" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: "이 PC에서 기억" }));
+  await userEvent.type(screen.getByLabelText("복구키"), ` ${"a".repeat(64)} `);
+  await userEvent.click(screen.getByRole("button", { name: "열기" }));
+  await waitFor(() => expect(gateway.unlockEncryptedVault).toHaveBeenCalledWith({ kind: "recoveryKey", value: "a".repeat(64) }, false));
 });
 
-it("chooses one of the generated video frames as the thumbnail", async () => {
-  const page: PrivateVaultAssetPage = {
-    items: [{ id: "v", title: null, originalName: "secret.mp4", byteSize: 24, width: 1920, height: 1080,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "video", durationMs: 70_000, preparationState: "ready", scrubFrameCount: 0 } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const gateway = vaultGateway(page);
-  vi.mocked(gateway.listPrivateVaultThumbnailCandidates!).mockResolvedValue([{ timestampMs: 10_000, imageBytes: [82, 73, 70, 70] }]);
-  render(<ExternalVaultBrowser gateway={gateway} />);
+it("keeps import progress and the summary when the view is left and reopened", async () => {
+  const gateway = vaultGateway();
+  let finish!: (value: unknown) => void;
+  let report!: (progress: unknown) => void;
+  vi.mocked(gateway.importIntoEncryptedVault!).mockImplementation((_folder, onProgress) => {
+    report = onProgress as (progress: unknown) => void;
+    return new Promise((resolve) => { finish = resolve; }) as never;
+  });
+  vi.mocked(open).mockResolvedValue("/home/me/photos");
+  const first = render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await userEvent.click(await first.findByRole("button", { name: "가져오기" }));
+  await waitFor(() => expect(gateway.importIntoEncryptedVault).toHaveBeenCalled());
+  first.unmount();
 
-  fireEvent.click(await screen.findByRole("button", { name: "secret.mp4" }));
-  fireEvent.click(screen.getByRole("button", { name: "썸네일 변경" }));
-  fireEvent.click(screen.getByRole("button", { name: "영상에서 고르기" }));
-  const frame = await screen.findByRole("img", { name: "0:10 프레임" });
-  fireEvent.click(frame.closest("button")!);
+  report({ processed: 4, total: 10, imported: 4, skipped: 0, failed: 0 });
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  expect(await screen.findByText("가져오는 중 4 / 10")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "가져오는 중…" })).toBeDisabled();
 
-  await waitFor(() => expect(gateway.setPrivateVaultThumbnailFromFrame).toHaveBeenCalledWith("v", 10_000));
+  finish({ total: 10, imported: 9, skipped: 1, failed: 0, withoutThumbnail: 0, legacyTitles: 0, legacyThumbnails: 0 });
+  expect(await screen.findByRole("dialog", { name: "가져오기 완료" })).toHaveTextContent("가져옴9개");
 });
 
-it("automatically reconciles external file changes while the vault is open", async () => {
-  vi.useFakeTimers();
-  const first: PrivateVaultAssetPage = {
-    items: [{ id: "v", title: null, originalName: "secret.mp4", byteSize: 24, width: 1920, height: 1080,
-      modifiedAt: "2026-09-13T00:00:00Z", media: { kind: "video", durationMs: 1_000, preparationState: "ready", scrubFrameCount: 0 } }],
-    totalCount: 1, nextOffset: null,
-  };
-  const empty: PrivateVaultAssetPage = { items: [], totalCount: 0, nextOffset: null };
-  const gateway = vaultGateway(first);
-  vi.mocked(gateway.listPrivateVaultAssets!).mockResolvedValueOnce(first).mockResolvedValue(empty);
-  vi.mocked(gateway.scanPrivateVault!).mockResolvedValueOnce({ scanned: 0, added: 0, updated: 0, unchanged: 0, removed: 1, failed: 0 });
-  render(<ExternalVaultBrowser gateway={gateway} />);
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-  expect(screen.getByRole("button", { name: "secret.mp4" })).toBeInTheDocument();
+it("shows an import that is already running in the backend instead of starting another", async () => {
+  const gateway = vaultGateway();
+  const running = { id: 3, running: true, progress: { processed: 2, total: 5, imported: 2, skipped: 0, failed: 0 }, report: null, error: null };
+  const done = { ...running, running: false, progress: { ...running.progress, processed: 5, imported: 5 },
+    report: { total: 5, imported: 5, skipped: 0, failed: 0, withoutThumbnail: 0, legacyTitles: 0, legacyThumbnails: 0 } };
+  const getEncryptedVaultImportStatus = vi.fn().mockResolvedValueOnce(running).mockResolvedValue(done);
+  Object.assign(gateway, { getEncryptedVaultImportStatus });
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
 
-  await act(async () => { vi.advanceTimersByTime(2_000); await Promise.resolve(); await Promise.resolve(); });
+  await userEvent.click(await screen.findByRole("button", { name: "가져오기" }));
+  expect(await screen.findByText("가져오는 중 2 / 5")).toBeInTheDocument();
+  expect(open).not.toHaveBeenCalled();
+  expect(gateway.importIntoEncryptedVault).not.toHaveBeenCalled();
 
-  expect(gateway.scanPrivateVault).toHaveBeenCalled();
-  expect(gateway.listPrivateVaultAssets).toHaveBeenCalledTimes(2);
-  expect(screen.queryByRole("button", { name: "secret.mp4" })).not.toBeInTheDocument();
-  vi.useRealTimers();
+  expect(await screen.findByRole("dialog", { name: "가져오기 완료" }, { timeout: 3000 })).toHaveTextContent("가져옴5개");
+  expect(gateway.listEncryptedVaultItems).toHaveBeenCalledTimes(2);
 });
 
-it("refreshes the index and reloads the first page", async () => {
-  const page: PrivateVaultAssetPage = { items: [], totalCount: 0, nextOffset: null };
-  const gateway = vaultGateway(page);
-  render(<ExternalVaultBrowser gateway={gateway} />);
-  await waitFor(() => expect(gateway.listPrivateVaultAssets).toHaveBeenCalledTimes(1));
-
-  fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
-  await waitFor(() => expect(gateway.scanPrivateVault).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(gateway.listPrivateVaultAssets).toHaveBeenCalledTimes(2));
+it("reports an import stopped by a lock and lets it be dismissed", async () => {
+  const gateway = vaultGateway();
+  vi.mocked(gateway.importIntoEncryptedVault!).mockRejectedValue({ code: "encrypted_vault_locked", message: "locked" });
+  vi.mocked(open).mockResolvedValue("/home/me/photos");
+  render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "가져오기" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("비밀 보관함이 잠겨 가져오기를 멈췄습니다. 다시 가져오면 이어서 진행합니다.");
+  await userEvent.click(screen.getByRole("button", { name: "닫기" }));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
-function vaultGateway(page: PrivateVaultAssetPage) {
-  return {
-    listPrivateVaultAssets: vi.fn().mockResolvedValue(page),
-    scanPrivateVault: vi.fn().mockResolvedValue({ scanned: 0, added: 0, updated: 0, unchanged: 0, removed: 0, failed: 0 }),
-    playPrivateVaultVideo: vi.fn().mockResolvedValue(undefined),
-    setPrivateVaultTitle: vi.fn().mockResolvedValue(undefined),
-    listPrivateVaultThumbnailCandidates: vi.fn().mockResolvedValue([]),
-    setPrivateVaultThumbnailFromFile: vi.fn().mockResolvedValue(undefined),
-    setPrivateVaultThumbnailFromFrame: vi.fn().mockResolvedValue(undefined),
-    resetPrivateVaultThumbnail: vi.fn().mockResolvedValue(undefined),
-    recordAssetOpened: vi.fn().mockResolvedValue(undefined),
-    recordAssetsExposed: vi.fn().mockResolvedValue(undefined),
-  } as unknown as LibraryGateway;
-}

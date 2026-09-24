@@ -18,6 +18,8 @@ mod public_media;
 use crate::{
     commands::AppState,
     library::{
+        error::LibraryError,
+        external_vault::EncryptedVaultMediaVariant,
         models::{ImportSource, IngestMediaRequest, IngestOutcome},
         Library, MAX_IMAGE_BYTES,
     },
@@ -30,6 +32,17 @@ pub const EXTENSION_ORIGIN: &str = "chrome-extension://nclkmjmmlcdaeomgadndeangc
 const MAX_JSON_BYTES: usize = 32 * 1024;
 const MAX_REMOTE_VIDEO_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const TOKEN_FILE_NAME: &str = "extension-token.txt";
+/// Plaintext decrypted per step of a vault playback stream. Each step re-resolves the item,
+/// so a locked vault ends the stream at the next step instead of keeping the key alive.
+const VAULT_STREAM_STEP_BYTES: u64 = 1024 * 1024;
+
+/// Which store an internal playback URL streams from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InternalPlaybackSource {
+    Library,
+    /// Unlocked encrypted Private Vault (ADR-0039), decrypted in memory per range.
+    Vault,
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 enum ApiError {
@@ -123,12 +136,21 @@ impl ExtensionRuntime {
     }
 
     pub(crate) fn playback_url(&self, asset_id: &str) -> Option<String> {
-        Uuid::parse_str(asset_id).ok()?;
+        self.internal_url("playback", asset_id)
+    }
+
+    /// Linux WebKitGTK streams video from this HTTP URL instead of the custom protocol.
+    pub(crate) fn vault_playback_url(&self, item_id: &str) -> Option<String> {
+        self.internal_url("vault-playback", item_id)
+    }
+
+    fn internal_url(&self, route: &str, id: &str) -> Option<String> {
+        Uuid::parse_str(id).ok()?;
         let playback_ticket = match self.0.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
             RuntimeStatus::Ready { playback_ticket, .. } => playback_ticket,
             RuntimeStatus::Starting | RuntimeStatus::BindFailed => return None,
         };
-        Some(format!("{API_BASE_URL}/v1/internal/playback/{asset_id}?ticket={playback_ticket}"))
+        Some(format!("{API_BASE_URL}/v1/internal/{route}/{id}?ticket={playback_ticket}"))
     }
 
     fn mark_bind_failed(&self) {
@@ -203,12 +225,16 @@ fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token:
     let method = request.method().as_str().to_owned();
     let request_url = request.url().to_owned();
     let path = request_url.split('?').next().unwrap_or(&request_url).to_owned();
-    if path.starts_with("/v1/internal/playback/") {
+    if path.starts_with("/v1/internal/playback/") || path.starts_with("/v1/internal/vault-playback/") {
         if method != "GET" { let _ = request.respond(Response::empty(StatusCode(405))); return; }
-        let Some(asset_id) = parse_internal_playback_request(&request_url, playback_ticket) else { let _ = request.respond(Response::empty(StatusCode(401))); return; };
+        let Some((source, id)) = parse_internal_playback_request(&request_url, playback_ticket) else { let _ = request.respond(Response::empty(StatusCode(401))); return; };
         let range = request_header(&request, "Range");
         let library = state.current_library();
-        let _ = request.respond(internal_playback_response(library.as_ref(), &asset_id, range.as_deref()));
+        let response = match source {
+            InternalPlaybackSource::Library => internal_playback_response(library.as_ref(), &id, range.as_deref()),
+            InternalPlaybackSource::Vault => internal_vault_playback_response(library.as_ref(), &id, range.as_deref()),
+        };
+        let _ = request.respond(response);
         return;
     }
     let origin = request_header(&request, "Origin");
@@ -249,17 +275,22 @@ fn request_header(request: &Request, name: &'static str) -> Option<String> {
         .map(|header| header.value.as_str().to_owned())
 }
 
-fn parse_internal_playback_request(value: &str, expected_ticket: &str) -> Option<String> {
+fn parse_internal_playback_request(value: &str, expected_ticket: &str) -> Option<(InternalPlaybackSource, String)> {
     if expected_ticket.is_empty() { return None; }
     let parsed = url::Url::parse(value).or_else(|_| url::Url::parse(API_BASE_URL).and_then(|base| base.join(value))).ok()?;
     if parsed.scheme() != "http" || parsed.host_str() != Some("127.0.0.1") || parsed.port_or_known_default() != Some(32145) { return None; }
     let segments = parsed.path_segments()?.collect::<Vec<_>>();
-    let ["v1", "internal", "playback", asset_id] = segments.as_slice() else { return None; };
+    let source = match segments.as_slice() {
+        ["v1", "internal", "playback", _] => InternalPlaybackSource::Library,
+        ["v1", "internal", "vault-playback", _] => InternalPlaybackSource::Vault,
+        _ => return None,
+    };
+    let asset_id = segments[3];
     Uuid::parse_str(asset_id).ok()?;
     let mut tickets = parsed.query_pairs().filter(|(key, _)| key == "ticket");
     let ticket = tickets.next()?.1;
     if tickets.next().is_some() || ticket.as_ref() != expected_ticket { return None; }
-    Some((*asset_id).to_owned())
+    Some((source, asset_id.to_owned()))
 }
 
 type InternalPlaybackResponse = Response<Box<dyn Read>>;
@@ -278,6 +309,74 @@ fn internal_playback_response(library: Option<&Library>, asset_id: &str, range_h
     let mut headers = vec![header("Content-Type", media.mime), header("Accept-Ranges", "bytes"), header("Cache-Control", "no-store")];
     if status == 206 { headers.push(header("Content-Range", &format!("bytes {start}-{end}/{}", media.length))); }
     Response::new(StatusCode(status), headers, Box::new(media.file.take(length)), Some(data_length), None)
+}
+
+/// Streams a vault video with the same range rules and headers as library playback. Nothing is
+/// written to disk; 423 while the vault is locked, 404 for ids that are not vault videos.
+fn internal_vault_playback_response(library: Option<&Library>, item_id: &str, range_header: Option<&str>) -> InternalPlaybackResponse {
+    let Some(library) = library else { return internal_empty_response(404, None); };
+    let (total, mime) = match library.encrypted_vault_media(item_id, EncryptedVaultMediaVariant::Playback) {
+        Ok(media) => (media.len(), media.mime),
+        Err(LibraryError::EncryptedVaultLocked) => return internal_empty_response(423, None),
+        Err(LibraryError::AssetNotFound) => return internal_empty_response(404, None),
+        Err(_) => return internal_empty_response(500, None),
+    };
+    if total == 0 { return internal_empty_response(416, Some("bytes */0".into())); }
+    let (status, start, end) = match range_header {
+        None => (200, 0, total - 1),
+        Some(value) => match crate::media_protocol::parse_range(value, total) { Some((start, end)) => (206, start, end), None => return internal_empty_response(416, Some(format!("bytes */{total}"))) },
+    };
+    let length = end - start + 1;
+    let Ok(data_length) = usize::try_from(length) else { return internal_empty_response(500, None); };
+    let mut headers = vec![header("Content-Type", mime), header("Accept-Ranges", "bytes"), header("Cache-Control", "no-store")];
+    if status == 206 { headers.push(header("Content-Range", &format!("bytes {start}-{end}/{total}"))); }
+    let reader = VaultPlaybackReader { library: library.clone(), item_id: item_id.to_owned(), position: start, end: end + 1, buffer: Vec::new(), consumed: 0 };
+    Response::new(StatusCode(status), headers, Box::new(reader), Some(data_length), None)
+}
+
+struct VaultPlaybackReader {
+    library: Library,
+    item_id: String,
+    position: u64,
+    /// Exclusive.
+    end: u64,
+    buffer: Vec<u8>,
+    consumed: usize,
+}
+
+impl Read for VaultPlaybackReader {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if self.consumed == self.buffer.len() {
+            zeroize::Zeroize::zeroize(&mut self.buffer);
+            self.buffer.clear();
+            self.consumed = 0;
+            if self.position >= self.end {
+                return Ok(0);
+            }
+            let step = (self.end - self.position).min(VAULT_STREAM_STEP_BYTES);
+            let mut media = self
+                .library
+                .encrypted_vault_media(&self.item_id, EncryptedVaultMediaVariant::Playback)
+                .map_err(|_| io::Error::other("vault playback unavailable"))?;
+            self.buffer = media
+                .read_range(self.position, step)
+                .map_err(|_| io::Error::other("vault playback failed"))?;
+            if self.buffer.is_empty() {
+                return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+            }
+            self.position += self.buffer.len() as u64;
+        }
+        let count = out.len().min(self.buffer.len() - self.consumed);
+        out[..count].copy_from_slice(&self.buffer[self.consumed..self.consumed + count]);
+        self.consumed += count;
+        Ok(count)
+    }
+}
+
+impl Drop for VaultPlaybackReader {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.buffer);
+    }
 }
 
 fn internal_empty_response(status: u16, content_range: Option<String>) -> InternalPlaybackResponse {
@@ -1000,8 +1099,75 @@ mod tests {
         assert!(url.starts_with(&format!("{API_BASE_URL}/v1/internal/playback/{asset_id}?ticket=")));
         assert!(url.ends_with("playback-secret"));
         assert!(!url.contains("extension-secret"));
-        assert_eq!(parse_internal_playback_request(&url, "playback-secret").as_deref(), Some(asset_id));
+        assert_eq!(parse_internal_playback_request(&url, "playback-secret"), Some((InternalPlaybackSource::Library, asset_id.to_owned())));
         assert!(parse_internal_playback_request(&url, "wrong").is_none());
+
+        let vault_url = runtime.vault_playback_url(asset_id).unwrap();
+        assert!(vault_url.starts_with(&format!("{API_BASE_URL}/v1/internal/vault-playback/{asset_id}?ticket=")));
+        assert!(!vault_url.contains("extension-secret"));
+        assert_eq!(parse_internal_playback_request(&vault_url, "playback-secret"), Some((InternalPlaybackSource::Vault, asset_id.to_owned())));
+        assert!(parse_internal_playback_request(&vault_url, "wrong").is_none());
+        assert!(runtime.vault_playback_url("not-a-uuid").is_none());
+        let other = format!("{API_BASE_URL}/v1/internal/vault-asset/{asset_id}?ticket=playback-secret");
+        assert!(parse_internal_playback_request(&other, "playback-secret").is_none());
+    }
+
+    #[test]
+    fn internal_vault_playback_streams_decrypted_ranges_only_while_unlocked() {
+        use std::io::Read as _;
+        use crate::library::models::{EncryptedVaultItemKind, EncryptedVaultQuery};
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let vault = temp.path().join("vault");
+        let source = temp.path().join("source");
+        std::fs::create_dir(&vault).unwrap();
+        std::fs::create_dir(&source).unwrap();
+        // Larger than one stream step so the reader decrypts in several steps.
+        let video = (0..2_500_000_u32).map(|value| (value % 251) as u8).collect::<Vec<_>>();
+        std::fs::write(source.join("clip.mp4"), &video).unwrap();
+        image::RgbImage::from_pixel(8, 6, image::Rgb([1, 2, 3])).save(source.join("picture.png")).unwrap();
+        library.create_encrypted_vault(&vault, "correct horse", false).unwrap();
+        library.import_into_encrypted_vault(&source, &mut |_| {}).unwrap();
+        let id_of = |kind| library.list_encrypted_vault_items(EncryptedVaultQuery { kind: Some(kind), offset: 0, limit: 1 }).unwrap().items[0].id.clone();
+        let video_id = id_of(EncryptedVaultItemKind::Video);
+        let image_id = id_of(EncryptedVaultItemKind::Image);
+        fn has(response: &InternalPlaybackResponse, name: &'static str, value: &str) -> bool { response.headers().iter().any(|h| h.field.equiv(name) && h.value.as_str() == value) }
+
+        let full = internal_vault_playback_response(Some(&library), &video_id, None);
+        assert_eq!(full.status_code().0, 200);
+        assert_eq!(full.data_length(), Some(video.len()));
+        assert!(has(&full, "Cache-Control", "no-store"));
+        assert!(has(&full, "Content-Type", "video/mp4"));
+        let mut bytes = Vec::new(); full.into_reader().read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, video);
+
+        let partial = internal_vault_playback_response(Some(&library), &video_id, Some("bytes=1048570-2097160"));
+        assert_eq!(partial.status_code().0, 206);
+        assert!(has(&partial, "Content-Range", "bytes 1048570-2097160/2500000"));
+        assert!(has(&partial, "Cache-Control", "no-store"));
+        let mut bytes = Vec::new(); partial.into_reader().read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, &video[1_048_570..=2_097_160]);
+
+        assert_eq!(internal_vault_playback_response(Some(&library), &video_id, Some("bytes=9999999-")).status_code().0, 416);
+        assert_eq!(internal_vault_playback_response(Some(&library), &image_id, None).status_code().0, 404);
+        assert_eq!(internal_vault_playback_response(Some(&library), "00000000-0000-4000-8000-000000000009", None).status_code().0, 404);
+        assert_eq!(internal_vault_playback_response(None, &video_id, None).status_code().0, 404);
+
+        // A stream opened before locking stops at its next decryption step.
+        let open = internal_vault_playback_response(Some(&library), &video_id, None);
+        let mut reader = open.into_reader();
+        let mut first = vec![0_u8; 16];
+        reader.read_exact(&mut first).unwrap();
+        library.lock_encrypted_vault();
+        let mut rest = Vec::new();
+        assert!(reader.read_to_end(&mut rest).is_err());
+        assert!(rest.len() < video.len());
+        let locked = internal_vault_playback_response(Some(&library), &video_id, None);
+        assert_eq!(locked.status_code().0, 423);
+        assert!(has(&locked, "Cache-Control", "no-store"));
+
+        // Library ids never reach the vault branch and vault ids never reach the library one.
+        assert_eq!(internal_playback_response(Some(&library), &video_id, None).status_code().0, 404);
     }
 
     #[test]

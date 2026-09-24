@@ -30,6 +30,20 @@ export function playbackUrl(assetId: string): string {
   return `${mediaOrigin()}/playback/${encodeURIComponent(assetId)}`;
 }
 
+/** Encrypted Private Vault routes (ADR-0039): decrypted in memory, never cached. */
+export function vaultAssetUrl(itemId: string): string {
+  return `${mediaOrigin()}/vault-asset/${encodeURIComponent(itemId)}`;
+}
+
+export function vaultThumbnailUrl(itemId: string, revision?: string | number): string {
+  const base = `${mediaOrigin()}/vault-thumbnail/${encodeURIComponent(itemId)}`;
+  return revision === undefined ? base : `${base}/v${encodeURIComponent(String(revision))}`;
+}
+
+export function vaultPlaybackUrl(itemId: string): string {
+  return `${mediaOrigin()}/vault-playback/${encodeURIComponent(itemId)}`;
+}
+
 export function scrubFrameUrl(assetId: string, frameIndex: number): string {
   return `${mediaOrigin()}/scrub-frame/${encodeURIComponent(assetId)}/${frameIndex}`;
 }

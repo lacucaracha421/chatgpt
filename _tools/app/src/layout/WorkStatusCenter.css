@@ -72,3 +72,19 @@
   align-items: flex-start;
   flex-direction: column;
 }
+
+/* A rail item with background work in progress (e.g. the Private Vault import). */
+.workspace-rail__activity {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: workspace-rail-activity 1.2s var(--ease-standard) infinite alternate;
+}
+
+@keyframes workspace-rail-activity { from { opacity: 1; } to { opacity: 0.35; } }
+
+@media (prefers-reduced-motion: reduce) { .workspace-rail__activity { animation: none; } }

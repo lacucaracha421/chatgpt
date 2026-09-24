@@ -35,8 +35,7 @@ use crate::{
             LibrarySummary, MangaCatalogRecoveryApplyResult, MangaCatalogRecoveryPreview,
             MangaCatalogRecoveryRemoteResult, MangaCatalogRecoverySelection, MangaDexApplyRequest,
             MangaDexConnection, MangaDexSearchResult, MangaDexVolumeSyncResult,
-            MangaDexWorkPreview, MangaSeries, MetadataBackup, PrivateVaultAssetPage,
-            PrivateVaultQuery, PrivateVaultScanReport, PrivateVaultStatus, PrivateVaultThumbnailCandidate, PurgeSummary, ReleaseWatchEvent,
+            MangaDexWorkPreview, MangaSeries, MetadataBackup, PurgeSummary, ReleaseWatchEvent,
             ReleaseWatchRunResult, ReleaseWatchRunStopReason, ReleaseWatchStatus,
             RemoteReadingProgress, ResolvedGallery, SetAssetClassification,
             SimilarityDecisionRequest, SimilarityIndexProgress,
@@ -395,9 +394,20 @@ impl From<LibraryError> for CommandError {
             LibraryError::UnsupportedVideo => "unsupported_video",
             LibraryError::VideoPreparationFailed => "video_preparation_failed",
             LibraryError::VideoToolUnavailable => "video_tool_unavailable",
-            LibraryError::MediaPlayerUnavailable => "media_player_unavailable",
-            LibraryError::MediaPlayerLaunchFailed => "media_player_launch_failed",
-            LibraryError::InvalidPrivateVaultTitle => "invalid_private_vault_title",
+            LibraryError::EncryptedVaultWrongSecret => "encrypted_vault_wrong_secret",
+            LibraryError::EncryptedVaultLocked => "encrypted_vault_locked",
+            LibraryError::EncryptedVaultNotFound => "encrypted_vault_not_found",
+            LibraryError::EncryptedVaultAlreadyExists => "encrypted_vault_already_exists",
+            LibraryError::EncryptedVaultEmptyPassword => "encrypted_vault_empty_password",
+            LibraryError::EncryptedVaultInvalidRecoveryKey => "encrypted_vault_invalid_recovery_key",
+            LibraryError::EncryptedVaultUnsupportedFormat => "encrypted_vault_unsupported_format",
+            LibraryError::EncryptedVaultCorrupt => "encrypted_vault_corrupt",
+            LibraryError::EncryptedVaultIo => "encrypted_vault_io_failed",
+            LibraryError::EncryptedVaultCrypto => "encrypted_vault_crypto_failed",
+            LibraryError::EncryptedVaultInvalidRoot => "encrypted_vault_invalid_root",
+            LibraryError::EncryptedVaultFolderUnavailable => "encrypted_vault_folder_unavailable",
+            LibraryError::EncryptedVaultImportRunning => "encrypted_vault_import_running",
+            LibraryError::InvalidEncryptedVaultTitle => "invalid_encrypted_vault_title",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
             LibraryError::MachineSettings { .. } => "machine_settings_failed",
@@ -428,6 +438,11 @@ pub fn get_extension_connection(
 #[tauri::command]
 pub fn get_internal_playback_url(asset_id: String, runtime: State<'_, crate::extension_api::ExtensionRuntime>) -> Result<String, CommandError> {
     runtime.playback_url(&asset_id).ok_or_else(|| CommandError { code: "playback_unavailable", message: "영상 재생 서버를 사용할 수 없습니다. 앱을 다시 실행해 주세요.".into() })
+}
+
+#[tauri::command]
+pub fn get_internal_vault_playback_url(item_id: String, runtime: State<'_, crate::extension_api::ExtensionRuntime>) -> Result<String, CommandError> {
+    runtime.vault_playback_url(&item_id).ok_or_else(|| CommandError { code: "playback_unavailable", message: "영상 재생 서버를 사용할 수 없습니다. 앱을 다시 실행해 주세요.".into() })
 }
 
 #[tauri::command]
@@ -2871,26 +2886,28 @@ pub async fn execute_legacy_package_migration(
 }
 
 #[tauri::command]
-pub async fn get_private_vault_status(
+pub async fn encrypted_vault_status(
     state: State<'_, AppState>,
-) -> Result<PrivateVaultStatus, CommandError> {
+) -> Result<crate::library::models::EncryptedVaultStatus, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.private_vault_status())
+    tauri::async_runtime::spawn_blocking(move || library.encrypted_vault_status())
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn register_private_vault(
+pub async fn create_encrypted_vault(
     root: String,
+    mut password: String,
+    remember: bool,
     state: State<'_, AppState>,
-) -> Result<PrivateVaultStatus, CommandError> {
+) -> Result<crate::library::models::CreatedEncryptedVault, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        library.register_private_vault(std::path::Path::new(&root))?;
-        library.scan_private_vault()?;
-        library.private_vault_status()
+        let result = library.create_encrypted_vault(std::path::Path::new(&root), &password, remember);
+        zeroize::Zeroize::zeroize(&mut password);
+        result
     })
     .await
     .map_err(|_| background_task_error())?
@@ -2898,109 +2915,117 @@ pub async fn register_private_vault(
 }
 
 #[tauri::command]
-pub async fn unregister_private_vault(state: State<'_, AppState>) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.unregister_private_vault())
-        .await
-        .map_err(|_| background_task_error())?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub async fn scan_private_vault(
+pub async fn unlock_encrypted_vault(
+    secret: crate::library::models::EncryptedVaultSecretInput,
+    remember: bool,
     state: State<'_, AppState>,
-) -> Result<PrivateVaultScanReport, CommandError> {
+) -> Result<crate::library::models::EncryptedVaultStatus, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.scan_private_vault())
+    tauri::async_runtime::spawn_blocking(move || library.unlock_encrypted_vault(&secret, remember))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn list_private_vault_assets(
-    query: PrivateVaultQuery,
+pub fn lock_encrypted_vault(
     state: State<'_, AppState>,
-) -> Result<PrivateVaultAssetPage, CommandError> {
+) -> Result<crate::library::models::EncryptedVaultStatus, CommandError> {
+    Ok(current_required(state)?.lock_encrypted_vault())
+}
+
+#[tauri::command]
+pub async fn forget_encrypted_vault_key(
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultStatus, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.list_private_vault_assets(query))
+    tauri::async_runtime::spawn_blocking(move || library.forget_encrypted_vault_key())
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub fn play_private_vault_video(
-    asset_id: String,
+pub async fn change_encrypted_vault_password(
+    current: crate::library::models::EncryptedVaultSecretInput,
+    mut new_password: String,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = library.change_encrypted_vault_password(&current, &new_password);
+        zeroize::Zeroize::zeroize(&mut new_password);
+        result
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn import_into_encrypted_vault(
+    source_folder: String,
+    on_progress: tauri::ipc::Channel<crate::library::models::EncryptedVaultImportProgress>,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultImportReport, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.import_into_encrypted_vault(std::path::Path::new(&source_folder), &mut |progress| {
+            let _ = on_progress.send(progress.clone());
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+/// The current or last Private Vault import, so the UI can reattach to it after leaving
+/// the vault view or reloading.
+#[tauri::command]
+pub fn encrypted_vault_import_status(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::models::EncryptedVaultImportJob>, CommandError> {
+    Ok(current_required(state)?.encrypted_vault_import_job())
+}
+
+#[tauri::command]
+pub fn list_encrypted_vault_items(
+    query: crate::library::models::EncryptedVaultQuery,
+    state: State<'_, AppState>,
+) -> Result<crate::library::models::EncryptedVaultItemPage, CommandError> {
     current_required(state)?
-        .play_private_vault_video(&asset_id)
+        .list_encrypted_vault_items(query)
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn set_private_vault_title(
-    asset_id: String,
+pub async fn set_encrypted_vault_title(
+    item_id: String,
     title: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.set_private_vault_title(&asset_id, title.as_deref()))
+    tauri::async_runtime::spawn_blocking(move || library.set_encrypted_vault_title(&item_id, title.as_deref()))
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn list_private_vault_thumbnail_candidates(
-    asset_id: String,
+pub fn preview_encrypted_vault_sidecar_cleanup(
     state: State<'_, AppState>,
-) -> Result<Vec<PrivateVaultThumbnailCandidate>, CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.private_vault_thumbnail_candidates(&asset_id))
-        .await
-        .map_err(|_| background_task_error())?
+) -> Result<crate::library::models::EncryptedVaultSidecarCleanupPreview, CommandError> {
+    current_required(state)?
+        .preview_encrypted_vault_sidecar_cleanup()
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
-pub async fn set_private_vault_thumbnail_from_file(
-    asset_id: String,
-    source_path: String,
+pub async fn apply_encrypted_vault_sidecar_cleanup(
     state: State<'_, AppState>,
-) -> Result<(), CommandError> {
+) -> Result<crate::library::models::EncryptedVaultSidecarCleanupResult, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        library.set_private_vault_thumbnail_from_file(&asset_id, std::path::Path::new(&source_path))
-    })
-    .await
-    .map_err(|_| background_task_error())?
-    .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub async fn set_private_vault_thumbnail_from_frame(
-    asset_id: String,
-    timestamp_ms: u64,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        library.set_private_vault_thumbnail_from_frame(&asset_id, timestamp_ms)
-    })
-    .await
-    .map_err(|_| background_task_error())?
-    .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub async fn reset_private_vault_thumbnail(
-    asset_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.reset_private_vault_thumbnail(&asset_id))
+    tauri::async_runtime::spawn_blocking(move || library.apply_encrypted_vault_sidecar_cleanup())
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

@@ -3,6 +3,7 @@ import { useRef, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
+import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
 import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
@@ -32,6 +33,8 @@ type Props = {
 
 export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, privateVaultAvailable = false, onImportFiles, renderManagement }: Props) {
   const chrome = useWorkspaceChrome();
+  const vaultImport = useVaultImportJob().job;
+  const vaultImportText = vaultImport?.running ? vaultImportProgressText(vaultImport) : undefined;
   const area = workspaceArea(view);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
   const collectionList = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
@@ -65,7 +68,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       })}
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "revisit" || view.kind === "creator" ? "page" : undefined} onClick={() => onNavigate({ kind: "revisit" })}><CalendarIcon aria-hidden="true" /><span>다시보기</span></button>
       <button type="button" className="workspace-rail__item" aria-current={view.kind === "notes" ? "page" : undefined} onClick={() => onNavigate({kind:"notes"})}><NoteIcon aria-hidden="true"/><span>메모</span></button>
-      {privateVaultAvailable && <button type="button" className="workspace-rail__item" aria-current={view.kind === "private_vault" ? "page" : undefined} onClick={() => onNavigate({ kind: "private_vault" })}><BookmarkIcon aria-hidden="true" /><span>비밀</span></button>}
+      {privateVaultAvailable && <button type="button" className="workspace-rail__item" aria-current={view.kind === "private_vault" ? "page" : undefined} aria-description={vaultImportText} title={vaultImportText} onClick={() => onNavigate({ kind: "private_vault" })}><BookmarkIcon aria-hidden="true" /><span>비밀</span>{vaultImportText && <span className="workspace-rail__activity" aria-hidden="true" />}</button>}
       <div className="workspace-rail__tail">
         {cloudProblemCount > 0 && <button type="button" className="workspace-rail__item" onClick={() => onNavigate({ kind: "settings", section: "cloud" })} aria-label={`동기화 문제 ${cloudProblemCount}개`}><span aria-hidden="true">!</span><span>동기화 문제 {cloudProblemCount}</span></button>}
         {renderManagement ? renderManagement(management) : <Menu label="라이브러리 관리" trigger={<><EllipsisHorizontalIcon aria-hidden="true" /><span>관리</span>{reviewCount > 0 && <span className="workspace-rail__review-alert" role="img" aria-label={`유사 검토 ${reviewCount}개 대기`} aria-description={`유사 검토 ${reviewCount}개 대기`}>!</span>}</>} items={management} />}

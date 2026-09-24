@@ -4,11 +4,13 @@ import { afterEach, expect, it, vi } from "vitest";
 import { dismissPublication, startPublication } from "../library/publicationJobs";
 import { WorkStatusCenter } from "./WorkStatusCenter";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
+import { resetVaultImportJob, startVaultImport } from "../external-vault/vaultImportJob";
 
 afterEach(() => {
   cleanup();
   dismissPublication("catalog");
   dismissPublication("collections");
+  resetVaultImportJob();
 });
 
 const idleCharacterAutomation = {
@@ -104,4 +106,34 @@ it("counts a persistent character failure as a problem with a recovery action", 
   await userEvent.click(trigger);
   expect(screen.getByRole("alert")).toHaveTextContent("캐릭터 분석 오류");
   expect(screen.getByRole("button", { name: "분석 환경 설정" })).toBeVisible();
+});
+
+it("shows a running Private Vault import on the 비밀 rail item and in the work center from any view", async () => {
+  const user = userEvent.setup();
+  let progress!: (value: { processed: number; total: number; imported: number; skipped: number; failed: number }) => void;
+  let finish!: (value: unknown) => void;
+  const importIntoEncryptedVault = vi.fn((_folder: string, onProgress?: typeof progress) => {
+    progress = onProgress!;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  void startVaultImport({ importIntoEncryptedVault } as any, "/home/me/photos");
+  render(<WorkspaceNavigation view={{ kind: "notes" }}
+    collectionType="game" width={208} onWidthChange={vi.fn()} onNavigate={vi.fn()}
+    assetNavigation={null} reviewCount={0} trashCount={0} privateVaultAvailable
+    renderManagement={(items) => <WorkStatusCenter characterAutomation={idleCharacterAutomation}
+      progress={null} managementItems={items} />} />);
+  act(() => progress({ processed: 7, total: 20, imported: 7, skipped: 0, failed: 0 }));
+
+  const rail = screen.getByRole("navigation", { name: "주요 영역" });
+  expect(within(rail).getByRole("button", { name: "비밀" })).toHaveAccessibleDescription("가져오는 중 7 / 20");
+  const trigger = within(rail).getByRole("button", { name: "라이브러리 관리" });
+  expect(trigger).toHaveAccessibleDescription("작업 센터 · 1개 진행 중");
+  await user.click(trigger);
+  expect(screen.getByRole("status", { name: "비밀 보관함 가져오기" })).toHaveTextContent("비밀 보관함 가져오기 · 가져오는 중 7 / 20");
+
+  await act(async () => finish({ total: 20, imported: 19, skipped: 0, failed: 1, withoutThumbnail: 0, legacyTitles: 0, legacyThumbnails: 0 }));
+  expect(within(rail).getByRole("button", { name: "비밀" })).not.toHaveAccessibleDescription();
+  expect(screen.getByRole("status", { name: "비밀 보관함 가져오기" })).toHaveTextContent("완료 · 가져옴 19개 · 실패 1개");
+  await user.click(screen.getByRole("button", { name: "닫기" }));
+  expect(screen.queryByRole("status", { name: "비밀 보관함 가져오기" })).not.toBeInTheDocument();
 });

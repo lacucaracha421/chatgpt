@@ -64,7 +64,8 @@ import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
 import { useCloudProblems } from "./useCloudProblems";
 import { useCollectionOpen } from "../statistics/useCollectionOpen";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
-import { useExternalVaultAvailability } from "../external-vault/useExternalVaultAvailability";
+import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
+import { reattachVaultImport } from "../external-vault/vaultImportJob";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
 
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
@@ -172,17 +173,20 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }, [entries]);
   const [sidebarWidth, setSidebarWidth] = useState(preferences.sidebarWidth);
   const [message, setMessage] = useState<string | null>(null);
-  const handlePrivateVaultDisconnect = useCallback(() => {
+  const handlePrivateVaultLeave = useCallback((reason: VaultLeaveReason) => {
     setView((current) => current.kind === "private_vault"
       ? { kind: "classification", classificationId: null }
       : current);
-    setMessage("비밀 보관함의 연결이 끊겼습니다.");
+    setMessage(reason === "locked" ? "비밀 보관함을 잠갔습니다." : "비밀 보관함의 연결이 끊겼습니다.");
   }, []);
-  const { status: privateVaultStatus, refresh: refreshPrivateVaultStatus } = useExternalVaultAvailability({
+  const { status: privateVaultStatus, refresh: refreshPrivateVaultStatus, update: updatePrivateVaultStatus } = useExternalVaultAvailability({
     gateway,
     view,
-    onDisconnect: handlePrivateVaultDisconnect,
+    onLeave: handlePrivateVaultLeave,
   });
+  // A vault import started before a webview reload keeps running in the backend; follow it.
+  useEffect(() => { void reattachVaultImport(gateway); }, [gateway]);
+  const privateVaultVisible = Boolean(privateVaultStatus && privateVaultStatus.state !== "absent" && gateway.listEncryptedVaultItems);
   const [assetRefresh, setAssetRefresh] = useState(0);
   const characterHub = useCharacterHub(assetRefresh);
   const [clearAssetSelectionRequest, setClearAssetSelectionRequest] = useState(0);
@@ -731,7 +735,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               cloudProblemCount={cloudProblems}
-              privateVaultAvailable={Boolean(privateVaultStatus?.available && gateway.listPrivateVaultAssets && gateway.scanPrivateVault)}
+              privateVaultAvailable={privateVaultVisible}
               renderManagement={(items) => <WorkStatusCenter managementItems={items} reviewCount={reviewCount} characterAutomation={characterAutomation} progress={dropState.progress}
                 similarityIndex={similarityIndex} browserStatus={browserStatus} dropEnabled={dropEnabled} />}
               assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets} characterGroups={characterHub.groups}
@@ -774,8 +778,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               <section className="library-content__browser" aria-label="자산 내용">
                 <Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "private_vault" ? (
-                  privateVaultStatus?.available && gateway.listPrivateVaultAssets && gateway.scanPrivateVault
-                    ? <ExternalVaultBrowser gateway={gateway} privacyMode={preferences.privacyMode} />
+                  privateVaultVisible && privateVaultStatus
+                    ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
+                        onContentChanged={() => void refreshPrivateVaultStatus()} privacyMode={preferences.privacyMode} />
                     : <DeferredViewFallback />
                 ) : view.kind === "notes" ? <NotesView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView

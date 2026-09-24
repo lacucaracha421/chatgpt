@@ -5,9 +5,9 @@ import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
-type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; thumbnailSrc?: string };
+type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; thumbnailSrc?: string; playbackSrc?: string };
 
-export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode = false, thumbnailSrc }: Props) {
+export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode = false, thumbnailSrc, playbackSrc }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
@@ -31,11 +31,11 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     if (!active || !playbackRequested || privacyMode) return;
     const video = videoRef.current;
     if (!video) return;
-    video.src = playbackUrl(asset.id);
+    video.src = playbackSrc ?? playbackUrl(asset.id);
     video.muted = true;
     void video.play().catch(() => undefined);
     return () => { video.pause(); video.removeAttribute("src"); video.load(); };
-  }, [active, asset.id, playbackRequested, privacyMode]);
+  }, [active, asset.id, playbackRequested, playbackSrc, privacyMode]);
   useEffect(() => {
     if (!active || privacyMode || asset.media.scrubFrameCount <= 1) {
       setHoverFrame(null);
@@ -129,7 +129,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     <img src={stillUrl} alt={alt} decoding="async" draggable={false} />
     {active && playbackRequested && <video
       ref={videoRef}
-      src={playbackUrl(asset.id)}
+      src={playbackSrc ?? playbackUrl(asset.id)}
       muted
       playsInline
       draggable={false}

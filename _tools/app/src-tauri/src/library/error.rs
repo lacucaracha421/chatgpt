@@ -531,12 +531,34 @@ pub enum LibraryError {
     VideoPreparationFailed,
     #[error("영상 처리 도구를 실행할 수 없습니다")]
     VideoToolUnavailable,
-    #[error("비밀 영상 재생을 위해 mpv를 설치해 주세요")]
-    MediaPlayerUnavailable,
-    #[error("비밀 영상 플레이어를 실행하지 못했습니다")]
-    MediaPlayerLaunchFailed,
-    #[error("비밀 영상 제목은 200자 이하여야 합니다")]
-    InvalidPrivateVaultTitle,
+    #[error("비밀번호 또는 복구 키가 맞지 않습니다")]
+    EncryptedVaultWrongSecret,
+    #[error("비밀 보관함이 잠겨 있습니다")]
+    EncryptedVaultLocked,
+    #[error("비밀 보관함을 찾을 수 없습니다")]
+    EncryptedVaultNotFound,
+    #[error("이 폴더에는 이미 비밀 보관함이 있습니다")]
+    EncryptedVaultAlreadyExists,
+    #[error("비밀번호를 입력해 주세요")]
+    EncryptedVaultEmptyPassword,
+    #[error("복구 키 형식이 올바르지 않습니다")]
+    EncryptedVaultInvalidRecoveryKey,
+    #[error("지원하지 않는 비밀 보관함 형식입니다")]
+    EncryptedVaultUnsupportedFormat,
+    #[error("비밀 보관함 데이터가 손상됐습니다")]
+    EncryptedVaultCorrupt,
+    #[error("비밀 보관함 파일을 읽거나 쓸 수 없습니다")]
+    EncryptedVaultIo,
+    #[error("암호화 처리에 실패했습니다")]
+    EncryptedVaultCrypto,
+    #[error("비밀 보관함은 메인 라이브러리 폴더 안이나 그 상위 폴더에 만들 수 없습니다")]
+    EncryptedVaultInvalidRoot,
+    #[error("선택한 폴더를 열 수 없습니다")]
+    EncryptedVaultFolderUnavailable,
+    #[error("이미 비밀 보관함으로 가져오는 중입니다")]
+    EncryptedVaultImportRunning,
+    #[error("제목은 200자 이하여야 합니다")]
+    InvalidEncryptedVaultTitle,
     #[error("라이브러리 파일을 쓸 수 없습니다: {path}")]
     WriteAsset {
         path: PathBuf,

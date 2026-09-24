@@ -77,14 +77,6 @@ pub(crate) fn probe_video(source: &Path, extension: &str) -> Result<VideoProbe, 
     ProcessVideoTool.probe(source, extension)
 }
 
-pub(crate) fn create_video_poster(
-    source: &Path,
-    seek_ms: u64,
-    destination: &Path,
-) -> Result<(), LibraryError> {
-    ProcessVideoTool.create_poster(source, seek_ms, destination)
-}
-
 fn ffmpeg_seek_seconds(seek_ms: u64) -> String {
     format!("{}.{:03}", seek_ms / 1_000, seek_ms % 1_000)
 }
@@ -525,54 +517,6 @@ fn install_prepared_directory(pending: &Path, final_directory: &Path) -> Result<
     Err(LibraryError::VideoPreparationFailed)
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct ExternalVideoPreparation {
-    pub(crate) probe: VideoProbe,
-    pub(crate) uses_proxy: bool,
-    pub(crate) scrub_frame_count: u32,
-}
-
-pub(crate) fn prepare_external_video(
-    source: &Path,
-    extension: &str,
-    destination: &Path,
-) -> Result<ExternalVideoPreparation, LibraryError> {
-    prepare_external_video_with(&ProcessVideoTool, source, extension, destination)
-}
-
-fn prepare_external_video_with<T: VideoTool>(
-    tool: &T,
-    source: &Path,
-    extension: &str,
-    destination: &Path,
-) -> Result<ExternalVideoPreparation, LibraryError> {
-    let probe = tool.probe(source, extension)?;
-    let parent = destination
-        .parent()
-        .ok_or(LibraryError::VideoPreparationFailed)?;
-    fs::create_dir_all(parent).map_err(|_| LibraryError::VideoPreparationFailed)?;
-    let pending = parent.join(format!(".pending-{}", uuid::Uuid::new_v4()));
-    fs::create_dir(&pending).map_err(|_| LibraryError::VideoPreparationFailed)?;
-    let result = (|| {
-        let poster = pending.join("poster.webp");
-        tool.create_poster(source, poster_seek_ms(probe.duration_ms), &poster)?;
-        require_non_empty_file(&poster)
-    })();
-    if let Err(error) = result {
-        let _ = fs::remove_dir_all(&pending);
-        return Err(error);
-    }
-    if destination.exists() {
-        fs::remove_dir_all(destination).map_err(|_| LibraryError::VideoPreparationFailed)?;
-    }
-    install_prepared_directory(&pending, destination)?;
-    Ok(ExternalVideoPreparation {
-        probe,
-        uses_proxy: false,
-        scrub_frame_count: 0,
-    })
-}
-
 fn safe_asset_id(asset_id: &str) -> bool {
     !asset_id.is_empty()
         && asset_id
@@ -941,7 +885,7 @@ mod tests {
 
     use super::{
         direct_playback, ffmpeg_seek_seconds, install_prepared_directory, parse_probe, poster_seek_ms,
-        prepare_external_video_with, scrub_timestamps_ms, VideoProbe, VideoTool,
+        scrub_timestamps_ms, VideoProbe, VideoTool,
     };
     use crate::library::{error::LibraryError, models::MediaSummary, Library};
 
@@ -1390,25 +1334,6 @@ mod tests {
 
         assert_eq!(progress.failed, 0);
         assert_eq!(tool.poster_seeks_ms.borrow().as_slice(), &[500]);
-    }
-
-    #[test]
-    fn external_video_preparation_writes_only_a_poster() {
-        let temp = tempfile::tempdir().unwrap();
-        let source = temp.path().join("source.mp4");
-        fs::write(&source, b"source").unwrap();
-        let destination = temp.path().join("derived");
-        let tool = FakeVideoTool::default();
-
-        let prepared = prepare_external_video_with(&tool, &source, "mp4", &destination).unwrap();
-
-        assert_eq!(prepared.probe.duration_ms, 2_000);
-        assert_eq!(prepared.scrub_frame_count, 0);
-        assert!(!prepared.uses_proxy);
-        assert_eq!(tool.proxy_calls.load(Ordering::SeqCst), 0);
-        assert!(destination.join("poster.webp").is_file());
-        assert!(!destination.join("scrub").exists());
-        assert!(!destination.join("playback.mp4").exists());
     }
 
     fn insert_pending_video(

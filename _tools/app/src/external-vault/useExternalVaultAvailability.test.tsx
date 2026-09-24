@@ -1,41 +1,75 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { AssetView, LibraryGateway, PrivateVaultStatus } from "../library/types";
-import { useExternalVaultAvailability } from "./useExternalVaultAvailability";
+import type { AssetView, EncryptedVaultStatus, LibraryGateway } from "../library/types";
+import { useExternalVaultAvailability, VAULT_STATUS_POLL_MS, type VaultLeaveReason } from "./useExternalVaultAvailability";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-const available: PrivateVaultStatus = {
-  registered: true, available: true, vaultId: "vault-1", root: "/vault", assetCount: 3, readOnly: false,
-};
-const unavailable: PrivateVaultStatus = { ...available, available: false, root: null };
+const unlocked: EncryptedVaultStatus = { state: "unlocked", vaultId: "vault-1", root: "/vault", itemCount: 3, remembered: true };
+const locked: EncryptedVaultStatus = { ...unlocked, state: "locked", itemCount: null };
+const absent: EncryptedVaultStatus = { state: "absent", vaultId: null, root: null, itemCount: null, remembered: false };
 
-function Harness({ gateway, view, onDisconnect }: {
-  gateway: Pick<LibraryGateway, "getPrivateVaultStatus">;
+function Harness({ gateway, view, onLeave }: {
+  gateway: Pick<LibraryGateway, "getEncryptedVaultStatus">;
   view: AssetView;
-  onDisconnect: () => void;
+  onLeave: (reason: VaultLeaveReason) => void;
 }) {
-  const { status } = useExternalVaultAvailability({ gateway, view, onDisconnect });
-  return <span>{status?.available ? "available" : status ? "unavailable" : "loading"}</span>;
+  const { status } = useExternalVaultAvailability({ gateway, view, onLeave });
+  return <span>{status?.state ?? "loading"}</span>;
 }
-it("loads status at startup and refreshes it when the window regains focus", async () => {
-  const getPrivateVaultStatus = vi.fn().mockResolvedValueOnce(available).mockResolvedValueOnce(unavailable);
-  render(<Harness gateway={{ getPrivateVaultStatus }} view={{ kind: "classification", classificationId: null }} onDisconnect={vi.fn()} />);
 
-  await waitFor(() => expect(screen.getByText("available")).toBeInTheDocument());
-  expect(getPrivateVaultStatus).toHaveBeenCalledTimes(1);
+it("loads status at startup and refreshes it on focus", async () => {
+  const getEncryptedVaultStatus = vi.fn().mockResolvedValueOnce(unlocked).mockResolvedValueOnce(absent);
+  render(<Harness gateway={{ getEncryptedVaultStatus }} view={{ kind: "classification", classificationId: null }} onLeave={vi.fn()} />);
+
+  await waitFor(() => expect(screen.getByText("unlocked")).toBeInTheDocument());
+  expect(getEncryptedVaultStatus).toHaveBeenCalledTimes(1);
 
   act(() => window.dispatchEvent(new Event("focus")));
-  await waitFor(() => expect(screen.getByText("unavailable")).toBeInTheDocument());
-  expect(getPrivateVaultStatus).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(screen.getByText("absent")).toBeInTheDocument());
+  expect(getEncryptedVaultStatus).toHaveBeenCalledTimes(2);
 });
 
-it("requests navigation away when an open secret view becomes unavailable", async () => {
-  const onDisconnect = vi.fn();
-  const getPrivateVaultStatus = vi.fn().mockResolvedValueOnce(available).mockResolvedValueOnce(unavailable);
-  render(<Harness gateway={{ getPrivateVaultStatus }} view={{ kind: "private_vault" }} onDisconnect={onDisconnect} />);
+it("polls while the window is visible so an inserted USB appears", async () => {
+  vi.useFakeTimers();
+  const getEncryptedVaultStatus = vi.fn().mockResolvedValueOnce(absent).mockResolvedValue(locked);
+  render(<Harness gateway={{ getEncryptedVaultStatus }} view={{ kind: "classification", classificationId: null }} onLeave={vi.fn()} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.getByText("absent")).toBeInTheDocument();
 
-  await waitFor(() => expect(screen.getByText("available")).toBeInTheDocument());
+  await act(async () => { await vi.advanceTimersByTimeAsync(VAULT_STATUS_POLL_MS); });
+  expect(screen.getByText("locked")).toBeInTheDocument();
+
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  try {
+    const calls = getEncryptedVaultStatus.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(VAULT_STATUS_POLL_MS * 3); });
+    expect(getEncryptedVaultStatus).toHaveBeenCalledTimes(calls);
+  } finally {
+    Reflect.deleteProperty(document, "visibilityState");
+  }
+});
+
+it("leaves an open secret view when the USB disappears", async () => {
+  const onLeave = vi.fn();
+  const getEncryptedVaultStatus = vi.fn().mockResolvedValueOnce(unlocked).mockResolvedValueOnce(absent);
+  render(<Harness gateway={{ getEncryptedVaultStatus }} view={{ kind: "private_vault" }} onLeave={onLeave} />);
+
+  await waitFor(() => expect(screen.getByText("unlocked")).toBeInTheDocument());
+  expect(onLeave).not.toHaveBeenCalled();
   act(() => window.dispatchEvent(new Event("focus")));
-  await waitFor(() => expect(onDisconnect).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(onLeave).toHaveBeenCalledWith("disconnected"));
+});
+
+it("leaves an open secret view when the vault is locked, but not when it starts locked", async () => {
+  const onLeave = vi.fn();
+  const getEncryptedVaultStatus = vi.fn().mockResolvedValueOnce(locked).mockResolvedValueOnce(unlocked).mockResolvedValueOnce(locked);
+  render(<Harness gateway={{ getEncryptedVaultStatus }} view={{ kind: "private_vault" }} onLeave={onLeave} />);
+
+  await waitFor(() => expect(screen.getByText("locked")).toBeInTheDocument());
+  act(() => window.dispatchEvent(new Event("focus")));
+  await waitFor(() => expect(screen.getByText("unlocked")).toBeInTheDocument());
+  expect(onLeave).not.toHaveBeenCalled();
+  act(() => window.dispatchEvent(new Event("focus")));
+  await waitFor(() => expect(onLeave).toHaveBeenCalledWith("locked"));
 });

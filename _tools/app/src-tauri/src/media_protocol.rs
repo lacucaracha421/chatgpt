@@ -14,6 +14,7 @@ use crate::library::{
     igdb::{IgdbClient, IgdbImageSize},
     mangadex,
     tmdb::{TmdbClient, TmdbImageSize},
+    external_vault::{EncryptedVaultMedia, EncryptedVaultMediaVariant},
     Library, MediaVariant, MAX_WORK_ARTWORK_BYTES,
 };
 
@@ -90,6 +91,9 @@ pub(crate) fn media_response_with_range(
     path: &str,
     range_header: Option<&str>,
 ) -> Response<Vec<u8>> {
+    if let Some((variant, item_id)) = parse_encrypted_vault_path(path) {
+        return encrypted_vault_response(library, method, &item_id, variant, range_header);
+    }
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
@@ -210,6 +214,23 @@ pub(crate) fn media_response_with_range(
             ) => empty_response(StatusCode::NOT_FOUND),
             Err(_) => empty_response(StatusCode::INTERNAL_SERVER_ERROR),
         };
+    }
+
+    // Encrypted Private Vault items share the asset/thumbnail/playback routes while the
+    // vault is unlocked. The lookup is in memory; an unknown id or a locked vault falls
+    // through to the main library.
+    let vault_variant = match variant {
+        MediaVariant::Asset => Some(EncryptedVaultMediaVariant::Asset),
+        MediaVariant::Thumbnail => Some(EncryptedVaultMediaVariant::Thumbnail),
+        MediaVariant::Playback => Some(EncryptedVaultMediaVariant::Playback),
+        _ => None,
+    };
+    if let Some(vault_variant) = vault_variant {
+        match library.encrypted_vault_media(&asset_id, vault_variant) {
+            Ok(media) => return encrypted_vault_media_response(media, range_header),
+            Err(LibraryError::AssetNotFound | LibraryError::EncryptedVaultLocked) => {}
+            Err(error) => return encrypted_vault_error_response(&error),
+        }
     }
 
     match library.resolve_media(&asset_id, variant) {
@@ -462,6 +483,107 @@ fn playback_response(
         .expect("validated range response is valid")
 }
 
+/// `/vault-asset/<id>`, `/vault-thumbnail/<id>[/v<n>]` and `/vault-playback/<id>`: routes
+/// that only ever serve the unlocked encrypted Private Vault and never touch the disk while
+/// it is locked.
+fn parse_encrypted_vault_path(path: &str) -> Option<(EncryptedVaultMediaVariant, String)> {
+    let mut segments = path.strip_prefix('/')?.split('/');
+    let variant = match segments.next()? {
+        "vault-asset" => EncryptedVaultMediaVariant::Asset,
+        "vault-thumbnail" => EncryptedVaultMediaVariant::Thumbnail,
+        "vault-playback" => EncryptedVaultMediaVariant::Playback,
+        _ => return None,
+    };
+    let item_id = segments.next()?.to_owned();
+    if variant == EncryptedVaultMediaVariant::Thumbnail {
+        if let Some(revision) = segments.next() {
+            let number = revision.strip_prefix('v')?;
+            if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+        }
+    }
+    (segments.next().is_none()).then_some((variant, item_id))
+}
+
+fn encrypted_vault_response(
+    library: Option<&Library>,
+    method: &Method,
+    item_id: &str,
+    variant: EncryptedVaultMediaVariant,
+    range_header: Option<&str>,
+) -> Response<Vec<u8>> {
+    if method != Method::GET {
+        return no_store(empty_response(StatusCode::METHOD_NOT_ALLOWED));
+    }
+    if uuid::Uuid::parse_str(item_id).is_err() {
+        return no_store(empty_response(StatusCode::BAD_REQUEST));
+    }
+    let Some(library) = library else {
+        return no_store(empty_response(StatusCode::NOT_FOUND));
+    };
+    match library.encrypted_vault_media(item_id, variant) {
+        Ok(media) => encrypted_vault_media_response(media, range_header),
+        Err(error) => encrypted_vault_error_response(&error),
+    }
+}
+
+fn encrypted_vault_error_response(error: &LibraryError) -> Response<Vec<u8>> {
+    no_store(empty_response(match error {
+        LibraryError::EncryptedVaultLocked => StatusCode::LOCKED,
+        LibraryError::AssetNotFound => StatusCode::NOT_FOUND,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }))
+}
+
+/// Decrypts only what the response needs. Videos (and any request carrying a Range header)
+/// use the same range rules as main-library playback, including the chunk limit.
+fn encrypted_vault_media_response(
+    mut media: EncryptedVaultMedia,
+    range_header: Option<&str>,
+) -> Response<Vec<u8>> {
+    let total = media.len();
+    if range_header.is_none() && !media.video {
+        return match media.read_range(0, total) {
+            Ok(bytes) if bytes.len() as u64 == total => no_store(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_TYPE, media.mime)
+                    .header(CONTENT_LENGTH, total.to_string())
+                    .body(bytes)
+                    .expect("vault media response is valid"),
+            ),
+            _ => no_store(empty_response(StatusCode::INTERNAL_SERVER_ERROR)),
+        };
+    }
+    let Some((start, end)) = range_header.and_then(|value| parse_range(value, total)) else {
+        return no_store(range_not_satisfiable(total));
+    };
+    let end = end.min(start.saturating_add(PLAYBACK_CHUNK_LIMIT - 1));
+    let length = end - start + 1;
+    match media.read_range(start, length) {
+        Ok(bytes) if bytes.len() as u64 == length => no_store(
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(CONTENT_TYPE, media.mime)
+                .header(ACCEPT_RANGES, "bytes")
+                .header(CONTENT_LENGTH, length.to_string())
+                .header(CONTENT_RANGE, format!("bytes {start}-{end}/{total}"))
+                .body(bytes)
+                .expect("vault range response is valid"),
+        ),
+        _ => no_store(empty_response(StatusCode::INTERNAL_SERVER_ERROR)),
+    }
+}
+
+fn no_store(mut response: Response<Vec<u8>>) -> Response<Vec<u8>> {
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        tauri::http::HeaderValue::from_static("no-store"),
+    );
+    response
+}
+
 pub(crate) fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
     if total == 0 || value.contains(',') {
         return None;
@@ -631,7 +753,6 @@ mod tests {
     const SERIES_ID: &str = "00000000-0000-4000-8000-000000000005";
     const COLLECTION_ID: &str = "00000000-0000-4000-8000-000000000006";
     const ARTWORK_ID: &str = "00000000-0000-4000-8000-000000000007";
-    const VAULT_VIDEO_ID: &str = "00000000-0000-4000-8000-000000000008";
 
     #[test]
     fn remote_manga_routes_accept_only_closed_numeric_paths() {
@@ -1152,52 +1273,6 @@ mod tests {
     }
 
     #[test]
-    fn external_vault_media_falls_back_through_standard_media_routes() {
-        let (_temp, library, _vault_id) = private_vault_media_library();
-
-        let image = media_response(Some(&library), &Method::GET, &format!("/asset/{ASSET_ID}"));
-        assert_eq!(image.status(), StatusCode::OK);
-        assert_eq!(image.headers()[CONTENT_TYPE], "image/png");
-        assert_eq!(image.body(), b"vault-image");
-
-        let thumbnail = media_response(
-            Some(&library),
-            &Method::GET,
-            &format!("/thumbnail/{ASSET_ID}"),
-        );
-        assert_eq!(thumbnail.status(), StatusCode::OK);
-        assert_eq!(thumbnail.headers()[CONTENT_TYPE], "image/webp");
-        assert_eq!(thumbnail.body(), b"vault-thumbnail");
-
-        let playback = media_response_with_range(
-            Some(&library),
-            &Method::GET,
-            &format!("/playback/{VAULT_VIDEO_ID}"),
-            Some("bytes=10-19"),
-        );
-        assert_eq!(playback.status(), StatusCode::PARTIAL_CONTENT);
-        assert_eq!(playback.headers()[CONTENT_RANGE], "bytes 10-19/36");
-        assert_eq!(playback.body(), b"abcdefghij");
-    }
-
-    #[test]
-    fn external_vault_fallback_rejects_unsafe_index_paths() {
-        let (temp, library, _vault_id) = private_vault_media_library();
-        std::fs::write(temp.path().join("outside.png"), b"outside").unwrap();
-        let db = rusqlite::Connection::open(temp.path().join("vault/.lakomics/index.sqlite")).unwrap();
-        db.execute(
-            "UPDATE vault_assets SET relative_path='../outside.png' WHERE id=?1",
-            [ASSET_ID],
-        )
-        .unwrap();
-
-        assert_eq!(
-            media_response(Some(&library), &Method::GET, &format!("/asset/{ASSET_ID}")).status(),
-            StatusCode::NOT_FOUND,
-        );
-    }
-
-    #[test]
     fn manga_page_route_rejects_out_of_range_page() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path().join("library")).unwrap();
@@ -1282,33 +1357,6 @@ mod tests {
     fn manga_routes_are_hidden_when_no_library_is_open() {
         let response = media_response(None, &Method::GET, &format!("/manga-cover/{SERIES_ID}"));
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    fn private_vault_media_library() -> (tempfile::TempDir, Library, String) {
-        let temp = tempfile::tempdir().unwrap();
-        let library = Library::open(temp.path().join("library")).unwrap();
-        let vault = temp.path().join("vault");
-        std::fs::create_dir(&vault).unwrap();
-        let status = library.register_private_vault(&vault).unwrap();
-        let vault_id = status.vault_id.unwrap();
-        std::fs::create_dir_all(vault.join("media")).unwrap();
-        std::fs::create_dir_all(vault.join(".lakomics/thumbnails")).unwrap();
-        std::fs::create_dir_all(vault.join(format!(".lakomics/media/{VAULT_VIDEO_ID}/scrub"))).unwrap();
-        std::fs::write(vault.join("media/image.png"), b"vault-image").unwrap();
-        std::fs::write(vault.join(".lakomics/thumbnails/image.webp"), b"vault-thumbnail").unwrap();
-        std::fs::write(vault.join("media/clip.mp4"), b"0123456789abcdefghijklmnopqrstuvwxyz").unwrap();
-        std::fs::write(vault.join(format!(".lakomics/media/{VAULT_VIDEO_ID}/poster.webp")), b"vault-poster").unwrap();
-        std::fs::write(vault.join(format!(".lakomics/media/{VAULT_VIDEO_ID}/scrub/000.webp")), b"vault-scrub").unwrap();
-        let db = rusqlite::Connection::open(vault.join(".lakomics/index.sqlite")).unwrap();
-        db.execute(
-            "INSERT INTO vault_assets(id,relative_path,media_kind,original_name,byte_size,modified_ns,modified_at,width,height,thumbnail_relative_path,scrub_frame_count) VALUES(?1,'media/image.png','image','image.png',11,1,'2026-09-13T00:00:00Z',8,6,'thumbnails/image.webp',0)",
-            [ASSET_ID],
-        ).unwrap();
-        db.execute(
-            "INSERT INTO vault_assets(id,relative_path,media_kind,original_name,byte_size,modified_ns,modified_at,width,height,duration_ms,container,video_codec,audio_codec,thumbnail_relative_path,playback_relative_path,scrub_relative_dir,scrub_frame_count) VALUES(?1,'media/clip.mp4','video','clip.mp4',36,2,'2026-09-13T00:00:01Z',1280,720,5000,'mp4','h264','aac',?2,NULL,?3,1)",
-            rusqlite::params![VAULT_VIDEO_ID, format!("media/{VAULT_VIDEO_ID}/poster.webp"), format!("media/{VAULT_VIDEO_ID}/scrub")],
-        ).unwrap();
-        (temp, library, vault_id)
     }
 
     fn write_test_png(path: &std::path::Path) {
@@ -1430,5 +1478,191 @@ mod permit_tests {
         *release.0.lock().unwrap() = true; release.1.notify_all();
         for job in jobs { let _ = job.join().unwrap(); }
         assert_eq!(*super::lock_media_active(),0);
+    }
+}
+
+#[cfg(test)]
+mod encrypted_vault_tests {
+    use tauri::http::{
+        header::{CACHE_CONTROL, CONTENT_RANGE, CONTENT_TYPE},
+        Method, Response, StatusCode,
+    };
+
+    use super::{media_response, media_response_with_range, parse_encrypted_vault_path};
+    use crate::library::{
+        models::{EncryptedVaultItemKind, EncryptedVaultQuery},
+        Library,
+    };
+
+    struct Fixture {
+        _temp: tempfile::TempDir,
+        library: Library,
+        image_id: String,
+        video_id: String,
+        image: Vec<u8>,
+        video: Vec<u8>,
+    }
+
+    fn fixture() -> Fixture {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let vault = temp.path().join("vault");
+        let source = temp.path().join("source");
+        std::fs::create_dir(&vault).unwrap();
+        std::fs::create_dir(&source).unwrap();
+        image::RgbImage::from_pixel(12, 8, image::Rgb([1, 2, 3]))
+            .save(source.join("picture.png"))
+            .unwrap();
+        let video = (0..200_000_u32).map(|value| (value % 253) as u8).collect::<Vec<_>>();
+        std::fs::write(source.join("clip.mp4"), &video).unwrap();
+        library
+            .create_encrypted_vault(&vault, "correct horse", false)
+            .unwrap();
+        library
+            .import_into_encrypted_vault(&source, &mut |_| {})
+            .unwrap();
+        let id_of = |kind| {
+            library
+                .list_encrypted_vault_items(EncryptedVaultQuery {
+                    kind: Some(kind),
+                    offset: 0,
+                    limit: 1,
+                })
+                .unwrap()
+                .items[0]
+                .id
+                .clone()
+        };
+        let image_id = id_of(EncryptedVaultItemKind::Image);
+        let video_id = id_of(EncryptedVaultItemKind::Video);
+        Fixture {
+            image: std::fs::read(source.join("picture.png")).unwrap(),
+            _temp: temp,
+            library,
+            image_id,
+            video_id,
+            video,
+        }
+    }
+
+    fn get(library: &Library, path: &str, range: Option<&str>) -> Response<Vec<u8>> {
+        let response = media_response_with_range(Some(library), &Method::GET, path, range);
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL).and_then(|value| value.to_str().ok()),
+            Some("no-store"),
+            "{path} {range:?} -> {}",
+            response.status()
+        );
+        response
+    }
+
+    #[test]
+    fn vault_routes_parse_only_closed_paths() {
+        let id = "00000000-0000-4000-8000-000000000009";
+        assert!(parse_encrypted_vault_path(&format!("/vault-asset/{id}")).is_some());
+        assert!(parse_encrypted_vault_path(&format!("/vault-thumbnail/{id}/v3")).is_some());
+        assert!(parse_encrypted_vault_path(&format!("/vault-playback/{id}")).is_some());
+        for path in [
+            format!("/vault-asset/{id}/extra"),
+            format!("/vault-thumbnail/{id}/x3"),
+            format!("/vault-playback/{id}/1"),
+            format!("/vault-other/{id}"),
+        ] {
+            assert!(parse_encrypted_vault_path(&path).is_none(), "{path}");
+        }
+    }
+
+    #[test]
+    fn serves_decrypted_media_with_ranges_and_no_store() {
+        let fixture = fixture();
+        let library = &fixture.library;
+        let image = get(library, &format!("/vault-asset/{}", fixture.image_id), None);
+        assert_eq!(image.status(), StatusCode::OK);
+        assert_eq!(image.headers()[CONTENT_TYPE], "image/png");
+        assert_eq!(image.body(), &fixture.image);
+
+        let thumbnail = get(library, &format!("/vault-thumbnail/{}/v2", fixture.image_id), None);
+        assert_eq!(thumbnail.status(), StatusCode::OK);
+        assert_eq!(thumbnail.headers()[CONTENT_TYPE], "image/webp");
+        assert!(image::load_from_memory(thumbnail.body()).is_ok());
+        let poster = get(library, &format!("/vault-thumbnail/{}", fixture.video_id), None);
+        assert_eq!(poster.status(), StatusCode::OK);
+
+        let playback = format!("/vault-playback/{}", fixture.video_id);
+        let middle = get(library, &playback, Some("bytes=70000-140000"));
+        assert_eq!(middle.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(middle.headers()[CONTENT_TYPE], "video/mp4");
+        assert_eq!(middle.headers()[CONTENT_RANGE], "bytes 70000-140000/200000");
+        assert_eq!(middle.body(), &fixture.video[70_000..=140_000]);
+        let suffix = get(library, &playback, Some("bytes=-10"));
+        assert_eq!(suffix.body(), &fixture.video[199_990..]);
+        let open = get(library, &playback, Some("bytes=0-"));
+        assert_eq!(open.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(open.body(), &fixture.video);
+        assert_eq!(
+            get(library, &playback, None).status(),
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+        assert_eq!(
+            get(library, &playback, Some("bytes=200000-")).status(),
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+        let image_range = get(
+            library,
+            &format!("/vault-asset/{}", fixture.image_id),
+            Some("bytes=1-3"),
+        );
+        assert_eq!(image_range.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(image_range.body(), &fixture.image[1..=3]);
+
+        // The shared routes serve vault items from memory while the vault is unlocked.
+        let shared = get(library, &format!("/asset/{}", fixture.image_id), None);
+        assert_eq!(shared.body(), &fixture.image);
+        let shared_playback = get(
+            library,
+            &format!("/playback/{}", fixture.video_id),
+            Some("bytes=0-99"),
+        );
+        assert_eq!(shared_playback.body(), &fixture.video[..100]);
+
+        assert_eq!(
+            get(library, &format!("/vault-playback/{}", fixture.image_id), Some("bytes=0-1")).status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            get(library, "/vault-asset/00000000-0000-4000-8000-000000000009", None).status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            get(library, "/vault-asset/not-a-uuid", None).status(),
+            StatusCode::BAD_REQUEST
+        );
+        let post = super::media_response_with_range(
+            Some(library),
+            &Method::POST,
+            &format!("/vault-asset/{}", fixture.image_id),
+            None,
+        );
+        assert_eq!(post.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(post.headers()[CACHE_CONTROL], "no-store");
+    }
+
+    #[test]
+    fn locked_vault_refuses_media() {
+        let fixture = fixture();
+        let library = &fixture.library;
+        library.lock_encrypted_vault();
+        for path in [
+            format!("/vault-asset/{}", fixture.image_id),
+            format!("/vault-thumbnail/{}", fixture.image_id),
+            format!("/vault-playback/{}", fixture.video_id),
+        ] {
+            let response = get(library, &path, Some("bytes=0-9"));
+            assert_eq!(response.status(), StatusCode::LOCKED, "{path}");
+            assert!(response.body().is_empty());
+        }
+        let shared = media_response(Some(library), &Method::GET, &format!("/asset/{}", fixture.image_id));
+        assert_eq!(shared.status(), StatusCode::NOT_FOUND);
+        assert!(shared.body().is_empty());
     }
 }

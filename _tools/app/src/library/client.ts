@@ -52,11 +52,14 @@ import type {
   MetadataBackup,
   MetadataImportPlan,
   PurgeSummary,
-  PrivateVaultAssetPage,
-  PrivateVaultQuery,
-  PrivateVaultScanReport,
-  PrivateVaultStatus,
-  PrivateVaultThumbnailCandidate,
+  CreatedEncryptedVault,
+  EncryptedVaultImportJob,
+  EncryptedVaultImportProgress,
+  EncryptedVaultImportReport,
+  EncryptedVaultItemPage,
+  EncryptedVaultSidecarCleanupPreview,
+  EncryptedVaultSidecarCleanupResult,
+  EncryptedVaultStatus,
   ImageSimilarityScan,
   SimilarityIndexProgress,
   SimilarityReviewPage,
@@ -471,24 +474,27 @@ export const libraryGateway: LibraryGateway = {
     invoke<string[]>("get_asset_collections", { assetId }),
   patchAssetCollections: (patch: AssetCollectionPatch) =>
     invoke<void>("patch_asset_collections", { patch }),
-  getPrivateVaultStatus: () => invoke<PrivateVaultStatus>("get_private_vault_status"),
-  registerPrivateVault: (root) => invoke<PrivateVaultStatus>("register_private_vault", { root }),
-  unregisterPrivateVault: () => invoke<void>("unregister_private_vault"),
-  scanPrivateVault: () => invoke<PrivateVaultScanReport>("scan_private_vault"),
-  listPrivateVaultAssets: (query: PrivateVaultQuery) =>
-    invoke<PrivateVaultAssetPage>("list_private_vault_assets", { query }),
-  playPrivateVaultVideo: (assetId) =>
-    invoke<void>("play_private_vault_video", { assetId }),
-  setPrivateVaultTitle: (assetId, title) =>
-    invoke<void>("set_private_vault_title", { assetId, title }),
-  listPrivateVaultThumbnailCandidates: (assetId) =>
-    invoke<PrivateVaultThumbnailCandidate[]>("list_private_vault_thumbnail_candidates", { assetId }),
-  setPrivateVaultThumbnailFromFile: (assetId, sourcePath) =>
-    invoke<void>("set_private_vault_thumbnail_from_file", { assetId, sourcePath }),
-  setPrivateVaultThumbnailFromFrame: (assetId, timestampMs) =>
-    invoke<void>("set_private_vault_thumbnail_from_frame", { assetId, timestampMs }),
-  resetPrivateVaultThumbnail: (assetId) =>
-    invoke<void>("reset_private_vault_thumbnail", { assetId }),
+  getEncryptedVaultStatus: () => invoke<EncryptedVaultStatus>("encrypted_vault_status"),
+  createEncryptedVault: (root, password, remember) =>
+    invoke<CreatedEncryptedVault>("create_encrypted_vault", { root, password, remember }),
+  unlockEncryptedVault: (secret, remember) =>
+    invoke<EncryptedVaultStatus>("unlock_encrypted_vault", { secret, remember }),
+  lockEncryptedVault: () => invoke<EncryptedVaultStatus>("lock_encrypted_vault"),
+  forgetEncryptedVaultKey: () => invoke<EncryptedVaultStatus>("forget_encrypted_vault_key"),
+  changeEncryptedVaultPassword: (current, newPassword) =>
+    invoke<void>("change_encrypted_vault_password", { current, newPassword }),
+  importIntoEncryptedVault: (sourceFolder, onProgress) => {
+    const channel = new Channel<EncryptedVaultImportProgress>();
+    channel.onmessage = (progress) => onProgress?.(progress);
+    return invoke<EncryptedVaultImportReport>("import_into_encrypted_vault", { sourceFolder, onProgress: channel });
+  },
+  getEncryptedVaultImportStatus: () => invoke<EncryptedVaultImportJob | null>("encrypted_vault_import_status"),
+  listEncryptedVaultItems: (query) => invoke<EncryptedVaultItemPage>("list_encrypted_vault_items", { query }),
+  setEncryptedVaultTitle: (itemId, title) => invoke<void>("set_encrypted_vault_title", { itemId, title }),
+  previewEncryptedVaultSidecarCleanup: () =>
+    invoke<EncryptedVaultSidecarCleanupPreview>("preview_encrypted_vault_sidecar_cleanup"),
+  applyEncryptedVaultSidecarCleanup: () =>
+    invoke<EncryptedVaultSidecarCleanupResult>("apply_encrypted_vault_sidecar_cleanup"),
   getMangaRoot: () => invoke<string | null>("get_manga_root"),
   getOtherMachineMangaRoot: () => invoke<string | null>("get_other_machine_manga_root"),
   setMangaRoot: (path) => invoke("set_manga_root", { path }),

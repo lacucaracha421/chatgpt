@@ -255,6 +255,8 @@ pub struct Library {
     // Machine-local settings file (app config dir) for per-computer values such as
     // the manga root. None keeps the legacy shared-database behaviour (tests, tools).
     machine_settings_path: Arc<RwLock<Option<PathBuf>>>,
+    // Encrypted Private Vault (ADR-0039): lock state, decrypted index and write serialization.
+    encrypted_vault: Arc<external_vault::EncryptedVaultRuntime>,
 }
 
 /// The durable library identity read through a connection the caller already holds.
@@ -343,6 +345,7 @@ impl Library {
             igdb_token_cache: igdb::IgdbTokenCache::default(),
             igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
             machine_settings_path: Arc::default(),
+            encrypted_vault: Arc::default(),
         };
         library.backfill_legacy_collection_kinds()?;
         library.normalize_showcase_orders()?;
@@ -689,18 +692,10 @@ impl Library {
                 unreachable!()
             }
         };
-        if let Some(relative_path) = relative_path {
-            return self.open_library_media(&relative_path);
+        match relative_path {
+            Some(relative_path) => self.open_library_media(&relative_path),
+            None => Err(LibraryError::AssetNotFound),
         }
-        let external_variant = match variant {
-            MediaVariant::Asset => external_vault::PrivateVaultMediaVariant::Asset,
-            MediaVariant::Thumbnail => external_vault::PrivateVaultMediaVariant::Thumbnail,
-            MediaVariant::Playback => external_vault::PrivateVaultMediaVariant::Playback,
-            _ => return Err(LibraryError::AssetNotFound),
-        };
-        let status = self.private_vault_status()?;
-        let vault_id = status.vault_id.ok_or(LibraryError::AssetNotFound)?;
-        self.resolve_private_vault_media(&vault_id, asset_id, external_variant)
     }
 
     pub(crate) fn open_library_media(

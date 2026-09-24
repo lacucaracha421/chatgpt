@@ -7,9 +7,9 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { StableImage } from "../shared/ui/StableImage";
 import { VideoPlayer } from "../video/VideoPlayer";
-import { assetUrl } from "./mediaUrl";
+import { assetUrl, vaultAssetUrl } from "./mediaUrl";
 
-export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAssetOpened, onToggleFavorite, onTrash, privacyMode = false }: { items: AssetSummary[]; activeId: string | null; onActiveIdChange: (id: string) => void; onClose: () => void; onAssetOpened?: (asset: AssetSummary) => void | Promise<void>; onToggleFavorite?: (asset: AssetSummary) => void; onTrash?: (asset: AssetSummary) => void; privacyMode?: boolean }) {
+export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAssetOpened, onToggleFavorite, onTrash, privacyMode = false, mediaSource = "library" }: { items: AssetSummary[]; activeId: string | null; onActiveIdChange: (id: string) => void; onClose: () => void; onAssetOpened?: (asset: AssetSummary) => void | Promise<void>; onToggleFavorite?: (asset: AssetSummary) => void; onTrash?: (asset: AssetSummary) => void; privacyMode?: boolean; /** `vault`: encrypted Private Vault item routes. */ mediaSource?: "library" | "vault" }) {
   const index = items.findIndex((item) => item.id === activeId);
   const asset = items[index];
   const [imageFailed, setImageFailed] = useState(false);
@@ -64,10 +64,10 @@ export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAsse
       {privacyMode
         ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" />
         : asset.media.kind === "video"
-          ? <VideoPlayer key={asset.id} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
+          ? <VideoPlayer key={asset.id} source={mediaSource} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
           : imageFailed
             ? <EmptyState title="이미지를 불러오지 못했습니다">다른 자산으로 이동하면 자동으로 다시 시도합니다.</EmptyState>
-            : <StableImage className="asset-viewer__media" src={assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setImageFailed(true)} />}
+            : <StableImage className="asset-viewer__media" src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setImageFailed(true)} />}
     </div>
   </Dialog>;
 }

@@ -130,8 +130,11 @@ fn identity_is_independent_from_mutable_settings() {
     let elsewhere = tempfile::tempdir().unwrap();
     let vault = elsewhere.path().join("vault");
     fs::create_dir_all(&vault).unwrap();
-    library.register_private_vault(&vault).unwrap();
-    library.unregister_private_vault().unwrap();
+    // Creating a Private Vault writes the vault id and root into the settings row.
+    library
+        .create_encrypted_vault(&vault, "correct horse", false)
+        .unwrap();
+    library.lock_encrypted_vault();
     assert_eq!(library.library_id().unwrap(), identity);
 }
 

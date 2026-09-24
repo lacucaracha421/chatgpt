@@ -99,6 +99,8 @@ pub fn run() {
                 {
                     library.stop_character_scan();
                     library.stop_video_similarity_scan();
+                    // ADR-0039: drop the Private Vault key on app exit.
+                    library.lock_encrypted_vault();
                 }
                 window.app_handle().exit(0);
             }
@@ -135,6 +137,7 @@ pub fn run() {
             commands::open_library,
             commands::get_extension_connection,
             commands::get_internal_playback_url,
+            commands::get_internal_vault_playback_url,
             commands::inspect_metadata_import,
             commands::ensure_daily_backup,
             commands::list_metadata_backups,
@@ -398,17 +401,18 @@ pub fn run() {
             commands::import_book_collections,
             commands::inspect_legacy_package_migration,
             commands::execute_legacy_package_migration,
-            commands::get_private_vault_status,
-            commands::register_private_vault,
-            commands::unregister_private_vault,
-            commands::scan_private_vault,
-            commands::list_private_vault_assets,
-            commands::play_private_vault_video,
-            commands::set_private_vault_title,
-            commands::list_private_vault_thumbnail_candidates,
-            commands::set_private_vault_thumbnail_from_file,
-            commands::set_private_vault_thumbnail_from_frame,
-            commands::reset_private_vault_thumbnail,
+            commands::encrypted_vault_status,
+            commands::create_encrypted_vault,
+            commands::unlock_encrypted_vault,
+            commands::lock_encrypted_vault,
+            commands::forget_encrypted_vault_key,
+            commands::change_encrypted_vault_password,
+            commands::import_into_encrypted_vault,
+            commands::encrypted_vault_import_status,
+            commands::list_encrypted_vault_items,
+            commands::set_encrypted_vault_title,
+            commands::preview_encrypted_vault_sidecar_cleanup,
+            commands::apply_encrypted_vault_sidecar_cleanup,
             commands::get_collection_source_root,
             commands::set_collection_source_root,
             commands::list_collection_covers,

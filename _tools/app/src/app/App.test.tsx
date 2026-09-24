@@ -256,23 +256,26 @@ describe("App", () => {
     window.removeEventListener("lakomics-catalog-bookmarks-changed", changed);
   });
 
-  it("shows Secret only while the registered external vault is available", async () => {
+  it("shows Secret while the encrypted vault USB is present and leaves when it disappears", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
-    const available = { registered: true, available: true, vaultId: "vault-1", root: "/vault", assetCount: 0, readOnly: false };
-    libraryGateway.getPrivateVaultStatus = vi.fn().mockResolvedValueOnce(available).mockResolvedValueOnce({ ...available, available: false, root: null });
-    libraryGateway.listPrivateVaultAssets = vi.fn().mockResolvedValue({ items: [], totalCount: 0, nextOffset: null });
-    libraryGateway.scanPrivateVault = vi.fn().mockResolvedValue({ scanned: 0, added: 0, updated: 0, unchanged: 0, removed: 0, failed: 0 });
+    const locked = { state: "locked" as const, vaultId: "vault-1", root: "/vault", itemCount: null, remembered: false };
+    libraryGateway.getEncryptedVaultStatus = vi.fn().mockResolvedValueOnce(locked).mockResolvedValueOnce({ ...locked, state: "absent", vaultId: null, root: null });
+    libraryGateway.listEncryptedVaultItems = vi.fn().mockResolvedValue({ items: [], totalCount: 0, nextOffset: null });
+    libraryGateway.unlockEncryptedVault = vi.fn();
 
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
 
     const secret = await screen.findByRole("button", { name: "비밀" });
     await userEvent.click(secret);
-    expect(await screen.findByRole("region", { name: "비밀" })).toBeVisible();
+    const view = await screen.findByRole("region", { name: "비밀" });
+    expect(within(view).getByLabelText("비밀번호")).toBeVisible();
+    expect(libraryGateway.listEncryptedVaultItems).not.toHaveBeenCalled();
 
     act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() => expect(screen.queryByRole("button", { name: "비밀" })).not.toBeInTheDocument());
     await waitFor(() => expect(screen.queryByRole("region", { name: "비밀" })).not.toBeInTheDocument());
+    expect(await screen.findByText("비밀 보관함의 연결이 끊겼습니다.")).toBeVisible();
   });
 
   it("remounts and reloads the workspace after switching library roots", async () => {

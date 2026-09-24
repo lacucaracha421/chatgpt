@@ -1,24 +1,84 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AssetGallery } from "../assets/AssetGallery";
 import { AssetViewer } from "../assets/AssetViewer";
-import { thumbnailUrl } from "../assets/mediaUrl";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AssetSummary, LibraryGateway, PrivateVaultAssetSummary, PrivateVaultThumbnailCandidate } from "../library/types";
+import type {
+  AssetSummary, EncryptedVaultImportReport, EncryptedVaultItem,
+  EncryptedVaultItemKind, EncryptedVaultStatus, LibraryGateway,
+} from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { TextField } from "../shared/ui/TextField";
+import { vaultErrorMessage } from "./vaultErrors";
+import { dismissVaultImport, reattachVaultImport, startVaultImport, useVaultImportJob, vaultImportProgressText } from "./vaultImportJob";
 import "./externalVault.css";
 
-type Filter = "all" | "images" | "videos";
+type Filter = "all" | EncryptedVaultItemKind;
 const PAGE_SIZE = 80;
-const AUTO_SYNC_MS = 2_000;
+/** While an import runs, the first page refreshes at most this often. */
+const LIVE_REFRESH_MS = 2_000;
 
-export function ExternalVaultBrowser({ gateway, privacyMode = false }: { gateway: LibraryGateway; privacyMode?: boolean }) {
-  const listAssets = gateway.listPrivateVaultAssets!;
-  const scanVault = gateway.scanPrivateVault!;
-  const playVideo = gateway.playPrivateVaultVideo!;
+type Props = {
+  gateway: LibraryGateway;
+  status: EncryptedVaultStatus;
+  onStatusChange: (status: EncryptedVaultStatus) => void;
+  onContentChanged?: () => void;
+  privacyMode?: boolean;
+};
+
+/** The 비밀 view: an unlock panel while locked, the encrypted gallery while unlocked. */
+export function ExternalVaultBrowser({ gateway, status, onStatusChange, onContentChanged, privacyMode = false }: Props) {
+  return status.state === "unlocked"
+    ? <VaultGallery gateway={gateway} onStatusChange={onStatusChange} onContentChanged={onContentChanged} privacyMode={privacyMode} />
+    : <VaultUnlockPanel gateway={gateway} remembered={status.remembered} onStatusChange={onStatusChange} />;
+}
+
+function VaultUnlockPanel({ gateway, remembered, onStatusChange }: { gateway: LibraryGateway; remembered: boolean; onStatusChange: (status: EncryptedVaultStatus) => void }) {
+  const [kind, setKind] = useState<"password" | "recoveryKey">("password");
+  const [value, setValue] = useState("");
+  const [remember, setRemember] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function unlock(event: FormEvent) {
+    event.preventDefault();
+    if (busy || !value || !gateway.unlockEncryptedVault) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await gateway.unlockEncryptedVault({ kind, value: kind === "recoveryKey" ? value.trim() : value }, remember);
+      setValue("");
+      onStatusChange(next);
+    } catch (cause) {
+      setError(vaultErrorMessage(cause, kind, "비밀 보관함을 열지 못했습니다."));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const recovery = kind === "recoveryKey";
+  return <section className="external-vault-unlock" aria-label="비밀">
+    <form className="external-vault-unlock__form" onSubmit={(event) => void unlock(event)}>
+      <h2>비밀 보관함이 잠겨 있습니다</h2>
+      <p>{recovery ? "보관함을 만들 때 받은 64자리 복구키를 입력하세요." : remembered ? "이 PC에 기억한 키로 열지 못했습니다. 비밀번호를 입력하세요." : "비밀번호를 입력하면 보관함을 엽니다."}</p>
+      <TextField key={kind} autoFocus type={recovery ? "text" : "password"} label={recovery ? "복구키" : "비밀번호"}
+        autoComplete="off" spellCheck={false} value={value} onChange={(event) => setValue(event.target.value)} />
+      <label className="external-vault-check">
+        <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />이 PC에서 기억
+      </label>
+      {error && <p className="external-vault-message external-vault-message--error" role="alert">{error}</p>}
+      <div className="external-vault-actions">
+        <Button type="submit" variant="primary" disabled={busy || !value}>{busy ? "여는 중…" : "열기"}</Button>
+        <Button type="button" variant="ghost" disabled={busy} onClick={() => { setKind(recovery ? "password" : "recoveryKey"); setValue(""); setError(null); }}>
+          {recovery ? "비밀번호로 열기" : "복구키로 열기"}
+        </Button>
+      </div>
+    </form>
+  </section>;
+}
+
+function VaultGallery({ gateway, onStatusChange, onContentChanged, privacyMode }: { gateway: LibraryGateway; onStatusChange: (status: EncryptedVaultStatus) => void; onContentChanged?: () => void; privacyMode: boolean }) {
+  const listItems = gateway.listEncryptedVaultItems!;
   const [filter, setFilter] = useState<Filter>("all");
   const [items, setItems] = useState<AssetSummary[]>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
@@ -26,17 +86,18 @@ export function ExternalVaultBrowser({ gateway, privacyMode = false }: { gateway
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [titleEditorOpen, setTitleEditorOpen] = useState(false);
-  const [thumbnailEditorOpen, setThumbnailEditorOpen] = useState(false);
-  const [thumbnailRevision, setThumbnailRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const autoSyncBusyRef = useRef(false);
-  const queryKind = filter === "all" ? null : filter;
+  const { job: importJob, completions } = useVaultImportJob();
+  const importing = Boolean(importJob?.running);
+  const [locking, setLocking] = useState(false);
+  const kind = filter === "all" ? null : filter;
+
   const loadFirst = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const page = await listAssets({ mediaKind: queryKind, offset: 0, limit: PAGE_SIZE });
+      const page = await listItems({ kind, offset: 0, limit: PAGE_SIZE });
       setItems(page.items.map(toAssetSummary));
       setNextOffset(page.nextOffset);
       setTotalCount(page.totalCount);
@@ -48,7 +109,7 @@ export function ExternalVaultBrowser({ gateway, privacyMode = false }: { gateway
     } finally {
       setLoading(false);
     }
-  }, [listAssets, queryKind]);
+  }, [kind, listItems]);
 
   useEffect(() => { void loadFirst(); }, [loadFirst]);
   useEffect(() => {
@@ -58,85 +119,101 @@ export function ExternalVaultBrowser({ gateway, privacyMode = false }: { gateway
   const loadNext = useCallback(async () => {
     if (nextOffset === null) return;
     try {
-      const page = await listAssets({ mediaKind: queryKind, offset: nextOffset, limit: PAGE_SIZE });
+      const page = await listItems({ kind, offset: nextOffset, limit: PAGE_SIZE });
       setItems((current) => [...current, ...page.items.map(toAssetSummary)]);
       setNextOffset(page.nextOffset);
       setTotalCount(page.totalCount);
     } catch (cause) {
-      setError(commandErrorMessage(cause, "다음 자산을 불러오지 못했습니다."));
+      setError(commandErrorMessage(cause, "다음 항목을 불러오지 못했습니다."));
     }
-  }, [listAssets, nextOffset, queryKind]);
-  const openVideo = useCallback(async (assetId: string) => {
-    setError(null);
-    try { await playVideo(assetId); }
-    catch (cause) { setError(commandErrorMessage(cause, "비밀 영상을 재생하지 못했습니다.")); }
-  }, [playVideo]);
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try { await scanVault(); await loadFirst(); }
-    catch (cause) { setError(commandErrorMessage(cause, "비밀 보관함을 새로고치지 못했습니다.")); setLoading(false); }
-  }, [loadFirst, scanVault]);
-  const changed = useCallback(async (thumbnailChanged = false) => {
-    if (thumbnailChanged) setThumbnailRevision((value) => value + 1);
-    await loadFirst();
-  }, [loadFirst]);
-  const autoSync = useCallback(async () => {
-    if (autoSyncBusyRef.current || loading || titleEditorOpen || thumbnailEditorOpen) return;
-    autoSyncBusyRef.current = true;
-    try {
-      const report = await scanVault();
-      if (report.added > 0 || report.updated > 0 || report.removed > 0 || report.failed > 0) {
-        if (report.updated > 0) setThumbnailRevision((value) => value + 1);
-        await loadFirst();
-      }
-    } catch {
-      // Background reconciliation is best-effort; explicit refresh surfaces errors.
-    } finally {
-      autoSyncBusyRef.current = false;
-    }
-  }, [loadFirst, loading, scanVault, thumbnailEditorOpen, titleEditorOpen]);
+  }, [kind, listItems, nextOffset]);
+
+  // The import lives outside this view; refresh when one ends (also one that ended while
+  // the view was closed is already in the first load) and, while it runs, the first page.
+  const seenCompletions = useRef(completions);
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") void autoSync();
-    }, AUTO_SYNC_MS);
-    return () => window.clearInterval(timer);
-  }, [autoSync]);
+    if (seenCompletions.current === completions) return;
+    seenCompletions.current = completions;
+    onContentChanged?.();
+    void loadFirst();
+  }, [completions, loadFirst, onContentChanged]);
+  const lastLiveRefresh = useRef(Date.now());
+  const liveRefreshAllowed = useRef(true);
+  liveRefreshAllowed.current = items.length <= PAGE_SIZE && viewerId === null;
+  const importedSoFar = importJob?.running ? importJob.progress?.imported ?? 0 : 0;
+  useEffect(() => {
+    if (importedSoFar === 0) return;
+    const timer = window.setTimeout(() => {
+      if (!liveRefreshAllowed.current) return;
+      lastLiveRefresh.current = Date.now();
+      void loadFirst();
+    }, Math.max(0, lastLiveRefresh.current + LIVE_REFRESH_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [importedSoFar, loadFirst]);
+
+  async function importFolder() {
+    if (importing || !gateway.importIntoEncryptedVault) return;
+    setError(null);
+    if (await reattachVaultImport(gateway)) return;
+    let folder: string | string[] | null;
+    try { folder = await open({ directory: true, multiple: false, title: "비밀 보관함으로 가져올 폴더" }); }
+    catch (cause) { setError(commandErrorMessage(cause, "폴더를 선택하지 못했습니다.")); return; }
+    if (typeof folder !== "string") return;
+    dismissVaultImport();
+    await startVaultImport(gateway, folder);
+  }
+
+  async function lock() {
+    if (!gateway.lockEncryptedVault) return;
+    setLocking(true);
+    setError(null);
+    try {
+      setViewerId(null);
+      onStatusChange(await gateway.lockEncryptedVault());
+    } catch (cause) {
+      setError(commandErrorMessage(cause, "비밀 보관함을 잠그지 못했습니다."));
+      setLocking(false);
+    }
+  }
 
   const active = useMemo(() => items.some((item) => item.id === viewerId) ? viewerId : null, [items, viewerId]);
   const selected = useMemo(() => items.find((item) => item.id === selectedId) ?? null, [items, selectedId]);
-  const selectedVideo = selected?.media.kind === "video" ? selected : null;
   const selectedAssetIds = useMemo(() => selectedId ? new Set([selectedId]) : new Set<string>(), [selectedId]);
 
   return <section className="external-vault-browser" aria-label="비밀">
     <header className="external-vault-browser__toolbar">
       <div className="external-vault-browser__filters" role="group" aria-label="미디어 필터">
-        {(["all", "images", "videos"] as const).map((value) => <Button key={value} size="sm"
+        {(["all", "image", "video"] as const).map((value) => <Button key={value} size="sm"
           variant={filter === value ? "secondary" : "ghost"} aria-pressed={filter === value}
-          onClick={() => setFilter(value)}>{{ all: "전체", images: "이미지", videos: "영상" }[value]}</Button>)}
+          onClick={() => setFilter(value)}>{{ all: "전체", image: "이미지", video: "영상" }[value]}</Button>)}
       </div>
       <div className="external-vault-browser__actions">
-        <Button size="sm" variant="ghost" disabled={!selectedVideo} onClick={() => setTitleEditorOpen(true)}>제목 변경</Button>
-        <Button size="sm" variant="ghost" disabled={!selectedVideo} onClick={() => setThumbnailEditorOpen(true)}>썸네일 변경</Button>
-        <Button size="sm" variant="ghost" onClick={() => void refresh()} disabled={loading}>새로고침</Button>
+        <Button size="sm" variant="ghost" disabled={!selected} onClick={() => setTitleEditorOpen(true)}>제목 변경</Button>
+        <Button size="sm" variant="ghost" disabled={importing || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()}>{importing ? "가져오는 중…" : "가져오기"}</Button>
+        <Button size="sm" variant="ghost" disabled={importing || locking} onClick={() => void lock()}>잠그기</Button>
       </div>
     </header>
+    {importJob?.running && <div className="external-vault-browser__progress" role="status">
+      <span>{vaultImportProgressText(importJob)}</span>
+      <progress aria-label="가져오기 진행률" max={importJob.progress?.total || undefined} value={importJob.progress?.total ? importJob.progress.processed : undefined} />
+    </div>}
     {error && <p className="external-vault-browser__error" role="alert">{error}</p>}
+    {importJob?.error && <p className="external-vault-browser__error" role="alert">
+      {importJob.error} <Button size="sm" variant="ghost" onClick={dismissVaultImport}>닫기</Button>
+    </p>}
     {!loading && items.length === 0
-      ? <EmptyState title="비밀 보관함이 비어 있습니다">이미지나 영상을 보관함에 넣은 뒤 새로고침하시와요.</EmptyState>
+      ? <EmptyState title="비밀 보관함이 비어 있습니다"><p>가져오기로 PC 폴더의 이미지와 영상을 암호화해 넣을 수 있습니다.</p></EmptyState>
       : <AssetGallery items={items} layout="masonry" scopeKey={`external-vault:${filter}`} totalCount={totalCount}
-          metadataVisible={!privacyMode} captionLabel={(asset) => asset.title || asset.originalName}
-          privacyMode={privacyMode} thumbnailCacheKey={thumbnailRevision}
+          mediaSource="vault" metadataVisible={!privacyMode} captionLabel={(asset) => asset.title || asset.originalName}
+          privacyMode={privacyMode}
           selectedAssetIds={selectedAssetIds} focusAssetId={selectedId}
           onSelectionGesture={(asset) => setSelectedId(asset.id)} onClearSelection={() => setSelectedId(null)}
           hasNextPage={nextOffset !== null} onLoadNextPage={() => void loadNext()}
-          onOpen={(asset) => { if (asset.media.kind === "video") void openVideo(asset.id); else setViewerId(asset.id); }} />}
-    {active && <AssetViewer items={items} activeId={active} onActiveIdChange={setViewerId} onClose={() => setViewerId(null)} privacyMode={privacyMode} />}
-    {titleEditorOpen && selectedVideo && <TitleEditor asset={selectedVideo} gateway={gateway}
-      onClose={() => setTitleEditorOpen(false)} onChanged={() => void changed()} />}
-    {thumbnailEditorOpen && selectedVideo && <ThumbnailEditor asset={selectedVideo} gateway={gateway}
-      privacyMode={privacyMode} revision={thumbnailRevision} onClose={() => setThumbnailEditorOpen(false)}
-      onChanged={() => { setThumbnailEditorOpen(false); void changed(true); }} />}
+          onOpen={(asset) => setViewerId(asset.id)} />}
+    {active && <AssetViewer items={items} activeId={active} onActiveIdChange={setViewerId} onClose={() => setViewerId(null)} privacyMode={privacyMode} mediaSource="vault" />}
+    {titleEditorOpen && selected && <TitleEditor asset={selected} gateway={gateway}
+      onClose={() => setTitleEditorOpen(false)} onChanged={() => void loadFirst()} />}
+    {importJob?.report && !importJob.running && <ImportReportDialog report={importJob.report} onClose={dismissVaultImport} />}
   </section>;
 }
 
@@ -145,9 +222,10 @@ function TitleEditor({ asset, gateway, onClose, onChanged }: { asset: AssetSumma
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function save() {
+    if (!gateway.setEncryptedVaultTitle) return;
     setBusy(true); setError(null);
     try {
-      await gateway.setPrivateVaultTitle!(asset.id, title.trim() || null);
+      await gateway.setEncryptedVaultTitle(asset.id, title.trim() || null);
       onChanged(); onClose();
     } catch (cause) { setError(commandErrorMessage(cause, "제목을 저장하지 못했습니다.")); }
     finally { setBusy(false); }
@@ -160,78 +238,37 @@ function TitleEditor({ asset, gateway, onClose, onChanged }: { asset: AssetSumma
   </Dialog>;
 }
 
-function ThumbnailEditor({ asset, gateway, privacyMode, revision, onClose, onChanged }: { asset: AssetSummary; gateway: LibraryGateway; privacyMode: boolean; revision: number; onClose(): void; onChanged(): void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [candidates, setCandidates] = useState<Array<{ timestampMs: number; url: string }>>([]);
-  const urls = useRef<string[]>([]);
-  useEffect(() => () => { urls.current.forEach((url) => URL.revokeObjectURL(url)); }, []);
-  function replaceCandidates(values: PrivateVaultThumbnailCandidate[]) {
-    urls.current.forEach((url) => URL.revokeObjectURL(url));
-    const next = values.map((candidate) => ({
-      timestampMs: candidate.timestampMs,
-      url: URL.createObjectURL(new Blob([new Uint8Array(candidate.imageBytes)], { type: "image/webp" })),
-    }));
-    urls.current = next.map((candidate) => candidate.url);
-    setCandidates(next);
-  }
-  async function chooseFile() {
-    try {
-      const path = await open({ multiple: false, directory: false, filters: [{ name: "썸네일 이미지", extensions: ["jpg", "jpeg", "png", "webp"] }] });
-      if (typeof path !== "string") return;
-      await run(() => gateway.setPrivateVaultThumbnailFromFile!(asset.id, path));
-    } catch (cause) {
-      setError(commandErrorMessage(cause, "이미지 파일을 선택하지 못했습니다."));
-    }
-  }
-  async function loadFrames() {
-    setBusy(true); setError(null);
-    try { replaceCandidates(await gateway.listPrivateVaultThumbnailCandidates!(asset.id)); }
-    catch (cause) { setError(commandErrorMessage(cause, "썸네일 후보를 만들지 못했습니다.")); }
-    finally { setBusy(false); }
-  }
-  async function run(operation: () => Promise<void>) {
-    setBusy(true); setError(null);
-    try { await operation(); onChanged(); }
-    catch (cause) { setError(commandErrorMessage(cause, "썸네일을 변경하지 못했습니다.")); }
-    finally { setBusy(false); }
-  }
-  return <Dialog open title="썸네일 변경" variant="medium" onClose={() => { if (!busy) onClose(); }}>
-    <div className="external-vault-thumbnail-editor">
-      <div className="external-vault-thumbnail-editor__current">
-        {privacyMode ? <span>비공개 모드</span> : <img src={thumbnailUrl(asset.id, revision)} alt="현재 썸네일" />}
-      </div>
-      <div className="external-vault-thumbnail-editor__choices">
-        <Button disabled={busy} onClick={() => void chooseFile()}>이미지 파일 선택</Button>
-        <Button disabled={busy || privacyMode} onClick={() => void loadFrames()}>영상에서 고르기</Button>
-        <Button disabled={busy} variant="ghost" onClick={() => void run(() => gateway.resetPrivateVaultThumbnail!(asset.id))}>기본 썸네일로 복원</Button>
-      </div>
-      {candidates.length > 0 && !privacyMode && <div className="external-vault-thumbnail-editor__frames" aria-label="영상 프레임 후보">
-        {candidates.map((candidate) => <button key={candidate.timestampMs} type="button" disabled={busy}
-          onClick={() => void run(() => gateway.setPrivateVaultThumbnailFromFrame!(asset.id, candidate.timestampMs))}>
-          <img src={candidate.url} alt={`${formatTimestamp(candidate.timestampMs)} 프레임`} />
-          <span>{formatTimestamp(candidate.timestampMs)}</span>
-        </button>)}
-      </div>}
-    </div>
-    {error && <p className="external-vault-editor__error" role="alert">{error}</p>}
-    <div className="ui-dialog__actions"><Button disabled={busy} onClick={onClose}>닫기</Button></div>
+function ImportReportDialog({ report, onClose }: { report: EncryptedVaultImportReport; onClose(): void }) {
+  const rows: Array<[string, number]> = [
+    ["가져옴", report.imported],
+    ["이미 있음", report.skipped],
+    ["실패", report.failed],
+    ["영상 썸네일로 적용", report.sidecarThumbnails ?? 0],
+    ["썸네일 없음", report.withoutThumbnail],
+    ["이전 보관함 제목", report.legacyTitles],
+    ["이전 보관함 썸네일", report.legacyThumbnails],
+  ];
+  return <Dialog open title="가져오기 완료" onClose={onClose}>
+    <dl className="external-vault-report">
+      {rows.filter(([, value], index) => index < 3 || value > 0).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value.toLocaleString()}개</dd></div>)}
+    </dl>
+    <p className="external-vault-editor__hint">원본 파일은 PC에 그대로 남아 있습니다. 필요 없으면 직접 지우세요.</p>
+    <div className="ui-dialog__actions"><Button variant="primary" onClick={onClose}>닫기</Button></div>
   </Dialog>;
 }
 
-function toAssetSummary(asset: PrivateVaultAssetSummary): AssetSummary {
-  const title = asset.title ?? null;
-  return {
-    id: asset.id, title, originalName: asset.originalName, byteSize: asset.byteSize, width: asset.width, height: asset.height,
-    collectedAt: asset.modifiedAt, favorite: false, sourceUrl: null, sourcePublishedAt: null,
-    creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null,
-    importBatchId: null, originalModifiedAt: asset.modifiedAt,
-    media: asset.media.kind === "video" ? { ...asset.media, preparationState: "ready", scrubFrameCount: 0 } : asset.media,
-  };
-}
+const FALLBACK_SIZE = { image: [1600, 1200], video: [1920, 1080] } as const;
 
-function formatTimestamp(milliseconds: number) {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+function toAssetSummary(item: EncryptedVaultItem): AssetSummary {
+  const [fallbackWidth, fallbackHeight] = FALLBACK_SIZE[item.kind];
+  return {
+    id: item.id, title: item.title, originalName: item.originalFileName, byteSize: item.byteSize,
+    width: item.width || fallbackWidth, height: item.height || fallbackHeight,
+    collectedAt: item.importedAt, favorite: false, sourceUrl: null, sourcePublishedAt: null,
+    creatorName: null, creatorHandle: null, creatorUrl: null, importSource: null,
+    importBatchId: null, originalModifiedAt: item.importedAt,
+    media: item.kind === "video"
+      ? { kind: "video", durationMs: 0, preparationState: "ready", scrubFrameCount: 0 }
+      : { kind: "image" },
+  };
 }
