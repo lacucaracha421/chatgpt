@@ -1106,6 +1106,25 @@ class ChangeLogTests(AlbumAuthorityFixture):
         self.assertEqual(self.changes(after=1).json()["items"][0]["sequence"], 2)
         self.assertEqual(self.changes(after=2).json()["items"], [])
 
+    def test_caught_up_poll_answers_304_until_the_feed_moves(self):
+        first = self.changes(after=0)
+        self.assertEqual(first.status_code, 200)
+        etag = first.headers["ETag"]
+        cached = self.client.get(
+            CHANGES, params={"libraryId": LIBRARY, "epoch": "1", "after": "0", "limit": "100"},
+            headers={**self.client_auth, "If-None-Match": etag})
+        self.assertEqual(cached.status_code, 304)
+        self.assertEqual(cached.content, b"")
+        self.assertEqual(cached.headers["ETag"], etag)
+        self.assertEqual(self.command(album_authority.RENAME, R1, album_id="other",
+                                      name="A", expectedRevision=1).status_code, 200)
+        moved = self.client.get(
+            CHANGES, params={"libraryId": LIBRARY, "epoch": "1", "after": "0", "limit": "100"},
+            headers={**self.client_auth, "If-None-Match": etag})
+        self.assertEqual(moved.status_code, 200)
+        self.assertNotEqual(moved.headers["ETag"], etag)
+        self.assertEqual(moved.json()["cursor"], 1)
+
     def test_a_cursor_ahead_of_the_authority_is_its_own_state(self):
         response = self.changes(after=99)
         self.assertEqual(response.status_code, 409, response.text)

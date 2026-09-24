@@ -141,6 +141,19 @@ class MobileCatalogApiTests(unittest.TestCase):
                 count = self.client.get("/v1/mobile-catalog/count", headers=AUTH, params={"token": page["countToken"]})
                 self.assertEqual(count.status_code, 200, count.text)
                 self.assertEqual(count.json()["totalCount"], len(actual))
+    def test_status_poll_answers_304_until_a_publication_changes_it(self):
+        before = self.client.get("/v1/mobile-catalog/status", headers=AUTH)
+        self.assertEqual(before.status_code, 200)
+        self.assertFalse(before.json()["ready"])
+        etag = before.headers["ETag"]
+        cached = self.client.get("/v1/mobile-catalog/status", headers={**AUTH, "If-None-Match": etag})
+        self.assertEqual(cached.status_code, 304)
+        self.assertEqual(cached.content, b"")
+        self.assertEqual(self.publish().status_code, 200)
+        after = self.client.get("/v1/mobile-catalog/status", headers={**AUTH, "If-None-Match": etag})
+        self.assertEqual(after.status_code, 200)
+        self.assertTrue(after.json()["ready"])
+        self.assertNotEqual(after.headers["ETag"], etag)
     def test_auth_unpublished_and_query_rejections(self):
         self.assertEqual(self.client.get("/v1/mobile-catalog/status").status_code, 401)
         self.assertFalse(self.search().json()["ready"])

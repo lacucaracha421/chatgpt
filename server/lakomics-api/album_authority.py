@@ -71,6 +71,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import conditional
 import asset_authority
 import asset_filters
 import asset_visibility
@@ -1472,7 +1473,8 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
 
     @app.get(PREFIX + "/changes")
     async def album_changes(request: Request, libraryId: str, epoch: int, after: int = 0,
-                            limit: int = 100, authorization: str | None = Header(default=None)):
+                            limit: int = 100, authorization: str | None = Header(default=None),
+                            if_none_match: str | None = Header(default=None)):
         require_client(authorization)
         if not set(request.query_params) <= {"libraryId", "epoch", "after", "limit"}:
             fail(422, "invalidAlbumCommand", "앨범 변경 요청이 올바르지 않습니다.")
@@ -1483,23 +1485,31 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
 
         def run():
             with get_db() as db:
-                row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
-                cursor = row["cursor"]
-                if after > cursor:
-                    # A cursor beyond the server is authority skew, not retention.
-                    # A fresh baseline resolves both, but the distinction matters for
-                    # the client's error surface.
-                    fail(409, "cursorAhead", "변경 커서가 권위 커서보다 앞서 있습니다.")
-                # A cursor at or below the pruned floor has a real gap behind it.
-                # Reporting "no changes" would silently drop accepted mutations.
-                if after < pruned_through(db, libraryId, epoch):
-                    raise expired_cursor(row)
-                items = change_items(db, libraryId, epoch, after, limit)
+                # Identity, cursor, retention floor and rows must describe one snapshot,
+                # exactly as the classification and asset feeds read theirs: as separate
+                # autocommit statements a command committing in between would advertise
+                # an older cursor while carrying newer rows.
+                db.execute("BEGIN")
+                try:
+                    row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                    cursor = row["cursor"]
+                    if after > cursor:
+                        # A cursor beyond the server is authority skew, not retention.
+                        # A fresh baseline resolves both, but the distinction matters for
+                        # the client's error surface.
+                        fail(409, "cursorAhead", "변경 커서가 권위 커서보다 앞서 있습니다.")
+                    # A cursor at or below the pruned floor has a real gap behind it.
+                    # Reporting "no changes" would silently drop accepted mutations.
+                    if after < pruned_through(db, libraryId, epoch):
+                        raise expired_cursor(row)
+                    items = change_items(db, libraryId, epoch, after, limit)
+                finally:
+                    db.rollback()
                 next_after = items[-1]["sequence"] if items else after
                 return {"libraryId": row["libraryId"], "epoch": row["epoch"],
                         "contractVersion": row["contractVersion"], "cursor": cursor,
                         "items": items, "nextAfter": next_after, "hasMore": next_after < cursor}
-        return await run_in_threadpool(run)
+        return conditional.json_response(await run_in_threadpool(run), if_none_match)
 
     @app.put(PREFIX + "/commands")
     async def album_command(request: Request, authorization: str | None = Header(default=None)):
