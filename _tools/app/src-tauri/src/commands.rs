@@ -494,6 +494,9 @@ fn open_library_in_state(
     if let Some(previous) = current.as_ref() {
         previous.stop_character_scan();
         previous.stop_video_similarity_scan();
+        // The Private Vault session belongs to the library runtime: lock it so two runtimes
+        // never hold the same vault unlocked (a running import stops at its next step).
+        previous.lock_encrypted_vault();
     }
     *current = Some(library);
     Ok(summary)
@@ -3503,6 +3506,37 @@ mod tests {
 
         assert_eq!(second, first);
         assert_eq!(second.root, root.to_string_lossy());
+    }
+
+    #[test]
+    fn switching_libraries_locks_the_previous_private_vault() {
+        use crate::library::models::EncryptedVaultState;
+
+        let temp = tempfile::tempdir().unwrap();
+        let (first_root, second_root, vault) = (
+            temp.path().join("first"),
+            temp.path().join("second"),
+            temp.path().join("vault"),
+        );
+        for dir in [&first_root, &second_root, &vault] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let state = AppState::default();
+        open_library_in_state(first_root.to_string_lossy().into_owned(), &state, None).unwrap();
+        let first = state.current_library().unwrap();
+        first
+            .create_encrypted_vault(&vault, "correct horse", false)
+            .unwrap();
+        assert_eq!(
+            first.encrypted_vault_status().unwrap().state,
+            EncryptedVaultState::Unlocked
+        );
+
+        open_library_in_state(second_root.to_string_lossy().into_owned(), &state, None).unwrap();
+        assert_eq!(
+            first.encrypted_vault_status().unwrap().state,
+            EncryptedVaultState::Locked
+        );
     }
 }
 

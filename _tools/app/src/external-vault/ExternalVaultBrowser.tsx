@@ -241,9 +241,10 @@ function TitleEditor({ asset, gateway, onClose, onChanged }: { asset: AssetSumma
 function ImportReportDialog({ report, onClose }: { report: EncryptedVaultImportReport; onClose(): void }) {
   const rows: Array<[string, number]> = [
     ["가져옴", report.imported],
-    ["이미 있음", report.skipped],
+    ["이미 있음 (같은 내용 확인)", report.skipped],
     ["실패", report.failed],
     ["영상 썸네일로 적용", report.sidecarThumbnails ?? 0],
+    ["영상 썸네일 파일 건너뜀 (이미 썸네일 있음)", report.sidecarSkipped ?? 0],
     ["썸네일 없음", report.withoutThumbnail],
     ["이전 보관함 제목", report.legacyTitles],
     ["이전 보관함 썸네일", report.legacyThumbnails],
@@ -252,7 +253,8 @@ function ImportReportDialog({ report, onClose }: { report: EncryptedVaultImportR
     <dl className="external-vault-report">
       {rows.filter(([, value], index) => index < 3 || value > 0).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value.toLocaleString()}개</dd></div>)}
     </dl>
-    <p className="external-vault-editor__hint">원본 파일은 PC에 그대로 남아 있습니다. 필요 없으면 직접 지우세요.</p>
+    <p className="external-vault-editor__hint">원본 파일은 PC에 그대로 남아 있습니다. 원본을 지우기 전에 보관함에서 파일이 열리는지 확인하세요.</p>
+    {report.failed > 0 && <p className="external-vault-editor__hint">실패한 파일은 보관함에 없습니다. 이 파일의 원본은 지우지 마세요.</p>}
     <div className="ui-dialog__actions"><Button variant="primary" onClick={onClose}>닫기</Button></div>
   </Dialog>;
 }

@@ -61,6 +61,9 @@ pub(crate) enum VaultError {
     Crypto,
     #[error("비밀 보관함 파일을 읽거나 쓸 수 없습니다")]
     Io(#[from] io::Error),
+    /// The folder now holds another vault (or none): a USB swapped under an unlocked session.
+    #[error("다른 비밀 보관함으로 바뀌었습니다")]
+    Changed,
 }
 
 pub(crate) const FORMAT_VERSION: u32 = 1;
@@ -69,6 +72,9 @@ pub(crate) const KDF_NAME: &str = "pbkdf2-hmac-sha256";
 pub(crate) const PBKDF2_ITERATIONS: u32 = 600_000;
 /// Upper bound accepted from `vault.json`, so a damaged file cannot stall unlock forever.
 const MAX_PBKDF2_ITERATIONS: u32 = 20_000_000;
+/// Lowest iteration count accepted from the unauthenticated `vault.json`, so a tampered
+/// header cannot weaken the password wrap. Tests create vaults with a low count to stay fast.
+const MIN_STORED_PBKDF2_ITERATIONS: u32 = if cfg!(test) { 100 } else { PBKDF2_ITERATIONS };
 pub(crate) const CHUNK_SIZE: usize = 64 * 1024;
 
 const KEY_LEN: usize = 32;
@@ -366,6 +372,7 @@ impl VaultHeader {
         if password.is_empty() {
             return Err(VaultError::EmptyPassword);
         }
+        let iterations = iterations.clamp(MIN_STORED_PBKDF2_ITERATIONS, MAX_PBKDF2_ITERATIONS);
         let vault_id = Uuid::new_v4();
         let master = MasterKey::generate()?;
         let recovery = WrappingKey(random_bytes()?);
@@ -395,7 +402,7 @@ impl VaultHeader {
         if self.format_version != FORMAT_VERSION || self.kdf.name != KDF_NAME {
             return Err(VaultError::UnsupportedFormat);
         }
-        if self.kdf.iterations == 0 || self.kdf.iterations > MAX_PBKDF2_ITERATIONS {
+        if !(MIN_STORED_PBKDF2_ITERATIONS..=MAX_PBKDF2_ITERATIONS).contains(&self.kdf.iterations) {
             return Err(VaultError::Corrupt);
         }
         self.salt().map(|_| ())
@@ -435,15 +442,33 @@ impl VaultHeader {
     }
 
     /// Rewraps only the password wrap, with a fresh salt. The recovery wrap is untouched.
-    pub(crate) fn set_password(&mut self, master: &MasterKey, new_password: &str) -> Result<()> {
+    /// The new wrap uses at least `min_iterations` (the configured production cost), never
+    /// less than the stored count, so a lowered count in `vault.json` is not inherited.
+    pub(crate) fn set_password(
+        &mut self,
+        master: &MasterKey,
+        new_password: &str,
+        min_iterations: u32,
+    ) -> Result<()> {
         if new_password.is_empty() {
             return Err(VaultError::EmptyPassword);
         }
+        let iterations = self
+            .kdf
+            .iterations
+            .max(min_iterations)
+            .clamp(MIN_STORED_PBKDF2_ITERATIONS, MAX_PBKDF2_ITERATIONS);
         let salt = random_bytes::<SALT_LEN>()?;
-        let key = password_key(new_password, self.kdf.iterations, &salt)?;
+        let key = password_key(new_password, iterations, &salt)?;
         self.password_wrap = wrap(&key, master, &self.vault_id, WrapKind::Password)?;
         self.kdf.salt = hex(&salt);
+        self.kdf.iterations = iterations;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn iterations(&self) -> u32 {
+        self.kdf.iterations
     }
 }
 
@@ -686,5 +711,37 @@ impl ObjectReader {
 
     pub(crate) fn read_all(&mut self) -> Result<Vec<u8>> {
         self.read_range(0, self.len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_password_never_weakens_the_stored_cost() {
+        let (mut header, master, _) = VaultHeader::create("old", 1_000).unwrap();
+        header.set_password(&master, "new", 2_000).unwrap();
+        assert_eq!(header.iterations(), 2_000);
+        // A lower configured minimum never lowers the stored cost.
+        header.set_password(&master, "newer", 500).unwrap();
+        assert_eq!(header.iterations(), 2_000);
+        assert!(header.unlock(&Secret::Password("newer")).is_ok());
+    }
+
+    #[test]
+    fn stored_iterations_below_the_floor_are_rejected() {
+        let (header, _, _) = VaultHeader::create("pw", 1_000).unwrap();
+        let mut json = serde_json::to_value(&header).unwrap();
+        json["kdf"]["iterations"] = serde_json::json!(MIN_STORED_PBKDF2_ITERATIONS - 1);
+        let tampered: VaultHeader = serde_json::from_value(json).unwrap();
+        assert!(matches!(tampered.validate(), Err(VaultError::Corrupt)));
+        assert!(matches!(
+            tampered.unlock(&Secret::Password("pw")),
+            Err(VaultError::Corrupt)
+        ));
+        // A creation request below the floor is raised to it.
+        let (low, _, _) = VaultHeader::create("pw", 1).unwrap();
+        assert_eq!(low.iterations(), MIN_STORED_PBKDF2_ITERATIONS);
     }
 }

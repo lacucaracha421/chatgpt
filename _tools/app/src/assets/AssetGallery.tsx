@@ -190,7 +190,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
           });
         }
       };
-      preview.src = assetUrl(sourceAsset.id);
+      preview.src = mediaSource === "vault" ? vaultAssetUrl(sourceAsset.id) : assetUrl(sourceAsset.id);
       if (typeof preview.decode === "function") void preview.decode().then(reveal, () => undefined);
       else reveal();
     }, QUICK_PREVIEW_DELAY_MS);

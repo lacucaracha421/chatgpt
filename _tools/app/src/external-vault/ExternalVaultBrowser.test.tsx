@@ -94,12 +94,17 @@ it("imports a folder with progress and shows the summary", async () => {
   expect(await screen.findByText("가져오는 중 3 / 10")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "잠그기" })).toBeDisabled();
 
-  finish({ total: 10, imported: 8, skipped: 1, failed: 1, withoutThumbnail: 0, legacyTitles: 2, legacyThumbnails: 0, sidecarThumbnails: 3 });
+  finish({ total: 10, imported: 8, skipped: 1, failed: 1, withoutThumbnail: 0, legacyTitles: 2, legacyThumbnails: 0, sidecarThumbnails: 3, sidecarSkipped: 2 });
   const dialog = await screen.findByRole("dialog", { name: "가져오기 완료" });
   expect(dialog).toHaveTextContent("가져옴8개");
   expect(dialog).toHaveTextContent("영상 썸네일로 적용3개");
   expect(dialog).toHaveTextContent("이전 보관함 제목2개");
   expect(dialog).not.toHaveTextContent("이전 보관함 썸네일");
+  expect(dialog).toHaveTextContent("이미 있음 (같은 내용 확인)1개");
+  expect(dialog).toHaveTextContent("원본을 지우기 전에 보관함에서 파일이 열리는지 확인하세요.");
+  expect(dialog).toHaveTextContent("실패한 파일은 보관함에 없습니다. 이 파일의 원본은 지우지 마세요.");
+  expect(dialog).not.toHaveTextContent("필요 없으면 직접 지우세요");
+  expect(dialog).toHaveTextContent("영상 썸네일 파일 건너뜀 (이미 썸네일 있음)2개");
   expect(onContentChanged).toHaveBeenCalled();
   expect(gateway.listEncryptedVaultItems).toHaveBeenCalledTimes(2);
 });

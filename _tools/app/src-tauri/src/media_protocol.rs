@@ -216,23 +216,8 @@ pub(crate) fn media_response_with_range(
         };
     }
 
-    // Encrypted Private Vault items share the asset/thumbnail/playback routes while the
-    // vault is unlocked. The lookup is in memory; an unknown id or a locked vault falls
-    // through to the main library.
-    let vault_variant = match variant {
-        MediaVariant::Asset => Some(EncryptedVaultMediaVariant::Asset),
-        MediaVariant::Thumbnail => Some(EncryptedVaultMediaVariant::Thumbnail),
-        MediaVariant::Playback => Some(EncryptedVaultMediaVariant::Playback),
-        _ => None,
-    };
-    if let Some(vault_variant) = vault_variant {
-        match library.encrypted_vault_media(&asset_id, vault_variant) {
-            Ok(media) => return encrypted_vault_media_response(media, range_header),
-            Err(LibraryError::AssetNotFound | LibraryError::EncryptedVaultLocked) => {}
-            Err(error) => return encrypted_vault_error_response(&error),
-        }
-    }
-
+    // Encrypted Private Vault items are served only by the `/vault-*` routes above; the
+    // shared routes never resolve them.
     match library.resolve_media(&asset_id, variant) {
         Ok(media) if matches!(variant, MediaVariant::Playback) => {
             playback_response(media, range_header)
@@ -1615,15 +1600,16 @@ mod encrypted_vault_tests {
         assert_eq!(image_range.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(image_range.body(), &fixture.image[1..=3]);
 
-        // The shared routes serve vault items from memory while the vault is unlocked.
-        let shared = get(library, &format!("/asset/{}", fixture.image_id), None);
-        assert_eq!(shared.body(), &fixture.image);
-        let shared_playback = get(
-            library,
-            &format!("/playback/{}", fixture.video_id),
-            Some("bytes=0-99"),
-        );
-        assert_eq!(shared_playback.body(), &fixture.video[..100]);
+        // The shared routes never serve vault items, even while the vault is unlocked.
+        for path in [
+            format!("/asset/{}", fixture.image_id),
+            format!("/thumbnail/{}", fixture.image_id),
+            format!("/playback/{}", fixture.video_id),
+        ] {
+            let shared = media_response_with_range(Some(library), &Method::GET, &path, Some("bytes=0-99"));
+            assert_eq!(shared.status(), StatusCode::NOT_FOUND, "{path}");
+            assert!(shared.body().is_empty(), "{path}");
+        }
 
         assert_eq!(
             get(library, &format!("/vault-playback/{}", fixture.image_id), Some("bytes=0-1")).status(),

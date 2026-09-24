@@ -770,6 +770,8 @@ export type EncryptedVaultImportReport = {
   legacyThumbnails: number;
   /** `<video>_thumb.<image>` files applied as their video's thumbnail instead of separate images (always sent by the backend). */
   sidecarThumbnails?: number;
+  /** Sidecars not stored because their video already has a different custom thumbnail (always sent by the backend). */
+  sidecarSkipped?: number;
 };
 
 /** Image items that are a video's `_thumb` sidecar, imported before the sidecar rule. `examples`: up to 5 file names. */

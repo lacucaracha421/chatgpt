@@ -1422,6 +1422,9 @@ pub struct EncryptedVaultImportReport {
     /// `<video>_thumb.<image>` files applied as their sibling video's custom thumbnail
     /// instead of being imported as separate images.
     pub sidecar_thumbnails: u64,
+    /// `_thumb` sidecar files not stored because their video already has a different
+    /// custom thumbnail (disposable derived files; neither present nor failed).
+    pub sidecar_skipped: u64,
 }
 
 /// Image items that are really a sibling video's `_thumb` sidecar (imported before the

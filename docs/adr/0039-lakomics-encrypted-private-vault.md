@@ -10,13 +10,13 @@ Supersedes: the "Lakomics does not encrypt or unlock containers" rule of `docs/s
 
 Protects: file contents, thumbnails, file names, folder structure, titles and every other vault metadata on a lost or borrowed USB.
 
-Does not protect: the existence of a Lakomics vault, its approximate total size and object count, malware or memory inspection on an unlocked trusted PC, OS-level traces outside Lakomics' control, or deniability.
+Does not protect: the existence of a Lakomics vault, its approximate total size and object count, the size of each encrypted object (close to the original file size) and file timestamps, malware or memory inspection on an unlocked trusted PC, OS-level traces outside Lakomics' control, or deniability.
 
 ## Format
 
 - A vault is a folder (normally the root of an exFAT USB) containing `.lakomics-vault/`:
   - `vault.json` (plaintext): format version, vault UUID, KDF parameters and salt, and the master key wrapped twice — once by the password-derived key and once by the recovery key. Nothing else.
-  - `index.bin`: the encrypted vault index (items, original names, relative paths, titles, thumbnail references, trash state). Written atomically (temporary file, flush, rename).
+  - `index.bin`: the encrypted vault index (items, original names, relative paths, titles, thumbnail references, content hashes, trash state). Written atomically (temporary file, flush, rename); the replaced generation is kept as `index.prev.bin`, and unlock falls back to it when `index.bin` does not decrypt.
   - `objects/<random id>`: one encrypted object per original file, thumbnail, poster or custom thumbnail. Object ids are random and reveal nothing.
 - Keys:
   - A random 256-bit master key encrypts everything. Changing the password rewraps only the master key.
@@ -37,7 +37,8 @@ Does not protect: the existence of a Lakomics vault, its approximate total size 
 - Import from a plaintext folder keeps the existing vault's titles and custom thumbnails when that folder contains the old `.lakomics/index.sqlite`. Plaintext is never written to the USB during migration: the user copies the VeraCrypt contents to the trusted PC, formats the USB, then imports.
 - Video plays in the in-app player through ranged decryption. External mpv playback is not carried over unless it can stream without plaintext files.
 - The old plaintext vault format is supported only as an import source.
-- A crash during import or deletion may leave orphan objects; they are removed after the next successful unlock by comparing `objects/` with the index.
+- A crash during import or deletion may leave orphan objects; they are removed after the next successful unlock by comparing `objects/` with the index. Objects and temporary files modified in the last 10 minutes are kept (they may belong to an import still running in another app runtime), and a session opened from `index.prev.bin` deletes nothing.
+- Every write first re-checks the vault UUID in `vault.json`, so a USB swapped under an unlocked session is locked, never written. A resumed import skips a file only when an item with the same relative path, size and SHA-256 content hash is already in the vault.
 
 ## Boundaries
 

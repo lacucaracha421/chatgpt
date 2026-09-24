@@ -31,7 +31,9 @@ use zeroize::Zeroize;
 use super::{
     canonical_vault_root,
     crypto::{MasterKey, ObjectReader, Secret, VaultError},
-    encrypted_store::{EncryptedVault, VaultIndex, VaultItem, VaultItemKind, VAULT_DIR},
+    encrypted_store::{
+        self, EncryptedVault, VaultIndex, VaultItem, VaultItemKind, ORPHAN_SAFETY_WINDOW, VAULT_DIR,
+    },
     scan::{self, VaultMediaKind},
     validated_relative,
 };
@@ -176,6 +178,9 @@ struct Session {
     root: PathBuf,
     index: VaultIndex,
     generation: u64,
+    /// The index came from `index.prev.bin` because `index.bin` did not decrypt. Objects
+    /// newer than that backup are unknown to it, so nothing is deleted in this session.
+    from_backup_index: bool,
 }
 
 #[derive(Default)]
@@ -362,6 +367,7 @@ pub(crate) fn vault_error(error: VaultError) -> LibraryError {
         VaultError::Corrupt => LibraryError::EncryptedVaultCorrupt,
         VaultError::Crypto => LibraryError::EncryptedVaultCrypto,
         VaultError::Io(_) => LibraryError::EncryptedVaultIo,
+        VaultError::Changed => LibraryError::EncryptedVaultLocked,
     }
 }
 
@@ -396,6 +402,19 @@ fn original_mime(item: &VaultItem) -> &'static str {
     }
 }
 
+/// Image type from magic bytes: JPEG, PNG or WebP.
+fn sniff_image_mime(head: &[u8]) -> Option<&'static str> {
+    if head.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if head.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if head.len() >= 12 && head.starts_with(b"RIFF") && &head[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
 fn normalized_title(title: Option<&str>) -> Result<Option<String>, LibraryError> {
     let normalized = title.map(str::trim).filter(|value| !value.is_empty());
     if normalized.is_some_and(|value| value.chars().count() > MAX_TITLE_CHARS) {
@@ -412,8 +431,61 @@ enum ImportOutcome {
     },
     /// A `_thumb` sidecar became its sibling video's custom thumbnail (no new item).
     SidecarApplied,
-    Skipped,
+    /// A `_thumb` sidecar not stored because its video already has a different custom
+    /// thumbnail. Sidecars are disposable derived files, so this is not data loss.
+    SidecarSkipped,
+    /// Verified to be in the vault already (same content hash). `backfilled` when a hash was
+    /// just recorded for an older item, which the index must save.
+    Skipped {
+        backfilled: bool,
+    },
     Failed,
+}
+
+/// A vault object that may hold the same file: the resume pre-filter matched its relative
+/// path and size; its content hash decides.
+struct Known {
+    object_id: String,
+    content_sha256: Option<String>,
+}
+
+/// Vault items by (original relative path, byte size): the cheap pre-filter of a resume.
+type KnownFiles = HashMap<(String, u64), Vec<Known>>;
+
+/// SHA-256 of a plaintext source file on the trusted PC; `None` if it cannot be read.
+fn hash_file(path: &Path) -> Option<String> {
+    encrypted_store::sha256_hex(&mut File::open(path).ok()?).ok()
+}
+
+enum Duplicate {
+    No,
+    /// `backfill`: the object id of an older item whose hash was computed to confirm it.
+    Yes {
+        backfill: Option<String>,
+    },
+}
+
+/// Whether one of `candidates` holds exactly the content hashed as `source_hash`. Items from
+/// before hashes were recorded are confirmed by decrypting and hashing their object; an
+/// unreadable object never counts as a match, so the file is imported again instead.
+fn find_duplicate(vault: &EncryptedVault, candidates: &[Known], source_hash: &str) -> Duplicate {
+    if candidates
+        .iter()
+        .any(|known| known.content_sha256.as_deref() == Some(source_hash))
+    {
+        return Duplicate::Yes { backfill: None };
+    }
+    candidates
+        .iter()
+        .filter(|known| known.content_sha256.is_none())
+        .find(|known| {
+            vault
+                .object_sha256(&known.object_id)
+                .is_ok_and(|hash| hash == source_hash)
+        })
+        .map_or(Duplicate::No, |known| Duplicate::Yes {
+            backfill: Some(known.object_id.clone()),
+        })
 }
 
 /// The file name of the video a `<video file name>_thumb.<jpg|jpeg|png|webp>` sidecar
@@ -516,10 +588,20 @@ impl Library {
     /// library database. A vault whose folder disappeared is locked (key dropped).
     pub fn encrypted_vault_status(&self) -> Result<EncryptedVaultStatus, LibraryError> {
         let runtime = &*self.encrypted_vault;
-        {
+        let unlocked = runtime.state().session.as_ref().map(|session| {
+            (
+                session.root.clone(),
+                session.vault.vault_id(),
+                session.generation,
+            )
+        });
+        if let Some((root, vault_id, generation)) = unlocked {
+            // Re-read the UUID, not just the folder: another vault may have been swapped in
+            // at the same drive letter or mount point.
+            let same_vault = EncryptedVault::read_vault_id(&root).is_ok_and(|id| id == vault_id);
             let mut state = runtime.state();
-            if let Some(session) = &state.session {
-                if vault_present(&session.root) {
+            if state.session_matching(generation).is_some() {
+                if same_vault {
                     return Ok(state.status());
                 }
                 state.forget_location();
@@ -644,16 +726,21 @@ impl Library {
         current: &EncryptedVaultSecretInput,
         new_password: &str,
     ) -> Result<(), LibraryError> {
-        let root = self
+        let _writes = self.encrypted_vault.writes();
+        let (vault, generation) = self
             .encrypted_vault
             .state()
             .session
             .as_ref()
-            .map(|session| session.root.clone())
+            .map(|session| (Arc::clone(&session.vault), session.generation))
             .ok_or(LibraryError::EncryptedVaultLocked)?;
-        let _writes = self.encrypted_vault.writes();
-        EncryptedVault::change_password(&root, &secret_of(current), new_password)
-            .map_err(vault_error)
+        vault
+            .change_password(
+                &secret_of(current),
+                new_password,
+                self.encrypted_vault.env.pbkdf2_iterations,
+            )
+            .map_err(|error| self.vault_write_error(generation, error))
     }
 
     pub fn list_encrypted_vault_items(
@@ -772,7 +859,16 @@ impl Library {
             let video = video && variant != EncryptedVaultMediaVariant::Thumbnail;
             (Arc::clone(&session.vault), object_id, mime, video)
         };
-        let reader = vault.open_object(&object_id).map_err(vault_error)?;
+        let mut reader = vault.open_object(&object_id).map_err(vault_error)?;
+        // Custom thumbnails keep their original format (JPEG/PNG sidecars, legacy files).
+        let mime = if variant == EncryptedVaultMediaVariant::Thumbnail {
+            let mut head = reader.read_range(0, 12).map_err(vault_error)?;
+            let sniffed = sniff_image_mime(&head).unwrap_or(mime);
+            head.zeroize();
+            sniffed
+        } else {
+            mime
+        };
         Ok(EncryptedVaultMedia {
             reader,
             mime,
@@ -837,12 +933,16 @@ impl Library {
                 .session
                 .as_ref()
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
-            let existing = session
-                .index
-                .items
-                .iter()
-                .map(|item| (item.original_relative_path.clone(), item.byte_size))
-                .collect::<HashSet<_>>();
+            let mut existing = KnownFiles::new();
+            for item in &session.index.items {
+                existing
+                    .entry((item.original_relative_path.clone(), item.byte_size))
+                    .or_default()
+                    .push(Known {
+                        object_id: item.object_id.clone(),
+                        content_sha256: item.content_sha256.clone(),
+                    });
+            }
             let mut videos = VideoPaths::default();
             for item in &session.index.items {
                 if item.kind == VaultItemKind::Video && item.trashed_at.is_none() {
@@ -935,7 +1035,11 @@ impl Library {
                     report.sidecar_thumbnails += 1;
                     unsaved += 1;
                 }
-                ImportOutcome::Skipped => report.skipped += 1,
+                ImportOutcome::SidecarSkipped => report.sidecar_skipped += 1,
+                ImportOutcome::Skipped { backfilled } => {
+                    report.skipped += 1;
+                    unsaved += usize::from(backfilled);
+                }
                 ImportOutcome::Failed => report.failed += 1,
             }
             if unsaved >= SAVE_EVERY.max(existing.len() / 20) {
@@ -969,7 +1073,7 @@ impl Library {
         relative_path: &str,
         media_kind: VaultMediaKind,
         legacy: Option<&LegacyEntry>,
-        existing: &mut HashSet<(String, u64)>,
+        existing: &mut KnownFiles,
     ) -> Result<ImportOutcome, LibraryError> {
         let Ok(metadata) = fs::symlink_metadata(path) else {
             return Ok(ImportOutcome::Failed);
@@ -979,8 +1083,29 @@ impl Library {
         }
         let byte_size = metadata.len();
         let key = (relative_path.to_owned(), byte_size);
-        if existing.contains(&key) {
-            return Ok(ImportOutcome::Skipped);
+        // Same path and size is only a hint (another source folder can reuse the path):
+        // the file counts as imported only when its content hash matches.
+        if let Some(candidates) = existing.get_mut(&key) {
+            let Some(source_hash) = hash_file(path) else {
+                return Ok(ImportOutcome::Failed);
+            };
+            match find_duplicate(vault, candidates, &source_hash) {
+                Duplicate::Yes { backfill: None } => {
+                    return Ok(ImportOutcome::Skipped { backfilled: false })
+                }
+                Duplicate::Yes {
+                    backfill: Some(object_id),
+                } => {
+                    for known in candidates.iter_mut() {
+                        if known.object_id == object_id {
+                            known.content_sha256 = Some(source_hash.clone());
+                        }
+                    }
+                    self.record_content_hash(generation, &object_id, &source_hash)?;
+                    return Ok(ImportOutcome::Skipped { backfilled: true });
+                }
+                Duplicate::No => {}
+            }
         }
         let kind = match media_kind {
             VaultMediaKind::Video => VaultItemKind::Video,
@@ -1009,8 +1134,11 @@ impl Library {
         {
             return Err(LibraryError::EncryptedVaultLocked);
         }
-        let object_id = match vault.write_object(&mut file) {
-            Ok(object_id) => object_id,
+        let (object_id, content_sha256) = match vault.write_object_hashed(&mut file) {
+            Ok(written) => written,
+            Err(VaultError::Changed) => {
+                return Err(self.vault_write_error(generation, VaultError::Changed))
+            }
             Err(_) if !vault_present(vault_root) => return Err(LibraryError::EncryptedVaultLocked),
             Err(_) => return Ok(ImportOutcome::Failed),
         };
@@ -1027,7 +1155,7 @@ impl Library {
         let has_thumbnail = thumbnail_object_id.is_some() || poster_object_id.is_some();
         let item = VaultItem {
             id: Uuid::new_v4().to_string(),
-            object_id,
+            object_id: object_id.clone(),
             original_relative_path: relative_path.to_owned(),
             original_file_name: relative_path
                 .rsplit('/')
@@ -1043,6 +1171,8 @@ impl Library {
             thumbnail_object_id,
             poster_object_id,
             trashed_at: None,
+            content_sha256: Some(content_sha256.clone()),
+            thumbnail_sha256: None,
         };
         {
             let mut state = self.encrypted_vault.state();
@@ -1051,7 +1181,10 @@ impl Library {
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
             session.index.items.push(item);
         }
-        existing.insert(key);
+        existing.entry(key).or_default().push(Known {
+            object_id,
+            content_sha256: Some(content_sha256),
+        });
         Ok(ImportOutcome::Imported {
             legacy_title: legacy_title.is_some(),
             legacy_thumbnail: legacy_thumbnail_id.is_some(),
@@ -1060,10 +1193,12 @@ impl Library {
     }
 
     /// Applies a `<video>_thumb.<image>` sidecar as the custom thumbnail of its sibling video
-    /// `video_path`. A sidecar already imported as an image, or whose video already has a
-    /// custom thumbnail (carried over from a legacy index or applied by an earlier import),
-    /// is skipped. `None` when the video is not in the vault (for example its import failed)
-    /// or the file is too large for a thumbnail: the caller imports it as an ordinary image.
+    /// `video_path`. A sidecar already in the vault with the same content (as an image item,
+    /// or as that video's custom thumbnail) is skipped as present. A sidecar whose video
+    /// already has a different custom thumbnail is not stored and is reported separately
+    /// (`SidecarSkipped`), never as present. `None` when the video is not in the vault (for
+    /// example its import failed) or the file is too large for a thumbnail: the caller then
+    /// imports it as an ordinary image.
     #[allow(clippy::too_many_arguments)]
     fn import_sidecar(
         &self,
@@ -1073,7 +1208,7 @@ impl Library {
         path: &Path,
         relative_path: &str,
         video_path: &str,
-        existing: &HashSet<(String, u64)>,
+        existing: &KnownFiles,
     ) -> Result<Option<ImportOutcome>, LibraryError> {
         let Ok(metadata) = fs::symlink_metadata(path) else {
             return Ok(Some(ImportOutcome::Failed));
@@ -1081,8 +1216,20 @@ impl Library {
         if !metadata.is_file() {
             return Ok(Some(ImportOutcome::Failed));
         }
-        if existing.contains(&(relative_path.to_owned(), metadata.len())) {
-            return Ok(Some(ImportOutcome::Skipped));
+        let mut source_hash = None;
+        if let Some(candidates) = existing.get(&(relative_path.to_owned(), metadata.len())) {
+            let Some(hash) = hash_file(path) else {
+                return Ok(Some(ImportOutcome::Failed));
+            };
+            if let Duplicate::Yes { backfill } = find_duplicate(vault, candidates, &hash) {
+                if let Some(object_id) = &backfill {
+                    self.record_content_hash(generation, object_id, &hash)?;
+                }
+                return Ok(Some(ImportOutcome::Skipped {
+                    backfilled: backfill.is_some(),
+                }));
+            }
+            source_hash = Some(hash);
         }
         if metadata.len() > MAX_LEGACY_THUMBNAIL_BYTES {
             return Ok(None);
@@ -1095,7 +1242,7 @@ impl Library {
                     && item.original_relative_path == video_path
             })
         };
-        {
+        let current_thumbnail = {
             let mut state = self.encrypted_vault.state();
             let session = state
                 .session_matching(generation)
@@ -1103,15 +1250,46 @@ impl Library {
             let Some(position) = video_position(session) else {
                 return Ok(None);
             };
-            if session.index.items[position].thumbnail_object_id.is_some() {
-                return Ok(Some(ImportOutcome::Skipped));
+            let video = &session.index.items[position];
+            video
+                .thumbnail_object_id
+                .clone()
+                .map(|object_id| (object_id, video.thumbnail_sha256.clone()))
+        };
+        if let Some((object_id, recorded)) = current_thumbnail {
+            let Some(hash) = source_hash.or_else(|| hash_file(path)) else {
+                return Ok(Some(ImportOutcome::Failed));
+            };
+            let same = match &recorded {
+                Some(recorded) => *recorded == hash,
+                None => vault
+                    .object_sha256(&object_id)
+                    .is_ok_and(|thumbnail| thumbnail == hash),
+            };
+            if !same {
+                return Ok(Some(ImportOutcome::SidecarSkipped));
             }
+            if recorded.is_none() {
+                let mut state = self.encrypted_vault.state();
+                let session = state
+                    .session_matching(generation)
+                    .ok_or(LibraryError::EncryptedVaultLocked)?;
+                if let Some(position) = video_position(session) {
+                    session.index.items[position].thumbnail_sha256 = Some(hash);
+                }
+            }
+            return Ok(Some(ImportOutcome::Skipped {
+                backfilled: recorded.is_none(),
+            }));
         }
         let Ok(mut file) = File::open(path) else {
             return Ok(Some(ImportOutcome::Failed));
         };
-        let object_id = match vault.write_object(&mut file) {
-            Ok(object_id) => object_id,
+        let (object_id, hash) = match vault.write_object_hashed(&mut file) {
+            Ok(written) => written,
+            Err(VaultError::Changed) => {
+                return Err(self.vault_write_error(generation, VaultError::Changed))
+            }
             Err(_) if !vault_present(vault_root) => return Err(LibraryError::EncryptedVaultLocked),
             Err(_) => return Ok(Some(ImportOutcome::Failed)),
         };
@@ -1121,8 +1299,45 @@ impl Library {
             .ok_or(LibraryError::EncryptedVaultLocked)?;
         // Every index change holds the write lock, so the video is still where it was.
         let position = video_position(session).ok_or(LibraryError::EncryptedVaultLocked)?;
-        session.index.items[position].thumbnail_object_id = Some(object_id);
+        let video = &mut session.index.items[position];
+        video.thumbnail_object_id = Some(object_id);
+        video.thumbnail_sha256 = Some(hash);
         Ok(Some(ImportOutcome::SidecarApplied))
+    }
+
+    /// Records the content hash confirmed for an older item (saved with the next index save).
+    fn record_content_hash(
+        &self,
+        generation: u64,
+        object_id: &str,
+        hash: &str,
+    ) -> Result<(), LibraryError> {
+        let _writes = self.encrypted_vault.writes();
+        let mut state = self.encrypted_vault.state();
+        let session = state
+            .session_matching(generation)
+            .ok_or(LibraryError::EncryptedVaultLocked)?;
+        for item in session
+            .index
+            .items
+            .iter_mut()
+            .filter(|item| item.object_id == object_id)
+        {
+            item.content_sha256 = Some(hash.to_owned());
+        }
+        Ok(())
+    }
+
+    /// Maps a failed vault write. `Changed` (another vault, or none, at the session root)
+    /// also drops the session, so nothing more is written there and status reports it.
+    fn vault_write_error(&self, generation: u64, error: VaultError) -> LibraryError {
+        if matches!(error, VaultError::Changed) {
+            let mut state = self.encrypted_vault.state();
+            if state.session_matching(generation).is_some() {
+                state.forget_location();
+            }
+        }
+        vault_error(error)
     }
 
     /// Image items that are a sibling video's `_thumb` sidecar, imported before the sidecar
@@ -1161,7 +1376,7 @@ impl Library {
         if runtime.import_running() {
             return Err(LibraryError::EncryptedVaultImportRunning);
         }
-        let (vault, generation, mut index) = {
+        let (vault, generation, mut index, from_backup_index) = {
             let state = runtime.state();
             let session = state
                 .session
@@ -1171,6 +1386,7 @@ impl Library {
                 Arc::clone(&session.vault),
                 session.generation,
                 session.index.clone(),
+                session.from_backup_index,
             )
         };
         let matches = sidecar_image_matches(&index);
@@ -1182,17 +1398,20 @@ impl Library {
         for (image, video) in matches {
             if index.items[video].thumbnail_object_id.is_none() {
                 index.items[video].thumbnail_object_id = Some(index.items[image].object_id.clone());
+                index.items[video].thumbnail_sha256 = index.items[image].content_sha256.clone();
                 result.moved_to_video_thumbnail += 1;
             }
             removed.insert(image);
         }
-        index.items = std::mem::take(&mut index.items)
+        let (dropped, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut index.items)
             .into_iter()
             .enumerate()
-            .filter_map(|(position, item)| (!removed.contains(&position)).then_some(item))
-            .collect();
+            .partition(|(position, _)| removed.contains(position));
+        index.items = kept.into_iter().map(|(_, item)| item).collect();
         result.removed = removed.len() as u64;
-        vault.save_index(&mut index).map_err(vault_error)?;
+        vault
+            .save_index(&mut index)
+            .map_err(|error| self.vault_write_error(generation, error))?;
         {
             let mut state = runtime.state();
             let session = state
@@ -1200,8 +1419,24 @@ impl Library {
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
             session.index = index.clone();
         }
-        // Best effort, like unlock: anything left behind is removed on the next unlock.
-        let _ = vault.remove_orphans(&index);
+        // Delete exactly the objects this cleanup stopped referencing (best effort; anything
+        // left behind is removed by a later unlock). Nothing is deleted while the session
+        // runs on the backup index.
+        if !from_backup_index {
+            let referenced = index.referenced_objects();
+            let unreferenced = dropped
+                .iter()
+                .flat_map(|(_, item)| {
+                    [
+                        Some(item.object_id.as_str()),
+                        item.thumbnail_object_id.as_deref(),
+                        item.poster_object_id.as_deref(),
+                    ]
+                })
+                .flatten()
+                .filter(|object_id| !referenced.contains(object_id));
+            let _ = vault.remove_objects(unreferenced);
+        }
         Ok(result)
     }
 
@@ -1217,23 +1452,30 @@ impl Library {
             .session_matching(generation)
             .map(|session| session.index.clone())
             .ok_or(LibraryError::EncryptedVaultLocked)?;
-        vault.save_index(&mut snapshot).map_err(vault_error)?;
+        vault
+            .save_index(&mut snapshot)
+            .map_err(|error| self.vault_write_error(generation, error))?;
         if let Some(session) = self.encrypted_vault.state().session_matching(generation) {
             session.index.revision = snapshot.revision;
         }
         Ok(())
     }
 
-    /// Loads the index, removes orphans left by a crash and makes this the unlocked session.
+    /// Loads the index (or its previous generation if it is damaged), removes orphans left
+    /// by a crash and makes this the unlocked session.
     fn install_encrypted_session(
         &self,
         root: PathBuf,
         vault: EncryptedVault,
     ) -> Result<(), LibraryError> {
         let _writes = self.encrypted_vault.writes();
-        let index = vault.load_index().map_err(vault_error)?;
-        // Best effort: a read-only or busy USB must not prevent opening the vault.
-        let _ = vault.remove_orphans(&index);
+        let (index, from_backup_index) = vault.load_index_with_fallback().map_err(vault_error)?;
+        // Best effort: a read-only or busy USB must not prevent opening the vault. Recent
+        // objects may belong to an import in another runtime; a backup index does not know
+        // the newest objects, so it never drives deletion.
+        if !from_backup_index {
+            let _ = vault.remove_orphans(&index, ORPHAN_SAFETY_WINDOW);
+        }
         let vault_id = vault.vault_id();
         let mut state = self.encrypted_vault.state();
         state.generation += 1;
@@ -1242,6 +1484,7 @@ impl Library {
             root: root.clone(),
             index,
             generation: state.generation,
+            from_backup_index,
         });
         state.located = Some(Located { root, vault_id });
         state.auto_unlock_tried = Some(vault_id);
@@ -2169,11 +2412,277 @@ mod tests {
         };
         let orphan_path = vault.join(".lakomics-vault/objects").join(&orphan);
         assert!(orphan_path.is_file());
+        age(&orphan_path);
+        // A fresh orphan may be an import in flight in another runtime: it stays.
+        let fresh = write_unindexed_object(&library);
+        let fresh_path = vault.join(".lakomics-vault/objects").join(&fresh);
         library.lock_encrypted_vault();
         library
             .unlock_encrypted_vault(&password(PASSWORD), false)
             .unwrap();
         assert!(!orphan_path.exists());
+        assert!(fresh_path.exists());
+    }
+
+    /// Moves a file's modification time before the orphan safety window.
+    fn age(path: &Path) {
+        let long_ago = std::time::SystemTime::now()
+            - super::ORPHAN_SAFETY_WINDOW
+            - std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+    }
+
+    /// An object written by an import that has not saved its index yet.
+    fn write_unindexed_object(library: &Library) -> String {
+        let state = library.encrypted_vault.state();
+        state
+            .session
+            .as_ref()
+            .unwrap()
+            .vault
+            .write_object(&mut std::io::Cursor::new(b"in flight".to_vec()))
+            .unwrap()
+    }
+
+    /// Another runtime (library switch, second window) on the same vault: its unlock
+    /// never deletes objects of an import still running in the first runtime.
+    #[test]
+    fn unlock_in_another_runtime_keeps_objects_of_an_import_in_flight() {
+        let (_temp, library, vault) = setup();
+        library
+            .create_encrypted_vault(&vault, PASSWORD, false)
+            .unwrap();
+        let in_flight = write_unindexed_object(&library);
+        let mut other = library.clone();
+        other.encrypted_vault = std::sync::Arc::new(super::EncryptedVaultRuntime::default());
+        other.encrypted_vault_status().unwrap();
+        other
+            .unlock_encrypted_vault(&password(PASSWORD), false)
+            .unwrap();
+        assert!(vault
+            .join(".lakomics-vault/objects")
+            .join(&in_flight)
+            .exists());
+    }
+
+    fn vault_snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut files = all_files(root)
+            .into_iter()
+            .map(|path| {
+                let bytes = fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect::<Vec<_>>();
+        files.sort();
+        files
+    }
+
+    /// The reported risk: vault A unlocked, the USB swapped for vault B at the same mount.
+    /// No write of A may land in B, and status must stop reporting A as unlocked.
+    #[test]
+    fn a_vault_swapped_under_an_unlocked_session_is_never_written() {
+        let (temp, library, vault) = setup();
+        library
+            .create_encrypted_vault(&vault, PASSWORD, false)
+            .unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        write_jpg(&source.join("x.mp4_thumb.jpg"), 10);
+        library
+            .import_into_encrypted_vault(&source, &mut |_| {})
+            .unwrap();
+        fs::write(source.join("x.mp4"), video_bytes()).unwrap();
+        library
+            .import_into_encrypted_vault(&source, &mut |_| {})
+            .unwrap();
+        assert_eq!(
+            library
+                .preview_encrypted_vault_sidecar_cleanup()
+                .unwrap()
+                .count,
+            1
+        );
+        let id = items_by_name(&library)["x.mp4"].clone();
+        write_png(&source.join("new.png"), 8, 8);
+
+        // Swap: A leaves, B (another vault) appears at the same path.
+        let other_library = Library::open(temp.path().join("other-library")).unwrap();
+        let b_root = temp.path().join("b");
+        fs::create_dir(&b_root).unwrap();
+        let b_id = other_library
+            .create_encrypted_vault(&b_root, "other", false)
+            .unwrap()
+            .status
+            .vault_id
+            .unwrap();
+        fs::rename(&vault, temp.path().join("a-away")).unwrap();
+        fs::rename(&b_root, &vault).unwrap();
+        let before = vault_snapshot(&vault);
+
+        assert!(matches!(
+            library.set_encrypted_vault_title(&id, Some("x")),
+            Err(LibraryError::EncryptedVaultLocked)
+        ));
+        assert_eq!(vault_snapshot(&vault), before);
+        // Each write path on a fresh session of A (the first failure drops the session).
+        let reopen = |library: &Library| {
+            fs::rename(&vault, temp.path().join("b-away")).unwrap();
+            fs::rename(temp.path().join("a-away"), &vault).unwrap();
+            library.lock_encrypted_vault();
+            library.encrypted_vault_status().unwrap();
+            library
+                .unlock_encrypted_vault(&password(PASSWORD), false)
+                .unwrap();
+            fs::rename(&vault, temp.path().join("a-away")).unwrap();
+            fs::rename(temp.path().join("b-away"), &vault).unwrap();
+        };
+        reopen(&library);
+        assert!(matches!(
+            library.import_into_encrypted_vault(&source, &mut |_| {}),
+            Err(LibraryError::EncryptedVaultLocked)
+        ));
+        assert_eq!(vault_snapshot(&vault), before);
+        reopen(&library);
+        assert!(matches!(
+            library.apply_encrypted_vault_sidecar_cleanup(),
+            Err(LibraryError::EncryptedVaultLocked)
+        ));
+        assert_eq!(vault_snapshot(&vault), before);
+        reopen(&library);
+        assert!(matches!(
+            library.change_encrypted_vault_password(&password(PASSWORD), "new"),
+            Err(LibraryError::EncryptedVaultLocked)
+        ));
+        assert_eq!(vault_snapshot(&vault), before);
+
+        // Status alone notices the swap without any write attempt.
+        reopen(&library);
+        let status = library.encrypted_vault_status().unwrap();
+        assert_eq!(status.state, EncryptedVaultState::Locked);
+        assert_eq!(status.vault_id.as_deref(), Some(b_id.as_str()));
+        assert!(library.encrypted_vault.state().session.is_none());
+        assert_eq!(vault_snapshot(&vault), before);
+    }
+
+    /// Resume must not treat a different file as imported just because it has the same
+    /// relative path and size (for example the same layout in another source folder).
+    #[test]
+    fn resume_skips_only_files_whose_content_is_already_in_the_vault() {
+        let (temp, library, vault) = setup();
+        library
+            .create_encrypted_vault(&vault, PASSWORD, false)
+            .unwrap();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        let third = temp.path().join("third");
+        for (root, fill) in [(&first, b'a'), (&second, b'b'), (&third, b'a')] {
+            fs::create_dir_all(root.join("dir")).unwrap();
+            fs::write(root.join("dir/same.jpg"), vec![fill; 4096]).unwrap();
+        }
+        let report = library
+            .import_into_encrypted_vault(&first, &mut |_| {})
+            .unwrap();
+        assert_eq!((report.imported, report.skipped), (1, 0));
+        let other = library
+            .import_into_encrypted_vault(&second, &mut |_| {})
+            .unwrap();
+        assert_eq!((other.imported, other.skipped), (1, 0), "different content");
+        let same = library
+            .import_into_encrypted_vault(&third, &mut |_| {})
+            .unwrap();
+        assert_eq!((same.imported, same.skipped), (0, 1), "same content");
+
+        // Items from before hashes existed: confirmed by decrypting their object.
+        {
+            let mut state = library.encrypted_vault.state();
+            let session = state.session.as_mut().unwrap();
+            for item in &mut session.index.items {
+                item.content_sha256 = None;
+            }
+            let mut index = session.index.clone();
+            session.vault.save_index(&mut index).unwrap();
+        }
+        library.lock_encrypted_vault();
+        library
+            .unlock_encrypted_vault(&password(PASSWORD), false)
+            .unwrap();
+        let old = library
+            .import_into_encrypted_vault(&third, &mut |_| {})
+            .unwrap();
+        assert_eq!((old.imported, old.skipped), (0, 1));
+        let fourth = temp.path().join("fourth");
+        fs::create_dir_all(fourth.join("dir")).unwrap();
+        fs::write(fourth.join("dir/same.jpg"), vec![b'c'; 4096]).unwrap();
+        let different = library
+            .import_into_encrypted_vault(&fourth, &mut |_| {})
+            .unwrap();
+        assert_eq!((different.imported, different.skipped), (1, 0));
+        // The confirmed hash was recorded and saved.
+        library.lock_encrypted_vault();
+        library
+            .unlock_encrypted_vault(&password(PASSWORD), false)
+            .unwrap();
+        let state = library.encrypted_vault.state();
+        let items = &state.session.as_ref().unwrap().index.items;
+        assert_eq!(items.len(), 3);
+        assert!(
+            items
+                .iter()
+                .filter(|item| item.content_sha256.is_some())
+                .count()
+                >= 2
+        );
+    }
+
+    /// A damaged `index.bin` opens from `index.prev.bin`, and that session deletes nothing,
+    /// because objects newer than the backup are unknown to it.
+    #[test]
+    fn a_damaged_index_opens_from_the_backup_without_orphan_cleanup() {
+        let (temp, library, vault) = setup();
+        library
+            .create_encrypted_vault(&vault, PASSWORD, false)
+            .unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        write_png(&source.join("one.png"), 8, 8);
+        library
+            .import_into_encrypted_vault(&source, &mut |_| {})
+            .unwrap();
+        write_png(&source.join("two.png"), 9, 8);
+        library
+            .import_into_encrypted_vault(&source, &mut |_| {})
+            .unwrap();
+        library.lock_encrypted_vault();
+        let objects = vault.join(".lakomics-vault/objects");
+        for entry in fs::read_dir(&objects).unwrap() {
+            age(&entry.unwrap().path());
+        }
+        let count = object_count(&vault);
+        let index = vault.join(".lakomics-vault/index.bin");
+        let mut bytes = fs::read(&index).unwrap();
+        bytes[60] ^= 1;
+        fs::write(&index, bytes).unwrap();
+
+        let status = library
+            .unlock_encrypted_vault(&password(PASSWORD), false)
+            .unwrap();
+        assert_eq!(status.state, EncryptedVaultState::Unlocked);
+        assert_eq!(status.item_count, Some(1));
+        assert_eq!(object_count(&vault), count, "two.png's objects are kept");
+        assert!(
+            library
+                .encrypted_vault
+                .state()
+                .session
+                .as_ref()
+                .unwrap()
+                .from_backup_index
+        );
     }
 
     fn write_jpg(path: &Path, shade: u8) -> Vec<u8> {
@@ -2212,6 +2721,18 @@ mod tests {
         fs::read_dir(vault.join(".lakomics-vault/objects"))
             .unwrap()
             .count()
+    }
+
+    fn thumbnail_type(library: &Library, id: &str) -> String {
+        let response = crate::media_protocol::media_response(
+            Some(library),
+            &tauri::http::Method::GET,
+            &format!("/vault-thumbnail/{id}"),
+        );
+        response.headers()[tauri::http::header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .to_owned()
     }
 
     /// What the thumbnail route of the media protocol serves for `id`.
@@ -2274,13 +2795,19 @@ mod tests {
         let report = library
             .import_into_encrypted_vault(&source, &mut |_| {})
             .unwrap();
+        // c.mp4 already has a different (legacy) custom thumbnail: its sidecar is neither
+        // an image item nor reported as present, but counted on its own.
         assert_eq!(
             (report.total, report.imported, report.skipped, report.failed),
-            (7, 4, 1, 0)
+            (7, 4, 0, 0)
         );
         assert_eq!(
-            (report.sidecar_thumbnails, report.legacy_thumbnails),
-            (2, 1)
+            (
+                report.sidecar_thumbnails,
+                report.sidecar_skipped,
+                report.legacy_thumbnails
+            ),
+            (2, 1, 1)
         );
 
         let items = items_by_name(&library);
@@ -2292,6 +2819,8 @@ mod tests {
             .unwrap();
         assert_eq!(images.total_count, 1);
         assert_eq!(thumbnail_route(&library, &items["a.mp4"]), a_thumb);
+        assert_eq!(thumbnail_type(&library, &items["a.mp4"]), "image/jpeg");
+        assert_eq!(thumbnail_type(&library, &items["c.mp4"]), "image/webp");
         assert_eq!(thumbnail_route(&library, &items["c.mp4"]), legacy);
         assert_eq!(thumbnail_route(&library, &items["d.mp4"]), d_thumb);
         assert_eq!(
@@ -2308,8 +2837,13 @@ mod tests {
             .import_into_encrypted_vault(&source, &mut |_| {})
             .unwrap();
         assert_eq!(
-            (again.imported, again.sidecar_thumbnails, again.skipped),
-            (0, 0, 7)
+            (
+                again.imported,
+                again.sidecar_thumbnails,
+                again.skipped,
+                again.sidecar_skipped
+            ),
+            (0, 0, 6, 1)
         );
         assert_eq!(object_count(&vault), objects);
         assert_eq!(items_by_name(&library).len(), 4);
@@ -2409,7 +2943,8 @@ mod tests {
         assert_eq!(object_count(&vault), 8);
         assert_eq!(thumbnail_route(&library, &items["a.mp4"]), a_thumb);
 
-        // A re-import neither brings the sidecars back nor re-applies them.
+        // A re-import neither brings the sidecars back nor re-applies them: a's content is the
+        // video thumbnail now, and c's video keeps its own thumbnail (sidecar skipped).
         let reimport = library
             .import_into_encrypted_vault(&source, &mut |_| {})
             .unwrap();
@@ -2417,9 +2952,10 @@ mod tests {
             (
                 reimport.imported,
                 reimport.sidecar_thumbnails,
-                reimport.skipped
+                reimport.skipped,
+                reimport.sidecar_skipped
             ),
-            (0, 0, 5)
+            (0, 0, 4, 1)
         );
         assert_eq!(items_by_name(&library).len(), 3);
     }

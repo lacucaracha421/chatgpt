@@ -226,8 +226,10 @@ fn handle_request(app: AppHandle, mut request: Request, state: &AppState, token:
     let request_url = request.url().to_owned();
     let path = request_url.split('?').next().unwrap_or(&request_url).to_owned();
     if path.starts_with("/v1/internal/playback/") || path.starts_with("/v1/internal/vault-playback/") {
-        if method != "GET" { let _ = request.respond(Response::empty(StatusCode(405))); return; }
-        let Some((source, id)) = parse_internal_playback_request(&request_url, playback_ticket) else { let _ = request.respond(Response::empty(StatusCode(401))); return; };
+        let (source, id) = match accept_internal_playback_request(&method, &request_url, playback_ticket) {
+            Ok(accepted) => accepted,
+            Err(rejection) => { let _ = request.respond(rejection); return; }
+        };
         let range = request_header(&request, "Range");
         let library = state.current_library();
         let response = match source {
@@ -289,8 +291,21 @@ fn parse_internal_playback_request(value: &str, expected_ticket: &str) -> Option
     Uuid::parse_str(asset_id).ok()?;
     let mut tickets = parsed.query_pairs().filter(|(key, _)| key == "ticket");
     let ticket = tickets.next()?.1;
-    if tickets.next().is_some() || ticket.as_ref() != expected_ticket { return None; }
+    if tickets.next().is_some() || !constant_time_eq(ticket.as_bytes(), expected_ticket.as_bytes()) { return None; }
     Some((source, asset_id.to_owned()))
+}
+
+/// Method and ticket check of an internal playback request. Rejections carry
+/// `Cache-Control: no-store` like every playback response.
+fn accept_internal_playback_request(method: &str, url: &str, expected_ticket: &str) -> Result<(InternalPlaybackSource, String), InternalPlaybackResponse> {
+    if method != "GET" { return Err(internal_empty_response(405, None)); }
+    parse_internal_playback_request(url, expected_ticket).ok_or_else(|| internal_empty_response(401, None))
+}
+
+/// Compares secrets without an early exit on the first differing byte. The length is not
+/// secret (tickets have a fixed length). `ring::constant_time` is deprecated in ring 0.17.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && std::hint::black_box(a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y))) == 0
 }
 
 type InternalPlaybackResponse = Response<Box<dyn Read>>;
@@ -1107,6 +1122,15 @@ mod tests {
         assert!(!vault_url.contains("extension-secret"));
         assert_eq!(parse_internal_playback_request(&vault_url, "playback-secret"), Some((InternalPlaybackSource::Vault, asset_id.to_owned())));
         assert!(parse_internal_playback_request(&vault_url, "wrong").is_none());
+        assert!(parse_internal_playback_request(&vault_url, "playback-secreT").is_none());
+        assert!(parse_internal_playback_request(&vault_url, "playback-secret-longer").is_none());
+        assert!(constant_time_eq(b"abc", b"abc") && !constant_time_eq(b"abc", b"abd") && !constant_time_eq(b"abc", b"ab"));
+        assert!(accept_internal_playback_request("GET", &vault_url, "playback-secret").is_ok());
+        for (method, ticket, status) in [("POST", "playback-secret", 405), ("GET", "wrong", 401)] {
+            let rejection = accept_internal_playback_request(method, &vault_url, ticket).unwrap_err();
+            assert_eq!(rejection.status_code().0, status);
+            assert!(rejection.headers().iter().any(|header| header.field.equiv("Cache-Control") && header.value.as_str() == "no-store"), "{method} {ticket}");
+        }
         assert!(runtime.vault_playback_url("not-a-uuid").is_none());
         let other = format!("{API_BASE_URL}/v1/internal/vault-asset/{asset_id}?ticket=playback-secret");
         assert!(parse_internal_playback_request(&other, "playback-secret").is_none());
