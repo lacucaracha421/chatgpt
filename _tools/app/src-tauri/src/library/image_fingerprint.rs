@@ -3,10 +3,34 @@ use image::DynamicImage;
 use super::error::LibraryError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ImageFingerprint {
+pub struct ImageFingerprint {
     pub(crate) bytes: [u8; 32],
     pub(crate) cropped_bytes: [u8; 32],
     pub(crate) quality: u8,
+}
+
+/// Fingerprint a horizontal reflection of an already EXIF-oriented image.
+/// Kept separate from ingestion while mirror matching is being benchmarked.
+#[allow(dead_code)]
+pub fn mirrored_fingerprint(image: &DynamicImage) -> Result<ImageFingerprint, LibraryError> {
+    fingerprint(&DynamicImage::ImageRgba8(image::imageops::flip_horizontal(
+        image,
+    )))
+}
+
+/// Approximate a reflection by negating odd horizontal DCT frequencies.
+/// Stored bits lack coefficient magnitudes and the recomputed median, so this
+/// is not an exact PDQ transform (especially for zero/near-median coefficients).
+#[allow(dead_code)]
+pub fn approx_mirror_bits(hash: &[u8; 32]) -> [u8; 32] {
+    let mut mirrored = *hash;
+    for i in 0..16 {
+        for j in (1..16).step_by(2) {
+            let k = i * 16 + j;
+            mirrored[31 - k / 8] ^= 1 << (k % 8);
+        }
+    }
+    mirrored
 }
 
 pub(crate) fn fingerprint(image: &DynamicImage) -> Result<ImageFingerprint, LibraryError> {
@@ -101,9 +125,54 @@ mod tests {
     use image::{DynamicImage, ImageBuffer, Rgb};
 
     use super::{
-        dimensions_are_compatible, fingerprint, hamming_distance, minimum_distance,
-        ImageFingerprint,
+        approx_mirror_bits, dimensions_are_compatible, fingerprint, hamming_distance,
+        minimum_distance, mirrored_fingerprint, ImageFingerprint,
     };
+
+    #[test]
+    fn exact_mirror_matches_flipped_fixture_but_not_original() {
+        let image = detailed_fixture(640, 480);
+        let original = fingerprint(&image).unwrap();
+        let mirror = mirrored_fingerprint(&image).unwrap();
+        let flipped = DynamicImage::ImageRgb8(image::imageops::flip_horizontal(&image.to_rgb8()));
+        let flipped_fingerprint = fingerprint(&flipped).unwrap();
+
+        assert!(minimum_distance(&original, &mirror) > 20);
+        assert_eq!(mirror, flipped_fingerprint);
+        assert_eq!(minimum_distance(&mirror, &flipped_fingerprint), 0);
+        assert_eq!(mirrored_fingerprint(&flipped).unwrap(), original);
+    }
+
+    #[test]
+    fn approximate_mirror_flips_only_odd_horizontal_frequencies_and_is_involutive() {
+        let hash = fingerprint(&detailed_fixture(640, 480)).unwrap().bytes;
+        let mirror = approx_mirror_bits(&hash);
+        for k in 0..256 {
+            let changed = ((hash[31 - k / 8] ^ mirror[31 - k / 8]) >> (k % 8)) & 1;
+            assert_eq!(usize::from(changed), (k % 16) % 2);
+        }
+        assert_eq!(hamming_distance(&hash, &mirror), 128);
+        assert_eq!(approx_mirror_bits(&mirror), hash);
+        assert_eq!(approx_mirror_bits(&approx_mirror_bits(&[0; 32])), [0; 32]);
+    }
+
+    #[test]
+    fn symmetric_fixture_is_its_own_exact_mirror() {
+        let mut pixels = detailed_fixture(641, 480).to_rgb8();
+        for y in 0..pixels.height() {
+            for x in 0..pixels.width() / 2 {
+                pixels.put_pixel(pixels.width() - 1 - x, y, *pixels.get_pixel(x, y));
+            }
+        }
+        let image = DynamicImage::ImageRgb8(pixels);
+        assert_eq!(
+            minimum_distance(
+                &fingerprint(&image).unwrap(),
+                &mirrored_fingerprint(&image).unwrap()
+            ),
+            0
+        );
+    }
 
     #[test]
     fn fingerprint_returns_pdq_bytes_and_quality() {
