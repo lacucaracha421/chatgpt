@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useRef,useState,type MutableRefObject} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useRef,useState,type MutableRefObject} from 'react';
 import {ArrowLeftIcon,ArrowPathIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
 import {Button,IconButton} from './ui';
@@ -59,8 +59,24 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   const editing=selected&&draft;
   // The editor and the trash are one level below the list; Back returns from the left.
   const section=useRef<HTMLElement>(null);
+  const [editorHeight,setEditorHeight]=useState<number>();
+  useLayoutEffect(()=>{
+    const viewport=window.visualViewport;
+    if(!active||!selected||!viewport){setEditorHeight(undefined);return;}
+    const update=()=>{
+      // Limit the editor to the visible bottom, rather than subtracting the IME
+      // twice when Android has already resized the WebView or applied insets.
+      const top=section.current?.getBoundingClientRect().top??0;
+      setEditorHeight(viewport.scale===1?Math.max(0,viewport.offsetTop+viewport.height-top):undefined);
+    };
+    update();
+    viewport.addEventListener('resize',update);
+    viewport.addEventListener('scroll',update);
+    window.addEventListener('resize',update);
+    return()=>{viewport.removeEventListener('resize',update);viewport.removeEventListener('scroll',update);window.removeEventListener('resize',update);};
+  },[active,selected]);
   useLevelMotion(section,active&&loaded&&state.unlocked?(editing?'edit':trash?'trash':'list'):null,(editing?1:0)+(trash?1:0));
-  return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none'}} aria-label="메모">
+  return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:editing?editorHeight:undefined}} aria-label="메모">
     {!loaded?<p className="hint notes-loading">메모를 불러오는 중…</p>:!state.unlocked?<>
       <header className="notes-top"><h1>메모</h1></header>
       <form className="notes-unlock" onSubmit={event=>{event.preventDefault();setError('');void native<NotesState>('notesUnlock',{key}).then(next=>{setKey('');accept(next);}).catch(reason=>setError(errorText(reason)));}}><h2>메모 연결</h2><p>PC 메모에서 사용하는 복구 키를 한 번 입력하세요.</p><input type="password" aria-label="메모 복구 키" value={key} autoComplete="off" spellCheck={false} autoCapitalize="none" onChange={event=>setKey(event.target.value)}/><Button type="submit" variant="primary" disabled={key.trim().length!==64}>메모 열기</Button></form>

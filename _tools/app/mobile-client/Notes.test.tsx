@@ -5,7 +5,7 @@ const mock=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mock.native,errorText:(e:Error)=>e.message}));
 const note:MobileNote={id:'a'.repeat(32),title:'제목',body:'내용',pinned:false,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false};
 beforeEach(()=>{mock.native.mockReset();mock.native.mockImplementation(async(op)=>op==='notesState'||op==='notesSync'?{unlocked:true,notes:[note]}:undefined);});
-afterEach(cleanup);
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('keeps typing made during a save and writes it against the acknowledged local revision',async()=>{
  let finish!:(value:MobileNote)=>void;
  mock.native.mockImplementation(async(op,p)=>{
@@ -63,4 +63,38 @@ it('shows a trashed note read-only with a restore action',async()=>{
  expect((screen.getByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).readOnly).toBe(true);
  fireEvent.click(screen.getByRole('button',{name:'복원'}));
  await waitFor(()=>expect(screen.queryByText('휴지통에 있는 메모입니다.')).toBeNull());
+});
+
+it('fits the editor above the visual keyboard, follows viewport panning, and restores on close',async()=>{
+ const viewport=Object.assign(new EventTarget(),{height:1280,offsetTop:0,scale:1});
+ vi.stubGlobal('visualViewport',viewport);vi.stubGlobal('innerHeight',1280);
+ vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockReturnValue({top:64,bottom:1200,left:0,right:800,width:800,height:1136,x:0,y:64,toJSON:()=>({})});
+ render(<Notes active backRef={{current:null}}/>);fireEvent.click(await screen.findByText('제목'));
+ const body=await screen.findByRole('textbox',{name:'메모 내용'}),section=screen.getByRole('region',{name:'메모'});
+ expect(section.style.maxHeight).toBe('1216px');
+ act(()=>body.focus());
+ act(()=>{viewport.height=800;viewport.dispatchEvent(new Event('resize'));});
+ expect(section.style.maxHeight).toBe('736px');expect(document.activeElement).toBe(body);
+ // A resized layout must not have the same keyboard height subtracted again.
+ vi.stubGlobal('innerHeight',800);fireEvent(window,new Event('resize'));
+ expect(section.style.maxHeight).toBe('736px');
+ act(()=>{viewport.offsetTop=100;viewport.dispatchEvent(new Event('scroll'));});
+ expect(section.style.maxHeight).toBe('836px');
+ act(()=>{viewport.height=1280;viewport.offsetTop=0;viewport.dispatchEvent(new Event('resize'));});
+ expect(section.style.maxHeight).toBe('1216px');
+ fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));await screen.findByRole('button',{name:'새 메모'});
+ expect(section.style.maxHeight).toBe('');
+});
+
+it('cleans up viewport listeners on tab switches and does not treat pinch zoom as a keyboard',async()=>{
+ const viewport=Object.assign(new EventTarget(),{height:700,offsetTop:0,scale:1});
+ vi.stubGlobal('visualViewport',viewport);
+ const removed=vi.spyOn(viewport,'removeEventListener'),backRef={current:null};
+ const view=render(<Notes active backRef={backRef}/>);fireEvent.click(await screen.findByText('제목'));
+ await screen.findByRole('textbox',{name:'메모 내용'});const section=screen.getByRole('region',{name:'메모'});
+ expect(section.style.maxHeight).toBe('700px');
+ act(()=>{viewport.scale=2;viewport.dispatchEvent(new Event('resize'));});expect(section.style.maxHeight).toBe('');
+ view.rerender(<Notes active={false} backRef={backRef}/>);
+ expect(removed).toHaveBeenCalledWith('resize',expect.any(Function));expect(removed).toHaveBeenCalledWith('scroll',expect.any(Function));
+ view.rerender(<Notes active backRef={backRef}/>);view.unmount();expect(removed).toHaveBeenCalledTimes(4);
 });

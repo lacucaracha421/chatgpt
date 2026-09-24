@@ -31,10 +31,10 @@
 .notes-fab.ui-button{position:absolute;right:var(--mobile-gutter);bottom:20px;min-height:56px;padding:0 20px 0 16px;border-radius:16px;gap:8px;font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.45);z-index:3}
 .notes-fab svg{width:22px;stroke-width:2}
 .notes-editor{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;padding:0 var(--mobile-gutter) 16px}
-.notes-editor__inner{display:flex;flex-direction:column;flex:1;width:100%;max-width:760px;margin:0 auto}
+.notes-editor__inner{display:flex;flex-direction:column;flex:1;min-height:0;width:100%;max-width:760px;margin:0 auto}
 .notes-editor input,.notes-editor textarea{background:none;border:0;outline:none;color:inherit;font:inherit;resize:none;padding:0;min-width:0}
 .notes-editor input{font-size:24px;font-weight:600;padding:8px 0 4px}
-.notes-editor textarea{flex:1;min-height:50dvh;font-size:16px;line-height:1.7}
+.notes-editor textarea{flex:1;min-height:0;overflow:auto;font-size:16px;line-height:1.7}
 .notes-editor input::placeholder,.notes-editor textarea::placeholder{color:var(--color-muted)}
 .notes-editor input:focus-visible,.notes-editor textarea:focus-visible{outline:none}
 .notes-when{margin:0 0 14px;padding-bottom:14px;border-bottom:1px solid var(--color-border);font-size:12px;color:var(--color-muted)}

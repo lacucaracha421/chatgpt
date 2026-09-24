@@ -233,11 +233,11 @@ describe('mobile catalog reads',()=>{
     await waitFor(()=>expect(mocks.native.mock.calls.filter(([op])=>op==='catalogImage').length).toBeLessThanOrEqual(3));
     act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryByRole('button',{name:'읽기 닫기'})).toBeNull();expect(screen.getByText('40페이지 · 조회 1,200')).toBeTruthy();
   });
-  it('shows one page at a time, advances with the next control, and stores reading position',async()=>{
+  it('shows one page at a time, advances with the next control, without storing reading position',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText('밤의 도서관'));await screen.findByRole('button',{name:'읽기'});fireEvent.click(screen.getByRole('button',{name:'읽기'}));
     await screen.findByRole('button',{name:'다음 페이지'});expect(screen.getAllByText('1 / 5').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));await waitFor(()=>expect(screen.getAllByText('2 / 5').length).toBeGreaterThan(0));
-    expect(localStorage.getItem('lakomics.catalog.reading.kHentai:42')).toBe('1');expect((screen.getByRole('button',{name:'이전 페이지'}) as HTMLButtonElement).disabled).toBe(false);
+    expect(localStorage.getItem('lakomics.catalog.reading.kHentai:42')).toBeNull();expect((screen.getByRole('button',{name:'이전 페이지'}) as HTMLButtonElement).disabled).toBe(false);
   });
   it('keeps reader chrome hidden while swiping, shows it only on tap, and supports pinch zoom',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText('밤의 도서관'));await screen.findByRole('button',{name:'읽기'});fireEvent.click(screen.getByRole('button',{name:'읽기'}));
@@ -590,11 +590,17 @@ describe('mobile catalog layout',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     await screen.findByText('23분 전 갱신');expect(await screen.findByRole('button',{name:'새 작품 가져오기'})).toBeTruthy();
   });
-  it('offers to continue reading from the saved page',async()=>{
+  it('offers only Read and starts at the cover even when old progress exists',async()=>{
     localStorage.setItem('lakomics.catalog.reading.kHentai:42','11');
     render(<Catalog active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText('밤의 도서관'));
-    expect(await screen.findByRole('button',{name:'이어 읽기 12p'})).toBeTruthy();
+    const read=await screen.findByRole('button',{name:'읽기'});
+    expect(screen.queryByRole('button',{name:/이어\s*읽기/})).toBeNull();
     expect(screen.getByText('태그를 누르면 같은 태그로 검색합니다.')).toBeTruthy();
+    fireEvent.click(read);await screen.findByRole('img',{name:'1페이지'});
+    fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));await screen.findByRole('img',{name:'2페이지'});
+    fireEvent.click(screen.getByRole('button',{name:'읽기 닫기'}));
+    fireEvent.click(await screen.findByRole('button',{name:'읽기'}));await screen.findByRole('img',{name:'1페이지'});
+    expect(localStorage.getItem('lakomics.catalog.reading.kHentai:42')).toBe('11');
   });
 });
 describe('mobile catalog tag autocomplete',()=>{
