@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
-import { NotesWorkspace } from "./NotesView";
+import { NotesWorkspace, RecoveryKeyReveal } from "./NotesView";
 import { NotesStore, type NotesRequest, type Note } from "./store";
 afterEach(cleanup);
 function surface(store:NotesStore){return render(<WorkspaceChromeProvider scope="notes"><ChromeTarget name="navigation"/><ChromeTarget name="actions"/><ChromeTarget name="search"/><NotesWorkspace store={store}/></WorkspaceChromeProvider>);}
@@ -50,4 +50,17 @@ it("keeps typing status stable without delaying local writes",async()=>{
     await act(async()=>{vi.advanceTimersByTime(1200);});
     expect(screen.getByText("PC에 저장됨 · 동기화 대기")).toBeInTheDocument();
   } finally { vi.useRealTimers(); }
+});
+
+it("reveals the stored recovery key as text and a QR code only on request",async()=>{
+  const operations:string[]=[];
+  const store=new NotesStore((async(op:string)=>{operations.push(op);return{key:"b".repeat(64)};}) as NotesRequest);
+  render(<RecoveryKeyReveal store={store}/>);
+  expect(screen.queryByRole("img",{name:"복구키 QR 코드"})).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button",{name:"복구키 보기"}));
+  expect(await screen.findByRole("img",{name:"복구키 QR 코드"})).toHaveAttribute("src",expect.stringMatching(/^data:image\/png;base64,/));
+  expect(screen.getByRole("textbox",{name:"복구키"})).toHaveValue("b".repeat(64));
+  expect(operations).toEqual(["recoveryKey"]);
+  await userEvent.click(screen.getByRole("button",{name:"숨기기"}));
+  expect(screen.queryByRole("textbox",{name:"복구키"})).not.toBeInTheDocument();
 });

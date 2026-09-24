@@ -4,7 +4,22 @@ import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { PlusIcon, BookmarkIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { NOTES_REFRESH_INTERVAL, notesStore, type Note, type NotesStore } from "./store";
+import QRCode from "qrcode";
 import "./notes.css";
+
+export function RecoveryKeyReveal({store}:{store:NotesStore}){
+  const [key,setKey]=useState<string|null>(null);const [qr,setQr]=useState("");const [error,setError]=useState("");
+  async function reveal(){setError("");try{const next=(await store.request<{key:string}>("recoveryKey")).key;setQr(await QRCode.toDataURL(next,{margin:2,width:220,errorCorrectionLevel:"M"}));setKey(next);}catch(e){setError(e instanceof Error?e.message:String(e));}}
+  function hide(){setKey(null);setQr("");}
+  return <>{key===null
+    ?<Button onClick={()=>void reveal()}>복구키 보기</Button>
+    :<><label htmlFor="notes-recovery-key">복구키</label>
+      {qr&&<img className="notes-recovery-qr" src={qr} alt="복구키 QR 코드" width={220} height={220}/>}
+      <textarea id="notes-recovery-key" className="ui-input notes-key" value={key} readOnly spellCheck={false} autoComplete="off"/>
+      <p>휴대폰 카메라로 QR을 찍어 나온 값을 모바일 메모의 복구키 칸에 붙여넣으세요. 다른 사람이 보지 않는 곳에서 열고, 따로 보관해 주세요.</p>
+      <Button onClick={hide}>숨기기</Button></>}
+    {error&&<p role="alert">{error}</p>}</>;
+}
 
 function KeySetup({store}:{store:NotesStore}){
   const [key,setKey]=useState("");const [generated,setGenerated]=useState(false);const [confirmed,setConfirmed]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState("");
@@ -32,7 +47,7 @@ export function NotesWorkspace({store}:{store:NotesStore}){
   const newNote=()=>{setTrash(false);setPinned(false);setQuery("");setSelected(store.create());requestAnimationFrame(()=>bodyRef.current?.focus());};
   function edit(change:Partial<Note>){if(note){setEditing(true);clearTimeout(editTimer.current);editTimer.current=setTimeout(()=>setEditing(false),1200);store.edit({...note,...change});}}
   async function backup(operation:"export"|"import"){setBackupBusy(true);try{await store.backup(operation);}finally{setBackupBusy(false);}}
-  const settings=<div className="notes-backup"><Button disabled={backupBusy||state.syncing||state.saving} onClick={()=>void backup("export")}>암호화 백업 저장</Button><Button disabled={backupBusy||state.syncing||state.saving} onClick={()=>void backup("import")}>백업에서 메모 추가</Button><p>같은 복구키의 백업을 새 메모로 추가합니다. 기존 메모는 유지됩니다.</p></div>;
+  const settings=<div className="notes-backup"><Button disabled={backupBusy||state.syncing||state.saving} onClick={()=>void backup("export")}>암호화 백업 저장</Button><Button disabled={backupBusy||state.syncing||state.saving} onClick={()=>void backup("import")}>백업에서 메모 추가</Button><p>같은 복구키의 백업을 새 메모로 추가합니다. 기존 메모는 유지됩니다.</p><RecoveryKeyReveal store={store}/></div>;
   const status=state.error?"저장·동기화 확인 필요":state.notes.some(n=>n.conflict)?"충돌 확인 필요":editing?"편집 중 · 자동 저장":state.saving?"PC에 저장 중…":state.syncing?"동기화 중…":state.notes.some(n=>n.pending)?"PC에 저장됨 · 동기화 대기":state.lastSyncedAt?"동기화됨":"PC에 저장됨";
   const navigation=<div className="notes-index"><div className="notes-scopes"><button className="workspace-index-link" aria-current={!trash&&!pinned?"page":undefined} onClick={()=>{setTrash(false);setPinned(false);}}>모든 메모 <span>{state.notes.filter(n=>!n.deleted).length}</span></button><button className="workspace-index-link" aria-current={pinned&&!trash?"page":undefined} onClick={()=>{setTrash(false);setPinned(true);}}>고정</button><button className="workspace-index-link" aria-current={trash?"page":undefined} onClick={()=>{setTrash(true);setPinned(false);}}>휴지통</button></div>
     <div className="notes-list" aria-label="메모 목록">{notes.map(n=><button key={n.id} className={`notes-list-item${selected===n.id?" is-selected":""}`} onClick={()=>setSelected(n.id)} aria-current={selected===n.id?"true":undefined}><span className="notes-list-title">{n.pinned&&<BookmarkIcon aria-label="고정됨"/>}{n.title.trim()||"제목 없는 메모"}{n.conflict&&<span className="notes-conflict-mark" aria-description="충돌 확인 필요">!</span>}</span><span className="notes-list-preview">{n.body.trim().replace(/\s+/g," ")||"내용 없음"}</span><time dateTime={n.updatedAt}>{new Date(n.updatedAt).toLocaleDateString("ko-KR",{month:"short",day:"numeric"})}</time></button>)}{state.unlocked&&!notes.length&&<p className="notes-list-empty">{query?"검색 결과가 없습니다":trash?"휴지통이 비어 있습니다":"메모가 없습니다"}</p>}</div>

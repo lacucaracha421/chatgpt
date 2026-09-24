@@ -1477,6 +1477,7 @@ pub async fn notes_request(root:String, operation:String, input:serde_json::Valu
         Ok(match operation.as_str() {
             "state"=>serde_json::to_value(library.notes_state()?)?,
             "generateKey"=>serde_json::json!({"key":generate_key()?}),
+            "recoveryKey"=>serde_json::json!({"key":library.notes_recovery_key()?}),
             "unlock"=>serde_json::to_value(library.notes_unlock(input.get("key").and_then(|v|v.as_str()).ok_or(Error::Message("복구키를 입력해 주세요."))?)?)?,
             "save"=>serde_json::to_value(library.notes_save(serde_json::from_value(input)?)?)?,
             "sync"=>serde_json::to_value(library.notes_sync()?)?,

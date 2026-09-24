@@ -221,6 +221,10 @@ impl Library {
         credential::set_notes_key(&self.notes_target(), &key)?;
         self.notes_state()
     }
+    /// The stored key is the recovery key; showing it lets a user re-record a lost copy.
+    pub fn notes_recovery_key(&self) -> Result<String> {
+        Ok(hex(&self.notes_key()?))
+    }
     pub fn notes_state(&self) -> Result<State> {
         if credential::notes_key(&self.notes_target())?.is_none() {
             return Ok(State {

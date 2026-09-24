@@ -48,3 +48,4 @@
 .notes-save-status { display: inline-block; inline-size: 24ch; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; text-align: end; white-space: nowrap; }
 
 .notes-body:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--space-1); border-radius: var(--radius-sm); }
+.notes-recovery-qr { align-self: flex-start; background: #fff; border-radius: var(--radius-sm, 4px); }
