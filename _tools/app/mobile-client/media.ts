@@ -1,26 +1,29 @@
 import {api, native} from './transport';
 import {mapBounded} from './model';
 import type {Asset, Ticket} from './types';
+import type {MediaTiming} from './perf';
+import {clearOriginalTicketWarm} from './originalTicketWarm';
 const tickets = new Map<string, {ticket: Ticket; until: number}>();
 const inFlight = new Map<string, Promise<Ticket>>();
 let epoch = 0;
-export function clearMediaCache() { epoch++; tickets.clear(); inFlight.clear(); }
+export function clearMediaCache() { epoch++; tickets.clear(); inFlight.clear(); for(const entry of originals.values())entry.controller.abort(); originals.clear(); clearOriginalTicketWarm(); }
 export function invalidateTicket(asset: Asset, variant: string) { tickets.delete(`${asset.pending ? 'pending' : 'asset'}:${asset.id}:${variant}`); }
-export async function mediaTicket(asset: Asset, variant: 'thumbnail' | 'original', signal?:AbortSignal): Promise<Ticket> {
+async function requestMediaTicket(asset: Asset, variant: 'thumbnail' | 'original', signal?:AbortSignal, timing?:MediaTiming): Promise<Ticket> {
   const key = `${asset.pending ? 'pending' : 'asset'}:${asset.id}:${variant}`;
   const cached = tickets.get(key);
-  if (cached && cached.until > Date.now()) return cached.ticket;
-  if (!signal && inFlight.has(key)) return inFlight.get(key)!;
+  if (cached && cached.until > Date.now()) {if(timing)timing.source='memory';return cached.ticket;}
+  if (!signal && inFlight.has(key)) {if(timing)timing.source='shared';return inFlight.get(key)!;}
+  if(timing)timing.source=asset.pending?'pending':'native';
   const generation = epoch;
   const promise = (async () => {
     const ticket = asset.pending
       ? await api<{download_url: string}>(`/v1/captures/${encodeURIComponent(asset.id)}/download`, signal).then(t => ({url: t.download_url, expires_in: 540}))
       : variant === 'thumbnail'
         ? await native<Ticket>('thumbnail', {assetId:asset.id}, signal)
-        : await native<Ticket>('media', {assetId:asset.id,mime:asset.content_type}, signal);
+        : await native<Ticket>('media', {assetId:asset.id,mime:asset.content_type,...(timing?{perfId:timing.requestId}:{})}, signal);
     if (!/^https:\/\//.test(ticket.url) && !(import.meta.env.DEV && ticket.url.startsWith('data:image/'))) throw new Error('유효한 미디어 주소를 받지 못했습니다.');
     const expiry = 'expires_at' in ticket && ticket.expires_at ? Date.parse(ticket.expires_at) : Date.now() + (ticket.expires_in ?? 240) * 1000;
-    if (generation === epoch) {
+    if (generation === epoch && !signal?.aborted) {
       if (tickets.size >= 240) tickets.delete(tickets.keys().next().value!);
       tickets.set(key, {ticket, until: expiry - 15_000});
     }
@@ -29,6 +32,31 @@ export async function mediaTicket(asset: Asset, variant: 'thumbnail' | 'original
   if (!signal) inFlight.set(key, promise);
   try { return await promise; } finally { if (inFlight.get(key) === promise) inFlight.delete(key); }
 }
+// One native transfer per asset. Each caller owns its subscription, not the shared
+// CancellationSignal; leaving a prefetch/main caller cannot cancel the other one.
+const originals = new Map<string, {controller:AbortController; promise:Promise<Ticket>; users:number; settled:boolean}>();
+export function mediaTicket(asset:Asset, variant:'thumbnail'|'original', signal?:AbortSignal, timing?:MediaTiming):Promise<Ticket> {
+  if(signal?.aborted)return Promise.reject(new DOMException('Cancelled','AbortError'));
+  if(variant!=='original')return requestMediaTicket(asset,variant,signal,timing);
+  const key=`${asset.pending?'pending':'asset'}:${asset.id}`;
+  let entry=originals.get(key);
+  if(!entry){
+    const controller=new AbortController();
+    entry={controller,promise:requestMediaTicket(asset,variant,controller.signal,timing),users:0,settled:false};
+    originals.set(key,entry);
+    const owned=entry;
+    void entry.promise.finally(()=>{owned.settled=true;if(originals.get(key)===owned)originals.delete(key);}).catch(()=>{});
+  }else if(timing)timing.source='shared';
+  const shared=entry;shared.users++;
+  return new Promise((resolve,reject)=>{
+    let done=false;
+    const finish=()=>{if(done)return false;done=true;signal?.removeEventListener('abort',cancel);if(--shared.users===0){if(originals.get(key)===shared)originals.delete(key);if(!shared.settled)shared.controller.abort();}return true;};
+    const cancel=()=>{if(finish())reject(new DOMException('Cancelled','AbortError'));};
+    signal?.addEventListener('abort',cancel,{once:true});
+    shared.promise.then(value=>{if(finish())resolve(value);},error=>{if(finish())reject(error);});
+  });
+}
+
 export function decodeImage(url: string, signal?: AbortSignal): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();

@@ -1,10 +1,11 @@
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, TagIcon, TrashIcon} from '@heroicons/react/24/outline';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import type {Asset} from './types';
 import {dateLabel, imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText} from './transport';
+import {viewerTiming} from './perf';
 import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
@@ -33,7 +34,10 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   trashNotice?:React.ReactNode}) {
   const asset = items[index];
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
+  const timing=useRef<{id:string;url?:string;span:ReturnType<typeof viewerTiming>}|undefined>(undefined);
   const prepared=useRef(new Map<string,string>());
+  const prefetches=useRef(new Map<string,{controller:AbortController; ticket:ReturnType<typeof mediaTicket>; decoded:Promise<void>}>());
+  useEffect(()=>()=>{for(const work of prefetches.current.values())work.controller.abort();prefetches.current.clear();},[]);
   const [decoded, setDecoded] = useState<{id: string; url: string}>();
   const original = decoded?.id === asset.id ? decoded.url : prepared.current.get(asset.id);
   const [error, setError] = useState('');
@@ -83,30 +87,55 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
   useEffect(() => {
     const controller = new AbortController();
+    const fromPrepared=prepared.current.has(asset.id)&&asset.kind!=='video'&&!retry;
+    const span=viewerTiming(asset.id,asset.kind,fromPrepared);
+    const observation={id:asset.id,url:fromPrepared?prepared.current.get(asset.id):undefined,span};
+    timing.current=observation;
+    span.log('open');
     setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); setAddOpen(false); setAdded(''); setChrome(true);
     gesture.current.points.clear();
     const load = async () => {
       try {
-        const ticket = await mediaTicket(asset, 'original', controller.signal);
+        const shared=!retry?prefetches.current.get(asset.id):undefined;
+        if(shared)span.media.source='shared';
+        const ticket = await (shared?.ticket ?? mediaTicket(asset, 'original', controller.signal, span.media));
+        span.log('native',controller.signal.aborted?'canceled':'ok');
         if (controller.signal.aborted) return;
-        if (asset.kind !== 'video') await decodeImage(ticket.url, controller.signal);
+        if (asset.kind !== 'video') {if(shared)await shared.decoded;else await decodeImage(ticket.url, controller.signal);span.log('decoded',controller.signal.aborted?'canceled':'ok');}
+        observation.url=ticket.url;
         if (!controller.signal.aborted){if(asset.kind!=='video'){prepared.current.set(asset.id,ticket.url);while(prepared.current.size>6)prepared.current.delete(prepared.current.keys().next().value!);}setDecoded({id:asset.id,url:ticket.url});}
-      } catch (reason) { if (!controller.signal.aborted) setError(errorText(reason)); }
+      } catch (reason) { if(!span.done)span.log('end',controller.signal.aborted?'canceled':'error');if (!controller.signal.aborted) setError(errorText(reason)); }
     };
     if(!prepared.current.has(asset.id)||asset.kind==='video'||retry)void load();
-    return () => {controller.abort();clearTimeout(stallTimer.current);};
+    return () => {controller.abort();if(!span.done)span.log('end','canceled');clearTimeout(stallTimer.current);};
   }, [asset.id, asset.pending, retry]);
+  // Observe React's committed src, not setDecoded() scheduling or a screen paint.
+  useLayoutEffect(() => {
+    const observation=timing.current;
+    if(!observation||observation.id!==asset.id||observation.span.done||!observation.url)return;
+    const element=asset.kind==='video'?video.current:surface.current?.querySelector('img');
+    if(element?.getAttribute('src')===observation.url)observation.span.log('commit');
+  });
   useEffect(() => {setTransform({scale:1,x:0,y:0});}, [asset.id,asset.pending]);
   useEffect(() => {
-    if (!original) return;
-    const controller = new AbortController();
-    for (const neighbour of imageNeighbours(items, index).reverse().filter(item => (item.size_bytes == null || item.size_bytes <= 8*1024*1024)&&!prepared.current.has(item.id)).slice(0,2)) {
-      void mediaTicket(neighbour, 'original', controller.signal).then(ticket => {
-        if (!controller.signal.aborted) return decodeImage(ticket.url, controller.signal).then(()=>{if(!controller.signal.aborted){prepared.current.set(neighbour.id,ticket.url);while(prepared.current.size>6)prepared.current.delete(prepared.current.keys().next().value!);}});
-      }).catch(() => {});
+    const neighbours=imageNeighbours(items,index).reverse().filter(item=>(item.size_bytes==null||item.size_bytes<=8*1024*1024)).slice(0,2);
+    const retained=new Set([asset.id,...neighbours.map(item=>item.id)]);
+    for(const [id,work] of prefetches.current)if(!retained.has(id)){work.controller.abort();prefetches.current.delete(id);}
+    if(!original)return;
+    for(const neighbour of neighbours){
+      if(prepared.current.has(neighbour.id)||prefetches.current.has(neighbour.id))continue;
+      const controller=new AbortController();
+      const span=viewerTiming(neighbour.id,neighbour.kind,false);span.log('prefetch_start');
+      const ticket=mediaTicket(neighbour,'original',controller.signal,span.media);
+      const decoded=ticket.then(async value=>{
+        if(controller.signal.aborted)return;
+        await decodeImage(value.url,controller.signal);
+        if(!controller.signal.aborted){prepared.current.set(neighbour.id,value.url);while(prepared.current.size>6)prepared.current.delete(prepared.current.keys().next().value!);}
+      });
+      const work={controller,ticket,decoded};prefetches.current.set(neighbour.id,work);
+      void decoded.then(()=>span.log('prefetch_finish',controller.signal.aborted?'canceled':'ok'),()=>span.log('prefetch_finish',controller.signal.aborted?'canceled':'error')).finally(()=>{if(prefetches.current.get(neighbour.id)===work)prefetches.current.delete(neighbour.id);});
     }
-    return () => controller.abort();
-  }, [original, items, index]);
+  }, [original, items, index, asset.id]);
   useEffect(() => {
     if (!chrome || info || albumOpen || classificationOpen || exclusion || addOpen || asset.kind === 'video') return;
     const timer = setTimeout(() => setChrome(false), 4000); return () => clearTimeout(timer);

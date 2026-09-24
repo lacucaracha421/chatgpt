@@ -52,15 +52,36 @@ final class MediaRepository {
  void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache.clear();}finally{tickets.clear();}}}
  InputStream stream(String key,long generation)throws IOException{return cache.open(key,generation);}
  private final ScheduledExecutorService ticketWorker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
- private final TicketBatcher<Scope,JSONObject> tickets=new TicketBatcher<>(ticketWorker,this::fetchTickets);
- private JSONObject ticket(String id,String variant,Scope scope,CancellationSignal signal)throws Exception{
+ private final TicketBatcher<Scope,JSONObject> tickets=new TicketBatcher<>(ticketWorker,this::fetchTickets,MediaRepository::ticketExpiry,System::currentTimeMillis);
+ private static long ticketExpiry(JSONObject value){try{return java.time.Instant.parse(value.getString("expires_at")).toEpochMilli();}catch(Exception ignored){return 0;}}
+ JSONObject prewarmTickets(JSONArray ids,CancellationSignal signal,java.util.function.BooleanSupplier allowed)throws Exception{
+  if(ids.length()>50)throw new IllegalArgumentException("Too many tickets");
+  List<TicketBatcher<Scope,JSONObject>.Waiter> waiters=new ArrayList<>();List<String> keys=new ArrayList<>();
   try{
+   synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
+    for(int i=0;i<ids.length();i++){
+     signal.throwIfCanceled();if(!allowed.getAsBoolean())break;
+     String id=ids.getString(i);if(keys.contains(id))continue;Scope scope=scope(id,"original");
+     waiters.add(tickets.submit(scope.ticketGroup,scope,id,"original",()->signal.isCanceled() || !allowed.getAsBoolean() || scope.generation!=cache.generation()));keys.add(id);
+    }
+   }
+   JSONArray ready=new JSONArray();
+   for(int i=0;i<waiters.size();i++)try{JSONObject value=waiters.get(i).await();ready.put(new JSONObject().put("assetId",keys.get(i)).put("expires_at",value.getString("expires_at")));}catch(Exception failure){signal.throwIfCanceled();}
+   return new JSONObject().put("items",ready);
+  }finally{for(TicketBatcher<Scope,JSONObject>.Waiter waiter:waiters)waiter.close();}
+ }
+ private JSONObject ticket(String id,String variant,Scope scope,CancellationSignal signal)throws Exception{return ticket(id,variant,scope,signal,false);}
+ private JSONObject ticket(String id,String variant,Scope scope,CancellationSignal signal,boolean fresh)throws Exception{
+  try{
+   PerfLog.Op perf=PerfLog.current.get();
    TicketBatcher<Scope,JSONObject>.Waiter waiter;
+   long submitted;
    synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
     if(scope.generation!=cache.generation())throw new IOException("Cache invalidated");
-    waiter=tickets.submit(scope.ticketGroup,scope,id,variant,()->signal!=null&&signal.isCanceled() || scope.generation!=cache.generation());
+    submitted=System.nanoTime();
+    waiter=tickets.submit(scope.ticketGroup,scope,id,variant,()->signal!=null&&signal.isCanceled() || scope.generation!=cache.generation(),fresh);
    }
-   return waiter.await();
+   try{return waiter.await();}finally{if(perf!=null){perf.ticket+=System.nanoTime()-submitted;perf.batch(waiter.timing());}}
   }catch(CancellationException canceled){if(signal!=null)signal.throwIfCanceled();throw new IOException("Cache invalidated");}
  }
  private List<JSONObject> fetchTickets(Scope scope,List<TicketBatcher.Item> items)throws Exception{
@@ -69,11 +90,20 @@ final class MediaRepository {
   synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){if(scope.generation!=cache.generation())throw new IOException("Cache invalidated");active.add(signal);}
   try{
    JSONArray requests=new JSONArray();for(TicketBatcher.Item item:items)requests.put(new JSONObject().put("asset_id",item.id).put("variant",item.variant));
-   JSONArray results=client.apiFor(scope.connection,"/v1/library/media-tickets","POST",new JSONObject().put("items",requests),signal).getJSONArray("items");
+   JSONObject body=new JSONObject().put("items",requests);
+   JSONArray results;long httpStarted=System.nanoTime();
+   try{results=client.apiFor(scope.connection,"/v1/library/media-tickets?verify_digest=true"+(items.get(0).fresh?"&fresh_head=true":""),"POST",body,signal).getJSONArray("items");}
+   finally{if(!items.isEmpty()&&items.get(0).batch!=null)items.get(0).batch.httpNanos=System.nanoTime()-httpStarted;}
    List<JSONObject> matches=new ArrayList<>();
    for(TicketBatcher.Item item:items){JSONObject match=null;for(int i=0;i<results.length();i++){JSONObject result=results.getJSONObject(i);if(result.optString("asset_id").equals(item.id)&&result.optString("variant").equals(item.variant)){if(result.optBoolean("ok"))match=result;break;}}matches.add(match);}
    return matches;
   }finally{active.remove(signal);}
+ }
+ private JSONObject directTicket(String id,Scope scope,CancellationSignal signal)throws Exception{
+  // WebView streams these bytes directly, so it cannot promise digest verification.
+  PerfLog.Op perf=PerfLog.current.get();long started=System.nanoTime();
+  try{return client.apiFor(scope.connection,"/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","original"),signal);}
+  finally{if(perf!=null)perf.ticket+=System.nanoTime()-started;}
  }
  static boolean imageMime(String mime){return mime!=null && mime.matches("image/(jpeg|png|webp|gif|avif|heic|heif|bmp)");}
  private JSONObject local(Scope scope,String mime)throws Exception{
@@ -85,15 +115,18 @@ final class MediaRepository {
  JSONObject browser(String id,String variant,String mime,CancellationSignal signal)throws Exception{
   if(signal==null)signal=new CancellationSignal();signal.throwIfCanceled();
   Scope scope=scope(id,variant);
-  if(variant.equals("original") && !imageMime(mime))return ticket(id,variant,scope,signal);
+  PerfLog.Op perf=PerfLog.current.get();
+  if(variant.equals("original") && mime!=null && !mime.isEmpty() && !imageMime(mime)){if(perf!=null)perf.cache="bypass";return directTicket(id,scope,signal);}
   // Hold the existing reentrant fill lock before requesting a ticket: a caller
   // arriving during another image's download must recheck the cache, not issue a ticket.
   LockEntry entry=retainLock(scope.key);boolean locked=false;
   try{
-   lock(entry,signal);locked=true;signal.throwIfCanceled();
-   try{cache.file(scope.key,scope.generation);return local(scope,variant.equals("thumbnail")?"image/webp":mime);}catch(FileNotFoundException ignored){}
+   long lockStarted=System.nanoTime();
+   try{lock(entry,signal);locked=true;}finally{if(perf!=null)perf.lock+=System.nanoTime()-lockStarted;}
+   signal.throwIfCanceled();
+   try{cache.file(scope.key,scope.generation);if(perf!=null)perf.cache="hit";return local(scope,variant.equals("thumbnail")?"image/webp":imageMime(mime)?mime:cachedImageMime(scope));}catch(FileNotFoundException ignored){if(perf!=null)perf.cache="miss";}
    JSONObject first=ticket(id,variant,scope,signal);
-   if(variant.equals("original") && (!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>MAX_VIEW_IMAGE))return first;
+   if(variant.equals("original") && (!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>MAX_VIEW_IMAGE)){if(perf!=null)perf.cache="bypass";return directTicket(id,scope,signal);}
    fill(id,variant,scope,signal,first);signal.throwIfCanceled();
    return local(scope,variant.equals("thumbnail")?"image/webp":first.optString("content_type",mime));
   }finally{releaseLock(scope.key,entry,locked);}
@@ -102,9 +135,9 @@ final class MediaRepository {
   if(error instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)error).status;return status==408 || status==429 || status>=500 || status==403;}
   return error instanceof java.net.SocketTimeoutException || error instanceof java.net.SocketException || error instanceof EOFException;
  }
- private interface TicketSource {JSONObject read()throws Exception;}
+ private interface TicketSource {JSONObject read(boolean fresh)throws Exception;}
  private void fill(String id,String variant,Scope scope,CancellationSignal signal,JSONObject first)throws Exception{
-  fillFrom(variant,scope,signal,first,()->ticket(id,variant,scope,signal));
+  fillFrom(variant,scope,signal,first,fresh->ticket(id,variant,scope,signal,fresh));
  }
  private LockEntry retainLock(String key){synchronized(locks){LockEntry entry=locks.get(key);if(entry==null){entry=new LockEntry();locks.put(key,entry);}entry.users++;return entry;}}
  private void lock(LockEntry entry,CancellationSignal signal)throws Exception{
@@ -113,26 +146,33 @@ final class MediaRepository {
  }
  private void releaseLock(String key,LockEntry entry,boolean locked){if(locked)entry.lock.unlock();synchronized(locks){if(--entry.users==0)locks.remove(key);}}
  private void fillFrom(String variant,Scope scope,CancellationSignal signal,JSONObject first,TicketSource source)throws Exception{
+  PerfLog.Op perf=PerfLog.current.get();
   LockEntry entry=retainLock(scope.key);
   boolean locked=false,permit=false;active.add(signal);
   try{
    long deadline=System.currentTimeMillis()+180000;
-   lock(entry,signal);locked=true;
+   long lockStarted=System.nanoTime();
+   try{lock(entry,signal);locked=true;}finally{if(perf!=null)perf.lock+=System.nanoTime()-lockStarted;}
    signal.throwIfCanceled();
    try{cache.file(scope.key,scope.generation);return;}catch(FileNotFoundException ignored){}
-   while(!(permit=transfers.tryAcquire(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}
+   long permitStarted=System.nanoTime();
+   try{while(!(permit=transfers.tryAcquire(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}}
+   finally{if(perf!=null)perf.permit+=System.nanoTime()-permitStarted;}
    long maximum=variant.equals("thumbnail")?ThumbnailCache.MAX_FILE:MAX_ORIGINAL;
-   JSONObject initial=first==null?source.read():first;
+   JSONObject initial=first==null?source.read(false):first;
    long expected=initial.optLong("size_bytes",0);if(expected>maximum)throw new IOException("Original exceeds 512 MiB selection limit");
    long reservation=expected>0?expected:maximum;
-   cache.obtain(scope.key,scope.generation,reservation,file->{
-    JSONObject current=initial;
+   long obtainStarted=System.nanoTime();final long[] callbackNanos={0};
+   try{cache.obtain(scope.key,scope.generation,reservation,file->{
+    long callbackStarted=System.nanoTime();
+    try{JSONObject current=initial;
     for(int attempt=0;;attempt++){
      signal.throwIfCanceled();
-     try{client.download(current.getString("url"),file,reservation,signal);if(expected>0 && file.length()!=expected)throw new EOFException("Incomplete media");if(!current.optString("sha256").isEmpty()){java.security.MessageDigest hash=java.security.MessageDigest.getInstance("SHA-256");try(InputStream input=new FileInputStream(file)){byte[] buffer=new byte[32768];int count;while((count=input.read(buffer))!=-1)hash.update(buffer,0,count);}if(!NotesCrypto.hex(hash.digest()).equals(current.getString("sha256")))throw new IOException("Image digest mismatch");}signal.throwIfCanceled();return;}
-     catch(Exception failure){signal.throwIfCanceled();if(attempt>=1 || !retryable(failure))throw failure;current=source.read();}
+     try{client.download(current.getString("url"),file,reservation,signal);MediaTransfer.verifyTicket(file,current.optLong("size_bytes",0),current.optString("sha256"));signal.throwIfCanceled();return;}
+     catch(Exception failure){signal.throwIfCanceled();if(attempt>=1 || !retryable(failure))throw failure;current=source.read(true);}
     }
-   });
+    }finally{callbackNanos[0]+=System.nanoTime()-callbackStarted;}
+   });}finally{if(perf!=null){long elapsed=System.nanoTime()-obtainStarted;perf.obtain+=elapsed;perf.commit+=elapsed-callbackNanos[0];}}
   }finally{active.remove(signal);if(permit)transfers.release();releaseLock(scope.key,entry,locked);}
  }
  private String cachedImageMime(Scope scope)throws Exception{
@@ -148,7 +188,7 @@ final class MediaRepository {
   NetworkPolicy.catalogImage(workId,revision,kind,index,url);Scope scope=scopedIdentity("catalog/kHentai/"+workId+"/"+kind+"/"+index+"/"+ThumbnailCache.key(url));
   try{String mime=cachedImageMime(scope);if(imageMime(mime))return local(scope,mime);cache.remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
   JSONObject external=new JSONObject().put("url",url).put("size_bytes",0);
-  try{fillFrom("thumbnail",scope,signal,external,()->external);}catch(CloudClient.HttpFailure failure){if(failure.status==403)throw new IOException("Catalog image URL expired");throw failure;}
+  try{fillFrom("thumbnail",scope,signal,external,fresh->external);}catch(CloudClient.HttpFailure failure){if(failure.status==403)throw new IOException("Catalog image URL expired");throw failure;}
   signal.throwIfCanceled();String mime=cachedImageMime(scope);if(!imageMime(mime)){cache.remove(scope.key,scope.generation);throw new IOException("Catalog image type is unsupported");}return local(scope,mime);
  }
  JSONObject collectionArtwork(String collection,String artwork,String variant,String revision,String digest,CancellationSignal signal)throws Exception{
@@ -160,8 +200,8 @@ final class MediaRepository {
    String mime=count==12 && header[0]=='R' && header[1]=='I' && header[2]=='F' && header[3]=='F' && header[8]=='W' && header[9]=='E' && header[10]=='B' && header[11]=='P'?"image/webp":java.net.URLConnection.guessContentTypeFromStream(input);
    if(imageMime(mime))return local(scope,mime);
   }catch(FileNotFoundException ignored){}
-  TicketSource source=()->client.api("/v1/collections/"+collection+"/artworks/"+artwork+"/media-ticket","POST",new JSONObject().put("variant",variant),signal);
-  JSONObject first=source.read();
+  TicketSource source=fresh->client.api("/v1/collections/"+collection+"/artworks/"+artwork+"/media-ticket","POST",new JSONObject().put("variant",variant),signal);
+  JSONObject first=source.read(false);
   if(!digest.isEmpty()&&!digest.equals(first.optString("sha256")))throw new IOException("Artwork changed; refresh metadata");
   if(!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>ThumbnailCache.MAX_FILE)throw new IOException("Artwork exceeds limit");
   fillFrom(variant,scope,signal,first,source);signal.throwIfCanceled();return local(scope,first.getString("content_type"));

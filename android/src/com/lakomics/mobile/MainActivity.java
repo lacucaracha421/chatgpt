@@ -15,8 +15,12 @@ public final class MainActivity extends Activity {
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
+ private final PerfLog.Pool perfPool=new PerfLog.Pool();
  private final ConcurrentHashMap<String,CancellationSignal> active=new ConcurrentHashMap<>();
  private boolean destroyed=false;
+ private volatile boolean foreground=false;
+ // Metering follows the WebView warm-up policy; native also fences queued work on pause.
+ private boolean ticketWarmAllowed(){return foreground;}
  @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);
   try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
   getWindow().setStatusBarColor(Color.rgb(16,17,18));getWindow().setNavigationBarColor(Color.rgb(16,17,18));
@@ -83,8 +87,11 @@ public final class MainActivity extends Activity {
  final class Bridge {
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
   @JavascriptInterface public void request(String id,String operation,String payload){
+   if("perfLog".equals(operation)){PerfLog.javascript(payload);return;}
    if(id==null || id.length()>128 || payload==null || payload.length()>65536){return;}CancellationSignal signal=new CancellationSignal();if(active.putIfAbsent(id,signal)!=null)return;
-   try{(operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage")?mediaWorkers:workers).execute(()->{try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
+   final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")?perfPool.submit(operation,mediaWorkers.getQueue().size()):null;
+   try{(operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage")?mediaWorkers:workers).execute(()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
+    if(perf!=null){perf.asset=PerfLog.id(p.optString("assetId"));perf.request=PerfLog.id(p.optString("perfId"));}
     switch(operation){
      case "notesState":data=notes.state();break;
      case "notesUnlock":data=notes.unlock(p.getString("key"));break;
@@ -96,6 +103,7 @@ public final class MainActivity extends Activity {
      case "thumbnail":data=thumbnail(p.getString("assetId"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
+     case "mediaTickets":data=media==null?new JSONObject().put("items",new JSONArray()):media.prewarmTickets(p.getJSONArray("assetIds"),signal,MainActivity.this::ticketWarmAllowed);break;
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
      case "pickerStatus":data=pickerStatus();break;
      case "albumStatus":data=albumStatus();break;
@@ -139,8 +147,8 @@ public final class MainActivity extends Activity {
      case "copyText":copyText(p.getString("text"),signal);data=new JSONObject();break;
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();
-    }if(!signal.isCanceled())reply(id,true,data,null);
-   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}finally{active.remove(id,signal);}});}catch(RejectedExecutionException e){active.remove(id,signal);reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,null);}
+    }if(perf!=null)perf.status="ok";if(!signal.isCanceled())reply(id,true,data,null);
+   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}finally{active.remove(id,signal);if(perf!=null){if(signal.isCanceled())perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}}});}catch(RejectedExecutionException e){active.remove(id,signal);if(perf!=null){perf.status="rejected";perfPool.remove(perf);perf.finish(payload);}reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,null);}
   }
  }
  @Override public void onBackPressed(){emit("lakomics-back",null);}
@@ -151,10 +159,10 @@ public final class MainActivity extends Activity {
   }else getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
  @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused)hideStatusBar();}
- @Override protected void onResume(){super.onResume();hideStatusBar();if(web!=null){web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).refresh(false);}
+ @Override protected void onResume(){super.onResume();foreground=true;hideStatusBar();if(web!=null){web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).refresh(false);}
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
   AlbumReplicaService.get(this).start();}
- @Override protected void onPause(){if(web!=null)web.onPause();AlbumReplicaService.get(this).stop();super.onPause();}
+ @Override protected void onPause(){foreground=false;if(web!=null)web.onPause();AlbumReplicaService.get(this).stop();super.onPause();}
  @Override protected void onDestroy(){destroyed=true;stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

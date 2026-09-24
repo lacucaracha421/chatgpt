@@ -30,7 +30,10 @@ public final class TicketBatcherTest {
  private static void coalescesAndPrunes()throws Exception{
   Scheduler scheduler=new Scheduler();AtomicInteger calls=new AtomicInteger();
   TicketBatcher<String,String> batcher=new TicketBatcher<>(scheduler,(connection,items)->{
-   calls.incrementAndGet();check(items.size()==2);check(items.get(0).id.equals("same"));check(items.get(1).id.equals("other"));return values(connection,items);
+   calls.incrementAndGet();check(items.size()==2);check(items.get(0).id.equals("same"));check(items.get(1).id.equals("other"));
+   check(items.get(0).batch==items.get(1).batch);check(items.get(0).batch.size==2);
+   items.get(0).batch.httpNanos=1234567;
+   return values(connection,items);
   });
   AtomicBoolean firstCanceled=new AtomicBoolean(),queuedCanceled=new AtomicBoolean();
   TicketBatcher<String,String>.Waiter first=batcher.submit("account/1","a","same","thumbnail",firstCanceled::get);
@@ -41,6 +44,8 @@ public final class TicketBatcherTest {
   check(scheduler.tasks.size()==1);scheduler.flush();
   canceled(first::await);canceled(removed::await);
   check(second.await().equals("a/same/thumbnail"));check(other.await().equals("a/other/thumbnail"));check(calls.get()==1);
+  check(second.timing()==other.timing());check(second.timing().httpNanos==1234567);check(second.timing().id>0);
+  check(removed.timing()==null);
   canceled(()->batcher.submit("account/1","a","pre-canceled","thumbnail",()->true));
   TicketBatcher<String,String>.Waiter abandoned=batcher.submit("account/1","a","abandoned","thumbnail",()->false);
   abandoned.close();scheduler.flush();canceled(abandoned::await);check(calls.get()==1);
@@ -93,6 +98,7 @@ public final class TicketBatcherTest {
   TicketBatcher<String,String>.Waiter second=batcher.submit("a/1","a","same","thumbnail",()->false);
   scheduler.flush();unavailable(first::await);unavailable(second::await);
   TicketBatcher<String,String>.Waiter retry=batcher.submit("a/1","a","same","thumbnail",()->false);scheduler.flush();check(retry.await().equals("a/same/thumbnail"));
+  check(first.timing()==second.timing());check(first.timing().id!=retry.timing().id);
   // A transfer retry must renew the ticket, not reuse a completed capability.
   TicketBatcher<String,String>.Waiter fresh=batcher.submit("a/1","a","same","thumbnail",()->false);scheduler.flush();check(fresh.await().equals("a/same/thumbnail"));check(calls.get()==3);
   TicketBatcher<String,String> partial=new TicketBatcher<>(scheduler,(connection,items)->Arrays.asList(null,"good"));
@@ -139,8 +145,27 @@ public final class TicketBatcherTest {
   unavailable(()->rejected.submit("a/1","a","same","thumbnail",()->false));
   unavailable(()->rejected.submit("a/1","a","same","thumbnail",()->false));
  }
+ private static void prewarmedOriginalExpiryAndFreshRetry()throws Exception{
+  Scheduler scheduler=new Scheduler();AtomicLong now=new AtomicLong(1_000);AtomicInteger calls=new AtomicInteger();
+  TicketBatcher<String,Long> batcher=new TicketBatcher<>(scheduler,(connection,items)->{
+   calls.incrementAndGet();List<Long> result=new ArrayList<>();for(TicketBatcher.Item item:items)result.add(now.get()+300_000);return result;
+  },value->value,now::get);
+  TicketBatcher<String,Long>.Waiter warm=batcher.submit("a/1","a","image","original",()->false);
+  scheduler.flush();warm.await();calls.set(0);
+  // This is the same submit/await path used by browser() after a disk miss.
+  batcher.submit("a/1","a","image","original",()->false).await();check(calls.get()==0);check(scheduler.tasks.isEmpty());
+  now.addAndGet(285_000); // Safety margin, not wall-clock timing.
+  TicketBatcher<String,Long>.Waiter expired=batcher.submit("a/1","a","image","original",()->false);
+  scheduler.flush();expired.await();check(calls.get()==1);
+  TicketBatcher<String,Long>.Waiter fresh=batcher.submit("a/1","a","image","original",()->false,true);
+  scheduler.flush();fresh.await();check(calls.get()==2);
+  batcher.clear();TicketBatcher<String,Long>.Waiter cleared=batcher.submit("a/1","a","image","original",()->false);
+  scheduler.flush();cleared.await();check(calls.get()==3);
+  TicketBatcher<String,Long>.Waiter account=batcher.submit("b/1","b","image","original",()->false);
+  scheduler.flush();account.await();check(calls.get()==4);
+ }
  public static void main(String[] args)throws Exception{
-  coalescesAndPrunes();inFlightSharing();cancelOneInFlight();scopesAndVariants();failureAndFreshRetry();boundsAndLaterBatchCancellation();clearDuringFlight();interruptionAndRejectedScheduler();
+  prewarmedOriginalExpiryAndFreshRetry();coalescesAndPrunes();inFlightSharing();cancelOneInFlight();scopesAndVariants();failureAndFreshRetry();boundsAndLaterBatchCancellation();clearDuringFlight();interruptionAndRejectedScheduler();
   System.out.println("TicketBatcher: "+checks+" checks passed");
  }
 }

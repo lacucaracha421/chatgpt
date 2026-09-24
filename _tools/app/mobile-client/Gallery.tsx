@@ -1,3 +1,4 @@
+import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState,type ReactNode} from 'react';
 import {observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
@@ -7,6 +8,18 @@ import {dateLabel, justifiedRows, rowHeight} from './model';
 import {invalidateTicket, loadThumbnail, mediaTicket, prefetchThumbnails} from './media';
 
 function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean}) {
+  const host=useRef<HTMLButtonElement>(null);
+  useEffect(()=>{
+    const element=host.current;if(paused||!element||!window.IntersectionObserver)return;
+    let visible:AbortController|undefined;
+    const observer=new IntersectionObserver(entries=>{
+      if(entries.some(entry=>entry.isIntersecting)){
+        if(!visible){visible=new AbortController();warmOriginalTickets([asset],visible.signal);}
+      }else{visible?.abort();visible=undefined;}
+    },{root:element.closest('.gallery-scroll'),rootMargin:'0px'});
+    observer.observe(element);
+    return()=>{observer.disconnect();visible?.abort();};
+  },[asset.id,asset.kind,asset.pending,paused]);
   const [preview, setPreview] = useState(asset.preview);
   const [retried, setRetried] = useState(false);
   useEffect(() => {
@@ -21,7 +34,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: As
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <button className="media-tile" style={{width}} onClick={() => onOpen(index)} aria-label={`${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} data-asset-id={asset.id}>
+  return <button ref={host} className="media-tile" style={{width}} onClick={() => onOpen(index)} aria-label={`${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} data-asset-id={asset.id}>
     <span className="tile-picture" style={{height}}>
       {preview ? <img src={preview} alt="" draggable={false} onError={retry}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
       {asset.kind === 'video' && <span className="video-mark" aria-label="영상"><PlayIcon/></span>}

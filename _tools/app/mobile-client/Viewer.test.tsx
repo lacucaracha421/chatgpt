@@ -11,9 +11,74 @@ vi.mock('./ClassificationAssignmentEditor',()=>({ClassificationAssignmentEditor:
 vi.mock('./ViewerInfo',()=>({ViewerInfo:(props:{asset:Asset;mediaError:string;onClose():void})=>{mocks.info(props);return <div>viewer-info-open<button aria-label="정보 닫기" onClick={props.onClose}/></div>;}}));
 import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
-afterEach(cleanup);
+afterEach(()=>{cleanup();delete window.LakomicsNative;});
 beforeEach(()=>{mocks.ticket.mockReset();mocks.decode.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));});
 describe('progressive viewer',()=>{
+  it('logs the original commit only after decode and observes prepared neighbour reuse',async()=>{
+    const events:Record<string,unknown>[]=[];
+    window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn()};
+    let finish!:()=>void;
+    mocks.decode.mockImplementation((url:string)=>url.endsWith('a')?new Promise<void>(resolve=>{finish=resolve;}):Promise.resolve());
+    const {rerender}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(events.some(p=>p.event==='native'&&p.id==='a')).toBe(true));
+    expect(events.some(p=>p.event==='commit')).toBe(false);
+    expect(screen.getByRole('img').getAttribute('src')).toBe(items[0].preview);
+    await act(async()=>{finish();});
+    await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.id==='a')).toBe(true));
+    expect(screen.getByRole('img').getAttribute('src')).toContain('original-a');
+    await waitFor(()=>expect(events.some(p=>p.event==='prefetch_finish'&&p.id==='b'&&p.status==='ok')).toBe(true));
+    const requests=mocks.ticket.mock.calls.length;
+    rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.id==='b'&&p.prepared===true&&p.source==='prepared')).toBe(true));
+    expect(mocks.ticket).toHaveBeenCalledTimes(requests);
+  });
+  it('keeps one native media operation across a page append and a swipe onto a prefetch',async()=>{
+    const real=await vi.importActual<typeof import('./media')>('./media');real.clearMediaCache();
+    mocks.ticket.mockImplementation(real.mediaTicket);mocks.decode.mockResolvedValue(undefined);
+    const requests:{id:string;assetId:string}[]=[],cancel=vi.fn();let finish!:()=>void;
+    window.LakomicsNative={cancel,request:(id,op,payload)=>{
+      if(op!=='media')return;
+      const {assetId}=JSON.parse(payload);requests.push({id,assetId});
+      const reply=()=>window.dispatchEvent(new CustomEvent('lakomics-native',{detail:{id,ok:true,data:{url:`https://test.invalid/original-${assetId}`,expires_in:240}}}));
+      if(assetId==='b')finish=reply;else reply();
+    }};
+    const props={onIndex:()=>{},onClose:()=>{}};
+    const view=render(<Viewer {...props} items={items} index={0}/>);
+    try{
+      await waitFor(()=>expect(requests.filter(r=>r.assetId==='b')).toHaveLength(1));
+      const operation=requests.find(r=>r.assetId==='b')!.id;
+      const appended=[...items,{id:'c',kind:'image'},{id:'d',kind:'image'}];
+      view.rerender(<Viewer {...props} items={appended} index={0}/>);
+      expect(cancel).not.toHaveBeenCalledWith(operation);
+      view.rerender(<Viewer {...props} items={appended} index={1}/>);
+      expect(cancel).not.toHaveBeenCalledWith(operation);
+      expect(requests.filter(r=>r.assetId==='b')).toHaveLength(1);
+      await act(async()=>{finish();});
+      await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('original-b'));
+      expect(requests.filter(r=>r.assetId==='b')).toHaveLength(1);
+      expect(cancel).not.toHaveBeenCalledWith(operation);
+    }finally{view.unmount();real.clearMediaCache();}
+  });
+  it('cancels a pending prefetch only when it leaves the current and neighbour set',async()=>{
+    mocks.decode.mockResolvedValue(undefined);
+    mocks.ticket.mockImplementation((asset:Asset)=>asset.id==='b'?new Promise(()=>{}):Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));
+    const all=[...items,{id:'c',kind:'image'},{id:'d',kind:'image'}],props={onIndex:()=>{},onClose:()=>{}};
+    const view=render(<Viewer {...props} items={all} index={0}/>);
+    await waitFor(()=>expect(mocks.ticket.mock.calls.some(([a])=>a.id==='b')).toBe(true));
+    const signal=mocks.ticket.mock.calls.find(([a])=>a.id==='b')![2] as AbortSignal;
+    view.rerender(<Viewer {...props} items={all} index={3}/>);
+    expect(signal.aborted).toBe(true);
+  });
+  it('logs cancellation without claiming a late decode committed',async()=>{
+    const events:Record<string,unknown>[]=[];
+    window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn()};
+    let finish!:()=>void;mocks.decode.mockImplementation(()=>new Promise<void>(resolve=>{finish=resolve;}));
+    const {unmount}=render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(mocks.decode).toHaveBeenCalledOnce());
+    unmount();await act(async()=>{finish();});
+    expect(events.filter(p=>p.event==='end')).toMatchObject([{id:'a',status:'canceled'}]);
+    expect(events.some(p=>p.event==='commit')).toBe(false);
+  });
   it('cancels the native original request when leaving the viewer',async()=>{
     mocks.ticket.mockImplementation(()=>new Promise(()=>{}));
     const {unmount}=render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);

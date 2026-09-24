@@ -1,3 +1,5 @@
+import {meteredConnection,warmConnection as connection} from './warmNetwork';
+export {meteredConnection} from './warmNetwork';
 import {api} from './transport';
 import {normalizePage, pagePath} from './model';
 import {EMPTY_FILTERS} from './assetFilters';
@@ -38,11 +40,6 @@ export function warmEnabled() { return read<boolean>(OFF_KEY) !== true; }
 export function setWarmEnabled(enabled:boolean) { write(OFF_KEY, !enabled); window.dispatchEvent(new Event(`${EVENT}-toggle`)); }
 /** Forget progress, e.g. after the media cache was cleared or the connection changed. */
 export function resetWarmProgress() { try {localStorage.removeItem(PROGRESS_KEY);} catch { /* optional */ } }
-
-type Connection = {type?:string; saveData?:boolean; addEventListener?(type:string, listener:()=>void):void; removeEventListener?(type:string, listener:()=>void):void};
-const connection = () => (navigator as Navigator & {connection?:Connection}).connection;
-/** Unknown connection types are allowed; only an explicitly cellular or data-saving link pauses. */
-export function meteredConnection() { const value = connection(); return value?.type === 'cellular' || value?.saveData === true; }
 
 async function pass(scope:string, signal:AbortSignal) {
   let progress = saved(scope);

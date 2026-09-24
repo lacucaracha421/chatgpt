@@ -1,9 +1,23 @@
 import {afterEach, expect, it, vi} from 'vitest';
 const mocks = vi.hoisted(() => ({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport', () => ({api:mocks.api,native:mocks.native}));
-import {clearMediaCache, loadThumbnail, prefetchThumbnails} from './media';
+import {warmOriginalTickets} from './originalTicketWarm';
+import {clearMediaCache, loadThumbnail, prefetchThumbnails, mediaTicket} from './media';
+import type {MediaTiming} from './perf';
 
 afterEach(() => {vi.unstubAllGlobals(); clearMediaCache(); mocks.api.mockReset(); mocks.native.mockReset();});
+
+it('correlates originals without changing ticket caching or making another request',async()=>{
+  const asset={id:'a',kind:'image' as const,content_type:'image/png'};
+  const ticket={url:'https://example.invalid/original',expires_in:240};mocks.native.mockResolvedValue(ticket);
+  const first:MediaTiming={requestId:'trace-1',source:'unknown'};
+  expect(await mediaTicket(asset,'original',undefined,first)).toBe(ticket);
+  expect(first.source).toBe('native');
+  expect(mocks.native).toHaveBeenCalledWith('media',{assetId:'a',mime:'image/png',perfId:'trace-1'},expect.any(AbortSignal));
+  const second:MediaTiming={requestId:'trace-2',source:'unknown'};
+  expect(await mediaTicket(asset,'original',undefined,second)).toBe(ticket);
+  expect(second.source).toBe('memory');expect(mocks.native).toHaveBeenCalledOnce();
+});
 
 it('bounds thumbnail work, displays a fast image independently, and cancels obsolete queued tiles', async () => {
   vi.stubGlobal('Image', class {
@@ -61,4 +75,72 @@ it('keeps background work to three slots and behind waiting visible tiles',async
   expect(started()).toEqual(['p0','p1','p2']);
   expect(decoded.mock.calls.some(([url])=>String(url).includes('/p'))).toBe(false);
   visible.forEach(controller=>controller.abort());
+});
+
+
+it('joins an in-flight original and aborts only after the last subscriber leaves',async()=>{
+  let finish!:(value:{url:string;expires_in:number})=>void;
+  mocks.native.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+  const asset={id:'neighbour',kind:'image'},prefetch=new AbortController(),main=new AbortController();
+  const warm=mediaTicket(asset,'original',prefetch.signal).catch(error=>error);
+  const opened=mediaTicket(asset,'original',main.signal);
+  expect(mocks.native).toHaveBeenCalledTimes(1);
+  const nativeSignal=mocks.native.mock.calls[0][2] as AbortSignal;
+  prefetch.abort();expect(nativeSignal.aborted).toBe(false);
+  finish({url:'https://test.invalid/original',expires_in:240});
+  expect((await opened).url).toContain('/original');expect((await warm).name).toBe('AbortError');
+  const leaving=new AbortController();void mediaTicket({id:'other',kind:'image'},'original',leaving.signal).catch(()=>{});
+  const otherSignal=mocks.native.mock.lastCall![2] as AbortSignal;
+  leaving.abort();expect(otherSignal.aborted).toBe(true);
+});
+
+it('warms only visible image tickets once while valid, in batches, then renews at the safety margin',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-09-24T00:00:00Z'));
+  const first=new AbortController(),second=new AbortController();
+  mocks.native.mockImplementation(async(op:string,payload:{assetIds:string[]})=>{
+    expect(op).toBe('mediaTickets');
+    return {items:payload.assetIds.map(assetId=>({assetId,expires_at:new Date(Date.now()+300_000).toISOString()}))};
+  });
+  try{
+    warmOriginalTickets([{id:'a',kind:'image'},{id:'b',kind:'gif'},{id:'v',kind:'video'},{id:'p',kind:'image',pending:true}],first.signal);
+    warmOriginalTickets([{id:'a',kind:'image'}],second.signal);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.native).toHaveBeenCalledTimes(1);
+    expect(mocks.native.mock.calls[0][1]).toEqual({assetIds:['a','b']});
+    first.abort();
+    await vi.advanceTimersByTimeAsync(284_999);expect(mocks.native).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);expect(mocks.native).toHaveBeenCalledTimes(2);
+    expect(mocks.native.mock.calls[1][1]).toEqual({assetIds:['a']});
+  }finally{first.abort();second.abort();vi.useRealTimers();}
+});
+
+it('pauses ticket warming while hidden or metered and drops items that leave before dispatch',async()=>{
+  vi.useFakeTimers();
+  const connection=new EventTarget() as EventTarget & {type:string};connection.type='cellular';
+  vi.stubGlobal('navigator',{...navigator,connection});
+  const current=new AbortController(),gone=new AbortController();
+  const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');
+  mocks.native.mockImplementation(async(_op:string,payload:{assetIds:string[]})=>({items:payload.assetIds.map(assetId=>({assetId,expires_at:new Date(Date.now()+300_000).toISOString()}))}));
+  try{
+    warmOriginalTickets([{id:'a',kind:'image'}],current.signal);
+    warmOriginalTickets([{id:'gone',kind:'image'}],gone.signal);gone.abort();
+    await vi.advanceTimersByTimeAsync(0);expect(mocks.native).not.toHaveBeenCalled();
+    visibility.mockReturnValue('hidden');connection.type='wifi';connection.dispatchEvent(new Event('change'));
+    await vi.advanceTimersByTimeAsync(0);expect(mocks.native).not.toHaveBeenCalled();
+    visibility.mockReturnValue('visible');document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);expect(mocks.native).toHaveBeenCalledTimes(1);
+    expect(mocks.native.mock.calls[0][1]).toEqual({assetIds:['a']});
+  }finally{current.abort();visibility.mockRestore();vi.useRealTimers();}
+});
+
+it('bounds visible ticket subscriptions to 128 and each native batch to 50',async()=>{
+  vi.useFakeTimers();
+  const controller=new AbortController();
+  mocks.native.mockImplementation(async(_op:string,payload:{assetIds:string[]})=>({items:payload.assetIds.map(assetId=>({assetId,expires_at:new Date(Date.now()+300_000).toISOString()}))}));
+  try{
+    warmOriginalTickets(Array.from({length:200},(_,i)=>({id:`visible-${i}`,kind:'image'})),controller.signal);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(mocks.native.mock.calls.map(([,payload])=>payload.assetIds.length)).toEqual([50,50,28]);
+    expect(new Set(mocks.native.mock.calls.flatMap(([,payload])=>payload.assetIds)).size).toBe(128);
+  }finally{controller.abort();vi.useRealTimers();}
 });
