@@ -181,6 +181,17 @@ class CollectionPersonalEditTests(unittest.TestCase):
         self.assertEqual(memo.json()['detail'], {'code': 'collectionPersonalConflict', 'message': memo.json()['detail']['message'],
                                                  'current': 'PC 메모'})
 
+    def test_published_memo_with_surrounding_whitespace_does_not_conflict_forever(self):
+        padded = copy.deepcopy(self.items)
+        padded[0]['description'] = '  PC 메모  '
+        self.ready(items=padded)
+        reply = self.edit(self.command('memo', '새 메모', 'PC 메모'))
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(self.detail()['description'], '새 메모')
+        stale = self.edit(self.command('memo', '다른 메모', '예전 메모'))
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.json()['detail']['current'], '새 메모')
+
     def test_validation_matches_pc(self):
         self.ready()
         for field, value, expected in [('myScore', 5.5, 3.0), ('myScore', -0.5, 3.0), ('myScore', 2.25, 3.0),
