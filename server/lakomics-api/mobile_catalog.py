@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 import api_auth
 import catalog_bookmarks
 import conditional
+import prune_catalog_artifacts as pruning
 import mobile_catalog_replica as replica
 import mobile_catalog_suggestions as suggestions
 from mobile_catalog_query import (QueryError, mobile_query_text, freeze_query, count_groups, search_groups, detail,
@@ -186,6 +187,12 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
     lifecycle(app).on_startup(startup)
     def root():
         return Path(artifact_root()).resolve()
+    # Background retention (off with LAKOMICS_CATALOG_AUTO_PRUNE=0). Publishing
+    # only wakes it; pruning never runs on a request thread.
+    pruner = pruning.AutoPruner(root, get_db)
+    app.state.catalog_pruner = pruner
+    lifecycle(app).on_startup(pruner.start)
+    lifecycle(app).on_shutdown(pruner.stop)
     def sign(payload):
         encoded = base64.urlsafe_b64encode(replica.encode(payload).encode()).decode().rstrip("=")
         signature = hmac.new(secret().encode(), encoded.encode(), hashlib.sha256).hexdigest()
@@ -367,8 +374,10 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
             # Fast rejection only. The real fence runs inside replica.publish's
             # commit transaction.
             replica.fail(409, "Catalog publication library does not match the active authority")
-        return await run_in_threadpool(replica.publish, body, root(), get_db,
-                                       external_publisher=True, publisher_library_id=library)
+        result = await run_in_threadpool(replica.publish, body, root(), get_db,
+                                         external_publisher=True, publisher_library_id=library)
+        pruner.trigger()
+        return result
 
     def authority_read(db, library_id, epoch):
         return catalog_bookmarks.require_authority(db, library_id, epoch)
@@ -524,7 +533,9 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
                 except HTTPException as error:
                     if error.status_code != 409 or attempt == 2:
                         raise
-        return await run_in_threadpool(publish_policy)
+        result = await run_in_threadpool(publish_policy)
+        pruner.trigger()
+        return result
 
     @app.get(PREFIX + "/search")
     def search(request: Request, authorization: str | None = Header(default=None)):
@@ -694,5 +705,5 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
             unavailable(exc)
     if refresh_fetcher is not None:
         from mobile_catalog_refresh import register_refresh
-        register_refresh(app, get_db, root, require_client, refresh_fetcher)
+        register_refresh(app, get_db, root, require_client, refresh_fetcher, on_published=pruner.trigger)
     return startup

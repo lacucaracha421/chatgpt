@@ -41,6 +41,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "app.startup_album_replica",
             "notes.register_notes.<locals>.startup_notes",
             "mobile_catalog.register_mobile_catalog.<locals>.startup",
+            "prune_catalog_artifacts.AutoPruner.start",
             "mobile_catalog_refresh.RefreshWorker.startup",
             "mobile_collections.register_collections.<locals>.startup_collections",
             "mobile_characters.register_characters.<locals>.startup",
@@ -51,6 +52,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "app.startup_image_thumbnails",
         ]
         expected_shutdown = [
+            "prune_catalog_artifacts.AutoPruner.stop",
             "mobile_catalog_refresh.RefreshWorker.shutdown",
             "app.shutdown_image_thumbnails",
         ]

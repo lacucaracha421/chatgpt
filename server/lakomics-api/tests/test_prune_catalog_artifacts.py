@@ -1,6 +1,5 @@
 """Retention and maintenance safety tests, exclusively on temporary fixtures."""
 import io
-import fcntl
 import os
 from pathlib import Path
 import shutil
@@ -238,12 +237,8 @@ class PruneCatalogTests(unittest.TestCase):
             with self.get_db() as db:
                 self.assertIsNone(db.execute("SELECT * FROM mobile_catalog_artifacts WHERE digest=?", [digest]).fetchone())
                 db.execute("BEGIN IMMEDIATE")  # Row deletion already committed.
-            competing_fd = prune.open_directory(self.root)
-            try:
-                with self.assertRaises(BlockingIOError):
-                    fcntl.flock(competing_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            finally:
-                os.close(competing_fd)
+            with replica.catalog_lock(self.root, blocking=False) as acquired:
+                self.assertFalse(acquired)  # Writers stay excluded through unlinking.
             original(name, **kwargs)
             raise FileNotFoundError(name)
 
@@ -253,31 +248,27 @@ class PruneCatalogTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertIn("already_gone=1", output)
 
-    def test_plan_is_protected_by_control_write_transaction(self):
+    def test_plan_holds_catalog_lock_but_no_control_write_lock(self):
         self.artifact("old")
         original = prune.plan
 
         def inspect(db, *args):
             self.assertTrue(db.in_transaction)
             with self.get_db() as competing:
-                with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
-                    competing.execute("BEGIN IMMEDIATE")
+                competing.execute("BEGIN IMMEDIATE")  # Unrelated API writers keep going.
+                competing.rollback()
+            with replica.catalog_lock(self.root, blocking=False) as acquired:
+                self.assertFalse(acquired)
             return original(db, *args)
 
         with mock.patch.object(prune, "plan", side_effect=inspect):
-            self.execute(apply=True)
+            self.assertEqual(self.execute(apply=True)[0], 0)
 
-    def test_apply_requires_stopped_api_acknowledgement_before_opening_db(self):
-        self.artifact("old")
-        before = self.db_path.read_bytes()
-        error = io.StringIO()
-        with redirect_stderr(error), mock.patch.object(prune, "open_directory") as opened:
-            result = prune.main(["--db", str(self.db_path), "--apply"])
-        self.assertNotEqual(result, 0)
-        opened.assert_not_called()
-        self.assertIn("Refusing --apply", error.getvalue())
-        self.assertIn("--api-stopped", error.getvalue())
-        self.assertEqual(self.db_path.read_bytes(), before)
+    def test_apply_no_longer_requires_api_stopped_acknowledgement(self):
+        _, path = self.artifact("old")
+        with redirect_stdout(io.StringIO()), mock.patch.object(prune.time, "time", return_value=self.now):
+            self.assertEqual(prune.main(["--db", str(self.db_path), "--apply"]), 0)
+        self.assertFalse(path.exists())
 
     def test_dry_run_is_read_only_and_does_not_take_a_write_lock(self):
         self.artifact("old")
@@ -327,19 +318,56 @@ class PruneCatalogTests(unittest.TestCase):
                 self.assertNotEqual(prune.main(arguments), 0)
         self.assertFalse(missing.exists())
 
-    def test_second_apply_is_refused_while_first_holds_directory_lock(self):
+    def test_apply_is_refused_while_a_writer_or_pruner_holds_the_catalog_lock(self):
         _, path = self.artifact("old")
+        for exclusive in (False, True):
+            with self.subTest(exclusive=exclusive), replica.catalog_lock(self.root, exclusive=exclusive):
+                error = io.StringIO()
+                with redirect_stderr(error):
+                    self.assertNotEqual(self.execute(apply=True)[0], 0)
+                self.assertIn("catalog lock", error.getvalue())
+                self.assertTrue(path.exists())
+                self.assertEqual(self.execute()[0], 0)  # Dry run takes no lock.
+        self.assertEqual(self.execute(apply=True)[0], 0)
+        self.assertFalse(path.exists())
+
+    def test_lock_file_is_never_pruned(self):
+        with replica.catalog_lock(self.root):
+            pass
+        lock = self.root / replica.LOCK_NAME
+        os.utime(lock, (0, 0))
+        self.assert_kept([lock], "catalog lock file")
+        self.assertEqual(self.execute(apply=True)[0], 0)
+        self.assertTrue(lock.exists())
+
+    def test_retention_setting_parsing_and_window(self):
+        env = prune.RETENTION_ENV
+        self.assertEqual(prune.retention_seconds({}), 48 * 3600)
+        self.assertEqual(prune.retention_seconds({env: "72"}), 72 * 3600)
+        self.assertEqual(prune.retention_seconds({env: "1"}), 24 * 3600)
+        for bad in ("soon", "nan", "inf"):
+            with self.assertLogs(prune.LOG, "WARNING"):
+                self.assertEqual(prune.retention_seconds({env: bad}), 48 * 3600)
+        self.assertTrue(prune.auto_prune_enabled({}))
+        for off in ("0", "false", "OFF", "no"):
+            self.assertFalse(prune.auto_prune_enabled({prune.AUTO_PRUNE_ENV: off}))
+        _, path = self.artifact("sixty", age=60 * 3600)
         fd = prune.open_directory(self.root)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            error = io.StringIO()
-            with redirect_stderr(error):
-                self.assertNotEqual(self.execute(apply=True)[0], 0)
-            self.assertIn("directory lock", error.getvalue())
-            self.assertTrue(path.exists())
-            self.assertEqual(self.execute()[0], 0)  # Dry run takes no directory lock.
+            with self.get_db() as db:
+                entries = {e.name: e for e in prune.plan(db, fd, self.db_path.stat(), self.now, 72 * 3600)}
         finally:
             os.close(fd)
+        self.assertIn("mtime within 72h", entries[path.name].reasons)
+        with redirect_stdout(io.StringIO()), mock.patch.object(prune.time, "time", return_value=self.now):
+            self.assertEqual(prune.main(["--db", str(self.db_path), "--apply", "--retention-hours", "72"]), 0)
+        self.assertTrue(path.exists())
+        with mock.patch.dict(os.environ, {env: "72"}), redirect_stdout(io.StringIO()), \
+                mock.patch.object(prune.time, "time", return_value=self.now):
+            self.assertEqual(prune.main(["--db", str(self.db_path), "--apply"]), 0)
+        self.assertTrue(path.exists())
+        self.assertEqual(self.execute(apply=True)[0], 0)
+        self.assertFalse(path.exists())
 
     def test_kept_by_rule_counts_and_summary(self):
         self.publication("current", current=True)

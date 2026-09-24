@@ -88,7 +88,16 @@ def parse_page(body, language):
 
 
 def materialize(root, content, get_db, additions=()):
-    """Build an immutable derived artifact without touching the readable baseline."""
+    """Build an immutable derived artifact without touching the readable baseline.
+
+    Holds the catalog lock shared (re-entered inside publish) so the pruner cannot
+    remove the source or the derived file before it is registered and published.
+    """
+    with replica.catalog_lock(root):
+        return _materialize(root, content, get_db, additions)
+
+
+def _materialize(root, content, get_db, additions):
     with get_db() as control:
         saved = control.execute("SELECT payload FROM mobile_catalog_server_additions ORDER BY work_id").fetchall()
     merged = {row["work"]["Id"]: row for row in map(lambda r: json.loads(r[0]), saved)}

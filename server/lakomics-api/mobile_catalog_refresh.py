@@ -52,8 +52,9 @@ def public_job(row):
 
 
 class RefreshWorker:
-    def __init__(self, get_db, root, fetch_page):
+    def __init__(self, get_db, root, fetch_page, on_published=None):
         self.get_db, self.root, self.fetch_page = get_db, root, fetch_page
+        self.on_published = on_published
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.thread = None
@@ -260,6 +261,11 @@ class RefreshWorker:
                 if not done and self.stop.wait(0.4):
                     return True
             self.publish(job, owner)
+            if self.on_published is not None:
+                try:
+                    self.on_published()
+                except Exception:
+                    LOG.error("Catalog refresh post-publish hook failed")
         except Exception:
             with self.get_db() as db:
                 changed = db.execute("UPDATE mobile_catalog_refresh_jobs SET state='failed',error=?,updated=? WHERE id=? AND owner=? AND state='running' AND lease>?", ["갱신하지 못했습니다. 기존 목록은 유지됩니다. 다시 시도해 주세요.", time.time(), job["id"], owner, time.time()]).rowcount
@@ -304,8 +310,8 @@ class RefreshWorker:
                     raise
 
 
-def register_refresh(app, get_db, root, require_auth, fetch_page):
-    worker = RefreshWorker(get_db, root, fetch_page)
+def register_refresh(app, get_db, root, require_auth, fetch_page, on_published=None):
+    worker = RefreshWorker(get_db, root, fetch_page, on_published)
     lifecycle(app).on_startup(worker.startup)
     lifecycle(app).on_shutdown(worker.shutdown)
 

@@ -8,9 +8,14 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from contextlib import contextmanager, closing
 from pathlib import Path
+try:
+    import fcntl
+except ImportError:  # Non-POSIX hosts import this module; they get no lock and no auto-prune.
+    fcntl = None
 from fastapi import HTTPException
 import catalog_bookmarks
 from mobile_catalog_query import count_groups, freeze_query, search_groups
@@ -74,6 +79,67 @@ def checked_digest(value):
     if not isinstance(value, str) or not re.fullmatch("[a-f0-9]{64}", value):
         fail()
     return value
+
+LOCK_NAME = ".catalog.lock"
+_held = threading.local()
+
+
+@contextmanager
+def catalog_lock(root=None, *, exclusive=False, blocking=True, dir_fd=None):
+    """Cross-process lock on ``<root>/.catalog.lock``; yields whether it is held.
+
+    Writers that create, link or register catalog files hold it shared, so they
+    never block each other; the pruner holds it exclusively for plan + delete.
+    Every acquisition opens its own descriptor, because flock belongs to the open
+    file description: threads and processes then exclude each other alike. A
+    thread that already holds the lock for ``root`` re-enters without a second
+    acquisition (publish -> materialize -> prepare_users). Take it before any
+    control-database transaction, never inside one, so the order is always
+    lock -> database. Without fcntl (non-POSIX) this is a no-op.
+    """
+    if fcntl is None:
+        yield True
+        return
+    key = os.path.realpath(root) if root is not None else None
+    held = getattr(_held, "roots", None)
+    if held is None:
+        held = _held.roots = {}
+    if key is not None and key in held and (held[key] or not exclusive):
+        yield True
+        return
+    if dir_fd is None:
+        Path(root).mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    if dir_fd is None:
+        fd = os.open(Path(root) / LOCK_NAME, flags, 0o644)
+    else:
+        fd = os.open(LOCK_NAME, flags, 0o644, dir_fd=dir_fd)
+    try:
+        # Whoever creates it (API or an operator CLI) leaves it openable by the
+        # other; flock needs only read access. A umask must not lock anyone out.
+        if os.fstat(fd).st_mode & 0o777 != 0o644:
+            try:
+                os.fchmod(fd, 0o644)
+            except OSError:
+                pass
+        try:
+            fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | (0 if blocking else fcntl.LOCK_NB))
+            acquired = True
+        except BlockingIOError:
+            acquired = False
+        if not acquired:
+            yield False
+            return
+        if key is not None:
+            held[key] = exclusive
+        try:
+            yield True
+        finally:
+            if key is not None:
+                held.pop(key, None)
+    finally:
+        os.close(fd)
+
 
 def startup(get_db):
     with get_db() as db:
@@ -186,16 +252,21 @@ def import_content(path, expected, root, get_db):
         with open(temporary, "rb+") as sealed:
             os.fsync(sealed.fileno())
         destination = artifact_path(root, expected)
-        # Atomic create-if-absent, including concurrent processes. Never replace
-        # an immutable file held by readers. Staging is on the same filesystem.
-        try:
-            os.link(temporary, destination)
-        except FileExistsError:
-            pass
-        os.unlink(temporary)
-        with get_db() as db:
-            db.execute("INSERT INTO mobile_catalog_artifacts VALUES(?,?,?) ON CONFLICT(digest) DO NOTHING", [expected, encode(manifest), str(int(time.time()))])
-            db.commit()
+        # The pruner must not interleave between linking and registration: an
+        # already-present file could otherwise lose its row or file in between.
+        with catalog_lock(root):
+            # Atomic create-if-absent, including concurrent processes. Never replace
+            # an immutable file held by readers. Staging is on the same filesystem.
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                pass
+            os.unlink(temporary)
+            with get_db() as db:
+                # A re-upload of an existing digest refreshes ready_at, so it counts
+                # as the newest PC upload and survives until the PC publishes it.
+                db.execute("INSERT INTO mobile_catalog_artifacts VALUES(?,?,?) ON CONFLICT(digest) DO UPDATE SET ready_at=excluded.ready_at", [expected, encode(manifest), str(int(time.time()))])
+                db.commit()
         return {"contentDigest": expected, "ready": True, "counts": counts}
     finally:
         if os.path.exists(temporary):
@@ -241,6 +312,12 @@ def validate_users(value):
     return value
 
 def prepare_users(root, content, revision, users):
+    # publish() already holds the catalog lock; direct callers take it here.
+    with catalog_lock(root):
+        _prepare_users(root, content, revision, users)
+
+
+def _prepare_users(root, content, revision, users):
     destination = users_path(root, revision)
     if destination.exists():
         return
@@ -343,6 +420,16 @@ def publish(body, root, get_db, *, additions=(), finalize=None,
     if body["baseRevision"] is not None:
         checked_digest(body["baseRevision"])
     users = validate_users(body["userSnapshot"])
+    # Held shared from the first file check through the commit: the base content,
+    # an existing users projection and the derived artifact must all survive until
+    # the new publication makes them current. The pruner skips meanwhile.
+    with catalog_lock(root):
+        return _publish(body, content, users, root, get_db, additions=additions, finalize=finalize,
+                        external_publisher=external_publisher, publisher_library_id=publisher_library_id)
+
+
+def _publish(body, content, users, root, get_db, *, additions, finalize, external_publisher,
+             publisher_library_id):
     # Initial snapshot. The control-database connection is closed again before any
     # materialization or prepare work, so no read lock is held meanwhile.
     authority = catalog_bookmarks.load(get_db)
@@ -418,7 +505,14 @@ def open_publication(root, get_db, revision=None, bookmarks=None):
             fail(409, "Catalog snapshot is unavailable; refresh")
         publication = dict(row)
     users, content = publication_paths(root, publication)
-    db = sqlite3.connect(users.as_uri() + "?mode=ro", uri=True)
+    # The pruner may unlink either file between the check above and each open.
+    # Once open, an unlinked file stays readable; a failed open of a file that is
+    # now gone is the same expired snapshot as the check above (409, not 500).
+    try:
+        db = sqlite3.connect(users.as_uri() + "?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        publication_paths(root, publication)
+        raise
     db.row_factory = sqlite3.Row
     try:
         if bookmarks is not None:
@@ -426,7 +520,11 @@ def open_publication(root, get_db, revision=None, bookmarks=None):
             # read transaction starts. Inactive authority creates no shadow, so
             # this path is untouched while the domain is PC-owned.
             catalog_bookmarks.attach_shadow(db, bookmarks)
-        db.execute("ATTACH DATABASE ? AS catalog", [content.as_uri() + "?mode=ro"])
+        try:
+            db.execute("ATTACH DATABASE ? AS catalog", [content.as_uri() + "?mode=ro"])
+        except sqlite3.OperationalError:
+            publication_paths(root, publication)
+            raise
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")
         yield db, publication
