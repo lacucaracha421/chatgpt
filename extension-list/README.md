@@ -5,6 +5,22 @@ extension. After updating it, reload the extension and the collecting page so th
 new content scripts are active. The existing connection and portable profile are
 retained.
 
+Menu order and hidden folders also synchronize through
+`GET/PUT /v1/extension/settings` when that optional server module is wired.
+Changes remain local immediately and are sent together after 750 ms of inactivity.
+After reinstalling, pair with the same Lakomics server again to restore them.
+Settings belong to the server's library, not the installation's pairing token.
+Deleted folder IDs are ignored; newly published folders follow the saved order
+and start visible. Existing pinned shortcuts remain in the portable profile.
+
+Settings are read on browser startup, extension installation/update, and pairing.
+Opening the menu checks them at most once every five minutes, with no polling.
+Offline edits survive service-worker suspension and retry on subsequent use.
+A revision conflict re-reads the server and retries the latest local document
+once. Older servers returning 404 retain local behavior and the legacy profile
+order synchronization. The new server module must be registered separately;
+installing this extension alone does not activate the endpoint.
+
 ## Edge menu
 
 Version 3.0.0.34 uses a semicircle attached to the selected screen edge. Image

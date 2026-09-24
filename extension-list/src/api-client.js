@@ -79,6 +79,7 @@
   async function request(path, options = {}) {
     const connection = await readConnection();
     if (!connection) return { ok: false, status: 401, code: "unpaired" };
+    if (options.expectedOrigin && connection.origin !== options.expectedOrigin) return { ok: false, status: 0, code: "connection_changed" };
     const response = await rawRequest(connection.origin, path, { ...options, token: connection.token });
     if (!response.ok && response.status === 401) return { ...response, code: "revoked" };
     return response;

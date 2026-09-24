@@ -1,4 +1,4 @@
-importScripts("classification-tree.js", "api-client.js", "profile-store.js", "save-client.js", "translate-service.js");
+importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translate-service.js");
 
 (() => {
   "use strict";
@@ -6,9 +6,13 @@ importScripts("classification-tree.js", "api-client.js", "profile-store.js", "sa
     if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message);
     switch (message?.type) {
       case "pair": {
+        const previous = await globalThis.LakomicsListApi.readConnection();
         const result = await globalThis.LakomicsListApi.pair(message.value);
         if (!result.ok) return result;
-        const state = await globalThis.LakomicsProfileStore.seed(result.bootstrap);
+        if (previous?.origin !== result.connection.origin) await globalThis.LakomicsProfileStore.clear();
+        await globalThis.LakomicsProfileStore.seed(result.bootstrap);
+        await globalThis.LakomicsMenuSettings.sync({ force: true });
+        const state = await globalThis.LakomicsProfileStore.readState();
         void globalThis.LakomicsProfileStore.flush();
         return { ok: true, state, connection: { origin: result.connection.origin, clientId: result.connection.clientId } };
       }
@@ -123,7 +127,11 @@ importScripts("classification-tree.js", "api-client.js", "profile-store.js", "sa
 
   chrome.runtime.onStartup?.addListener(() => {
     void globalThis.LakomicsProfileStore.flush()
-      .then(() => globalThis.LakomicsProfileStore.refresh())
+      .then(() => globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true }))
       .catch(() => {});
+  });
+
+  chrome.runtime.onInstalled?.addListener(() => {
+    void globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true }).catch(() => {});
   });
 })();

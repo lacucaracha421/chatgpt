@@ -23,23 +23,29 @@
   }
 
   async function readState() {
-    const stored = await chrome.storage.local.get([STATE_KEY, HIDDEN_KEY]);
-    return normalizeState(stored[STATE_KEY] && { ...stored[STATE_KEY], hiddenClassificationIds: stored[HIDDEN_KEY] });
+    const menu = globalThis.LakomicsMenuSettings;
+    const stored = await chrome.storage.local.get([STATE_KEY, HIDDEN_KEY, ...(menu ? [menu.KEY] : [])]);
+    const state = stored[STATE_KEY] && { ...stored[STATE_KEY], hiddenClassificationIds: stored[HIDDEN_KEY] };
+    return normalizeState(menu ? menu.project(state, stored[menu.KEY]) : state);
   }
 
   async function writeState(value) {
-    const stored = await chrome.storage.local.get([STATE_KEY, HIDDEN_KEY]);
-    const normalized = normalizeState({ ...value, hiddenClassificationIds: stored[HIDDEN_KEY], arcLayout: value.arcLayout ?? normalizeState(stored[STATE_KEY])?.arcLayout, syncedAt: value.syncedAt ?? Date.now() });
+    const menu = globalThis.LakomicsMenuSettings;
+    const stored = await chrome.storage.local.get([STATE_KEY, HIDDEN_KEY, ...(menu ? [menu.KEY] : [])]);
+    const state = { ...value, hiddenClassificationIds: stored[HIDDEN_KEY], arcLayout: value.arcLayout ?? normalizeState(stored[STATE_KEY])?.arcLayout, syncedAt: value.syncedAt ?? Date.now() };
+    const normalized = normalizeState(menu ? menu.project(state, stored[menu.KEY]) : state);
     if (!normalized) throw new Error("Invalid Lakomics state");
     await chrome.storage.local.set({ [STATE_KEY]: normalized });
     return normalized;
   }
 
   async function clear() {
+    await globalThis.LakomicsMenuSettings?.clear();
     await chrome.storage.local.remove([STATE_KEY, OUTBOX_KEY, HIDDEN_KEY]);
   }
 
   async function setHidden(ids) {
+    await globalThis.LakomicsMenuSettings?.record({ hiddenClassificationIds: ids }, await readState());
     await chrome.storage.local.set({ [HIDDEN_KEY]: globalThis.LakomicsClassificationTree.cleanIds(ids) });
     return { ok: true, state: await readState() };
   }
@@ -50,13 +56,15 @@
     return state;
   }
 
-  async function refresh() {
+  async function refresh({ forceMenuSettings = false } = {}) {
     if (refreshPromise) return refreshPromise;
     const promise = globalThis.LakomicsListApi.request("/v1/extension/bootstrap")
       .then(async (response) => {
         if (!response.ok) return { ok: false, code: response.code || `http_${response.status}` };
         const state = await seed(response.data);
-        return state ? { ok: true, state } : { ok: false, code: "invalid_state" };
+        if (!state) return { ok: false, code: "invalid_state" };
+        await globalThis.LakomicsMenuSettings?.sync({ force: forceMenuSettings });
+        return { ok: true, state: await readState() };
       }).finally(() => { if (refreshPromise === promise) refreshPromise = null; });
     refreshPromise = promise;
     return promise;
@@ -68,6 +76,9 @@
       const refreshed = await refresh();
       return refreshed.ok ? { ok: true, state: refreshed.state, stale: false } : refreshed;
     }
+    await globalThis.LakomicsMenuSettings?.sync();
+    state = await readState();
+    if (!state) return { ok: false, code: "state_missing" };
     if (refreshIfStale && Date.now() - state.syncedAt > 30_000) void flush().then(() => refresh()).catch(() => {});
     return { ok: true, state, stale: Date.now() - state.syncedAt > 60_000 };
   }
@@ -125,6 +136,7 @@
   async function patchProfile(patch) {
     const state = await readState();
     if (!state) return { ok: false, code: "state_missing" };
+    if (patch.listOrderPatch) await globalThis.LakomicsMenuSettings?.record(patch, state);
     const optimistic = await writeState({ ...state, profile: applyLocal(state.profile, patch), syncedAt: state.syncedAt });
     const sent = await sendPatch(patch);
     if (sent.ok) return sent;
