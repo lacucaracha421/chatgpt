@@ -15,6 +15,7 @@ Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is impl
 3. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
 4. **Server review follow-ups (2026-09-24)** — review branch merged (`ae9af4b`); catalog artifact pruning (server disk 83% full, ~3.4 GB/day), then judgment calls 4, 2, 1 and 7 from `docs/research/server-review-2026-09-24.md` §3. Deployment needs approval.
 5. **VAULT-ENC-001** and **MOBILE-PARITY-001** — implemented; native/tablet acceptance remains.
+6. **PC-REVIEW-001** — fix the ten confirmed high findings of the 2026-09-25 PC app review, sync blockers first. Until item 1 is fixed, do not roll the server database back.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
@@ -248,6 +249,26 @@ After (`cf2075b`, Linux dev build, same 15-minute idle window, 2026-09-24 16:29�
 Status: `TODO` — found by the 2026-09-25 `PC-POLL-001` re-measurement.
 
 With the app idle for 15 minutes, these endpoints are still read about once a minute each, outside the shared status pass: `/v1/captures/pending` 18, `/v1/library/characters/review/decisions` 16, `/v1/library/characters/exclusions` 16, `/v1/library/similarity/review/decisions` 15, `/v1/collections/status` 15, `/v1/collections/personal-edits` 15 (~95 of 151 requests). Read them only when the shared status (or an ETag/cursor) says their domain moved, following `library/authority_pass.rs`; expected idle total under 50 per 15 minutes. Also find what wakes the fast interval every ~3 minutes while idle. Measure the same 15-minute window before/after.
+
+
+## PC-REVIEW-001 — Fix findings of the 2026-09-25 PC app review
+
+Status: `TODO` — review done 2026-09-25 (read-only, 8 Opus reviewers); report with all findings: [`docs/research/pc-app-review-2026-09-25.md`](../research/pc-app-review-2026-09-25.md). 10 high (controller-verified), 31 medium, 49 low (medium/low unverified unless marked). Nothing was blocked in the Linux library at review time.
+
+Suggested order (high findings; details and file:line in the report):
+1. Asset re-baseline hard-deletes local Assets absent from the new baseline (server DB restore → PC data loss, never re-uploaded). Until fixed, do not roll the server DB back.
+2. Asset lifecycle queue: a head `conflict` row stops trash/restore/purge sync forever.
+3. Album queue: adding a not-yet-uploaded Asset to an Album blocks Album send/receive forever (`invalidAlbumMembership` treated as structural).
+4. Classification queue: an assignment for an Asset trashed/purged or permanently failed before upload blocks Classification forever.
+   - With 1–4: surface blocked/stopped sync state in the UI (errors are currently dropped in `workload.rs`).
+5. One unappliable mobile character exclusion blocks all later exclusions and skips the rest of the character sync.
+6. Private Vault: a session opened from the backup index can save, and the next unlock's orphan cleanup then deletes objects of the lost generation.
+7. Private Vault: the one-time recovery key is lost on Esc/navigation during creation.
+8. Similarity review list fails as a whole when one open review's existing Asset left `normal`.
+9. IGDB import/hero change fails when a screenshot is chosen as the hero.
+10. Viewer stops opening after trashing an asset opened via "open existing".
+
+Notable medium follow-ups: restore guard lacks an Asset authority probe (two reviewers); library open, trash purge and scan cancel block the UI thread; Linux provider-credential commands can block the GTK thread up to 10 s; every window focus reloads sidebar, galleries and trash; Aladin/Kakao volume renumbering fails refreshes forever; artwork cleanup can delete an in-flight import's files; a locked leftover file (drag-out staging or artwork) can stop the library from opening on Windows; long HEVC/ProRes videos hit the 30-minute ffmpeg cap; S36 rollback stops on a trashed auto-accepted image.
 
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
