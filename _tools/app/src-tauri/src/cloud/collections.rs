@@ -52,6 +52,9 @@ pub(crate) struct ReplicaCollection {
     summary: CollectionSummary,
     volumes: Vec<CollectionVolume>,
     series: Option<serde_json::Value>,
+    // Omitted rather than null so a server without Film details still accepts film-less replicas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    film: Option<serde_json::Value>,
     artworks: Vec<ReplicaArtwork>,
 }
 #[derive(Debug, Serialize)]
@@ -243,8 +246,10 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
                 supplement_source_covers(root, configured, source, &mut summary, &mut volumes, &mut artworks, &mut files, &mut total_bytes)?;
             }
             let series = committed_series(&transaction, &summary.id)?;
+            let film = committed_film(&transaction, &summary.id)?;
             let collection = ReplicaCollection {
                 series,
+                film,
                 summary,
                 volumes,
                 artworks,
@@ -828,6 +833,30 @@ fn committed_series(db: &rusqlite::Connection, id: &str) -> Result<Option<serde_
     Ok(Some(serde_json::json!({"status":series["status"],"cast":series.get("cast").cloned().unwrap_or(serde_json::json!([])),"seasons":seasons})))
 }
 
+// Film details cross as text only: no provider poster paths, and no local collection links,
+// which the PC resolves at read time and Mobile cannot follow by TMDB id.
+fn committed_film(db: &rusqlite::Connection, id: &str) -> Result<Option<serde_json::Value>, LibraryError> {
+    use rusqlite::OptionalExtension;
+    use serde_json::{json, Value};
+    let raw: Option<String> = db.query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='tmdb' AND external_id NOT LIKE 'tv:%' LIMIT 1", [id], |r| r.get(0)).optional()?;
+    let Some(raw) = raw else { return Ok(None) };
+    let value: Value = serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    let Some(film) = value.get("film").filter(|f| f.is_object()) else { return Ok(None) };
+    let rows = |key: &str, limit: usize| film.get(key).and_then(Value::as_array).into_iter().flatten().filter(|v| v.is_object()).take(limit).cloned().collect::<Vec<_>>();
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let cast: Vec<_> = rows("cast", 200).iter().filter(|c| c["name"].is_string()).map(|c| json!({"name":c["name"],"character":text(c,"character")})).collect();
+    let releases: Vec<_> = rows("releases", 500).iter()
+        .filter(|r| r["country"].is_string() && r["date"].is_string() && r["releaseType"].as_u64().is_some_and(|t| (1..=6).contains(&t)))
+        .map(|r| json!({"country":r["country"],"releaseType":r["releaseType"],"date":r["date"],"certification":text(r,"certification")})).collect();
+    let related = film.get("related").filter(|r| r.is_object() && r["collectionName"].is_string()).map(|related| {
+        let parts: Vec<_> = related.get("parts").and_then(Value::as_array).into_iter().flatten()
+            .filter(|p| p["movieId"].is_i64() && p["title"].is_string()).take(200)
+            .map(|p| json!({"movieId":p["movieId"],"title":p["title"],"releaseDate":p["releaseDate"].as_str()})).collect();
+        json!({"collectionName":related["collectionName"],"parts":parts})
+    });
+    Ok(Some(json!({"cast":cast,"releases":releases,"related":related})))
+}
+
 #[cfg(test)]
 mod series_projection_tests {
     #[test]
@@ -841,5 +870,26 @@ mod series_projection_tests {
         assert_eq!(result["seasons"][0]["episodes"][0]["runtimeMinutes"],24);
         assert!(!result.to_string().contains("overview"));
         assert!(!result.to_string().contains("private-provider"));
+    }
+
+    #[test]
+    fn committed_film_metadata_is_text_only_and_movie_only() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE collection_external_bindings(collection_id TEXT,provider TEXT,external_id TEXT,provider_data_json TEXT)").unwrap();
+        let data = serde_json::json!({"overview":"Imported overview","film":{
+            "cast":[{"name":"Actor","character":"Hero","profilePath":"/private-provider-path"}],
+            "releases":[{"country":"KR","releaseType":3,"date":"2024-01-02","certification":"15","note":"x"},{"country":"US","releaseType":9,"date":"2024-01-01","certification":""}],
+            "related":{"collectionName":"Saga","parts":[{"movieId":7,"title":"Part 2","releaseDate":null,"posterPath":"/private-provider-path","localCollectionId":"local-work"}]}}});
+        db.execute("INSERT INTO collection_external_bindings VALUES('work','tmdb','42',?1)",[data.to_string()]).unwrap();
+        db.execute("INSERT INTO collection_external_bindings VALUES('show','tmdb','tv:5',?1)",[data.to_string()]).unwrap();
+        let result = super::committed_film(&db,"work").unwrap().unwrap();
+        assert_eq!(result, serde_json::json!({
+            "cast":[{"name":"Actor","character":"Hero"}],
+            "releases":[{"country":"KR","releaseType":3,"date":"2024-01-02","certification":"15"}],
+            "related":{"collectionName":"Saga","parts":[{"movieId":7,"title":"Part 2","releaseDate":null}]}}));
+        assert!(super::committed_film(&db,"show").unwrap().is_none());
+        assert!(super::committed_film(&db,"missing").unwrap().is_none());
+        db.execute("INSERT INTO collection_external_bindings VALUES('old','tmdb','43','{}')",[]).unwrap();
+        assert!(super::committed_film(&db,"old").unwrap().is_none());
     }
 }

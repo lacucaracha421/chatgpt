@@ -350,6 +350,40 @@ it('shows personal and provider metadata, hides manga imported descriptions, and
  fireEvent.click(toggle);expect(screen.getByText('한국어 줄거리').classList.contains('is-clamped')).toBe(false);
 });
 
+describe('film details',()=>{
+  const film={cast:[{name:'배우 가',character:'주인공'},{name:'배우 나',character:''}],
+    releases:[{country:'US',releaseType:3,date:'2024-01-01',certification:'PG-13'},{country:'KR',releaseType:3,date:'2024-02-03',certification:'15'},{country:'JP',releaseType:4,date:'2024-05-01',certification:''}],
+    related:{collectionName:'사가 컬렉션',parts:[{movieId:3,title:'속편',releaseDate:'2026-01-01'},{movieId:2,title:'전편',releaseDate:'2020-01-01'}]}};
+  const open=async(detail:CollectionDetail)=>{
+    mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[detail]}:{revision:'r1',item:detail});
+    render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(detail.name));
+    await screen.findByLabelText('작품 정보',{selector:'dl'});
+  };
+  it('shows cast, KR plus earliest releases with a full-list toggle, and unlinked related works',async()=>{
+    await open({...item,type:'movie',film});
+    const cast=screen.getByRole('region',{name:'출연'});
+    expect(within(cast).getByText('배우 가')).toBeTruthy();expect(within(cast).getByText('주인공')).toBeTruthy();
+    const releases=screen.getByRole('region',{name:'개봉 정보'});
+    expect(within(releases).getAllByRole('listitem').map(row=>row.textContent)).toEqual(['2024.01.01미국 · 극장 개봉 · PG-13','2024.02.03한국 · 극장 개봉 · 15']);
+    const toggle=within(releases).getByRole('button',{name:'전체 보기'});fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');expect(within(releases).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(releases).getByText('일본 · 디지털')).toBeTruthy();
+    const related=screen.getByRole('region',{name:'관련 작품'});
+    expect(within(related).getByText('사가 컬렉션')).toBeTruthy();
+    expect(within(related).getAllByRole('listitem').map(row=>row.querySelector('strong')?.textContent)).toEqual(['전편','속편']);
+    expect(within(related).queryByRole('button')).toBeNull();
+  });
+  it('renders nothing extra for an older publication without film details',async()=>{
+    await open({...item,type:'movie'});
+    for(const name of ['출연','개봉 정보','관련 작품'])expect(screen.queryByRole('region',{name})).toBeNull();
+  });
+  it('hides the release toggle when every release is already shown',async()=>{
+    await open({...item,type:'movie',film:{cast:[],releases:[film.releases[1]],related:null}});
+    expect(screen.queryByRole('region',{name:'출연'})).toBeNull();expect(screen.queryByRole('region',{name:'관련 작품'})).toBeNull();
+    expect(within(screen.getByRole('region',{name:'개봉 정보'})).queryByRole('button')).toBeNull();
+  });
+});
+
 it('uses production company and TV date range for movie grid captions',()=>{
   const movie={...item,type:'movie' as const,productionCompany:'Studio',director:'Director',year:2016,seasonDateRange:['2016-01-14','2024-05-05']};
   expect(collectionCardCredit(movie)).toBe('Studio');expect(collectionCardDate(movie)).toBe('16.1.14~24.5.5');expect(collectionCardDate({...movie,seasonDateRange:null})).toBe('2016');

@@ -88,6 +88,14 @@
 .collection-episodes strong{font-weight:500;font-size:14px}
 .collection-episodes small{color:var(--color-muted);font-size:12px}
 .collection-cast{color:var(--color-muted);font-size:13px;margin:12px 0 0}
+.collection-film-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+.collection-film-heading .collection-film-toggle{min-height:44px;color:var(--color-muted);font-size:13px}
+.collection-film-cast ul,.collection-film-releases ul,.collection-film-related ul{list-style:none;margin:0;padding:0}
+.collection-film-cast li,.collection-film-releases li,.collection-film-related li{display:flex;align-items:baseline;gap:8px;min-height:44px;padding:10px 0;border-bottom:1px solid var(--color-border);font-size:14px}
+.collection-film-cast strong,.collection-film-related strong{font-weight:500;min-width:0;overflow-wrap:anywhere}
+.collection-film-cast small,.collection-film-related small{color:var(--color-muted);font-size:12px;margin-left:auto;flex-shrink:0;max-width:50%;text-align:right;overflow-wrap:anywhere}
+.collection-film-releases time{color:var(--color-muted);flex-shrink:0;min-width:84px}
+.collection-film-subtitle{color:var(--color-muted);font-size:13px;margin:-6px 0 4px}
 .collection-overview{margin:0;line-height:1.6;max-width:65ch;white-space:pre-line}
 .collection-overview.is-clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .collection-information .collection-overview-toggle{min-height:36px;padding:4px 0;color:var(--color-muted);font-size:13px}

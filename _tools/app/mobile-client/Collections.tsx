@@ -1,5 +1,6 @@
 import {usePublicationCheck} from './usePublicationCheck';
 import {CollectionMetadata} from './CollectionMetadata';
+import {FilmDetails} from './FilmDetails';
 import {useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
 import {ArrowLeftIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, StarIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
@@ -406,6 +407,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
         <div className="collection-volume-shelf">{volumes.slice(0,volumeLimit).map((volume,index)=><button key={volume.id} className="collection-tile" onClick={()=>setCoverIndex(index+1)}><Artwork item={item} id={volume.coverArtworkId} revision={detail!.revision} active={active&&!paused} label={volumeLabel(volume)}/><span>{volumeLabel(volume)}{volumeReleaseLabel(volume)&&<span className="collection-volume-date numeric"> · {volumeReleaseLabel(volume)}</span>}</span></button>)}</div>
         {volumes.length>volumeLimit&&<Button variant="ghost" onClick={()=>setVolumeLimit(n=>n+96)}>표지 더 보기</Button>}</section>}
       {item.type==='movie'&&item.series&&<SeriesDetails item={item} revision={detail!.revision} active={active&&!paused}/>}
+      {item.type==='movie'&&item.film&&<FilmDetails key={item.id} film={item.film}/>}
       <section className="collection-block collection-information" aria-label="작품 정보 영역"><h2>작품 정보</h2>
         {description&&<><p className={`collection-overview ${overview?'':'is-clamped'}`}>{description}</p><Button variant="ghost" className="collection-overview-toggle" aria-expanded={overview} onClick={()=>setOverview(open=>!open)}>{overview?'접기':'더 보기'}</Button></>}
         <CollectionMetadata item={item}/></section>

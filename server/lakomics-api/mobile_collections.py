@@ -83,6 +83,35 @@ class Series(StrictModel):
     seasons: list[Season] = Field(default_factory=list, max_length=200)
 
 
+class FilmCast(StrictModel):
+    name: str = Field(max_length=2000)
+    character: str = Field(default="", max_length=2000)
+
+
+class FilmRelease(StrictModel):
+    country: str = Field(max_length=20)
+    releaseType: int = Field(ge=1, le=6)
+    date: str = Field(max_length=100)
+    certification: str = Field(default="", max_length=100)
+
+
+class RelatedFilm(StrictModel):
+    movieId: int
+    title: str = Field(max_length=2000)
+    releaseDate: str | None = Field(default=None, max_length=100)
+
+
+class RelatedFilms(StrictModel):
+    collectionName: str = Field(max_length=2000)
+    parts: list[RelatedFilm] = Field(default_factory=list, max_length=200)
+
+
+class Film(StrictModel):
+    cast: list[FilmCast] = Field(default_factory=list, max_length=200)
+    releases: list[FilmRelease] = Field(default_factory=list, max_length=500)
+    related: RelatedFilms | None = None
+
+
 class Collection(StrictModel):
     id: ID
     name: str = Field(min_length=1, max_length=2000)
@@ -114,6 +143,7 @@ class Collection(StrictModel):
     createdAt: str = Field(max_length=100)
     updatedAt: str = Field(max_length=100)
     series: Series | None = None
+    film: Film | None = None
     volumes: list[Volume] = Field(default_factory=list, max_length=5000)
     artworks: list[Artwork] = Field(default_factory=list, max_length=10000)
 
@@ -137,11 +167,13 @@ def encode(value) -> str:
 
 
 def public_item(item: dict, detail: bool = False) -> dict:
-    result = {key: value for key, value in item.items() if key not in ("volumes", "artworks", "series")}
+    result = {key: value for key, value in item.items() if key not in ("volumes", "artworks", "series", "film")}
     visible = None if detail else {item.get("selectedWorkArtworkId"), item.get("selectedHeroArtworkId"), item.get("selectedBackdropArtworkId")}
     result["artworkVersions"] = {art["id"]: {variant: (art.get(variant) or {}).get("sha256") for variant in ("thumbnail", "original")} for art in item["artworks"] if visible is None or art["id"] in visible}
     if detail:
         result["series"] = item.get("series")
+        # Replicas published before Film details simply have no film block.
+        result["film"] = item.get("film")
         result["volumes"] = item["volumes"]
         result["artworks"] = [
             {"id": art["id"], "kind": art["kind"], "selected": art["selected"],

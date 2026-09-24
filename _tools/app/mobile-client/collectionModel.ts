@@ -12,7 +12,13 @@ export type CollectionSummary = {
   showcase:boolean; showcaseOrder?:number|null; volumes?:CollectionVolume[];
 };
 export type CollectionSeason = {id:number;seasonNumber:number;name:string;airDate:string|null;posterArtworkId:string|null;episodes:{id:number;episodeNumber:number;name:string;airDate:string|null;runtimeMinutes:number|null}[]};
-export type CollectionDetail = CollectionSummary & {series?:{status:string|null;cast:string[];seasons:CollectionSeason[]}|null;volumes:CollectionVolume[]; artworks:{id:string;kind:string;selected:boolean;thumbnailAvailable:boolean;originalAvailable:boolean}[]};
+/** TMDB film details as published by the PC: text only, without posters or local collection links. */
+export type CollectionFilm = {
+  cast:{name:string;character:string}[];
+  releases:{country:string;releaseType:number;date:string;certification:string}[];
+  related:{collectionName:string;parts:{movieId:number;title:string;releaseDate:string|null}[]}|null;
+};
+export type CollectionDetail = CollectionSummary & {film?:CollectionFilm|null;series?:{status:string|null;cast:string[];seasons:CollectionSeason[]}|null;volumes:CollectionVolume[]; artworks:{id:string;kind:string;selected:boolean;thumbnailAvailable:boolean;originalAvailable:boolean}[]};
 export type CollectionPage = {totalCount?:number;ready:boolean;revision:string|null;publishedAt:string|null;items:CollectionSummary[];nextCursor:string|null;filterVersion?:1};
 export function collectionPath(type:CollectionKind, q:string, showcase:boolean, cursor:string|null, filters?:CollectionFilters) {
   const params = new URLSearchParams({type,q,showcase:String(showcase),limit:showcase?'16':'48'});

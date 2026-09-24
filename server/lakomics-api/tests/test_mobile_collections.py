@@ -76,6 +76,24 @@ class MobileCollectionsTests(unittest.TestCase):
         item["series"]["seasons"][0]["posterArtworkId"] = "outside"
         self.assertEqual(self.publish([item], response.json()["revision"]).status_code, 422)
 
+    def test_mobile_film_projection_is_detail_only_and_optional(self):
+        film_item, plain = work(type="movie"), work(id="plain", type="movie")
+        film_item["film"] = {"cast": [{"name": "Actor", "character": "Hero"}],
+                             "releases": [{"country": "KR", "releaseType": 3, "date": "2024-01-02", "certification": "15"}],
+                             "related": {"collectionName": "Saga", "parts": [{"movieId": 7, "title": "Part 2", "releaseDate": None}]}}
+        response = self.publish([film_item, plain])
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(all("film" not in item for item in self.listing(type="movie").json()["items"]))
+        detail = self.client.get("/v1/collections/work", headers=AUTH).json()["item"]
+        self.assertEqual(detail["film"]["related"]["parts"][0]["movieId"], 7)
+        self.assertEqual(detail["film"]["releases"][0]["releaseType"], 3)
+        self.assertIsNone(self.client.get("/v1/collections/plain", headers=AUTH).json()["item"]["film"])
+        revision = response.json()["revision"]
+        for key, value in (("posterPath", "/provider"), ("localCollectionId", "work")):
+            leaked = copy.deepcopy(film_item)
+            leaked["film"]["related"]["parts"][0][key] = value
+            self.assertEqual(self.publish([leaked], revision).status_code, 422)
+
     def test_unpublished_differs_from_published_empty(self):
         self.assertFalse(self.listing().json()["ready"])
         self.assertEqual(self.publish([]).status_code, 200)
