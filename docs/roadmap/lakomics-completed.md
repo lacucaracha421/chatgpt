@@ -2532,3 +2532,8 @@ disables debugging, retaining the existing installation certificate. Updated des
 code must be running for automatic publication. Android device installation, actual
 Keystore/SQLite offline-conflict acceptance, Windows native runtime and real-network image
 timing remain unverified. See `android/README.md` for the artifact and evidence.
+
+
+## Dropped 2026-09-24
+
+Removed from the active backlog at the user's request: `AI-JEV-001` (Jev decision-model evaluation) and `DEV-ZED-001` (Zed IDE workflow evaluation). No work was done on either.

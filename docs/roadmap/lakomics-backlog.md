@@ -20,7 +20,7 @@ Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is impl
 
 `MEDIA-R2-001` is closed at the currently satisfactory media-delivery scope; extra variants are not required. `CHAR-AUTO-001` is closed for this improvement pass; future concrete classification mistakes can open bounded follow-up work rather than keeping a permanent accuracy task active.
 
-Later / optional: AV source-and-candidate selection (`LONG-001`), Artist hub (`ARTIST-001`), optional provider work (`CATALOG-002B`), Jev decision-model evaluation (`AI-JEV-001`), and Zed IDE workflow evaluation (`DEV-ZED-001`). Similar-video calibration stays deferred until representative samples naturally appear.
+Later / optional: AV source-and-candidate selection (`LONG-001`), Artist hub (`ARTIST-001`), optional provider work (`CATALOG-002B`). Similar-video calibration stays deferred until representative samples naturally appear.
 
 ## Status legend
 
@@ -201,6 +201,29 @@ Collector (`extension-list/`):
 - Disable the right-side recommended-images button for now (keep the code; re-enable later).
 
 NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
+
+## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)
+
+Status: `TODO` — concepts in `docs/prototypes/pc-declutter-20260924/` (README, index.html, PNGs); the user likes all three (2026-09-24). Staged plan combining them:
+1. **C — Quiet chrome first** (lowest risk, mostly moving things): one top bar merging title bar and list header; one status indicator ("작업 N") opening a single panel for sync, running jobs, review queues and lightweight mode; selection bar that appears only while selecting; merged release notices; Settings › 일반 trimmed to ~7 items with maintenance/diagnostics under 고급 › 복구·진단; experimental/recovery buttons off the character series header.
+2. **A — Focused navigation**: rail reduced to 에셋 · 컬렉션 · 망가; everything else via a `Ctrl+K` 이동 palette and 더보기, with review-queue counts shown only when non-zero; Revisit folded into the asset index for now.
+3. **B — Task-first Home**: together with the Revisit rebuild (PC and mobile) — 이어 보기 as the hero, 확인할 것 queues that disappear at zero, tools in one row. Needs resume-position data and queue counts first; avoid a dashboard feel (DESIGN.md).
+Ideas to carry to mobile (MOBILE-DESIGN-001): single status indicator, zero-hiding queues, neutral filters, search icon only where searchable, conclusion-first settings, continue-watching.
+
+## MOBILE-DESIGN-001 — Premium mobile layout pass (Galaxy Tab S11 portrait)
+
+Status: `TODO` — brief given by the user 2026-09-24; start after the mobile Private Vault UI work lands (same files). Home screen is out of scope (waits for the Revisit rebuild).
+
+Goal: a calmer, premium feel ("이제 고급감을 추구할 때").
+- **One screen, one conclusion:** on the S11 in portrait each screen's content must resolve within the viewport — no section header or row that peeks just below the fold (e.g. Library root's '기타' / '오리지널' needing a small scroll to appear). Compose sections so the first screen ends cleanly.
+- **Shared top bar on every tab:** the logo (Home already has it) on all tabs; use the bar's space for actions moved up from the content (e.g. from the Library header); search becomes a small icon in the top bar, common to all tabs; buttons restyled toward the PC app's button feel.
+- **Library tab:** remove the "최근 연 폴더" (recent folders) section.
+- **Showcase:** the filter button is always shown active/white and distracts; make it neutral unless a non-default filter is set (filters are rarely changed).
+- **Loading more assets on scroll:** smooth, Apple-like appearance of newly loaded tiles (no pop-in or layout jump; respect reduced motion; keep virtualization/perf).
+- **Asset viewer top icons:** their meaning is not obvious — make each action recognisable (clearer icons, short labels or a first-use hint; accessible names already exist but are invisible).
+- **Bottom navigation bar:** slightly taller across the app (it was raised 8px in 0.8.2; now increase its height a little too).
+Earlier related request (USER-REQ-20260924): logo on all tabs, better use of the top bar, PC-like buttons.
+Process: show browser-rendered mockups at 800×1280 (S11 portrait) for approval before the APK.
 
 ## PC-POLL-001 — Cut the desktop app's idle server polling
 
@@ -698,7 +721,7 @@ Remaining acceptance: verify a new live capture with the PC off; verify real tab
 
 ## MOBILE-PERF-002 — First-view thumbnail latency
 
-Status: `HOLD` — the client-side warm-up covers everyday browsing.
+Status: `HOLD` — the client-side warm-up covers everyday browsing. Reconfirmed 2026-09-24: stay on hold; revisit with measurements during `PERF-ALL-001` if new-image thumbnails feel slow.
 
 On the tablet an uncached thumbnail takes about 1.5–2.4 s: the Tokyo API answers a ticket in about 0.07–0.1 s and the nearest Cloudflare edge (ICN) is 3 ms away, so the time is R2 storage response latency. 0.7.4 parallelised and prefetched; 0.7.6 warms the whole Library into the native cache (about 200 thumbnails/min). Remaining slow cases are newly captured images and a cleared cache. Options if they matter: serve thumbnails from the Tokyo server's disk (13 GB free on 2026-09-23; ~360 MB for the current library) in batched requests, or move derived thumbnails to an APAC-hinted bucket. Both need server work, a copy of production thumbnails and deployment approval.
 
@@ -876,25 +899,3 @@ Keep the timeline idea deferred until there is a concrete browsing need beyond t
 
 # Optional AI / development tooling experiments
 
-## AI-JEV-001 — Jev decision-model evaluation
-
-Status: `HOLD` — invite/API access gated; evaluate before integration.
-
-Evaluate TypeSafe Jev as an optional **decision/arbitration layer**, not as a replacement for Lakomics' local vision pipeline. If concrete classification mistakes justify a future experiment after the accepted `CHAR-AUTO-001` pass, feed existing detector/CCIP candidate evidence into a small typed `accept / review / reject` decision and compare it against the current deterministic baseline on representative holdout mistakes. The current accuracy-pass closure does not activate this optional experiment. If that is useful, later evaluate similarity relation labeling and ingest routing. Preserve manual decisions and conservative deterministic gates; never delegate server authority/revision/outbox logic, destructive deletion, or other correctness invariants to Jev. Do not add a production dependency until invite access exists and measured accuracy/calibration provides a concrete benefit.
-
-## DEV-ZED-001 — Zed IDE workflow evaluation
-
-Status: `HOLD` — optional developer-experience experiment.
-
-Evaluate Zed on the Linux Lakomics checkout only as an editor/agent workflow improvement: fast native editing, integrated diff/terminal, and ACP-hosted agents such as Codex may reduce context switching. Treat Codex-in-Zed as the same Codex resource budget, **not** a way to bypass or reduce Codex quota. Keep Zed entirely optional: no repository/runtime dependency, toolchain migration, or workflow lock-in is justified unless a hands-on trial is clearly better than the current setup.
-
-# Current execution order
-
-This is guidance, not authorization to start or mutate production data.
-
-1. `CHAR-AUTO-007` enable S36 per series on the user's PC, spot-check acceptances, then widen.
-2. `CLOUD-POST-001` only the residual publication/compatibility scope, when its consumer and ownership prerequisites are met; do not repeat completed authority rollouts.
-3. `WORKS-001` small Film polish.
-4. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
-
-`CLOUD-UI-001` was already closed on 2026-09-16 and must not be selected again. HOLD items should not be promoted without a new product reason.
