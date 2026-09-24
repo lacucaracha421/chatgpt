@@ -1,3 +1,4 @@
+import {onVisible} from './useVisibleInterval';
 import {native} from './transport';
 import {meteredConnection,warmConnection as connection} from './warmNetwork';
 import type {Asset} from './types';
@@ -9,6 +10,8 @@ const ready=new Map<string,number>();
 let timer:ReturnType<typeof setTimeout>|undefined;
 let active:AbortController|undefined;
 let generation=0;
+let removeVisible:(()=>void)|undefined;
+const hide=()=>{if(document.visibilityState==='hidden')schedule();};
 const allowed=()=>document.visibilityState!=='hidden'&&!meteredConnection();
 function schedule(){
   if(timer!==undefined)clearTimeout(timer);timer=undefined;
@@ -52,10 +55,10 @@ export function warmOriginalTickets(items:Asset[],signal:AbortSignal){
   }
   const wasEmpty=!visible.size;
   for(const id of ids){let watchers=visible.get(id);if(!watchers){watchers=new Set();visible.set(id,watchers);}watchers.add(token);}
-  if(wasEmpty&&visible.size){document.addEventListener('visibilitychange',schedule);connection()?.addEventListener?.('change',schedule);window.addEventListener('lakomics-resume',schedule);}
+  if(wasEmpty&&visible.size){document.addEventListener('visibilitychange',hide);connection()?.addEventListener?.('change',schedule);removeVisible=onVisible(schedule);}
   const release=()=>{
     for(const id of ids){const watchers=visible.get(id);watchers?.delete(token);if(!watchers?.size)visible.delete(id);}
-    if(!visible.size){document.removeEventListener('visibilitychange',schedule);connection()?.removeEventListener?.('change',schedule);window.removeEventListener('lakomics-resume',schedule);}
+    if(!visible.size){document.removeEventListener('visibilitychange',hide);connection()?.removeEventListener?.('change',schedule);removeVisible?.();removeVisible=undefined;}
     schedule();
   };
   signal.addEventListener('abort',release,{once:true});schedule();

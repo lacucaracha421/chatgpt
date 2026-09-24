@@ -1,3 +1,4 @@
+import {onVisible} from './useVisibleInterval';
 /**
  * Personal Collection edits for the UI: the queued value shows at once with a
  * pending mark, delivery runs after each edit, and retries follow the bookmark
@@ -107,8 +108,7 @@ export function useCollectionEditBackgroundFlush(enabled: boolean) {
       if (Object.values(readCollectionEdits()).some(intent => !intent.conflict)) void flushCollectionEdits().catch(() => {});
     };
     send();
-    window.addEventListener('lakomics-resume', send);
-    document.addEventListener('visibilitychange', send);
-    return () => { window.removeEventListener('lakomics-resume', send); document.removeEventListener('visibilitychange', send); };
+    const removeVisible=onVisible(send);
+    return () => { removeVisible(); };
   }, [enabled]);
 }

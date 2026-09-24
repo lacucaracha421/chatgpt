@@ -22,8 +22,13 @@ final class AssetReplica {
     private final AlbumReplica.Transport transport;
     private final Storage storage;
     private final Lock lock;
+    private final java.util.function.BooleanSupplier skipUnchanged;
     AssetReplica(AlbumReplica.Transport transport, Storage storage, Lock lock) {
-        this.transport=transport; this.storage=storage; this.lock=lock;
+        this(transport, storage, lock, () -> false);
+    }
+    AssetReplica(AlbumReplica.Transport transport, Storage storage, Lock lock,
+                 java.util.function.BooleanSupplier skipUnchanged) {
+        this.transport=transport; this.storage=storage; this.lock=lock; this.skipUnchanged=skipUnchanged;
     }
     private Snapshot read(String scope) {
         lock.lock(); try {return storage.readAssets(scope);} finally {lock.unlock();}
@@ -47,6 +52,7 @@ final class AssetReplica {
         if(local!=null && (!local.library.equals(domain.libraryId)||local.epoch!=domain.epoch))
             throw new IllegalArgumentException("Asset authority identity changed");
         if(local==null) {baseline(scope,domain);return true;}
+        if(local.cursor==domain.cursor && skipUnchanged.getAsBoolean())return false;
         boolean changed=false;
         try {
             for(int page=0;page<2000;page++) {

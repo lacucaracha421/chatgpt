@@ -1,3 +1,4 @@
+import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, ChevronRightIcon, PauseIcon, PhotoIcon, PlayIcon, Square2StackIcon} from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
@@ -261,8 +262,8 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
   }, []);
   useEffect(() => {
     if (!auto || compare !== 'flicker') return;
-    const timer = window.setInterval(() => setPhase(value => !value), FLICKER_MS);
-    return () => window.clearInterval(timer);
+    const timer = visibleInterval(() => setPhase(value => !value), FLICKER_MS);
+    return () => timer();
   }, [auto, compare]);
 
   /** Pairs this device already decided, or that hold an image a queued decision will trash. */

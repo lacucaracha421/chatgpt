@@ -49,10 +49,20 @@ final class ClassificationAuthoritySync {
     private final ClassificationReplica.Transport transport;
     private final ClassificationReplica.State state;
     private final ClassificationReplica.Clock clock;
+    private final java.util.function.BooleanSupplier skipUnchanged;
 
     ClassificationAuthoritySync(ClassificationReplica.Transport transport,
                                 ClassificationReplica.State state,
                                 ClassificationReplica.Clock clock) {
+        this(transport, state, clock, () -> false);
+    }
+
+    /** Only the coordinated foreground poll may omit an unchanged feed. Explicit
+     * reconciliation still reads and validates it, even when status matches locally. */
+    ClassificationAuthoritySync(ClassificationReplica.Transport transport,
+            ClassificationReplica.State state, ClassificationReplica.Clock clock,
+            java.util.function.BooleanSupplier skipUnchanged) {
+        this.skipUnchanged = skipUnchanged;
         this.transport = transport;
         this.state = state;
         this.clock = clock;
@@ -181,6 +191,7 @@ final class ClassificationAuthoritySync {
             if (local.contractVersion != remote.contractVersion) {
                 return adopt(scope, remote, result, true);
             }
+            if (local.cursor == remote.cursor && skipUnchanged.getAsBoolean()) return result;
             try {
                 applyChanges(scope, local, result);
                 return result;

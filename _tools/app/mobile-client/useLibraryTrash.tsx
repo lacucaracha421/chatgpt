@@ -1,3 +1,4 @@
+import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {errorText} from './transport';
 import type {Asset} from './types';
@@ -44,12 +45,11 @@ export function useLibraryTrash<V extends ViewerLike>(configured: boolean, endpo
     };
     const read = () => { void readLifecycle().then(apply, () => {}); };
     const onEvent = (event: Event) => { const detail = (event as CustomEvent<LifecycleState>).detail; if (detail) apply(detail); };
-    read();
+    if(document.visibilityState!=='hidden')read();
     // The lifecycle replica is adopted by the first native pass, so availability can arrive late.
-    const timer = window.setInterval(read, 15_000);
-    window.addEventListener('lakomics-resume', read);
+    const timer = visibleInterval(read, 15_000);
     window.addEventListener(ASSET_LIFECYCLE_EVENT, onEvent);
-    return () => { active = false; clearInterval(timer); window.removeEventListener('lakomics-resume', read); window.removeEventListener(ASSET_LIFECYCLE_EVENT, onEvent); };
+    return () => { active = false; timer(); window.removeEventListener(ASSET_LIFECYCLE_EVENT, onEvent); };
   }, [configured, endpoint]);
 
   useEffect(() => {

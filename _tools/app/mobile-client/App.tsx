@@ -1,3 +1,4 @@
+import {onVisible} from './useVisibleInterval';
 import {fetchAssetFilterVersion, fetchListGeneration, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
@@ -198,17 +199,19 @@ export function App() {
   useEffect(() => {
     if (!status.configured) return;
     let running=false, active=true;
+    let pendingGeneration:string|null=null;
     const controller=new AbortController();
     const check=async () => {
       if (!active || running || document.visibilityState === 'hidden') return;
       running=true;
       try {
-        const generation=await fetchListGeneration(controller.signal);
+        const hint=pendingGeneration;pendingGeneration=null;
+        const generation=hint??await fetchListGeneration(controller.signal);
         if (!active) return;
         const state=latest.current;
         // Without the endpoint there is no cheap change signal: leave the committed
         // view alone and let the foreground/resume refresh handle navigation.
-        if (generation === null) return;
+        if (!generation) return;
         if (generation !== observedGeneration.current) {
           viewCache.current.clear(); cancelMore(); clearMediaCache();
           // This device's own trash/restore moves the generation too; the viewer already
@@ -218,13 +221,14 @@ export function App() {
           setIndexRevision(value=>value+1);
         }
       } catch { /* Retain last committed view on transport failure; cache reuse still validates. */ }
-      finally {running=false;}
+      finally {running=false;if(active&&pendingGeneration!==null)void check();}
     };
     const changed=()=>{observedGeneration.current=null;void check();};
-    const timer=window.setInterval(()=>void check(),5000);
-    window.addEventListener('focus',check); window.addEventListener('lakomics-resume',check); document.addEventListener('visibilitychange',check);
+    const generationEvent=(event:Event)=>{const value=(event as CustomEvent<{generation?:string}>).detail?.generation;if(typeof value==='string'){pendingGeneration=value;void check();}};
+    const removeVisible=onVisible(()=>{if(pendingGeneration!==null)void check();});
+    window.addEventListener('lakomics-list-generation',generationEvent);
     window.addEventListener(ASSET_LIST_CHANGED_EVENT,changed);
-    return()=>{active=false;controller.abort();clearInterval(timer);window.removeEventListener('focus',check);window.removeEventListener('lakomics-resume',check);document.removeEventListener('visibilitychange',check);window.removeEventListener(ASSET_LIST_CHANGED_EVENT,changed);};
+    return()=>{active=false;controller.abort();removeVisible();window.removeEventListener('lakomics-list-generation',generationEvent);window.removeEventListener(ASSET_LIST_CHANGED_EVENT,changed);};
   },[status.configured,status.endpoint,load,cancelMore]);
   useLayoutEffect(() => {
     if (!page.version) return;
@@ -370,8 +374,8 @@ export function App() {
       else if (!state.page.view.root) goParent();
       else void native('finish').catch(() => {});
     };
-    window.addEventListener('lakomics-resume', visible); document.addEventListener('visibilitychange', visible); window.addEventListener('lakomics-back', back);
-    return () => {window.removeEventListener('lakomics-resume', visible); document.removeEventListener('visibilitychange', visible); window.removeEventListener('lakomics-back', back);};
+    const removeVisible=onVisible(visible); window.addEventListener('lakomics-back', back);
+    return () => {removeVisible(); window.removeEventListener('lakomics-back', back);};
   }, [refreshSecondary, load, restoreBeforeCharacter,goParent]);
   useEffect(() => {
     const folderId=page.view.classification??(page.view.characterNode?entries.find(entry=>entry.characterNode===page.view.characterNode)?.id:undefined);

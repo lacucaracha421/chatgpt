@@ -69,6 +69,34 @@ final class ForegroundSchedule {
     /** Set when an immediate pass was requested but could not start yet. */
     private boolean owed;
     private ScheduledFuture<?> handle;
+    private int idle;
+    private static final long[] DELAYS = {5_000,15_000,30_000,60_000};
+
+    /** Local work returns to the convergence target and cannot be lost to single-flight. */
+    void wake() {
+        synchronized(gate) {
+            idle=0;
+            if(!armed)return;
+            rearmTimer();
+            owed=!immediate.run();
+        }
+    }
+
+    void passFinished(boolean changed) {
+        synchronized(gate) {
+            if(armed) {
+                idle=changed?0:Math.min(idle+1,DELAYS.length-1);
+                rearmTimer();
+            }
+            passFinished();
+        }
+    }
+
+    private void rearmTimer() {
+        if(handle!=null)handle.cancel(false);
+        long arm=++generation;
+        handle=timer.schedule(()->tick(arm),DELAYS[idle]);
+    }
 
     ForegroundSchedule(Timer timer, Immediate immediate, Runnable repeating) {
         this.timer = timer;
@@ -138,9 +166,9 @@ final class ForegroundSchedule {
     private void arm() {
         if (!foreground || armed) return;
         armed = true;
-        long arm = ++generation;
+        idle=0;
+        rearmTimer();
         owed = !immediate.run();
-        handle = timer.schedule(() -> tick(arm), INTERVAL_MILLIS);
     }
 
     /**

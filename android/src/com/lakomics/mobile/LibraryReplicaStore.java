@@ -48,7 +48,10 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
     }
 
     AssetReplica assetReplica(AlbumReplica.Transport transport) {
-        return new AssetReplica(transport, (AssetReplica.Storage)db, lock);
+        return assetReplica(transport, () -> false);
+    }
+    AssetReplica assetReplica(AlbumReplica.Transport transport, java.util.function.BooleanSupplier skipUnchanged) {
+        return new AssetReplica(transport, (AssetReplica.Storage)db, lock, skipUnchanged);
     }
     void clearAssets() {
         lock.lock();try {((AssetReplica.Storage)db).clearAssets();((AssetLifecycleOutbox.Storage)db).clearLifecycle();}finally {lock.unlock();}

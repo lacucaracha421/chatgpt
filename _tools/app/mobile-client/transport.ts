@@ -1,10 +1,15 @@
+import {onVisible} from './useVisibleInterval';
 declare global {
   interface Window { LakomicsNative?: {request(id: string, operation: string, payload: string): void; cancel(id: string): void} }
 }
-type Reply = {id: string; ok: boolean; data?: unknown; error?: string; status?: number; details?: unknown};
-type Pending = {resolve(value: unknown): void; reject(error: Error): void; cleanup(): void};
+type Reply = {id: string; ok: boolean; cancelled?:boolean; data?: unknown; error?: string; status?: number; details?: unknown};
+type Pending = {resume?():void;resolve(value: unknown): void; reject(error: Error): void; cleanup(): void};
 const pending = new Map<string, Pending>();
 let sequence = 0;
+let foreground=true;
+window.addEventListener('lakomics-pause',()=>{foreground=false;});
+window.addEventListener('lakomics-resume',()=>{foreground=true;});
+const resumable=new Set(['thumbnail','media','collectionArtwork','catalogImage','mediaTickets']);
 let developmentTransport: ((op: string, payload: Record<string, unknown>) => Promise<unknown>) | undefined;
 
 /**
@@ -32,7 +37,8 @@ window.addEventListener('lakomics-native', event => {
   const entry = pending.get(reply?.id);
   if (!entry) return;
   pending.delete(reply.id); entry.cleanup();
-  if (reply.ok) entry.resolve(reply.data);
+  if (reply.cancelled) {if(entry.resume)entry.resume();else entry.reject(new DOMException('Cancelled','AbortError'));}
+  else if (reply.ok) entry.resolve(reply.data);
   else entry.reject(new ApiError(typeof reply.error === 'string' ? reply.error : '요청을 완료하지 못했습니다.', typeof reply.status === 'number' ? reply.status : null, reply.details));
 });
 export function setDevelopmentTransport(transport: typeof developmentTransport) {
@@ -50,17 +56,29 @@ export function native<T>(operation: string, payload: Record<string, unknown> = 
     const abort = () => { window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new DOMException('Cancelled', 'AbortError')); };
     const timer = window.setTimeout(() => { window.LakomicsNative?.cancel(id); pending.delete(id); cleanup(); reject(new Error('연결 시간이 초과되었습니다. 다시 시도해 주세요.')); }, 45_000);
     const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); };
-    pending.set(id, {resolve: value => resolve(value as T), reject, cleanup});
+    const resume=()=>{
+      if(signal?.aborted){reject(new DOMException('Cancelled','AbortError'));return;}
+      // onStop releases native transfers. Keep the live caller, with no deadline timer
+      // or network work while hidden; on resume it gets a fresh native request.
+      let removeVisible=()=>{};
+      const stopWaiting=()=>{removeVisible();signal?.removeEventListener('abort',cancelWaiting);};
+      const cancelWaiting=()=>{stopWaiting();reject(new DOMException('Cancelled','AbortError'));};
+      const retry=()=>{if(!foreground||document.visibilityState==='hidden')return;stopWaiting();void native<T>(operation,payload,signal).then(resolve,reject);};
+      removeVisible=onVisible(retry);
+      signal?.addEventListener('abort',cancelWaiting,{once:true});
+      retry();
+    };
+    pending.set(id, {resolve: value => resolve(value as T), reject, cleanup, ...(resumable.has(operation)?{resume}:{})});
     signal?.addEventListener('abort', abort, {once: true});
     try { window.LakomicsNative!.request(id, operation, JSON.stringify(payload)); }
     catch { pending.delete(id); cleanup(); reject(new Error('앱 연결을 시작하지 못했습니다.')); }
   });
 }
-export function api<T>(path: string, signal?: AbortSignal, body?: unknown, method?: 'GET' | 'POST' | 'PUT'): Promise<T> {
+export function api<T>(path: string, signal?: AbortSignal, body?: unknown, method?: 'GET' | 'POST' | 'PUT', conditional=false): Promise<T> {
   // An explicit method only ever refines a body-bearing request; a bodyless call
   // stays a read, so no existing caller can accidentally become a write.
   const resolved = method ?? (body === undefined ? 'GET' : 'POST');
-  return native<T>('api', {path, method: resolved, ...(body === undefined ? {} : {body})}, signal);
+  return native<T>('api', {path, method: resolved, ...(conditional && resolved === 'GET' ? {conditional:true} : {}), ...(body === undefined ? {} : {body})}, signal);
 }
 export function errorText(error: unknown): string {
   if (error instanceof DOMException && error.name === 'AbortError') return '';

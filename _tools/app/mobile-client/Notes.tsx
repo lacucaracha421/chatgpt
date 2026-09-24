@@ -1,3 +1,4 @@
+import {useVisibleInterval} from './useVisibleInterval';
 import {useCallback,useEffect,useLayoutEffect,useRef,useState,type MutableRefObject} from 'react';
 import {ArrowLeftIcon,ArrowPathIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
@@ -41,8 +42,13 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
     }catch(reason){if(alive.current)setError(errorText(reason));}finally{syncRequest.current=false;if(alive.current)setSyncing(false);}
   },[flush]);
   useEffect(()=>{if(!draft?.dirty)return;const timer=setTimeout(()=>{void flush().then(()=>sync()).catch(()=>{});},500);return()=>clearTimeout(timer);},[draft?.generation,flush,sync]);
-  useEffect(()=>{if(!active||!state.unlocked)return;void sync();const timer=setInterval(()=>{if(document.visibilityState!=='hidden')void sync();},60_000);const resume=()=>{if(document.visibilityState!=='hidden')void sync();};window.addEventListener('lakomics-resume',resume);document.addEventListener('visibilitychange',resume);return()=>{clearInterval(timer);window.removeEventListener('lakomics-resume',resume);document.removeEventListener('visibilitychange',resume);};},[active,state.unlocked,sync]);
-  useEffect(()=>{if(!active||!state.notes.some(n=>n.pending))return;const timer=setTimeout(()=>void sync(),2000);return()=>clearTimeout(timer);},[active,state.notes,sync]);
+  const pending=state.notes.some(note=>note.pending);
+  const [retryDelay,setRetryDelay]=useState(2000);
+  useEffect(()=>{setRetryDelay(2000);},[pending]);
+  useVisibleInterval(()=>void sync(),active&&state.unlocked&&!pending?60_000:null,true);
+  useVisibleInterval(()=>{
+    void sync().finally(()=>{if(alive.current)setRetryDelay(delay=>Math.min(60_000,delay*2));});
+  },active&&state.unlocked&&pending?retryDelay:null);
   useEffect(()=>{const leave=()=>{if(document.visibilityState==='hidden')void flush().catch(()=>{});};document.addEventListener('visibilitychange',leave);return()=>document.removeEventListener('visibilitychange',leave);},[flush]);
   const leave=()=>{void flush().then(()=>setSelected(null)).catch(()=>{});};
   useEffect(()=>{backRef.current=()=>{if(selected){leave();return true;}if(trash){setTrash(false);return true;}return false;};return()=>{backRef.current=null;};},[selected,trash,flush,backRef]);

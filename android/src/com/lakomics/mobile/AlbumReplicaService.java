@@ -20,9 +20,9 @@ import java.util.concurrent.TimeUnit;
  * Foreground Album replica synchronization for the Android app.
  *
  * This is not a background service. It runs while the app is in the foreground, on
- * resume and then about every five seconds — the same convergence target the PC's
- * authority loops use — and stops as soon as the app is paused. No wake lock is taken
- * and no WorkManager job is scheduled: metadata convergence is not worth keeping the
+ * resume, then backs off from five seconds to one minute while unchanged. Local work
+ * and detected changes reset the delay. Polling stops as soon as the app is paused.
+ * No wake lock is taken and no WorkManager job is scheduled: metadata convergence is not worth keeping the
  * device awake for, and the next foreground resume reconciles anyway.
  *
  * Foreground state lives in {@link ForegroundSchedule}, not here, so the transitions
@@ -68,6 +68,26 @@ final class AlbumReplicaService {
      * a pass that started under the old account from reporting state under the new one.
      */
     private int attempt;
+    private final ThreadLocal<SyncStatusPass> statusPass=new ThreadLocal<>();
+    private String previousStatus;
+    private boolean passChanged;
+    private long lastGenerationCheck;
+    private volatile java.util.function.Consumer<String> generationListener;
+    void setListGenerationListener(java.util.function.Consumer<String> listener){generationListener=listener;}
+    private void localWork(){
+        // A user write may finish entering the outbox just after onPause. Deliver that
+        // intent once even when the repeating foreground schedule is disarmed.
+        worker.execute(()->{schedule.wake();request(true);});
+    }
+    private void wrote(String path){SyncStatusPass pass=statusPass.get();if(pass!=null){pass.wrote(path);passChanged=true;}}
+    private boolean canSkipUnchangedFeed(String domain) {
+        SyncStatusPass pass=statusPass.get();
+        return pass!=null && pass.canSkipUnchangedFeed(domain);
+    }
+    private String readForPass(String path)throws Exception{
+        SyncStatusPass pass=statusPass.get();
+        return pass==null?client.conditionalApi(path,null).toString():pass.get(path);
+    }
 
     private LibraryReplicaStore store;
     private AlbumAuthoritySync sync;
@@ -100,6 +120,8 @@ final class AlbumReplicaService {
 
     /** Begin foreground polling, reconciling immediately. Idempotent. */
     void start() {
+        java.util.function.Consumer<String> listener=generationListener;
+        if(listener!=null&&assetListGeneration!=null&&!assetListGeneration.isEmpty())listener.accept(assetListGeneration);
         schedule.start();
     }
 
@@ -137,6 +159,7 @@ final class AlbumReplicaService {
             // account that was just replaced, and its answer must not become this one's.
             attempt++;
             lastAttempt = 0;
+            previousStatus=null;lastGenerationCheck=0;assetListGeneration="";client.clearConditional();
             code = "";
             error = "";
             last = null;
@@ -201,6 +224,7 @@ final class AlbumReplicaService {
             try {
                 pass();
             } finally {
+                statusPass.remove();
                 synchronized (gate) {
                     syncing = false;
                 }
@@ -208,7 +232,7 @@ final class AlbumReplicaService {
                 // replacement connection whose request was refused by single-flight. Doing
                 // it here is what makes that reconciliation happen as soon as the slot frees
                 // instead of at the next interval.
-                schedule.passFinished();
+                schedule.passFinished(passChanged);
             }
         });
         return true;
@@ -219,6 +243,7 @@ final class AlbumReplicaService {
     // -----------------------------------------------------------------------
 
     private void pass() {
+        passChanged=false;
         int startedUnder;
         synchronized (gate) {
             startedUnder = attempt;
@@ -232,6 +257,17 @@ final class AlbumReplicaService {
                 return;
             }
             scope = scope(connection);
+            statusPass.set(new SyncStatusPass(path->{
+                String value=client.conditionalApiFor(connection,path,null).toString();
+                if(path.equals("/v1/sync/status")){
+                    synchronized(gate){if(startedUnder==attempt){
+                        if(!value.equals(previousStatus))passChanged=true;
+                        previousStatus=value;
+                    }}
+                }
+                return value;
+            }));
+
         } catch (Exception unreadable) {
             record(startedUnder, null, AlbumReplica.CODE_TRANSPORT, "연결 정보를 읽을 수 없습니다.");
             return;
@@ -245,26 +281,14 @@ final class AlbumReplicaService {
             try {
                 AssetReplica asset;
                 AssetLifecycleOutbox lifecycle;
-                synchronized(gate){engine();asset=store.assetReplica(new Transport());lifecycle=lifecycleWriter;}
+                synchronized(gate){engine();asset=store.assetReplica(new Transport(), () -> canSkipUnchangedFeed("assets"));lifecycle=lifecycleWriter;}
                 // Library Trash intents are delivered before the lifecycle catch-up, so an
                 // accepted trash/restore arrives in the same pass's receive. A delivery
                 // failure keeps its rows and never skips the read.
                 try{lifecycle.flush(scope);lifecycleCode="";}
                 catch(AssetLifecycleOutbox.Failure failure){lifecycleCode=failure.code;}
                 catch(RuntimeException failure){lifecycleCode=AlbumReplica.CODE_STORE_UNAVAILABLE;}
-                boolean changed=asset.sync(scope);
-                String generation=CloudClient.listGeneration(client,null,null);
-                synchronized(gate) {
-                    // A null generation means the deployed server has no list-generation
-                    // endpoint, so only a real local Asset change can invalidate; treating
-                    // null as "changed" would refresh the provider on every pass forever.
-                    boolean generationChanged=generation!=null&&!generation.equals(assetListGeneration);
-                    if(startedUnder==attempt && (changed || generationChanged)) {
-                        assetListGeneration=generation;
-                        LibraryDocumentsProvider.invalidateMetadata(context);
-                        PickerLibrary.get(context).refresh(true);
-                    }
-                }
+                if(asset.sync(scope))passChanged=true;
             }catch(Exception unavailable){/* A failed read lane retries next foreground pass. */}
             AuthorityPass.Outcome outcome = AuthorityPass.run(
                     () -> albumLane(scope),
@@ -281,6 +305,31 @@ final class AlbumReplicaService {
             // the pass could not be set up at all.
             record(startedUnder, null, AlbumReplica.CODE_STORE_UNAVAILABLE,
                     "라이브러리 복제본을 열 수 없습니다.");
+        }
+        // This signal also covers legacy Classification snapshots, Character publication,
+        // and Asset row metadata that does not advance an authority cursor. Keep its
+        // minute fallback independent of receive-lane failures and run after local writes.
+        refreshListGeneration(startedUnder);
+    }
+
+    private void refreshListGeneration(int startedUnder) {
+        String generation=assetListGeneration;
+        long now=SystemClock.elapsedRealtime();
+        if(passChanged || lastGenerationCheck==0 || now-lastGenerationCheck>=60_000) {
+            try {
+                generation=CloudClient.listGeneration(client,null,null);
+                synchronized(gate){if(startedUnder==attempt)lastGenerationCheck=now;}
+            } catch(Exception unavailable) { /* Retry without blocking successful replicas. */ }
+        }
+        synchronized(gate) {
+            boolean generationChanged=generation!=null&&!generation.equals(assetListGeneration);
+            if(startedUnder==attempt && (passChanged || generationChanged)) {
+                passChanged=true;assetListGeneration=generation;
+                java.util.function.Consumer<String> listener=generationListener;
+                if(generationChanged && listener!=null)listener.accept(generation);
+                LibraryDocumentsProvider.invalidateMetadata(context);
+                PickerLibrary.get(context).refresh(true);
+            }
         }
     }
 
@@ -299,6 +348,7 @@ final class AlbumReplicaService {
             pass = cycle;
         }
         AlbumSyncPass.Result completed = pass.run(scope);
+        if(completed.receive!=null&&(completed.receive.appliedChanges>0||completed.receive.adoptedBaseline))passChanged=true;
         if (completed.flush.sent > 0 || completed.flush.noOp > 0) {
             // External picker collections are a published snapshot, so refresh them after
             // the server accepts a membership change. The refresh is async and retains the
@@ -323,6 +373,7 @@ final class AlbumReplicaService {
         }
         if (pass == null) return null;
         ClassificationSyncPass.Result completed = pass.run(scope);
+        if(completed.receive!=null&&(completed.receive.appliedChanges>0||completed.receive.adoptedBaseline))passChanged=true;
         // A durable blocked conflict outranks the receive code, because it is the state the
         // user has to act on: the receive may then report a perfectly healthy domain that
         // says nothing about the intent still waiting for a decision.
@@ -404,7 +455,7 @@ final class AlbumReplicaService {
         @Override
         public String get(String path) throws Exception {
             try {
-                return client.api(path, "GET", null, null).toString();
+                return readForPass(path);
             } catch (CloudClient.HttpFailure failure) {
                 throw new ClassificationReplica.HttpFailure(failure.status, failure.detail);
             }
@@ -425,7 +476,8 @@ final class AlbumReplicaService {
             try {
                 // The payload is frozen in the durable outbox. Parsing it only adapts it to
                 // the existing authenticated client; no field is regenerated or rebased.
-                return client.api(path, "PUT", new JSONObject(payload), null).toString();
+                String reply=client.api(path, "PUT", new JSONObject(payload), null).toString();
+                wrote(path);return reply;
             } catch (CloudClient.HttpFailure failure) {
                 throw new ClassificationAssignmentOutbox.HttpFailure(failure.status,
                         failure.detail);
@@ -439,7 +491,8 @@ final class AlbumReplicaService {
         public String put(String path, String payload) throws Exception {
             try {
                 // The payload is frozen in the durable outbox; it is only adapted here.
-                return client.api(path, "PUT", new JSONObject(payload), null).toString();
+                String reply=client.api(path, "PUT", new JSONObject(payload), null).toString();
+                wrote(path);return reply;
             } catch (CloudClient.HttpFailure failure) {
                 throw new AssetLifecycleOutbox.HttpFailure(failure.status, failure.detail);
             }
@@ -451,7 +504,7 @@ final class AlbumReplicaService {
         @Override
         public String get(String path) throws Exception {
             try {
-                return client.api(path, "GET", null, null).toString();
+                return readForPass(path);
             } catch (CloudClient.HttpFailure failure) {
                 // The rejected body is what carries the coded reason, so it is passed
                 // through rather than replaced by the status.
@@ -464,7 +517,8 @@ final class AlbumReplicaService {
             try {
                 // The payload is frozen in the durable outbox. Parsing only adapts it to
                 // the existing authenticated client; no field is regenerated or rebased.
-                return client.api(path, "PUT", new JSONObject(payload), null).toString();
+                String reply=client.api(path, "PUT", new JSONObject(payload), null).toString();
+                wrote(path);return reply;
             } catch (CloudClient.HttpFailure failure) {
                 throw new AlbumMembershipOutbox.HttpFailure(failure.status, failure.detail);
             }
@@ -581,14 +635,14 @@ final class AlbumReplicaService {
      * process serves status and Album collections from the database it already holds, and
      * it must not need a network pass to do it. Caller holds {@link #gate}.
      */
-    private String assetListGeneration="";
+    private volatile String assetListGeneration="";
 
     private AlbumAuthoritySync engine() {
         if (sync == null) {
             store = new LibraryReplicaStore(AndroidReplicaDb.open(context));
             Transport transport = new Transport();
             AlbumReplica.Clock clock = () -> Instant.now().toString();
-            sync = new AlbumAuthoritySync(transport, store, clock);
+            sync = new AlbumAuthoritySync(transport, store, clock, () -> canSkipUnchangedFeed("albums"));
             outbox = new AlbumMembershipOutbox(transport, store, clock);
             cycle = new AlbumSyncPass(outbox, sync);
             // The Classification domain shares this store and transport but keeps its own
@@ -597,7 +651,7 @@ final class AlbumReplicaService {
             // so no caller-supplied payload can reach the authority.
             ClassificationTransport classificationTransport = new ClassificationTransport();
             classification = new ClassificationAuthoritySync(classificationTransport, store,
-                    () -> Instant.now().toString());
+                    () -> Instant.now().toString(), () -> canSkipUnchangedFeed("classifications"));
             classificationWriter = new ClassificationAssignmentOutbox(new WriteTransport(), store,
                     () -> Instant.now().toString());
             classificationCycle = new ClassificationSyncPass(classificationWriter, classification);
@@ -731,7 +785,7 @@ final class AlbumReplicaService {
             LibraryReplicaStore.MembershipEdit edit = store.queueMembership(scope, albumId, assetId,
                     desiredState, UUID.randomUUID().toString(), Instant.now().toString());
             JSONObject value = membershipState(assetId);
-            if (edit.changed) request(true);
+            if (edit.changed) localWork();
             return value;
         }
     }
@@ -756,7 +810,7 @@ final class AlbumReplicaService {
                 throw new IllegalArgumentException("Invalid Album conflict action");
             }
             JSONObject value = membershipState(assetId);
-            request(true);
+            localWork();
             return value;
         }
     }
@@ -856,7 +910,7 @@ final class AlbumReplicaService {
                     assetId, classificationId, UUID.randomUUID().toString(),
                     Instant.now().toString());
             JSONObject value = classificationAssignmentState(assetId);
-            if (edit.changed) request(true);
+            if (edit.changed) localWork();
             return value;
         }
     }
@@ -923,7 +977,7 @@ final class AlbumReplicaService {
             } catch (Exception unrepresentable) {
                 throw new IllegalStateException("Library Trash state unavailable");
             }
-            if (edit.row != null) request(true);
+            if (edit.row != null) localWork();
             return value;
         }
     }

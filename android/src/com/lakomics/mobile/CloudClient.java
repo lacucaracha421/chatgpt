@@ -5,6 +5,13 @@ import java.net.*;
 import java.io.*;
 final class CloudClient {
  final SecureSettings settings;
+ private final ConditionalRead conditional=new ConditionalRead();
+ void clearConditional(){conditional.clear();}
+ JSONObject conditionalApi(String path,CancellationSignal cancel)throws Exception{return conditionalApiFor(settings.read(),path,cancel);}
+ JSONObject conditionalApiFor(JSONObject connection,String path,CancellationSignal cancel)throws Exception{
+  String scope=ThumbnailCache.key(connection.getString("endpoint")+"\n"+connection.getString("token"));
+  return new JSONObject(conditional.get(scope,path,etag->authenticatedReply(connection,path,"GET",null,cancel,etag)));
+ }
  CloudClient(SecureSettings s){settings=s;}
  JSONObject api(String path,String method,JSONObject body,CancellationSignal cancel) throws Exception {
   return authenticated(settings.read(),path,method,body,cancel);
@@ -17,17 +24,24 @@ final class CloudClient {
  static final class HttpFailure extends IOException {final int status;final String detail;HttpFailure(int s,String d){super("HTTP failure");status=s;detail=d;}
   JSONObject detailObject(){if(detail==null||detail.isEmpty())return null;try{return new JSONObject(detail);}catch(JSONException ignored){return null;}}}
  private JSONObject authenticated(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel)throws Exception{
+  ConditionalRead.Reply reply=authenticatedReply(s,path,method,body,cancel,null);
+  if(reply.status==304)throw new IOException("Unexpected unconditional 304");
+  return new JSONObject(reply.body);
+ }
+ private ConditionalRead.Reply authenticatedReply(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel,String etag)throws Exception{
   NetworkPolicy.api(path,method);if(!s.has("token"))throw new IllegalStateException("Not configured");
   HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
   try {
    prepare(c,cancel);c.setRequestMethod(method);c.setRequestProperty("Authorization","Bearer "+s.getString("token"));c.setRequestProperty("Accept","application/json");
+   if(etag!=null)c.setRequestProperty("If-None-Match",etag);
    if(method.equals("POST") || method.equals("PUT")){byte[] b=(body==null?"{}":body.toString()).getBytes("UTF-8");if(b.length>(path.startsWith("/v1/notes/")?610000:65536))throw new IOException("Request too large");c.setDoOutput(true);c.setFixedLengthStreamingMode(b.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream o=c.getOutputStream()){o.write(b);}}
    int code=c.getResponseCode();
-   // A 4xx body carries the server's structured reason (a revision conflict's
-   // current state, for example). Reading it here keeps the distinction the
-   // client needs; the body is bounded and only re-exposed field by field.
-   if(code<200 || code>=300)throw new HttpFailure(code,errorBody(c));
-   ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=c.getInputStream()){copy(in,out,4*1024*1024,cancel);}JSONObject result=new JSONObject(out.toString("UTF-8"));stripKeys(result);reusable=true;return result;
+   ConditionalRead.Reply reply=ConditionalRead.response(code,c.getHeaderField("ETag"),()->{
+    ByteArrayOutputStream out=new ByteArrayOutputStream();
+    try(InputStream in=c.getInputStream()){copy(in,out,4*1024*1024,cancel);}
+    JSONObject result=new JSONObject(out.toString("UTF-8"));stripKeys(result);return result.toString();
+   },status->new HttpFailure(status,errorBody(c)));
+   reusable=true;return reply;
   } finally {if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}
  }
  static String errorBody(HttpURLConnection c){

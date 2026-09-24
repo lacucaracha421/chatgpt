@@ -1,3 +1,4 @@
+import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckCircleIcon, PhotoIcon, TrashIcon} from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
@@ -69,9 +70,9 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
       if (ids !== activeIds.current) { activeIds.current = ids; void reload(); }
     };
     const onEvent = (event: Event) => { const detail = (event as CustomEvent<LifecycleState>).detail; if (detail) setLifecycleState(detail); };
-    const timer = window.setInterval(() => { if (document.visibilityState !== 'hidden') void readLifecycle().then(apply, () => {}); }, POLL);
+    const timer = visibleInterval(() => { if (document.visibilityState !== 'hidden') void readLifecycle().then(apply, () => {}); }, POLL);
     window.addEventListener(ASSET_LIFECYCLE_EVENT, onEvent);
-    return () => { clearInterval(timer); window.removeEventListener(ASSET_LIFECYCLE_EVENT, onEvent); };
+    return () => { timer(); window.removeEventListener(ASSET_LIFECYCLE_EVENT, onEvent); };
   }, [reload]);
 
   const more = async () => {

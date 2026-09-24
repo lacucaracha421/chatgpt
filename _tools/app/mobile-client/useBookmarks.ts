@@ -1,3 +1,4 @@
+import {useVisibleInterval} from './useVisibleInterval';
 /**
  * Mobile bookmark state for the catalog UI: the user's action, its durable
  * intent, and its delivery.
@@ -112,18 +113,5 @@ export function useBookmarks({active, authority}: {active: boolean; authority: B
  * is visible, and immediately when the app returns to the foreground.
  */
 export function usePendingRetry(active: boolean, pending: boolean, flush: () => Promise<void>) {
-  const latest = useRef(flush);
-  latest.current = flush;
-  useEffect(() => {
-    if (!active || !pending) return;
-    const resume = () => { void latest.current(); };
-    const timer = setInterval(resume, 30_000);
-    window.addEventListener('lakomics-resume', resume);
-    document.addEventListener('visibilitychange', resume);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('lakomics-resume', resume);
-      document.removeEventListener('visibilitychange', resume);
-    };
-  }, [active, pending]);
+  useVisibleInterval(()=>void flush(),active&&pending?30_000:null);
 }

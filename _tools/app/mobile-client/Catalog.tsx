@@ -74,6 +74,7 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
   const [capabilityRetry,setCapabilityRetry]=useState(0);
   // Tag autocomplete, offered only by a server that advertises it.
   const [suggestable,setSuggestable]=useState(false);
+  const [refreshSupported,setRefreshSupported]=useState(false);
   const [suggestOpen,setSuggestOpen]=useState(false),[options,setOptions]=useState<CatalogSuggestion[]>([]),[activeOption,setActiveOption]=useState(-1);
   const suggestRequest=useRef(0),searchInput=useRef<HTMLInputElement>(null),suggestionList=useRef<HTMLUListElement>(null);
   const activePreferences=preferences.categories!==null||preferences.excludedTags.length>0;
@@ -81,9 +82,10 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
   const onStatus=useCallback((reply:unknown,changed:boolean)=>{
     // The authority is re-read on every check, because a server can start or stop
     // advertising the write capability without the publication moving.
-    const status=reply as {authorityLibraryId?:string|null;authorityEpoch?:number|null;authorityContractVersion?:number|null;authorityCursor?:number|null;capabilities?:{bookmarkWrite?:boolean}};
+    const status=reply as {authorityLibraryId?:string|null;authorityEpoch?:number|null;authorityContractVersion?:number|null;authorityCursor?:number|null;capabilities?:{bookmarkWrite?:boolean;refreshRequest?:boolean}};
     setCapability(supportsDisplayPreferences(status)?'supported':'unsupported');
     setSuggestable(supportsSuggestions(status));
+    setRefreshSupported(status.capabilities?.refreshRequest===true);
     const epoch=status.authorityEpoch;
     const nextCursor=typeof status.authorityCursor==='number'?status.authorityCursor:null;
     const bookmarkChanged=authorityCursor.current!==undefined&&authorityCursor.current!==nextCursor;
@@ -115,7 +117,7 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
     suggestionList.current?.children[activeOption]?.scrollIntoView?.({block:'nearest'});
   },[activeOption]);
   const listboxOpen=suggestions&&suggestOpen&&options.length>0;
-  usePublicationCheck(active&&!paused&&!reader,statusPath,published,onStatus,5_000,{
+  usePublicationCheck(active&&!paused&&!reader,statusPath,published,onStatus,30_000,{
     retryKey:capabilityRetry,
     onError:()=>setCapability(current=>current==='checking'?'failed':current),
   });
@@ -362,7 +364,7 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[endpoint]);
 
-  const refreshState=useCatalogRefresh({active:active&&!paused&&!selected&&!!page?.ready,language:query.language,publication:page?.publicationRevision??null,endpoint,onPublished:reload});
+  const refreshState=useCatalogRefresh({supported:refreshSupported,active:active&&!paused&&!selected&&!!page?.ready,language:query.language,publication:page?.publicationRevision??null,endpoint,onPublished:reload});
   const now=useNow(active&&!paused);
   const listPull=usePullToRefresh(list,reload,busy,!active||paused||!!selected||!!reader);
   const items=(()=>{const seen=new Set<string>(),all:CatalogItem[]=[];for(const item of [...(page?.items??[]),...(more?.items??[])]){const id=`${item.provider}:${item.groupId}`;if(!seen.has(id)){seen.add(id);all.push(item);}}return all;})();

@@ -1,3 +1,4 @@
+import {visibleInterval} from './useVisibleInterval';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {FolderIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
@@ -50,8 +51,8 @@ export function AlbumMembershipEditor({assetId,open,onClose}:{assetId:string;ope
     alive.current++;
     const controller=new AbortController();
     void load(controller.signal);
-    const timer=window.setInterval(()=>void load(),5000);
-    return()=>{alive.current++;controller.abort();window.clearInterval(timer);};
+    const timer=visibleInterval(()=>void load(),5000);
+    return()=>{alive.current++;controller.abort();timer();};
   },[open,load]);
   const toggle=async(album:MembershipAlbum)=>{
     if(album.blocked||saving.has(album.id)||!state)return;

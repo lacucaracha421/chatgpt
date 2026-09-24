@@ -127,14 +127,14 @@ export function loadThumbnail(asset: Asset, signal: AbortSignal): Promise<Asset>
 export function prefetchThumbnails(assets: Asset[], signal: AbortSignal) {
   for (const asset of assets) {
     if (asset.pending || asset.preview || asset.thumbnail_available === false) continue;
-    // Scrolling on drops queued work only; a started download finishes into the cache.
-    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail').catch(() => undefined), signal, () => {});
+    // The visibility owner also cancels an in-flight speculative transfer.
+    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail', signal).catch(() => undefined), signal, () => {});
   }
 }
 /** Library warm-up: one thumbnail through the prefetch queue, settled when native is done. */
 export function warmThumbnail(asset: Asset, signal: AbortSignal): Promise<void> {
   if (asset.pending || asset.thumbnail_available === false) return Promise.resolve();
   return new Promise(resolve => {
-    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail').then(() => resolve(), () => resolve()), signal, () => resolve());
+    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail', signal).then(() => resolve(), () => resolve()), signal, () => resolve());
   });
 }

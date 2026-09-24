@@ -21,7 +21,9 @@ final class PickerLibrary {
     private final SecureSettings settings;
     private final CloudClient client;
     private final AtomicFile file;
-    private final ExecutorService worker=Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor();
+    private final PickerRefreshSchedule schedule=new PickerRefreshSchedule();
+    private ScheduledFuture<?> trailing;
     private volatile PickerSnapshot snapshot=PickerSnapshot.empty();
     private long epoch=0,lastAttempt=0;
     private CancellationSignal active;
@@ -34,15 +36,33 @@ final class PickerLibrary {
     private void load(){try{connection=revision();if(connection.isEmpty())return;try(InputStream in=file.openRead()){ByteArrayOutputStream out=new ByteArrayOutputStream();CloudClient.copy(in,out,96L*1024*1024,null);JSONObject o=new JSONObject(out.toString("UTF-8"));if(!o.getString("connection").equals(connection))return;snapshot=decode(o);}}catch(Exception ignored){file.delete();}}
     synchronized JSONObject status(){try{return new JSONObject().put("syncing",running).put("scanned",scanned).put("mediaCount",snapshot.media.size()).put("albumCount",snapshot.albums.size()).put("lastSyncedAt",snapshot.syncedAt).put("error",error).put("ready",snapshot.syncedAt>0);}catch(JSONException e){throw new IllegalStateException(e);}}
     PickerSnapshot current(){refresh(false);return snapshot;}
+    synchronized void resume(){schedule.resume();refresh(false);}
+    synchronized void pause(){
+        schedule.pause();if(trailing!=null){trailing.cancel(false);trailing=null;}
+        if(active!=null)active.cancel();
+    }
     synchronized void refresh(boolean force){
-        if(running)return;String current=revision();if(current.isEmpty())return;
+        String current=revision();if(current.isEmpty())return;
         if(!current.equals(connection)){reset();connection=current;}
-        long now=System.currentTimeMillis();if(!force&&now-lastAttempt<15L*60*1000)return;
-        running=true;scanned=0;error="";lastAttempt=now;long attempt=epoch;String revision=current;CancellationSignal signal=new CancellationSignal();active=signal;
-        worker.execute(()->sync(attempt,revision,signal));
+        schedule.request(force,SystemClock.elapsedRealtime());schedulePending();
+    }
+    private synchronized void schedulePending(){
+        long delay=schedule.delay(SystemClock.elapsedRealtime());
+        if(delay<0 || trailing!=null)return;
+        trailing=worker.schedule(()->{synchronized(this){
+            trailing=null;
+            long remaining=schedule.delay(SystemClock.elapsedRealtime());
+            if(remaining<0)return;
+            if(remaining>0){schedulePending();return;}
+            String current=revision();if(current.isEmpty())return;
+            schedule.started(SystemClock.elapsedRealtime());
+            running=true;scanned=0;error="";lastAttempt=System.currentTimeMillis();
+            long attempt=epoch;CancellationSignal signal=new CancellationSignal();active=signal;
+            worker.execute(()->sync(attempt,current,signal));
+        }},delay,TimeUnit.MILLISECONDS);
     }
     /** Call under CONNECTION_LOCK after settings write/clear, before exposing the new connection. */
-    synchronized void reset(){epoch++;if(active!=null)active.cancel();active=null;running=false;lastAttempt=0;scanned=0;error="";connection=revision();snapshot=PickerSnapshot.empty();file.delete();notifyPicker();}
+    synchronized void reset(){epoch++;schedule.reset();if(trailing!=null){trailing.cancel(false);trailing=null;}if(active!=null)active.cancel();active=null;running=false;lastAttempt=0;scanned=0;error="";connection=revision();snapshot=PickerSnapshot.empty();file.delete();notifyPicker();}
     private void check(long attempt,String revision,CancellationSignal signal){signal.throwIfCanceled();synchronized(this){if(attempt!=epoch||!revision.equals(revision()))throw new OperationCanceledException();}}
     private void sync(long attempt,String revision,CancellationSignal signal){
         try{
@@ -73,7 +93,7 @@ final class PickerLibrary {
             synchronized(this){check(attempt,revision,signal);save(encoded);snapshot=next;error="";}
             notifyPicker();
         }catch(Exception e){synchronized(this){if(epoch==attempt)error=e instanceof OperationCanceledException?"":"Library refresh failed. Previous library remains available; retry from Lakomics.";}}
-        finally{synchronized(this){if(epoch==attempt){running=false;active=null;}}}
+        finally{synchronized(this){if(epoch==attempt){running=false;active=null;schedule.finished();schedulePending();}}}
     }
     private static long date(JSONObject o){for(String key:new String[]{"collected_at","committed_at","source_published_at"}){String value=o.optString(key,"");try{return Math.max(0,Instant.parse(value).toEpochMilli());}catch(Exception ignored){}try{return Math.max(0,LocalDateTime.parse(value.replace(' ','T')).toInstant(ZoneOffset.UTC).toEpochMilli());}catch(Exception ignored){}}return 0;}
     private static PickerSnapshot.Media media(JSONObject o)throws JSONException {

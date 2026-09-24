@@ -106,7 +106,14 @@ public final class AlbumReplicaScheduleTest {
         void invalidate() { events.add("invalidate"); }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+        explicitReadsValidateEqualCursorPages();
+        classificationReadTransportStaysGetOnly();
+        explicitClassificationReadsRejectReplay();
+        idleRequestBudget();
+        conditionalResponses();
+        backoffAndWake();
+        pickerBurstAndPause();
         startsPollingAndReconcilesImmediately();
         repeatedResumeDoesNotDuplicateWork();
         pauseStopsPollingWithoutTouchingTheReplica();
@@ -122,6 +129,173 @@ public final class AlbumReplicaScheduleTest {
 
         System.out.println("AlbumReplicaScheduleTest passed: " + checks
                 + " checks (generations, start, pause, connection replacement, pending reconcile)");
+    }
+
+    /** Socket-free reproduction of the existing Album continuation fixtures. */
+    private static void explicitReadsValidateEqualCursorPages() {
+        String library="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        String row="{\"sequence\":8,\"authorityCursor\":8,\"commandType\":\"renameAlbum\","
+                +"\"operationId\":\"x\",\"changedAt\":\"t\",\"album\":{\"id\":\"root\",\"name\":\"Skipped\","
+                +"\"parentId\":null,\"description\":null,\"iconKey\":null,\"colorKey\":null,\"deleted\":false,\"entityRevision\":2}}";
+        for(long[] entry:new long[][]{{6,8},{7,10},{7,7},{8,8}}) {
+            int[] writes={0};List<String> requests=new ArrayList<>();
+            AlbumReplica.Adopted local=new AlbumReplica.Adopted("account",library,1,1,7,"now","now");
+            AlbumReplica.State state=(AlbumReplica.State)java.lang.reflect.Proxy.newProxyInstance(
+                    AlbumReplica.State.class.getClassLoader(),new Class[]{AlbumReplica.State.class},(proxy,method,args)->{
+                        if(method.getName().equals("adopted"))return local;
+                        if(method.getName().equals("applyChanges")){writes[0]++;return null;}
+                        throw new AssertionError("Unexpected store operation: "+method.getName());
+                    });
+            AlbumReplica.Transport transport=path->{
+                requests.add(path);
+                if(path.equals("/v1/sync/status"))return statusFor("albums",library,entry[0]);
+                return "{\"libraryId\":\""+library+"\",\"epoch\":1,\"contractVersion\":1,\"cursor\":"+entry[0]
+                        +",\"items\":["+row+"],\"nextAfter\":"+entry[1]+",\"hasMore\":"+(entry[1]!=entry[0])+"}";
+            };
+            AlbumAuthoritySync.Result result=new AlbumAuthoritySync(transport,state,()->"now").reconcile("account");
+            boolean valid=entry[0]==8;
+            equal(valid?null:AlbumReplica.CODE_MALFORMED,result.code,"Explicit reconcile validates continuation even at equal cursor");
+            equal(valid?1:0,writes[0],"Rejected continuation never writes rows");
+            equal(valid?8L:7L,result.localCursor,"Rejected continuation never advances cursor");
+            equal(2,requests.size(),"Explicit reconcile reads the feed as well as status");
+            check(requests.get(1).contains("after=7"),"Feed uses stored cursor");
+        }
+    }
+
+    private static String statusFor(String domain,String library,long cursor) {
+        return "{\"protocolVersion\":1,\"active\":true,\"libraryId\":\""+library+"\",\"domains\":[{\"domain\":\""+domain
+                +"\",\"libraryId\":\""+library+"\",\"epoch\":1,\"contractVersion\":1,\"cursor\":"+cursor+"}]}";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void explicitClassificationReadsRejectReplay() {
+        String library="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        for(int kind=0;kind<3;kind++) {
+            boolean valid=kind==2;long sequence=valid?3:2,ceiling=valid?3:2,next=kind==0?3:sequence;
+            int[] writes={0};List<String> requests=new ArrayList<>();
+            ClassificationReplica.Adopted local=new ClassificationReplica.Adopted("account",library,1,1,2,"now","now");
+            ClassificationReplica.State state=(ClassificationReplica.State)java.lang.reflect.Proxy.newProxyInstance(
+                    ClassificationReplica.State.class.getClassLoader(),new Class[]{ClassificationReplica.State.class},(proxy,method,args)->{
+                        if(method.getName().equals("classificationAdopted"))return local;
+                        if(method.getName().equals("applyClassificationChanges")){
+                            ClassificationReplica.requireContiguous((List<ClassificationReplica.Change>)args[2],(Long)args[1]);
+                            writes[0]++;return null;
+                        }
+                        throw new AssertionError("Unexpected store operation: "+method.getName());
+                    });
+            ClassificationReplica.Transport transport=path->{
+                requests.add(path);
+                if(path.equals("/v1/sync/status"))return statusFor("classifications",library,2);
+                return "{\"libraryId\":\""+library+"\",\"epoch\":1,\"contractVersion\":1,\"cursor\":"+ceiling
+                        +",\"items\":[{\"sequence\":"+sequence+",\"authorityCursor\":"+sequence
+                        +",\"commandType\":\"renameClassification\",\"operationId\":\"x\",\"changedAt\":\"t\","
+                        +"\"classification\":{\"id\":\"series\",\"kind\":\"tag\",\"name\":\"Once\",\"parentId\":null,"
+                        +"\"iconKey\":null,\"colorKey\":null,\"deleted\":false,\"entityRevision\":3}}],\"nextAfter\":"+next+",\"hasMore\":false}";
+            };
+            ClassificationAuthoritySync.Result result=new ClassificationAuthoritySync(transport,state,()->"now").reconcile("account");
+            equal(valid?null:ClassificationReplica.CODE_MALFORMED,result.code,"Explicit Classification receive validates replay/continuation at equal status cursor");
+            equal(valid?1:0,result.appliedChanges,"Replayed change is not applied twice");
+            equal(valid?1:0,writes[0],"Rejected Classification response writes nothing");
+            equal(valid?3L:2L,result.localCursor,"Only a valid new change advances Classification cursor");
+            equal(2,requests.size(),"Explicit Classification receive still requests the feed");
+            check(requests.get(1).contains("after=2"),"Replay check resumes from its stored cursor");
+        }
+    }
+
+    private static void classificationReadTransportStaysGetOnly() {
+        for(java.lang.reflect.Method method:ClassificationReplica.Transport.class.getDeclaredMethods())
+            equal("get",method.getName(),"Classification transport preserves its GET-only contract");
+    }
+
+    private static void backoffAndWake() {
+        Fixture f=new Fixture();f.schedule.start();
+        f.schedule.passFinished(false);f.schedule.passFinished(false);f.schedule.passFinished(false);f.schedule.passFinished(false);
+        equal(List.of(5000L,15000L,30000L,60000L,60000L),f.timer.intervals,"Idle delay reaches one minute");
+        f.schedule.passFinished(true);equal(5000L,f.timer.intervals.get(5),"Detected change resets delay");
+        f.schedule.passFinished(false);f.schedule.wake();equal(5000L,f.timer.intervals.get(7),"Local outbox resets delay");
+        equal(1,f.timer.pending(),"Backoff never accumulates timers");
+        f.schedule.stop();f.schedule.wake();equal(0,f.timer.pending(),"Writes do not arm background polling");
+        f.schedule.start();equal(5000L,f.timer.intervals.get(8),"Resume resets delay");
+    }
+
+    private static void pickerBurstAndPause() {
+        PickerRefreshSchedule s=new PickerRefreshSchedule();s.resume();int walks=0;
+        s.request(true,0);equal(0L,s.delay(0),"First forced refresh starts immediately");s.started(0);walks++;
+        for(int i=1;i<300;i++)s.request(true,i*1000L);
+        equal(-1L,s.delay(299000),"Running walk does not overlap");s.finished();
+        equal(1000L,s.delay(299000),"Burst is held until five minutes");
+        s.started(300000);walks++;s.finished();equal(-1L,s.delay(300001),"Only one trailing walk");
+        equal(2,walks,"Five minute burst costs at most two walks");
+        s.request(true,600000);s.started(600000);s.pause();s.finished();
+        equal(-1L,s.delay(602000),"Pause keeps cancelled walk pending without a timer");
+        s.resume();equal(0L,s.delay(610000),"Resume retries an interrupted walk");
+    }
+
+    private static void conditionalResponses() throws Exception {
+        ConditionalRead.Reply empty=ConditionalRead.response(304,"v1",()->{throw new AssertionError("304 parsed as JSON");},code->{throw new AssertionError("304 treated as HTTP failure");});
+        equal(304,empty.status,"CloudClient response path accepts 304 without reading a body");
+        try{ConditionalRead.response(401,null,()->{throw new AssertionError("Failure parsed as success");},code->new java.io.IOException("auth"));throw new AssertionError("401 accepted");}catch(java.io.IOException expected){checks++;}
+        ConditionalRead cache=new ConditionalRead();
+        equal("first",cache.get("account-a","/status",tag->{equal(null,tag,"First GET has no validator");return new ConditionalRead.Reply(200,"v1","first");}),"200 body");
+        equal("first",cache.get("account-a","/status",tag->{equal("v1",tag,"ETag sent on repeat");return new ConditionalRead.Reply(304,"v1",null);}),"304 preserves body");
+        equal("old-server",cache.get("account-a","/status",tag->new ConditionalRead.Reply(200,null,"old-server")),"Ignoring validators remains compatible");
+        cache.get("account-b","/status",tag->{equal(null,tag,"Account change drops validator");return new ConditionalRead.Reply(200,"b","other");});
+        cache.clear();cache.get("account-b","/status",tag->{equal(null,tag,"Disconnect drops validator");return new ConditionalRead.Reply(200,null,"other");});
+        try{cache.get("account-c","/status",tag->new ConditionalRead.Reply(304,null,null));throw new AssertionError("Uncached 304 accepted");}catch(java.io.IOException expected){checks++;}
+    }
+
+    /** The production three receive engines share the conditional status request. */
+    private static void idleRequestBudget() throws Exception {
+        String library="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        ConditionalRead cache=new ConditionalRead();
+        java.util.Map<String,Long> cursors=new java.util.LinkedHashMap<>();
+        for(String name:List.of("assets","albums","classifications"))cursors.put(name,0L);
+        List<String> requests=new ArrayList<>();int[] notModified={0};
+        AlbumReplica.Transport wire=path->{
+            requests.add(path);
+            if(!path.equals("/v1/sync/status"))throw new AlbumReplica.HttpFailure(503,"{}");
+            StringBuilder domains=new StringBuilder();
+            for(java.util.Map.Entry<String,Long> e:cursors.entrySet()){
+                if(domains.length()>0)domains.append(',');
+                domains.append("{\"domain\":\"").append(e.getKey()).append("\",\"libraryId\":\"").append(library).append("\",\"epoch\":1,\"contractVersion\":1,\"cursor\":").append(e.getValue()).append('}');
+            }
+            String body="{\"protocolVersion\":1,\"active\":true,\"libraryId\":\""+library+"\",\"domains\":["+domains+"]}";
+            String etag=body;
+            return cache.get("account",path,tag->{if(etag.equals(tag)){notModified[0]++;return new ConditionalRead.Reply(304,etag,null);}return new ConditionalRead.Reply(200,etag,body);});
+        };
+        AlbumReplica.Adopted album=new AlbumReplica.Adopted("account",library,1,1,0,"now","now");
+        ClassificationReplica.Adopted classification=new ClassificationReplica.Adopted("account",library,1,1,0,"now","now");
+        AlbumReplica.State albums=(AlbumReplica.State)java.lang.reflect.Proxy.newProxyInstance(AlbumReplica.State.class.getClassLoader(),new Class[]{AlbumReplica.State.class},(proxy,method,args)->{
+            if(method.getName().equals("adopted"))return album;
+            throw new AssertionError("Unexpected idle Album store work: "+method.getName());
+        });
+        ClassificationReplica.State classifications=(ClassificationReplica.State)java.lang.reflect.Proxy.newProxyInstance(ClassificationReplica.State.class.getClassLoader(),new Class[]{ClassificationReplica.State.class},(proxy,method,args)->{
+            if(method.getName().equals("classificationAdopted"))return classification;
+            throw new AssertionError("Unexpected idle Classification store work: "+method.getName());
+        });
+        AssetReplica.Storage assets=new AssetReplica.Storage(){
+            public AssetReplica.Snapshot readAssets(String scope){return new AssetReplica.Snapshot(library,1,0,java.util.Collections.emptyMap());}
+            public void replaceAssets(String scope,AssetReplica.Snapshot value){throw new AssertionError("Unexpected idle Asset write");}
+            public void clearAssets(){throw new AssertionError("Unexpected idle clear");}
+        };
+        wire.get("/v1/sync/status");requests.clear();
+        for(String changed:List.of("none","assets","albums","classifications")){
+            for(String name:cursors.keySet())cursors.put(name,name.equals(changed)?1L:0L);
+            requests.clear();SyncStatusPass pass=new SyncStatusPass(wire);
+            try{new AssetReplica(pass,assets,new java.util.concurrent.locks.ReentrantLock(),()->pass.canSkipUnchangedFeed("assets")).sync("account");}catch(AlbumReplica.HttpFailure expected){}
+            new AlbumAuthoritySync(pass,albums,()->"now",()->pass.canSkipUnchangedFeed("albums")).reconcile("account");
+            new ClassificationAuthoritySync(pass::get,classifications,()->"now",()->pass.canSkipUnchangedFeed("classifications")).reconcile("account");
+            equal(changed.equals("none")?1:2,requests.size(),"Only status plus changed domain feed: "+changed);
+            equal("/v1/sync/status",requests.get(0),"Status shared across domains");
+            if(!changed.equals("none"))check(requests.get(1).contains("/"+changed+"/")&&requests.get(1).contains("changes"),"Only changed domain requested");
+        }
+        equal(1,notModified[0],"Idle pass receives exactly one 304");
+        SyncStatusPass afterWrite=new SyncStatusPass(wire);
+        afterWrite.wrote("/v1/assets/authority/commands");
+        check(!afterWrite.canSkipUnchangedFeed("assets"),"Cannot skip before status is loaded");
+        afterWrite.get("/v1/sync/status");afterWrite.wrote("/v1/albums/commands");
+        check(!afterWrite.canSkipUnchangedFeed("albums"),"Later Album write cannot use stale unchanged hint");
+        check(afterWrite.canSkipUnchangedFeed("assets")&&afterWrite.canSkipUnchangedFeed("classifications"),"Local write does not fetch unrelated domains");
     }
 
     private static void startsPollingAndReconcilesImmediately() {

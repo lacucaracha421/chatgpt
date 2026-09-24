@@ -380,24 +380,36 @@ describe('server list generation',()=>{
       if(path.startsWith('/v1/library/assets'))return {items,has_more:false,next_cursor:null};
       return original(path);
     });
-    return {change(next:typeof a){revision++;items=next;}};
+    return {change(next:typeof a){revision++;items=next;},generation(){return revision.toString(16).padStart(64,'0');}};
   }
   it.each(['mobile assignment','remote assignment','remote trash','remote tombstone'])('%s removes an Asset from cached A on foreground',async()=>{
     const server=fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     await screen.findByLabelText('자산 목록');
-    server.change([]);act(()=>window.dispatchEvent(new Event('lakomics-resume')));
+    server.change([]);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
     fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
   });
   it('remote restore returns the same ID and new canonical Assets appear without restart',async()=>{
     const server=fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    server.change([]);act(()=>window.dispatchEvent(new Event('focus')));
+    server.change([]);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
-    server.change(a);act(()=>window.dispatchEvent(new Event('lakomics-resume')));
+    server.change(a);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
     await screen.findByText('tile-a1');
-    server.change([...a,...b]);act(()=>window.dispatchEvent(new Event('focus')));
+    server.change([...a,...b]);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
     await screen.findByText('tile-b1');
+  });
+  it('has no periodic list-generation fetch while idle; native events refresh it',async()=>{
+    const server=fixture();render(<App/>);
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    await act(async()=>{});vi.useFakeTimers();
+    try{
+      const before=mocks.api.mock.calls.filter(([path])=>path==='/v1/library/list-generation').length;
+      await act(()=>vi.advanceTimersByTimeAsync(180_000));
+      expect(mocks.api.mock.calls.filter(([path])=>path==='/v1/library/list-generation')).toHaveLength(before);
+      server.change([]);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
+      await act(async()=>{});expect(screen.queryByText('tile-a1')).toBeNull();
+    }finally{vi.useRealTimers();}
   });
   // A server that predates the generation endpoint answers 404. The list fetch must
   // survive that: generation invalidation is an optimization over the canonical read,

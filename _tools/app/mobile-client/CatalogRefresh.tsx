@@ -1,3 +1,4 @@
+import {useVisibleInterval} from './useVisibleInterval';
 import {useEffect, useRef, useState} from 'react';
 import {ArrowPathIcon, CloudArrowDownIcon} from '@heroicons/react/24/outline';
 import {IconButton} from './ui';
@@ -7,42 +8,48 @@ import {api, errorText} from './transport';
 type Language = 'korean' | 'japanese';
 export type RefreshJob = {id:string; language:Language; state:'queued'|'running'|'completed'|'failed'; pages:number; added:number; hasMore:boolean; error:string|null; publicationRevision:string|null};
 type Pending = {operationId:string; language:Language};
-type Options = {active:boolean; language:Language|'all'; publication:string|null; endpoint:string; onPublished():void};
+type Options = {supported?:boolean;active:boolean; language:Language|'all'; publication:string|null; endpoint:string; onPublished():void};
 
 /** Server-side catalog refresh: capability, job polling and one durable request at a time. */
-export function useCatalogRefresh({active, language, publication, endpoint, onPublished}:Options) {
-  const [supported,setSupported]=useState(false),[job,setJob]=useState<RefreshJob|null>(null);
-  const [sending,setSending]=useState(false),[error,setError]=useState(''),[check,setCheck]=useState(0);
+export function useCatalogRefresh({supported=false, active, language, publication, endpoint, onPublished}:Options) {
+  const [job,setJob]=useState<RefreshJob|null>(null);
+  const [sending,setSending]=useState(false),[error,setError]=useState('');
   const owner=useRef<AbortController|null>(null),onPublishedRef=useRef(onPublished);
   const notified=useRef<string|null>(null);
   onPublishedRef.current=onPublished;
   const storageKey=`lakomics.catalog.refresh.${endpoint}`;
   const running=job?.state==='queued'||job?.state==='running';
   useEffect(()=>()=>owner.current?.abort(),[]);
-  useEffect(()=>{
-    if(!active)return;
-    const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
-    async function poll(){
-      try{
-        const status=await api<{capabilities?:{refreshRequest?:boolean}}>('/v1/mobile-catalog/status',controller.signal);
-        if(controller.signal.aborted)return;
-        const enabled=status.capabilities?.refreshRequest===true;setSupported(enabled);
-        if(!enabled)return;
-        const result=await api<{job:RefreshJob|null}>('/v1/mobile-catalog/refresh',controller.signal);
-        if(controller.signal.aborted)return;
-        setJob(result.job);setError('');
-        if(result.job?.state==='completed'&&result.job.publicationRevision&&notified.current!==result.job.id){
-          notified.current=result.job.id;
-          if(result.job.publicationRevision!==publication)onPublishedRef.current();
-        }
-        timer=setTimeout(()=>void poll(),result.job?.state==='queued'||result.job?.state==='running'?2000:30000);
-      }catch(reason){if(!controller.signal.aborted){setError(errorText(reason));timer=setTimeout(()=>void poll(),10000);}}
+  const polling=useRef<AbortController|null>(null);
+  const accept=(next:RefreshJob|null)=>{
+    setJob(next);setError('');
+    try{if(next?.state==='queued'||next?.state==='running')localStorage.setItem(`${storageKey}.job`,JSON.stringify(next));else localStorage.removeItem(`${storageKey}.job`);}catch{/* Optional recovery hint. */}
+    if(next?.state==='completed'&&next.publicationRevision&&notified.current!==next.id){
+      notified.current=next.id;if(next.publicationRevision!==publication)onPublishedRef.current();
     }
-    void poll();return()=>{controller.abort();clearTimeout(timer);};
-  },[active,check,publication]);
+  };
+  useEffect(()=>{
+    setJob(null);notified.current=null;
+    try{const saved=JSON.parse(localStorage.getItem(`${storageKey}.job`)??'null') as RefreshJob|null;
+      if(saved&&typeof saved.id==='string'&&(saved.state==='queued'||saved.state==='running'))setJob(saved);
+    }catch{/* Ignore malformed optional state. */}
+  },[storageKey]);
+  useEffect(()=>{
+    const hide=()=>{if(document.visibilityState==='hidden'){polling.current?.abort();polling.current=null;}};
+    document.addEventListener('visibilitychange',hide);
+    return()=>{hide();polling.current?.abort();polling.current=null;document.removeEventListener('visibilitychange',hide);};
+  },[active,storageKey]);
+  useVisibleInterval(()=>{
+    if(polling.current)return;
+    const controller=polling.current=new AbortController();
+    void api<{job:RefreshJob|null}>('/v1/mobile-catalog/refresh',controller.signal).then(result=>{
+      if(!controller.signal.aborted)accept(result.job);
+    }).catch(reason=>{if(!controller.signal.aborted)setError(errorText(reason));})
+      .finally(()=>{if(polling.current===controller)polling.current=null;});
+  },active&&supported&&running?2000:null,true);
 
   async function request(target:Language){
-    if(owner.current||running)return;
+    if(owner.current||running||!active||!supported||document.visibilityState==='hidden')return;
     const controller=new AbortController();owner.current=controller;setSending(true);setError('');
     try{
       let pending:Pending|null=null;
@@ -54,7 +61,7 @@ export function useCatalogRefresh({active, language, publication, endpoint, onPu
       const result=await api<{job:RefreshJob}>('/v1/mobile-catalog/refresh',controller.signal,pending);
       if(controller.signal.aborted)return;
       try{localStorage.removeItem(storageKey);}catch{/* No credentials are stored here. */}
-      setJob(result.job);setCheck(value=>value+1);
+      accept(result.job);
     }catch(reason){if(!controller.signal.aborted)setError(errorText(reason));}
     finally{if(owner.current===controller){owner.current=null;if(!controller.signal.aborted)setSending(false);}}
   }
@@ -75,7 +82,7 @@ export function syncedLabel(publishedAt:string|null|undefined, now:number) {
 }
 export function useNow(active:boolean, interval=30_000) {
   const [now,setNow]=useState(()=>Date.now());
-  useEffect(()=>{if(!active)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),interval);return()=>clearInterval(timer);},[active,interval]);
+  useVisibleInterval(()=>setNow(Date.now()),active?interval:null,true);
   return now;
 }
 

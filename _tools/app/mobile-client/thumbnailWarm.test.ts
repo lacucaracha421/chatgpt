@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.useFakeTimers({shouldAdvanceTime:true});
   localStorage.clear(); resetWarmProgress(); setWarmEnabled(true);
   mocks.api.mockImplementation(async (path:string) => pages[new URL(path, 'https://x.invalid').searchParams.get('cursor') ?? 'first']);
-  mocks.native.mockImplementation(async (_op:string, payload:{assetId:string}) => ({url:`https://example.invalid/${payload.assetId}`, expires_in:240}));
+  mocks.native.mockImplementation(async (op:string, payload:{assetId:string}) => op==='status'?{battery:{charging:false,level:80,powerSave:false}}:({url:`https://example.invalid/${payload.assetId}`, expires_in:240}));
 });
 afterEach(() => { vi.useRealTimers(); stop?.(); stop = null; clearMediaCache(); mocks.api.mockReset(); mocks.native.mockReset(); vi.unstubAllGlobals(); });
 
@@ -29,7 +29,7 @@ it('walks every Library page once, asking native for each thumbnail, then report
     expect.stringContaining('/v1/library/assets?limit=100'),
     expect.stringContaining('cursor=c2'),
   ]);
-  expect(mocks.native.mock.calls.map(([op, payload]) => `${op}:${payload.assetId}`)).toEqual(['thumbnail:a', 'thumbnail:b', 'thumbnail:c']);
+  expect(mocks.native.mock.calls.filter(([op])=>op!=='status').map(([op, payload]) => `${op}:${payload.assetId}`)).toEqual(['thumbnail:a', 'thumbnail:b', 'thumbnail:c']);
   expect(warmState().warmed).toBe(3);
   // A finished pass is not repeated within a day.
   stop(); stop = startThumbnailWarm('https://server.invalid');
@@ -63,4 +63,24 @@ it('stays paused when switched off or on a cellular or data-saving link', async 
   expect(warmState().status).toBe('metered');
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(mocks.api).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  {charging:false,level:49,powerSave:false},
+  {charging:false,level:95,powerSave:true},
+  undefined,
+])('does not warm on a disallowed or unknown battery state: %j',async battery=>{
+  mocks.native.mockResolvedValue({battery});
+  stop=startThumbnailWarm('battery-test');
+  await vi.advanceTimersByTimeAsync(65_000);
+  expect(mocks.api).not.toHaveBeenCalled();
+  expect(mocks.native.mock.calls.every(([op])=>op==='status')).toBe(true);
+  expect(warmState().status).toBe('waiting');
+});
+it('allows charging even below fifty percent',async()=>{
+  const original=mocks.native.getMockImplementation()!;
+  mocks.native.mockImplementation((op:string,payload:{assetId:string})=>op==='status'?Promise.resolve({battery:{charging:true,level:10,powerSave:false}}):original(op,payload));
+  stop=startThumbnailWarm('charging-test');await vi.advanceTimersByTimeAsync(5500);
+  expect(mocks.api).toHaveBeenCalledTimes(2);
 });

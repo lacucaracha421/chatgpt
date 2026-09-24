@@ -1,3 +1,4 @@
+import {onVisible} from './useVisibleInterval';
 /**
  * App-level character-review delivery and the "검토 N" counts shown at the entry points.
  */
@@ -15,15 +16,13 @@ export function useCharacterReviewBackgroundFlush(enabled: boolean) {
       if (Object.keys(readReviewIntents()).length) void flushCharacterReview().catch(() => {});
     };
     send();
-    window.addEventListener('lakomics-resume', send);
+    const removeVisible=onVisible(send);
     window.addEventListener('online', send);
     window.addEventListener(CHARACTER_REVIEW_EVENT, send);
-    document.addEventListener('visibilitychange', send);
     return () => {
-      window.removeEventListener('lakomics-resume', send);
+      removeVisible();
       window.removeEventListener('online', send);
       window.removeEventListener(CHARACTER_REVIEW_EVENT, send);
-      document.removeEventListener('visibilitychange', send);
     };
   }, [enabled]);
 }

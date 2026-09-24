@@ -1,3 +1,4 @@
+import {useVisibleInterval} from './useVisibleInterval';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowUpRightIcon} from '@heroicons/react/24/outline';
 import {ClassificationIcon, classificationColor} from '../src/classification/classificationAppearance';
@@ -17,11 +18,7 @@ export interface HomeProps {
 }
 export function Home({items,classifications,revisit,captures,busy,paused,secondaryError,revision,onSelect,onOpen,onPending}:HomeProps) {
   const [day,setDay] = useState(dayNumber);
-  useEffect(() => {
-    const update = () => setDay(dayNumber());
-    const timer = window.setInterval(update,60000); document.addEventListener('visibilitychange',update);
-    return () => {clearInterval(timer); document.removeEventListener('visibilitychange',update);};
-  },[]);
+  useVisibleInterval(()=>setDay(dayNumber()),paused?null:60_000);
   const folders = useMemo(() => discoveryFolders(classifications,day),[classifications,day]);
   const [covers,setCovers] = useState<Record<string,Asset[]>>({});
   const [failed,setFailed] = useState(false);

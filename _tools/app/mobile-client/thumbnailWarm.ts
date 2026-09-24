@@ -1,6 +1,6 @@
 import {meteredConnection,warmConnection as connection} from './warmNetwork';
 export {meteredConnection} from './warmNetwork';
-import {api} from './transport';
+import {api,native} from './transport';
 import {normalizePage, pagePath} from './model';
 import {EMPTY_FILTERS} from './assetFilters';
 import {ALL_ASSETS} from './libraryModel';
@@ -41,14 +41,21 @@ export function setWarmEnabled(enabled:boolean) { write(OFF_KEY, !enabled); wind
 /** Forget progress, e.g. after the media cache was cleared or the connection changed. */
 export function resetWarmProgress() { try {localStorage.removeItem(PROGRESS_KEY);} catch { /* optional */ } }
 
+export type BatteryState={charging:boolean;level:number;powerSave:boolean};
+export function batteryAllowsWarm(battery:BatteryState|undefined) {
+  return !!battery&&(battery.charging===true||(battery.level>=50&&battery.powerSave===false));
+}
 async function pass(scope:string, signal:AbortSignal) {
   let progress = saved(scope);
   if (progress.completedAt !== null) {
     if (Date.now() - progress.completedAt < REPEAT_AFTER) { publish({status:'done', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
     progress = {scope, cursor:null, warmed:0, completedAt:null};
   }
-  publish({status:'running', warmed:progress.warmed, completedAt:null});
   for (;;) {
+    const status=await native<{battery?:BatteryState}>('status',{},signal);
+    if(signal.aborted)return;
+    if(!batteryAllowsWarm(status.battery)) {publish({status:'waiting',warmed:progress.warmed,completedAt:progress.completedAt});return false;}
+    publish({status:'running', warmed:progress.warmed, completedAt:null});
     let page:Page;
     try { page = normalizePage(await api<Page>(pagePath(ALL_ASSETS, progress.cursor, EMPTY_FILTERS, WARM_PAGE), signal)); }
     catch (error) {
@@ -86,11 +93,11 @@ export function startThumbnailWarm(scope:string) {
   const begin = () => {
     if (stopped || controller || !warmEnabled() || meteredConnection() || document.visibilityState === 'hidden') return;
     const current = controller = new AbortController();
-    void pass(scope, current.signal).then(() => {
+    void pass(scope, current.signal).then(allowed => {
       if (controller !== current) return;
       controller = null;
       // A finished pass checks again after the repeat interval while the app stays open.
-      timer = window.setTimeout(() => { timer = 0; evaluate(); }, REPEAT_AFTER);
+      timer = window.setTimeout(() => { timer = 0; evaluate(); }, allowed===false?RETRY_AFTER:REPEAT_AFTER);
     }, () => {
       if (controller !== current || current.signal.aborted) return;
       controller = null; const progress = saved(scope);

@@ -168,7 +168,7 @@ final class MediaRepository {
     try{JSONObject current=initial;
     for(int attempt=0;;attempt++){
      signal.throwIfCanceled();
-     try{client.download(current.getString("url"),file,reservation,signal);MediaTransfer.verifyTicket(file,current.optLong("size_bytes",0),current.optString("sha256"));signal.throwIfCanceled();return;}
+     try{client.download(current.getString("url"),file,reservation,signal);MediaTransfer.verifyTicket(file,current.optLong("size_bytes",0),current.isNull("sha256")?"":current.optString("sha256"));signal.throwIfCanceled();return;}
      catch(Exception failure){signal.throwIfCanceled();if(attempt>=1 || !retryable(failure))throw failure;current=source.read(true);}
     }
     }finally{callbackNanos[0]+=System.nanoTime()-callbackStarted;}

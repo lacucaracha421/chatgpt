@@ -5,7 +5,7 @@ const mock=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mock.native,errorText:(e:Error)=>e.message}));
 const note:MobileNote={id:'a'.repeat(32),title:'제목',body:'내용',pinned:false,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false};
 beforeEach(()=>{mock.native.mockReset();mock.native.mockImplementation(async(op)=>op==='notesState'||op==='notesSync'?{unlocked:true,notes:[note]}:undefined);});
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('keeps typing made during a save and writes it against the acknowledged local revision',async()=>{
  let finish!:(value:MobileNote)=>void;
  mock.native.mockImplementation(async(op,p)=>{
@@ -97,4 +97,19 @@ it('cleans up viewport listeners on tab switches and does not treat pinch zoom a
  view.rerender(<Notes active={false} backRef={backRef}/>);
  expect(removed).toHaveBeenCalledWith('resize',expect.any(Function));expect(removed).toHaveBeenCalledWith('scroll',expect.any(Function));
  view.rerender(<Notes active backRef={backRef}/>);view.unmount();expect(removed).toHaveBeenCalledTimes(4);
+});
+
+it('backs pending sync off from two seconds to one minute and stops timers when hidden',async()=>{
+ vi.useFakeTimers();let visibility:DocumentVisibilityState='visible';
+ vi.spyOn(document,'visibilityState','get').mockImplementation(()=>visibility);
+ mock.native.mockResolvedValue({unlocked:true,notes:[{...note,pending:true}]});
+ render(<Notes active backRef={{current:null}}/>);await act(async()=>{});
+ const syncs=()=>mock.native.mock.calls.filter(([op])=>op==='notesSync').length;
+ expect(syncs()).toBe(0);
+ for(const [index,delay] of [2000,4000,8000,16000,32000,60000].entries()){
+  await act(()=>vi.advanceTimersByTimeAsync(delay-1));expect(syncs()).toBe(index);
+  await act(()=>vi.advanceTimersByTimeAsync(1));expect(syncs()).toBe(index+1);
+ }
+ visibility='hidden';act(()=>document.dispatchEvent(new Event('visibilitychange')));
+ expect(vi.getTimerCount()).toBe(0);await act(()=>vi.advanceTimersByTimeAsync(120000));expect(syncs()).toBe(6);
 });

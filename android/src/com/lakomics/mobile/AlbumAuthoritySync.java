@@ -44,9 +44,19 @@ final class AlbumAuthoritySync {
     private final AlbumReplica.Transport transport;
     private final AlbumReplica.State state;
     private final AlbumReplica.Clock clock;
+    private final java.util.function.BooleanSupplier skipUnchanged;
 
     AlbumAuthoritySync(AlbumReplica.Transport transport, AlbumReplica.State state,
                        AlbumReplica.Clock clock) {
+        this(transport, state, clock, () -> false);
+    }
+
+    /** Only the coordinated foreground poll may omit an unchanged feed. Explicit
+     * reconciliation still reads and validates it, even when status matches locally. */
+    AlbumAuthoritySync(AlbumReplica.Transport transport,
+            AlbumReplica.State state, AlbumReplica.Clock clock,
+            java.util.function.BooleanSupplier skipUnchanged) {
+        this.skipUnchanged = skipUnchanged;
         this.transport = transport;
         this.state = state;
         this.clock = clock;
@@ -172,6 +182,7 @@ final class AlbumAuthoritySync {
             if (local.contractVersion != remote.contractVersion) {
                 return adopt(scope, remote, result, true);
             }
+            if (local.cursor == remote.cursor && skipUnchanged.getAsBoolean()) return result;
             try {
                 applyChanges(scope, local, result);
                 return result;

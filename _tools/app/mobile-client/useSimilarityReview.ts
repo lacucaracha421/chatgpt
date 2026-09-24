@@ -1,3 +1,4 @@
+import {onVisible} from './useVisibleInterval';
 /**
  * App-level similarity-review delivery and the "유사 이미지 검토 N" count.
  */
@@ -30,16 +31,14 @@ export function useSimilarityReviewBackgroundFlush(enabled: boolean) {
       if (wait !== null) timer = window.setTimeout(send, wait);
     };
     send();
-    window.addEventListener('lakomics-resume', send);
+    const removeVisible=onVisible(send);
     window.addEventListener('online', send);
     window.addEventListener(SIMILARITY_REVIEW_EVENT, send);
-    document.addEventListener('visibilitychange', send);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('lakomics-resume', send);
+      removeVisible();
       window.removeEventListener('online', send);
       window.removeEventListener(SIMILARITY_REVIEW_EVENT, send);
-      document.removeEventListener('visibilitychange', send);
     };
   }, [enabled]);
 }

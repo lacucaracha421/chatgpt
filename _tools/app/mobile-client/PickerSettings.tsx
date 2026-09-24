@@ -1,4 +1,5 @@
-import {useEffect, useState} from 'react';
+import {useVisibleInterval} from './useVisibleInterval';
+import {useState} from 'react';
 import {Button} from './ui';
 import {errorText, native} from './transport';
 type PickerStatus = {supported:boolean; eligible?:boolean; selected?:boolean; syncing:boolean; scanned:number; mediaCount:number; albumCount:number; ready:boolean; lastSyncedAt:number; error:string};
@@ -6,14 +7,9 @@ export function PickerSettings({configured}:{configured:boolean}) {
   const [status,setStatus] = useState<PickerStatus>();
   const [error,setError] = useState('');
   const [busy,setBusy] = useState(false);
-  useEffect(() => {
-    const controller = new AbortController(); let timer:ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {const result=await native<PickerStatus>('pickerStatus',{},controller.signal);if (!controller.signal.aborted) {setStatus(result);timer=setTimeout(() => void poll(),result.syncing?2000:10000);}}
-      catch (reason) {if (!controller.signal.aborted) setError(errorText(reason));}
-    };
-    void poll();return () => {controller.abort();clearTimeout(timer);};
-  },[configured]);
+  useVisibleInterval(()=>{
+    void native<PickerStatus>('pickerStatus').then(setStatus).catch(reason=>setError(errorText(reason)));
+  },configured?(status?.syncing?2000:10000):null,true);
   return <section className="settings-note"><h3>다른 앱에서 첨부하기</h3>
     <p>커뮤니티의 첨부 화면에서 <strong>파일 → Lakomics</strong>를 열면 분류 폴더 안의 이미지와 영상을 고를 수 있습니다.</p>
     {status?.supported && <>

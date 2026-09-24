@@ -1,3 +1,4 @@
+import {visibleInterval} from './useVisibleInterval';
 import {ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {ChevronDownIcon,ChevronRightIcon,FolderIcon,MagnifyingGlassIcon,XMarkIcon} from '@heroicons/react/24/outline';
@@ -170,8 +171,8 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
     void load(controller.signal);
     // The replica converges on its own cadence, so re-reading while open is what turns a
     // still-pending choice into a confirmed one.
-    const timer=window.setInterval(()=>void load(),5000);
-    return()=>{alive.current++;controller.abort();window.clearInterval(timer);};
+    const timer=visibleInterval(()=>void load(),5000);
+    return()=>{alive.current++;controller.abort();timer();};
   },[open,assetId,load]);
   const select=async(classificationId:string|null)=>{
     if(saving||!state?.adopted||state.blocked)return;
