@@ -13,8 +13,8 @@ Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is impl
 1. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. Next: switch 젠레스 (시시아 excluded), 명조, 아이돌 and 리버스 on the user's PC, spot-check S36 acceptances, then widen.
 2. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
 3. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
-4. **VAULT-ENC-001** — Lakomics-encrypted Private Vault (ADR-0039); takes priority over further mobile work.
-5. **MOBILE-PARITY-001** — Film details, personal metadata edits, similarity review and Library Trash on Android, in that order.
+4. **Server review follow-ups (2026-09-24)** — review branch merged (`ae9af4b`); catalog artifact pruning (server disk 83% full, ~3.4 GB/day), then judgment calls 4, 2, 1 and 7 from `docs/research/server-review-2026-09-24.md` §3. Deployment needs approval.
+5. **VAULT-ENC-001** and **MOBILE-PARITY-001** — implemented; native/tablet acceptance remains.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
@@ -123,7 +123,7 @@ Acceptance: a supported edit can be made with PC off, survives offline retry/res
 
 ## MOBILE-BUG-002 — Mobile Catalog search does nothing
 
-Status: `TODO` — bug reported 2026-09-24.
+Status: `VERIFY` — fixed in `7d2bfa6` (search submits, newest first, autocomplete; in APK 0.8.1); tablet confirmation pending.
 
 Search in the Android Catalog does not work. Reproduce first on the current APK: record the query, whether any request reaches the server (`searchMode=mobile` search-page path), the response, and whether the UI ignores it. Then fix the failing layer and verify search together with category inclusion, excluded tags and paging.
 
@@ -142,7 +142,7 @@ Global cross-device deletion remains intentionally deferred. Require tombstones,
 
 ## VAULT-ENC-001 — Lakomics-encrypted Private Vault (ADR-0039)
 
-Status: `IN_PROGRESS` — started 2026-09-24; takes priority over further mobile work.
+Status: `VERIFY` — stages 1–3 implemented (`cc917f6`, `590af74`, `bbf8502`); stage 4 native acceptance remains (Linux USB; Windows waits for WIN-SYNC-001).
 
 Replace VeraCrypt with Lakomics' own per-file encryption so a USB plugged into another computer shows nothing readable. The user copies the VeraCrypt contents (including `.lakomics/`) to the trusted PC, formats the 64 GB USB as exFAT, then imports.
 
@@ -164,9 +164,47 @@ Once the Linux PC publishes Collections with the personal-edit handshake, the ol
 - FAULT game in WebView2 (`http://tauri.localhost` → `http://lakomics.localhost` original-image reads).
 - Collections authority (docs/research/collection-authority-design-20260924.md) may be activated before this update; the old Windows build is then fenced for Collections and its local-only edits are not carried over (the upgrade produces a salvage report).
 
+## USER-REQ-20260924 — User requests, 2026-09-24 evening
+
+Status: `TODO` — recorded as given; scope and priority to be confirmed per item.
+
+Mobile:
+- Design consistency with the PC app: app UI, logo in the top bar, Home screen.
+- Monthly subscription calculator (scope unclear — confirm what it tracks).
+- Notes: more note types; API documentation for notes.
+- Battery usage: investigate and reduce (polling, thumbnail warm-up, background work).
+- New-release notifications (see the Future-work note; follow targets and delivery undecided).
+- Notes: tapping 동기화 syncs with the PC immediately.
+- Bottom navigation bar slightly higher.
+
+PC:
+- Start Collections authority slice 1 (docs/research/collection-authority-design-20260924.md).
+- Asset viewer and video viewer improvements (!!), clarified 2026-09-24: the title at top-left and the buttons at top-right cover the image — keep them off the image or hide them; in videos, Left/Right should seek about 5 s (currently does nothing); the left/right `<` `>` arrows should auto-hide.
+
+Second batch (same evening; details will be given at implementation time):
+
+Mobile:
+- Notes: when the keyboard opens, lift the editor by the keyboard height so the text being typed stays visible.
+- ~~Manga Catalog reader: remove 이어읽기 (continue reading); add a page slider to jump directly to any page (e.g. page 25 of 40).~~ Done in 0.8.2–0.8.3 (`2af8d1e`, `f6ac798`); accepted on the tablet 2026-09-24.
+- File exchange between the PC and mobile through the Lakomics server, replacing the current LocalSend workflow: send a file and it arrives on the other device right away.
+
+PC:
+- Lightweight processing mode ("데이터 처리용 라이트모드"): while the user is on the mobile app, keep only the PC work that mobile features depend on running and pause nearly everything else.
+
+PC and mobile:
+- Notes like a notes app: checklists, reordering, and similar editing features, on both PC and mobile.
+
+Collector (`extension-list/`):
+- A better way into subfolders than double-tap (open question).
+- Store the semicircle menu's folder order and hidden folders (e.g. 리버스, 명조) on the server; today a reinstall resets them.
+- Twitter/X only: add a control in X's left navigation (Profile, Home, …) that scrolls to the top and loads new posts in one step, replacing the manual scroll-up-and-refresh.
+- Disable the right-side recommended-images button for now (keep the code; re-enable later).
+
+NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
+
 ## MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
 
-Status: `TODO` — user-selected scope, 2026-09-24. Each slice needs its own server/APK rollout authorization.
+Status: `VERIFY` — slices 1–4 implemented (`dc55ffd`, `90a0811`, `00fbc8c`, `4363e33`, `ce2827f`), server deployed at `ce2827f` and APK 0.8.1 installed; tablet acceptance of each slice pending.
 
 The user chose these desktop features for Android, in this suggested order (smallest and safest first):
 1. **Film details** (read-only): show `WORKS-001` cast, release info and related works in mobile Collections. Publish the Film snapshot block alongside the TV `series` block (`src-tauri/src/cloud/collections.rs`, `committed_series`), then render it; local related works open the local work.
