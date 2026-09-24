@@ -102,6 +102,15 @@ def readable_users_path(root, value):
     current = users_path(root, value)
     return current if current.is_file() else legacy_users_path(root, value)
 
+
+def publication_paths(root, publication):
+    """History outlives GC'd files for rollback and authority activation retries."""
+    users = readable_users_path(root, publication["revision"])
+    content = artifact_path(root, publication["content_digest"])
+    if not users.is_file() or not content.is_file():
+        fail(409, "Catalog snapshot is unavailable; refresh")
+    return users, content
+
 def import_content(path, expected, root, get_db):
     checked_digest(expected)
     counts = {kind: 0 for kind in TABLES}
@@ -408,7 +417,8 @@ def open_publication(root, get_db, revision=None, bookmarks=None):
         if row is None:
             fail(409, "Catalog snapshot is unavailable; refresh")
         publication = dict(row)
-    db = sqlite3.connect(readable_users_path(root, publication["revision"]).as_uri() + "?mode=ro", uri=True)
+    users, content = publication_paths(root, publication)
+    db = sqlite3.connect(users.as_uri() + "?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     try:
         if bookmarks is not None:
@@ -416,7 +426,7 @@ def open_publication(root, get_db, revision=None, bookmarks=None):
             # read transaction starts. Inactive authority creates no shadow, so
             # this path is untouched while the domain is PC-owned.
             catalog_bookmarks.attach_shadow(db, bookmarks)
-        db.execute("ATTACH DATABASE ? AS catalog", [artifact_path(root, publication["content_digest"]).as_uri() + "?mode=ro"])
+        db.execute("ATTACH DATABASE ? AS catalog", [content.as_uri() + "?mode=ro"])
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")
         yield db, publication
