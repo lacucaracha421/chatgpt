@@ -236,9 +236,18 @@ Process: show browser-rendered mockups at 800×1280 (S11 portrait) for approval 
 
 ## PC-POLL-001 — Cut the desktop app's idle server polling
 
-Status: `TODO` — measured 2026-09-24; do after the lightweight-mode fix lands (delegate to Opus).
+Status: `DONE` — implemented in `cf2075b`; re-measured 2026-09-25 (see below). Remaining pollers moved to `PC-POLL-002`.
 
 Server access log, 15 min with the Linux desktop app idle (client 100.122.139.56): 1,606 requests (~6,400/h), all 200 — `/v1/sync/status` 502, `/v1/mobile-catalog/status` 334, asset/album/classification/bookmark change feeds ~167 each. The desktop sends no `If-None-Match`, although the server supports ETag/304 on these endpoints (`conditional.py`). Apply what Android 0.8.6 did (`f25ddd8`): one sync-status read per pass with ETag, fetch a domain feed only when its cursor moved, idle backoff (5 → 15 → 30 → 60 s, back to fast after local writes/focus/changes), share one status read across the React sync hooks (`useAssetAuthoritySync`, `useAlbumAuthoritySync`, `useClassificationAuthoritySync`, `useCatalogBookmarkSync`, …) and the native lightweight-mode ticks. Measure the same 15-minute idle window before/after. Note: tablet traffic reaches the server through the local proxy and is logged as 100.76.119.29 (tablet 0.8.5 → 0.8.6: 476 → 184 requests per 15 min, first 15 min after install).
+
+
+After (`cf2075b`, Linux dev build, same 15-minute idle window, 2026-09-24 16:29–16:44 UTC): 151 requests (~600/h, −91%), 49 of them 304. `/v1/sync/status` 25 and `/v1/mobile-catalog/status` 25 (about one per minute once idle, as designed); the rest are pollers outside the coordinated pass (see `PC-POLL-002`). Three short returns to the 5 s interval (~every 3 min) coincided with the app's own uploads (character replica, saved X media, a media ticket); the source of that 3-minute cadence was not traced.
+
+## PC-POLL-002 — Fold the remaining desktop pollers into the coordinated pass
+
+Status: `TODO` — found by the 2026-09-25 `PC-POLL-001` re-measurement.
+
+With the app idle for 15 minutes, these endpoints are still read about once a minute each, outside the shared status pass: `/v1/captures/pending` 18, `/v1/library/characters/review/decisions` 16, `/v1/library/characters/exclusions` 16, `/v1/library/similarity/review/decisions` 15, `/v1/collections/status` 15, `/v1/collections/personal-edits` 15 (~95 of 151 requests). Read them only when the shared status (or an ETag/cursor) says their domain moved, following `library/authority_pass.rs`; expected idle total under 50 per 15 minutes. Also find what wakes the fast interval every ~3 minutes while idle. Measure the same 15-minute window before/after.
 
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
