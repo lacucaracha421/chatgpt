@@ -51,7 +51,15 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
         return new AssetReplica(transport, (AssetReplica.Storage)db, lock);
     }
     void clearAssets() {
-        lock.lock();try {((AssetReplica.Storage)db).clearAssets();}finally {lock.unlock();}
+        lock.lock();try {((AssetReplica.Storage)db).clearAssets();((AssetLifecycleOutbox.Storage)db).clearLifecycle();}finally {lock.unlock();}
+    }
+    /** The adopted lifecycle replica for this scope, or null. */
+    AssetReplica.Snapshot assetSnapshot(String scope) {
+        lock.lock();try {return ((AssetReplica.Storage)db).readAssets(scope);}finally {lock.unlock();}
+    }
+    /** The Library Trash writer over the same database and lock as the lifecycle replica. */
+    AssetLifecycleOutbox assetLifecycle(AssetLifecycleOutbox.Transport transport) {
+        return new AssetLifecycleOutbox(transport, (AssetLifecycleOutbox.Storage)db, lock);
     }
 
     void close() {
@@ -307,6 +315,38 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
                 db.writeMember(new AlbumReplica.Member(confirmed.albumId, confirmed.assetId,
                         desired, confirmed.entityRevision), now);
                 db.deleteOutbox(seq);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Drop one intent the authority refused with the definitive `assetTombstoned`.
+     *
+     * The Asset was emptied from the trash on a PC, so the membership change can never
+     * apply and retrying or blocking it would only hold the queue. The row is retired, the
+     * relation returns to its last confirmed state, and later intents are replayed as
+     * presentation (they will be dropped the same way when they reach the server).
+     */
+    void dropTombstonedMembership(String scope, long seq, String now) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                ReplicaDb.StoredAuthority authority = requireAuthority(scope);
+                ReplicaDb.OutboxRow dropped = null;
+                for (ReplicaDb.OutboxRow row : db.outbox()) if (row.seq == seq) dropped = row;
+                if (dropped == null) throw new IllegalStateException("Album intent is gone");
+                AlbumReplica.Member current = db.member(dropped.albumId, dropped.assetId);
+                db.writeMember(new AlbumReplica.Member(dropped.albumId, dropped.assetId,
+                        !dropped.desiredState, current == null ? 0 : current.entityRevision), now);
+                db.deleteOutbox(seq);
+                replayOutbox(authority, now);
                 db.commit();
             } catch (RuntimeException failure) {
                 try { db.rollback(); } catch (RuntimeException ignored) { }
@@ -1134,6 +1174,29 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
                 } else {
                     db.writeAssignment(confirmed, now);
                 }
+                db.deleteClassificationOutbox(seq);
+                db.commit();
+            } catch (RuntimeException failure) {
+                try { db.rollback(); } catch (RuntimeException ignored) { }
+                throw failure;
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Drop one assignment intent refused with the definitive `assetTombstoned`.
+     *
+     * The visible assignment is composed from confirmed lineage plus the queue, so retiring
+     * the row is the whole effect; nothing about a tombstoned Asset is shown anyway.
+     */
+    void dropClassificationAssignment(String scope, long seq) {
+        lock.lock();
+        try {
+            db.begin();
+            try {
+                requireClassificationAuthority(scope);
                 db.deleteClassificationOutbox(seq);
                 db.commit();
             } catch (RuntimeException failure) {

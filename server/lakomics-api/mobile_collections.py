@@ -269,28 +269,37 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         confirmed = {row["sha256"]: (row["size_bytes"], row["content_type"]) for row in rows}
         return {"missing": [item.sha256 for item in body.items if confirmed.get(item.sha256) != (item.sizeBytes, item.contentType)]}
 
+    def roles(authorization):
+        """Which snapshot forms this caller may send, decided before reading the body.
+
+        The shared token keeps the legacy snapshot form (the currently deployed PC);
+        the handshake reads the edit log, so it needs the publisher role. A caller
+        that is neither, such as a client-role token, is refused at once."""
+        try:
+            require_auth(authorization)
+        except HTTPException:
+            publisher(authorization)  # 401 for every other caller
+            return {"handshake"}
+        return {"legacy", "handshake"} if publisher is require_auth else {"legacy"}
+
     @app.put("/v1/collections/replica")
     async def publish_replica(request: Request, authorization: str | None = Header(default=None)):
-        reader(authorization)
+        allowed = roles(authorization)
         chunks = bytearray()
         async for chunk in request.stream():
             if len(chunks) + len(chunk) > MAX_SNAPSHOT_BYTES:
                 raise HTTPException(413, "Collection snapshot too large")
             chunks.extend(chunk)
+        return await run_in_threadpool(commit_snapshot, chunks, allowed)
+
+    def commit_snapshot(chunks, allowed):
         try:
             snapshot = Replica.model_validate_json(chunks)
         except ValidationError as exc:
             # Never echo a submitted local path, provider config or arbitrary payload.
             raise HTTPException(422, "Invalid collection snapshot") from exc
-        # The handshake reads the edit log, so it needs the publisher role; a legacy
-        # snapshot keeps the shared token until the first upgraded publication.
-        if snapshot.personalEditVersion is not None:
-            publisher(authorization)
-        else:
-            require_auth(authorization)
-        return await run_in_threadpool(commit_snapshot, snapshot)
-
-    def commit_snapshot(snapshot):
+        if ("legacy" if snapshot.personalEditVersion is None else "handshake") not in allowed:
+            raise HTTPException(401, "Unauthorized")
         personal_edits.validate_handshake(snapshot)
         ids = [item.id for item in snapshot.collections]
         if len(set(ids)) != len(ids):

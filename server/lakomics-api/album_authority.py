@@ -71,6 +71,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import asset_authority
 import asset_filters
 import asset_visibility
 import classification_authority
@@ -1019,6 +1020,11 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
         current_state = bool(relation["desired_state"]) if relation is not None else False
         current_revision = relation["entity_revision"] if relation is not None else 0
         desired = entity["desiredState"]
+        # Link rule: `normal` and `trash` Assets accept membership changes (a trashed
+        # Asset keeps its Album relations); a tombstoned Asset is refused with the
+        # definitive `assetTombstoned`, which clients drop instead of retrying.
+        asset_authority.require_linkable(db, asset_id, adding=False,
+                                         missing_code="invalidAlbumMembership")
         # ADR-0037 decision 2: an already-matching desired state is idempotent, so it
         # is accepted and receipted without a new change and without demanding a
         # revision the caller could not know. Only a real state change needs CAS.
@@ -1033,9 +1039,8 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
         if current_revision != entity["expectedRevision"]:
             raise membership_conflict(row, album_id, asset_id, relation)
         if desired:
-            if db.execute("SELECT 1 FROM visible_assets WHERE id=? AND committed=1",
-                          [asset_id]).fetchone() is None:
-                fail(422, "invalidAlbumMembership", "자산을 찾을 수 없습니다.", assetId=asset_id)
+            asset_authority.require_linkable(db, asset_id, adding=True,
+                                             missing_code="invalidAlbumMembership")
         new_revision = current_revision + 1
         db.execute(
             "INSERT INTO album_authority_members(library_id,album_id,asset_id,desired_state,"

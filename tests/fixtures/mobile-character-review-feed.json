@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "libraryId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "baseRevision": null,
+  "decisionCursor": 0,
+  "policyVersion": "s36-v3",
+  "generatedAt": "2026-09-24T09:00:00Z",
+  "skipped": [],
+  "targets": {
+    "c": {"name": "캐릭터", "seriesId": "s", "fingerprint": "fp-c-1", "referenceAssetIds": ["ref-1"]},
+    "d": {"name": "둘째", "seriesId": "s", "fingerprint": "fp-d-1", "referenceAssetIds": []}
+  },
+  "items": [
+    {"assetId": "a", "targetId": "c", "sources": ["doubtful"], "verdict": "none", "knn3": 0.41, "basis": "2026-09-24T08:59:00Z"},
+    {"assetId": "cand-1", "targetId": "c", "sources": ["s36", "b36"], "verdict": "recommended", "knn3": 0.83, "basis": "2026-09-24T08:59:00Z"},
+    {"assetId": "cand-2", "targetId": "d", "sources": ["b36"], "verdict": "recommended", "basis": "2026-09-24T08:58:00Z"},
+    {"assetId": "cand-3", "targetId": "d", "sources": ["s36"], "verdict": "recommended", "knn3": 0.77, "basis": "2026-09-24T08:58:00Z"},
+    {"assetId": "not-uploaded", "targetId": "c", "sources": ["s36"], "verdict": "recommended", "knn3": 0.9, "basis": "2026-09-24T08:57:00Z"}
+  ]
+}

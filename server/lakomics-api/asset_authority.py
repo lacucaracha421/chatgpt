@@ -69,6 +69,8 @@ TRASH_ASSET = "trashAsset"
 RESTORE_ASSET = "restoreAsset"
 TOMBSTONE_ASSET = "tombstoneAsset"
 LIFECYCLE_COMMAND_TYPES = (TRASH_ASSET, RESTORE_ASSET, TOMBSTONE_ASSET)
+#: Reversible commands an ordinary client credential may send (mobile Library Trash).
+CLIENT_COMMAND_TYPES = (TRASH_ASSET, RESTORE_ASSET)
 
 ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
 COMMAND_KEYS = ENVELOPE_KEYS | {"assetId", "expectedEntityRevision"}
@@ -310,6 +312,90 @@ def hidden_asset_ids(db, library_id, asset_ids):
         f" AND lifecycle IN ('{TRASH}','{TOMBSTONED}') AND asset_id IN ({placeholders})",
         [library_id, *asset_ids]).fetchall()
     return {row[0] for row in rows}
+
+
+CODE_ASSET_TOMBSTONED = "assetTombstoned"
+
+
+def require_linkable(db, asset_id, *, adding, missing_code):
+    """The Asset link rule for Classification assignment and Album membership.
+
+    ADR-0038 §4: relationships survive trash, so a `trash` Asset may still be assigned,
+    moved or added exactly like a `normal` one - otherwise a phone that trashes an Asset
+    would jam the PC's queued organization of that same Asset. A `tombstoned` Asset is
+    gone: every change is refused with the definitive `assetTombstoned`, which a client
+    drops instead of retrying.
+
+    `adding` additionally requires a committed Asset the authority (when active) knows as
+    `normal` or `trash`; an unknown Asset fails closed with `missing_code`, the same
+    fail-closed rule as the visibility projection. While the domain is inactive the
+    legacy committed check is unchanged.
+    """
+    active = authority.active_domain(db, DOMAIN)
+    lifecycle = None
+    if active is not None:
+        row = db.execute(
+            "SELECT lifecycle FROM asset_authority_state WHERE library_id=? AND asset_id=?",
+            [active["libraryId"], asset_id]).fetchone()
+        lifecycle = row[0] if row is not None else None
+        if lifecycle == TOMBSTONED:
+            fail(409, CODE_ASSET_TOMBSTONED, "영구 삭제된 자산입니다.", assetId=asset_id)
+    if not adding:
+        return
+    committed = db.execute("SELECT 1 FROM assets WHERE id=? AND committed=1",
+                           [asset_id]).fetchone() is not None
+    if not committed or (active is not None and lifecycle not in (NORMAL, TRASH)):
+        fail(422, missing_code, "자산을 찾을 수 없습니다.", assetId=asset_id)
+
+
+DEFAULT_TRASH_PAGE = 60
+MAX_TRASH_PAGE = 100
+
+
+def trash_page(db, library_id, cursor, limit):
+    """Committed `trash` Assets for the mobile Library Trash, newest trash first.
+
+    Ordered by the lifecycle `updated_at` (the moment the trash was accepted) and then by
+    Asset id, so the keyset cursor `(updated_at, asset_id)` is total. Tombstoned Assets
+    are never listed: the query reads `lifecycle='trash'` only. Returns raw rows joined
+    with the server `assets` row so the caller can reuse the mobile list projection, plus
+    the whole-trash count and byte total.
+    """
+    params = [library_id]
+    clause = ""
+    if cursor is not None:
+        clause = " AND (state.updated_at<? OR (state.updated_at=? AND state.asset_id<?))"
+        params += [cursor[0], cursor[0], cursor[1]]
+    rows = db.execute(
+        "SELECT asset.*, state.entity_revision AS lifecycle_revision,"
+        " state.updated_at AS trashed_at"
+        " FROM asset_authority_state AS state JOIN assets AS asset ON asset.id=state.asset_id"
+        " WHERE state.library_id=? AND state.lifecycle='trash' AND asset.committed=1"
+        + clause + " ORDER BY state.updated_at DESC, state.asset_id DESC LIMIT ?",
+        [*params, limit + 1]).fetchall()
+    totals = db.execute(
+        "SELECT COUNT(*), COALESCE(SUM(asset.size_bytes),0)"
+        " FROM asset_authority_state AS state JOIN assets AS asset ON asset.id=state.asset_id"
+        " WHERE state.library_id=? AND state.lifecycle='trash' AND asset.committed=1",
+        [library_id]).fetchone()
+    return rows[:limit], len(rows) > limit, totals[0], totals[1]
+
+
+def trash_ticket_assets(db, asset_ids):
+    """`assets` rows for trash-scoped media tickets: committed and canonically `trash`.
+
+    Never a normal or tombstoned Asset, and nothing at all while the domain is inactive -
+    an inactive library has no server-side trash to preview.
+    """
+    active = authority.active_domain(db, DOMAIN)
+    if active is None or not asset_ids:
+        return {}
+    placeholders = ",".join("?" for _ in asset_ids)
+    return {row["id"]: dict(row) for row in db.execute(
+        "SELECT asset.* FROM assets AS asset JOIN asset_authority_state AS state"
+        " ON state.asset_id=asset.id AND state.library_id=?"
+        f" WHERE asset.committed=1 AND state.lifecycle='trash' AND asset.id IN ({placeholders})",
+        [active["libraryId"], *asset_ids]).fetchall()}
 
 
 def change_items(db, library_id, epoch, after, limit, ceiling=None):
@@ -930,10 +1016,11 @@ PREFIX = "/v1/assets/authority"
 def register_asset_authority(app, get_db, require_client, require_publisher):
     """Register the Asset authority read/command routes.
 
-    Lifecycle is a publisher operation: trashing an Asset is a user-visible canonical
-    change, and an ordinary read-scoped client credential must not be able to retire
-    Assets. This mirrors the Classification structural/assignment split rather than
-    inventing a third privilege level.
+    Trash and restore are reversible and accept an ordinary client credential, so the
+    phone can move an Asset to the Library Trash and back. Tombstone retires an Asset
+    and stays publisher-only: emptying the trash is a PC operation. This mirrors the
+    Classification structural/assignment split rather than inventing a third privilege
+    level.
 
     Startup creates the additive tables only. It never activates the domain, promotes a
     Capture or touches existing Asset rows, so a deployment that never activates behaves
@@ -1148,8 +1235,10 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
     async def asset_command(request: Request, authorization: str | None = Header(default=None)):
         # Authenticate, then decide the required role, before any envelope or field
         # validation, so an under-privileged caller learns nothing about the contract.
+        # Trash and restore are reversible user intents any signed-in client may send;
+        # tombstone (and any unrecognized command) stays publisher-only, which keeps
+        # emptying the trash PC-only by construction.
         require_client(authorization)
-        require_publisher(authorization)
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > 16 * 1024:
@@ -1159,6 +1248,9 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
             body = json.loads(data)
         except (ValueError, UnicodeError):
             fail()
+        declared = body.get("commandType") if isinstance(body, dict) else None
+        if declared not in CLIENT_COMMAND_TYPES:
+            require_publisher(authorization)
         library_id, epoch, contract_version, operation_id, command_type, entity = parse_command(body)
         now = now_iso()
 

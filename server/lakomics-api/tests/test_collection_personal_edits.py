@@ -1,12 +1,15 @@
 """Mobile personal Collection edits against real API transactions and disposable data."""
 import copy
 import json
+import threading
 import unittest
 import uuid
+from unittest import mock
 
 from tests import test_mobile_collections as fixtures
 import api_auth
 import authority
+import mobile_collections
 
 api_app, AUTH, work = fixtures.api_app, fixtures.AUTH, fixtures.work
 
@@ -104,6 +107,30 @@ class CollectionPersonalEditTests(unittest.TestCase):
         for headers in (AUTH, self.auth):
             self.assertEqual(self.publish(self.body(cursor=1, base=self.status()['revision']), headers=headers).status_code, 401)
 
+    def test_replica_role_is_decided_before_the_body_is_read(self):
+        # A client-role token is refused before the server buffers an oversized body.
+        huge = b'{' + b' ' * (13 * 1024 * 1024) + b'}'
+        for headers in ({}, self.auth, {'Authorization': 'Bearer nope'}):
+            reply = self.client.put('/v1/collections/replica', headers=headers, content=huge)
+            self.assertEqual(reply.status_code, 401)
+        # Allowed callers still reach the size limit and snapshot validation.
+        for headers in (AUTH, self.publisher):
+            self.assertEqual(self.client.put('/v1/collections/replica', headers=headers, content=huge).status_code, 413)
+        # Parsing and validation run in the threadpool, not on the event loop.
+        threads = []
+        original = mobile_collections.Replica.model_validate_json
+        def recording(*args, **kwargs):
+            threads.append(threading.current_thread().name)
+            return original(*args, **kwargs)
+        with mock.patch.object(mobile_collections.Replica, 'model_validate_json', side_effect=recording):
+            self.ready()
+            legacy = self.publish(self.body(upgraded=False, base=self.status()['revision']), headers=AUTH)
+            self.assertEqual(legacy.status_code, 409)
+        self.assertEqual(len(threads), 2)
+        self.assertTrue(all(name.startswith('AnyIO worker thread') for name in threads), threads)
+        # The publisher token cannot send the legacy form (it is not the shared token).
+        self.assertEqual(self.publish(self.body(upgraded=False, base=self.status()['revision'])).status_code, 401)
+
     def test_accept_patches_row_bumps_revision_and_replays(self):
         old = self.ready()
         request = self.command()
@@ -159,7 +186,8 @@ class CollectionPersonalEditTests(unittest.TestCase):
         for field, value, expected in [('myScore', 5.5, 3.0), ('myScore', -0.5, 3.0), ('myScore', 2.25, 3.0),
                                        ('myScore', True, 3.0), ('myScore', '4', 3.0), ('showcase', 1, False),
                                        ('showcase', None, False), ('memo', 3, 'PC 메모'), ('memo', 'x' * 2001, 'PC 메모'),
-                                       ('rating', 4.0, 3.0)]:
+                                       ('rating', 4.0, 3.0), ('myScore', 10 ** 400, 3.0), ('myScore', 4.0, 10 ** 400),
+                                       ('myScore', -(10 ** 400), 3.0)]:
             reply = self.edit(self.command(field, value, expected))
             self.assertEqual(reply.status_code, 422, (field, value))
             self.assertEqual(self.code(reply), 'invalidCollectionPersonalEdit')

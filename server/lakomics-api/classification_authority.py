@@ -821,10 +821,11 @@ def _apply_assignment(db, *, row, library_id, epoch, operation_id, payload_sha, 
             # The target must exist to be assigned; a tombstone is gone, not empty.
             fail(404, "classificationNotFound", "분류를 찾을 수 없습니다.",
                  classificationId=desired)
-        if db.execute("SELECT 1 FROM visible_assets WHERE id=? AND committed=1",
-                      [asset_id]).fetchone() is None:
-            fail(422, "invalidClassificationAssignment", "자산을 찾을 수 없습니다.",
-                 assetId=asset_id)
+    # Link rule: `normal` and `trash` Assets accept assignment changes; a tombstoned
+    # Asset is refused with the definitive `assetTombstoned`.
+    import asset_authority
+    asset_authority.require_linkable(db, asset_id, adding=desired is not None,
+                                     missing_code="invalidClassificationAssignment")
     current = assignment_row(db, library_id, asset_id)
     current_value = current["classification_id"] if current is not None else None
     current_revision = current["entity_revision"] if current is not None else 0

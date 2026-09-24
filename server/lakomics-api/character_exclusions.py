@@ -95,6 +95,9 @@ def rebuild_hidden(db, index):
     db.execute("""INSERT INTO mobile_character_hidden_members
         SELECT DISTINCT 'character:' || target_id,'all',asset_id
         FROM mobile_character_exclusions WHERE sequence>?""", (current["applied_cursor"],))
+    # Pending "아님" review decisions hide current members exactly like exclusions.
+    import character_review
+    character_review.insert_hidden(db)
     # Groups are unions: rejecting C must not hide an Asset still belonging to D.
     # A group-only member lacking child evidence is retained, not guessed away.
     nodes = json.dumps(index["nodes"], ensure_ascii=False)
@@ -162,6 +165,10 @@ def register(app, get_db, require_client, require_publisher):
                                (command.assetId, node_id)).fetchone()
             if asset is None or not re.fullmatch(r"[a-f0-9]{64}", asset["sha256"] or ""):
                 fail(409, "characterSnapshotChanged", "제외할 자산을 다시 확인해 주세요.")
+            # Mirror of the review channel's check: one correction per pair awaits the PC.
+            import character_review
+            if character_review.pending_pair(db, command.targetId, command.assetId):
+                fail(409, "pendingCharacterCorrection", "이 자산의 캐릭터 검토가 PC 반영을 기다리고 있습니다.")
             sequence = current["last_sequence"] + 1
             if sequence > MAX_CURSOR:
                 fail(409, "characterExclusionCursorRejected", "캐릭터 제외 기록 한도에 도달했습니다.")

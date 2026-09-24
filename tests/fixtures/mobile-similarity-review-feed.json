@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "libraryId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "baseRevision": null,
+  "decisionCursor": 0,
+  "generatedAt": "2026-09-24T09:00:00Z",
+  "skipped": [],
+  "items": [
+    {
+      "reviewId": "r1",
+      "kind": "historical",
+      "distance": 3,
+      "recommendedAssetId": "a",
+      "recommendation": "keep_existing",
+      "a": {
+        "assetId": "a",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 2400,
+        "height": 3200,
+        "byteSize": 812345,
+        "format": "PNG",
+        "sourceLabel": "x.com/artist/status/1",
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": [
+          "원본",
+          "캐릭터"
+        ]
+      },
+      "b": {
+        "assetId": "s1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 1200,
+        "height": 1600,
+        "byteSize": 204800,
+        "format": "JPEG",
+        "sourceLabel": "pixiv.net/artworks/2",
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      }
+    },
+    {
+      "reviewId": "r2",
+      "kind": "historical",
+      "distance": 5,
+      "recommendedAssetId": null,
+      "recommendation": null,
+      "a": {
+        "assetId": "s1",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 1200,
+        "height": 1600,
+        "byteSize": 204800,
+        "format": "JPEG",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      },
+      "b": {
+        "assetId": "s2",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 1200,
+        "height": 1600,
+        "byteSize": 198000,
+        "format": "WEBP",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      }
+    },
+    {
+      "reviewId": "r3",
+      "kind": "historical",
+      "distance": 2,
+      "recommendedAssetId": "s3",
+      "recommendation": "replace_existing",
+      "a": {
+        "assetId": "s2",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 1200,
+        "height": 1600,
+        "byteSize": 198000,
+        "format": "WEBP",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      },
+      "b": {
+        "assetId": "s3",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 2000,
+        "height": 2600,
+        "byteSize": 700000,
+        "format": "PNG",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      }
+    },
+    {
+      "reviewId": "r4",
+      "kind": "historical",
+      "distance": 4,
+      "recommendedAssetId": null,
+      "recommendation": null,
+      "a": {
+        "assetId": "s3",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 2000,
+        "height": 2600,
+        "byteSize": 700000,
+        "format": "PNG",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      },
+      "b": {
+        "assetId": "not-uploaded",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 100,
+        "height": 100,
+        "byteSize": 10,
+        "format": "PNG",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      }
+    },
+    {
+      "reviewId": "r5",
+      "kind": "historical",
+      "distance": 1,
+      "recommendedAssetId": null,
+      "recommendation": null,
+      "a": {
+        "assetId": "b",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "width": 800,
+        "height": 600,
+        "byteSize": 5000,
+        "format": "PNG",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      },
+      "b": {
+        "assetId": "s4",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "width": 800,
+        "height": 600,
+        "byteSize": 5100,
+        "format": "PNG",
+        "sourceLabel": null,
+        "collectedAt": "2026-09-20T10:00:00Z",
+        "classifications": []
+      }
+    }
+  ]
+}

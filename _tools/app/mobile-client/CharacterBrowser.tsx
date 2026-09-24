@@ -12,6 +12,7 @@ import type {Asset,AssetFiltersValue} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
 import {filterSummary} from './AssetFilters';
 import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
+import {CharacterReviewChip} from './CharacterReview';
 import './characters.css';
 
 /**
@@ -65,7 +66,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:Characte
   </button>;
 }
 
-export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,review}:{review?:{enabled:boolean;refreshKey:unknown;onOpen(target:{id:string;name:string}):void};entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -252,6 +253,7 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
   const foldable=folderStrip&&children.length>0;
   const filterControls=(node?.kind==='series'||foldable)&&<div className="character-filters">{node?.kind==='series'&&(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}{foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>}</div>;
   const overview=<>
+    {review&&node?.kind==='character'&&<CharacterReviewChip key={node.id} enabled={review.enabled&&active&&!paused} targetId={node.sourceId} refreshKey={review.refreshKey} onOpen={()=>review.onOpen({id:node.sourceId,name:node.name})}/>}
     {!landscape&&filterControls}
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
     {hasActiveFilters(where.filters)&&<p className="hint">{filterSummary(where.filters)}{filterPending&&' · 표시 중인 목록에는 아직 적용되지 않았습니다.'}<Button variant="ghost" onClick={()=>applyFilters({...EMPTY_FILTERS})}>필터 해제</Button></p>}

@@ -154,6 +154,15 @@ Stages:
 
 Also fix the bugs found in the 2026-09-24 audit where they survive the rewrite: scans that delete titles/thumbnails after partial failures, uncached full-image responses, per-tile status probes, and focus-only removal detection.
 
+## WIN-SYNC-001 — Update the Windows PC after the 2026-09-24 changes
+
+Status: `TODO` — the user's Windows PC is unavailable as of 2026-09-24.
+
+Once the Linux PC publishes Collections with the personal-edit handshake, the older Windows build is refused for Collection publication only (other domains and local data are unaffected). On the Windows PC: pull `main` (requires the commits to be pushed first), rebuild, and verify:
+- Collection publication resumes.
+- Private Vault on Windows: Credential Manager remember/auto-unlock, USB detection by drive letter, removal lock, in-app video playback.
+- FAULT game in WebView2 (`http://tauri.localhost` → `http://lakomics.localhost` original-image reads).
+
 ## MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
 
 Status: `TODO` — user-selected scope, 2026-09-24. Each slice needs its own server/APK rollout authorization.
@@ -683,7 +692,7 @@ Some characters have distinct forms (아리아: robot form and human form). With
 
 ## CHAR-AUTO-009 — Person crop quality and main-character focus
 
-Status: `TODO` — measure with the CHAR-AUTO-007 evaluator; bundle any re-extraction with the S36 switch so the library is re-read once.
+Status: `HOLD` — measured 2026-09-23: in the chronological S36 + knn3 crop-policy comparison the current crop policy (P0) was best (recall 34.6% at ~3% FP) and every alternative (fragment/mascot filtering, head extension, box merging, main-character-only) was slightly worse. The user chose to keep the current crops and not adopt main-character-only. Reopen only with concrete new failure cases; the text below is the original proposal.
 
 User reports (2026-09-23): crops sometimes cut a face in half or pick up mascots, and multi-person images attach minor background characters. A random sample of 72 library crops showed roughly: ~10 non-human/mascot crops (mascot cats, chibi mushrooms, plush toys, objects), ~10 fragments (half faces, hat/hand/legs only), ~5 boxes containing several people, and frequent duplicate boxes for the same person (full body plus upper body, overlapping manga panels).
 

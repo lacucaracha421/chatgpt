@@ -60,6 +60,23 @@ ASSET2 = "20000000-0000-4000-8000-000000000002"
 ASSET3 = "20000000-0000-4000-8000-000000000003"
 
 
+def activate_asset_lifecycle(get_db, library_id, lifecycles):
+    """Activate the Asset lifecycle domain with the given canonical states (link rule)."""
+    import asset_authority
+    asset_authority.startup(get_db)
+    with get_db() as db:
+        db.execute("INSERT INTO authority_domains(library_id,domain,epoch,contract_version,"
+                   "change_cursor,baseline_digest,baseline_revision,activated_at)"
+                   " VALUES(?,'assets',1,1,0,?,NULL,'2026-09-24T00:00:00Z')",
+                   [library_id, "0" * 64])
+        for asset_id, state in lifecycles.items():
+            db.execute("INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,"
+                       "entity_revision,created_at,updated_at) VALUES(?,?,?,1,?,?)",
+                       [library_id, asset_id, state, "2026-09-24T00:00:00Z",
+                        "2026-09-24T00:00:00Z"])
+        db.commit()
+
+
 class ClassificationAuthorityFixture(unittest.TestCase):
     def setUp(self):
         import tempfile
@@ -791,6 +808,28 @@ class AssignmentTests(ClassificationAuthorityFixture):
             422, "invalidClassificationAssignment")
         self.assertEqual(detail["assetId"], "uncommitted")
         self.assertEqual(self.assignment_rows(), [])
+
+    def test_a_trashed_asset_accepts_assignment_changes(self):
+        # Link rule: a phone-trashed Asset keeps its organization and must not jam the
+        # PC classification queue.
+        activate_asset_lifecycle(self.get_db, LIBRARY, {ASSET: "trash"})
+        self.assertEqual(self.command(classification_authority.ASSIGNMENT, R1, assetId=ASSET,
+                                      classificationId=WORK, expectedRevision=0).status_code, 200)
+        self.assertEqual(self.command(classification_authority.ASSIGNMENT, R2, assetId=ASSET,
+                                      classificationId=None, expectedRevision=1).status_code, 200)
+
+    def test_a_tombstoned_asset_is_refused_with_a_definitive_code(self):
+        self.command(classification_authority.ASSIGNMENT, R1, assetId=ASSET2,
+                     classificationId=WORK, expectedRevision=0)
+        activate_asset_lifecycle(self.get_db, LIBRARY, {ASSET: "tombstoned", ASSET2: "tombstoned"})
+        detail = self.assert_coded(
+            self.command(classification_authority.ASSIGNMENT, R2, assetId=ASSET,
+                         classificationId=WORK, expectedRevision=0), 409, "assetTombstoned")
+        self.assertEqual(detail["assetId"], ASSET)
+        self.assert_coded(
+            self.command(classification_authority.ASSIGNMENT, R3, assetId=ASSET2,
+                         classificationId=None, expectedRevision=1), 409, "assetTombstoned")
+        self.assertEqual(self.assignment_rows(), [(ASSET2, WORK, 1)])
 
     def test_clearing_does_not_require_the_asset_to_be_committed(self):
         self.command(classification_authority.ASSIGNMENT, R1, assetId=ASSET,

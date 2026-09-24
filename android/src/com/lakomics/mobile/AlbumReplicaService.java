@@ -76,6 +76,9 @@ final class AlbumReplicaService {
     private ClassificationAuthoritySync classification;
     private ClassificationAssignmentOutbox classificationWriter;
     private ClassificationSyncPass classificationCycle;
+    /** Library Trash writer (trash/restore only); flushed at the head of the Asset read lane. */
+    private AssetLifecycleOutbox lifecycleWriter;
+    private volatile String lifecycleCode = "";
     private long lastAttempt;
     private volatile boolean syncing;
     private volatile String code = "";
@@ -241,7 +244,14 @@ final class AlbumReplicaService {
             // Asset reads and list generation remain independent of either write lane.
             try {
                 AssetReplica asset;
-                synchronized(gate){engine();asset=store.assetReplica(new Transport());}
+                AssetLifecycleOutbox lifecycle;
+                synchronized(gate){engine();asset=store.assetReplica(new Transport());lifecycle=lifecycleWriter;}
+                // Library Trash intents are delivered before the lifecycle catch-up, so an
+                // accepted trash/restore arrives in the same pass's receive. A delivery
+                // failure keeps its rows and never skips the read.
+                try{lifecycle.flush(scope);lifecycleCode="";}
+                catch(AssetLifecycleOutbox.Failure failure){lifecycleCode=failure.code;}
+                catch(RuntimeException failure){lifecycleCode=AlbumReplica.CODE_STORE_UNAVAILABLE;}
                 boolean changed=asset.sync(scope);
                 String generation=CloudClient.listGeneration(client,null,null);
                 synchronized(gate) {
@@ -423,6 +433,19 @@ final class AlbumReplicaService {
         }
     }
 
+    /** The Library Trash write transport: PUT to the lifecycle command route only. */
+    private final class LifecycleTransport implements AssetLifecycleOutbox.Transport {
+        @Override
+        public String put(String path, String payload) throws Exception {
+            try {
+                // The payload is frozen in the durable outbox; it is only adapted here.
+                return client.api(path, "PUT", new JSONObject(payload), null).toString();
+            } catch (CloudClient.HttpFailure failure) {
+                throw new AssetLifecycleOutbox.HttpFailure(failure.status, failure.detail);
+            }
+        }
+    }
+
     /** One authenticated GET over the existing native transport policy. */
     private final class Transport implements AlbumReplica.Transport, AlbumMembershipOutbox.Transport {
         @Override
@@ -578,6 +601,7 @@ final class AlbumReplicaService {
             classificationWriter = new ClassificationAssignmentOutbox(new WriteTransport(), store,
                     () -> Instant.now().toString());
             classificationCycle = new ClassificationSyncPass(classificationWriter, classification);
+            lifecycleWriter = store.assetLifecycle(new LifecycleTransport());
         }
         return sync;
     }
@@ -834,6 +858,83 @@ final class AlbumReplicaService {
             JSONObject value = classificationAssignmentState(assetId);
             if (edit.changed) request(true);
             return value;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Library Trash (mobile): trash / restore intents
+    // -----------------------------------------------------------------------
+
+    /**
+     * Queued Library Trash intents for the web client's overlay.
+     *
+     * `available` is false until the lifecycle replica is adopted, which is what gives an
+     * intent its authority identity; the web hides the trash action until then. Each item
+     * says what the user asked for and where it is: `pending`/`sending` (이동 대기 / 복원
+     * 대기), `blocked` (a conflict to show) or `dropped` (영구 삭제됨).
+     */
+    JSONObject assetLifecycleState() {
+        synchronized (gate) {
+            try {
+                JSONObject value = new JSONObject().put("code", lifecycleCode);
+                JSONArray items = new JSONArray();
+                String scope = scopeOrNull();
+                if (scope.isEmpty()) return value.put("available", false).put("items", items);
+                engine();
+                AssetReplica.Snapshot adopted = store.assetSnapshot(scope);
+                value.put("available", adopted != null);
+                for (AssetLifecycleOutbox.Row row : lifecycleWriter.rows()) {
+                    items.put(new JSONObject()
+                            .put("assetId", row.assetId)
+                            .put("command", AssetLifecycleOutbox.TRASH.equals(row.commandType) ? "trash" : "restore")
+                            .put("state", row.state)
+                            .put("conflictCode", row.conflictCode == null ? JSONObject.NULL : row.conflictCode)
+                            .put("createdAt", row.createdAt));
+                }
+                return value.put("items", items);
+            } catch (Exception unavailable) {
+                throw new IllegalStateException("Library Trash state unavailable");
+            }
+        }
+    }
+
+    /**
+     * Move one Asset to the Library Trash or restore it; `command` is `trash` or `restore`.
+     *
+     * The intent is durable before this returns. Undo is the inverse command: a still-pending
+     * intent is cancelled locally, otherwise the inverse is queued behind it. The native
+     * layer owns every protocol field; the web supplies only the Asset, the command and the
+     * lifecycle revision it saw (0 when unknown).
+     */
+    JSONObject setAssetLifecycle(String assetId, String command, long seenRevision) {
+        String commandType = "trash".equals(command) ? AssetLifecycleOutbox.TRASH
+                : "restore".equals(command) ? AssetLifecycleOutbox.RESTORE : null;
+        if (commandType == null) throw new IllegalArgumentException("Invalid lifecycle command");
+        if (seenRevision < 0) throw new IllegalArgumentException("Invalid revision");
+        synchronized (gate) {
+            String scope = scopeOrNull();
+            if (scope.isEmpty()) throw new IllegalStateException("Not configured");
+            engine();
+            AssetLifecycleOutbox.Edit edit = lifecycleWriter.queue(scope, assetId, commandType,
+                    seenRevision, UUID.randomUUID().toString(), Instant.now().toString());
+            JSONObject value = assetLifecycleState();
+            try {
+                value.put("cancelled", edit.cancelled).put("tombstoned", edit.tombstoned);
+            } catch (Exception unrepresentable) {
+                throw new IllegalStateException("Library Trash state unavailable");
+            }
+            if (edit.row != null) request(true);
+            return value;
+        }
+    }
+
+    /** Acknowledge a blocked or dropped outcome for one Asset. */
+    JSONObject dismissAssetLifecycle(String assetId) {
+        synchronized (gate) {
+            if (scopeOrNull().isEmpty()) throw new IllegalStateException("Not configured");
+            engine();
+            lifecycleWriter.dismiss(assetId);
+            return assetLifecycleState();
         }
     }
 

@@ -110,6 +110,12 @@ public final class MainActivity extends Activity {
      // expected revision — so no raw Classification command can be constructed here.
      case "classificationAssignmentState":data=AlbumReplicaService.get(MainActivity.this).classificationAssignmentState(p.getString("assetId"));break;
      case "classificationAssignmentSet":data=AlbumReplicaService.get(MainActivity.this).setClassificationAssignment(p.getString("assetId"),p.isNull("classificationId")?null:p.getString("classificationId"));break;
+     // Library Trash: the web supplies only the Asset, `trash`/`restore` and the lifecycle
+     // revision it saw; the native outbox owns every protocol field. There is no empty or
+     // tombstone operation: emptying the trash stays on the PC.
+     case "assetLifecycleState":data=AlbumReplicaService.get(MainActivity.this).assetLifecycleState();break;
+     case "assetLifecycleSet":data=AlbumReplicaService.get(MainActivity.this).setAssetLifecycle(p.getString("assetId"),p.getString("command"),p.optLong("seenRevision",0));break;
+     case "assetLifecycleDismiss":data=AlbumReplicaService.get(MainActivity.this).dismissAssetLifecycle(p.getString("assetId"));break;
      case "pickerRefresh":PickerLibrary.get(MainActivity.this).refresh(true);data=pickerStatus();break;
      case "openPickerSettings":if(Build.VERSION.SDK_INT<33)throw new UnsupportedOperationException();Intent pickerSettings=new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES_SETTINGS);if(pickerSettings.resolveActivity(getPackageManager())==null)throw new UnsupportedOperationException();runOnUiThread(()->{try{startActivity(pickerSettings);}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
      case "configure": String endpoint=NetworkPolicy.endpoint(p.getString("endpoint"),p.optBoolean("allowPrivateHttp",false));String token=p.getString("token");client.validate(endpoint,token,signal);LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();settings.write(endpoint,token,p.optBoolean("allowPrivateHttp",false));cancelOtherRequests(signal);if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();

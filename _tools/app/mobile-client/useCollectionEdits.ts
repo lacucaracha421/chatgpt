@@ -2,6 +2,8 @@
  * Personal Collection edits for the UI: the queued value shows at once with a
  * pending mark, delivery runs after each edit, and retries follow the bookmark
  * schedule (every 30 s while pending and visible, and on returning to the app).
+ * `notice` briefly explains an edit that was not kept: the device could not store
+ * it, or the server refused it for good and the value went back.
  */
 
 import {useCallback, useEffect, useRef, useState} from 'react';
@@ -18,10 +20,13 @@ import {
 } from './collectionEditOutbox';
 import {errorText} from './transport';
 
+const NOTICE_MS = 5000;
+
 export function useCollectionEdits({active, onSettled}: {active: boolean; onSettled(): void}) {
   const [intents, setIntents] = useState(readCollectionEdits);
   const [supported, setSupported] = useState(false);
   const [failure, setFailure] = useState('');
+  const [notice, setNotice] = useState('');
   const mounted = useRef(true);
   const settled = useRef(onSettled);
   settled.current = onSettled;
@@ -32,13 +37,20 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
     return () => window.removeEventListener(COLLECTION_EDITS_EVENT, read);
   }, []);
   useEffect(() => { if (active) setIntents(readCollectionEdits()); }, [active]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const flush = useCallback(async () => {
     try {
       const report = await flushCollectionEdits();
       if (!mounted.current) return;
       // Waiting for a PC/server upgrade is not an error; the value stays "전송 대기".
-      setFailure('');
+      setFailure(report.error ? errorText(report.error) : '');
+      const rejected = report.outcomes.find(({outcome, message}) => outcome === 'rejected' && message);
+      if (rejected?.message) setNotice(rejected.message);
       if (report.outcomes.some(({outcome}) => outcome === 'confirmed' || outcome === 'already-current' || outcome === 'rejected')) settled.current();
     } catch (error) {
       if (mounted.current) setFailure(errorText(error));
@@ -53,9 +65,17 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   }, []);
 
   const edit = useCallback((collectionId: string, field: CollectionEditField, value: CollectionEditValue, authoritative: CollectionEditValue) => {
-    commitCollectionEdit(collectionId, field, value, authoritative);
+    try {
+      commitCollectionEdit(collectionId, field, value, authoritative);
+    } catch (error) {
+      // Not stored, so not queued: say so instead of showing it as 전송 대기.
+      setNotice(errorText(error));
+      setIntents(readCollectionEdits());
+      return;
+    }
     setIntents(readCollectionEdits());
     setFailure('');
+    setNotice('');
     void flush();
   }, [flush]);
 
@@ -75,7 +95,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   const pending = Object.values(intents).some(intent => !intent.conflict);
   usePendingRetry(active, pending, flush);
 
-  return {supported, failure, edit, resolveConflict, visible, observeStatus, flush};
+  return {supported, failure, notice, edit, resolveConflict, visible, observeStatus, flush};
 }
 
 /** App-level delivery: on start and on returning to the foreground, whatever screen is open. */

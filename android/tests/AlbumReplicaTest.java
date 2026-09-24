@@ -1044,6 +1044,7 @@ public final class AlbumReplicaTest {
             v2OutboxSchemaHasAConservativeV3Upgrade();
             invalidAssetIdentityCannotEnterTheOutbox();
             unknownCommandRejectionRemainsRetryableAndPending();
+            tombstonedAssetMembershipIsDropped();
         } finally {
             deleteTree(directory);
         }
@@ -1607,6 +1608,33 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
         store.close();
     }
 
+    /** `assetTombstoned` drops the intent and restores the confirmed relation; no block. */
+    private static void tombstonedAssetMembershipIsDropped() {
+        MemoryDb db = new MemoryDb();
+        LibraryReplicaStore store = new LibraryReplicaStore(db);
+        installReferenceBaseline(store, "scope-a");
+        AlbumReplica.Member before = store.memberships("scope-a", false).get("root:asset_2");
+        store.queueMembership("scope-a", "root", "asset_2", before == null || !before.desiredState,
+                "95000000-0000-0000-0000-000000000001", CLOCK.now());
+        AlbumMembershipOutbox writer = new AlbumMembershipOutbox((path, payload) -> {
+            throw new AlbumMembershipOutbox.HttpFailure(409,
+                    "{\"detail\":{\"code\":\"assetTombstoned\",\"assetId\":\"asset_2\"}}");
+        }, store, CLOCK);
+        AlbumMembershipOutbox.Flush flush;
+        try {
+            flush = writer.flush("scope-a");
+        } catch (AlbumMembershipOutbox.Failure failure) {
+            throw new AssertionError("assetTombstoned must not fail the flush", failure);
+        }
+        equal(1, flush.dropped, "The tombstoned intent is dropped");
+        equal(0, flush.blocked, "not blocked");
+        equal(0, store.outbox("scope-a").size(), "The queue is empty");
+        AlbumReplica.Member after = store.memberships("scope-a", false).get("root:asset_2");
+        equal(before == null ? false : before.desiredState, after == null ? false : after.desiredState,
+                "The relation returns to its confirmed state");
+        store.close();
+    }
+
     private static void unknownCommandRejectionRemainsRetryableAndPending() {
         MemoryDb db = new MemoryDb();
         LibraryReplicaStore store = new LibraryReplicaStore(db);
@@ -1633,8 +1661,8 @@ private static void malformedAcceptedMembershipOutcomeStaysPending(Path director
         // v4 added the read-only Classification replica beside the Album domain, and v5 adds
         // the Classification assignment outbox. Both arrive through the same additive DDL,
         // so the v2 outbox upgrade below is unchanged and still what this check pins.
-        equal(6, ReplicaSchema.VERSION,
-                "Schema v5 adds the Classification assignment outbox to the identity-bound v3 outbox");
+        equal(7, ReplicaSchema.VERSION,
+                "Schema v7 (Asset lifecycle outbox) keeps the identity-bound v3 outbox upgrade");
         String[] upgrade = ReplicaSchema.upgradeStatements(2);
         equal(2, upgrade.length, "The intermediate v2 outbox needs two identity columns");
         check(upgrade[0].contains("library_id") && upgrade[0].contains("DEFAULT ''"),

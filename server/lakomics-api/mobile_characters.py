@@ -11,6 +11,8 @@ from starlette.concurrency import run_in_threadpool
 
 import asset_filters
 import character_exclusions
+import character_review
+import similarity_review
 
 PREFIX = "/v1/library/characters"
 MAX_BYTES = 24 * 1024 * 1024
@@ -57,6 +59,8 @@ class Replica(Strict):
     manualExclusionVersion: Literal[1] | None = None
     libraryId: character_exclusions.LIBRARY | None = None
     exclusionCursor: int | None = Field(default=None, ge=0, le=character_exclusions.MAX_CURSOR)
+    # Present once the PC understands mobile character review (it may be 0 before adoption).
+    reviewDecisionCursor: int | None = Field(default=None, ge=0, le=character_exclusions.MAX_CURSOR)
 
 
 def encode(value):
@@ -71,7 +75,8 @@ def validate(snapshot):
     upgraded = snapshot.manualExclusionVersion is not None
     if upgraded != (snapshot.libraryId is not None and snapshot.exclusionCursor is not None):
         invalid()
-    if not upgraded and (snapshot.libraryId is not None or snapshot.exclusionCursor is not None):
+    if not upgraded and (snapshot.libraryId is not None or snapshot.exclusionCursor is not None
+                         or snapshot.reviewDecisionCursor is not None):
         invalid()
     nodes = {n.id: n for n in snapshot.nodes}
     if len(nodes) != len(snapshot.nodes):
@@ -120,6 +125,9 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
     reader = require_client or require_auth
     publisher = require_publisher or require_auth
     character_exclusions.register(app, get_db, reader, publisher)
+    character_review.register(app, get_db, reader, publisher, asset_item, asset_memberships)
+    # Similarity review shares the Asset hydration and token roles; it is not a character lane.
+    similarity_review.register(app, get_db, reader, publisher, asset_item, asset_memberships)
 
     def startup():
         with get_db() as db:
@@ -135,6 +143,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                   PRIMARY KEY(node_id,filter,position), UNIQUE(node_id,filter,asset_id));
             """)
             db.executescript(character_exclusions.DDL)
+            db.executescript(character_review.DDL)
+            db.executescript(similarity_review.DDL)
             db.commit()
 
     lifecycle(app).on_startup(startup)
@@ -169,6 +179,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             db.execute("BEGIN IMMEDIATE")
             previous = state(db)
             character_exclusions.publication_guard(db, snapshot)
+            character_review.publication_guard(db, snapshot)
             # Freeze availability and display metadata with memberships. Uploads
             # completed later become visible at the next explicit publication.
             ids = sorted({id for s in snapshot.scopes for id in s.assetIds} |
@@ -200,7 +211,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                 exclusions = character_exclusions.state(db)
                 identity.update(manualExclusionVersion=1, libraryId=snapshot.libraryId,
                                 exclusionCursor=snapshot.exclusionCursor,
-                                lastExclusionSequence=exclusions['last_sequence'] if exclusions else 0)
+                                lastExclusionSequence=exclusions['last_sequence'] if exclusions else 0,
+                                **character_review.identity(db, snapshot))
             revision = hashlib.sha256(encode(identity).encode()).hexdigest()
             if previous and previous["revision"] == revision:
                 return {"revision": revision, "nodes": len(nodes)}
@@ -219,6 +231,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             db.execute("INSERT INTO mobile_character_state VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET "
                        "revision=excluded.revision,published_at=excluded.published_at,index_json=excluded.index_json",
                        (revision, datetime.now(timezone.utc).isoformat(), index_json))
+            character_review.acknowledge_publication(db, snapshot)
             character_exclusions.acknowledge_publication(db, snapshot, index)
             db.commit()
             return {"revision": revision, "nodes": len(nodes)}
@@ -248,8 +261,10 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             db.execute('BEGIN')
             current = state(db)
             capability, exclusion_state = character_exclusions.advertisement(db)
+            review_capability, review_state = character_review.advertisement(db)
             return {"version": 1, "authority": "pc", "authorityEpoch": 0,
-                    "capabilities": {"read": True, "write": False, **capability}, **exclusion_state, "ready": current is not None,
+                    "capabilities": {"read": True, "write": False, **capability, **review_capability},
+                    **exclusion_state, **review_state, "ready": current is not None,
                     "revision": current["revision"] if current else None,
                     "publishedAt": current["published_at"] if current else None,
                     **(visible_index(db, current) if current else {"nodes": [], "scopes": []})}

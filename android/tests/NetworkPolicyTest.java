@@ -66,6 +66,12 @@ public final class NetworkPolicyTest {
  for(String path:new String[]{"/v1/library/characters/exclusions/","/v1/library/characters/exclusions/extra","/v1/library/characters/exclusion","/v1/library/characters/exclusionsx","/v1/library/characters/replica"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  reject(()->NetworkPolicy.api("/v1/library/characters/exclusions%2f..","POST"));
  pass(()->NetworkPolicy.api("/v1/collections/status","GET"));
+ // Personal Collection edits: the device may submit the command, but the edit feed is a
+ // publisher-only read of every edit, so GET stays denied with or without a query.
+ pass(()->NetworkPolicy.api("/v1/collections/personal-edits","POST"));
+ reject(()->NetworkPolicy.api("/v1/collections/personal-edits","GET"));
+ reject(()->NetworkPolicy.api("/v1/collections/personal-edits?libraryId=0123456789abcdef0123456789abcdef&after=0&limit=100","GET"));
+ for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/personal-edits",method));
  // Album authority replication keeps its read paths. 2C-3 adds exactly the domain's
  // one typed mutation route, PUT /v1/albums/commands, and no other Album write.
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/albums/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));
@@ -105,6 +111,44 @@ public final class NetworkPolicyTest {
  // The paths that legitimately accept these methods are excluded on purpose: a media
  // ticket is a read capability, and catalog refresh is a bounded server-side read.
  for(String path:new String[]{"/v1/library/assets/a-1/prepare","/v1/library/album-snapshot","/v1/library/album-media","/v1/library/metadata-backup","/v1/collections/replica","/v1/collections/artworks/prepare","/v1/mobile-catalog/publication","/v1/library/classifications","/v1/library/assets","/v1/library/revisit","/v1/captures/pending","/v1/library/characters"})for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ // Mobile character review: the device reads the candidate feed and submits decisions only.
+ pass(()->NetworkPolicy.api("/v1/library/characters/review","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/characters/review?target=c&limit=20&cursor=abc","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/characters/review?asset=a-1","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/characters/review/decisions","POST"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/characters/review",method));
+ // The decision log is a publisher read of every decision, and the feed PUT is the PC's
+ // publication: neither is reachable, with or without a query.
+ for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/characters/review/decisions",method));
+ reject(()->NetworkPolicy.api("/v1/library/characters/review/decisions?libraryId=0123456789abcdef0123456789abcdef&after=0&limit=100","GET"));
+ for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/characters/review/feed",method));
+ for(String path:new String[]{"/v1/library/characters/review/","/v1/library/characters/reviewx","/v1/library/characters/review/decisions/","/v1/library/characters/review/decisions/extra","/v1/library/characters/review/../exclusions","/v1/library/characters/review%2f..","/v1/library/characters/review/decisions%2f.."})for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api(path,method));
+ // Catalog tag autocomplete: a read under the catalog's 16 KiB path bound, GET only.
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/suggestions?text=artist%3Aasa&limit=10","GET"));
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/suggestions?text=%EA%B0%80&limit=10&revealBlocked=true","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/suggestions?text=a",method));
+ for(String path:new String[]{"/v1/mobile-catalog/suggestions/","/v1/mobile-catalog/suggestionsx","/v1/mobile-catalog/suggestions/../publication","/v1/mobile-catalog/suggestions#x"})reject(()->NetworkPolicy.api(path,"GET"));
+ StringBuilder longSuggestion=new StringBuilder("/v1/mobile-catalog/suggestions?text=");for(int i=0;i<17000;i++)longSuggestion.append('a');reject(()->NetworkPolicy.api(longSuggestion.toString(),"GET"));
+ // Mobile similarity review: the device reads the pair queue and submits decisions only.
+ pass(()->NetworkPolicy.api("/v1/library/similarity/review","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/similarity/review?limit=20&cursor=abc","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/similarity/review/decisions","POST"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/similarity/review",method));
+ for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/similarity/review/decisions",method));
+ reject(()->NetworkPolicy.api("/v1/library/similarity/review/decisions?libraryId=0123456789abcdef0123456789abcdef&after=0&limit=100","GET"));
+ for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/similarity/review/feed",method));
+ for(String path:new String[]{"/v1/library/similarity","/v1/library/similarity/review/","/v1/library/similarity/reviewx","/v1/library/similarity/review/decisions/","/v1/library/similarity/review/decisions/extra","/v1/library/similarity/review/../review/feed","/v1/library/similarity/review%2f..","/v1/library/similarity/review/decisions%2f.."})for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api(path,method));
+ // Mobile Library Trash: the trash list is a GET, the lifecycle command route a PUT, and
+ // trash-scoped tickets reuse the existing ticket POSTs with a query that widens nothing.
+ pass(()->NetworkPolicy.api("/v1/library/trash","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/trash?limit=60&cursor=abc","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/trash",method));
+ pass(()->NetworkPolicy.api("/v1/assets/authority/commands","PUT"));
+ for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/assets/authority/commands",method));
+ pass(()->NetworkPolicy.api("/v1/library/media-tickets?lifecycle=trash","POST"));
+ pass(()->NetworkPolicy.api("/v1/library/assets/a-1/media-ticket?lifecycle=trash","POST"));
+ for(String path:new String[]{"/v1/library/trash/","/v1/library/trashx","/v1/library/trash/empty","/v1/library/trash/../assets","/v1/library/trash%2f..","/v1/assets/authority/commands/","/v1/assets/authority/commands/extra","/v1/assets/authority/activate","/v1/assets/authority/activation-baseline","/v1/assets/authority/activation-inventory","/v1/assets/authority/commands%2f.."})for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api(path,method));
+ reject(()->NetworkPolicy.api("/v1/assets/authority/activate?x=/v1/assets/authority/commands","PUT"));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

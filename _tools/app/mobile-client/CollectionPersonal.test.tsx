@@ -125,7 +125,9 @@ it('asks about a memo the PC changed meanwhile, then overwrites',async()=>{
   expect(commands()).toHaveLength(1);
   fireEvent.click(within(choice).getByRole('button',{name:'덮어쓰기'}));
   await waitFor(()=>expect(commands()).toHaveLength(2));
-  expect(commands()[1]).toMatchObject({operationId:commands()[0].operationId,expected:'PC가 바꾼 메모',value:'모바일 초안'});
+  expect(commands()[1]).toMatchObject({expected:'PC가 바꾼 메모',value:'모바일 초안'});
+  // Overwriting changes the payload, so it goes out under a new operation id.
+  expect(commands()[1].operationId).not.toBe(commands()[0].operationId);
   await waitFor(()=>expect(readCollectionEdits()).toEqual({}));
 });
 
@@ -140,4 +142,23 @@ it('discards the draft on a memo conflict',async()=>{
   expect(readCollectionEdits()).toEqual({});
   expect(within(memoSection()).queryByText('버릴 메모')).toBeNull();
   expect(commands()).toHaveLength(1);
+});
+
+it('says briefly why an edit for a deleted Collection went back',async()=>{
+  command=()=>new ApiError('x',404,{detail:{code:'collectionNotFound',message:'m'}});
+  await openDetail();
+  fireEvent.click(within(personal()).getByRole('button',{name:/쇼케이스/}));
+  expect(await within(personal()).findByRole('alert')).toHaveProperty('textContent',expect.stringContaining('PC에서 삭제'));
+  expect(readCollectionEdits()).toEqual({});
+  expect(within(personal()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
+});
+
+it('does not show an edit the device could not store as queued',async()=>{
+  await openDetail();
+  vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('full','QuotaExceededError');});
+  fireEvent.click(within(personal()).getByRole('button',{name:/쇼케이스/}));
+  expect((await within(personal()).findByRole('alert')).textContent).toBe('기기에 저장하지 못했습니다.');
+  expect(within(personal()).queryByText('전송 대기')).toBeNull();
+  expect(within(personal()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
+  expect(commands()).toHaveLength(0);
 });

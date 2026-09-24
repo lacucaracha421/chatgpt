@@ -21,8 +21,8 @@ export type CharacterScope = {nodeId:string;filter:CharacterFilter;totalCount:nu
  */
 export type CharacterExclusion = {libraryId:string;revision:string;exclusionCursor:number};
 export type CharacterIndex = {
-  version:1;authority:'pc';authorityEpoch:0;capabilities:{read:boolean;write:boolean;manualExclusion?:boolean};
-  libraryId?:string;exclusionCursor?:number;
+  version:1;authority:'pc';authorityEpoch:0;capabilities:{read:boolean;write:boolean;manualExclusion?:boolean;characterReview?:boolean};
+  libraryId?:string;exclusionCursor?:number;reviewDecisionCursor?:number;appliedReviewDecisionCursor?:number;
   navigationOrder?:string[];ready:boolean;revision:string|null;publishedAt:string|null;nodes:CharacterNode[];scopes:CharacterScope[];
 };
 export type CharacterPage = Page & {revision:string;totalCount:number;sourceCount:number};
@@ -67,4 +67,13 @@ export function characterExclusion(value:CharacterIndex|undefined|null):Characte
   if(typeof value.revision!=='string'||!/^[a-f0-9]{64}$/.test(value.revision))return null;
   if(!Number.isSafeInteger(cursor)||(cursor??-1)<0)return null;
   return {libraryId,revision:value.revision,exclusionCursor:cursor!};
+}
+/**
+ * The library id mobile character-review decisions are sent under, or `null` while no PC has
+ * adopted review (the entry points stay hidden then).
+ */
+export function characterReviewLibrary(value:CharacterIndex|undefined|null):string|null {
+  const libraryId=value?.libraryId;
+  if(value?.capabilities?.characterReview!==true)return null;
+  return typeof libraryId==='string'&&/^[a-f0-9]{32}$/.test(libraryId)?libraryId:null;
 }

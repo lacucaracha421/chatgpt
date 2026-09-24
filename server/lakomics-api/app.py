@@ -2468,13 +2468,19 @@ def create_mobile_media_ticket(
     asset_id: str,
     request: MediaTicketRequest,
     authorization: str | None = Header(default=None),
+    lifecycle: Literal["trash"] | None = Query(default=None),
 ):
     require_auth(authorization)
     with get_db() as db:
-        asset = db.execute(
-            "SELECT * FROM visible_assets WHERE id = ? AND committed = 1",
-            (asset_id,),
-        ).fetchone()
+        if lifecycle == "trash":
+            # Trash scope (mobile Library Trash): only canonically trashed Assets,
+            # never normal or tombstoned ones. Without the scope nothing changes.
+            asset = asset_authority.trash_ticket_assets(db, [asset_id]).get(asset_id)
+        else:
+            asset = db.execute(
+                "SELECT * FROM visible_assets WHERE id = ? AND committed = 1",
+                (asset_id,),
+            ).fetchone()
     if asset is None:
         raise HTTPException(status_code=404, detail="Committed asset not found")
 
@@ -2520,6 +2526,7 @@ class MediaTicketBatchRequest(BaseModel):
 def create_mobile_media_tickets(
     request: MediaTicketBatchRequest,
     authorization: str | None = Header(default=None),
+    lifecycle: Literal["trash"] | None = Query(default=None),
 ):
     """바운스된 썸네일 티켓 묶음 발급. 개별 티켓과 동일한 인증/변형 화이트
     리스트/서명 규칙을 적용하며, 개별 항목 실패는 배치 전체를 실패시키지
@@ -2538,13 +2545,16 @@ def create_mobile_media_tickets(
     asset_ids = list(dict.fromkeys(asset_id for asset_id, _ in pairs))
     placeholders = ",".join("?" for _ in asset_ids)
     with get_db() as db:
-        assets_by_id = {
-            row["id"]: dict(row)
-            for row in db.execute(
-                f"SELECT * FROM visible_assets WHERE committed = 1 AND id IN ({placeholders})",
-                asset_ids,
-            ).fetchall()
-        }
+        if lifecycle == "trash":
+            assets_by_id = asset_authority.trash_ticket_assets(db, asset_ids)
+        else:
+            assets_by_id = {
+                row["id"]: dict(row)
+                for row in db.execute(
+                    f"SELECT * FROM visible_assets WHERE committed = 1 AND id IN ({placeholders})",
+                    asset_ids,
+                ).fetchall()
+            }
 
     def resolve_ticket(pair: tuple[str, str]) -> dict:
         asset_id, variant = pair
@@ -2578,6 +2588,51 @@ def create_mobile_media_tickets(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(resolve_ticket, pairs))
     return {"items": results}
+
+
+@app.get("/v1/library/trash")
+def list_mobile_library_trash(
+    authorization: str | None = Header(default=None),
+    cursor: str | None = None,
+    limit: int = Query(default=asset_authority.DEFAULT_TRASH_PAGE, ge=1,
+                       le=asset_authority.MAX_TRASH_PAGE),
+):
+    """Mobile Library Trash: committed `trash` Assets, newest trash first.
+
+    Items use the mobile asset projection plus `entityRevision` (the lifecycle
+    compare-and-set revision a restore command must present) and `trashedAt`. The
+    envelope carries the lifecycle authority identity a command needs. Tombstoned Assets
+    are never listed. While the lifecycle domain is inactive there is no server-side
+    trash, so the list is empty and `active` is false.
+    """
+    require_client(authorization)
+    with get_db() as db:
+        db.execute("BEGIN")
+        try:
+            active = authority.active_domain(db, asset_authority.DOMAIN)
+            if active is None:
+                return {"active": False, "items": [], "next_cursor": None, "has_more": False,
+                        "total_count": 0, "total_bytes": 0}
+            position = decode_mobile_cursor(cursor, "trash") if cursor is not None else None
+            rows, has_more, total_count, total_bytes = asset_authority.trash_page(
+                db, active["libraryId"], position, limit)
+            memberships = _mobile_memberships(db, rows)
+        finally:
+            db.rollback()
+    items = []
+    for row in rows:
+        item = mobile_asset_item(row, memberships.get(row["id"], []))
+        item["lifecycle"] = asset_authority.TRASH
+        item["entityRevision"] = row["lifecycle_revision"]
+        item["trashedAt"] = row["trashed_at"]
+        items.append(item)
+    next_cursor = None
+    if has_more and rows:
+        next_cursor = encode_mobile_cursor("trash", rows[-1]["trashed_at"], rows[-1]["id"])
+    return {"active": True, "libraryId": active["libraryId"], "epoch": active["epoch"],
+            "contractVersion": active["contractVersion"], "cursor": active["cursor"],
+            "items": items, "next_cursor": next_cursor, "has_more": has_more,
+            "total_count": total_count, "total_bytes": total_bytes}
 
 
 # --- CLOUD-006 full-library replication (PC -> VPS/R2) -----------------------

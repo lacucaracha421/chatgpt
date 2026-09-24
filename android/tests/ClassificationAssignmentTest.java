@@ -95,6 +95,7 @@ public final class ClassificationAssignmentTest {
             rebasedRowSucceedsOnTheNextPass(directory);
             conflictDescribingAnotherAssetIsRefused(directory);
             blockedRejectionPreservesIntentAndStopsFifo(directory);
+            tombstonedAssetIsDroppedNotBlocked(directory);
             unknownRejectionStaysPendingAndRetryable(directory);
             malformedAcceptanceNeverDeletesIntent(directory);
             acceptedNoOpRetiresWithoutAdvancingRevision(directory);
@@ -684,6 +685,32 @@ public final class ClassificationAssignmentTest {
         equal(before, rows.get(0).payload,
                 "and never rewrites the expectation onto a foreign revision");
         equal(3L, rows.get(0).expectedRevision, "The stored expectation is unchanged");
+        store.close();
+    }
+
+    /**
+     * `assetTombstoned` is definitive (the Asset was emptied from the trash): the intent is
+     * dropped rather than blocked, so it never holds the FIFO queue.
+     */
+    private static void tombstonedAssetIsDroppedNotBlocked(Path directory) throws Exception {
+        SqliteDb db = new SqliteDb(directory.resolve("tombstoned.sqlite"), true);
+        LibraryReplicaStore store = adoptSqlite(db, "scope-a");
+        store.queueClassificationAssignment("scope-a", "asset_1", SERIES,
+                "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeef1", CLOCK.now());
+        store.queueClassificationAssignment("scope-a", "asset_2", SERIES,
+                "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeef2", CLOCK.now());
+        final int[] calls = {0};
+        ClassificationAssignmentOutbox writer = new ClassificationAssignmentOutbox(
+                (path, payload) -> {
+                    calls[0]++;
+                    throw new ClassificationAssignmentOutbox.HttpFailure(409,
+                            "{\"detail\":{\"code\":\"assetTombstoned\",\"assetId\":\"x\"}}");
+                }, store, CLOCK);
+        ClassificationAssignmentOutbox.Flush result = writer.flush("scope-a");
+        equal(2, calls[0], "A dropped intent does not stop the queue");
+        equal(2, result.dropped, "Both tombstoned intents are dropped");
+        equal(0, result.blocked, "and nothing is blocked");
+        equal(0, store.classificationOutbox("scope-a").size(), "The queue is empty");
         store.close();
     }
 
@@ -1402,7 +1429,7 @@ public final class ClassificationAssignmentTest {
      * Album rows and a pending Album outbox row.
      */
     private static void v4ReplicaUpgradesInPlaceToV5(Path directory) throws Exception {
-        equal(6, ReplicaSchema.VERSION, "v5 adds the Classification assignment outbox");
+        equal(7, ReplicaSchema.VERSION, "v7 is the current schema; v5 added the assignment outbox");
         equal(0, ReplicaSchema.upgradeStatements(4).length,
                 "The v4 upgrade is additive DDL alone, so it needs no ALTER statements");
         check(ReplicaSchema.canUpgradeFrom(4), "The v4 replica upgrades in place");
@@ -1440,7 +1467,7 @@ public final class ClassificationAssignmentTest {
         legacy.close();
 
         SqliteDb upgraded = new SqliteDb(file, true);
-        equal(6L, upgraded.userVersion(), "The reopened replica reports the v5 schema");
+        equal((long) ReplicaSchema.VERSION, upgraded.userVersion(), "The reopened replica reports the current schema");
         equal(1L, upgraded.countClassificationOutboxTables(),
                 "The upgrade creates the Classification assignment outbox");
         // Classification identity and cursor.

@@ -418,11 +418,13 @@ class LifecycleTests(AssetAuthorityFixture):
         self.assertEqual(response.status_code, 404, response.text)
         self.assertEqual(response.json()["detail"]["code"], "assetNotFound")
 
-    def test_a_command_requires_the_publisher_role(self):
+    def test_a_tombstone_command_requires_the_publisher_role(self):
+        # Trash/restore accept a client credential (mobile Library Trash); tombstone,
+        # which empties the trash, never does.
         with api_app.get_db() as db:
             _, client_token = api_auth.provision_token(db, "client", "asset-reader-2")
             db.commit()
-        response = self.command(asset_authority.TRASH_ASSET, self.asset_id(0), 1,
+        response = self.command(asset_authority.TOMBSTONE_ASSET, self.asset_id(0), 1,
                                 headers={"Authorization": f"Bearer {client_token}"})
         self.assertIn(response.status_code, (401, 403), response.text)
 
@@ -1110,15 +1112,38 @@ class RoleBoundaryTests(AssetAuthorityFixture):
                 db.execute("SELECT count(*) FROM asset_authority_changes").fetchone()[0], 0)
 
     def test_a_client_token_cannot_drive_lifecycle_commands(self):
+        """Role matrix (mobile Library Trash): a client may trash and restore; it may
+        never tombstone, so emptying the trash stays PC-only."""
         self.activate()
         self.seed_asset()
-        for command_type in (asset_authority.TRASH_ASSET, asset_authority.TOMBSTONE_ASSET):
-            response = self.command(command_type, ASSET, 1, headers=self.client_token())
-            self.assertIn(response.status_code, (401, 403),
-                          f"{command_type}: {response.text}")
+        client = self.client_token()
+        response = self.command(asset_authority.TOMBSTONE_ASSET, ASSET, 1, headers=client)
+        self.assertIn(response.status_code, (401, 403), response.text)
         with api_app.get_db() as db:
             self.assertEqual(asset_authority.state_row(db, LIBRARY, ASSET)[0],
                              asset_authority.NORMAL)
+
+        trashed = self.command(asset_authority.TRASH_ASSET, ASSET, 1, headers=client)
+        self.assertEqual(trashed.status_code, 200, trashed.text)
+        self.assertEqual(trashed.json()["asset"]["lifecycle"], asset_authority.TRASH)
+        # Still refused on a trashed Asset: tombstone is publisher-only in every state.
+        refused = self.command(asset_authority.TOMBSTONE_ASSET, ASSET, 2, headers=client)
+        self.assertIn(refused.status_code, (401, 403), refused.text)
+        restored = self.command(asset_authority.RESTORE_ASSET, ASSET, 2, headers=client)
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["asset"]["lifecycle"], asset_authority.NORMAL)
+
+        # An unrecognized command name needs the publisher role, so a client learns
+        # nothing about the contract from it.
+        response = self.client.put("/v1/assets/authority/commands", headers=client, json={
+            "libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
+            "operationId": new_operation(), "commandType": "purgeAsset", "assetId": ASSET,
+            "expectedEntityRevision": 3})
+        self.assertIn(response.status_code, (401, 403), response.text)
+        # An extension credential is not a client credential.
+        response = self.command(asset_authority.TRASH_ASSET, ASSET, 3,
+                                headers=self.extension_token())
+        self.assertIn(response.status_code, (401, 403), response.text)
 
     def test_the_shared_token_cannot_activate_or_command(self):
         # The legacy shared token is an interactive read credential. It must not satisfy

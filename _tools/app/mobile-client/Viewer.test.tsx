@@ -218,3 +218,19 @@ describe('progressive viewer',()=>{
     expect(change).not.toHaveBeenCalled();
   });
 });
+describe('viewer Library Trash action',()=>{
+  it('offers 휴지통으로 without confirmation and renders the host snackbar inside the viewer',async()=>{
+    const trash=vi.fn();
+    render(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}} onTrash={trash} trashNotice={<div role="status">휴지통으로 이동함</div>}/>);
+    fireEvent.click(screen.getByRole('button',{name:'휴지통으로'}));
+    expect(trash).toHaveBeenCalledWith(items[1]);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByText('휴지통으로 이동함')).toBeTruthy();
+  });
+  it('has no trash action without the capability or for a pending capture',()=>{
+    const {rerender}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(screen.queryByRole('button',{name:'휴지통으로'})).toBeNull();
+    rerender(<Viewer items={[{id:'p',kind:'image',pending:true}]} index={0} onIndex={()=>{}} onClose={()=>{}} onTrash={()=>{}}/>);
+    expect(screen.queryByRole('button',{name:'휴지통으로'})).toBeNull();
+  });
+});

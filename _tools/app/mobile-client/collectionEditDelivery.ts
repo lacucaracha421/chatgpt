@@ -7,16 +7,20 @@
  *   transport failure keeps it queued and the next pass resends the same id;
  * * `changed: false` is a confirmation, not a failure;
  * * a `collectionPersonalConflict` never silently drops an intent. Rating and
- *   Showcase adopt the server's `current` as `expected` and retry once under the
- *   same id; a memo is parked for the user unless `current` is already the draft
- *   or one of this device's own earlier values;
+ *   Showcase adopt the server's `current` as `expected` and retry once under a
+ *   new id (the payload changed); a memo is parked for the user unless `current`
+ *   is already the draft or one of this device's own earlier values;
+ * * an `operationConflict` (the id was used for another payload) retries once
+ *   under a new id;
+ * * a server refusal of one intent does not stop the others in the same pass; a
+ *   transport failure ends the pass, since every other send would fail too;
  * * nothing is sent until `/v1/collections/status` advertises
  *   `collectionPersonalEdit`.
  *
  * It never enqueues and never schedules itself.
  */
 
-import {api} from './transport';
+import {api, ApiError} from './transport';
 import {
   type CollectionEditIntent,
   type CollectionEditValue,
@@ -24,17 +28,27 @@ import {
   markCollectionEditConflict,
   readCollectionEdits,
   rebaseCollectionEdit,
+  reissueCollectionEdit,
 } from './collectionEditOutbox';
 
 export const PERSONAL_EDIT_PATH = '/v1/collections/personal-edits';
 
-export type CollectionEditOutcome = 'confirmed' | 'already-current' | 'superseded' | 'deferred' | 'withheld' | 'conflict' | 'rejected';
+export type CollectionEditOutcome = 'confirmed' | 'already-current' | 'superseded' | 'deferred' | 'withheld' | 'conflict' | 'rejected' | 'failed';
 
 export type CollectionEditReport = {
-  outcomes: {key: string; outcome: CollectionEditOutcome}[];
+  /** `message` explains a `rejected` (dropped) edit to the user. */
+  outcomes: {key: string; outcome: CollectionEditOutcome; message?: string}[];
   /** True when the server has not advertised the capability. */
   unsupported: boolean;
+  /** The first server refusal that kept an intent queued (`failed`), if any. */
+  error?: unknown;
 };
+
+/** Why an edit that can never succeed was dropped. */
+const REJECTED = new Map<unknown, string>([
+  ['collectionNotFound', 'PC에서 삭제되었거나 게시되지 않은 작품이라 변경을 반영하지 못했습니다.'],
+  ['invalidCollectionPersonalEdit', '서버가 이 변경을 받지 않아 되돌렸습니다.'],
+]);
 
 export type CollectionEditStatus = {
   revision?: string | null;
@@ -76,14 +90,33 @@ async function pass(signal?: AbortSignal): Promise<CollectionEditReport> {
     const intent = readCollectionEdits()[key];
     if (!intent) continue;
     if (intent.conflict) { report.outcomes.push({key, outcome: 'conflict'}); continue; }
-    report.outcomes.push({key, outcome: await deliver(intent, libraryId, 1, signal)});
+    try {
+      const outcome = await deliver(intent, libraryId, 1, signal);
+      report.outcomes.push(typeof outcome === 'string' ? {key, outcome} : {key, ...outcome});
+    } catch (error) {
+      if (!refusedByServer(error)) throw error;
+      // This intent stays queued; the others still get their send.
+      report.outcomes.push({key, outcome: 'failed'});
+      report.error ??= error;
+    }
   }
   return report;
 }
 
+/**
+ * A server answer about this one command. Transport failures, timeouts and
+ * account-wide answers (401/403/408/429, 5xx) end the pass instead.
+ */
+function refusedByServer(error: unknown): boolean {
+  return error instanceof ApiError && error.status !== null && error.status >= 400 && error.status < 500
+    && ![401, 403, 408, 429].includes(error.status);
+}
+
 type Receipt = {operationId?: string; changed?: boolean};
 
-async function deliver(intent: CollectionEditIntent, libraryId: string, attempt: number, signal?: AbortSignal): Promise<CollectionEditOutcome> {
+type Delivered = CollectionEditOutcome | {outcome: 'rejected'; message: string};
+
+async function deliver(intent: CollectionEditIntent, libraryId: string, attempt: number, signal?: AbortSignal): Promise<Delivered> {
   try {
     const receipt = await api<Receipt>(PERSONAL_EDIT_PATH, signal, {
       version: 1,
@@ -104,14 +137,19 @@ async function deliver(intent: CollectionEditIntent, libraryId: string, attempt:
     }
     // A deleted Collection or a malformed edit can never succeed: drop it rather
     // than retrying forever. Everything else stays queued for the next pass.
-    if (detail?.code === 'collectionNotFound' || detail?.code === 'invalidCollectionPersonalEdit') {
-      return confirmCollectionEdit(intent) ? 'rejected' : 'superseded';
+    const rejected = REJECTED.get(detail?.code);
+    if (rejected) return confirmCollectionEdit(intent) ? {outcome: 'rejected', message: rejected} : 'superseded';
+    if (detail?.code === 'operationConflict') {
+      const reissued = reissueCollectionEdit(intent);
+      if (!reissued) return 'superseded';
+      if (attempt > 1) return 'deferred';
+      return deliver(reissued, libraryId, attempt + 1, signal);
     }
     throw error;
   }
 }
 
-async function conflict(intent: CollectionEditIntent, libraryId: string, current: CollectionEditValue, attempt: number, signal?: AbortSignal): Promise<CollectionEditOutcome> {
+async function conflict(intent: CollectionEditIntent, libraryId: string, current: CollectionEditValue, attempt: number, signal?: AbortSignal): Promise<Delivered> {
   if (current === intent.value) return confirmCollectionEdit(intent) ? 'already-current' : 'superseded';
   // A memo is only rebased when `current` is this device's own earlier value.
   if (intent.field === 'memo' && !intent.own.includes(current)) {

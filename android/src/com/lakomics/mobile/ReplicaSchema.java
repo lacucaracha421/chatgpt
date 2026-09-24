@@ -25,8 +25,13 @@ package com.lakomics.mobile;
  * stores exactly what that one command needs.
  */
 final class ReplicaSchema {
-    /** Version 6 adds the independent, read-only Asset lifecycle replica. */
-    static final int VERSION = 6;
+    /**
+     * Version 6 adds the independent, read-only Asset lifecycle replica. Version 7 adds the
+     * Asset lifecycle outbox (mobile Library Trash: `trashAsset`/`restoreAsset` only). Both
+     * are additive `CREATE ... IF NOT EXISTS` DDL, so a v6 device database upgrades in place
+     * with every existing row intact.
+     */
+    static final int VERSION = 7;
 
     /** v0 is fresh, v1-v3 are older replicas; all upgrade in place. */
     static boolean canUpgradeFrom(int version) {
@@ -160,7 +165,37 @@ final class ReplicaSchema {
                     + " ON classification_assignment_outbox(state,seq)",
             "CREATE INDEX IF NOT EXISTS classification_outbox_asset"
                     + " ON classification_assignment_outbox(asset_id,seq)",
+            // ---------------------------------------------------------------
+            // Asset lifecycle outbox (v7). One Asset per row, two commands only;
+            // `sending` marks a row that may already be accepted and therefore can no
+            // longer be cancelled locally, and `dropped` keeps "영구 삭제됨" visible
+            // until the user acknowledges it.
+            // ---------------------------------------------------------------
+            "CREATE TABLE IF NOT EXISTS asset_lifecycle_outbox("
+                    + "seq INTEGER PRIMARY KEY,operation_id TEXT NOT NULL UNIQUE,"
+                    + "command_type TEXT NOT NULL CHECK(command_type IN ('trashAsset','restoreAsset')),"
+                    + "asset_id TEXT NOT NULL,library_id TEXT NOT NULL,epoch INTEGER NOT NULL,"
+                    + "contract_version INTEGER NOT NULL,"
+                    + "source_lifecycle TEXT NOT NULL CHECK(source_lifecycle IN ('normal','trash')),"
+                    + "expected_revision INTEGER NOT NULL,payload TEXT NOT NULL,"
+                    + "state TEXT NOT NULL CHECK(state IN ('pending','sending','blocked','dropped')),"
+                    + "rebased INTEGER NOT NULL DEFAULT 0,conflict_code TEXT,conflict_detail TEXT,"
+                    + "created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS asset_lifecycle_outbox_asset"
+                    + " ON asset_lifecycle_outbox(asset_id,seq)",
     };
+
+    static final String READ_LIFECYCLE_OUTBOX =
+            "SELECT seq,operation_id,command_type,asset_id,library_id,epoch,contract_version,"
+                    + "source_lifecycle,expected_revision,payload,state,rebased,conflict_code,"
+                    + "conflict_detail,created_at FROM asset_lifecycle_outbox ORDER BY seq";
+    static final String WRITE_LIFECYCLE_OUTBOX =
+            "INSERT OR REPLACE INTO asset_lifecycle_outbox(seq,operation_id,command_type,asset_id,"
+                    + "library_id,epoch,contract_version,source_lifecycle,expected_revision,payload,"
+                    + "state,rebased,conflict_code,conflict_detail,created_at)"
+                    + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    static final String DELETE_LIFECYCLE_OUTBOX = "DELETE FROM asset_lifecycle_outbox WHERE seq=?";
+    static final String CLEAR_LIFECYCLE_OUTBOX = "DELETE FROM asset_lifecycle_outbox";
 
     /** The adoption row and its cursor. `singleton=1` is the adoption marker itself. */
     static final String WRITE_AUTHORITY =

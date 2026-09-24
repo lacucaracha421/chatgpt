@@ -85,6 +85,23 @@ def fixture_snapshot(version=album_authority.SNAPSHOT_VERSION, appearance=True,
     return body
 
 
+def activate_asset_lifecycle(get_db, library_id, lifecycles):
+    """Activate the Asset lifecycle domain with the given canonical states (link rule)."""
+    import asset_authority
+    asset_authority.startup(get_db)
+    with get_db() as db:
+        db.execute("INSERT INTO authority_domains(library_id,domain,epoch,contract_version,"
+                   "change_cursor,baseline_digest,baseline_revision,activated_at)"
+                   " VALUES(?,'assets',1,1,0,?,NULL,'2026-09-24T00:00:00Z')",
+                   [library_id, "0" * 64])
+        for asset_id, state in lifecycles.items():
+            db.execute("INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,"
+                       "entity_revision,created_at,updated_at) VALUES(?,?,?,1,?,?)",
+                       [library_id, asset_id, state, "2026-09-24T00:00:00Z",
+                        "2026-09-24T00:00:00Z"])
+        db.commit()
+
+
 class AlbumAuthorityFixture(unittest.TestCase):
     def setUp(self):
         import tempfile
@@ -594,6 +611,36 @@ class CommandTests(AlbumAuthorityFixture):
         self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(response.json()["detail"]["code"], "invalidAlbumMembership")
         self.assertNotIn(("other", "no-such-asset", 1, 1), self.member_rows())
+
+    def test_a_trashed_asset_accepts_membership_changes(self):
+        # Link rule: relationships survive trash, so a phone-trashed Asset must not jam
+        # the PC's queued Album edits for it.
+        activate_asset_lifecycle(self.get_db, LIBRARY, {ASSET2: "trash"})
+        added = self.command(album_authority.MEMBERSHIP, R1, album_id="other",
+                             assetId=ASSET2, desiredState=True, expectedRevision=0)
+        self.assertEqual(added.status_code, 200, added.text)
+        removed = self.command(album_authority.MEMBERSHIP, R2, album_id="other",
+                               assetId=ASSET2, desiredState=False, expectedRevision=1)
+        self.assertEqual(removed.status_code, 200, removed.text)
+
+    def test_a_tombstoned_asset_is_refused_with_a_definitive_code(self):
+        activate_asset_lifecycle(self.get_db, LIBRARY, {ASSET: "tombstoned", ASSET2: "tombstoned"})
+        for operation, album_id, asset_id, desired, revision in (
+                (R1, "other", ASSET2, True, 0),     # add
+                (R2, "root", ASSET, False, 1)):     # remove an existing membership
+            response = self.command(album_authority.MEMBERSHIP, operation, album_id=album_id,
+                                    assetId=asset_id, desiredState=desired,
+                                    expectedRevision=revision)
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(response.json()["detail"]["code"], "assetTombstoned")
+            self.assertEqual(response.json()["detail"]["assetId"], asset_id)
+
+    def test_an_asset_unknown_to_an_active_lifecycle_domain_cannot_be_added(self):
+        activate_asset_lifecycle(self.get_db, LIBRARY, {ASSET: "normal"})
+        response = self.command(album_authority.MEMBERSHIP, R1, album_id="other",
+                                assetId=ASSET3, desiredState=True, expectedRevision=0)
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "invalidAlbumMembership")
 
     def test_every_mutation_appends_one_change_and_advances_only_its_own_cursor(self):
         with self.get_db() as db:

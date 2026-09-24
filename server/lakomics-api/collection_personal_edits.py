@@ -76,7 +76,10 @@ def normalized(field, value, *, limit=MAX_MEMO_CHARS):
             return None
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             invalid()
-        value = float(value)
+        try:
+            value = float(value)
+        except OverflowError:  # a JSON integer beyond float range
+            invalid()
         if not math.isfinite(value) or not 0.0 <= value <= 5.0 or (value * 2) % 1 != 0:
             invalid()
         return value

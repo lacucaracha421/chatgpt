@@ -8,6 +8,8 @@ final class AlbumMembershipOutbox {
     static final String COMMAND_PATH = "/v1/albums/commands";
     static final String CODE_PROTOCOL_INTEGRITY = "albumCommandOutcomeUnknown";
     static final String CODE_TRANSPORT = "transport";
+    /** Definitive refusal for an Asset emptied from the trash: dropped, never retried. */
+    static final String CODE_ASSET_TOMBSTONED = "assetTombstoned";
 
     interface Transport {
         String put(String path, String payload) throws Exception;
@@ -35,6 +37,8 @@ final class AlbumMembershipOutbox {
         int noOp;
         int pending;
         int blocked;
+        /** Intents dropped because their Asset is tombstoned. */
+        int dropped;
         boolean stopped;
     }
 
@@ -91,6 +95,14 @@ final class AlbumMembershipOutbox {
                 body = transport.put(COMMAND_PATH, row.payload);
             } catch (HttpFailure rejected) {
                 String code = detailCode(rejected.body);
+                if (CODE_ASSET_TOMBSTONED.equals(code)) {
+                    // Definitive: the Asset was emptied from the trash. Drop instead of
+                    // blocking, so a tombstone never holds the Album queue.
+                    store.dropTombstonedMembership(scope, row.seq, clock.now());
+                    report.pending--;
+                    report.dropped++;
+                    continue;
+                }
                 if (isBlockingConflict(code)) {
                     store.blockMembership(scope, row.seq, code, rejected.body);
                     report.pending--;

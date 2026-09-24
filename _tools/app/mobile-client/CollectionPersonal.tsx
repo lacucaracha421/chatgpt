@@ -10,6 +10,8 @@ type Visible<T> = {value: T; pending: boolean; conflict: {current: CollectionEdi
 export type PersonalEdits = {
   supported: boolean;
   failure: string;
+  /** A short message about an edit that was not kept. */
+  notice: string;
   edit(collectionId: string, field: CollectionEditField, value: CollectionEditValue, authoritative: CollectionEditValue): void;
   resolveConflict(collectionId: string, field: CollectionEditField, choice: 'overwrite' | 'discard'): void;
   visible<T extends CollectionEditValue>(collectionId: string, field: CollectionEditField, authoritative: T): Visible<T>;
@@ -47,6 +49,7 @@ export function CollectionPersonal({item, edits, sheet, onSheet}: {item: Collect
           </button>
         : (showcase.value || showcase.pending) && <div className={`collection-personal-row${showcase.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">쇼케이스</span><span className="collection-personal-value">{showcase.value ? '추가됨' : '추가 안 함'}</span>{showcase.pending && <Pending/>}</div>}
       {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}
+      {edits.notice && <p className="collection-personal-failure" role="alert">{edits.notice}</p>}
     </section>
     {(editable || memo.value || memo.pending) && <section className="collection-block collection-memo" aria-label="내 메모">
       <div className="collection-memo-heading"><h2>내 메모</h2>{memo.pending && !memo.conflict && <Pending/>}{editable && <Button variant="ghost" className="collection-memo-edit" onClick={() => onSheet('memo')}>{memo.value ? '편집' : '메모 쓰기'}</Button>}</div>

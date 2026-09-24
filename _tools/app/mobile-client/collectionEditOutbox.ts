@@ -6,13 +6,17 @@
  * 1. **One intent per `collectionId:field`, minted once.** The operation id is
  *    created when the user acts and reused on every transport retry, because a
  *    timeout may mean the server applied the edit and only the response was lost.
+ *    **A changed payload always gets a new id**: the server refuses a reused id
+ *    with a different payload (`operationConflict`).
  * 2. **A new user action replaces the queued intent with a new operation id.** It
  *    keeps the queued intent's `expected` (the server value it was composed
  *    against) and remembers the replaced value as this device's own, so a late
  *    acceptance of the replaced edit is not mistaken for someone else's change.
  * 3. **Removed on receipt.** A receipt for a replaced operation id is ignored.
  *
- * Only {@link commitCollectionEdit} enqueues, and only user actions call it.
+ * Only {@link commitCollectionEdit} enqueues, and only user actions call it. It
+ * throws when the device cannot store the edit, so the UI never shows an unsaved
+ * edit as queued.
  */
 
 export type CollectionEditField = 'myScore' | 'showcase' | 'memo';
@@ -33,6 +37,7 @@ export type CollectionEditIntent = {
 };
 
 const INTENTS_KEY = 'lakomics.collections.edits.outbox.v1';
+export const SAVE_FAILED = '기기에 저장하지 못했습니다.';
 export const MEMO_LIMIT = 2000;
 /** Fired after the durable queue changes, so every screen re-reads it. */
 export const COLLECTION_EDITS_EVENT = 'lakomics-collection-edits';
@@ -77,9 +82,11 @@ export function readCollectionEdits(): Record<string, CollectionEditIntent> {
   } catch { return {}; }
 }
 
-function write(intents: Record<string, CollectionEditIntent>): void {
-  try { localStorage.setItem(INTENTS_KEY, JSON.stringify(intents)); } catch { /* Storage may be unavailable; the caller keeps the change in memory. */ }
+/** Persist the queue; false when storage refused it (the stored queue is unchanged). */
+function write(intents: Record<string, CollectionEditIntent>): boolean {
+  try { localStorage.setItem(INTENTS_KEY, JSON.stringify(intents)); } catch { return false; }
   try { window.dispatchEvent(new Event(COLLECTION_EDITS_EVENT)); } catch { /* No window outside the app. */ }
+  return true;
 }
 
 export function readCollectionEdit(collectionId: string, field: CollectionEditField): CollectionEditIntent | null {
@@ -89,7 +96,8 @@ export function readCollectionEdit(collectionId: string, field: CollectionEditFi
 /**
  * Commit the user's edit. `authoritative` is the server value the screen shows.
  * Returns the queued intent, or null when nothing needs sending (the value is
- * already the server's and no earlier edit is queued).
+ * already the server's and no earlier edit is queued). Throws {@link SAVE_FAILED}
+ * when the device could not store it.
  */
 export function commitCollectionEdit(
   collectionId: string,
@@ -114,7 +122,7 @@ export function commitCollectionEdit(
     own: previous ? [...previous.own, previous.value].slice(-5) : [],
   };
   intents[key] = intent;
-  write(intents);
+  if (!write(intents)) throw new Error(SAVE_FAILED);
   return intent;
 }
 
@@ -129,19 +137,31 @@ export function confirmCollectionEdit(expected: CollectionEditIntent): boolean {
 }
 
 /**
- * Re-point an intent at the server's current value, keeping its operation id: a
- * `collectionPersonalConflict` is returned before any receipt is stored, so the id
- * cannot collide with a recorded payload.
+ * Re-point an intent at the server's current value under a new operation id: the
+ * payload changes, and a `collectionPersonalConflict` proves the server stored no
+ * receipt for the old id, so retiring it is safe.
  */
-export function rebaseCollectionEdit(expected: CollectionEditIntent, current: CollectionEditValue): CollectionEditIntent | null {
+export function rebaseCollectionEdit(
+  expected: CollectionEditIntent,
+  current: CollectionEditValue,
+  operationId: () => string = () => crypto.randomUUID(),
+): CollectionEditIntent | null {
+  return replace(expected, stored => { stored.expected = current; delete stored.conflict; stored.operationId = operationId(); });
+}
+
+/** A new operation id for an unchanged payload, after the server refused the old id. */
+export function reissueCollectionEdit(expected: CollectionEditIntent, operationId: () => string = () => crypto.randomUUID()): CollectionEditIntent | null {
+  return replace(expected, stored => { stored.operationId = operationId(); });
+}
+
+/** Change the stored intent if it is still `expected`; null when replaced or not saved. */
+function replace(expected: CollectionEditIntent, change: (stored: CollectionEditIntent) => void): CollectionEditIntent | null {
   const intents = readCollectionEdits();
   const key = collectionEditKey(expected.collectionId, expected.field);
   const stored = intents[key];
   if (!stored || stored.operationId !== expected.operationId) return null;
-  stored.expected = current;
-  delete stored.conflict;
-  write(intents);
-  return stored;
+  change(stored);
+  return write(intents) ? stored : null;
 }
 
 /** Park a memo intent until the user chooses; it is not sent meanwhile. */
@@ -151,8 +171,7 @@ export function markCollectionEditConflict(expected: CollectionEditIntent, curre
   const stored = intents[key];
   if (!stored || stored.operationId !== expected.operationId) return false;
   stored.conflict = {current};
-  write(intents);
-  return true;
+  return write(intents);
 }
 
 /** The user's answer to a memo conflict. */

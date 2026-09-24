@@ -42,7 +42,7 @@ final class NetworkPolicy {
   boolean classificationPut=p.equals("/v1/classifications/authority/commands");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
   get=get || p.equals("/v1/collections") || (p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}") && !p.equals("/v1/collections/personal-edits"));
-  get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");
+  get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/suggestions") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");
   post=post || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}/artworks/[A-Za-z0-9_-]{1,128}/media-ticket");
   // Personal Collection edits (rating, Showcase, memo): only the client command. The edit
   // log is a publisher read and stays unreachable from here.
@@ -55,13 +55,28 @@ final class NetworkPolicy {
   // character routes stay publisher-only, so none of them may be reached from here: they
   // remain absent from the allowlist and the malformed variants below are rejected.
   post=post || p.equals("/v1/library/characters/exclusions");
+  // Mobile character review: the candidate feed read and the decision command, and nothing
+  // else. The feed PUT and the decision log GET are publisher-only and stay unreachable.
+  get=get || p.equals("/v1/library/characters/review");
+  post=post || p.equals("/v1/library/characters/review/decisions");
+  // Mobile similarity review: the pair queue read and the decision command, and nothing
+  // else. The feed PUT and the decision log GET are publisher-only and stay unreachable.
+  get=get || p.equals("/v1/library/similarity/review");
+  post=post || p.equals("/v1/library/similarity/review/decisions");
   // The catalog bookmark command: one desired-state write per work identity, and
   // nothing else. The id charset excludes `/`, `.`, `%` and `?`, so the segment
   // cannot traverse or re-encode into a different entity.
   boolean bookmarkPut=p.matches("/v1/mobile-catalog/bookmarks/(kHentai|heliotrope)/[0-9A-Za-z_-]{1,64}");
   boolean albumPut=p.equals("/v1/albums/commands");
+  // Mobile Library Trash: the trash read, and the Asset lifecycle command route written by
+  // `AssetLifecycleOutbox`, which constructs `trashAsset`/`restoreAsset` only. The server
+  // requires the publisher role for `tombstoneAsset`, so emptying the trash stays on the PC.
+  // Trash thumbnails use the existing ticket POSTs with `?lifecycle=trash` (queries are
+  // stripped above and grant no other target). Activation stays absent.
+  get=get || p.equals("/v1/library/trash");
+  boolean lifecyclePut=p.equals("/v1/assets/authority/commands");
   get=get || p.matches("/v1/notes/[a-f0-9]{64}");
-  boolean put=bookmarkPut || albumPut || classificationPut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
+  boolean put=bookmarkPut || albumPut || classificationPut || lifecyclePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
   if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post))throw new IllegalArgumentException("Unsupported read operation");
  }
 }

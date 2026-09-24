@@ -16,7 +16,7 @@ import java.util.List;
  * about syntax, which the check harness catches because it drives the same store through
  * its own adapter over a real SQLite engine.
  */
-final class AndroidReplicaDb implements ReplicaDb, AssetReplica.Storage {
+final class AndroidReplicaDb implements ReplicaDb, AssetLifecycleOutbox.Storage {
     /** The app-private database file, under no-backup storage. */
     static final String FILE_NAME = "library-replica.sqlite";
 
@@ -93,6 +93,33 @@ final class AndroidReplicaDb implements ReplicaDb, AssetReplica.Storage {
     }
     @Override public void clearAssets() {
         db.beginTransaction();try{db.execSQL("DELETE FROM asset_state");db.execSQL("DELETE FROM asset_authority");db.setTransactionSuccessful();}finally{db.endTransaction();}
+    }
+
+    @Override public List<AssetLifecycleOutbox.Row> lifecycleOutbox() {
+        List<AssetLifecycleOutbox.Row> rows = new ArrayList<>();
+        try (Cursor c = db.rawQuery(ReplicaSchema.READ_LIFECYCLE_OUTBOX, null)) {
+            while (c.moveToNext()) {
+                rows.add(new AssetLifecycleOutbox.Row(c.getLong(0), c.getString(1), c.getString(2),
+                        c.getString(3), c.getString(4), c.getLong(5), c.getLong(6), c.getString(7),
+                        c.getLong(8), c.getString(9), c.getString(10), c.getLong(11) != 0,
+                        c.isNull(12) ? null : c.getString(12), c.isNull(13) ? null : c.getString(13),
+                        c.getString(14)));
+            }
+        }
+        return rows;
+    }
+    @Override public void insertLifecycle(AssetLifecycleOutbox.Row row) { replaceLifecycle(row); }
+    @Override public void replaceLifecycle(AssetLifecycleOutbox.Row row) {
+        db.execSQL(ReplicaSchema.WRITE_LIFECYCLE_OUTBOX, new Object[]{row.seq, row.operationId,
+                row.commandType, row.assetId, row.libraryId, row.epoch, row.contractVersion,
+                row.sourceLifecycle, row.expectedRevision, row.payload, row.state, row.rebased ? 1 : 0,
+                row.conflictCode, row.conflictDetail, row.createdAt});
+    }
+    @Override public void deleteLifecycle(long seq) {
+        db.execSQL(ReplicaSchema.DELETE_LIFECYCLE_OUTBOX, new Object[]{seq});
+    }
+    @Override public void clearLifecycle() {
+        db.execSQL(ReplicaSchema.CLEAR_LIFECYCLE_OUTBOX);
     }
 
     @Override

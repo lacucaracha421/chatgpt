@@ -32,6 +32,8 @@ final class ClassificationAssignmentOutbox {
 
     /** The authority's code for an unaccepted compare-and-set failure, which may rebase. */
     static final String CODE_REVISION_CONFLICT = "revisionConflict";
+    /** Definitive refusal for an Asset emptied from the trash: dropped, never retried. */
+    static final String CODE_ASSET_TOMBSTONED = "assetTombstoned";
 
     interface Transport {
         String put(String path, String payload) throws Exception;
@@ -60,6 +62,8 @@ final class ClassificationAssignmentOutbox {
         int noOp;
         /** Intents rebased onto the authority's current revision. Not a conflict. */
         int rebased;
+        /** Intents dropped because their Asset is tombstoned. */
+        int dropped;
         int pending;
         int blocked;
         boolean stopped;
@@ -137,6 +141,15 @@ final class ClassificationAssignmentOutbox {
                 body = transport.put(COMMAND_PATH, row.payload);
             } catch (HttpFailure rejected) {
                 String code = detailCode(rejected.body);
+                if (CODE_ASSET_TOMBSTONED.equals(code)) {
+                    // Definitive: the Asset was emptied from the trash, so the assignment can
+                    // never apply. Dropped rather than retried or blocked, so it cannot hold
+                    // the queue.
+                    store.dropClassificationAssignment(scope, row.seq);
+                    report.pending--;
+                    report.dropped++;
+                    continue;
+                }
                 if (CODE_REVISION_CONFLICT.equals(code)) {
                     // The rejected command was never accepted or receipted, and an
                     // assignment's whole meaning is its desired value, so presenting the
