@@ -2505,14 +2505,21 @@ def list_mobile_revisit_creator_assets(
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
-def _ticket_head(asset, variant, object_key):
-    # Authorization and live visibility have already been checked for this request.
-    # Original/legacy keys remain mutable; a digest in the row alone is not enough.
-    identity = None
-    if variant == "thumbnail":
-        identity = tuple(asset[field] for field in (
-            "sha256", "content_type", "size_bytes", "metadata_revision", "updated_at"))
-    return head_cache.ticket_heads.head(_s3, R2_BUCKET, object_key, identity=identity)
+def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=False):
+    # Replication commit updates all of these fields, but presigned PUT can overwrite
+    # a mutable key before that transaction (or without committing at all). Identity
+    # alone is insufficient. Only digest-verifying clients may reuse original HEADs;
+    # the ticket carries the committed digest, so even same-size replacement fails
+    # closed. Legacy clients and rows without a digest retain a live HEAD.
+    digest = asset["sha256"]
+    verified_original = (variant == "original" and verify_digest
+                         and isinstance(digest, str) and len(digest) == 64
+                         and all(char in "0123456789abcdef" for char in digest))
+    identity = tuple(asset[field] for field in (
+        "object_key", "sha256", "content_type", "size_bytes", "metadata_revision", "updated_at"))
+    return head_cache.ticket_heads.head(
+        _s3, R2_BUCKET, object_key, identity=identity,
+        verified_original=verified_original, fresh=fresh_head)
 
 
 @app.post("/v1/library/assets/{asset_id}/media-ticket")
@@ -2521,6 +2528,8 @@ def create_mobile_media_ticket(
     request: MediaTicketRequest,
     authorization: str | None = Header(default=None),
     lifecycle: Literal["trash"] | None = Query(default=None),
+    fresh_head: bool = Query(default=False),
+    verify_digest: bool = Query(default=False),
 ):
     client_guard(get_db, API_TOKEN)(authorization)
     with get_db() as db:
@@ -2540,7 +2549,7 @@ def create_mobile_media_ticket(
     if not object_key:
         raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
     try:
-        metadata = _ticket_head(asset, request.variant, object_key)
+        metadata = _ticket_head(asset, request.variant, object_key, fresh_head=fresh_head, verify_digest=verify_digest)
     except ClientError as exc:
         code = str(exc.response.get("Error", {}).get("Code", ""))
         if code in ("404", "NoSuchKey", "NotFound"):
@@ -2555,6 +2564,7 @@ def create_mobile_media_ticket(
         "variant": request.variant,
         "content_type": metadata.get("ContentType") or asset["content_type"],
         "size_bytes": metadata.get("ContentLength"),
+        "sha256": asset["sha256"] if request.variant == "original" else None,
     }
 
 
@@ -2579,6 +2589,8 @@ def create_mobile_media_tickets(
     request: MediaTicketBatchRequest,
     authorization: str | None = Header(default=None),
     lifecycle: Literal["trash"] | None = Query(default=None),
+    fresh_head: bool = Query(default=False),
+    verify_digest: bool = Query(default=False),
 ):
     """바운스된 썸네일 티켓 묶음 발급. 개별 티켓과 동일한 인증/변형 화이트
     리스트/서명 규칙을 적용하며, 개별 항목 실패는 배치 전체를 실패시키지
@@ -2617,7 +2629,7 @@ def create_mobile_media_tickets(
         if not object_key:
             return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "unavailable"}
         try:
-            metadata = _ticket_head(asset, variant, object_key)
+            metadata = _ticket_head(asset, variant, object_key, fresh_head=fresh_head, verify_digest=verify_digest)
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             if code in ("404", "NoSuchKey", "NotFound"):
@@ -2631,6 +2643,7 @@ def create_mobile_media_tickets(
             "url": presign_get(object_key, MEDIA_TICKET_TTL_SECONDS),
             "content_type": metadata.get("ContentType") or asset["content_type"],
             "size_bytes": metadata.get("ContentLength"),
+            "sha256": asset["sha256"] if variant == "original" else None,
             "expires_at": expires_at.isoformat(),
         }
 

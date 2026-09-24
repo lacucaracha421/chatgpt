@@ -8,8 +8,8 @@ from collections import OrderedDict
 
 # Writers: cloud/collections.rs hashes artwork bytes; image_thumbnails.py binds
 # derived keys to a verified source digest and a versioned encoding recipe.
-# library/{id}, inbox, legacy artwork and backup keys are mutable, even with sha256
-# in their database rows, and must always use a fresh HEAD.
+# Mutable originals may opt in only for clients that verify the row digest on download.
+# Legacy artwork/thumbnail and backup keys still always use a fresh HEAD.
 _IMMUTABLE_KEY = re.compile(
     r"(?:work-artwork/mobile/[a-f0-9]{64}|"
     r"derived/(?:image-thumbnails/v[12]|media-thumbnails/v1/gif|"
@@ -46,17 +46,17 @@ class HeadMetadataCache:
             # One generation avoids an unbounded map of per-key invalidations.
             self._generation += 1
 
-    def head(self, storage, bucket, key, *, identity=None):
-        """Reuse success only for an allowlisted key and unchanged DB metadata.
+    def head(self, storage, bucket, key, *, identity=None, verified_original=False, fresh=False):
+        """Reuse success for immutable keys or digest-verified originals, with unchanged DB metadata.
 
         Omit identity for upload verification: always HEAD and invalidate tickets.
         Network calls stay outside the lock; concurrent cold misses may duplicate
         HEADs, but do not serialize the existing bounded ticket request pool.
         """
         namespace = _storage_namespace(storage)
-        if namespace is None or not _IMMUTABLE_KEY.fullmatch(key):
+        if namespace is None or not (_IMMUTABLE_KEY.fullmatch(key) or verified_original):
             return storage.head_object(Bucket=bucket, Key=key)
-        if identity is None:
+        if identity is None or fresh:
             self.invalidate(storage, bucket, key)
             try:
                 return storage.head_object(Bucket=bucket, Key=key)
