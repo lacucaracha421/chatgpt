@@ -2,6 +2,7 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -17,8 +18,11 @@ from typing import Annotated, Literal
 from botocore.exceptions import ClientError
 from app_lifecycle import lifecycle
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from starlette.requests import ClientDisconnect
 
 import album_authority
 import asset_authority
@@ -32,6 +36,9 @@ import head_cache
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
 API_TOKEN = os.environ.get("LAKOMICS_API_TOKEN", "")
+#: How long one request waits for a writer before failing. Readers never wait once the
+#: control database runs in WAL mode (see ``startup``); this bounds writer-on-writer waits.
+DB_BUSY_TIMEOUT_SECONDS = 10
 
 app = FastAPI(title="Lakomics Cloud API", version="0.1.0")
 
@@ -42,13 +49,53 @@ def now_iso() -> str:
 
 @contextmanager
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=DB_BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     asset_visibility.install(conn)
     try:
         yield conn
     finally:
         conn.close()
+
+
+@app.exception_handler(ClientDisconnect)
+async def client_disconnected(request: Request, exc: ClientDisconnect):
+    """The peer closed the connection while its request body was still arriving.
+
+    Nobody is left to receive an answer, so this is not a server fault: without this
+    handler the exception escapes the application and the server logs a traceback
+    and a 500 for what is an incomplete upload. The status only reaches the access log.
+    """
+    return Response(status_code=400)
+
+
+async def read_bounded_body(request: Request, limit: int, too_large: str) -> bytes:
+    """The whole request body, or 413 as soon as it is known to exceed ``limit``.
+
+    A declared ``Content-Length`` is rejected before any byte is read; a chunked body is
+    rejected mid-stream, so no more than ``limit`` bytes are ever held in memory.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > limit:
+                raise HTTPException(status_code=413, detail=too_large)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > limit:
+            raise HTTPException(status_code=413, detail=too_large)
+        data.extend(chunk)
+    return bytes(data)
+
+
+def body_validation_error(exc: ValidationError) -> RequestValidationError:
+    """The same 422 document FastAPI produces for a declared body parameter."""
+    return RequestValidationError([
+        {"type": error["type"], "loc": ("body", *error["loc"]), "msg": error["msg"],
+         "input": error.get("input")}
+        for error in exc.errors(include_url=False)])
 
 
 def require_auth(authorization: str | None):
@@ -163,6 +210,15 @@ def startup():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     with get_db() as db:
+        # Write-ahead logging is persistent in the database file, so this runs once per
+        # deployment. It is what lets the polling reads (`/v1/sync/status` and the change
+        # feeds, several per second) proceed while a publication, catalog refresh or
+        # thumbnail job holds the write lock: under the default rollback journal every
+        # reader waits for the writer's commit and fails with "database is locked"
+        # once the busy timeout expires.
+        if db.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() != "wal":
+            logging.getLogger(__name__).warning(
+                "Control database could not switch to WAL; readers may block on writers")
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS assets (
@@ -1589,36 +1645,26 @@ SavedXMediaKey = Annotated[
 ]
 
 
-@app.middleware("http")
-async def bound_saved_x_media_snapshot_body(request: Request, call_next):
-    if request.method == "PUT" and request.url.path == "/v1/saved-x-media":
-        declared = request.headers.get("content-length")
-        if declared is not None:
-            try:
-                if int(declared) > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
-                    return JSONResponse(status_code=413, content={"detail": "Snapshot too large"})
-            except ValueError:
-                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
-        body = await request.body()
-        if len(body) > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
-            return JSONResponse(status_code=413, content={"detail": "Snapshot too large"})
-    return await call_next(request)
-
-
 class SavedXMediaSnapshotPublish(BaseModel):
     model_config = ConfigDict(extra="forbid")
     keys: list[SavedXMediaKey] = Field(max_length=MAX_SAVED_X_MEDIA_KEYS)
 
 
 @app.put("/v1/saved-x-media")
-def publish_saved_x_media_snapshot(
-    snapshot: SavedXMediaSnapshotPublish,
+async def publish_saved_x_media_snapshot(
+    request: Request,
     authorization: str | None = Header(default=None),
-    content_length: int | None = Header(default=None),
 ):
+    # The body is streamed against the cap by this route itself, like the command routes,
+    # rather than by an application-wide middleware: that middleware buffered the whole
+    # upload before checking it, and a client that dropped the connection mid-upload
+    # surfaced as an unhandled exception (a traceback and a 500) on every route it wrapped.
     require_auth(authorization)
-    if content_length is not None and content_length > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
-        raise HTTPException(status_code=413, detail="Snapshot too large")
+    body = await read_bounded_body(request, MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES, "Snapshot too large")
+    try:
+        snapshot = SavedXMediaSnapshotPublish.model_validate_json(body)
+    except ValidationError as exc:
+        raise body_validation_error(exc)
 
     keys = list(dict.fromkeys(snapshot.keys))
     published_at = now_iso()
@@ -1630,19 +1676,22 @@ def publish_saved_x_media_snapshot(
     if len(payload.encode("utf-8")) > MAX_SAVED_X_MEDIA_SNAPSHOT_BYTES:
         raise HTTPException(status_code=413, detail="Snapshot too large")
 
-    with get_db() as db:
-        db.execute(
-            """
-            INSERT INTO saved_x_media_snapshots (singleton, payload, published_at, updated_at)
-            VALUES (1, ?, ?, ?)
-            ON CONFLICT(singleton) DO UPDATE SET
-                payload = excluded.payload,
-                published_at = excluded.published_at,
-                updated_at = excluded.updated_at
-            """,
-            (payload, published_at, now_iso()),
-        )
-        db.commit()
+    def store():
+        with get_db() as db:
+            db.execute(
+                """
+                INSERT INTO saved_x_media_snapshots (singleton, payload, published_at, updated_at)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(singleton) DO UPDATE SET
+                    payload = excluded.payload,
+                    published_at = excluded.published_at,
+                    updated_at = excluded.updated_at
+                """,
+                (payload, published_at, now_iso()),
+            )
+            db.commit()
+
+    await run_in_threadpool(store)
     return {"ok": True, "count": len(keys), "published_at": published_at}
 
 
