@@ -9,6 +9,17 @@ import {flushCharacterReview, isReviewInFlight, reviewPath, type ReviewCounts, t
 import {useCharacterReviewCount} from './useCharacterReview';
 import './characterReview.css';
 
+const SKIPPED_KEY = 'lakomics.characters.review.skipped.v1';
+const SKIPPED_LIMIT = 3000;
+function readSkippedPairs(): Set<string> {
+  try { const raw = JSON.parse(localStorage.getItem(SKIPPED_KEY) || '[]'); return new Set(Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : []); } catch { return new Set(); }
+}
+function writeSkippedPairs(keys: Set<string>) {
+  try { localStorage.setItem(SKIPPED_KEY, JSON.stringify([...keys].slice(-SKIPPED_LIMIT))); } catch { /* per-device convenience only */ }
+}
+function rememberSkippedPair(key: string) { const keys = readSkippedPairs(); keys.delete(key); keys.add(key); writeSkippedPairs(keys); }
+function forgetSkippedPair(key: string) { const keys = readSkippedPairs(); if (keys.delete(key)) writeSkippedPairs(keys); }
+
 const SOURCE_LABEL: Record<ReviewSource, string> = {s36: 'S36 추천', b36: 'B36 추천', doubtful: '다시 확인'};
 const UNDO_DEPTH = 5;
 const PAGE = 20;
@@ -69,6 +80,8 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
   const cursor = useRef<string | null>(null);
   const more = useRef(false);
   const done = useRef(new Set<string>());
+  // Skipped rows are remembered on this device and come back only after everything else.
+  const deferred = useRef<ReviewItem[]>([]);
   const card = useRef<HTMLDivElement>(null);
   const drag = useRef<{id: number; x: number; y: number; t: number} | null>(null);
   const alive = useRef(true);
@@ -90,7 +103,7 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
     return () => window.removeEventListener(CHARACTER_REVIEW_EVENT, read);
   }, []);
 
-  /** Rows this device already handled (queued, decided or skipped this session) never reappear. */
+  /** Rows this device already handled (queued or decided this session) never reappear; skipped rows go last. */
   const fresh = useCallback((items: ReviewItem[]) => {
     const hidden = queuedReviewPairs();
     return items.filter(item => {
@@ -112,8 +125,14 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
       if (restart) setTotal(feed.counts.total);
       setQueue(current => {
         const seen = new Set(current.map(item => reviewPairKey(item.targetId, item.assetId)));
-        const added = fresh(feed.items).filter(item => !seen.has(reviewPairKey(item.targetId, item.assetId)));
-        return restart ? fresh(feed.items) : [...current, ...added];
+        const skipped = readSkippedPairs();
+        const incoming = fresh(feed.items);
+        if (restart) deferred.current = [];
+        const later = new Set(deferred.current.map(item => reviewPairKey(item.targetId, item.assetId)));
+        for (const item of incoming){ const key = reviewPairKey(item.targetId, item.assetId); if (skipped.has(key) && !later.has(key)){ deferred.current.push(item); later.add(key); } }
+        const normal = incoming.filter(item => !skipped.has(reviewPairKey(item.targetId, item.assetId)));
+        const added = normal.filter(item => !seen.has(reviewPairKey(item.targetId, item.assetId)));
+        return restart ? normal : [...current, ...added];
       });
       setState({phase: 'ready', ready: feed.ready});
     } catch (reason) {
@@ -141,6 +160,13 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
     return () => controller.abort();
   }, [queue, state.phase, load]);
 
+  // Skipped candidates wait until everything else is done; then the user can go through them again.
+  const replaySkipped = () => {
+    const back = deferred.current.filter(item => !done.current.has(reviewPairKey(item.targetId, item.assetId)));
+    deferred.current = [];
+    setQueue(back);
+  };
+
   const current = queue[0];
   const act = useCallback((action: Action) => {
     const item = queue[0];
@@ -154,8 +180,12 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
       } catch (reason) { setNotice(errorText(reason)); setOffset({x: 0, y: 0}); return; }
       setReviewed(value => value + 1);
       void flushCharacterReview().catch(() => {});
+      forgetSkippedPair(key);
+      done.current.add(key);
+    } else {
+      rememberSkippedPair(key);
+      deferred.current = [...deferred.current.filter(row => reviewPairKey(row.targetId, row.assetId) !== key), item];
     }
-    done.current.add(key);
     setNotice('');
     setOffset({x: 0, y: 0});
     setUndo(stack => [...stack, {action, item, operationId}].slice(-UNDO_DEPTH));
@@ -173,7 +203,9 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
       } catch (reason) { setNotice(errorText(reason)); return; }
       setReviewed(value => Math.max(0, value - 1));
     }
-    done.current.delete(reviewPairKey(last.item.targetId, last.item.assetId));
+    const lastKey = reviewPairKey(last.item.targetId, last.item.assetId);
+    done.current.delete(lastKey);
+    if (last.action === 'skipped'){ forgetSkippedPair(lastKey); deferred.current = deferred.current.filter(row => reviewPairKey(row.targetId, row.assetId) !== lastKey); }
     setUndo(stack => stack.slice(0, -1));
     setQueue(rest => [last.item, ...rest.filter(row => reviewPairKey(row.targetId, row.assetId) !== reviewPairKey(last.item.targetId, last.item.assetId))]);
   }, [undo, libraryId]);
@@ -246,6 +278,7 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
     {state.phase === 'ready' && state.ready && !current && <div className="empty-state review-empty">
       <h2>모두 검토했습니다</h2>
       <p>{pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 캐릭터 갤러리에 나타납니다.` : 'PC가 새 후보를 보내면 여기에 나타납니다.'}</p>
+      {!cursor.current && deferred.current.length > 0 && <Button onClick={replaySkipped}>건너뛴 {deferred.current.length}개 다시 보기</Button>}
     </div>}
     {state.phase === 'ready' && state.ready && current && <div className="review-body">
       <div ref={card} className="review-card" data-hint={hint} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; setOffset({x: 0, y: 0}); }}

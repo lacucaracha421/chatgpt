@@ -147,7 +147,7 @@ describe('tab return retention',()=>{
     await act(async()=>{});expect(listCalls()).toHaveLength(3);expect(detailCalls()).toHaveLength(2);
   });
 
-  it('retries failed artwork on return, and reloads changed digest/revision without reusing the old source',async()=>{
+  it('retries failed artwork on return, and reloads a changed digest, and keeps the image across a revision-only change',async()=>{
     let work={...item,artworkVersions:{cover:{thumbnail:'digest-1'}}},revision='r1';
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision}:{...page,revision,items:[work]});
     mocks.native.mockRejectedValueOnce(new Error('media offline')).mockImplementation(async(_op,payload)=>({url:`https://example.invalid/${payload.revision}-${payload.digest}`}));
@@ -160,9 +160,13 @@ describe('tab return retention',()=>{
     work={...work,artworkVersions:{cover:{thumbnail:'digest-2'}}};pull(list());
     await waitFor(()=>expect(screen.getByRole('img',{name:item.name}).getAttribute('src')).toContain('digest-2'));
     expect(artworkCalls('cover')).toHaveLength(4);
-    revision='r2';pull(list());
-    await waitFor(()=>expect(screen.getByRole('img',{name:item.name}).getAttribute('src')).toContain('r2-digest-2'));
-    expect(artworkCalls('cover')).toHaveLength(5);
+    // A new publication revision with the same digest is the same image: no new ticket, same element.
+    const current=screen.getByRole('img',{name:item.name});
+    const reads=listCalls().length;revision='r2';pull(list());
+    await waitFor(()=>expect(listCalls().length).toBeGreaterThan(reads));await act(async()=>{});
+    expect(screen.getByRole('img',{name:item.name})).toBe(current);
+    expect(current.getAttribute('src')).toContain('r1-digest-2');
+    expect(artworkCalls('cover')).toHaveLength(4);
   });
 
   it('retries interrupted artwork and ignores a late ticket from the abandoned request',async()=>{

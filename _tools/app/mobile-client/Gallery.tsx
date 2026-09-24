@@ -1,6 +1,6 @@
 import {usePullToRefresh} from './usePullToRefresh';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState,type ReactNode} from 'react';
-import {useVirtualizer} from '@tanstack/react-virtual';
+import {observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PlayIcon, PhotoIcon} from '@heroicons/react/24/outline';
 import type {Asset} from './types';
 import {dateLabel, justifiedRows, rowHeight} from './model';
@@ -29,6 +29,15 @@ function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: As
   </button>;
 }
 
+/**
+ * A retained tab is hidden with display:none, which reports a zero-size scroller. Passing that
+ * on would shrink the rendered rows to the overscan and unmount the tiles below it, so every
+ * returning tab re-created and re-decoded their images (a visible flicker). The last real size
+ * is kept instead; a later real resize still lays the rows out again.
+ */
+const observeShownRect = (instance: Virtualizer<HTMLDivElement, Element>, callback: (rect: {width: number; height: number}) => void) =>
+  observeElementRect(instance, rect => { if (rect.width > 0 && rect.height > 0) callback(rect); });
+
 export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, intro, onRefresh, busy=false, stale=false}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean}) {
   const parent = useRef<HTMLDivElement>(null);
   const pull=usePullToRefresh(parent,onRefresh,busy,paused);
@@ -42,7 +51,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   },[intro!=null]);
   const [width, setWidth] = useState(600);
   const rows = useMemo(() => justifiedRows(items, width, rowHeight(density, width)), [items, width, density]);
-  const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, estimateSize: i => rows[i].height + 10, overscan: 2,scrollMargin:introHeight});
+  const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, estimateSize: i => rows[i].height + 10, overscan: 2,scrollMargin:introHeight,observeElementRect:observeShownRect});
   const oldRows = useRef(rows);
   useLayoutEffect(() => {
     const scroll = parent.current;

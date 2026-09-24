@@ -1,5 +1,5 @@
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
-import {afterEach, beforeEach, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {CollectionDetail, CollectionPage} from './collectionModel';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
@@ -161,4 +161,58 @@ it('does not show an edit the device could not store as queued',async()=>{
   expect(within(personal()).queryByText('전송 대기')).toBeNull();
   expect(within(personal()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
   expect(commands()).toHaveLength(0);
+});
+
+describe('artwork across a confirmed Showcase edit',()=>{
+  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-art img')];
+  const detailCalls=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/w');
+  const artworkCalls=()=>mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork');
+  /** The list card loads before the detail opens (a hidden list does not load artwork). */
+  async function openWithArtwork(){
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    await waitFor(()=>expect(artwork()).toHaveLength(1));
+    fireEvent.click(screen.getByText(base.name));
+    await screen.findByRole('region',{name:'내 기록'});
+    await waitFor(()=>expect(artwork()).toHaveLength(2));
+  }
+
+  it('keeps the same image elements and URLs when only the publication revision moved',async()=>{
+    item={...base,selectedWorkArtworkId:'cover',artworkVersions:{cover:{thumbnail:'a'.repeat(64)}}};
+    // Native answers a digest-keyed cache URL, which does not depend on the revision.
+    mocks.native.mockImplementation(async(_op:string,payload:{digest:string})=>({url:`https://app.lakomics.local/media-cache/1/${payload.digest.slice(0,8)}`}));
+    await openWithArtwork();
+    const before=artwork(),sources=before.map(image=>image.getAttribute('src')),requested=artworkCalls().length;
+    fireEvent.click(within(personal()).getByRole('button',{name:/쇼케이스/}));
+    await waitFor(()=>expect(readCollectionEdits()).toEqual({}));
+    await waitFor(()=>expect(detailCalls().length).toBeGreaterThan(1));
+    await waitFor(()=>expect(within(personal()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('true'));
+    await act(async()=>{});
+    expect(revision).toBe('r2');
+    const after=artwork();
+    expect(after.map(image=>image.getAttribute('src'))).toEqual(sources);
+    after.forEach((image,index)=>expect(image).toBe(before[index]));
+    expect(document.querySelector('.collection-art-placeholder')).toBeNull();
+    expect(artworkCalls()).toHaveLength(requested);
+  });
+
+  it('keeps showing the old image until a revision-keyed replacement is ready',async()=>{
+    item={...base,selectedWorkArtworkId:'cover'};
+    const next=Promise.withResolvers<{url:string}>();
+    mocks.native.mockImplementation(async(_op:string,payload:{revision:string})=>payload.revision==='r1'?{url:'https://example.invalid/r1'}:next.promise);
+    await openWithArtwork();
+    const before=artwork();
+    fireEvent.click(within(personal()).getByRole('button',{name:/쇼케이스/}));
+    await waitFor(()=>expect(artworkCalls().some(([, payload])=>payload.revision==='r2')).toBe(true));
+    // Waiting for the new ticket never falls back to the placeholder.
+    expect(document.querySelector('.collection-art-placeholder')).toBeNull();
+    expect(artwork().map(image=>image.getAttribute('src'))).toEqual(['https://example.invalid/r1','https://example.invalid/r1']);
+    await act(async()=>next.resolve({url:'https://example.invalid/r2'}));
+    // The open detail swaps in place; the hidden list card follows once it is shown again.
+    await waitFor(()=>expect(artwork()[1].getAttribute('src')).toBe('https://example.invalid/r2'));
+    expect(artwork()[0].getAttribute('src')).toBe('https://example.invalid/r1');
+    fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
+    await waitFor(()=>expect(artwork()[0].getAttribute('src')).toBe('https://example.invalid/r2'));
+    expect(document.querySelector('.collection-list .collection-art-placeholder')).toBeNull();
+    artwork().slice(0,1).forEach((image,index)=>expect(image).toBe(before[index]));
+  });
 });

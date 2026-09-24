@@ -66,9 +66,11 @@ describe('character review screen',()=>{
     swipe(0,-400);
     expect(readReviewIntents()['d:a3']).toBeUndefined();
     expect(await screen.findByText('모두 검토했습니다')).toBeTruthy();
+    expect(screen.getByRole('button',{name:'건너뛴 1개 다시 보기'})).toBeTruthy();
     // A small drag snaps back instead of deciding.
     cleanup();install(feed());mount();
-    // a1 and a2 are still queued, so only the skipped a3 comes back.
+    // a1 and a2 are still queued; the skipped a3 is remembered and waits behind everything else.
+    fireEvent.click(await screen.findByRole('button',{name:'건너뛴 1개 다시 보기'}));
     expect(await screen.findByText('둘째')).toBeTruthy();
     expect(screen.queryByText('루미')).toBeNull();
     // A slow, short drag snaps back; the same distance as a quick fling decides.

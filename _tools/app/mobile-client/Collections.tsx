@@ -44,9 +44,21 @@ function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, 
     signal.addEventListener('abort',cancel,{once:true}); if(artworkActive<4)start();else artworkQueue.push(start);
   });
 }
+/**
+ * What identifies an artwork's bytes. A published digest names them exactly, and native keys its
+ * cache by it, so a publication revision alone (every personal edit, such as Showcase, bumps it)
+ * is not a new image. Without a digest the revision is the only version there is.
+ */
+function artworkVersion(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
+  return id?item.artworkVersions?.[id]?.[original?'original':'thumbnail']||revision:'';
+}
 function artworkSource(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
-  const variant=original?'original':'thumbnail';
-  return JSON.stringify([item.id,id??null,item.coverAssetId??null,revision,variant,id?item.artworkVersions?.[id]?.[variant]??'':'']);
+  return JSON.stringify([item.id,id??null,item.coverAssetId??null,original?'original':'thumbnail',artworkVersion(item,id,revision,original)]);
+}
+/** Resolves once `url` is decoded (or cannot be), so a replacement never blanks the old image. */
+async function decoded(url:string) {
+  const image=new Image();image.src=url;
+  try{await image.decode?.();}catch{/* the element's own onError reports it */}
 }
 const validArtworkUrl=(url:string)=>/^https:\/\//.test(url)||(import.meta.env.DEV&&url.startsWith('data:image/'));
 type LoadedArtwork = {source:string;url:string};
@@ -58,21 +70,25 @@ type LoadedArtwork = {source:string;url:string};
 function Artwork({item,id,revision,original=false,active=true,label,physical}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string;physical?:'book'|'game'}) {
   const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [image,setImage]=useState<LoadedArtwork|null>(null), [failed,setFailed]=useState<string|null>(null);
   const [flat,setFlat]=useState<string|null>(null);
-  const source=artworkSource(item,id,revision,original),loaded=useRef<string|null>(null);
+  const source=artworkSource(item,id,revision,original),loaded=useRef<string|null>(null),shown=useRef<string|null>(null);
   useEffect(()=>{if(original || !host.current)return; if(!('IntersectionObserver' in window)){setVisible(true);return;} const observer=new IntersectionObserver(entries=>setVisible(entries.some(entry=>entry.isIntersecting)),{rootMargin:'120px'});observer.observe(host.current);return()=>observer.disconnect();},[original]);
   useEffect(()=>{
     if(!active||!visible||(!id&&!item.coverAssetId)||loaded.current===source)return;
     setFailed(null);const controller=new AbortController();
-    void artworkTicket(item,id,revision,original,controller.signal).then(ticket=>{
+    void artworkTicket(item,id,revision,original,controller.signal).then(async ticket=>{
       if(controller.signal.aborted)return;
       if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');
+      // A replacement keeps the shown image until its own bytes are ready; the same URL just stays.
+      if(shown.current&&shown.current!==ticket.url)await decoded(ticket.url);
+      if(controller.signal.aborted)return;
       loaded.current=source;setImage({source,url:ticket.url});
     }).catch(()=>{if(!controller.signal.aborted)setFailed(source);});
     return()=>controller.abort();
   },[source,active,visible]);
-  const broken=failed===source,ready=image?.source===source&&!broken;
+  const broken=failed===source,ready=!!image&&!broken&&(!!id||!!item.coverAssetId);
+  shown.current=ready?image.url:null;
   const solid=ready&&physical&&flat!==source;
-  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={revision} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} onError={()=>{loaded.current=null;setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
+  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} onError={()=>{loaded.current=null;setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
 }
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};
@@ -214,9 +230,10 @@ function HeroArtwork({item,id,revision,active}:{item:CollectionDetail;id:string;
       if(controller.signal.aborted)return;
       const image=new Image();image.src=ticket.url;await image.decode();
       if(!controller.signal.aborted){loaded.current=source;setOriginal({source,url:ticket.url});}
-    }).catch(()=>{});return()=>controller.abort();
+    // A failed replacement stops showing an original that no longer matches this artwork.
+    }).catch(()=>{if(!controller.signal.aborted)setOriginal(current=>current?.source===source?current:null);});return()=>controller.abort();
   },[source,active]);
-  return <div className="collection-backdrop"><Artwork item={item} id={id} revision={revision} active={active}/>{available&&original?.source===source&&<img className="collection-hero-original" src={original.url} alt="" onError={()=>{loaded.current=null;setOriginal(null);}}/>}</div>;
+  return <div className="collection-backdrop"><Artwork item={item} id={id} revision={revision} active={active}/>{available&&original&&<img className="collection-hero-original" src={original.url} alt="" onError={()=>{loaded.current=null;setOriginal(null);}}/>}</div>;
 }
 function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:string;active:boolean}) {
   const seasons=item.series?.seasons??[];
