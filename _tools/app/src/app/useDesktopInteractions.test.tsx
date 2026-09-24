@@ -27,3 +27,18 @@ it("routes mouse button four through the shared back request", () => {
 
   expect(onBack).toHaveBeenCalledOnce();
 });
+
+it("reads mouse button four from pointerup when the compatibility mouseup is suppressed", () => {
+  const onBack = vi.fn(() => true);
+  render(<Harness onBack={onBack} />);
+
+  // e.g. over the video element, which cancels pointerdown
+  fireEvent.pointerUp(window, { button: 3 });
+  expect(onBack).toHaveBeenCalledOnce();
+
+  // a normal press delivers pointerup and then mouseup in the same task: still one back
+  onBack.mockClear();
+  fireEvent.pointerUp(window, { button: 3 });
+  fireEvent.mouseUp(window, { button: 3 });
+  expect(onBack).toHaveBeenCalledOnce();
+});
