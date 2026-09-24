@@ -22,6 +22,7 @@ import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { ViewToolbar } from "../layout/ViewToolbar";
+import { collectPages, faultAssets, FaultPlayButton, faultSelectionItem, useFaultGame, type FaultScope } from "../games/FaultGame";
 import { CharacterRegistry, characterDraft, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
 import { needsReferenceConfirmation, useReferenceRegionInspection } from "./ReferenceRegionChoices";
@@ -283,12 +284,21 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     </>}
   </AnchoredPanel>;
   const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 분류 다시 켜기</Button> : null;
+  // FAULT: the character, group or series gallery offers its whole scope (read the same way as the gallery).
+  const playFault = useFaultGame();
+  const faultScope: FaultScope | null = !picking && (faultAssets(page.items).length > 0 || page.nextCursor !== null)
+    ? (signal) => collectPages((after) => !targetId && !currentGroup && excludedOnly
+      ? hubApi.excludedAssets(series.classificationId, after, 100)
+      : hubApi.browse({ seriesId: series.classificationId, targetId: targetId ?? null, groupId: currentGroup?.id ?? null,
+        ...(!targetId && !currentGroup ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter, all: seriesGalleryView === "all" } : { all }), after, limit: 100 }), signal)
+    : null;
   const contextItems: ContextMenuItem[] = picking ? [
     { id: "cancel-pick", label: "이미지 선택 취소", onSelect: () => finishPick(false) },
   ] : [
     ...libraryContextItems({ count: selectedIds.length, busy, albums,
       sourceUrls: page.items.filter(asset => selection.ids.has(asset.id)).map(asset => asset.sourceUrl), onMessage: setMessage,
       onAlbum: id => void action(() => gateway.patchAssetAlbums({ assetIds: selectedIds, addAlbumIds: [id], removeAlbumIds: [] })) }),
+    ...faultSelectionItem(playFault, page.items.filter(asset => selection.ids.has(asset.id))),
     { id: "info", label: "정보 열기", disabled: !selectedIds.length, onSelect: () => setInspector(true) },
     { id: "refresh", label: "새로고침", onSelect: refresh },
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: busy || !selectedIds.length, onSelect: () => void action(async () => { await gateway.trashAssets(selectedIds); setUndo(selectedIds); setSelection(emptySelection()); }) },
@@ -309,6 +319,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => beginPick("references", openEditor(current))}>레퍼런스 추가</Button>
         </>)}
         {!picking && !currentGroup && editorPanel}
+        <FaultPlayButton scope={faultScope} />
         {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
           { id: "pick-cover", label: "시리즈 표지 선택", onSelect: () => beginPick("hero") },
           ...(series.heroAssetId ? [{ id: "clear-cover", label: "시리즈 표지 해제", onSelect: () => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null })) }] : []),

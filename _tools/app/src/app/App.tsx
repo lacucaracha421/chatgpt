@@ -67,6 +67,7 @@ import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
 import { reattachVaultImport } from "../external-vault/vaultImportJob";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
+import { FaultGameProvider } from "../games/FaultGame";
 
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
@@ -727,6 +728,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
   return (
     <PrivacyProvider privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
+      <FaultGameProvider>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
         <WorkspaceChromeProvider scope={JSON.stringify(view)}>
         <AppShell
@@ -902,6 +904,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
       {mangaViewer && <Suspense fallback={null}><MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} onClose={() => setMangaViewer(null)} /></Suspense>}
+      </FaultGameProvider>
     </PrivacyProvider>
   );
 }
