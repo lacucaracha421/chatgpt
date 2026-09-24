@@ -186,13 +186,13 @@ Second batch (same evening; details will be given at implementation time):
 Mobile:
 - Notes: when the keyboard opens, lift the editor by the keyboard height so the text being typed stays visible.
 - ~~Manga Catalog reader: remove 이어읽기 (continue reading); add a page slider to jump directly to any page (e.g. page 25 of 40).~~ Done in 0.8.2–0.8.3 (`2af8d1e`, `f6ac798`); accepted on the tablet 2026-09-24.
-- File exchange between the PC and mobile through the Lakomics server, replacing the current LocalSend workflow: send a file and it arrives on the other device right away.
+- File exchange between the PC and mobile through the Lakomics server, replacing the current LocalSend workflow: send a file and it arrives on the other device right away. Decided 2026-09-24: both directions; received files go to the device's Downloads folder; transfers are one-off, so the server deletes them soon after delivery (short expiry for undelivered files).
 
 PC:
 - Lightweight processing mode ("데이터 처리용 라이트모드"): while the user is on the mobile app, keep only the PC work that mobile features depend on running and pause nearly everything else.
 
 PC and mobile:
-- Notes like a notes app: checklists, reordering, and similar editing features, on both PC and mobile.
+- Notes like a notes app, on both PC and mobile. Scope chosen 2026-09-24: checklist notes (items can be checked and reordered), note colours, and Markdown rendering. Design must fit the existing encrypted notes sync.
 
 Collector (`extension-list/`):
 - A better way into subfolders than double-tap (open question).
