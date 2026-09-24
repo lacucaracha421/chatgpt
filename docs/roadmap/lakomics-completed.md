@@ -4,6 +4,10 @@ This is the archive for completed, superseded, and historical Lakomics work. It 
 
 ## Closure checkpoint — 2026-09-24 — Rust test runtime
 
+### SIMILARITY-002B — PDQ mirror/rotation candidates
+
+Status: `CLOSED` — closed 2026-09-24 at the user's decision after measurement; no matching change shipped. Commit `18f111b` added a read-only `pdq_mirror_audit` example and an exact mirrored fingerprint. Running it over the whole active library (8,574 eligible images) found **0** mirrored near-duplicates and **0** false positives at distance ≤ 20, and no near-symmetric images. The bit-level mirror approximation was unusable (median hamming 242/256, probably an off-by-one in the DCT frequency parity), so a historical scan would need re-decoding. Reopen only with a concrete mirrored repost; rotation was not measured.
+
 ### DEV-TEST-001 — Rust test suite runtime
 
 Status: `DONE` — commit `38e411a` cut the full Rust suite from about 6 minutes to about 70 s: bundled SQLite built with `SQLITE_DEFAULT_MEMSTATUS=0` (the global memory-statistics mutex serialized test threads), test HTTP fixtures shut down explicitly instead of waiting for client/idle timeouts, and catalog-scale fixtures are `#[ignore]`d (run with `--ignored`). Previously measured: about 4–5 minutes of run time plus about a minute of linking.

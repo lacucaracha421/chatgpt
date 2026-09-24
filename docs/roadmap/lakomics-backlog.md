@@ -13,13 +13,14 @@ Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is impl
 1. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. Next: switch 젠레스 (시시아 excluded), 명조, 아이돌 and 리버스 on the user's PC, spot-check S36 acceptances, then widen.
 2. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
 3. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
-4. **MOBILE-PARITY-001** — Film details, personal metadata edits, similarity review and Library Trash on Android, in that order.
+4. **VAULT-ENC-001** — Lakomics-encrypted Private Vault (ADR-0039); takes priority over further mobile work.
+5. **MOBILE-PARITY-001** — Film details, personal metadata edits, similarity review and Library Trash on Android, in that order.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
 `MEDIA-R2-001` is closed at the currently satisfactory media-delivery scope; extra variants are not required. `CHAR-AUTO-001` is closed for this improvement pass; future concrete classification mistakes can open bounded follow-up work rather than keeping a permanent accuracy task active.
 
-Later / optional: AV source-and-candidate selection (`LONG-001`), image mirror/rotation matching (`SIMILARITY-002B`), Artist hub (`ARTIST-001`), optional provider work (`CATALOG-002B`), Jev decision-model evaluation (`AI-JEV-001`), and Zed IDE workflow evaluation (`DEV-ZED-001`). Similar-video calibration stays deferred until representative samples naturally appear.
+Later / optional: AV source-and-candidate selection (`LONG-001`), Artist hub (`ARTIST-001`), optional provider work (`CATALOG-002B`), Jev decision-model evaluation (`AI-JEV-001`), and Zed IDE workflow evaluation (`DEV-ZED-001`). Similar-video calibration stays deferred until representative samples naturally appear.
 
 ## Status legend
 
@@ -120,6 +121,12 @@ Keep destructive global media deletion under `MOBILE-003`; do not use this item 
 
 Acceptance: a supported edit can be made with PC off, survives offline retry/response loss, becomes authoritative exactly once, and appears later on PC without a manual publish/sync step.
 
+## MOBILE-BUG-002 — Mobile Catalog search does nothing
+
+Status: `TODO` — bug reported 2026-09-24.
+
+Search in the Android Catalog does not work. Reproduce first on the current APK: record the query, whether any request reaches the server (`searchMode=mobile` search-page path), the response, and whether the UI ignores it. Then fix the failing layer and verify search together with category inclusion, excluded tags and paging.
+
 ## MOBILE-008 — Catalog update requests and status
 
 Status: `IN_PROGRESS` — server refresh worker and Android request/status UI already exist.
@@ -133,13 +140,27 @@ Risk: HIGH.
 
 Global cross-device deletion remains intentionally deferred. Require tombstones, grace period, acknowledgement/reconciliation, explicit purge, conflict handling, and recovery before activation.
 
+## VAULT-ENC-001 — Lakomics-encrypted Private Vault (ADR-0039)
+
+Status: `IN_PROGRESS` — started 2026-09-24; takes priority over further mobile work.
+
+Replace VeraCrypt with Lakomics' own per-file encryption so a USB plugged into another computer shows nothing readable. The user copies the VeraCrypt contents (including `.lakomics/`) to the trusted PC, formats the 64 GB USB as exFAT, then imports.
+
+Stages:
+1. Crypto core: vault format, key wrapping (password, recovery key), chunked AES-256-GCM objects with seekable reads, encrypted atomic index, orphan cleanup. No UI.
+2. Create/unlock/lock, remember-on-this-PC (OS credential store), import from a plaintext folder keeping old titles/custom thumbnails, encrypted thumbnails, browse through the media protocol with `no-store`.
+3. In-app add, export, vault trash and empty; ranged video playback in the in-app player.
+4. Native acceptance on Windows and Linux: real USB removal, credential store, large videos.
+
+Also fix the bugs found in the 2026-09-24 audit where they survive the rewrite: scans that delete titles/thumbnails after partial failures, uncached full-image responses, per-tile status probes, and focus-only removal detection.
+
 ## MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
 
 Status: `TODO` — user-selected scope, 2026-09-24. Each slice needs its own server/APK rollout authorization.
 
 The user chose these desktop features for Android, in this suggested order (smallest and safest first):
 1. **Film details** (read-only): show `WORKS-001` cast, release info and related works in mobile Collections. Publish the Film snapshot block alongside the TV `series` block (`src-tauri/src/cloud/collections.rs`, `committed_series`), then render it; local related works open the local work.
-2. **Personal Collection metadata edits**: my rating, Showcase and memo, through the `MOBILE-WRITE-002` durable intent / expected-revision / receipt model proven by bookmarks. Works with the PC off and appears on PC without a manual sync.
+2. **Personal Collection metadata edits** ([design](../research/mobile-collection-personal-edits-design-20260924.md), decisions recorded 2026-09-24): my rating, Showcase membership and memo, through the `MOBILE-WRITE-002` durable intent / expected-revision / receipt model proven by bookmarks. Works with the PC off and appears on PC without a manual sync.
 3. **Similarity review**: mobile shows the open review pairs and records `keep_existing` / `replace_existing` / `keep_both`; the PC applies file-level results. A decision must never delete or replace an original before the PC applies it under the existing ADR-0007 rules.
 4. **Library Trash**: move assets to the Library Trash from mobile, and browse/restore it. This activates `MOBILE-003`: it must use the tombstone, grace-period, acknowledgement and recovery protocol, never immediate deletion. Emptying the trash stays PC-only unless separately decided.
 
@@ -190,9 +211,8 @@ Other follow-up candidates, without a fixed order:
 - **Mobile Manga Catalog edition review:** define candidate/evidence sharing and decision authority; published edition groups alone are not pending review candidates. Keep this separate from Asset duplicate review.
 - **Collection 3D model viewer:** decide supported model formats, touch interaction and device performance limits; this is not the existing physical-cover renderer.
 - **Multi-person character competition:** collect concrete mistakes and improve the affected arbitration cases without reopening the entire accepted classification pass.
-- **Film Collection polish (`WORKS-001`):** cast/director, release information and related works, without rebuilding the existing Film/TV foundation.
+- **Film Collection polish (`WORKS-001`):** implemented on desktop and mobile 2026-09-24; remaining is in-app acceptance.
 - **AV metadata and cover acquisition (`LONG-001`):** fetch candidates and let the user choose artwork without silently replacing manual choices.
-- **Mirror/rotation similarity (`SIMILARITY-002B`):** extend matching after ordinary historical discovery is useful.
 
 Keep larger foundation work separately scoped: durable mobile metadata (`MOBILE-CACHE-001`), additional mobile edit domains (`MOBILE-WRITE-002`), remaining Character/Collection ownership and publication cleanup (`CLOUD-POST-001`), server-owned jobs with PC workers (`CLOUD-WORK-001`), and safe global deletion (`MOBILE-003`). This recommendation does not restart completed authority rollouts or promote deferred architecture work.
 
@@ -687,12 +707,6 @@ Keep clustering/re-identification research deferred while explicit-reference cla
 
 # Similarity / media identity
 
-## SIMILARITY-002B — PDQ geometric-invariance candidates
-
-Status: `TODO`
-
-After historical discovery is useful, evaluate mirror/flip and 90/180/270-degree transformed reposts. Prefer query-time transform candidates over unconditional full reindex, preserve the existing PDQ final gate, and benchmark false positives on real artwork before enabling by default.
-
 ## SIMILARITY-003 — Similar-video fingerprinting and review
 
 Status: `PARTIAL` — implementation exists; verification is deferred because representative duplicate/variant videos have not naturally appeared yet.
@@ -822,6 +836,5 @@ This is guidance, not authorization to start or mutate production data.
 2. `CLOUD-POST-001` only the residual publication/compatibility scope, when its consumer and ownership prerequisites are met; do not repeat completed authority rollouts.
 3. `WORKS-001` small Film polish.
 4. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.
-5. `SIMILARITY-002B` transform matching when useful.
 
 `CLOUD-UI-001` was already closed on 2026-09-16 and must not be selected again. HOLD items should not be promoted without a new product reason.
