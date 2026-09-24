@@ -745,3 +745,7 @@ mod tests {
         assert_eq!(low.iterations(), MIN_STORED_PBKDF2_ITERATIONS);
     }
 }
+
+#[cfg(test)]
+#[path = "android_fixture.rs"]
+mod android_fixture;

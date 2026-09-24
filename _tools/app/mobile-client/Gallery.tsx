@@ -7,10 +7,16 @@ import type {Asset} from './types';
 import {dateLabel, justifiedRows, rowHeight} from './model';
 import {invalidateTicket, loadThumbnail, mediaTicket, prefetchThumbnails} from './media';
 
-function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean}) {
+/**
+ * Private Vault tiles. `asset.preview` is the native vault route, used as-is: no tickets,
+ * thumbnail loading/prefetch, original warming or retries through the library media client.
+ */
+export type GalleryVaultSource = {label(asset: Asset): string};
+
+function Tile({asset, index, width, height, onOpen, onReady, paused, vault}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; vault?:GalleryVaultSource}) {
   const host=useRef<HTMLButtonElement>(null);
   useEffect(()=>{
-    const element=host.current;if(paused||!element||!window.IntersectionObserver)return;
+    const element=host.current;if(paused||vault||!element||!window.IntersectionObserver)return;
     let visible:AbortController|undefined;
     const observer=new IntersectionObserver(entries=>{
       if(entries.some(entry=>entry.isIntersecting)){
@@ -19,24 +25,29 @@ function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: As
     },{root:element.closest('.gallery-scroll'),rootMargin:'0px'});
     observer.observe(element);
     return()=>{observer.disconnect();visible?.abort();};
-  },[asset.id,asset.kind,asset.pending,paused]);
+  },[asset.id,asset.kind,asset.pending,paused,vault]);
   const [preview, setPreview] = useState(asset.preview);
   const [retried, setRetried] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    if (!paused && !asset.preview) void loadThumbnail(asset, controller.signal).then(ready => {
+    if (!paused && !vault && !asset.preview) void loadThumbnail(asset, controller.signal).then(ready => {
       if (!controller.signal.aborted && ready.preview) {setPreview(ready.preview); onReady(ready);}
     }, () => {});
     return () => controller.abort();
-  }, [asset.id, asset.preview, asset.thumbnail_available, asset.pending, onReady, paused]);
+  }, [asset.id, asset.preview, asset.thumbnail_available, asset.pending, onReady, paused, vault]);
   const retry = () => {
+    if (vault) {setPreview(undefined); return;}
     if (retried || asset.pending || asset.thumbnail_available === false) return;
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <button ref={host} className="media-tile" style={{width}} onClick={() => onOpen(index)} aria-label={`${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} data-asset-id={asset.id}>
+  return <button ref={host} className="media-tile" style={{width}} onClick={() => onOpen(index)} aria-label={vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} data-asset-id={asset.id}>
     <span className="tile-picture" style={{height}}>
-      {preview ? <img src={preview} alt="" draggable={false} onError={retry}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
+      {preview ? <img src={preview} alt="" draggable={false} onError={retry} onLoad={vault && !asset.ratio && !(asset.width && asset.height) ? event => {
+        // A vault item without index dimensions takes its shape from the decoded thumbnail.
+        const {naturalWidth: w, naturalHeight: h} = event.currentTarget;
+        if (w > 0 && h > 0) onReady({...asset, ratio: w / h});
+      } : undefined}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
       {asset.kind === 'video' && <span className="video-mark" aria-label="영상"><PlayIcon/></span>}
     </span>
   </button>;
@@ -51,7 +62,9 @@ function Tile({asset, index, width, height, onOpen, onReady, paused}: {asset: As
 const observeShownRect = (instance: Virtualizer<HTMLDivElement, Element>, callback: (rect: {width: number; height: number}) => void) =>
   observeElementRect(instance, rect => { if (rect.width > 0 && rect.height > 0) callback(rect); });
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, intro, onRefresh, busy=false, stale=false}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean}) {
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, intro, onRefresh, busy=false, stale=false, vault}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+  /** Private Vault mode: same layout and gestures, no library media client. */
+  vault?:GalleryVaultSource}) {
   const parent = useRef<HTMLDivElement>(null);
   const pull=usePullToRefresh(parent,onRefresh,busy,paused);
   const introduction=useRef<HTMLDivElement>(null);
@@ -91,7 +104,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   const lastRow = virtualRows.length ? virtualRows[virtualRows.length - 1].index : -1;
   useEffect(() => {
     const element = parent.current;
-    if (paused || lastRow < 0 || !element || element.clientHeight <= 0) return;
+    if (paused || vault || lastRow < 0 || !element || element.clientHeight <= 0) return;
     const controller = new AbortController(), ahead: Asset[] = [];
     let height = 0;
     for (let index = lastRow + 1; index < rows.length && height < element.clientHeight * 2; index++) {
@@ -99,7 +112,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     }
     prefetchThumbnails(ahead, controller.signal);
     return () => controller.abort();
-  }, [lastRow, rows, paused]);
+  }, [lastRow, rows, paused, vault]);
   const checkEnd = () => {const element = parent.current; if (!paused && element && element.clientHeight > 0 && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
   useEffect(checkEnd, [items.length, onNearEnd, paused]);
   return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onScroll={event => {if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
@@ -108,7 +121,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => <div className="gallery-row" key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
-        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused}/>) }
+        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} vault={vault}/>) }
       </div>)}
     </div>
   </div>;

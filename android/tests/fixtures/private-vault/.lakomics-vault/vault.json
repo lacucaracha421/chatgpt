@@ -1,0 +1,17 @@
+{
+  "formatVersion": 1,
+  "vaultId": "00112233-4455-6677-8899-aabbccddeeff",
+  "kdf": {
+    "name": "pbkdf2-hmac-sha256",
+    "iterations": 600000,
+    "salt": "11111111111111111111111111111111"
+  },
+  "passwordWrap": {
+    "nonce": "313131313131313131313131",
+    "ciphertext": "9533a92c0c1b2bb28402414df0d0c9e9fd6457c519fc331e830a58ea54682031efaeda75bc555312d3fa91574d29c8ff"
+  },
+  "recoveryWrap": {
+    "nonce": "323232323232323232323232",
+    "ciphertext": "7a477dcc399f57d4dc0a516ad13ed00cc5392d39e3d77067a398e279fad3561b5103e446441e8c5b6c009853e013710f"
+  }
+}

@@ -23,15 +23,23 @@ import './Viewer.css';
  * The exclusion is composed from this value alone, so it can never outlive the origin that
  * carried it: an `assetId` belongs to whichever request was formed for the asset on screen.
  */
+/**
+ * Private Vault source. `original` is the native vault session route, used as-is: no tickets,
+ * prepared/decoded caches, neighbour prefetch, timing logs, info panel or asset actions.
+ */
+export type ViewerVaultSource = {original(asset: Asset): string; label(asset: Asset): string};
+
 export type ViewerCharacterContext = {targetId:string;name:string;libraryId:string;revision:string;protectedAssetIds:string[]};
 
-export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,reviewLibrary,onTrash,trashNotice}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,reviewLibrary,onTrash,trashNotice,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
   /** The library character-review decisions go to; set only when a PC adopted review. */
   reviewLibrary?:string|null;
   /** Move the Asset on screen to the Library Trash (no confirmation: it is reversible). */
   onTrash?(asset:Asset):void;
   /** The host's "휴지통으로 이동함 · 실행 취소" snackbar, rendered inside the modal viewer. */
-  trashNotice?:React.ReactNode}) {
+  trashNotice?:React.ReactNode;
+  /** Private Vault mode: same gestures, chrome and video controls; no library media or actions. */
+  vault?:ViewerVaultSource}) {
   const asset = items[index];
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
   const timing=useRef<{id:string;url?:string;span:ReturnType<typeof viewerTiming>}|undefined>(undefined);
@@ -39,7 +47,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const prefetches=useRef(new Map<string,{controller:AbortController; ticket:ReturnType<typeof mediaTicket>; decoded:Promise<void>}>());
   useEffect(()=>()=>{for(const work of prefetches.current.values())work.controller.abort();prefetches.current.clear();},[]);
   const [decoded, setDecoded] = useState<{id: string; url: string}>();
-  const original = decoded?.id === asset.id ? decoded.url : prepared.current.get(asset.id);
+  const original = vault ? vault.original(asset) : decoded?.id === asset.id ? decoded.url : prepared.current.get(asset.id);
+  // Vault images decode in place; the thumbnail covers the surface until the original has loaded.
+  const [loaded, setLoaded] = useState('');
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [info, setInfo] = useState(false);
@@ -86,6 +96,10 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const stallTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
   useEffect(() => {
+    if (vault) {
+      timing.current = undefined; setLoaded(''); setError(''); setChrome(true); gesture.current.points.clear();
+      return () => clearTimeout(stallTimer.current);
+    }
     const controller = new AbortController();
     const fromPrepared=prepared.current.has(asset.id)&&asset.kind!=='video'&&!retry;
     const span=viewerTiming(asset.id,asset.kind,fromPrepared);
@@ -118,6 +132,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   });
   useEffect(() => {setTransform({scale:1,x:0,y:0});}, [asset.id,asset.pending]);
   useEffect(() => {
+    if(vault)return;
     const neighbours=imageNeighbours(items,index).reverse().filter(item=>(item.size_bytes==null||item.size_bytes<=8*1024*1024)).slice(0,2);
     const retained=new Set([asset.id,...neighbours.map(item=>item.id)]);
     for(const [id,work] of prefetches.current)if(!retained.has(id)){work.controller.abort();prefetches.current.delete(id);}
@@ -175,9 +190,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
-    <div className={`viewer ${chrome ? 'chrome-visible' : ''}`}>
-      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{reviewLibrary&&!asset.pending&&<Button size="sm" variant="ghost" onClick={()=>{setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAdded('');setAddOpen(true);setChrome(true);}}>캐릭터에 추가</Button>}{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<IconButton label="분류" icon={TagIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/>{onTrash&&!asset.pending&&<IconButton label="휴지통으로" icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAddOpen(false);setChrome(true);onTrash(asset);}}/>}</div></header>
-      <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}`} onPointerDown={event => {
+    <div className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}`}>
+      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{!vault&&<>{reviewLibrary&&!asset.pending&&<Button size="sm" variant="ghost" onClick={()=>{setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAdded('');setAddOpen(true);setChrome(true);}}>캐릭터에 추가</Button>}{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<IconButton label="분류" icon={TagIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/>{onTrash&&!asset.pending&&<IconButton label="휴지통으로" icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAddOpen(false);setChrome(true);onTrash(asset);}}/>}</>}</div></header>
+      <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
         if (event.button > 0 || info || albumOpen || classificationOpen || exclusion || addOpen) return;
         if(asset.kind==='video'&&video.current){const rect=video.current.getBoundingClientRect();if(event.clientY>rect.bottom-64)return;}
         if(asset.kind!=='video')event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -213,12 +228,17 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           const saved=videoResume.current;if(saved.id!==asset.id)return;
           event.currentTarget.currentTime=Math.min(saved.time,Number.isFinite(event.currentTarget.duration)?event.currentTarget.duration:saved.time);
           if(saved.playing)void event.currentTarget.play().catch(() => {});
-        }} onError={() => {if(original){clearTimeout(stallTimer.current);setError('영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.');}}}/>
+        }} onError={event => {if(original){clearTimeout(stallTimer.current);setError(`영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.${vault?mediaErrorCode(event.currentTarget.error):''}`);}}} {...(vault?{controlsList:'nodownload noremoteplayback',disablePictureInPicture:true}:{})}/>
+          : vault ? <>
+            {asset.preview && loaded !== asset.id && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
+            <img key={asset.id} className="viewer-image" src={original} alt={vault.label(asset)} draggable={false} onLoad={() => setLoaded(asset.id)} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded === asset.id ? undefined : 0}}/>
+          </>
           : (original || asset.preview) ? <img key={asset.id} className="viewer-image" src={original || asset.preview} alt={asset.creator_name || asset.creator_handle || '저장한 이미지'} draggable={false} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
       </div>
-      {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {if(video.current)videoResume.current={id:asset.id,time:video.current.currentTime,playing:!video.current.paused};invalidateTicket(asset, 'original'); setRetry(value => value + 1);}}><ArrowPathIcon/>다시 시도</Button></div>}
+      {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {if(video.current)videoResume.current={id:asset.id,time:video.current.currentTime,playing:!video.current.paused};if(!vault)invalidateTicket(asset, 'original'); setRetry(value => value + 1);}}><ArrowPathIcon/>다시 시도</Button></div>}
       {transform.scale > 1 && <div className="zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={() => setTransform({scale:1,x:0,y:0})}/></div>}
-      <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span>{asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
+      <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className={vault ? 'viewer-title' : undefined}>{vault ? vault.label(asset) : asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
+      {!vault&&<>
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
       <CharacterExclusionEditor request={exclusion} target={exclusionKey} characterName={character?.name||'이 캐릭터'} assetLabel={asset.creator_name||asset.creator_handle||'이 자산'} onClose={()=>setExclusion(null)} onExcluded={receipt=>{setExclusion(null);onCharacterExcluded?.(receipt);}}/>
@@ -226,6 +246,18 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       {trashNotice}
       {addOpen&&reviewLibrary&&<CharacterAddSheet assetId={asset.id} libraryId={reviewLibrary} onClose={()=>setAddOpen(false)} onAdded={name=>{setAddOpen(false);setAdded(`${name}에 추가했습니다 · PC 반영 대기`);}}/>}
       {info && <Dialog open title="미디어 정보" variant="wide" onClose={() => setInfo(false)}><DialogDescription className="sr-only">작가, 출처와 파일 정보를 확인하고 텍스트로 복사합니다.</DialogDescription><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></Dialog>}
+      </>}
     </div>
   </Dialog>;
+}
+
+/**
+ * The media element's own error class for a vault video, e.g. ` (오류 2 · PIPELINE_ERROR_READ)`.
+ * Only the code and Chromium's leading error name are kept: never a URL or file detail.
+ */
+function mediaErrorCode(error: MediaError | null) {
+  if (!error) return '';
+  const name = /^[A-Z][A-Z0-9_]+/.exec(error.message ?? '')?.[0];
+  console.warn(`vault video error ${error.code}${name ? ` ${name}` : ''}`);
+  return ` (오류 ${error.code}${name ? ` · ${name}` : ''})`;
 }

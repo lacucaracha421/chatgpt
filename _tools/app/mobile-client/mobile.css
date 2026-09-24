@@ -139,6 +139,7 @@ input[type=checkbox] { accent-color:var(--color-accent); width:20px; height:20px
 .viewer-surface video, .viewer-image { display:block; width:100%; height:100%; object-fit:contain; }
 .viewer-image { user-select:none; will-change:transform; }
 .viewer-error { position:absolute; bottom:64px; left:16px; right:16px; background:#242526ed; padding:10px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; z-index:2; }
+.viewer.is-video .viewer-error { bottom:auto; top:64px; }
 .zoom-reset { position:absolute; left:16px; top:64px; z-index:2; background:var(--color-sidebar); border-radius:2px; }
 .empty-inline { padding:24px; color:var(--color-muted); }
 @media(min-width:1000px) and (orientation:landscape) {
@@ -250,6 +251,11 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
   .viewer-bar { position:absolute; left:0; right:0; height:48px; padding-inline:8px; background:#111213d9; }
   .viewer>header { top:env(safe-area-inset-top); }
   .viewer>footer { bottom:env(safe-area-inset-bottom); }
+  /* A video keeps its bars in their own rows: an overlaid footer would cover the native
+     seek bar (video chrome never auto-hides), so the controls stay fully operable. */
+  .viewer.is-video { display:grid; }
+  .viewer.is-video .viewer-bar { position:static; height:auto; }
+  .viewer.is-video .viewer-surface { width:auto; height:auto; }
   /* Portrait folder cards were a wide, short box, so cover-cropping cut characters off.
      Give the card a portrait frame and contain the image instead of cropping it. */
   .character-browser:not(.character-browser-landscape) .character-card-image { height:auto; aspect-ratio:3/4; }

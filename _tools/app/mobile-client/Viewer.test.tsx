@@ -1,6 +1,7 @@
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
+import {readFileSync} from 'node:fs';
 // Radix's dialog focus/escape machinery schedules work outside `fireEvent`, so the
 // environment must advertise `act` support for those updates to be flushed.
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
@@ -297,5 +298,65 @@ describe('viewer Library Trash action',()=>{
     expect(screen.queryByRole('button',{name:'휴지통으로'})).toBeNull();
     rerender(<Viewer items={[{id:'p',kind:'image',pending:true}]} index={0} onIndex={()=>{}} onClose={()=>{}} onTrash={()=>{}}/>);
     expect(screen.queryByRole('button',{name:'휴지통으로'})).toBeNull();
+  });
+});
+
+describe('vault source',()=>{
+  const vaultItems:Asset[]=[{id:'v1',kind:'image',preview:'https://app.lakomics.local/vault/s/t1'},{id:'v2',kind:'video'}];
+  const vault={original:(asset:Asset)=>`https://app.lakomics.local/vault/s/${asset.id}`,label:(asset:Asset)=>`제목 ${asset.id}`};
+  it('uses the vault route directly with the same chrome and no library media, timing or actions',async()=>{
+    const media=await import('./media');vi.mocked(media.invalidateTicket).mockClear();
+    const native=vi.fn();window.LakomicsNative={request:native,cancel:vi.fn()};
+    const onIndex=vi.fn();
+    const view=render(<Viewer items={vaultItems} index={0} onIndex={onIndex} onClose={()=>{}} vault={vault}/>);
+    const original=screen.getByAltText('제목 v1');
+    expect(original.getAttribute('src')).toBe('https://app.lakomics.local/vault/s/v1');
+    expect(document.querySelector('.viewer-placeholder')?.getAttribute('src')).toBe(vaultItems[0].preview);
+    fireEvent.load(original);
+    expect(document.querySelector('.viewer-placeholder')).toBeNull();
+    expect(screen.getByText('1 / 2')).toBeTruthy();expect(screen.getByText('제목 v1')).toBeTruthy();
+    for(const action of ['분류','앨범','미디어 정보','휴지통으로'])expect(screen.queryByRole('button',{name:action})).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'다음 자산'}));
+    expect(onIndex).toHaveBeenCalledWith(1);
+    view.rerender(<Viewer items={vaultItems} index={1} onIndex={onIndex} onClose={()=>{}} vault={vault}/>);
+    const video=document.querySelector('video')!;
+    expect(video.getAttribute('src')).toBe('https://app.lakomics.local/vault/s/v2');
+    expect(video.getAttribute('controlsList')).toBe('nodownload noremoteplayback');
+    expect(video.hasAttribute('disablePictureInPicture')).toBe(true);
+    fireEvent.error(video);
+    fireEvent.click(await screen.findByRole('button',{name:'다시 시도'}));
+    expect(document.querySelector('video')?.getAttribute('src')).toBe('https://app.lakomics.local/vault/s/v2');
+    await act(async()=>{await Promise.resolve();});
+    expect(mocks.ticket).not.toHaveBeenCalled();expect(mocks.decode).not.toHaveBeenCalled();
+    expect(media.invalidateTicket).not.toHaveBeenCalled();
+    expect(native).not.toHaveBeenCalled();
+  });
+});
+
+describe('video controls',()=>{
+  // jsdom has no layout, so the guarantee is checked on the classes and on the overlay layout rules.
+  const css=readFileSync('mobile-client/mobile.css','utf8');
+  const overlay=css.slice(css.indexOf('@media (orientation:portrait), (max-width:999px)'));
+  it('keeps the footer out of the video controls in vault and library mode',()=>{
+    const vault={original:(asset:Asset)=>`https://app.lakomics.local/vault/s/${asset.id}`,label:(asset:Asset)=>asset.id};
+    for(const props of [{vault},{}]){
+      mocks.ticket.mockResolvedValue({url:'https://test.invalid/original-v'});
+      const view=render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}} {...props}/>);
+      const viewer=document.querySelector('.viewer')!,surface=viewer.querySelector('.viewer-surface')!,footer=viewer.querySelector('footer.viewer-bar')!;
+      expect(viewer.classList.contains('is-video')).toBe(true);
+      expect(surface.nextElementSibling===footer||!!(surface.compareDocumentPosition(footer)&Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+      expect(footer.contains(surface)).toBe(false);
+      view.unmount();
+    }
+    // Where bars otherwise overlay the media, a video viewer returns to row layout and static bars.
+    expect(overlay).toMatch(/\.viewer\.is-video \{ display:grid; \}/);
+    expect(overlay).toMatch(/\.viewer\.is-video \.viewer-bar \{ position:static;/);
+    expect(overlay.indexOf('.viewer.is-video .viewer-bar')).toBeGreaterThan(overlay.indexOf('.viewer-bar { position:absolute'));
+    // Status messages sit at the top for video, never over the seek bar.
+    expect(css).toMatch(/\.viewer\.is-video \.viewer-error \{ bottom:auto; top:64px; \}/);
+  });
+  it('does not mark image viewers as video',()=>{
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(document.querySelector('.viewer')!.classList.contains('is-video')).toBe(false);
   });
 });

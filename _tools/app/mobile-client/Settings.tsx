@@ -8,9 +8,9 @@ import {onWarmState, setWarmEnabled, warmEnabled, warmState, type WarmState} fro
 import './Settings.css';
 
 type CacheStatus = {bytes:number; count:number; limit:number};
-const APP_VERSION = '0.8.6';
+const APP_VERSION = '0.8.9';
 
-export function Settings({status, onStatus, onClose, onCacheCleared}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void}) {
+export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void; onOpenVault?():void}) {
   const [endpoint, setEndpoint] = useState(status.endpoint);
   const [token, setToken] = useState('');
   const [privateHttp, setPrivateHttp] = useState(status.allowPrivateHttp ?? false);
@@ -61,6 +61,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared}: {status: S
       {cacheMessage && <p role="status">{cacheMessage}</p>}
       <ThumbnailWarmSetting/>
     </section>
+    {onOpenVault && <section className="settings-section" aria-label="비밀 보관함"><Button onClick={onOpenVault}>비밀 보관함</Button><p className="hint">USB를 연결해 이미지와 영상을 감상합니다.</p></section>}
     <PickerSettings configured={status.configured}/>
     <details className="settings-advanced">
       <summary>연결·캐시 동작 자세히</summary>

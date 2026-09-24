@@ -1,0 +1,18 @@
+.private-vault { height:100%; min-height:0; display:flex; flex-direction:column; background:var(--color-bg); -webkit-user-select:none; user-select:none; }
+.vault-header { display:flex; align-items:center; gap:12px; padding:8px 16px; border-bottom:1px solid var(--color-border); flex-shrink:0; }
+.vault-header button { min-height:48px; }
+.vault-header h2 { font-size:18px; font-weight:500; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vault-locked { flex:1; overflow:auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; padding:24px; }
+.vault-locked button { min-height:48px; }
+.vault-locked>svg { width:32px; height:32px; color:var(--color-muted); }
+.vault-locked h3 { font-size:18px; font-weight:500; }
+.vault-locked p { color:var(--color-muted); text-align:center; }
+.vault-locked form { display:flex; flex-direction:column; gap:20px; width:min(100%,360px); }
+.vault-secret-kind { display:flex; gap:8px; }
+.vault-secret-kind button { flex:1; }
+.private-vault>.error-message { padding:12px 24px; }
+/* Vault mode of the shared viewer: the thumbnail covers the surface until the original has loaded. */
+.viewer-surface.is-vault { position:relative; -webkit-user-select:none; user-select:none; }
+.viewer-surface.is-vault .viewer-placeholder { position:absolute; inset:0; }
+.viewer-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 12px; }
+@media(max-height:600px) { .vault-locked { justify-content:flex-start; gap:12px; } }

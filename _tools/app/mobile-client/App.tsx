@@ -1,3 +1,4 @@
+import {PrivateVault} from './PrivateVault';
 import {onVisible} from './useVisibleInterval';
 import {fetchAssetFilterVersion, fetchListGeneration, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {HeaderTools} from './HeaderTools';
@@ -64,6 +65,8 @@ export function App() {
   const collectionBack = useRef<(()=>boolean)|null>(null);
   const catalogBack = useRef<(()=>boolean)|null>(null);
   const [librarySegment,setLibrarySegment]=useState<'folders'|'albums'>('folders');
+  const [vaultOpen,setVaultOpen]=useState(false);
+  const vaultBack=useRef<(()=>boolean)|null>(null);
   const viewerBack = useRef<(()=>boolean)|null>(null);
   const [status, setStatus] = useState<Status>({configured:false, endpoint:''});
   // Queued personal Collection edits are sent on start and on return, whatever screen is open.
@@ -110,7 +113,7 @@ export function App() {
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
   const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
-  const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, similarity}); latest.current = {page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, similarity};
+  const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, similarity, vaultOpen}); latest.current = {page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, similarity, vaultOpen};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]; filters:AssetFiltersValue}>({view:LIBRARY,cursor:null,previous:[],filters:{...EMPTY_FILTERS}});
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
   // Committed classification or root to restore after leaving character browsing.
@@ -353,7 +356,8 @@ export function App() {
     const back = () => {
       const state = latest.current;
       // The FAULT game covers everything, so it closes before any surface beneath it.
-      if (state.fault) setFault(null);
+      if (state.vaultOpen) {if(!vaultBack.current?.())setVaultOpen(false);}
+      else if (state.fault) setFault(null);
       // The review screen covers the app too; it closes its zoom first, then itself.
       else if (state.review) {if (!reviewBack.current?.()) setReview(null);}
       else if (state.similarity) {if (!similarityBack.current?.()) setSimilarity(false);}
@@ -532,7 +536,8 @@ export function App() {
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={openHome}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={openLibrary}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}
     {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}><p>썸네일 크기</p><div role="radiogroup" aria-label="썸네일 크기">{DENSITIES.map((label,value)=><button className="sheet-option" role="radio" key={label} aria-checked={density===value} onClick={()=>{setDensity(value);store('lakomics.mobile.density',value);setViewSettings(false);}}>{label}<span className="radio-dot"/></button>)}</div>{faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
-    {settings && <Settings onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
+    {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}
+    {settings && <Settings onOpenVault={()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
     {fault && <FaultGame items={fault} onClose={() => setFault(null)}/>}
     {similarity && <SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/>}
     {review && reviewLibrary && <CharacterReview key={review.target?.id??'all'} libraryId={reviewLibrary} target={review.target} backRef={reviewBack} onClose={closeReview}/>}

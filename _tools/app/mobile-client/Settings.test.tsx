@@ -86,5 +86,13 @@ it('tucks the cache and connection recovery detail behind a disclosure',async()=
 
 it('reports the declared Android source version rather than a stale literal',async()=>{
   render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
-  expect(document.querySelector('.settings-foot')!.textContent).toContain('0.8.6 · Android');
+  expect(document.querySelector('.settings-foot')!.textContent).toContain('0.8.9 · Android');
+});
+
+it('opens the USB private vault even without a cloud connection',async()=>{
+  const openVault=vi.fn();
+  render(<Settings status={{configured:false,endpoint:''}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()} onOpenVault={openVault}/>);
+  fireEvent.click(screen.getByRole('button',{name:'비밀 보관함'}));
+  expect(openVault).toHaveBeenCalledOnce();
+  await screen.findByText('2.0 MB / 1 GB · 12개');
 });

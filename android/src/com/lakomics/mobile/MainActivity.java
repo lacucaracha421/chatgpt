@@ -12,6 +12,7 @@ import java.util.*;
 import java.util.concurrent.*;
 public final class MainActivity extends Activity {
  private static final String ORIGIN="https://app.lakomics.local";
+ private PrivateVault vault;
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
@@ -41,7 +42,7 @@ public final class MainActivity extends Activity {
   try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",false).put("cancelled",true));}catch(JSONException ignored){}
  }
  private synchronized void stopNonEssential(){stopped=true;for(Map.Entry<String,CancellationSignal> entry:nonEssential.entrySet())cancelOptional(entry.getKey(),entry.getValue());}
- @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);
+ @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);vault=new PrivateVault(this,state->emit("lakomics-vault",state));
   try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
   getWindow().setStatusBarColor(Color.rgb(16,17,18));getWindow().setNavigationBarColor(Color.rgb(16,17,18));
   web=new WebView(this);web.setBackgroundColor(Color.rgb(16,17,18));setContentView(web);
@@ -52,9 +53,9 @@ public final class MainActivity extends Activity {
   web.addJavascriptInterface(new Bridge(),"LakomicsNative");
   web.setWebViewClient(new WebViewClient(){
    @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest r){return !bundled(r.getUrl());}
-   @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u))return asset(u);if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
+   @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u)){if(u.getPath()!=null && u.getPath().startsWith("/vault/"))return vault.serve(r);return asset(u);}if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
    @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){h.cancel();}
-   @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail d){finish();return true;}
+   @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail d){vault.lock("");finish();return true;}
   });web.loadUrl(ORIGIN+"/index.html");
  }
  // The bundled FAULT game (single self-contained file: inline scripts, data: font) runs only as a same-origin
@@ -70,6 +71,7 @@ public final class MainActivity extends Activity {
  private void reply(String id,boolean ok,Object data,String error,Integer status,Object details){try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",ok).put("status",status==null?JSONObject.NULL:status).put("data",data==null?JSONObject.NULL:data).put("error",error==null?JSONObject.NULL:error).put("details",details==null?JSONObject.NULL:details));}catch(JSONException ignored){}}
  private void cancelOtherRequests(CancellationSignal current){for(CancellationSignal s:active.values())if(s!=current)s.cancel();}
  private static String errorMessage(Exception e){
+  if(e instanceof VaultCrypto.Invalid)return e.getMessage();
   if(e instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)e).status;if(status==401 || status==403)return "인증에 실패했습니다. 토큰을 확인해 주세요.";if(status==404)return "요청한 정보를 찾을 수 없습니다.";return "서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";}
   if(e instanceof java.net.SocketTimeoutException)return "연결 시간이 초과되었습니다. 다시 시도해 주세요.";
   if(e instanceof java.net.UnknownHostException || e instanceof java.net.ConnectException)return "서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.";
@@ -109,11 +111,25 @@ public final class MainActivity extends Activity {
   @JavascriptInterface public void request(String id,String operation,String payload){
    if("perfLog".equals(operation)){PerfLog.javascript(payload);return;}
    if(id==null || id.length()>128 || payload==null || payload.length()>65536){return;}CancellationSignal signal=new CancellationSignal();if(active.putIfAbsent(id,signal)!=null)return;
+   if("vaultShow".equals(operation)){
+    try{final boolean visible=new JSONObject(payload).getBoolean("visible");runOnUiThread(()->{
+     if(destroyed){active.remove(id);return;}
+     vault.setVisible(visible);web.setImportantForAutofill(visible?View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS:View.IMPORTANT_FOR_AUTOFILL_AUTO);
+     try{workers.execute(()->{try{if(!signal.isCanceled())reply(id,true,visible?vault.inspect():vault.state(),null);}catch(Exception e){reply(id,false,null,errorMessage(e));}finally{active.remove(id,signal);}});}
+     catch(RejectedExecutionException e){active.remove(id,signal);reply(id,false,null,"잠시 후 다시 시도해 주세요.");}
+    });}catch(JSONException e){active.remove(id,signal);reply(id,false,null,"보관함 화면을 열 수 없습니다.");}return;
+   }
+   if("vaultUnlock".equals(operation))signal.setOnCancelListener(()->vault.lock("보관함 열기가 취소되었습니다"));
+   if("vaultLock".equals(operation)){vault.lock("보관함이 잠겼습니다");try{reply(id,true,vault.state(),null);}catch(JSONException ignored){}active.remove(id);return;}
+   final long vaultEpoch=vault.epoch();
    if(optionalWork(operation)){synchronized(MainActivity.this){nonEssential.put(id,signal);if(stopped)cancelOptional(id,signal);}}
    final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")?perfPool.submit(operation,mediaWorkers.getQueue().size()):null;
    try{(operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage")?mediaWorkers:workers).execute(()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
     if(perf!=null){perf.asset=PerfLog.id(p.optString("assetId"));perf.request=PerfLog.id(p.optString("perfId"));}
     switch(operation){
+     case "vaultPick":data=vault.pick();break;
+     case "vaultState":data=vault.inspect();break;
+     case "vaultUnlock":data=vault.unlock(p.getString("secret"),p.optBoolean("recovery"),signal,vaultEpoch);break;
      case "notesState":data=notes.state();break;
      case "notesUnlock":data=notes.unlock(p.getString("key"));break;
      case "notesSave":data=notes.save(p);break;
@@ -172,6 +188,11 @@ public final class MainActivity extends Activity {
    }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}finally{active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(signal.isCanceled())perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}}});}catch(RejectedExecutionException e){active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){perf.status="rejected";perfPool.remove(perf);perf.finish(payload);}reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,null);}
   }
  }
+ @Override public void onTrimMemory(int level){if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}
+ @Override protected void onActivityResult(int request,int result,Intent data){
+  if(vault!=null && vault.picked(request,result,data)){try{workers.execute(()->{try{emit("lakomics-vault",vault.inspect());}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}return;}
+  super.onActivityResult(request,result,data);
+ }
  @Override public void onBackPressed(){emit("lakomics-back",null);}
  private void hideStatusBar(){
   if(Build.VERSION.SDK_INT>=30){
@@ -180,12 +201,12 @@ public final class MainActivity extends Activity {
   }else getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
  @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused)hideStatusBar();}
- @Override protected void onResume(){super.onResume();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).resume();}
+ @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).resume();}
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
   AlbumReplicaService.get(this).setListGenerationListener(generation->{try{emit("lakomics-list-generation",new JSONObject().put("generation",generation));}catch(JSONException ignored){}});
   AlbumReplicaService.get(this).start();}
  @Override protected void onPause(){foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();AlbumReplicaService.get(this).stop();super.onPause();}
- @Override protected void onStop(){stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;AlbumReplicaService.get(this).setListGenerationListener(null);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onStop(){if(vault!=null)vault.stopped();stopNonEssential();super.onStop();}
+ @Override protected void onDestroy(){destroyed=true;if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

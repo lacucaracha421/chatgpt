@@ -53,7 +53,7 @@ def main():
         run(javac, '-encoding', 'UTF-8', '-source', '8', '-target', '8', '-classpath', android,
             '-d', classes, *sorted((root / 'src').rglob('*.java')))
         checks = ['NetworkPolicy', 'DocumentTreePolicy', 'ThumbnailCache', 'PickerSnapshot',
-                  'MediaTransfer', 'TicketBatcher', 'TemporaryImagePolicy', 'ClipboardPolicy', 'NotesCrypto']
+                  'MediaTransfer', 'TicketBatcher', 'TemporaryImagePolicy', 'ClipboardPolicy', 'NotesCrypto', 'VaultCrypto']
         sources = [p for name in checks for p in (root / f'src/com/lakomics/mobile/{name}.java', root / f'tests/{name}Test.java')]
         # The additive Album collection projection is platform-free like the checks above,
         # but it reads the Album replica types, so those are compiled with it.
@@ -63,7 +63,8 @@ def main():
                     root / 'tests/AlbumCollectionsTest.java']
         run(javac, '-encoding', 'UTF-8', '-d', tests, *sources)
         for name in checks + ['AlbumCollections']:
-            run(java_cmd, '-cp', tests, f'com.lakomics.mobile.{name}Test')
+            run(java_cmd, f'-Dvault.fixtures={root / "tests/fixtures/private-vault"}',
+                '-cp', tests, f'com.lakomics.mobile.{name}Test')
         # The Album and Classification replica checks need neither the Android runtime
         # nor an Android database: the sync engines and the store depend on the
         # platform-free JSON reader and on the storage seam, so they run on the plain

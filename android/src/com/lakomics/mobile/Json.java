@@ -25,15 +25,21 @@ final class Json {
     static final int MAX_DEPTH = 16;
 
     private final String text;
+    private int maxDepth = MAX_DEPTH;
     private int at;
 
     private Json(String text) { this.text = text; }
 
     /** Parse one complete document into maps, lists, strings, longs, booleans or null. */
     static Object parse(String text) {
+        return parse(text, MAX_LENGTH, MAX_DEPTH);
+    }
+
+    static Object parse(String text, int maxLength, int maxDepth) {
         if (text == null) throw new IllegalArgumentException("Missing JSON body");
-        if (text.length() > MAX_LENGTH) throw new IllegalArgumentException("JSON body is too large");
+        if (text.length() > maxLength) throw new IllegalArgumentException("JSON body is too large");
         Json reader = new Json(text);
+        reader.maxDepth = maxDepth;
         reader.space();
         Object value = reader.value(0);
         reader.space();
@@ -50,7 +56,7 @@ final class Json {
     }
 
     private Object value(int depth) {
-        if (depth > MAX_DEPTH) throw new IllegalArgumentException("JSON nesting is too deep");
+        if (depth > maxDepth) throw new IllegalArgumentException("JSON nesting is too deep");
         if (at >= text.length()) throw new IllegalArgumentException("Truncated JSON body");
         char c = text.charAt(at);
         if (c == '{') return object(depth);
