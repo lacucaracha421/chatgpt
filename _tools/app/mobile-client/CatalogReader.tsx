@@ -48,8 +48,10 @@ export function CatalogReader({manifest,title,onClose,onRefresh,refreshing}:{man
   const blankCover=landscape&&start===0;
   const spreadRatio=shown.reduce((sum,page)=>sum+pageRatio(page),0)+(blankCover?pageRatio(shown[0]):0);
   const spreadWidth=Math.min(bounds.width,bounds.height*spreadRatio);
-  const next=landscape?(start===0?1:start+2):current+1;
-  const previous=landscape?(start<=1?0:start-2):current-1;
+  // Navigation and page labels follow the requested page, not the one still on screen while it loads.
+  const next=landscape?(targetStart===0?1:targetStart+2):target+1;
+  const previous=landscape?(targetStart<=1?0:targetStart-2):target-1;
+  const pageLabel=targetPages.length>1?`${targetStart+1}–${targetStart+2}`:targetStart+1;
   const stage=useRef<HTMLDivElement>(null),autoRefresh=useRef(false);
   const bindStage=useCallback((node:HTMLDivElement|null)=>{stage.current=node;setStageElement(node);},[]);
   const gesture=useRef({points:new Map<number,{x:number;y:number}>(),startX:0,startY:0,distance:0,scale:1,lastX:0,lastY:0,moved:false,pinched:false});
@@ -94,11 +96,11 @@ export function CatalogReader({manifest,title,onClose,onRefresh,refreshing}:{man
         </div>
         {target!==current&&<span className="reader-loading-next" role="status">{targetPages.some(page=>failedPages.includes(page.index))?<Button size="sm" onClick={()=>{setFailedPages([]);setAttempt(n=>n+1);}}>페이지 다시 불러오기</Button>:`${target+1}페이지 준비 중…`}</span>}
       </div>
-      <header className="catalog-reader-bar"><IconButton label="읽기 닫기" icon={ArrowLeftIcon} onClick={onClose}/><div><strong>{title}</strong><span>{shown.length>1?`${start+1}–${start+2}`:current+1} / {manifest.pages.length}</span></div><IconButton label="페이지 주소 갱신" icon={ArrowPathIcon} disabled={refreshing} onClick={onRefresh}/></header>
+      <header className="catalog-reader-bar"><IconButton label="읽기 닫기" icon={ArrowLeftIcon} onClick={onClose}/><div><strong>{title}</strong><span>{pageLabel} / {manifest.pages.length}</span></div><IconButton label="페이지 주소 갱신" icon={ArrowPathIcon} disabled={refreshing} onClick={onRefresh}/></header>
       {transform.scale>1&&<div className="catalog-reader-zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={()=>setTransform({scale:1,x:0,y:0})}/></div>}
       <footer className="catalog-reader-footer" onPointerDownCapture={()=>setControlsFocused(false)} onKeyDownCapture={()=>{setControlsFocused(true);setChrome(true);}} onFocusCapture={event=>{setControlsFocused(event.target.matches(':focus-visible'));setChrome(true);}} onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setControlsFocused(false);}}>
         <IconButton label="다음 페이지" icon={ChevronLeftIcon} disabled={next>=manifest.pages.length} onClick={()=>change(next)}/>
-        <label className="catalog-reader-jump"><span className="numeric">{scrubPage!==null?scrubPage:shown.length>1?`${start+1}–${start+2}`:current+1} / {manifest.pages.length}</span>
+        <label className="catalog-reader-jump"><span className="numeric">{scrubPage??pageLabel} / {manifest.pages.length}</span>
           <input type="range" aria-label="페이지 이동" min={1} max={manifest.pages.length} step={1} value={scrubPage??target+1} aria-valuetext={`${scrubPage??target+1} / ${manifest.pages.length}페이지`} disabled={manifest.pages.length<=1}
             onPointerDown={event=>{scrubbing.current=true;setScrubPage(target+1);setChrome(true);event.currentTarget.setPointerCapture?.(event.pointerId);}}
             onChange={event=>{const page=Number(event.currentTarget.value);if(scrubbing.current)setScrubPage(page);else change(page-1);}}
@@ -106,7 +108,7 @@ export function CatalogReader({manifest,title,onClose,onRefresh,refreshing}:{man
             onPointerCancel={()=>{scrubbing.current=false;setScrubPage(null);}}
             onLostPointerCapture={()=>{scrubbing.current=false;setScrubPage(null);}}/>
         </label>
-        <IconButton label="이전 페이지" icon={ChevronRightIcon} disabled={current===0} onClick={()=>change(previous)}/>
+        <IconButton label="이전 페이지" icon={ChevronRightIcon} disabled={target===0} onClick={()=>change(previous)}/>
       </footer>
     </div>
   </Dialog>;

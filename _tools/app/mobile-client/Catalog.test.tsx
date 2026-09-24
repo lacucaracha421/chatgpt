@@ -199,7 +199,7 @@ describe('mobile catalog reads',()=>{
     await screen.findByRole('img',{name:'1페이지'});await waitFor(()=>expect(pending.size).toBeGreaterThan(0));
     const preloaded=document.querySelector('[data-page="1"]');
     expect((document.querySelector('.catalog-reader-leaf') as HTMLElement).style.flexBasis).toBe('100%');
-    fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));expect(screen.getByRole('img',{name:'1페이지'})).toBeTruthy();expect(screen.getAllByText('1 / 5')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));expect(screen.getByRole('img',{name:'1페이지'})).toBeTruthy();expect(screen.getAllByText('2 / 5')).toHaveLength(2);
     await act(async()=>pending.get('https://app.lakomics.local/media-cache/page-1')?.());
     await screen.findByRole('img',{name:'2페이지'});expect(document.querySelector('[data-page="1"]')).toBe(preloaded);
     expect(mocks.native.mock.calls.filter(([op,payload])=>op==='catalogImage'&&payload.index===1)).toHaveLength(1);
