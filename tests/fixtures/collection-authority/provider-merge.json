@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "description": "Provider fill-merge rules shared by the server Collections authority (collection_authority.merge_provider) and the PC. `previous` and `fetched` are normalized provider values: the PC provider_snapshot() projection of the stored and the new snapshot (text trimmed, empty -> null, lists joined with ' · '). `mode` is `connect` for a new binding or a changed identity (PC Existing/Reconnect/New) and `refresh` for the same identity. `expectedUpdates` lists every field the provider is allowed to write (a value equal to the current one still appears); any field not listed keeps its current value. Sources: tmdb_flow.rs update_provider_metadata/can_refresh_* and Existing/Reconnect year rule, igdb_flow.rs may_fill_from_provider, mangadex_flow.rs fill_blank_provider_fields, aladin_flow.rs (never writes work fields).",
+  "cases": [
+    {
+      "name": "tmdb refresh preserves user values and an explicit clear (PC refresh_preserves_user_values_and_explicit_clear)",
+      "provider": "tmdb",
+      "mode": "refresh",
+      "current": {"year": 1998, "originalTitle": "Perfect Blue", "director": null, "productionCompany": "매드하우스 · Rex Entertainment", "releaseDate": "1998-02-28", "runtimeMinutes": 81, "genres": "Animation · Thriller", "overview": "My overview", "externalScore": 87},
+      "previous": {"originalTitle": "Perfect Blue", "director": "곤 사토시", "productionCompany": "매드하우스 · Rex Entertainment", "releaseDate": "1998-02-28", "runtimeMinutes": 81, "genres": "Animation · Thriller", "overview": "A singer becomes an actress.", "externalScore": 87},
+      "fetched": {"originalTitle": "Perfect Blue (Updated)", "director": "새 감독", "productionCompany": "새 제작사", "releaseDate": "1998-03-01", "runtimeMinutes": 82, "genres": "Drama", "overview": "Updated overview", "externalScore": 90},
+      "expectedUpdates": {"originalTitle": "Perfect Blue (Updated)", "productionCompany": "새 제작사", "releaseDate": "1998-03-01", "runtimeMinutes": 82, "genres": "Drama", "externalScore": 90}
+    },
+    {
+      "name": "tmdb refresh compares trimmed text and treats blank as empty",
+      "provider": "tmdb",
+      "mode": "refresh",
+      "current": {"year": null, "originalTitle": "  Perfect Blue ", "director": "", "productionCompany": "   ", "releaseDate": null, "runtimeMinutes": null, "genres": null, "overview": "   ", "externalScore": null},
+      "previous": {"originalTitle": "Perfect Blue", "director": null, "productionCompany": "Madhouse", "releaseDate": null, "runtimeMinutes": null, "genres": null, "overview": "A singer.", "externalScore": null},
+      "fetched": {"originalTitle": "Perfect Blue 2", "director": "Kon", "productionCompany": "Studio", "releaseDate": "1998-02-28", "runtimeMinutes": 81, "genres": "Thriller", "overview": "New.", "externalScore": 70},
+      "expectedUpdates": {"originalTitle": "Perfect Blue 2", "director": "Kon", "releaseDate": "1998-02-28", "runtimeMinutes": 81, "genres": "Thriller", "externalScore": 70}
+    },
+    {
+      "name": "tmdb refresh clears a field the provider dropped when the user never edited it",
+      "provider": "tmdb",
+      "mode": "refresh",
+      "current": {"year": 1998, "originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": 81, "genres": null, "overview": "A", "externalScore": 87},
+      "previous": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": 81, "genres": null, "overview": "A", "externalScore": 87},
+      "fetched": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "expectedUpdates": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null}
+    },
+    {
+      "name": "tmdb numeric fields refresh only while equal to the previous provider value",
+      "provider": "tmdb",
+      "mode": "refresh",
+      "current": {"year": null, "originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": 90, "genres": null, "overview": null, "externalScore": null},
+      "previous": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": 81, "genres": null, "overview": null, "externalScore": 87},
+      "fetched": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": 82, "genres": null, "overview": null, "externalScore": 90},
+      "expectedUpdates": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "genres": null, "overview": null}
+    },
+    {
+      "name": "tmdb connect to an existing work without a snapshot fills blanks and a missing year (PC Existing)",
+      "provider": "tmdb",
+      "mode": "connect",
+      "current": {"year": null, "originalTitle": null, "director": "User Director", "productionCompany": "  ", "releaseDate": null, "runtimeMinutes": null, "genres": null, "overview": "Mine", "externalScore": null},
+      "previous": null,
+      "fetched": {"originalTitle": "Perfect Blue", "director": "곤 사토시", "productionCompany": "매드하우스", "releaseDate": "1998-02-28", "runtimeMinutes": 81, "genres": "Animation", "overview": "A singer becomes an actress.", "externalScore": 87},
+      "expectedUpdates": {"originalTitle": "Perfect Blue", "productionCompany": "매드하우스", "releaseDate": "1998-02-28", "runtimeMinutes": 81, "genres": "Animation", "externalScore": 87, "year": 1998}
+    },
+    {
+      "name": "tmdb connect keeps a user year",
+      "provider": "tmdb",
+      "mode": "connect",
+      "current": {"year": 2000, "originalTitle": null, "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "previous": null,
+      "fetched": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "expectedUpdates": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null}
+    },
+    {
+      "name": "tmdb reconnect moves a year that still matches the previous release date (PC Reconnect)",
+      "provider": "tmdb",
+      "mode": "connect",
+      "current": {"year": 1998, "originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "previous": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "fetched": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "2003-05-01", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "expectedUpdates": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "2003-05-01", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null, "year": 2003}
+    },
+    {
+      "name": "tmdb reconnect keeps an edited year",
+      "provider": "tmdb",
+      "mode": "connect",
+      "current": {"year": 1999, "originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "previous": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "fetched": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "2003-05-01", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "expectedUpdates": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "2003-05-01", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null}
+    },
+    {
+      "name": "tmdb refresh never touches year",
+      "provider": "tmdb",
+      "mode": "refresh",
+      "current": {"year": 1998, "originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "previous": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "1998-02-28", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "fetched": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "2003-05-01", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null},
+      "expectedUpdates": {"originalTitle": null, "director": null, "productionCompany": null, "releaseDate": "2003-05-01", "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": null}
+    },
+    {
+      "name": "igdb refresh fills blanks whose previous provider value was blank (PC refresh_fills_blank_provider_metadata)",
+      "provider": "igdb",
+      "mode": "refresh",
+      "current": {"year": null, "developer": null, "publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null},
+      "previous": {"developer": null, "publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null},
+      "fetched": {"developer": "Smilebit", "publisher": "Sega", "releaseDate": "1999-06-01", "platforms": "Dreamcast · Windows", "genres": "Action · Music", "overview": "A stylish skating game."},
+      "expectedUpdates": {"developer": "Smilebit", "publisher": "Sega", "releaseDate": "1999-06-01", "platforms": "Dreamcast · Windows", "genres": "Action · Music", "overview": "A stylish skating game."}
+    },
+    {
+      "name": "igdb refresh preserves a field cleared after the old snapshot provided it (PC refresh_preserves_an_explicitly_cleared_provider_field)",
+      "provider": "igdb",
+      "mode": "refresh",
+      "current": {"year": null, "developer": "Smilebit", "publisher": null, "releaseDate": "  ", "platforms": null, "genres": null, "overview": null},
+      "previous": {"developer": null, "publisher": "Old Publisher", "releaseDate": null, "platforms": null, "genres": null, "overview": null},
+      "fetched": {"developer": "New Dev", "publisher": "Sega", "releaseDate": "1999-06-01", "platforms": "Dreamcast", "genres": "Action", "overview": "Skate."},
+      "expectedUpdates": {"releaseDate": "1999-06-01", "platforms": "Dreamcast", "genres": "Action", "overview": "Skate."}
+    },
+    {
+      "name": "igdb refresh never replaces a value still equal to the previous provider value (unlike TMDB)",
+      "provider": "igdb",
+      "mode": "refresh",
+      "current": {"year": null, "developer": "Smilebit", "publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null},
+      "previous": {"developer": "Smilebit", "publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null},
+      "fetched": {"developer": "Smilebit Corp", "publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null},
+      "expectedUpdates": {"publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null}
+    },
+    {
+      "name": "igdb connect (server new/existing bind) also fills a missing year from the release date",
+      "provider": "igdb",
+      "mode": "connect",
+      "current": {"year": null, "developer": null, "publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null},
+      "previous": null,
+      "fetched": {"developer": "Smilebit", "publisher": "Sega", "releaseDate": "1999-06-01", "platforms": null, "genres": null, "overview": null},
+      "expectedUpdates": {"developer": "Smilebit", "publisher": "Sega", "releaseDate": "1999-06-01", "platforms": null, "genres": null, "overview": null, "year": 1999}
+    },
+    {
+      "name": "mangadex fills blank text and a null year regardless of the previous snapshot",
+      "provider": "mangadex",
+      "mode": "refresh",
+      "current": {"year": null, "author": "  ", "genres": "Mine", "overview": null},
+      "previous": {"year": 2010, "author": "Old", "genres": "Old genres", "overview": "Old"},
+      "fetched": {"year": 2014, "author": "Kui Ryoko", "genres": "Fantasy · Comedy", "overview": "Dungeon food."},
+      "expectedUpdates": {"year": 2014, "author": "Kui Ryoko", "overview": "Dungeon food."}
+    },
+    {
+      "name": "mangadex connect keeps a user year",
+      "provider": "mangadex",
+      "mode": "connect",
+      "current": {"year": 2010, "author": "Me", "genres": null, "overview": "Mine"},
+      "previous": null,
+      "fetched": {"year": 2014, "author": "Kui Ryoko", "genres": "Fantasy", "overview": "Dungeon food."},
+      "expectedUpdates": {"genres": "Fantasy"}
+    },
+    {
+      "name": "aladin never writes work fields",
+      "provider": "aladin",
+      "mode": "connect",
+      "current": {"year": null, "author": null, "genres": null, "overview": null},
+      "previous": null,
+      "fetched": {},
+      "expectedUpdates": {}
+    },
+    {
+      "name": "kakao never writes work fields",
+      "provider": "kakao",
+      "mode": "refresh",
+      "current": {"year": null, "author": null, "genres": null, "overview": null},
+      "previous": {},
+      "fetched": {},
+      "expectedUpdates": {}
+    }
+  ],
+  "yearFromDate": [
+    {"input": "1998-02-28", "expected": 1998},
+    {"input": "2024", "expected": 2024},
+    {"input": "199", "expected": null},
+    {"input": "abcd-01-01", "expected": null},
+    {"input": " 998-01-01", "expected": null},
+    {"input": "+199-01-01", "expected": 199},
+    {"input": "-123-01-01", "expected": -123},
+    {"input": "한국어", "expected": null},
+    {"input": null, "expected": null}
+  ],
+  "valuesNormalization": [
+    {"provider": "tmdb", "input": {"originalTitle": "  Perfect Blue  ", "overview": "   ", "runtimeMinutes": 0, "externalScore": 0},
+     "expected": {"originalTitle": "Perfect Blue", "director": null, "productionCompany": null, "releaseDate": null, "runtimeMinutes": null, "genres": null, "overview": null, "externalScore": 0}},
+    {"provider": "igdb", "input": {"developer": " Smilebit "},
+     "expected": {"developer": "Smilebit", "publisher": null, "releaseDate": null, "platforms": null, "genres": null, "overview": null}},
+    {"provider": "mangadex", "input": {"year": 2014, "author": ""},
+     "expected": {"year": 2014, "author": null, "genres": null, "overview": null}},
+    {"provider": "aladin", "input": {}, "expected": {}}
+  ]
+}

@@ -13,6 +13,8 @@ from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+import authority
+import collection_authority
 import collection_personal_edits as personal_edits
 import head_cache
 
@@ -213,16 +215,39 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 );
             """)
             db.executescript(personal_edits.DDL)
+            # Collections authority tables only; the domain stays inactive until an
+            # explicit publisher activation.
+            collection_authority.startup_db(db)
             db.commit()
 
     lifecycle(app).on_startup(startup_collections)
 
-    def state(db):
+    def legacy_state(db):
         row = db.execute("SELECT revision,published_at FROM mobile_collection_replica WHERE singleton=1").fetchone()
         return (row["revision"], row["published_at"]) if row else (None, None)
 
+    def served(db):
+        """The Collections authority read state, or None while the PC replica is served."""
+        return collection_authority.served_state(db)
+
+    def state(db, active=None):
+        """``(revision, publishedAt)`` of what ``/v1/collections`` serves."""
+        if active is not None:
+            return active["revision"], active["publishedAt"]
+        return legacy_state(db)
+
+    def table(active):
+        # Same columns and payload shape, so one query path serves both sources.
+        return "collection_authority_projection" if active is not None else "mobile_collections"
+
+    def finalize(db, active, payload):
+        if active is not None:
+            collection_authority.finalize_item(db, active["libraryId"], payload)
+        return payload
+
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
-    personal_edits.register(app, get_db, reader, publisher, lambda db: state(db)[0])
+    personal_edits.register(app, get_db, reader, publisher, lambda db: legacy_state(db)[0])
+    collection_authority.register(app, get_db, reader, publisher)
 
     def head(blob: ArtworkUpload, *, ticket=False):
         key, storage_bucket = artwork_key(blob.sha256), bucket()
@@ -292,7 +317,14 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             chunks.extend(chunk)
         return await run_in_threadpool(commit_snapshot, chunks, allowed)
 
+    def fenced(db):
+        # ADR-0037 decision 7: once the Collections epoch is active, the legacy PC
+        # snapshot can never overwrite authority state. A no-op while inactive.
+        authority.fence_legacy_write(db, collection_authority.DOMAIN)
+
     def commit_snapshot(chunks, allowed):
+        with get_db() as db:
+            fenced(db)
         try:
             snapshot = Replica.model_validate_json(chunks)
         except ValidationError as exc:
@@ -305,7 +337,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         if len(set(ids)) != len(ids):
             raise HTTPException(422, "Duplicate collection IDs")
         with get_db() as db:
-            if state(db)[0] != snapshot.baseRevision:
+            if legacy_state(db)[0] != snapshot.baseRevision:
                 raise HTTPException(409, "Collection snapshot changed; refresh before publishing")
         blobs = {}
         for item in snapshot.collections:
@@ -344,7 +376,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         published = datetime.now(timezone.utc).isoformat()
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
-            if state(db)[0] != snapshot.baseRevision:
+            fenced(db)
+            if legacy_state(db)[0] != snapshot.baseRevision:
                 raise HTTPException(409, "Collection snapshot changed; refresh before publishing")
             personal_edits.publication_guard(db, snapshot)
             identity = items
@@ -377,7 +410,9 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         with get_db() as db:
             # A consistent read transaction binds metadata rows to this revision.
             db.execute("BEGIN")
-            revision, published = state(db)
+            active = served(db)
+            source = table(active)
+            revision, published = state(db, active)
             offset = 0
             # Showcase is a manual exhibition; library filters never alter it.
             rating_value = float(rating) if rating not in ("all", "unrated") else rating
@@ -419,19 +454,26 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 order = f"json_extract(payload,'$.createdAt') {direction}, name COLLATE NOCASE,id"
             else:
                 order = f"name COLLATE NOCASE {direction}, id"
-            total = db.execute("SELECT COUNT(*) FROM mobile_collections" + where, parameters).fetchone()[0]
-            rows = db.execute("SELECT payload FROM mobile_collections" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
+            total = db.execute(f"SELECT COUNT(*) FROM {source}" + where, parameters).fetchone()[0]
+            rows = db.execute(f"SELECT payload FROM {source}" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
+            payloads = [finalize(db, active, json.loads(row["payload"])) for row in rows[:limit]]
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
         return {"ready": revision is not None, "revision": revision, "publishedAt": published, "filterVersion": 1, "totalCount": total,
-                "items": [public_item(json.loads(row["payload"])) for row in rows[:limit]], "nextCursor": next_cursor}
+                "items": [public_item(payload) for payload in payloads], "nextCursor": next_cursor}
 
     @app.get("/v1/collections/status")
     def publication_status(authorization: str | None = Header(default=None)):
         require_auth(authorization)
         with get_db() as db:
             db.execute("BEGIN")
-            revision, published = state(db)
+            active = served(db)
+            revision, published = state(db, active)
             advertisement = personal_edits.advertisement(db)
+            if active is not None:
+                # Installed APKs keep sending personal edits; the server translates them
+                # into `updateWork`, so the capability no longer depends on the PC.
+                advertisement = {**advertisement, "capabilities": {"collectionPersonalEdit": True},
+                                 "libraryId": active["libraryId"]}
         return {"revision": revision, "publishedAt": published, **advertisement}
 
     @app.get("/v1/collections/{collection_id}")
@@ -439,17 +481,19 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         require_auth(authorization)
         with get_db() as db:
             db.execute("BEGIN")
-            revision, _ = state(db)
-            row = db.execute("SELECT payload FROM mobile_collections WHERE id=?", (collection_id,)).fetchone()
-        if row is None:
+            active = served(db)
+            revision, _ = state(db, active)
+            row = db.execute(f"SELECT payload FROM {table(active)} WHERE id=?", (collection_id,)).fetchone()
+            payload = None if row is None else finalize(db, active, json.loads(row["payload"]))
+        if payload is None:
             raise HTTPException(404, "Collection is not published")
-        return {"revision": revision, "item": public_item(json.loads(row["payload"]), True)}
+        return {"revision": revision, "item": public_item(payload, True)}
 
     @app.post("/v1/collections/{collection_id}/artworks/{artwork_id}/media-ticket")
     def artwork_ticket(collection_id: ID, artwork_id: ID, body: TicketRequest, authorization: str | None = Header(default=None)):
         require_auth(authorization)
         with get_db() as db:
-            row = db.execute("SELECT payload FROM mobile_collections WHERE id=?", (collection_id,)).fetchone()
+            row = db.execute(f"SELECT payload FROM {table(served(db))} WHERE id=?", (collection_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Collection is not published")
         art = next((art for art in json.loads(row["payload"])["artworks"] if art["id"] == artwork_id), None)

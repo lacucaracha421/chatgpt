@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 import authority
+import collection_authority
 
 PREFIX = "/v1/collections/personal-edits"
 MAX_CURSOR = 9_007_199_254_740_991
@@ -218,11 +219,15 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
         payload_digest = hashlib.sha256(encode(command.model_dump()).encode()).hexdigest()
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
-            current = check_library(db, command.libraryId)
-            if current is None:
-                fail(409, "collectionPersonalEditUnsupported", "PC 앱을 업데이트한 뒤 컬렉션을 게시해 주세요.")
+            # Once Collections authority is active this route is a compatibility shim
+            # onto `updateWork`; the PC-bridge log is no longer written.
+            active = authority.active_domain(db, collection_authority.DOMAIN)
+            if active is None:
+                current = check_library(db, command.libraryId)
+                if current is None:
+                    fail(409, "collectionPersonalEditUnsupported", "PC 앱을 업데이트한 뒤 컬렉션을 게시해 주세요.")
             # Receipts precede every state check: a response-lost retry stays valid
-            # after later edits or publications.
+            # after later edits or publications (including one accepted before activation).
             for table in ("mobile_collection_edits", "mobile_collection_edit_noops"):
                 receipt = db.execute(f"SELECT payload_digest,result_json FROM {table} WHERE operation_id=?",
                                      (command.operationId,)).fetchone()
@@ -230,6 +235,11 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
                     if receipt["payload_digest"] != payload_digest:
                         fail(409, "operationConflict", "다른 내용으로 편집 요청을 재사용할 수 없습니다.")
                     return json.loads(receipt["result_json"])
+            if active is not None:
+                result = collection_authority.personal_edit(
+                    db, active, command, value, expected, collection_authority.now_iso())
+                db.commit()
+                return result
             row = db.execute("SELECT payload FROM mobile_collections WHERE id=?", (command.collectionId,)).fetchone()
             if row is None:
                 fail(404, "collectionNotFound", "PC에서 삭제되었거나 게시되지 않은 작품입니다.")
