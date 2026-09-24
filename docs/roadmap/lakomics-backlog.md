@@ -10,7 +10,7 @@ Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is impl
 
 ## Current priority
 
-1. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. Next: switch 젠레스 (시시아 excluded), 명조, 아이돌 and 리버스 on the user's PC, spot-check S36 acceptances, then widen.
+1. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. The four series (젠레스 with 시시아 excluded, 명조, 아이돌, 리버스) are switched on the Linux PC. 2026-09-24: new target 엘렌 (젠레스) got 11 automatic S36 acceptances in 15 min (knn3 0.063–0.106); the user checked all 11 as correct. Next: choose further series to widen to; Windows PC switches separately.
 2. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
 3. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
 4. **Server review follow-ups (2026-09-24)** — review branch merged (`ae9af4b`); catalog artifact pruning (server disk 83% full, ~3.4 GB/day), then judgment calls 4, 2, 1 and 7 from `docs/research/server-review-2026-09-24.md` §3. Deployment needs approval.
@@ -169,12 +169,12 @@ Once the Linux PC publishes Collections with the personal-edit handshake, the ol
 Status: `TODO` — recorded as given; scope and priority to be confirmed per item.
 
 Mobile:
-- Design consistency with the PC app: app UI, logo in the top bar, Home screen.
-- Monthly subscription calculator (scope unclear — confirm what it tracks).
-- Notes: more note types; API documentation for notes.
+- Design consistency with the PC app (clarified 2026-09-24): the Home tab's top bar already has the logo — put it on every tab's top bar; use the top bar's space better; restyle buttons toward the PC app's button feel. The Home screen itself waits until Artist Revisit is rebuilt (PC and mobile).
+- Monthly subscription calculator (clarified 2026-09-24): track the user's own subscription services (e.g. streaming) and their monthly total.
+- Notes: more note types (see Notes v2). "API documentation for notes" means storing sensitive documents such as API keys inside the encrypted notes (clarified 2026-09-24) — covered by encrypted notes; consider a 'secret' note type with masked display/copy button in Notes v2.
 - Battery usage: investigate and reduce (polling, thumbnail warm-up, background work).
-- New-release notifications (see the Future-work note; follow targets and delivery undecided).
-- Notes: tapping 동기화 syncs with the PC immediately.
+- New-release notifications (clarified 2026-09-24): extend the PC app's existing Collections release-watch to the app — Collections only; shown inside the app (no push notifications).
+- Notes: tapping 동기화 syncs with the PC immediately (confirmed 2026-09-24: sometimes needed right away) — the PC must pick up the change within seconds, not its 5-minute notes poll.
 - Bottom navigation bar slightly higher.
 
 PC:
@@ -195,12 +195,18 @@ PC and mobile:
 - Notes like a notes app, on both PC and mobile. Scope chosen 2026-09-24: checklist notes (items can be checked and reordered), note colours, and Markdown rendering. Design must fit the existing encrypted notes sync.
 
 Collector (`extension-list/`):
-- A better way into subfolders than double-tap (open question).
+- A better way into subfolders than double-tap (clarified 2026-09-24: double-tap is hard one-handed and taps are sometimes missed) — design a one-handed alternative (e.g. long-press, a chevron target, or a second ring).
 - Store the semicircle menu's folder order and hidden folders (e.g. 리버스, 명조) on the server; today a reinstall resets them.
 - Twitter/X only: add a control in X's left navigation (Profile, Home, …) that scrolls to the top and loads new posts in one step, replacing the manual scroll-up-and-refresh.
 - Disable the right-side recommended-images button for now (keep the code; re-enable later).
 
 NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
+
+## PC-POLL-001 — Cut the desktop app's idle server polling
+
+Status: `TODO` — measured 2026-09-24; do after the lightweight-mode fix lands (delegate to Opus).
+
+Server access log, 15 min with the Linux desktop app idle (client 100.122.139.56): 1,606 requests (~6,400/h), all 200 — `/v1/sync/status` 502, `/v1/mobile-catalog/status` 334, asset/album/classification/bookmark change feeds ~167 each. The desktop sends no `If-None-Match`, although the server supports ETag/304 on these endpoints (`conditional.py`). Apply what Android 0.8.6 did (`f25ddd8`): one sync-status read per pass with ETag, fetch a domain feed only when its cursor moved, idle backoff (5 → 15 → 30 → 60 s, back to fast after local writes/focus/changes), share one status read across the React sync hooks (`useAssetAuthoritySync`, `useAlbumAuthoritySync`, `useClassificationAuthoritySync`, `useCatalogBookmarkSync`, …) and the native lightweight-mode ticks. Measure the same 15-minute idle window before/after. Note: tablet traffic reaches the server through the local proxy and is logged as 100.76.119.29 (tablet 0.8.5 → 0.8.6: 476 → 184 requests per 15 min, first 15 min after install).
 
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
@@ -230,12 +236,12 @@ User-requested notes for later work, not an implementation start or priority cha
 - **New-release notifications:** add notifications for new releases. Follow targets and notification delivery details remain to be defined.
 - **(Partly covered: mobile reviews PC-discovered similarity pairs, MOBILE-PARITY-001 slice 3; on-device discovery not built) Asset duplicate checking:** make duplicate checking available in the mobile Asset Library. Build on the completed desktop `SIMILARITY-004` discovery where relevant; keep this distinct from Catalog edition duplicates.
 - **Manga Catalog duplicate-edition checking — decided 2026-09-24, queued after vault A1 / file exchange / notes v2 (can run in parallel with mobile work since it is mostly PC + server):** keep the full comparison on the PC — the PC computes duplicate-edition candidates with the existing `catalog_review.rs` rules (title match, artist/group overlap, page count, category, language) and publishes them with the catalog; the server does not recompute the whole catalog (VPS: 1 CPU, 1.6 GB RAM, ~131k works). The server only checks works it adds itself during hourly refresh (indexed title lookup, milliseconds each). Review decisions (hide/keep) are server-owned so PC and mobile share them; mobile gets a review screen that reads the precomputed list; the PC applies the decisions. Works with the PC off for already-published candidates and server-added works.
-- **Asset Library multi-select move:** select multiple assets and move them together. Coordinate with `MOBILE-WRITE-002`; the destination and move semantics remain to be defined.
+- **Asset Library multi-select move:** select multiple assets and move them together. Clarified 2026-09-24: both targets — add to albums and change classification (folders). Coordinate with `MOBILE-WRITE-002`; the destination and move semantics remain to be defined.
 
 ## Shared — Desktop and mobile
 
-- **Artist Revisit on Home:** surface artist rediscovery on the Home screen. Coordinate with `ARTIST-001`; this explicitly requests Home placement, not only an Artist hub.
-- **Competing character candidates in multi-person images:** improve the competing-candidate system when one image contains multiple people. Track as a bounded follow-up to the accepted character-classification pass, not a reopening of all accuracy work.
+- **Artist Revisit on Home (2026-09-24: Revisit will be rebuilt from scratch later, PC and mobile; Home redesign waits for it):** surface artist rediscovery on the Home screen. Coordinate with `ARTIST-001`; this explicitly requests Home placement, not only an Artist hub.
+- **(Deferred 2026-09-24: hope S36 improves it; revisit later) Competing character candidates in multi-person images:** improve the competing-candidate system when one image contains multiple people. Track as a bounded follow-up to the accepted character-classification pass, not a reopening of all accuracy work.
 
 ## Browser extension
 
