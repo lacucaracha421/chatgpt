@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 import api_auth
 import catalog_bookmarks
 import mobile_catalog_replica as replica
+import mobile_catalog_suggestions as suggestions
 from mobile_catalog_query import (QueryError, mobile_query_text, freeze_query, count_groups, search_groups, detail,
                                   editions, SEARCH_MODES, NAMESPACE_MAX_BYTES, EXCLUDED_TAG_MAX, TAG_VALUE_MAX_BYTES)
 
@@ -245,7 +246,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         with get_db() as db:
             current = replica.current(db)
             manifest = db.execute("SELECT manifest FROM mobile_catalog_artifacts WHERE digest=?", [current["content_digest"]]).fetchone() if current else None
-            return {"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None, "displayPreferencesVersion": 1}}
+            return {"ready": bool(current), "publicationRevision": current["revision"] if current else None, "publishedAt": current["published_at"] if current else None, "sourceRevision": json.loads(manifest[0])["sourceRevision"] if manifest else None, "authorityLibraryId": authority["libraryId"] if authority else None, "authorityEpoch": authority["epoch"] if authority else None, "authorityContractVersion": authority["contractVersion"] if authority else None, "authorityCursor": authority["cursor"] if authority else None, "capabilities": {"providers": ["kHentai"], "read": True, "bookmarkWrite": bool(authority), "refreshRequest": refresh_fetcher is not None, "displayPreferencesVersion": 1, "suggestions": True}}
 
     @app.post(PREFIX + "/bookmark-authority/activate")
     async def activate(request: Request, authorization: str | None = Header(default=None)):
@@ -546,6 +547,36 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
                 return {"ready": True, "publicationRevision": publication["revision"], "publishedAt": publication["published_at"], "items": items, "nextCursor": next_cursor, "context": token(payload, "context", offset=0), "countToken": count_token, "totalCount": total, "countStatus": "ready" if total is not None else "pending"}
         except sqlite3.Error as exc:
             unavailable(exc)
+
+    suggestion_cache = suggestions.SuggestionCache()
+
+    @app.get(PREFIX + "/suggestions")
+    def suggest(request: Request, authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        params = dict(request.query_params)
+        if not set(params) <= {"text", "limit", "revealBlocked"} or "text" not in params:
+            replica.fail(400, "Unsupported catalog parameter")
+        text = params["text"]
+        if not text.strip() or len(text.encode("utf-8")) > suggestions.MAX_TEXT_BYTES:
+            replica.fail(422, "Suggestion text must be 1-200 bytes")
+        try:
+            limit = int(params.get("limit", str(suggestions.MAX_LIMIT)))
+        except ValueError:
+            replica.fail(400)
+        if not 1 <= limit <= suggestions.MAX_LIMIT or params.get("revealBlocked", "false") not in ("true", "false"):
+            replica.fail(400)
+        reveal = params.get("revealBlocked") == "true"
+        with get_db() as db:
+            if replica.current(db) is None:
+                return {"ready": False, "publicationRevision": None, "items": []}
+        try:
+            with replica.open_publication(root(), get_db) as (db, publication):
+                budget(db)
+                index = suggestion_cache.index(publication["revision"], db)
+        except sqlite3.Error as exc:
+            unavailable(exc)
+        return {"ready": True, "publicationRevision": publication["revision"],
+                "items": suggestions.match(index, text, limit, reveal)}
 
     @app.get(PREFIX + "/count")
     def count(token: str, authorization: str | None = Header(default=None)):

@@ -12,7 +12,11 @@
     {"text":"group:blocked","language":"all","scope":"all","revealBlocked":false,"expected":[["g3",3,1,false]]},
     {"text":"id:5","language":"all","scope":"all","revealBlocked":false,"expected":[]},
     {"text":"id:5","language":"all","scope":"all","revealBlocked":true,"expected":[["g5",5,1,false]]},
-    {"text":"id:3","language":"all","scope":"bookmarked","revealBlocked":false,"expected":[]}
+    {"text":"id:3","language":"all","scope":"bookmarked","revealBlocked":false,"expected":[]},
+    {"text":"a:foo AND pages>=100","language":"all","scope":"all","revealBlocked":false,"expected":[["g3",3,1,false]]},
+    {"text":"G:blocked","language":"all","scope":"all","revealBlocked":false,"expected":[["g3",3,1,false]]},
+    {"text":"-a:foo AND l:japanese","language":"all","scope":"all","revealBlocked":false,"expected":[["g1",2,2,true],["g6",7,2,false]]},
+    {"text":"f:\"x y\" OR a:\"bar\"","language":"all","scope":"all","revealBlocked":false,"expected":[["g1",2,2,true]]}
   ],
   "invalid": ["pages=10","alpha OR","\"unclosed","(alpha","id:0","category:12","pages>-1"]
 }

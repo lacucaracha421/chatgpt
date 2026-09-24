@@ -197,7 +197,9 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
   useEffect(() => {
     const request = ++suggestionRequest.current;
     const text = query.trim();
-    if (!status?.installed || text.length < 1 || text.includes(":")) {
+    // `artist:asa` and the short `a:asa` are suggested too; the library matches the
+    // namespace:value text and expands the short namespace.
+    if (!status?.installed || text.length < 1) {
       setSuggestions([]);
       setActiveSuggestionIndex(-1);
       return;
@@ -215,6 +217,12 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     }, 120);
     return () => window.clearTimeout(timer);
   }, [gateway, query, status?.installed]);
+
+  useEffect(() => {
+    // The list shows about four rows; arrow keys keep the active option in view.
+    if (activeSuggestionIndex < 0) return;
+    document.getElementById(`${suggestionsListboxId}-option-${activeSuggestionIndex}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeSuggestionIndex, suggestionsListboxId]);
 
   async function importCatalog() {
     const selected = await open({ directory: true, multiple: false });

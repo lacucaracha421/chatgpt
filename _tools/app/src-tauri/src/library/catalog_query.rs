@@ -2,6 +2,31 @@ use rusqlite::types::Value;
 
 const MAX_QUERY_BYTES: usize = 4_096;
 const MAX_QUERY_TOKENS: usize = 256;
+/// E-Hentai's short namespace forms, limited to namespaces the catalog carries
+/// (`reclass` never occurs, so `r:` stays an ordinary namespace). Keep aligned with
+/// `NAMESPACE_ALIASES` in server/lakomics-api/mobile_catalog_query.py.
+const NAMESPACE_ALIASES: [(&str, &str); 11] = [
+    ("a", "artist"),
+    ("c", "character"),
+    ("cos", "cosplayer"),
+    ("f", "female"),
+    ("g", "group"),
+    ("l", "language"),
+    ("loc", "location"),
+    ("m", "male"),
+    ("o", "other"),
+    ("p", "parody"),
+    ("x", "mixed"),
+];
+
+/// The full, lower-case namespace for a typed one (`a` becomes `artist`).
+pub(crate) fn expand_namespace(namespace: &str) -> String {
+    let lowered = namespace.to_lowercase();
+    NAMESPACE_ALIASES
+        .iter()
+        .find(|(short, _)| *short == lowered)
+        .map_or(lowered, |(_, full)| (*full).to_string())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SourceSpan {
@@ -361,7 +386,7 @@ impl Parser {
             return Ok(Expr::Title(word));
         }
         let (value, value_span) = self.take_value("':' 뒤에 값이 필요합니다")?;
-        let field = word.to_lowercase();
+        let field = expand_namespace(&word);
         match field.as_str() {
             "id" => parse_number(&value, value_span, false).map(Expr::Id),
             "category" => parse_category(&value).map(Expr::Category).ok_or_else(|| {
@@ -636,6 +661,31 @@ mod tests {
             parse("character:teitoku").unwrap(),
             Some(tag("character", "teitoku"))
         );
+    }
+
+    #[test]
+    fn parser_expands_short_namespaces_in_every_tag_position() {
+        assert_eq!(parse("a:asanagi").unwrap(), Some(tag("artist", "asanagi")));
+        assert_eq!(
+            parse("A:asanagi").unwrap(),
+            parse("artist:asanagi").unwrap()
+        );
+        assert_eq!(
+            parse("f:\"big breasts\"").unwrap(),
+            Some(tag("female", "big breasts"))
+        );
+        assert_eq!(
+            parse("-a:foo").unwrap(),
+            Some(Expr::Not(Box::new(tag("artist", "foo"))))
+        );
+        assert_eq!(
+            parse("cos:x OR loc:y").unwrap(),
+            parse("cosplayer:x OR location:y").unwrap()
+        );
+        for (short, full) in NAMESPACE_ALIASES {
+            assert_eq!(parse(&format!("{short}:v")).unwrap(), Some(tag(full, "v")));
+        }
+        assert_eq!(parse("r:v").unwrap(), Some(tag("r", "v")));
     }
 
     #[test]

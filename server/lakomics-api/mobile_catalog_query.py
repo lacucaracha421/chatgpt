@@ -17,6 +17,17 @@ SEARCH_MODES = ("mobile",)
 NAMESPACE_MAX_BYTES = 32
 TAG_VALUE_MAX_BYTES = 200
 EXCLUDED_TAG_MAX = 64
+# E-Hentai's short namespace forms, limited to namespaces the catalog carries
+# (`reclass` never occurs, so `r:` stays an ordinary namespace). Keep aligned with
+# NAMESPACE_ALIASES in library/catalog_query.rs.
+NAMESPACE_ALIASES = {"a": "artist", "c": "character", "cos": "cosplayer", "f": "female", "g": "group",
+                     "l": "language", "loc": "location", "m": "male", "o": "other", "p": "parody", "x": "mixed"}
+
+
+def expand_namespace(namespace):
+    """The full, lower-case namespace for a typed one (`a` → `artist`)."""
+    lowered = namespace.lower()
+    return NAMESPACE_ALIASES.get(lowered, lowered)
 
 
 
@@ -132,7 +143,7 @@ def parse_query(source):
             return ("title", text)
         take()
         v = value()
-        field = text.lower()
+        field = expand_namespace(text)
         if field == "id":
             return ("id", number(v))
         if field == "pages":
@@ -327,7 +338,7 @@ def mobile_query_text(source, search_mode=None):
             and namespace.lower() not in ("id", "pages", "uploader", "category") and plain_phrase(value)):
         forms = tag_value_variants(" ".join(value.split()))
         if forms:
-            return ("tag_variants", namespace.lower(), forms)
+            return ("tag_variants", expand_namespace(namespace), forms)
     # Advanced expressions keep their grammar; only exact tag spellings gain an alias.
     def tag_aliases(node):
         if node[0] == "tag":

@@ -145,7 +145,7 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 
 .chrome-search-editor .online-catalog__search { position: relative; display: flex; width: 100%; min-width: 0; max-width: none; margin: 0; }
 .chrome-search-editor .online-catalog__search input { width: 100%; min-width: 0; height: 40px; font-size: var(--text-lg); }
-.chrome-search-editor .online-catalog__suggestions { max-height: 240px; overflow-y: auto; z-index: 1; }
+.chrome-search-editor .online-catalog__suggestions { z-index: 1; }
 .workspace-index .manga-source-tabs button { width: 100%; min-height: 36px; text-align: center; justify-content: center; }
 .workspace-index .manga-source-tabs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .workspace-index .manga-source-tabs button:last-child { position: relative; grid-column: 1 / -1; margin-top: var(--space-2); }

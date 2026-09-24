@@ -1,7 +1,8 @@
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {Catalog} from './Catalog';
-import type {CatalogItem,CatalogPage} from './catalogModel';
+import {suggestionQuery,type CatalogItem,type CatalogPage} from './catalogModel';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn(),decode:vi.fn()}));
 vi.mock('./media',()=>({decodeImage:mocks.decode}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(e:Error)=>e.message}));
@@ -402,6 +403,41 @@ describe('mobile catalog reads',()=>{
     expect(searchParams(lastSearch()).has('searchMode')).toBe(false);
     expect([...searchParams(lastSearch()).keys()]).toEqual(['provider','language','text','sort','scope','revealBlocked','limit']);
   });
+  it('searches the typed text when the keyboard Search/Enter key submits the form',async()=>{
+    // The IME Search key is an implicit form submission: the browser activates the
+    // form's first submit button. The clear (X) button must not be that button.
+    const user=userEvent.setup();
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
+    await user.type(search,'john doe{Enter}');
+    await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('john doe'));
+    expect(search.value).toBe('john doe');
+    // A second search after a committed one must not be reset to the empty query either.
+    await user.type(search,' x{Enter}');
+    await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('john doe x'));
+    expect(search.value).toBe('john doe x');
+  });
+  it('searches newest first under a popular sort and restores that sort when the search is cleared',async()=>{
+    // 오늘 인기 only covers works posted in the last day, so `artist:x` would find nothing.
+    const user=userEvent.setup();
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const sortChip=()=>screen.getByRole('button',{name:/^카탈로그 정렬/});
+    expect(sortChip().textContent).toBe(CHOICES['hotDay']);
+    await user.type(screen.getByRole('textbox',{name:'카탈로그 검색'}),'artist:peachbitch{Enter}');
+    await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:peachbitch'));
+    expect(searchParams(lastSearch()).get('sort')).toBe('latest');
+    expect(sortChip().textContent).toBe(CHOICES['latest']);
+    expect(screen.getByText('검색 중에는 최신순으로 표시합니다')).toBeTruthy();
+    // A sort picked during the search applies to it, and the note no longer claims otherwise.
+    choose('카탈로그 정렬','views');
+    await waitFor(()=>expect(searchParams(lastSearch()).get('sort')).toBe('views'));
+    expect(screen.queryByText('검색 중에는 최신순으로 표시합니다')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'검색어 지우기'}));
+    // The unfiltered hotDay page is already cached, so the restored sort is read from the chip.
+    await waitFor(()=>expect(sortChip().textContent).toBe(CHOICES['hotDay']));
+    expect((screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('');
+    expect(screen.queryByText('검색 중에는 최신순으로 표시합니다')).toBeNull();
+  });
   it('preserves the unsent draft when the settings panel is applied',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
@@ -559,5 +595,74 @@ describe('mobile catalog layout',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText('밤의 도서관'));
     expect(await screen.findByRole('button',{name:'이어 읽기 12p'})).toBeTruthy();
     expect(screen.getByText('태그를 누르면 같은 태그로 검색합니다.')).toBeTruthy();
+  });
+});
+describe('mobile catalog tag autocomplete',()=>{
+  const suggestStatus={...capableStatus,capabilities:{...capableStatus.capabilities,suggestions:true}};
+  const suggestionCalls=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.includes('/suggestions?'));
+  const settle=()=>act(()=>new Promise(resolve=>setTimeout(resolve,250)));
+  const options=[{value:'artist:asanagi',label:null,count:1234},{value:'female:big breasts',label:'큰 가슴',count:88}];
+  function serve(status:object,suggest:(path:string)=>unknown=()=>({ready:true,publicationRevision:'p1',items:options})){
+    const fallback=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string,signal?:AbortSignal)=>path.includes('/status')?status:path.includes('/suggestions?')?suggest(path):fallback(path,signal));
+  }
+  async function open(){render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');}
+  const type=(role:'textbox'|'combobox',text:string)=>fireEvent.change(screen.getByRole(role,{name:'카탈로그 검색'}),{target:{value:text}});
+
+  it('turns a suggestion into namespace:value, quoting only a value the parser would misread',()=>{
+    expect(suggestionQuery('female:big breasts')).toBe('female:big breasts');
+    expect(suggestionQuery('artist:foo (bar)')).toBe('artist:"foo (bar)"');
+    expect(suggestionQuery('other:-x')).toBe('other:"-x"');
+    expect(suggestionQuery('parody:rock or roll')).toBe('parody:"rock or roll"');
+  });
+  it('asks nothing of a server that does not advertise suggestions',async()=>{
+    await open();type('textbox','art');await settle();
+    expect(suggestionCalls()).toEqual([]);expect(screen.queryByRole('listbox')).toBeNull();
+  });
+  it('never asks for empty text',async()=>{
+    serve(suggestStatus);await open();
+    type('combobox','   ');await settle();
+    expect(suggestionCalls()).toEqual([]);
+  });
+  it('debounces keystrokes into one request for the latest text, limited to 10',async()=>{
+    serve(suggestStatus);await open();
+    type('combobox','a');type('combobox','a:');type('combobox','a:asa');
+    await screen.findByRole('listbox',{name:'태그 추천'});
+    expect(suggestionCalls()).toHaveLength(1);
+    expect(searchParams(suggestionCalls()[0]).get('text')).toBe('a:asa');
+    expect(searchParams(suggestionCalls()[0]).get('limit')).toBe('10');
+    expect(screen.getAllByRole('option').map(option=>option.textContent)).toEqual(['artist:asanagi1,234','female:big breasts큰 가슴88']);
+  });
+  it('drops a reply that arrives after a newer request',async()=>{
+    const replies:Record<string,PromiseWithResolvers<unknown>>={};
+    serve(suggestStatus,path=>{const text=searchParams(path).get('text')!;replies[text]=Promise.withResolvers();return replies[text].promise;});
+    await open();
+    type('combobox','fo');await waitFor(()=>expect(suggestionCalls()).toHaveLength(1));
+    type('combobox','foo');await waitFor(()=>expect(suggestionCalls()).toHaveLength(2));
+    await act(async()=>replies['foo'].resolve({items:[{value:'artist:foo',label:null,count:2}]}));
+    await act(async()=>replies['fo'].resolve({items:[{value:'artist:fox',label:null,count:9}]}));
+    expect(screen.getAllByRole('option').map(option=>option.textContent)).toEqual(['artist:foo2']);
+  });
+  it('runs the search for a tapped suggestion, newest first, and closes the list',async()=>{
+    serve(suggestStatus);await open();
+    type('combobox','big');fireEvent.click(await screen.findByRole('option',{name:/female:big breasts/}));
+    await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('female:big breasts'));
+    expect(searchParams(lastSearch()).get('sort')).toBe('latest');
+    expect((screen.getByRole('combobox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('female:big breasts');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+  it('chooses with the arrow keys and Enter, and Escape or blur closes the list',async()=>{
+    serve(suggestStatus);await open();
+    const input=screen.getByRole('combobox',{name:'카탈로그 검색'});
+    type('combobox','a');await screen.findByRole('listbox');
+    fireEvent.keyDown(input,{key:'Escape'});expect(screen.queryByRole('listbox')).toBeNull();
+    type('combobox','as');await screen.findByRole('listbox');
+    fireEvent.blur(input);expect(screen.queryByRole('listbox')).toBeNull();
+    type('combobox','asa');await screen.findByRole('listbox');
+    fireEvent.keyDown(input,{key:'ArrowDown'});
+    expect(screen.getAllByRole('option')[0].getAttribute('aria-selected')).toBe('true');
+    expect(input.getAttribute('aria-activedescendant')).toBe('catalog-suggestion-0');
+    fireEvent.keyDown(input,{key:'Enter'});
+    await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:asanagi'));
   });
 });

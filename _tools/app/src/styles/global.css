@@ -3066,11 +3066,16 @@ textarea:focus-visible {
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-floating);
+  /* About four rows show at once; the rest (up to 10) scroll inside the list. */
+  max-height: calc(4 * 2.5rem + 2 * var(--space-1));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .online-catalog__suggestions button {
   display: flex;
-  align-items: baseline;
+  min-height: 2.5rem;
+  align-items: center;
   justify-content: space-between;
   width: 100%;
   gap: var(--space-3);

@@ -12,6 +12,15 @@
 .catalog-scroll{flex:1;overflow:auto;overscroll-behavior:contain;min-height:0;padding:0 var(--mobile-gutter) 28px}
 .catalog-search{margin:4px 0 4px}
 .catalog-search .ui-button--icon{width:40px;min-height:40px;padding:8px}
+/* Tag autocomplete: an overlay under the input, so opening it (or the soft keyboard)
+   never moves the list. About four 44px rows show at once; the rest scroll inside. */
+.catalog-search{position:relative}
+.catalog-suggestions{position:absolute;top:100%;left:0;right:0;z-index:3;list-style:none;margin:4px 0 0;padding:4px 0;max-height:calc(4 * var(--touch) + 8px);overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);box-shadow:0 8px 24px #0006}
+.catalog-suggestion{display:flex;align-items:center;gap:10px;min-height:var(--touch);padding:0 12px;cursor:pointer;font-size:14px}
+.catalog-suggestion[aria-selected=true],.catalog-suggestion:active{background:var(--color-selected)}
+.catalog-suggestion__value{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.catalog-suggestion__label{flex-shrink:1;min-width:0;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--color-muted)}
+.catalog-suggestion__count{flex-shrink:0;font-size:12px;color:var(--color-muted)}
 .catalog-banner{display:flex;align-items:center;gap:10px;margin:4px 0 8px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--color-surface);font-size:13px;color:var(--color-muted)}
 .catalog-banner svg{width:18px;flex-shrink:0;animation:catalog-spin .9s linear infinite}
 .catalog-banner strong{color:var(--color-text);font-weight:500}

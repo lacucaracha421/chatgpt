@@ -33,6 +33,34 @@ export function supportsDisplayPreferences(status:unknown):boolean{
   return typeof capabilities?.displayPreferencesVersion==='number'&&capabilities.displayPreferencesVersion>=DISPLAY_PREFERENCES_VERSION;
 }
 
+/** Whether a `/status` reply advertises tag autocomplete (`/v1/mobile-catalog/suggestions`). */
+export function supportsSuggestions(status:unknown):boolean{
+  return (status as {capabilities?:{suggestions?:unknown}}|null)?.capabilities?.suggestions===true;
+}
+export type CatalogSuggestion={value:string;label:string|null;count:number};
+/** The server's bounds: at most 10 suggestions for at most 200 bytes of text. */
+export const SUGGESTION_LIMIT=10;
+export const SUGGESTION_TEXT_MAX_BYTES=200;
+export function catalogSuggestionPath(text:string,revealBlocked:boolean){
+  const params=new URLSearchParams({text,limit:String(SUGGESTION_LIMIT)});
+  if(revealBlocked)params.set('revealBlocked','true');
+  return `/v1/mobile-catalog/suggestions?${params}`;
+}
+/**
+ * The query a chosen `namespace:value` suggestion becomes. A value the plain
+ * `namespace:value` reading would split or misread (quotes, parentheses, operators,
+ * a leading `-` word or an AND/OR/NOT word) is quoted, which the parser reads as the
+ * same exact tag.
+ */
+export function suggestionQuery(suggestion:string){
+  const colon=suggestion.indexOf(':');
+  if(colon<1)return suggestion;
+  const namespace=suggestion.slice(0,colon),value=suggestion.slice(colon+1);
+  const words=value.split(/\s+/).filter(Boolean);
+  const plain=words.length>0&&!/[()":<=>\\]/.test(value)&&!words.some(word=>/^(and|or|not)$/i.test(word)||word.startsWith('-'));
+  return plain?`${namespace}:${words.join(' ')}`:catalogTagQuery(namespace,value);
+}
+
 /** The wire spelling of the exclusions: sorted, deduplicated `(namespace,value)` pairs. */
 export function wireExcludedTags(tags:CatalogExcludedTag[]):CatalogExcludedTag[]{
   const seen=new Map<string,CatalogExcludedTag>();

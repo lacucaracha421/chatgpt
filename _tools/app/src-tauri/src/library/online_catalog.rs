@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     catalog_provider::{CatalogProvider, CatalogWorkIdentity},
-    catalog_query::{compile as compile_catalog_query, parse as parse_catalog_query},
+    catalog_query::{
+        compile as compile_catalog_query, expand_namespace, parse as parse_catalog_query,
+    },
     catalog_visibility::append_visibility_predicates,
     error::LibraryError,
     models::{
@@ -39,6 +41,9 @@ mod performance_tests;
 #[cfg(test)]
 #[path = "catalog_group_performance_tests.rs"]
 mod group_performance_tests;
+
+/// The list shows about four rows and scrolls for the rest; mobile uses the same bound.
+const MAX_SUGGESTIONS: u32 = 10;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ImportedSuggestion {
@@ -424,7 +429,13 @@ impl Library {
         text: &str,
         limit: u32,
     ) -> Result<Vec<CatalogSuggestion>, LibraryError> {
-        let needle = text.trim().to_lowercase();
+        let mut needle = text.trim().to_lowercase();
+        // `a:asa` means `artist:asa`, exactly as the search parser reads it.
+        if let Some((namespace, rest)) = needle.split_once(':') {
+            if !namespace.is_empty() {
+                needle = format!("{}:{rest}", expand_namespace(namespace));
+            }
+        }
         let lookup = self.catalog_lookup()?;
         Ok(lookup
             .suggestions
@@ -443,7 +454,7 @@ impl Library {
                     count: suggestion.count,
                 })
             })
-            .take(limit.min(20) as usize)
+            .take(limit.min(MAX_SUGGESTIONS) as usize)
             .collect())
     }
 
@@ -1801,6 +1812,21 @@ mod tests {
 
         assert_eq!(suggestions[0].value, "character:teitoku");
         assert_eq!(suggestions[0].label, "제독");
+    }
+
+    #[test]
+    fn search_suggestions_accept_full_and_short_namespace_input_and_cap_at_ten() {
+        let (_root, library) = searchable_library();
+
+        for text in ["character:teito", "CHARACTER:TEITO", "c:teito"] {
+            let suggestions = library.suggest_online_catalog(text, 10).unwrap();
+            assert_eq!(suggestions[0].value, "character:teitoku", "{text}");
+        }
+        assert!(library
+            .suggest_online_catalog("x:teito", 10)
+            .unwrap()
+            .is_empty());
+        assert!(library.suggest_online_catalog("", 50).unwrap().len() <= 10);
     }
 
     #[test]

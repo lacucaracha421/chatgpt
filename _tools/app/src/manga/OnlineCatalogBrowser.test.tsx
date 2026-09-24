@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CatalogGroupedSearchEvent, CatalogStatus, CatalogWork, CatalogWorkDetail, LibraryGateway, ResolvedGallery } from "../library/types";
@@ -526,6 +526,23 @@ describe("OnlineCatalogBrowser", () => {
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: "character:teitoku", page: 0 }),
     );
+  });
+
+  it("suggests for namespaced and short-namespace text and keeps the active option in view", async () => {
+    const gateway = createGateway(true);
+    const scrolled = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrolled;
+    onTestFinished(() => { Element.prototype.scrollIntoView = original; });
+    renderBrowser(gateway);
+    await userEvent.click(await screen.findByRole("button", { name: "온라인 만화 검색" }));
+    const search = await screen.findByRole("combobox", { name: "온라인 만화 검색" });
+
+    await userEvent.type(search, "c:teito");
+    await screen.findByRole("option", { name: /제독/ });
+    expect(gateway.suggestOnlineCatalog).toHaveBeenLastCalledWith("c:teito", 10);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(scrolled).toHaveBeenCalledWith({ block: "nearest" });
   });
 
   it("searches by a Korean suggestion, changes sort, and opens a result", async () => {
