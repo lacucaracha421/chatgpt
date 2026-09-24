@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 SERVER_DIR = Path(__file__).resolve().parents[1]
@@ -1653,3 +1654,56 @@ class ReplicationPublicationTests(LegacyFenceTests):
             self.assertEqual(db.execute("SELECT count(*) FROM asset_authority_changes").fetchone()[0],1)
         self.assertEqual(self.commit().status_code,200)
         self.assertEqual(self.status()["cursor"],1)
+
+    def test_normal_metadata_replication_still_publishes_with_a_new_revision(self):
+        self.activate()
+        self.prepare()
+        self.assertEqual(self.commit().status_code, 200)
+        with api_app.get_db() as db:
+            initial = db.execute("SELECT lifecycle_changed_at FROM asset_authority_state WHERE asset_id=?",
+                                 [ASSET]).fetchone()[0]
+            self.assertTrue(initial)
+            db.execute("UPDATE assets SET creator_name='Updated creator' WHERE id=?", [ASSET])
+            asset_authority.register_replication(db, LIBRARY, ASSET, "2026-09-25T00:00:00Z")
+            row = db.execute("SELECT lifecycle_changed_at,updated_at,entity_revision "
+                             "FROM asset_authority_state WHERE asset_id=?", [ASSET]).fetchone()
+            self.assertEqual(tuple(row), (initial, "2026-09-25T00:00:00Z", 2))
+            db.commit()
+        changes = self.changes(after=1)["items"]
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["asset"]["creatorName"], "Updated creator")
+        self.assertEqual(changes[0]["asset"]["entityRevision"], 2)
+
+
+class LifecycleTimestampMigrationTests(unittest.TestCase):
+    def test_old_rows_are_backfilled_without_lifecycle_or_revision_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "old.sqlite3"
+
+            @contextmanager
+            def connect():
+                with closing(sqlite3.connect(database)) as db, db:
+                    yield db
+
+            with connect() as db:
+                db.executescript(asset_authority.DDL.replace(
+                    " lifecycle_changed_at TEXT NOT NULL DEFAULT '',\n", ""))
+                for index, lifecycle in enumerate(("normal", "trash", "tombstoned")):
+                    db.execute("INSERT INTO asset_authority_state "
+                               "(library_id,asset_id,lifecycle,entity_revision,created_at,updated_at) "
+                               "VALUES(?,?,?,?,?,?)", [LIBRARY, str(index), lifecycle, index + 3,
+                                                      "created", f"2026-09-2{index}T00:00:00Z"])
+                before = db.execute("SELECT * FROM asset_authority_state ORDER BY asset_id").fetchall()
+            asset_authority.startup(connect)
+            with connect() as db:
+                rows = db.execute("SELECT * FROM asset_authority_state ORDER BY asset_id").fetchall()
+                self.assertEqual([row[:-1] for row in rows], before)
+                self.assertEqual([row[-1] for row in rows], [row[-1] for row in before])
+                self.assertEqual([row[2] for row in db.execute("PRAGMA index_info(asset_authority_trash_order)")],
+                                 ["library_id", "lifecycle", "lifecycle_changed_at", "asset_id"])
+                db.execute("UPDATE asset_authority_state SET updated_at='later' WHERE asset_id='1'")
+            asset_authority.startup(connect)
+            with connect() as db:
+                self.assertEqual(db.execute("SELECT lifecycle_changed_at FROM asset_authority_state "
+                                            "WHERE asset_id='1'").fetchone()[0], "2026-09-21T00:00:00Z")
+                self.assertEqual(db.execute("PRAGMA quick_check").fetchone()[0], "ok")

@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS asset_authority_state(
  import_source TEXT,
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL,
+ lifecycle_changed_at TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(library_id,asset_id));
 -- Ordinary reads filter on lifecycle; this index is what keeps that filter indexed
 -- rather than a scan over authority state.
@@ -187,6 +188,15 @@ CREATE TABLE IF NOT EXISTS asset_authority_baseline(
 def startup(get_db):
     with get_db() as db:
         db.executescript(DDL)
+        # Additive migration: preserve the last known timestamp for existing Assets.
+        columns = {row[1] for row in db.execute("PRAGMA table_info(asset_authority_state)")}
+        if "lifecycle_changed_at" not in columns:
+            db.execute("ALTER TABLE asset_authority_state ADD COLUMN "
+                       "lifecycle_changed_at TEXT NOT NULL DEFAULT ''")
+        db.execute("UPDATE asset_authority_state SET lifecycle_changed_at=updated_at "
+                   "WHERE lifecycle_changed_at=''")
+        db.execute("CREATE INDEX IF NOT EXISTS asset_authority_trash_order ON "
+                   "asset_authority_state(library_id,lifecycle,lifecycle_changed_at DESC,asset_id DESC)")
         db.commit()
 
 
@@ -356,8 +366,8 @@ MAX_TRASH_PAGE = 100
 def trash_page(db, library_id, cursor, limit):
     """Committed `trash` Assets for the mobile Library Trash, newest trash first.
 
-    Ordered by the lifecycle `updated_at` (the moment the trash was accepted) and then by
-    Asset id, so the keyset cursor `(updated_at, asset_id)` is total. Tombstoned Assets
+    Ordered by `lifecycle_changed_at` (the moment the trash was accepted) and then by
+    Asset id, so the keyset cursor `(lifecycle_changed_at, asset_id)` is total. Tombstoned Assets
     are never listed: the query reads `lifecycle='trash'` only. Returns raw rows joined
     with the server `assets` row so the caller can reuse the mobile list projection, plus
     the whole-trash count and byte total.
@@ -365,14 +375,14 @@ def trash_page(db, library_id, cursor, limit):
     params = [library_id]
     clause = ""
     if cursor is not None:
-        clause = " AND (state.updated_at<? OR (state.updated_at=? AND state.asset_id<?))"
+        clause = " AND (state.lifecycle_changed_at<? OR (state.lifecycle_changed_at=? AND state.asset_id<?))"
         params += [cursor[0], cursor[0], cursor[1]]
     rows = db.execute(
         "SELECT asset.*, state.entity_revision AS lifecycle_revision,"
-        " state.updated_at AS trashed_at"
+        " state.lifecycle_changed_at AS trashed_at"
         " FROM asset_authority_state AS state JOIN assets AS asset ON asset.id=state.asset_id"
         " WHERE state.library_id=? AND state.lifecycle='trash' AND asset.committed=1"
-        + clause + " ORDER BY state.updated_at DESC, state.asset_id DESC LIMIT ?",
+        + clause + " ORDER BY state.lifecycle_changed_at DESC, state.asset_id DESC LIMIT ?",
         [*params, limit + 1]).fetchall()
     totals = db.execute(
         "SELECT COUNT(*), COALESCE(SUM(asset.size_bytes),0)"
@@ -481,10 +491,10 @@ def promote_capture(db, *, library_id, capture_id, kind, object_key, content_typ
             "INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision,"
             "kind,object_key,content_type,size_bytes,sha256,source_url,creator_name,"
             "creator_handle,collected_at,source_published_at,import_source,created_at,"
-            "updated_at) VALUES(?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "updated_at,lifecycle_changed_at) VALUES(?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [library_id, asset_id, NORMAL, kind, object_key, content_type, size_bytes,
              sha256, source_url, creator_name, creator_handle, collected_at,
-             source_published_at, import_source, timestamp, timestamp])
+             source_published_at, import_source, timestamp, timestamp, timestamp])
     if duplicate is None:
         db.execute("INSERT INTO assets(id,kind,object_key,content_type,size_bytes,sha256,"
                    "created_at,updated_at,committed,collected_at,source_url,creator_name,"
@@ -566,8 +576,22 @@ def register_replication(db, library_id, asset_id, now):
     values = [asset[k] for k in fields]
     if old and list(old[2:13]) == values:
         return
+    # Android requires every emitted change to increase entityRevision. Metadata on
+    # a trashed Asset must not invalidate a queued restore, so update it quietly;
+    # the next lifecycle change (or baseline read) carries the latest projection.
+    quiet_trash_update = old is not None and old[0] == TRASH
     revision = old[1] + 1 if old else 1
-    db.execute("INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision," + ",".join(fields) + ",created_at,updated_at) VALUES(" + ",".join("?" for _ in range(17)) + ") ON CONFLICT(library_id,asset_id) DO UPDATE SET entity_revision=excluded.entity_revision," + ",".join(k+"=excluded."+k for k in fields) + ",updated_at=excluded.updated_at", [library_id,asset_id,NORMAL,revision,*values,asset["created_at"],now])
+    if quiet_trash_update:
+        revision = old[1]
+    db.execute(
+        "INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision,"
+        + ",".join(fields) + ",created_at,updated_at,lifecycle_changed_at) VALUES("
+        + ",".join("?" for _ in range(18))
+        + ") ON CONFLICT(library_id,asset_id) DO UPDATE SET entity_revision=excluded.entity_revision,"
+        + ",".join(k + "=excluded." + k for k in fields) + ",updated_at=excluded.updated_at",
+        [library_id, asset_id, NORMAL, revision, *values, asset["created_at"], now, now])
+    if quiet_trash_update:
+        return
     _record_change(db, library_id=library_id, command_type="replicateAsset", asset_id=asset_id, revision=revision, operation_id=str(uuid.uuid4()), delta={"asset":state_projection(state_row(db,library_id,asset_id),asset_id)}, now=now)
 
 
@@ -646,9 +670,10 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
 
     next_revision = revision + 1
     db.execute(
-        "UPDATE asset_authority_state SET lifecycle=?,entity_revision=?,updated_at=?"
-        " WHERE library_id=? AND asset_id=?",
-        [target, next_revision, now, library_id, asset_id])
+        "UPDATE asset_authority_state SET lifecycle=?,entity_revision=?,updated_at=?,"
+        " lifecycle_changed_at=CASE WHEN lifecycle='trash' OR ?='trash' THEN ? "
+        "ELSE lifecycle_changed_at END WHERE library_id=? AND asset_id=?",
+        [target, next_revision, now, target, now, library_id, asset_id])
     updated = state_row(db, library_id, asset_id)
     projection = state_projection(updated, asset_id)
     sequence = _record_change(
@@ -997,10 +1022,10 @@ def activate(db, *, library_id, expected_snapshot, now):
         db.execute(
             "INSERT INTO asset_authority_state(library_id,asset_id,lifecycle,entity_revision,"
             "kind,object_key,content_type,size_bytes,sha256,source_url,creator_name,"
-            "creator_handle,collected_at,source_published_at,import_source,created_at,updated_at)"
-            " VALUES(?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "creator_handle,collected_at,source_published_at,import_source,created_at,updated_at,lifecycle_changed_at)"
+            " VALUES(?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [library_id, asset_id, lifecycle_by_id[asset_id], row[0], row[1], row[2], row[3],
-             row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], row[12]])
+             row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], row[12], row[12]])
     db.execute(
         "INSERT INTO asset_authority_retention(library_id,epoch,pruned_through,pruned_at)"
         " VALUES(?,1,0,NULL)", [library_id])

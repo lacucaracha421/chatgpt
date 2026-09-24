@@ -521,6 +521,10 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                     "SELECT 1 FROM mobile_character_exclusions WHERE target_id=? AND asset_id=? AND sequence>?",
                     (command.targetId, command.assetId, excluded["applied_cursor"])).fetchone():
                 fail(409, "pendingCharacterCorrection", "이 자산의 캐릭터 제외가 PC 반영을 기다리고 있습니다.")
+            if command.origin == "feed" and db.execute(
+                    "SELECT 1 FROM mobile_character_review_items WHERE target_id=? AND asset_id=?",
+                    (command.targetId, command.assetId)).fetchone() is None:
+                fail(409, "characterReviewChanged", "검토 목록이 바뀌었습니다. 새로고침해 주세요.")
             sequence = current["last_sequence"] + 1
             if sequence > MAX_CURSOR:
                 fail(409, "characterReviewCursorRejected", "캐릭터 검토 기록 한도에 도달했습니다.")

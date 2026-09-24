@@ -223,7 +223,7 @@ class CharacterReviewTests(unittest.TestCase):
         self.assertEqual(self.code(self.decide({**request, 'decision': 'rejected'})), 'operationConflict')
         self.assertEqual(self.code(self.decide(self.command(asset='ref-1'))), 'characterReferenceProtected')
         self.assertEqual(self.code(self.decide(self.command(asset='ref-1', decision='rejected'))), 'characterReferenceProtected')
-        self.assertEqual(self.decide(self.command(asset='ref-1', decision='cleared')).status_code, 200)
+        self.assertEqual(self.decide(self.command(asset='ref-1', decision='cleared', origin='viewer')).status_code, 200)
         self.assertEqual(self.code(self.decide(self.command(target='zzz'))), 'characterReviewTargetMissing')
         self.assertEqual(self.code(self.decide(self.command(target='s'))), 'characterReviewTargetMissing')
         self.assertEqual(self.code(self.decide(self.command(asset='not-uploaded'))), 'characterReviewAssetMissing')
@@ -255,7 +255,28 @@ class CharacterReviewTests(unittest.TestCase):
         mirror = base.CharacterExclusionTests.exclude(self, base.CharacterExclusionTests.command(self, asset='a'))
         self.assertEqual(self.code(mirror), 'pendingCharacterCorrection')
         # Another character's pair is not blocked.
-        self.assertEqual(self.decide(self.command(target='d', asset='b')).status_code, 200)
+        self.assertEqual(self.decide(self.command(target='d', asset='b', origin='viewer', basis=None)).status_code, 200)
+
+    def test_feed_decisions_require_the_published_pair(self):
+        self.adopt()
+        for asset in ('other', 'b', 'cand-2'):
+            for decision in ('accepted', 'rejected', 'cleared'):
+                with self.subTest(asset=asset, decision=decision):
+                    reply = self.decide(self.command(asset=asset, decision=decision))
+                    self.assertEqual(reply.status_code, 409)
+                    self.assertEqual(self.code(reply), 'characterReviewChanged')
+        self.assertEqual(self.log().json()['items'], [])
+        command = self.command()
+        accepted = self.decide(command)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        feed = feed_fixture()
+        feed.update(baseRevision=self.read()['revision'], items=[])
+        self.assertEqual(self.put_feed(feed).status_code, 200)
+        # Lost-response retries still resolve from the receipt after feed removal.
+        self.assertEqual(self.decide(command).json(), accepted.json())
+        reply = self.decide(self.command())
+        self.assertEqual((reply.status_code, self.code(reply)), (409, 'characterReviewChanged'))
+        self.assertEqual(len(self.log().json()['items']), 1)
 
     def test_publisher_only_ordered_log(self):
         self.adopt()

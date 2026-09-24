@@ -10,6 +10,9 @@ from __future__ import annotations
 import hashlib
 import io
 import unittest
+from unittest import mock
+
+import api_auth
 
 from tests.test_asset_authority import AssetAuthorityFixture, new_operation  # noqa: F401
 from tests.test_capture_api_stub import fake_s3
@@ -47,9 +50,9 @@ class MobileLibraryTrashTests(AssetAuthorityFixture):
 
     def set_state(self, asset_id, lifecycle, updated_at, revision=2):
         with api_app.get_db() as db:
-            db.execute("UPDATE asset_authority_state SET lifecycle=?,updated_at=?,"
+            db.execute("UPDATE asset_authority_state SET lifecycle=?,updated_at=?,lifecycle_changed_at=?,"
                        "entity_revision=? WHERE asset_id=?",
-                       [lifecycle, updated_at, revision, asset_id])
+                       [lifecycle, updated_at, updated_at, revision, asset_id])
             db.commit()
 
     def trash(self, headers=None, **params):
@@ -99,6 +102,98 @@ class MobileLibraryTrashTests(AssetAuthorityFixture):
         self.assertFalse(second["has_more"])
         self.assertIsNone(second["next_cursor"])
         self.assertEqual(self.trash(cursor="not-a-cursor").status_code, 400)
+
+    def test_replication_keeps_trash_order_cursor_and_queued_restore_revision(self):
+        self.seeded()
+        before = self.trash(limit=1).json()
+        cursor = self.status()["cursor"]
+        # Exercise the authority upsert directly: the legacy HTTP commit still
+        # refuses non-normal Assets through its existing lifecycle fence.
+        with api_app.get_db() as db:
+            db.execute("UPDATE assets SET creator_name='Updated creator' WHERE id=?", [A])
+            asset_authority.register_replication(db, "e" * 32, A, "2026-09-25T00:00:00Z")
+            db.commit()
+        page = self.trash().json()
+        self.assertEqual([i["id"] for i in page["items"]], [B, A])
+        self.assertEqual(page["items"][1]["trashedAt"], "2026-09-24T01:00:00Z")
+        self.assertEqual(page["items"][1]["entityRevision"], 2)
+        self.assertEqual(self.trash(cursor=before["next_cursor"]).json()["items"][0]["id"], A)
+        # No equal-revision change is emitted: shipped Android rejects such a delta.
+        self.assertEqual(self.changes(after=cursor)["items"], [])
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT creator_name FROM asset_authority_state WHERE asset_id=?", [A]).fetchone()[0], "Updated creator")
+        with mock.patch.object(asset_authority, "now_iso", return_value="2026-09-25T00:00:00Z"):
+            restored = self.command(asset_authority.RESTORE_ASSET, A, 2)
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["asset"]["entityRevision"], 3)
+        self.assertEqual(restored.json()["asset"]["creatorName"], "Updated creator")
+        self.assertEqual(self.changes(after=cursor)["items"][0]["asset"]["entityRevision"], 3)
+        with mock.patch.object(asset_authority, "now_iso", return_value="2026-09-26T00:00:00Z"):
+            self.assertEqual(self.command(asset_authority.TRASH_ASSET, A, 3).status_code, 200)
+        retrash = self.trash().json()["items"][0]
+        self.assertEqual((retrash["id"], retrash["trashedAt"], retrash["entityRevision"]),
+                         (A, "2026-09-26T00:00:00Z", 4))
+        self.assertEqual(self.command(asset_authority.TRASH_ASSET, A, 4).status_code, 200)
+        self.assertEqual(self.trash().json()["items"][0]["trashedAt"], retrash["trashedAt"])
+        stale = self.command(asset_authority.RESTORE_ASSET, A, 2)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.json()["detail"]["code"], "revisionConflict")
+
+    def test_timestamp_ties_and_legacy_cursor_rejection(self):
+        self.seeded()
+        self.set_state(A, asset_authority.TRASH, "2026-09-24T03:00:00Z")
+        first = self.trash(limit=1).json()
+        self.assertEqual(first["items"][0]["id"], B)
+        self.assertEqual(self.trash(cursor=first["next_cursor"]).json()["items"][0]["id"], A)
+        legacy = api_app.encode_mobile_cursor("trash", "2026-09-24T03:00:00Z", B)
+        reply = self.trash(cursor=legacy)
+        self.assertEqual((reply.status_code, reply.json()["detail"]), (400, "Invalid cursor"))
+        with api_app.get_db() as db:
+            plan = db.execute("EXPLAIN QUERY PLAN SELECT asset.* FROM asset_authority_state state "
+                              "JOIN assets asset ON asset.id=state.asset_id WHERE state.library_id=? "
+                              "AND state.lifecycle='trash' AND asset.committed=1 "
+                              "ORDER BY state.lifecycle_changed_at DESC,state.asset_id DESC LIMIT 2", ["e" * 32]).fetchall()
+        details = " ".join(row[3] for row in plan)
+        self.assertIn("asset_authority_trash_order", details)
+        self.assertNotIn("TEMP B-TREE", details)
+
+    def test_media_ticket_client_auth_and_revocation_for_both_shapes_and_scopes(self):
+        self.seeded()
+        with api_app.get_db() as db:
+            token_id, token = api_auth.provision_token(db, "client", "media-reader")
+            db.commit()
+        client = {"Authorization": f"Bearer {token}"}
+        for headers in (client, self.admin, self.publisher):
+            for asset_id, params in ((A, {"lifecycle": "trash"}), (D, {})):
+                for variant in ("thumbnail", "original"):
+                    single = self.client.post(f"/v1/library/assets/{asset_id}/media-ticket",
+                                              headers=headers, params=params, json={"variant": variant})
+                    self.assertEqual(single.status_code, 200, single.text)
+                    batch = self.client.post("/v1/library/media-tickets", headers=headers, params=params,
+                                             json={"items": [{"asset_id": asset_id, "variant": variant}]})
+                    self.assertEqual(batch.status_code, 200, batch.text)
+                    self.assertTrue(batch.json()["items"][0]["ok"])
+        for params, allowed in (({}, {D}), ({"lifecycle": "trash"}, {A, B})):
+            for asset_id in (A, B, C, D):
+                single = self.client.post(f"/v1/library/assets/{asset_id}/media-ticket", headers=client,
+                                          params=params, json={"variant": "thumbnail"})
+                self.assertEqual(single.status_code, 200 if asset_id in allowed else 404)
+            batch = self.client.post("/v1/library/media-tickets", headers=client, params=params,
+                                     json={"items": [{"asset_id": aid, "variant": "thumbnail"} for aid in (A, B, C, D)]})
+            self.assertEqual({item["asset_id"] for item in batch.json()["items"] if item["ok"]}, allowed)
+        # Media access does not grant the publisher-only permanent-delete command.
+        self.assertEqual(self.command(asset_authority.TOMBSTONE_ASSET, A, 2, headers=client).status_code, 401)
+        with api_app.get_db() as db:
+            api_auth.revoke_token(db, token_id)
+            db.commit()
+        from tests.test_asset_authority import RoleBoundaryTests
+        extension = RoleBoundaryTests.extension_token(self)
+        for headers in ({}, client, extension, {"Authorization": "Bearer invalid"}):
+            for params in ({}, {"lifecycle": "trash"}):
+                self.assertEqual(self.client.post(f"/v1/library/assets/{A}/media-ticket", headers=headers,
+                                                  params=params, json={"variant": "thumbnail"}).status_code, 401)
+                self.assertEqual(self.client.post("/v1/library/media-tickets", headers=headers, params=params,
+                                                  json={"items": [{"asset_id": A, "variant": "thumbnail"}]}).status_code, 401)
 
     def test_requires_a_client_credential(self):
         self.seeded()

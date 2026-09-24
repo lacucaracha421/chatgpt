@@ -114,6 +114,29 @@ class SimilarityReviewTests(unittest.TestCase):
         self.assertEqual(self.code(self.client.get(REVIEW, headers=self.auth, params={'cursor': head['nextCursor']})),
                          'similarityReviewChanged')
 
+    def test_stale_feed_basis_rejects_decisions_even_when_pair_hashes_match(self):
+        old = self.adopt()
+        accepted_command = self.command(review='r3', decision='keep_both')
+        accepted = self.decide(accepted_command)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        feed = feed_fixture()
+        feed.update(baseRevision=old, generatedAt='2026-09-25T00:00:00Z')
+        published = self.put_feed(feed)
+        self.assertEqual(published.status_code, 200, published.text)
+        new = published.json()['revision']
+        self.assertNotEqual(old, new)
+        for decision in ('keep_existing', 'replace_existing', 'keep_both', 'withdrawn'):
+            with self.subTest(decision=decision):
+                reply = self.decide(self.command(review='r3' if decision == 'withdrawn' else 'r1',
+                                                 decision=decision, revision=old))
+                self.assertEqual(reply.status_code, 409, reply.text)
+                self.assertEqual(self.code(reply), 'similarityReviewChanged')
+        self.assertEqual(len(self.log().json()['items']), 1)
+        # Idempotent receipts take precedence over basis freshness.
+        self.assertEqual(self.decide(accepted_command).json(), accepted.json())
+        self.assertEqual(self.decide(self.command(review='r1', decision='keep_both', revision=new)).status_code, 200)
+        self.assertEqual(self.decide(self.command(review='r3', decision='withdrawn', revision=new)).status_code, 200)
+
     def test_atomic_replace_stale_base_validation_and_limits(self):
         revision = self.adopt()
         self.assertEqual(self.put_feed(feed_fixture()).json()['revision'], revision)  # Idempotent retry.

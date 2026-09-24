@@ -369,6 +369,8 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                 if receipt["payload_digest"] != payload_digest:
                     fail(409, "operationConflict", "다른 내용으로 검토 요청을 재사용할 수 없습니다.")
                 return json.loads(receipt["result_json"])
+            if command.basis.feedRevision != current["feed_revision"]:
+                fail(409, "similarityReviewChanged", "검토 목록이 바뀌었습니다. 새로고침해 주세요.")
             pending = {row["review_id"]: row for row in pending_decisions(db, current)}
             withdraws = None
             if command.decision == "withdrawn":

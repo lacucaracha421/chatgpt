@@ -2522,7 +2522,7 @@ def create_mobile_media_ticket(
     authorization: str | None = Header(default=None),
     lifecycle: Literal["trash"] | None = Query(default=None),
 ):
-    require_auth(authorization)
+    client_guard(get_db, API_TOKEN)(authorization)
     with get_db() as db:
         if lifecycle == "trash":
             # Trash scope (mobile Library Trash): only canonically trashed Assets,
@@ -2584,7 +2584,7 @@ def create_mobile_media_tickets(
     리스트/서명 규칙을 적용하며, 개별 항목 실패는 배치 전체를 실패시키지
     않는다. 임의 object key는 절대 요청할 수 없다 (asset id만 허용).
     """
-    require_auth(authorization)
+    client_guard(get_db, API_TOKEN)(authorization)
 
     # 중복 제거: 같은 asset+variant는 한 번만 서명한다.
     unique: dict[tuple[str, str], None] = {}
@@ -2665,7 +2665,7 @@ def list_mobile_library_trash(
             if active is None:
                 return {"active": False, "items": [], "next_cursor": None, "has_more": False,
                         "total_count": 0, "total_bytes": 0}
-            position = decode_mobile_cursor(cursor, "trash") if cursor is not None else None
+            position = decode_mobile_cursor(cursor, "trash-lifecycle-v2") if cursor is not None else None
             rows, has_more, total_count, total_bytes = asset_authority.trash_page(
                 db, active["libraryId"], position, limit)
             memberships = _mobile_memberships(db, rows)
@@ -2680,7 +2680,7 @@ def list_mobile_library_trash(
         items.append(item)
     next_cursor = None
     if has_more and rows:
-        next_cursor = encode_mobile_cursor("trash", rows[-1]["trashed_at"], rows[-1]["id"])
+        next_cursor = encode_mobile_cursor("trash-lifecycle-v2", rows[-1]["trashed_at"], rows[-1]["id"])
     return {"active": True, "libraryId": active["libraryId"], "epoch": active["epoch"],
             "contractVersion": active["contractVersion"], "cursor": active["cursor"],
             "items": items, "next_cursor": next_cursor, "has_more": has_more,
