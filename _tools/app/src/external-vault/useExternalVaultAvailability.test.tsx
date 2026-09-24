@@ -3,7 +3,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { AssetView, EncryptedVaultStatus, LibraryGateway } from "../library/types";
 import { useExternalVaultAvailability, VAULT_STATUS_POLL_MS, type VaultLeaveReason } from "./useExternalVaultAvailability";
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+const workload = vi.hoisted(() => ({ hidden: false, restricted: false }));
+vi.mock("../app/workloadProfile", () => ({ useWorkloadProfile: () => workload }));
+afterEach(() => { cleanup(); vi.useRealTimers(); workload.hidden = false; workload.restricted = false; });
 
 const unlocked: EncryptedVaultStatus = { state: "unlocked", vaultId: "vault-1", root: "/vault", itemCount: 3, remembered: true };
 const locked: EncryptedVaultStatus = { ...unlocked, state: "locked", itemCount: null };
@@ -72,4 +74,20 @@ it("leaves an open secret view when the vault is locked, but not when it starts 
   expect(onLeave).not.toHaveBeenCalled();
   act(() => window.dispatchEvent(new Event("focus")));
   await waitFor(() => expect(onLeave).toHaveBeenCalledWith("locked"));
+});
+
+it("clears unlocked state on hide before any delayed foreground refresh", async () => {
+  const onLeave = vi.fn();
+  const getEncryptedVaultStatus = vi.fn().mockResolvedValueOnce(unlocked).mockImplementation(() => new Promise(() => {}));
+  const gateway = { getEncryptedVaultStatus };
+  const view: AssetView = { kind: "private_vault" };
+  const { rerender } = render(<Harness gateway={gateway} view={view} onLeave={onLeave} />);
+  await waitFor(() => expect(screen.getByText("unlocked")).toBeInTheDocument());
+  workload.hidden = true;
+  rerender(<Harness gateway={gateway} view={view} onLeave={onLeave} />);
+  expect(screen.getByText("locked")).toBeInTheDocument();
+  expect(onLeave).toHaveBeenCalledWith("locked");
+  workload.hidden = false;
+  rerender(<Harness gateway={gateway} view={view} onLeave={onLeave} />);
+  expect(screen.queryByText("unlocked")).not.toBeInTheDocument();
 });

@@ -22,6 +22,21 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn fresh_job_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(180))
+}
+#[cfg(test)]
+mod workload_tests {
+    use super::*;
+    #[test]
+    fn workload_fresh_jobs_have_a_three_minute_budget() {
+        let now = Instant::now();
+        assert!(fresh_job_due(None, now));
+        assert!(!fresh_job_due(Some(now), now + Duration::from_secs(179)));
+        assert!(fresh_job_due(Some(now), now + Duration::from_secs(180)));
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct PreparedKey {
     runtime: String,
@@ -93,6 +108,7 @@ pub(super) struct Engine {
     shadow: std::collections::VecDeque<super::character_shadow::Pending>,
     /// Assets already checked by the S36 catch-up in this run.
     s36_checked: BTreeSet<String>,
+    last_fresh_attempt: Option<Instant>,
 }
 #[cfg(test)]
 impl Engine {
@@ -209,6 +225,7 @@ impl Library {
         engine.training = None;
     }
     pub(super) fn character_shadow_backfill_available(&self) -> Result<()> {
+        if crate::workload::is_restricted() { return Err(Error::Invalid("가벼운 모드가 끝난 뒤 과거 이미지 채점을 시작해 주세요.")); }
         let engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !engine.running || engine.stop.load(Ordering::Acquire)
             || !engine.config.as_ref().is_some_and(|config| config.shadow_model.is_some()) {
@@ -276,6 +293,18 @@ impl Library {
     }
     fn incremental_loop(&self, config: RuntimeConfig, stop: Arc<AtomicBool>) {
         while !stop.load(Ordering::Acquire) && Arc::strong_count(&self.lease) > 1 {
+            let restricted = crate::workload::is_restricted();
+            if restricted {
+                self.character_worker_pool.release();
+                let mut engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                engine.prepared_references = None;
+                engine.training = None;
+                if !fresh_job_due(engine.last_fresh_attempt, Instant::now()) {
+                    drop(engine);
+                    std::thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+            }
             let attempt = (|| -> Result<bool> {
                 let worker_paused: bool = self.connection()?.query_row(
                     "SELECT paused FROM character_autotag_control WHERE singleton=1",
@@ -286,9 +315,11 @@ impl Library {
                     return Ok(false);
                 }
                 let Some(job) = self.claim_character_autotag()? else {
+                    if crate::workload::is_restricted() { return Ok(false); }
                     if self.advance_character_reference_refresh(32)? > 0 {
                         return Ok(true);
                     }
+                    if crate::workload::is_restricted() { return Ok(false); }
                     // Preserve native augmentation warm-up priority as well.
                     if self
                         .advance_character_augmentation(&config, stop.clone())
@@ -296,7 +327,9 @@ impl Library {
                     {
                         return Ok(true);
                     }
+                    if crate::workload::is_restricted() { return Ok(false); }
                     if self.advance_character_shadow(&config, stop.clone()) { return Ok(true); }
+                    if crate::workload::is_restricted() { return Ok(false); }
                     return Ok(self.advance_character_shadow_backfill(&config, stop.clone()));
                 };
                 if self.supersede_invalid_reference_refresh_job(&job)? {
@@ -307,6 +340,7 @@ impl Library {
                         .character_incremental
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    e.last_fresh_attempt = Some(Instant::now());
                     e.active = Some(job.asset_id.clone());
                     e.active_series_name = None;
                     e.active_target_name = None;
@@ -316,7 +350,12 @@ impl Library {
                     e.total = 0;
                     e.compared = 0;
                 }
-                let outcome = self.compare_incremental_asset(&job, &config, stop.clone());
+                let mut job_config = config.clone();
+                if crate::workload::is_restricted() {
+                    job_config.augmentation_model = None;
+                    job_config.shadow_model = None;
+                }
+                let outcome = self.compare_incremental_asset(&job, &job_config, stop.clone());
                 if let Err(error) = outcome {
                     let stopped = stop.load(Ordering::Acquire);
                     let retry = stopped || job.attempts < 3;
@@ -548,7 +587,7 @@ impl Library {
         // Borrow separately: an optional worker failure resets the child but
         // cannot discard the already completed native comparisons.
         let augmentation =
-            if config.augmentation_model.is_some() && ready["augmentationAvailable"] == true {
+            if !crate::workload::is_restricted() && config.augmentation_model.is_some() && ready["augmentationAvailable"] == true {
                 self.compare_character_augmentation(
                     job,
                     config,
@@ -611,7 +650,7 @@ impl Library {
         if stop.load(Ordering::Acquire) {
             return Err(Error::Stale);
         }
-        let shadow = if config.shadow_model.is_some() {
+        let shadow = if !crate::workload::is_restricted() && config.shadow_model.is_some() {
             match super::character_shadow::observe(&tx, job, &predictions) {
                 Ok(pending) => Some(pending),
                 Err(error) => {

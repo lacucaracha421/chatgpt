@@ -1,3 +1,4 @@
+import { useWorkloadProfile, getWorkloadProfile } from "../app/workloadProfile";
 import { useEffect } from "react";
 import type { CollectionUpdateProvider, LibraryGateway, ReleaseWatchRunResult } from "../library/types";
 
@@ -9,7 +10,9 @@ export function useReleaseWatchCheck(
   libraryRoot: string,
   onChanged: (result: ReleaseWatchRunResult) => Promise<void>,
 ) {
+  const { restricted } = useWorkloadProfile();
   useEffect(() => {
+    if (restricted) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const run = async () => {
@@ -22,17 +25,17 @@ export function useReleaseWatchCheck(
         const api = gateway.collectionTracking;
         if (api?.runUpdates && api.updateStatus) {
           for (const provider of ["mangadex", "kakao"] as CollectionUpdateProvider[]) {
-            if (!active) break;
+            if (!active || getWorkloadProfile().restricted) break;
             try {
               const before = await api.updateStatus(provider);
-              if (!active) break;
+              if (!active || getWorkloadProfile().restricted) break;
               if (!before.remaining) continue;
               if (before.retryAt && Date.parse(before.retryAt) > Date.now()) {
                 scheduleRetry(before.retryAt);
                 continue;
               }
               const result = await api.runUpdates(provider);
-              if (!active) break;
+              if (!active || getWorkloadProfile().restricted) break;
               if (result.busy || (result.remaining > 0 && !result.retryAt)) nextWakeAt = Math.min(nextWakeAt, Date.now() + CONTINUATION_MS);
               else if (result.remaining > 0) scheduleRetry(result.retryAt);
               if (result.busy) continue;
@@ -60,5 +63,5 @@ export function useReleaseWatchCheck(
     return () => { active = false; clearTimeout(timer); };
     // Resubscribe only on gateway/library switch; callbacks read current app state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway, libraryRoot]);
+  }, [gateway, libraryRoot, restricted]);
 }

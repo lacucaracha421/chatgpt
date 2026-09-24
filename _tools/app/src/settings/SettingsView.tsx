@@ -1,3 +1,4 @@
+import { WorkloadControls } from "../app/WorkloadControls";
 import { publicationProgressText, startPublication, usePublicationJobs } from "../library/publicationJobs";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -749,6 +750,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     {section === "general" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>일반</h2></header>
+        <WorkloadControls />
         <dl className="settings-view__property">
           <dt>화면 배율</dt>
           <dd className="settings-view__credential-status">글자, 버튼, 이미지 등 앱 전체 크기를 조절합니다. 변경 즉시 적용되며 다음 실행에도 유지됩니다.</dd>

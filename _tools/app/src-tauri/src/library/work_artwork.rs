@@ -478,12 +478,14 @@ impl Library {
         };
 
         for (artwork_id, collection_id, relative_path) in artworks {
+            if crate::workload::is_restricted() { break; }
             let _ = self.ensure_work_artwork_thumbnail(&collection_id, &artwork_id, &relative_path);
         }
         Ok(())
     }
 
     pub(crate) fn start_work_artwork_thumbnail_backfill(&self) {
+        if crate::workload::is_restricted() { return; }
         let has_artwork = self.connection().and_then(|connection| {
             connection
                 .query_row(

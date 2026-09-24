@@ -81,7 +81,10 @@ fn ffmpeg_seek_seconds(seek_ms: u64) -> String {
     format!("{}.{:03}", seek_ms / 1_000, seek_ms % 1_000)
 }
 
-pub(crate) fn render_video_frame_webp(source: &Path, seek_ms: u64) -> Result<Vec<u8>, LibraryError> {
+pub(crate) fn render_video_frame_webp(
+    source: &Path,
+    seek_ms: u64,
+) -> Result<Vec<u8>, LibraryError> {
     let seek = ffmpeg_seek_seconds(seek_ms);
     run_tool(
         "ffmpeg",
@@ -243,7 +246,10 @@ impl Library {
             changed_asset_ids: Vec::new(),
         };
         for _ in 0..limit.clamp(1, 10) {
-            let Some(video) = self.reserve_pending_video()? else {
+            if crate::workload::is_restricted() {
+                break;
+            }
+            let Some(video) = self.reserve_pending_video(None)? else {
                 break;
             };
             let asset_id = video.asset_id.clone();
@@ -279,6 +285,9 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::AssetNotFound);
         }
+        // A light-mode upload owns preparation, so an explicit retry must wake
+        // that owner before the ordinary preparation loop resumes.
+        self.requeue_cloud_asset_after_thumbnail_ready(asset_id)?;
         Ok(())
     }
 
@@ -383,7 +392,45 @@ impl Library {
         fs::remove_dir_all(canonical_directory).map_err(|_| LibraryError::VideoPreparationFailed)
     }
 
-    fn reserve_pending_video(&self) -> Result<Option<PendingVideo>, LibraryError> {
+    /// Only the video already claimed by the upload worker is eligible here.
+    pub(crate) fn prepare_upload_video(&self, asset_id: &str) -> Result<(), LibraryError> {
+        self.prepare_upload_video_with(asset_id, &ProcessVideoTool)
+    }
+
+    fn prepare_upload_video_with<T: VideoTool>(
+        &self,
+        asset_id: &str,
+        tool: &T,
+    ) -> Result<(), LibraryError> {
+        let _guard = self
+            .video_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let thumbnail: Option<String> = self.connection()?.query_row(
+            "SELECT thumbnail_relative_path FROM assets WHERE id=?1",
+            [asset_id],
+            |row| row.get(0),
+        )?;
+        if thumbnail
+            .as_deref()
+            .is_some_and(|path| self.open_library_media(path).is_ok())
+        {
+            return Ok(());
+        }
+        if let Some(video) = self.reserve_pending_video(Some(asset_id))? {
+            if let Err(error) = self.prepare_video(tool, video) {
+                self.mark_video_failed(asset_id)?;
+                return Err(error);
+            }
+            crate::workload::video_prepared();
+        }
+        Ok(())
+    }
+
+    fn reserve_pending_video(
+        &self,
+        only_asset: Option<&str>,
+    ) -> Result<Option<PendingVideo>, LibraryError> {
         self.connection()?
             .query_row(
                 "UPDATE video_assets
@@ -392,12 +439,13 @@ impl Library {
                     SELECT video_assets.asset_id FROM video_assets
                     JOIN assets ON assets.id = video_assets.asset_id
                     WHERE video_assets.preparation_state = 'pending'
+                      AND (?1 IS NULL OR assets.id = ?1)
                       AND assets.status = 'normal'
                     ORDER BY video_assets.asset_id LIMIT 1
                  )
                  RETURNING asset_id, duration_ms, container, video_codec, audio_codec,
                     (SELECT relative_path FROM assets WHERE assets.id = video_assets.asset_id)",
-                [],
+                [only_asset],
                 |row| {
                     Ok(PendingVideo {
                         asset_id: row.get(0)?,
@@ -525,11 +573,20 @@ fn safe_asset_id(asset_id: &str) -> bool {
 }
 
 fn run_tool<const N: usize>(name: &str, arguments: [OsString; N]) -> Result<Vec<u8>, LibraryError> {
-    run_similarity_tool(name, &arguments, &std::sync::atomic::AtomicBool::new(false),
-        std::time::Instant::now() + std::time::Duration::from_secs(30 * 60), None)
-        .map_err(|error| if error == "tool_unavailable" {
+    run_similarity_tool(
+        name,
+        &arguments,
+        &std::sync::atomic::AtomicBool::new(false),
+        std::time::Instant::now() + std::time::Duration::from_secs(30 * 60),
+        None,
+    )
+    .map_err(|error| {
+        if error == "tool_unavailable" {
             LibraryError::VideoToolUnavailable
-        } else { LibraryError::VideoPreparationFailed })
+        } else {
+            LibraryError::VideoPreparationFailed
+        }
+    })
 }
 
 #[cfg(windows)]
@@ -557,11 +614,16 @@ fn tool_path(name: &str) -> Option<PathBuf> {
 #[cfg(target_os = "linux")]
 fn tool_path(name: &str) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
-    if !matches!(name, "ffmpeg" | "ffprobe") { return None; }
+    if !matches!(name, "ffmpeg" | "ffprobe") {
+        return None;
+    }
     std::env::split_paths(&std::env::var_os("PATH")?)
         .filter(|directory| directory.is_absolute())
         .map(|directory| directory.join(name))
-        .find(|path| path.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+        .find(|path| {
+            path.metadata()
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
 }
 
 /// Fingerprint jobs share the installed tools, but never create playback derivatives.
@@ -574,10 +636,16 @@ pub(crate) fn similarity_tool_profile() -> Result<String, &'static str> {
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let count = file.read(&mut buffer).map_err(|_| "tool_unavailable")?;
-        if count == 0 { break; }
+        if count == 0 {
+            break;
+        }
         hasher.update(&buffer[..count]);
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 pub(crate) fn inspect_similarity_geometry(
@@ -585,21 +653,46 @@ pub(crate) fn inspect_similarity_geometry(
     cancel: &std::sync::atomic::AtomicBool,
     deadline: std::time::Instant,
 ) -> Result<(), &'static str> {
-    let output = run_similarity_tool("ffprobe", &[
-        "-v".into(), "error".into(), "-select_streams".into(), "v:0".into(),
-        "-show_streams".into(), "-of".into(), "json".into(), source.as_os_str().to_owned(),
-    ], cancel, deadline, None)?;
+    let output = run_similarity_tool(
+        "ffprobe",
+        &[
+            "-v".into(),
+            "error".into(),
+            "-select_streams".into(),
+            "v:0".into(),
+            "-show_streams".into(),
+            "-of".into(),
+            "json".into(),
+            source.as_os_str().to_owned(),
+        ],
+        cancel,
+        deadline,
+        None,
+    )?;
     let json: serde_json::Value = serde_json::from_slice(&output).map_err(|_| "decode_failed")?;
-    let stream = json["streams"].as_array().and_then(|s| s.first()).ok_or("decode_failed")?;
+    let stream = json["streams"]
+        .as_array()
+        .and_then(|s| s.first())
+        .ok_or("decode_failed")?;
     let width = stream["width"].as_u64().ok_or("unsupported_geometry")?;
     let height = stream["height"].as_u64().ok_or("unsupported_geometry")?;
-    if width == 0 || height == 0 || width > 8192 || height > 8192 { return Err("unsupported_geometry"); }
-    if stream["sample_aspect_ratio"].as_str().is_some_and(|sar| !matches!(sar, "1:1" | "N/A")) {
+    if width == 0 || height == 0 || width > 8192 || height > 8192 {
         return Err("unsupported_geometry");
     }
-    if stream["tags"]["rotate"].as_str().is_some_and(|r| r.parse::<i64>().map_or(true, |n| n % 360 != 0))
-        || stream["side_data_list"].as_array().is_some_and(|rows|
-            rows.iter().any(|r| r["rotation"].as_f64().is_some_and(|n| n % 360.0 != 0.0))) {
+    if stream["sample_aspect_ratio"]
+        .as_str()
+        .is_some_and(|sar| !matches!(sar, "1:1" | "N/A"))
+    {
+        return Err("unsupported_geometry");
+    }
+    if stream["tags"]["rotate"]
+        .as_str()
+        .is_some_and(|r| r.parse::<i64>().map_or(true, |n| n % 360 != 0))
+        || stream["side_data_list"].as_array().is_some_and(|rows| {
+            rows.iter()
+                .any(|r| r["rotation"].as_f64().is_some_and(|n| n % 360.0 != 0.0))
+        })
+    {
         return Err("unsupported_geometry");
     }
     Ok(())
@@ -611,20 +704,49 @@ pub(crate) fn extract_similarity_frame(
     cancel: &std::sync::atomic::AtomicBool,
     deadline: std::time::Instant,
 ) -> Result<image::DynamicImage, &'static str> {
-    let temporary = tempfile::Builder::new().prefix("lakomics-video-similarity-").suffix(".png")
-        .tempfile().map_err(|_| "decode_failed")?;
+    let temporary = tempfile::Builder::new()
+        .prefix("lakomics-video-similarity-")
+        .suffix(".png")
+        .tempfile()
+        .map_err(|_| "decode_failed")?;
     let seek = format!("{}.{:03}", at_ms / 1000, at_ms % 1000);
-    run_similarity_tool("ffmpeg", &[
-        "-y".into(), "-nostdin".into(), "-hide_banner".into(), "-v".into(), "error".into(),
-        "-threads".into(), "1".into(), "-ss".into(), seek.into(),
-        "-i".into(), source.as_os_str().to_owned(), "-map".into(), "0:v:0".into(),
-        "-an".into(), "-sn".into(), "-dn".into(), "-frames:v".into(), "1".into(),
-        "-vf".into(), "scale=512:512:force_original_aspect_ratio=decrease".into(),
-        "-c:v".into(), "png".into(), "-threads".into(), "1".into(),
-        temporary.path().as_os_str().to_owned(),
-    ], cancel, deadline, Some(temporary.path()))?;
+    run_similarity_tool(
+        "ffmpeg",
+        &[
+            "-y".into(),
+            "-nostdin".into(),
+            "-hide_banner".into(),
+            "-v".into(),
+            "error".into(),
+            "-threads".into(),
+            "1".into(),
+            "-ss".into(),
+            seek.into(),
+            "-i".into(),
+            source.as_os_str().to_owned(),
+            "-map".into(),
+            "0:v:0".into(),
+            "-an".into(),
+            "-sn".into(),
+            "-dn".into(),
+            "-frames:v".into(),
+            "1".into(),
+            "-vf".into(),
+            "scale=512:512:force_original_aspect_ratio=decrease".into(),
+            "-c:v".into(),
+            "png".into(),
+            "-threads".into(),
+            "1".into(),
+            temporary.path().as_os_str().to_owned(),
+        ],
+        cancel,
+        deadline,
+        Some(temporary.path()),
+    )?;
     let frame = image::open(temporary.path()).map_err(|_| "decode_failed")?;
-    if frame.width() > 512 || frame.height() > 512 { return Err("decode_failed"); }
+    if frame.width() > 512 || frame.height() > 512 {
+        return Err("decode_failed");
+    }
     Ok(frame)
 }
 
@@ -635,27 +757,49 @@ fn run_similarity_tool(
     deadline: std::time::Instant,
     output_file: Option<&Path>,
 ) -> Result<Vec<u8>, &'static str> {
-    use std::{io::Read, process::Stdio, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
+    use std::{
+        io::Read,
+        process::Stdio,
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
     struct ReapedChild(std::process::Child);
     impl Drop for ReapedChild {
-        fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
     }
     fn drain(mut reader: impl Read, cap: usize, overflow: &AtomicBool) -> Vec<u8> {
         let mut retained = Vec::new();
         let mut chunk = [0_u8; 8192];
         loop {
-            let Ok(n) = reader.read(&mut chunk) else { break; };
-            if n == 0 { break; }
+            let Ok(n) = reader.read(&mut chunk) else {
+                break;
+            };
+            if n == 0 {
+                break;
+            }
             let take = n.min(cap.saturating_sub(retained.len()));
             retained.extend_from_slice(&chunk[..take]);
-            if take < n { overflow.store(true, Ordering::Relaxed); }
+            if take < n {
+                overflow.store(true, Ordering::Relaxed);
+            }
         }
         retained
     }
-    if cancel.load(Ordering::Relaxed) { return Err("cancelled"); }
-    if Instant::now() >= deadline { return Err("timeout"); }
+    if cancel.load(Ordering::Relaxed) {
+        return Err("cancelled");
+    }
+    if Instant::now() >= deadline {
+        return Err("timeout");
+    }
     let mut command = Command::new(tool_path(name).ok_or("tool_unavailable")?);
-    command.args(arguments).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let mut child = ReapedChild(command.spawn().map_err(|_| "tool_unavailable")?);
@@ -671,14 +815,26 @@ fn run_similarity_tool(
         // Continue draining even after the diagnostic retention limit is reached.
         let err = scope.spawn(|| drain(stderr, 16 * 1024, &AtomicBool::new(false)));
         let outcome = loop {
-            if cancel.load(Ordering::Relaxed) { break Err("cancelled"); }
-            if Instant::now() >= deadline { break Err("timeout"); }
+            if cancel.load(Ordering::Relaxed) {
+                break Err("cancelled");
+            }
+            if Instant::now() >= deadline {
+                break Err("timeout");
+            }
             if overflow.load(Ordering::Relaxed)
-                || output_file.is_some_and(|p| fs::metadata(p).is_ok_and(|m| m.len() > 2 * 1024 * 1024)) {
+                || output_file
+                    .is_some_and(|p| fs::metadata(p).is_ok_and(|m| m.len() > 2 * 1024 * 1024))
+            {
                 break Err("output_limit");
             }
             match child.0.try_wait() {
-                Ok(Some(status)) => break if status.success() { Ok(()) } else { Err("decode_failed") },
+                Ok(Some(status)) => {
+                    break if status.success() {
+                        Ok(())
+                    } else {
+                        Err("decode_failed")
+                    }
+                }
                 Err(_) => break Err("decode_failed"),
                 Ok(None) => std::thread::sleep(Duration::from_millis(20)),
             }
@@ -689,11 +845,19 @@ fn run_similarity_tool(
         let bytes = out.join().map_err(|_| "decode_failed")?;
         let _ = err.join();
         outcome?;
-        if overflow.load(Ordering::Relaxed) { return Err("output_limit"); }
+        if overflow.load(Ordering::Relaxed) {
+            return Err("output_limit");
+        }
         if let Some(path) = output_file {
-            let size = fs::metadata(path).map_err(|_| "insufficient_evidence")?.len();
-            if size == 0 { return Err("insufficient_evidence"); }
-            if size > 2 * 1024 * 1024 { return Err("output_limit"); }
+            let size = fs::metadata(path)
+                .map_err(|_| "insufficient_evidence")?
+                .len();
+            if size == 0 {
+                return Err("insufficient_evidence");
+            }
+            if size > 2 * 1024 * 1024 {
+                return Err("output_limit");
+            }
         }
         Ok(bytes)
     })
@@ -708,15 +872,25 @@ impl SimilarityProcessJob {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::*;
         let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-        if handle.is_null() { return Err("process_limit_failed"); }
+        if handle.is_null() {
+            return Err("process_limit_failed");
+        }
         let job = Self(handle);
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
         limits.ProcessMemoryLimit = 1024 * 1024 * 1024;
-        let configured = unsafe { SetInformationJobObject(handle, JobObjectExtendedLimitInformation,
-            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-            std::mem::size_of_val(&limits) as u32) };
-        if configured == 0 || unsafe { AssignProcessToJobObject(handle, child.as_raw_handle()) } == 0 {
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            )
+        };
+        if configured == 0
+            || unsafe { AssignProcessToJobObject(handle, child.as_raw_handle()) } == 0
+        {
             return Err("process_limit_failed");
         }
         Ok(job)
@@ -725,7 +899,11 @@ impl SimilarityProcessJob {
 
 #[cfg(windows)]
 impl Drop for SimilarityProcessJob {
-    fn drop(&mut self) { unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0); } }
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
 }
 
 fn scrub_frames_complete(directory: &Path, expected_count: u64) -> bool {
@@ -855,20 +1033,54 @@ pub(crate) fn parse_probe(json: &str, extension: &str) -> Result<VideoProbe, Lib
 #[test]
 #[ignore = "explicit native FFmpeg lifecycle acceptance"]
 fn native_similarity_tool_timeout_and_cancellation() {
-    use std::{sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
     let arguments: Vec<OsString> = [
-        "-nostdin", "-v", "error", "-re", "-f", "lavfi", "-i",
-        "testsrc2=size=64x64:rate=10:duration=30", "-f", "null", "-",
-    ].into_iter().map(Into::into).collect();
+        "-nostdin",
+        "-v",
+        "error",
+        "-re",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=64x64:rate=10:duration=30",
+        "-f",
+        "null",
+        "-",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
     let started = Instant::now();
-    assert_eq!(run_similarity_tool("ffmpeg", &arguments, &AtomicBool::new(false),
-        Instant::now() + Duration::from_millis(150), None), Err("timeout"));
+    assert_eq!(
+        run_similarity_tool(
+            "ffmpeg",
+            &arguments,
+            &AtomicBool::new(false),
+            Instant::now() + Duration::from_millis(150),
+            None
+        ),
+        Err("timeout")
+    );
     assert!(started.elapsed() < Duration::from_secs(2));
     let cancel = AtomicBool::new(false);
     std::thread::scope(|scope| {
-        scope.spawn(|| { std::thread::sleep(Duration::from_millis(150)); cancel.store(true, Ordering::Relaxed); });
-        assert_eq!(run_similarity_tool("ffmpeg", &arguments, &cancel,
-            Instant::now() + Duration::from_secs(30), None), Err("cancelled"));
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(150));
+            cancel.store(true, Ordering::Relaxed);
+        });
+        assert_eq!(
+            run_similarity_tool(
+                "ffmpeg",
+                &arguments,
+                &cancel,
+                Instant::now() + Duration::from_secs(30),
+                None
+            ),
+            Err("cancelled")
+        );
     });
     assert!(started.elapsed() < Duration::from_secs(4));
 }
@@ -884,8 +1096,8 @@ mod tests {
     use rusqlite::params;
 
     use super::{
-        direct_playback, ffmpeg_seek_seconds, install_prepared_directory, parse_probe, poster_seek_ms,
-        scrub_timestamps_ms, VideoProbe, VideoTool,
+        direct_playback, ffmpeg_seek_seconds, install_prepared_directory, parse_probe,
+        poster_seek_ms, scrub_timestamps_ms, VideoProbe, VideoTool,
     };
     use crate::library::{error::LibraryError, models::MediaSummary, Library};
 
@@ -1171,6 +1383,87 @@ mod tests {
     }
 
     #[test]
+    fn workload_upload_prepares_only_requested_video_and_reuses_existing_thumbnail() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for id in ["video-1", "video-2", "video-3"] {
+            insert_pending_video(&library, id, "mp4", "h264", Some("aac"), 1_000);
+        }
+        let tool = FakeVideoTool::default();
+        library.prepare_upload_video_with("video-2", &tool).unwrap();
+        assert_eq!(tool.poster_seeks_ms.borrow().len(), 1);
+        let state = |id: &str| {
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT preparation_state FROM video_assets WHERE asset_id=?1",
+                    [id],
+                    |r| r.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(state("video-2"), "ready");
+        assert_eq!(state("video-1"), "pending");
+        assert_eq!(state("video-3"), "pending");
+        // A usable poster is sufficient even if other preparation remains pending.
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE video_assets SET preparation_state='pending' WHERE asset_id='video-2'",
+                [],
+            )
+            .unwrap();
+        library
+            .prepare_upload_video_with("video-2", &FailingVideoTool)
+            .unwrap();
+        assert_eq!(state("video-2"), "pending");
+        library
+            .prepare_upload_video_with("video-3", &FailingVideoTool)
+            .unwrap_err();
+        assert_eq!(state("video-3"), "failed");
+        assert_eq!(state("video-1"), "pending");
+    }
+
+    #[test]
+    fn workload_video_retry_wakes_only_thumbnail_waiting_uploads() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_pending_video(&library, "video-1", "mp4", "h264", Some("aac"), 1_000);
+        library
+            .prepare_pending_videos_with(&FailingVideoTool, 1)
+            .unwrap();
+        library.connection().unwrap().execute("INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at,last_error) VALUES('upload','asset','video-1','upsert','failed',1,'2026',?1)", [LibraryError::CloudThumbnailUnavailable.to_string()]).unwrap();
+        library.retry_video_preparation("video-1").unwrap();
+        let status: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT status FROM cloud_sync_queue WHERE id='upload'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "pending");
+        library
+            .prepare_pending_videos_with(&FailingVideoTool, 1)
+            .unwrap();
+        library.connection().unwrap().execute("UPDATE cloud_sync_queue SET status='failed',last_error='unrelated permanent error' WHERE id='upload'", []).unwrap();
+        library.retry_video_preparation("video-1").unwrap();
+        let status: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT status FROM cloud_sync_queue WHERE id='upload'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "failed");
+    }
+
+    #[test]
     fn failed_video_waits_for_explicit_retry() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
@@ -1214,7 +1507,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(state, "ready");
-        assert!(reopened.root().join("video-media/video-1/scrub/001.webp").is_file());
+        assert!(reopened
+            .root()
+            .join("video-media/video-1/scrub/001.webp")
+            .is_file());
     }
 
     #[test]
@@ -1388,9 +1684,21 @@ mod tests {
 fn linux_system_video_tools_create_and_probe_proxy() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.mp4");
-    run_tool("ffmpeg", ["-v".into(), "error".into(), "-f".into(), "lavfi".into(),
-        "-i".into(), "color=c=blue:s=64x64:d=1".into(), "-c:v".into(), "libx264".into(),
-        source.as_os_str().to_owned()]).unwrap();
+    run_tool(
+        "ffmpeg",
+        [
+            "-v".into(),
+            "error".into(),
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            "color=c=blue:s=64x64:d=1".into(),
+            "-c:v".into(),
+            "libx264".into(),
+            source.as_os_str().to_owned(),
+        ],
+    )
+    .unwrap();
     let proxy = temp.path().join("proxy.mp4");
     ProcessVideoTool.create_proxy(&source, &proxy).unwrap();
     let probe = ProcessVideoTool.probe(&proxy, "mp4").unwrap();

@@ -41,6 +41,12 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
   const [pending, setPending] = useState(false);
   const [scan, setScan] = useState<ImageSimilarityScan | null | undefined>(undefined);
   const [scanRunning, setScanRunning] = useState(false);
+  const scanCancelled = useRef(false);
+  useEffect(() => {
+    const cancel = () => { scanCancelled.current = true; };
+    window.addEventListener("lakomics:cancel-user-scans", cancel);
+    return () => window.removeEventListener("lakomics:cancel-user-scans", cancel);
+  }, []);
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
   const generationRef = useRef(0);
@@ -122,13 +128,14 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
 
   async function runHistoricalScan() {
     if (scanRunning || !gateway.startImageSimilarityScan || !gateway.runImageSimilarityScanBatch) return;
+    scanCancelled.current = false;
     setScanRunning(true);
     setMessage(null);
     try {
       let current = scan && !scan.completed ? scan : await gateway.startImageSimilarityScan();
       if (!mountedRef.current) return;
       setScan(current);
-      while (mountedRef.current && !current.completed) {
+      while (mountedRef.current && !scanCancelled.current && !current.completed) {
         current = await gateway.runImageSimilarityScanBatch(current.id);
         if (!mountedRef.current) return;
         setScan(current);

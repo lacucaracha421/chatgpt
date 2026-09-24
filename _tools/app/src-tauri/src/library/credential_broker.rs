@@ -38,7 +38,9 @@
 //! rest.
 
 use std::fmt;
-use std::sync::{LazyLock, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
+#[cfg(not(test))]
+use std::sync::LazyLock;
 
 use super::credential::{self, CloudCredential, CredentialBackend, CredentialTarget, OsCredentialBackend};
 use super::error::LibraryError;
@@ -183,12 +185,21 @@ impl<B: CredentialBackend> CredentialBroker<B> {
 /// keyring backs every library the process opens, and two `Library` handles must not each
 /// hold a private copy of the same secret. Workers that need a different backend (tests)
 /// construct their own [`CredentialBroker`] directly instead of mutating this one.
+#[cfg(not(test))]
 static BROKER: LazyLock<CredentialBroker<OsCredentialBackend>> =
     LazyLock::new(|| CredentialBroker::new(OsCredentialBackend));
 
 /// The shared broker for cloud API and cloud publisher credentials.
+#[cfg(not(test))]
 pub(crate) fn broker() -> &'static CredentialBroker<OsCredentialBackend> {
     &BROKER
+}
+
+// Never share cached credentials between test threads. Cache behavior is covered
+// separately with explicitly owned CredentialBroker<CountingBackend> instances.
+#[cfg(test)]
+pub(crate) fn broker() -> CredentialBroker<OsCredentialBackend> {
+    CredentialBroker::new(OsCredentialBackend)
 }
 
 #[cfg(test)]

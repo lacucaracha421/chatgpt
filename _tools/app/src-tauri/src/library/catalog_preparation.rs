@@ -66,6 +66,7 @@ impl Library {
     }
 
     pub(crate) fn request_catalog_preparation(&self) -> bool {
+        if crate::workload::is_restricted() { return false; }
         if !self.root.join("catalogs/kdata.db").is_file() {
             return false;
         }
@@ -113,6 +114,7 @@ impl Library {
     /// metadata write; unchanged sources are opened read-only. Never call from
     /// a search request to memoize its first slow COUNT.
     pub(super) fn prepare_online_catalog_counts(&self) -> Result<bool, LibraryError> {
+        if crate::workload::is_restricted() { return Ok(false); }
         let path = self.root.join("catalogs/kdata.db");
         if !path.is_file() {
             return Ok(false);

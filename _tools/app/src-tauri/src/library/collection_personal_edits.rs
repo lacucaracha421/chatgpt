@@ -415,6 +415,8 @@ impl Library {
         }
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        let (before_generation, published_generation): (i64, i64) = transaction.query_row(
+            "SELECT generation,published_generation FROM mobile_publication_state WHERE kind='collections'", [], |row| Ok((row.get(0)?, row.get(1)?)))?;
         let durable: i64 = transaction
             .query_row(
                 "SELECT received_cursor FROM mobile_collection_personal_edit_sync
@@ -501,7 +503,12 @@ impl Library {
             // the new cursor; a changed row is also dirtied by the 0074 triggers.
             bump_collections_generation(&transaction)?;
         }
+        let after_generation: i64 = transaction.query_row("SELECT generation FROM mobile_publication_state WHERE kind='collections'", [], |row| row.get(0))?;
         transaction.commit()?;
+        if highest > durable {
+            self.collection_publication_defer.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+                .mobile_edit(before_generation, after_generation, published_generation, std::time::Instant::now(), crate::workload::is_lightweight());
+        }
         Ok(outcome)
     }
 }

@@ -73,7 +73,15 @@ fn backfill_control_state_is_idle_by_default_and_persists_pause() {
     let temp = tempfile::tempdir().unwrap();
     {
         let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+        library
+            .set_cloud_settings(
+                super::models::CloudSyncConfig {
+                    enabled: true,
+                    api_base_url: Some("https://fixture.test".into()),
+                },
+                true,
+            )
+            .unwrap();
         assert_eq!(
             library.cloud_backfill_control_state().unwrap(),
             BackfillControlState::Idle
@@ -98,7 +106,15 @@ fn reopening_preserves_running_backfill_without_introducing_a_hidden_pause() {
     let temp = tempfile::tempdir().unwrap();
     {
         let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+        library
+            .set_cloud_settings(
+                super::models::CloudSyncConfig {
+                    enabled: true,
+                    api_base_url: Some("https://fixture.test".into()),
+                },
+                true,
+            )
+            .unwrap();
         library
             .set_cloud_backfill_control_state(BackfillControlState::Running)
             .unwrap();
@@ -115,7 +131,15 @@ fn reopening_preserves_running_backfill_without_introducing_a_hidden_pause() {
 fn paused_backfill_does_not_claim_new_work_and_resume_preserves_queue() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let source = temp.path().join("paused.png");
     fs::write(&source, png_bytes(99)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
@@ -148,12 +172,22 @@ fn paused_backfill_does_not_claim_new_work_and_resume_preserves_queue() {
 fn reconcile_requeues_interrupted_and_thumbnail_ready_backfill_stages() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let source = temp.path().join("thumbnail-ready.png");
     fs::write(&source, png_bytes(31)).unwrap();
     let thumbnail_ready_id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
     let connection = library.connection().unwrap();
-    connection.execute("DELETE FROM cloud_sync_queue", []).unwrap();
+    connection
+        .execute("DELETE FROM cloud_sync_queue", [])
+        .unwrap();
     for (index, status) in ["preparing", "uploading", "committing", "synced", "failed"]
         .into_iter()
         .enumerate()
@@ -221,7 +255,14 @@ fn progress_redacts_queue_errors_and_hides_resolved_failures() {
     let progress = library.cloud_backfill_progress().unwrap();
     assert_eq!(progress.failed, 1);
     assert!(!progress.last_error.unwrap().contains("private"));
-    library.connection().unwrap().execute("UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = ?1", [&id]).unwrap();
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = ?1",
+            [&id],
+        )
+        .unwrap();
     assert_eq!(library.cloud_backfill_progress().unwrap().last_error, None);
 }
 
@@ -270,14 +311,27 @@ fn reconcile_repairs_normal_assets_that_never_entered_the_cloud_queue() {
     let trashed_id = ingest_png(&library, &trashed_source, "2026-09-01T00:00:00Z");
 
     let connection = library.connection().unwrap();
-    connection.execute("DELETE FROM cloud_sync_queue WHERE entity_id IN (?1, ?2)", [&normal_id, &trashed_id]).unwrap();
-    connection.execute("UPDATE assets SET status='trash', trashed_at='2026-09-03T00:00:00Z' WHERE id=?1", [&trashed_id]).unwrap();
+    connection
+        .execute(
+            "DELETE FROM cloud_sync_queue WHERE entity_id IN (?1, ?2)",
+            [&normal_id, &trashed_id],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE assets SET status='trash', trashed_at='2026-09-03T00:00:00Z' WHERE id=?1",
+            [&trashed_id],
+        )
+        .unwrap();
     drop(connection);
 
     let report = library.reconcile_cloud_backfill().unwrap();
     assert_eq!(report.requeued, 0);
     assert_eq!(report.seeded_missing, 1);
-    assert_eq!(queue_status(&library, &normal_id).as_deref(), Some("pending"));
+    assert_eq!(
+        queue_status(&library, &normal_id).as_deref(),
+        Some("pending")
+    );
     assert_eq!(queue_status(&library, &trashed_id), None);
     let second = library.reconcile_cloud_backfill().unwrap();
     assert_eq!(second.requeued, 0);
@@ -294,14 +348,20 @@ fn progress_hides_resolved_replication_item_activity_but_keeps_unresolved_retry_
     let item_error = "전송하지 못한 자료가 있습니다. 연결과 원본 파일을 확인해 주세요.";
 
     library.begin_cloud_activity("replication").unwrap();
-    library.finish_cloud_activity("replication", 1, 1, Some(item_error)).unwrap();
+    library
+        .finish_cloud_activity("replication", 1, 1, Some(item_error))
+        .unwrap();
     library.connection().unwrap().execute(
         "UPDATE cloud_sync_queue SET status='synced', synced_at='2026-09-02T00:01:00Z', last_error=NULL WHERE entity_id=?1",
         [&id],
     ).unwrap();
 
     let resolved = library.cloud_backfill_progress().unwrap();
-    let resolved_activity = resolved.activity.iter().find(|item| item.direction == "replication").unwrap();
+    let resolved_activity = resolved
+        .activity
+        .iter()
+        .find(|item| item.direction == "replication")
+        .unwrap();
     assert_eq!(resolved_activity.last_error, None);
     assert_eq!(resolved_activity.problems, 0);
 
@@ -310,7 +370,11 @@ fn progress_hides_resolved_replication_item_activity_but_keeps_unresolved_retry_
         [&id],
     ).unwrap();
     let unresolved = library.cloud_backfill_progress().unwrap();
-    let unresolved_activity = unresolved.activity.iter().find(|item| item.direction == "replication").unwrap();
+    let unresolved_activity = unresolved
+        .activity
+        .iter()
+        .find(|item| item.direction == "replication")
+        .unwrap();
     assert_eq!(unresolved_activity.last_error.as_deref(), Some(item_error));
     assert_eq!(unresolved_activity.problems, 1);
 }
@@ -319,7 +383,15 @@ fn progress_hides_resolved_replication_item_activity_but_keeps_unresolved_retry_
 fn bounded_scope_excludes_preexisting_pending_work_from_progress_and_claims() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let mut ids = Vec::new();
     for index in 0..3 {
         let source = temp.path().join(format!("bounded-{index}.png"));
@@ -351,7 +423,15 @@ fn bounded_scope_excludes_preexisting_pending_work_from_progress_and_claims() {
 fn normal_full_seed_clears_a_previous_bounded_scope() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let mut ids = Vec::new();
     for index in 0..2 {
         let source = temp.path().join(format!("full-{index}.png"));
@@ -376,7 +456,15 @@ fn normal_full_seed_clears_a_previous_bounded_scope() {
 fn full_backfill_progress_excludes_non_normal_queue_rows_without_deleting_them() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let normal_source = temp.path().join("normal-progress.png");
     let trashed_source = temp.path().join("trashed-progress.png");
     fs::write(&normal_source, png_bytes(230)).unwrap();
@@ -398,7 +486,10 @@ fn full_backfill_progress_excludes_non_normal_queue_rows_without_deleting_them()
     let progress = library.cloud_backfill_progress().unwrap();
     assert_eq!(progress.total_assets, 1);
     assert_eq!(progress.queued, 1);
-    assert_eq!(queue_status(&library, &normal_id).as_deref(), Some("pending"));
+    assert_eq!(
+        queue_status(&library, &normal_id).as_deref(),
+        Some("pending")
+    );
     assert_eq!(
         queue_status(&library, &trashed_id).as_deref(),
         Some("pending")
@@ -466,7 +557,15 @@ fn report_assets_ready(
 fn preflight_reports_classification_membership() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let classification = library
         .create_classification(crate::library::models::CreateClassification {
             kind: crate::library::models::ClassificationKind::Root,
@@ -511,7 +610,15 @@ fn preflight_reports_classification_membership() {
 fn seeding_enqueues_recent_first_and_is_idempotent() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
 
     let mut ids = Vec::new();
     for (index, collected_at) in [
@@ -572,7 +679,15 @@ fn seeding_enqueues_recent_first_and_is_idempotent() {
 fn seeding_skips_already_synced_assets() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let source = temp.path().join("synced.png");
     fs::write(&source, png_bytes(7)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -700,7 +815,15 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let source = temp.path().join("worker.png");
     fs::write(&source, png_bytes(9)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -720,7 +843,6 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
             .unwrap_or_else(|| "<non-string panic>".into());
     }
 }
-
 
 #[test]
 fn backfill_commit_carries_local_dimensions_and_omits_unknown_ones() {
@@ -943,7 +1065,15 @@ fn already_committed_asset_recommits_relationships_without_reupload() {
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let source = temp.path().join("committed.png");
     fs::write(&source, png_bytes(11)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -971,12 +1101,27 @@ fn spawn_replication_server(
     expected_kind: &'static str,
     finish_thumbnail_and_commit: bool,
 ) -> (String, thread::JoinHandle<()>) {
+    spawn_replication_server_with_hook(expected_kind, finish_thumbnail_and_commit, || {})
+}
+
+fn spawn_replication_server_with_hook(
+    expected_kind: &'static str,
+    finish_thumbnail_and_commit: bool,
+    original_uploaded: impl FnOnce() + Send + 'static,
+) -> (String, thread::JoinHandle<()>) {
     let server = Server::http("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", server.server_addr());
     let base_url = format!("{origin}/v1");
     let upload_url = format!("{origin}/r2-upload");
     let handle = thread::spawn(move || {
-        let mut prepare = server.recv().unwrap();
+        // A missing request must fail the contract, not block join() forever.
+        let receive =
+            || {
+                server.recv_timeout(std::time::Duration::from_secs(30))
+            .expect("replication fixture receive failed")
+            .expect("replication fixture did not receive the expected request within 30 seconds")
+            };
+        let mut prepare = receive();
         let body: Value = read_json(&mut prepare);
         assert_eq!(body["kind"], expected_kind);
         let asset_id = body["asset_id"].as_str().unwrap().to_owned();
@@ -991,7 +1136,7 @@ fn spawn_replication_server(
             })))
             .unwrap();
 
-        let mut presign = server.recv().unwrap();
+        let mut presign = receive();
         let requested: Value = read_json(&mut presign);
         assert_eq!(
             requested["object_key"],
@@ -1006,22 +1151,16 @@ fn spawn_replication_server(
                 "required_headers": {"Content-Type": requested["content_type"]}
             })))
             .unwrap();
-        server
-            .recv()
-            .unwrap()
-            .respond(Response::empty(200))
-            .unwrap();
-        server
-            .recv()
-            .unwrap()
-            .respond(Response::empty(201))
-            .unwrap();
+        receive().respond(Response::empty(200)).unwrap();
+        let register = receive();
+        original_uploaded();
+        register.respond(Response::empty(201)).unwrap();
 
         if !finish_thumbnail_and_commit {
             return;
         }
 
-        let mut thumb_presign = server.recv().unwrap();
+        let mut thumb_presign = receive();
         let requested: Value = read_json(&mut thumb_presign);
         thumb_presign
             .respond(json_response(json!({
@@ -1032,14 +1171,8 @@ fn spawn_replication_server(
                 "required_headers": {"Content-Type": requested["content_type"]}
             })))
             .unwrap();
-        server
-            .recv()
-            .unwrap()
-            .respond(Response::empty(200))
-            .unwrap();
-        server
-            .recv()
-            .unwrap()
+        receive().respond(Response::empty(200)).unwrap();
+        receive()
             .respond(json_response(json!({"ok": true, "committed": true})))
             .unwrap();
     });
@@ -1164,7 +1297,15 @@ fn video_prepare_upload_and_commit_flow() {
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     stub_video_probe();
     let asset_id = ingest_mp4(&library, temp.path(), "2026-08-30T00:00:00Z");
     // 비디오는 포스터가 준비되기 전까지 썸네일이 없다. 테스트를 위해 DB에
@@ -1195,7 +1336,15 @@ fn video_prepare_upload_and_commit_flow() {
 fn video_without_thumbnail_fails_independently_and_succeeds_after_retry() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     stub_video_probe();
 
     let image_source = temp.path().join("healthy.png");
@@ -1278,7 +1427,15 @@ fn video_without_thumbnail_fails_independently_and_succeeds_after_retry() {
 fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolated() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
     let source = temp.path().join("retry.png");
     fs::write(&source, png_bytes(11)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
@@ -1408,7 +1565,15 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
 fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: true, api_base_url: Some("https://fixture.test".into()) }, true).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
 
     // 오래된 자산(먼저 claim됨): 원본을 지워 영구 실패로 만든다.
     let old_source = temp.path().join("old.png");
@@ -1507,37 +1672,70 @@ fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
 fn disabling_replication_prevents_the_next_claim_without_discarding_pending_work() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    let config = super::models::CloudSyncConfig { enabled: true, api_base_url: Some("http://127.0.0.1:1".into()) };
+    let config = super::models::CloudSyncConfig {
+        enabled: true,
+        api_base_url: Some("http://127.0.0.1:1".into()),
+    };
     library.set_cloud_settings(config.clone(), true).unwrap();
     let source = temp.path().join("pending.png");
     fs::write(&source, png_bytes(99)).unwrap();
     let asset_id = ingest_png(&library, &source, "2026-09-06T00:00:00Z");
     library.seed_cloud_backfill_queue().unwrap();
-    library.set_cloud_settings(super::models::CloudSyncConfig { enabled: false, ..config }, true).unwrap();
-    let result = library.replicate_next_cloud_asset(&CloudClient::new("http://127.0.0.1:1").unwrap(), "fixture");
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: false,
+                ..config
+            },
+            true,
+        )
+        .unwrap();
+    let result = library
+        .replicate_next_cloud_asset(&CloudClient::new("http://127.0.0.1:1").unwrap(), "fixture");
     assert!(matches!(result, Ok(None)));
-    assert_eq!(queue_status(&library, &asset_id).as_deref(), Some("pending"));
+    assert_eq!(
+        queue_status(&library, &asset_id).as_deref(),
+        Some("pending")
+    );
     assert!(library.cloud_capture_enabled().unwrap());
 }
 
 #[test]
 fn revisions_of_one_asset_are_serialized_and_superseded_pending_work_is_retired() {
-    let temp=tempfile::tempdir().unwrap();let library=Library::open(temp.path().join("library")).unwrap();
-    library.set_cloud_sync_config(super::models::CloudSyncConfig {enabled:true,api_base_url:Some("https://fixture.test".into())}).unwrap();
-    let source=temp.path().join("source.png");fs::write(&source,png_bytes(42)).unwrap();
-    let id=ingest_png(&library,&source,"2026-09-09T00:00:00Z");
-    let first=library.claim_next_backfill_for_test().unwrap().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    library
+        .set_cloud_sync_config(super::models::CloudSyncConfig {
+            enabled: true,
+            api_base_url: Some("https://fixture.test".into()),
+        })
+        .unwrap();
+    let source = temp.path().join("source.png");
+    fs::write(&source, png_bytes(42)).unwrap();
+    let id = ingest_png(&library, &source, "2026-09-09T00:00:00Z");
+    let first = library.claim_next_backfill_for_test().unwrap().unwrap();
     {
-        let mut connection=library.connection().unwrap();let tx=connection.transaction().unwrap();
-        super::queue::enqueue_asset_upsert(&tx,&id,"2026-09-09T00:00:01Z").unwrap();tx.commit().unwrap();
+        let mut connection = library.connection().unwrap();
+        let tx = connection.transaction().unwrap();
+        super::queue::enqueue_asset_upsert(&tx, &id, "2026-09-09T00:00:01Z").unwrap();
+        tx.commit().unwrap();
     }
     assert!(library.claim_next_backfill_for_test().unwrap().is_none());
-    library.mark_cloud_sync_retry(&first.queue.id,"retry").unwrap();
-    let second=library.claim_next_backfill_for_test().unwrap().unwrap();
-    assert_ne!(first.queue.id,second.queue.id);
+    library
+        .mark_cloud_sync_retry(&first.queue.id, "retry")
+        .unwrap();
+    let second = library.claim_next_backfill_for_test().unwrap().unwrap();
+    assert_ne!(first.queue.id, second.queue.id);
     library.mark_cloud_sync_synced(&second.queue.id).unwrap();
     assert!(library.claim_next_backfill_for_test().unwrap().is_none());
-    assert_eq!(library.cloud_sync_queue_item(&first.queue.id).unwrap().unwrap().status,"synced");
+    assert_eq!(
+        library
+            .cloud_sync_queue_item(&first.queue.id)
+            .unwrap()
+            .unwrap()
+            .status,
+        "synced"
+    );
 }
 
 #[test]
@@ -1563,23 +1761,352 @@ fn legacy_server_pauses_replication_without_failing_the_queue() {
     });
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path().join("library")).unwrap();
-    library.set_cloud_sync_config(super::models::CloudSyncConfig { enabled:true, api_base_url:Some(base_url.clone()) }).unwrap();
+    library
+        .set_cloud_sync_config(super::models::CloudSyncConfig {
+            enabled: true,
+            api_base_url: Some(base_url.clone()),
+        })
+        .unwrap();
     for i in 0..8 {
         let path = temp.path().join(format!("{i}.png"));
         fs::write(&path, png_bytes(i * 23)).unwrap();
         ingest_png(&library, &path, "2026-09-09T00:00:00Z");
     }
-    let result = library.run_cloud_backfill_cycle_with_client(&CloudClient::new(&base_url).unwrap(), "test-token");
+    let result = library
+        .run_cloud_backfill_cycle_with_client(&CloudClient::new(&base_url).unwrap(), "test-token");
     control.unblock();
     let requests = server_thread.join().unwrap();
-    assert!(matches!(result, Err(LibraryError::CloudReplicationUpgradeRequired)));
-    assert_eq!(library.cloud_backfill_control_state().unwrap(), BackfillControlState::Paused);
+    assert!(matches!(
+        result,
+        Err(LibraryError::CloudReplicationUpgradeRequired)
+    ));
+    assert_eq!(
+        library.cloud_backfill_control_state().unwrap(),
+        BackfillControlState::Paused
+    );
     let connection = library.connection().unwrap();
-    let failed: i64 = connection.query_row("SELECT COUNT(*) FROM cloud_sync_queue WHERE status='failed'",[],|r|r.get(0)).unwrap();
-    let pending: i64 = connection.query_row("SELECT COUNT(*) FROM cloud_sync_queue WHERE status='pending'",[],|r|r.get(0)).unwrap();
+    let failed: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM cloud_sync_queue WHERE status='failed'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let pending: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM cloud_sync_queue WHERE status='pending'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(failed, 0);
     assert_eq!(pending, 8);
     drop(connection);
     assert!(library.claim_next_backfill_for_test().unwrap().is_none());
     assert!((1..=4).contains(&requests));
+}
+
+#[test]
+fn workload_new_ingests_bypass_seed_scope_without_claiming_backlog() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let old_file = temp.path().join("old.png");
+    fs::write(&old_file, png_bytes(1)).unwrap();
+    let old = ingest_png(&library, &old_file, "2026-01-01T00:00:00Z");
+    library.remember_new_ingest(&old, false);
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO cloud_backfill_scope(asset_id) VALUES(?1)",
+            [&old],
+        )
+        .unwrap();
+    let new_file = temp.path().join("new.png");
+    fs::write(&new_file, png_bytes(90)).unwrap();
+    let fresh = ingest_png(&library, &new_file, "2026-09-24T00:00:00Z");
+    let selected = library.claim_light_backfill_for_test().unwrap();
+    assert_eq!(selected.queue.entity_id, fresh);
+    assert!(library.claim_light_backfill_for_test().is_none());
+    assert_eq!(queue_status(&library, &old).as_deref(), Some("pending"));
+}
+
+#[test]
+fn workload_idle_preflight_settles_superseded_rows_without_credentials() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let file = temp.path().join("new.png");
+    fs::write(&file, png_bytes(1)).unwrap();
+    let id = ingest_png(&library, &file, "2026-09-24T00:00:00Z");
+    library.connection().unwrap().execute("INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at) VALUES('newer','asset',?1,'upsert','synced',2,'2026')", [&id]).unwrap();
+    library
+        .set_cloud_backfill_control_state(BackfillControlState::Running)
+        .unwrap();
+    library.run_cloud_backfill_cycle().unwrap();
+    assert_eq!(
+        count_rows(
+            &library,
+            "SELECT COUNT(*) FROM cloud_sync_queue WHERE status='pending'"
+        ),
+        0
+    );
+    assert_eq!(
+        library.cloud_backfill_control_state().unwrap(),
+        BackfillControlState::Idle
+    );
+}
+
+#[test]
+fn workload_backfill_empty_restricted_pass_then_normal_pass_do_not_leak_policy() {
+    use super::backfill::BackfillWorkload;
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let file = temp.path().join("old.png");
+    fs::write(&file, png_bytes(11)).unwrap();
+    let id = ingest_png(&library, &file, "2026-01-01T00:00:00Z");
+    library.remember_new_ingest(&id, false);
+    // A broken local original fails before HTTP, so this test needs no socket or token store.
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE assets SET relative_path='originals/missing.png' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    let client = CloudClient::new("http://127.0.0.1:1").unwrap();
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let summary = library
+        .run_cloud_backfill_cycle_with_workload(&client, "fixture", || {
+            assert!(
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 4,
+                "an empty pass must stop"
+            );
+            BackfillWorkload {
+                restricted: true,
+                prepare_videos: true,
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        (
+            summary.committed,
+            summary.permanent_failures,
+            summary.retry_scheduled
+        ),
+        (0, 0, 0)
+    );
+    assert_eq!(queue_status(&library, &id).as_deref(), Some("pending"));
+    let normal = library
+        .run_cloud_backfill_cycle_with_client(&client, "fixture")
+        .unwrap();
+    assert_eq!(normal.permanent_failures, 1);
+    assert_eq!(queue_status(&library, &id).as_deref(), Some("failed"));
+}
+
+#[test]
+fn workload_backfill_restricted_failure_is_one_attempt_and_single_flight_releases() {
+    use super::backfill::BackfillWorkload;
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    for n in 1..=2 {
+        let file = temp.path().join(format!("{n}.png"));
+        fs::write(&file, png_bytes(n * 40)).unwrap();
+        let id = ingest_png(&library, &file, "2026-09-24T00:00:00Z");
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET relative_path='originals/missing-' || id || '.png' WHERE id=?1",
+                [&id],
+            )
+            .unwrap();
+    }
+    let client = CloudClient::new("http://127.0.0.1:1").unwrap();
+    let policy = || BackfillWorkload {
+        restricted: true,
+        prepare_videos: true,
+    };
+    let guard = library.replication_lock.lock().unwrap();
+    assert_eq!(
+        library
+            .run_cloud_backfill_cycle_with_workload(&client, "fixture", policy)
+            .unwrap()
+            .permanent_failures,
+        0
+    );
+    assert_eq!(
+        count_rows(
+            &library,
+            "SELECT COUNT(*) FROM cloud_sync_queue WHERE status='pending'"
+        ),
+        2
+    );
+    drop(guard);
+    assert_eq!(
+        library
+            .run_cloud_backfill_cycle_with_workload(&client, "fixture", policy)
+            .unwrap()
+            .permanent_failures,
+        1
+    );
+    assert_eq!(
+        count_rows(
+            &library,
+            "SELECT COUNT(*) FROM cloud_sync_queue WHERE status='pending'"
+        ),
+        1
+    );
+    assert_eq!(
+        library
+            .run_cloud_backfill_cycle_with_workload(&client, "fixture", policy)
+            .unwrap()
+            .permanent_failures,
+        1
+    );
+    assert_eq!(
+        library
+            .run_cloud_backfill_cycle_with_workload(&client, "fixture", policy)
+            .unwrap()
+            .permanent_failures,
+        0
+    );
+}
+
+#[test]
+fn workload_backfill_restricted_video_uses_ready_thumbnail_without_touching_backlog() {
+    use super::backfill::BackfillWorkload;
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let file = temp.path().join("old.png");
+    fs::write(&file, png_bytes(17)).unwrap();
+    let old = ingest_png(&library, &file, "2026-01-01T00:00:00Z");
+    library.remember_new_ingest(&old, false);
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO cloud_backfill_scope(asset_id) VALUES(?1)",
+            [&old],
+        )
+        .unwrap();
+    stub_video_probe();
+    let video = ingest_mp4(&library, temp.path(), "2026-09-24T00:00:00Z");
+    fs::create_dir_all(temp.path().join("thumbnails/prepared")).unwrap();
+    fs::write(
+        temp.path().join("thumbnails/prepared/poster.webp"),
+        b"ready-poster",
+    )
+    .unwrap();
+    library.connection().unwrap().execute("UPDATE assets SET thumbnail_relative_path='thumbnails/prepared/poster.webp' WHERE id=?1", [&video]).unwrap();
+    let (url, server) = spawn_replication_server("video", true);
+    let summary = library
+        .run_cloud_backfill_cycle_with_workload(&CloudClient::new(&url).unwrap(), "fixture", || {
+            BackfillWorkload {
+                restricted: true,
+                prepare_videos: true,
+            }
+        })
+        .unwrap();
+    assert_eq!(summary.committed, 1);
+    assert_eq!(summary.permanent_failures, 0);
+    assert_eq!(queue_status(&library, &video).as_deref(), Some("synced"));
+    assert_eq!(queue_status(&library, &old).as_deref(), Some("pending"));
+    assert!(library.claim_light_backfill_for_test().is_none());
+    server.join().unwrap();
+}
+
+#[test]
+fn workload_backfill_video_takes_native_preparation_when_profile_changes_during_upload() {
+    use super::backfill::BackfillWorkload;
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    };
+    for hidden_only in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library
+            .set_cloud_settings(
+                super::models::CloudSyncConfig {
+                    enabled: true,
+                    api_base_url: Some("https://fixture.test".into()),
+                },
+                true,
+            )
+            .unwrap();
+        stub_video_probe();
+        let video = ingest_mp4(&library, temp.path(), "2026-09-24T00:00:00Z");
+        let changed = Arc::new(AtomicBool::new(false));
+        let server_changed = changed.clone();
+        let (url, server) = spawn_replication_server_with_hook("video", true, move || {
+            server_changed.store(true, Ordering::SeqCst);
+        });
+        let prepares = AtomicUsize::new(0);
+        let result = library.replicate_next_cloud_asset_with_workload(
+            &CloudClient::new(&url).unwrap(), "fixture",
+            BackfillWorkload { restricted: false, prepare_videos: false },
+            || {
+                let changed = changed.load(Ordering::SeqCst);
+                BackfillWorkload { restricted: changed && !hidden_only, prepare_videos: changed }
+            },
+            |id| {
+                assert_eq!(id, video);
+                assert!(changed.load(Ordering::SeqCst));
+                prepares.fetch_add(1, Ordering::SeqCst);
+                fs::create_dir_all(temp.path().join("thumbnails/fixture")).unwrap();
+                fs::write(temp.path().join("thumbnails/fixture/poster.webp"), b"fake-prepared-poster").unwrap();
+                library.connection()?.execute("UPDATE assets SET thumbnail_relative_path='thumbnails/fixture/poster.webp' WHERE id=?1", [id])?;
+                Ok(())
+            }).unwrap();
+        assert_eq!(result, Some(video.clone()));
+        assert_eq!(prepares.load(Ordering::SeqCst), 1);
+        assert_eq!(queue_status(&library, &video).as_deref(), Some("synced"));
+        server.join().unwrap();
+    }
 }

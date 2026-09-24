@@ -1,3 +1,5 @@
+import { nativeWorkload } from "./workloadProfile";
+import { listen } from "@tauri-apps/api/event";
 import {useEffect} from 'react';
 import type {LibraryGateway} from '../library/types';
 import {ALBUM_AUTHORITY_CHANGED_EVENT} from './useAlbumAuthoritySync';
@@ -6,6 +8,18 @@ import {CLASSIFICATION_AUTHORITY_CHANGED_EVENT} from './useClassificationAuthori
 export const ASSET_LIFECYCLE_CHANGED_EVENT = 'lakomics-asset-lifecycle-changed';
 export function useAssetAuthoritySync(gateway:LibraryGateway,libraryRoot:string) {
   useEffect(()=>{
+    if (nativeWorkload()) {
+      let stopped = false;
+      let unlisten: (() => void) | undefined;
+      const changed = () => {
+        window.dispatchEvent(new Event(CLASSIFICATION_AUTHORITY_CHANGED_EVENT));
+        window.dispatchEvent(new Event(ALBUM_AUTHORITY_CHANGED_EVENT));
+        window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT));
+      };
+      void listen("library://asset-authority-changed", changed).then(stop => { if (stopped) stop(); else unlisten = stop; }).catch(() => undefined);
+      window.addEventListener("focus", changed);
+      return () => { stopped = true; unlisten?.(); window.removeEventListener("focus", changed); };
+    }
     if (!gateway.syncAssetAuthority) return;
     let active=true,running=false;
     const run=async()=>{

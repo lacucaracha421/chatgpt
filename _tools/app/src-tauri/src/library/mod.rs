@@ -113,7 +113,7 @@ pub(crate) mod ingestion;
 pub mod legacy_migration;
 pub mod legacy_package_migration;
 mod lock;
-mod machine_settings;
+pub(crate) mod machine_settings;
 mod manga;
 pub(crate) mod mangadex;
 mod mangadex_flow;
@@ -259,6 +259,9 @@ pub struct Library {
     // Machine-local settings file (app config dir) for per-computer values such as
     // the manga root. None keeps the legacy shared-database behaviour (tests, tools).
     machine_settings_path: Arc<RwLock<Option<PathBuf>>>,
+    pub(crate) new_ingests: Arc<Mutex<std::collections::BTreeSet<String>>>,
+    pub(crate) replication_lock: Arc<Mutex<()>>,
+    pub(crate) collection_publication_defer: Arc<Mutex<crate::cloud::auto_publication::Deferral>>,
     // Encrypted Private Vault (ADR-0039): lock state, decrypted index and write serialization.
     encrypted_vault: Arc<external_vault::EncryptedVaultRuntime>,
 }
@@ -349,6 +352,9 @@ impl Library {
             igdb_token_cache: igdb::IgdbTokenCache::default(),
             igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
             machine_settings_path: Arc::default(),
+            new_ingests: Arc::default(),
+            replication_lock: Arc::default(),
+            collection_publication_defer: Arc::default(),
             encrypted_vault: Arc::default(),
         };
         library.backfill_legacy_collection_kinds()?;
@@ -372,10 +378,29 @@ impl Library {
     /// Store per-computer values (the manga root) in this machine's settings file
     /// instead of the shared library database.
     pub fn use_machine_settings(&self, path: PathBuf) {
+        if let Ok(id) = self.library_id() {
+            match machine_settings::new_ingests(&path, &id) {
+                Ok(ids) => *self.new_ingests.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = ids,
+                Err(error) => eprintln!("new ingest settings: {error}"),
+            }
+        }
         *self
             .machine_settings_path
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(path);
+    }
+
+    pub(crate) fn remember_new_ingest(&self, id: &str, pending: bool) {
+        let mut ids = self.new_ingests.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending { ids.insert(id.to_owned()); } else { ids.remove(id); }
+        if let (Some(path), Ok(library_id)) = (self.machine_settings_path(), self.library_id()) {
+            if let Err(error) = machine_settings::set_new_ingests(&path, &library_id, ids.clone()) {
+                eprintln!("new ingest settings: {error}");
+            }
+        }
+    }
+    pub(crate) fn new_ingest_json(&self) -> String {
+        serde_json::to_string(&*self.new_ingests.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).unwrap_or_else(|_| "[]".into())
     }
 
     pub(crate) fn machine_settings_path(&self) -> Option<PathBuf> {

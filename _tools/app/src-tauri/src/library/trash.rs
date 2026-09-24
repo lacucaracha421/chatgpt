@@ -186,6 +186,7 @@ impl Library {
     }
 
     pub fn purge_expired_trash(&self, now: DateTime<Utc>) -> Result<PurgeSummary, LibraryError> {
+        if crate::workload::is_restricted() { return Ok(PurgeSummary { deleted_count: 0, failed_asset_ids: Vec::new() }); }
         let _trash_guard = self
             .trash_lock
             .lock()

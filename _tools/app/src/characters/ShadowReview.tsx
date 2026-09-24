@@ -1,3 +1,4 @@
+import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
@@ -116,6 +117,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     let inbound: number | null = null;
     async function poll() {
       try {
+        if (getWorkloadProfile().hidden) return;
         const status = await api.status();
         if (!disposed) updateBackfill(status);
         if (api.inboundStatus) {
@@ -126,7 +128,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
       } catch (e) {
         if (!disposed) setBackfillError(commandErrorMessage(e, "채점 상태를 불러오지 못했습니다."));
       } finally {
-        if (!disposed) timer = setTimeout(() => void poll(), 1000);
+        if (!disposed) timer = setTimeout(() => void poll(), workloadPollDelay(1000));
       }
     }
     void poll();

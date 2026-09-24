@@ -1,3 +1,4 @@
+import { useWorkloadProfile } from "./workloadProfile";
 import {useEffect} from 'react';
 import type {LibraryGateway} from '../library/types';
 
@@ -24,14 +25,17 @@ const CLASSIFICATION_SYNC_INTERVAL_MS = 5_000;
  * their Asset appeared — because a poll that converged nothing must not churn the UI.
  */
 export function useClassificationAuthoritySync(gateway: LibraryGateway, libraryRoot: string) {
+  const { restricted } = useWorkloadProfile();
   useEffect(() => {
     if (!gateway.reconcileClassificationAuthority || !gateway.flushClassificationOutbox) return;
     let active = true;
     let running = false;
+    let lastRun = -Infinity;
     const run = async () => {
       // Single-flight: a slow pass must not stack behind the interval or the
       // foreground events that can all fire together.
-      if (!active || running) return;
+      if (!active || running || (restricted && Date.now() - lastRun < 60_000)) return;
+      lastRun = Date.now();
       running = true;
       try {
         const flushed = await gateway.flushClassificationOutbox!();
@@ -53,7 +57,7 @@ export function useClassificationAuthoritySync(gateway: LibraryGateway, libraryR
       }
     };
     void run();
-    const timer = window.setInterval(() => void run(), CLASSIFICATION_SYNC_INTERVAL_MS);
+    const timer = window.setInterval(() => void run(), restricted ? 60_000 : CLASSIFICATION_SYNC_INTERVAL_MS);
     window.addEventListener('online', run);
     window.addEventListener('focus', run);
     return () => {
@@ -62,5 +66,5 @@ export function useClassificationAuthoritySync(gateway: LibraryGateway, libraryR
       window.removeEventListener('online', run);
       window.removeEventListener('focus', run);
     };
-  }, [gateway, libraryRoot]);
+  }, [gateway, libraryRoot, restricted]);
 }

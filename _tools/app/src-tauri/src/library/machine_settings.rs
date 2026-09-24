@@ -6,7 +6,8 @@
 //! library's durable `library_id`.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
+    sync::Mutex,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -19,6 +20,10 @@ use super::error::LibraryError;
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MachineSettingsFile {
+    #[serde(default)]
+    workload: crate::workload::Settings,
+    #[serde(default)]
+    new_ingests: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     libraries: BTreeMap<String, LibraryEntry>,
 }
@@ -38,6 +43,8 @@ fn error(path: &Path, source: io::Error) -> LibraryError {
         source,
     }
 }
+
+static FILE_LOCK: Mutex<()> = Mutex::new(());
 
 fn read_file(path: &Path) -> Result<MachineSettingsFile, LibraryError> {
     match fs::read(path) {
@@ -61,8 +68,13 @@ pub(crate) fn set_entry(
     library_id: &str,
     value: LibraryEntry,
 ) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut file = read_file(path)?;
     file.libraries.insert(library_id.to_owned(), value);
+    write_file(path, &file)
+}
+
+fn write_file(path: &Path, file: &MachineSettingsFile) -> Result<(), LibraryError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|source| error(path, source))?;
     let bytes = serde_json::to_vec_pretty(&file)
@@ -149,5 +161,42 @@ mod tests {
         assert!(!usable_directory(r"C:\lakomics\2군"));
         #[cfg(windows)]
         assert!(!usable_directory("/home/laku/manga"));
+    }
+}
+
+pub(crate) fn workload(path: &Path) -> Result<crate::workload::Settings, LibraryError> {
+    Ok(read_file(path)?.workload)
+}
+pub(crate) fn set_workload(path: &Path, settings: crate::workload::Settings) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    file.workload = settings;
+    write_file(path, &file)
+}
+pub(crate) fn new_ingests(path: &Path, library: &str) -> Result<BTreeSet<String>, LibraryError> {
+    Ok(read_file(path)?.new_ingests.remove(library).unwrap_or_default())
+}
+pub(crate) fn set_new_ingests(path: &Path, library: &str, ids: BTreeSet<String>) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    file.new_ingests.insert(library.to_owned(), ids);
+    write_file(path, &file)
+}
+
+#[cfg(test)]
+mod workload_tests {
+    use super::*;
+    #[test]
+    fn workload_settings_and_new_ingests_survive_other_setting_writes() {
+        let temp = tempfile::tempdir().unwrap(); let path = temp.path().join("machine.json");
+        let settings = crate::workload::Settings { lightweight: true, auto_enter_minutes: Some(15), close_to_tray: false };
+        set_workload(&path, settings.clone()).unwrap();
+        set_new_ingests(&path, "library", BTreeSet::from(["asset".into()])).unwrap();
+        set_entry(&path, "library", LibraryEntry { manga_root: None }).unwrap();
+        assert_eq!(workload(&path).unwrap(), settings);
+        assert_eq!(new_ingests(&path, "library").unwrap(), BTreeSet::from(["asset".into()]));
+        fs::write(&path, b"invalid").unwrap();
+        assert!(set_workload(&path, crate::workload::Settings::default()).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"invalid");
     }
 }

@@ -1,3 +1,4 @@
+import { useWorkloadProfile } from "./workloadProfile";
 import {useEffect} from 'react';
 import type {LibraryGateway} from '../library/types';
 
@@ -15,12 +16,15 @@ const ALBUM_SYNC_INTERVAL_MS = 5_000;
  * `deferredToOutbox`, and this loop simply tries again on the next tick.
  */
 export function useAlbumAuthoritySync(gateway: LibraryGateway, libraryRoot: string) {
+  const { restricted } = useWorkloadProfile();
   useEffect(() => {
     if (!gateway.reconcileAlbumAuthority || !gateway.flushAlbumOutbox) return;
     let active = true;
     let running = false;
+    let lastRun = -Infinity;
     const run = async () => {
-      if (!active || running) return;
+      if (!active || running || (restricted && Date.now() - lastRun < 60_000)) return;
+      lastRun = Date.now();
       running = true;
       try {
         const flushed = await gateway.flushAlbumOutbox!();
@@ -44,7 +48,7 @@ export function useAlbumAuthoritySync(gateway: LibraryGateway, libraryRoot: stri
       }
     };
     void run();
-    const timer = window.setInterval(() => void run(), ALBUM_SYNC_INTERVAL_MS);
+    const timer = window.setInterval(() => void run(), restricted ? 60_000 : ALBUM_SYNC_INTERVAL_MS);
     window.addEventListener('online', run);
     window.addEventListener('focus', run);
     return () => {
@@ -53,5 +57,5 @@ export function useAlbumAuthoritySync(gateway: LibraryGateway, libraryRoot: stri
       window.removeEventListener('online', run);
       window.removeEventListener('focus', run);
     };
-  }, [gateway, libraryRoot]);
+  }, [gateway, libraryRoot, restricted]);
 }

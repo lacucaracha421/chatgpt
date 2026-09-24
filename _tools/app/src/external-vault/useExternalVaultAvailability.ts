@@ -1,3 +1,4 @@
+import { useWorkloadProfile } from "../app/workloadProfile";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssetView, EncryptedVaultState, EncryptedVaultStatus, LibraryGateway } from "../library/types";
 
@@ -40,10 +41,16 @@ export function useExternalVaultAvailability({ gateway, view, onLeave }: Options
     setStatus(next);
   }, []);
 
+  const { restricted, hidden } = useWorkloadProfile();
   useEffect(() => {
+    if (hidden) {
+      requestId.current += 1;
+      setStatus(current => current?.state === "unlocked" ? { ...current, state: "locked", itemCount: null } : current);
+      return;
+    }
     void refresh();
     const refreshVisible = () => { if (document.visibilityState !== "hidden") void refresh(); };
-    const timer = window.setInterval(refreshVisible, VAULT_STATUS_POLL_MS);
+    const timer = window.setInterval(refreshVisible, restricted ? 60_000 : VAULT_STATUS_POLL_MS);
     window.addEventListener("focus", refreshVisible);
     document.addEventListener("visibilitychange", refreshVisible);
     return () => {
@@ -52,7 +59,7 @@ export function useExternalVaultAvailability({ gateway, view, onLeave }: Options
       window.removeEventListener("focus", refreshVisible);
       document.removeEventListener("visibilitychange", refreshVisible);
     };
-  }, [refresh]);
+  }, [refresh, restricted, hidden]);
 
   const previousState = useRef<EncryptedVaultState | null>(null);
   const inVault = view.kind === "private_vault";

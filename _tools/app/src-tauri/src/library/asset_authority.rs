@@ -411,7 +411,7 @@ impl Library {
                 .ok_or(LibraryError::InvalidCloudSyncConfig)?,
         )?;
         let token = super::credential::read_cloud_api_token_os()?;
-        let result = self.sync_assets_with(&client, token.expose(), None);
+        let result = self.sync_assets_with(&client, token.expose(), None, crate::workload::is_restricted());
         if matches!(result, Err(LibraryError::CloudUnauthorized)) {
             super::credential_broker::broker()
                 .invalidate(super::credential::CredentialTarget::CloudApi);
@@ -423,6 +423,7 @@ impl Library {
         client: &CloudClient,
         token: &str,
         publisher: Option<&str>,
+        restricted: bool,
     ) -> Result<AssetSyncResult, LibraryError> {
         let _single = self
             .asset_sync_lock
@@ -487,7 +488,7 @@ impl Library {
         }
         // Finish file deletion for purges the server has accepted (this pass or earlier).
         self.delete_accepted_purge_files()?;
-        self.materialize_candidates(client, token, &mut result)?;
+        self.materialize_candidates(client, token, &mut result, restricted)?;
         Ok(result)
     }
     fn install_asset_baseline(
@@ -767,14 +768,20 @@ impl Library {
         }
         Ok(())
     }
+    fn pending_materializations(&self, restricted: bool) -> Result<Vec<String>, LibraryError> {
+        let candidates=self.connection()?.prepare("SELECT projection FROM asset_authority_state WHERE materialization='pending' AND lifecycle='normal' AND NOT EXISTS (SELECT 1 FROM asset_lifecycle_outbox o WHERE o.asset_id=asset_authority_state.asset_id AND o.desired<>'normal') ORDER BY asset_id LIMIT ?1")?.query_map([if restricted { 5 } else { 25 }],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        Ok(candidates)
+    }
     fn materialize_candidates(
         &self,
         client: &CloudClient,
         token: &str,
         result: &mut AssetSyncResult,
+        restricted: bool,
     ) -> Result<(), LibraryError> {
-        let candidates=self.connection()?.prepare("SELECT projection FROM asset_authority_state WHERE materialization='pending' AND lifecycle='normal' AND NOT EXISTS (SELECT 1 FROM asset_lifecycle_outbox o WHERE o.asset_id=asset_authority_state.asset_id AND o.desired<>'normal') ORDER BY asset_id LIMIT 25")?.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
-        for raw in candidates {
+        let candidates = self.pending_materializations(restricted)?;
+        for (index, raw) in candidates.into_iter().enumerate() {
+            if crate::workload::is_restricted() && index >= 5 { break; }
             let p: AssetProjection =
                 serde_json::from_str(&raw).map_err(|_| LibraryError::InvalidCloudResponse)?;
             let outcome = self.materialize_asset(client, token, &p);
@@ -877,6 +884,17 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::io::Cursor;
     const ID: &str = "80000000-0000-4000-8000-000000000001";
+    #[test]
+    fn workload_materialization_cap_preserves_pending_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for n in 0..30 {
+            library.connection().unwrap().execute("INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,projection) VALUES(?1,'normal',1,'{}')", [format!("id-{n:02}")]).unwrap();
+        }
+        assert_eq!(library.pending_materializations(true).unwrap().len(), 5);
+        assert_eq!(library.pending_materializations(false).unwrap().len(), 25);
+        assert_eq!(library.connection().unwrap().query_row("SELECT count(*) FROM asset_authority_state WHERE materialization='pending'", [], |r| r.get::<_, i64>(0)).unwrap(), 30);
+    }
     fn media() -> Vec<u8> {
         let mut data = Cursor::new(Vec::new());
         image::DynamicImage::new_rgb8(4, 4)
@@ -2230,7 +2248,7 @@ mod http_integration {
             )
             .unwrap();
         let first = library
-            .sync_assets_with(&client, token, Some(&publisher))
+            .sync_assets_with(&client, token, Some(&publisher), false)
             .unwrap();
         assert_eq!(first.materialized, 1);
         assert!(first.adopted);
@@ -2277,7 +2295,7 @@ mod http_integration {
             .unwrap();
         assert_eq!(
             library
-                .sync_assets_with(&client, token, Some(&publisher))
+                .sync_assets_with(&client, token, Some(&publisher), false)
                 .unwrap()
                 .flushed,
             1
@@ -2298,10 +2316,10 @@ mod http_integration {
         );
         library.restore_assets(&[id.clone()]).unwrap();
         library
-            .sync_assets_with(&client, token, Some(&publisher))
+            .sync_assets_with(&client, token, Some(&publisher), false)
             .unwrap();
         library
-            .sync_assets_with(&client, token, Some(&publisher))
+            .sync_assets_with(&client, token, Some(&publisher), false)
             .unwrap();
         assert_eq!(
             client
@@ -2311,11 +2329,11 @@ mod http_integration {
         );
         library.trash_assets(&[id.clone()]).unwrap();
         library
-            .sync_assets_with(&client, token, Some(&publisher))
+            .sync_assets_with(&client, token, Some(&publisher), false)
             .unwrap();
         library.empty_trash().unwrap();
         library
-            .sync_assets_with(&client, token, Some(&publisher))
+            .sync_assets_with(&client, token, Some(&publisher), false)
             .unwrap();
         client
             .asset_request("/_fixture/prune", Some(&json!({})), token)
@@ -2329,7 +2347,7 @@ mod http_integration {
                 .unwrap();
         }
         library
-            .sync_assets_with(&client, token, Some(&publisher))
+            .sync_assets_with(&client, token, Some(&publisher), false)
             .unwrap();
         let db = library.connection().unwrap();
         assert_eq!(

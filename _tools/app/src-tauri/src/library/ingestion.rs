@@ -582,6 +582,8 @@ impl Library {
         }
         if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
         transaction.commit()?;
+        drop(connection);
+        if !materialized { self.remember_new_ingest(&asset.id, true); }
         Ok(())
     }
 
@@ -655,6 +657,8 @@ impl Library {
         if !materialized { enqueue_asset_upsert(&transaction, &asset.id, &asset.collected_at)?; }
         if materialized { super::asset_authority::mark_materialized(&transaction, &asset.id)?; }
         transaction.commit()?;
+        drop(connection);
+        if !materialized { self.remember_new_ingest(&asset.id, true); }
         Ok(())
     }
 }

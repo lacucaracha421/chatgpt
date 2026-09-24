@@ -157,6 +157,7 @@ impl Library {
             stop_reason: None,
         };
         for (collection_id, _) in due {
+            if crate::workload::is_restricted() { break; }
             let query = match self
                 .book_flow(provider)
                 .get_aladin_connection(&collection_id)

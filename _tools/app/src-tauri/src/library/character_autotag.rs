@@ -595,18 +595,22 @@ impl Library {
 
     /// Called by the native owner only. Fresh ingestion precedes reconsideration.
     pub(super) fn claim_character_autotag(&self) -> Result<Option<Job>> {
+        self.claim_character_autotag_with_profile(crate::workload::is_restricted())
+    }
+    pub(super) fn claim_character_autotag_with_profile(&self, restricted: bool) -> Result<Option<Job>> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let id: Option<String> = transaction
             .query_row(
                 "SELECT asset_id FROM character_autotag_jobs
             WHERE state='pending' AND retry_at<=?1
+              AND (?2 = 0 OR cause NOT IN ('reconsideration', 'manual_scan'))
               AND (cause<>'reconsideration' OR NOT EXISTS(
                   SELECT 1 FROM character_autotag_control
                   WHERE singleton=1 AND reference_refresh_paused=1
               ))
             ORDER BY priority,updated_at,asset_id LIMIT 1",
-                [chrono::Utc::now().timestamp()],
+                params![chrono::Utc::now().timestamp(), restricted],
                 |r| r.get(0),
             )
             .optional()?;

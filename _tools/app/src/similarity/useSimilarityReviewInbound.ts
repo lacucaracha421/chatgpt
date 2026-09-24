@@ -1,3 +1,4 @@
+import { useWorkloadProfile } from "../app/workloadProfile";
 import { useEffect } from "react";
 import type { LibraryGateway } from "../library/types";
 
@@ -12,7 +13,9 @@ const POLL_MS = 10_000;
  * count reload. The first reading is only a baseline.
  */
 export function useSimilarityReviewInbound(gateway: LibraryGateway, onChange: () => void) {
+  const { restricted, hidden } = useWorkloadProfile();
   useEffect(() => {
+    if (hidden) return;
     const read = gateway.similarityReviewInboundStatus?.bind(gateway);
     if (!read) return;
     let active = true;
@@ -36,7 +39,7 @@ export function useSimilarityReviewInbound(gateway: LibraryGateway, onChange: ()
       }
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), POLL_MS);
+    const timer = window.setInterval(() => void poll(), restricted ? 60_000 : POLL_MS);
     return () => { active = false; window.clearInterval(timer); };
-  }, [gateway, onChange]);
+  }, [gateway, onChange, restricted, hidden]);
 }

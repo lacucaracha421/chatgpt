@@ -564,6 +564,11 @@ impl std::fmt::Debug for Pool {
     }
 }
 impl Pool {
+    /// Never interrupt a borrowed worker; its owner releases the session afterward.
+    pub(super) fn release(&self) {
+        if let Ok(mut session) = self.session.try_lock() { *session = None; }
+    }
+
     pub(super) fn with<T>(
         &self,
         config: &RuntimeConfig,

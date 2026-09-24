@@ -540,7 +540,7 @@ impl Library {
                     scope.spawn(move || {
                         chunk
                             .iter()
-                            .try_for_each(|id| self.index_similarity_asset(id))
+                            .try_for_each(|id| { if crate::workload::is_restricted() { Ok(()) } else { self.index_similarity_asset(id) } })
                     })
                 })
                 .collect();

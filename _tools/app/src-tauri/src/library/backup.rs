@@ -65,6 +65,7 @@ impl Library {
         &self,
         now: DateTime<Utc>,
     ) -> Result<Option<MetadataBackup>, LibraryError> {
+        if crate::workload::is_restricted() { return Ok(None); }
         let _backup_guard = self
             .backup_lock
             .lock()

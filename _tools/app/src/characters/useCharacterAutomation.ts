@@ -1,3 +1,4 @@
+import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -89,6 +90,7 @@ export function useCharacterAutomation(
 
     async function poll() {
       if (!active || polling) return;
+      if (getWorkloadProfile().hidden) { timer = setTimeout(() => void poll(), 60_000); return; }
       polling = true;
       clearTimeout(timer);
       try {
@@ -119,7 +121,7 @@ export function useCharacterAutomation(
       if (active) {
         timer = setTimeout(
           () => void poll(),
-          document.visibilityState === "hidden" ? 15000 : interval,
+          workloadPollDelay(document.visibilityState === "hidden" ? 15000 : interval),
         );
       }
     }

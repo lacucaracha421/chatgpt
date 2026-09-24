@@ -1,3 +1,4 @@
+import { workloadPollDelay, getWorkloadProfile } from "./workloadProfile";
 import { useEffect, useRef } from "react";
 import type { IngestOutcome, LibraryGateway } from "../library/types";
 
@@ -27,13 +28,14 @@ export function useCloudCaptureSync(
     const currentSubscriber = { gateway, libraryRoot, onResult, active: true };
     subscriber.current = currentSubscriber;
     let running = false;
+    let lastRun = -Infinity;
     let timerId: number | undefined;
     let windowFocused = document.hasFocus();
 
     const pollIntervalMs = () =>
       document.visibilityState === "hidden" || !windowFocused
         ? BACKGROUND_POLL_INTERVAL_MS
-        : ACTIVE_POLL_INTERVAL_MS;
+        : workloadPollDelay(ACTIVE_POLL_INTERVAL_MS);
 
     const clearTimer = () => {
       if (timerId === undefined) return;
@@ -42,7 +44,8 @@ export function useCloudCaptureSync(
     };
 
     const run = async () => {
-      if (!active || running) return;
+      if (!active || running || (getWorkloadProfile().restricted && Date.now() - lastRun < 60_000)) return;
+      lastRun = Date.now();
       running = true;
       let request = inFlight.current;
       try {

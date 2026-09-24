@@ -99,7 +99,7 @@ impl Library {
     }
 
     fn sync_configured_cloud_capture(&self, on_ingested: &dyn Fn(&IngestOutcome)) -> Result<CloudCaptureSyncResult, LibraryError> {
-        self.sync_configured_cloud_capture_with(on_ingested, crate::library::credential_broker::broker())
+        self.sync_configured_cloud_capture_with(on_ingested, &crate::library::credential_broker::broker())
     }
 
     /// The capture poll against a caller-supplied credential broker.

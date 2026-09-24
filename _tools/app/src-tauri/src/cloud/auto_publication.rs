@@ -11,21 +11,41 @@ fn dispatch(running: &'static Mutex<()>, work: impl FnOnce()+Send+'static) -> st
     })
 }
 
+/// Tracks only generations produced by receiving mobile personal edits. A local
+/// write changes the generation and immediately invalidates this deferral.
+#[derive(Debug, Default)]
+pub(crate) struct Deferral {
+    generation: Option<i64>,
+    since: Option<std::time::Instant>,
+}
+impl Deferral {
+    pub(crate) fn mobile_edit(&mut self, before: i64, after: i64, published: i64, now: std::time::Instant, light: bool) {
+        if light && (before == published || self.generation == Some(before)) {
+            self.generation = Some(after);
+            self.since.get_or_insert(now);
+        } else { *self = Self::default(); }
+    }
+    fn deferred(&mut self, generation: i64, now: std::time::Instant, light: bool) -> bool {
+        if light && self.generation == Some(generation) && self.since.is_some_and(|since| now.duration_since(since) < std::time::Duration::from_secs(1800)) { true }
+        else { *self = Self::default(); false }
+    }
+}
+
 impl Library {
-    pub(crate) fn run_due_mobile_publications(&self, order_ids: Vec<String>) -> Result<(),LibraryError> {
+    pub(crate) fn save_mobile_navigation_order(&self, order_ids: Vec<String>) -> Result<(),LibraryError> {
         if order_ids.len()>20_000 || order_ids.iter().any(|s|s.len()>180) {return Err(LibraryError::InvalidCloudResponse)}
         let order=serde_json::to_string(&order_ids).map_err(|_|LibraryError::InvalidCloudResponse)?;
+        self.connection()?.execute("UPDATE mobile_publication_state SET navigation_order=?1,generation=generation+1,first_dirty=CASE WHEN generation=published_generation THEN unixepoch() ELSE first_dirty END,last_dirty=unixepoch() WHERE kind='characters' AND navigation_order<>?1", [&order])?;
+        Ok(())
+    }
+    pub(crate) fn run_saved_mobile_publications(&self) -> Result<(),LibraryError> {
         let config=self.cloud_sync_config()?;
         let endpoint=config.api_base_url.unwrap_or_default();
-        {
-            let db=self.connection()?;
-            db.execute("UPDATE mobile_publication_state SET navigation_order=?1,generation=generation+1,first_dirty=CASE WHEN generation=published_generation THEN unixepoch() ELSE first_dirty END,last_dirty=unixepoch() WHERE kind='characters' AND navigation_order<>?1",[&order])?;
-            if !config.enabled || endpoint.is_empty() {return Ok(())}
-            db.execute("UPDATE mobile_publication_state SET endpoint=?1,generation=generation+1,first_dirty=0,last_dirty=0,retry_after=0 WHERE endpoint<>?1",[&endpoint])?;
-        }
+        if !config.enabled || endpoint.is_empty() {return Ok(())}
+        self.connection()?.execute("UPDATE mobile_publication_state SET endpoint=?1,generation=generation+1,first_dirty=0,last_dirty=0,retry_after=0 WHERE endpoint<>?1",[&endpoint])?;
         for (slot,kind) in ["collections","characters","visibility","similarity"].into_iter().enumerate() {
             let library=self.clone();let endpoint=endpoint.clone();
-            // Return after dispatch so the frontend's next tick can service every free lane.
+            // Return after dispatch so the native owner's next tick can service every free lane.
             dispatch(&RUNNING[slot],move || {
                 // `similarity`: automatic comparison of newly materialized Assets, then mobile
                 // similarity decisions and the pair feed (`similarity_review_sync.rs`).
@@ -66,6 +86,8 @@ impl Library {
             }
             return Ok(())
         };
+        if kind == "collections" && self.collection_publication_defer.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .deferred(generation, std::time::Instant::now(), crate::workload::is_lightweight()) { return Ok(()); }
         self.connection()?.execute("UPDATE mobile_publication_state SET retry_after=unixepoch()+60 WHERE kind=?1",[kind])?;
         let result=if kind=="collections" {self.push_cloud_collections(&|_|{}).map(|_|())} else {self.push_cloud_characters(&|_|{}).map(|_|())};
         if result.is_ok() {
@@ -189,5 +211,24 @@ impl Library {
         client.publish_catalog_visibility(&body,&token)?;
         self.connection()?.execute("UPDATE mobile_catalog_visibility_state SET published_digest=?2,retry_after=0 WHERE endpoint=?1",params![endpoint,digest])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod workload_tests {
+    use super::*;
+    #[test]
+    fn workload_deferral_preserves_local_edits_and_has_deadline() {
+        let now = std::time::Instant::now(); let mut d = Deferral::default();
+        d.mobile_edit(3, 5, 3, now, true);
+        assert!(d.deferred(5, now, true));
+        d.mobile_edit(5, 7, 3, now + std::time::Duration::from_secs(60), true);
+        assert!(!d.deferred(7, now + std::time::Duration::from_secs(1800), true));
+        d.mobile_edit(3, 5, 3, now, true);
+        assert!(!d.deferred(6, now, true));
+        d.mobile_edit(4, 5, 3, now, true);
+        assert!(!d.deferred(5, now, true));
+        d.mobile_edit(3, 5, 3, now, true);
+        assert!(!d.deferred(5, now, false));
     }
 }

@@ -855,3 +855,19 @@ fn failed_assets_outside_the_series_scope_are_not_counted_or_retried() {
         0
     );
 }
+
+#[test]
+fn workload_light_claim_skips_reconsideration_and_manual_enrollment() {
+    let f = Fixture::new();
+    let _ = f.ready("A");
+    let c = f.library.connection().unwrap();
+    c.execute("INSERT OR IGNORE INTO character_series(classification_id) VALUES(?1)", [&f.series]).unwrap();
+    assert!(enqueue(&c, "asset-5", Cause::Ingestion).unwrap());
+    c.execute("UPDATE character_autotag_jobs SET cause='reconsideration' WHERE asset_id='asset-5'", []).unwrap();
+    drop(c);
+    assert!(f.library.claim_character_autotag_with_profile(true).unwrap().is_none());
+    f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET cause='manual_scan' WHERE asset_id='asset-5'", []).unwrap();
+    assert!(f.library.claim_character_autotag_with_profile(true).unwrap().is_none());
+    f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET cause='ingestion' WHERE asset_id='asset-5'", []).unwrap();
+    assert_eq!(f.library.claim_character_autotag_with_profile(true).unwrap().unwrap().asset_id, "asset-5");
+}

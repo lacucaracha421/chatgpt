@@ -1,3 +1,4 @@
+import { useWorkloadProfile, getWorkloadProfile } from "../app/workloadProfile";
 import { useEffect, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { LibraryGateway } from "../library/types";
@@ -18,11 +19,14 @@ export function useSimilarityIndex(
     failed: 0,
   });
 
+  const { restricted } = useWorkloadProfile();
   useEffect(() => {
+    if (restricted) return;
     let active = true;
     let timer: number | undefined;
 
     const run = async () => {
+      if (getWorkloadProfile().restricted) return;
       try {
         const progress = await index();
         if (!active) return;
@@ -45,7 +49,7 @@ export function useSimilarityIndex(
       active = false;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [index]);
+  }, [index, restricted]);
 
-  return state;
+  return restricted ? { ...state, running: false } : state;
 }

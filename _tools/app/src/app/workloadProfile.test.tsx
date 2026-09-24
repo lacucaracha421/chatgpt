@@ -1,0 +1,33 @@
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+const bridge = vi.hoisted(() => ({ invoke: vi.fn(), handlers: new Map<string, (event: { payload: unknown }) => void>() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: bridge.invoke }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name, callback) => { bridge.handlers.set(name, callback); return () => bridge.handlers.delete(name); }) }));
+afterEach(() => { cleanup(); Reflect.deleteProperty(window, "__TAURI_INTERNALS__"); bridge.handlers.clear(); vi.resetModules(); vi.clearAllMocks(); });
+const normal = { lightweight: false, autoEnterMinutes: null, closeToTray: true, restricted: false, hidden: false, trayAvailable: true };
+it("receives native changes and keeps slow polling during recovery", async () => {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+  bridge.invoke.mockResolvedValue(normal);
+  const api = await import("./workloadProfile");
+  const { result } = renderHook(api.useWorkloadProfile);
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  expect(api.workloadPollDelay(5000)).toBe(5000);
+  act(() => bridge.handlers.get("workload://changed")?.({ payload: { ...normal, lightweight: true, restricted: true } }));
+  expect(result.current.lightweight).toBe(true);
+  expect(api.workloadPollDelay(5000)).toBe(60_000);
+  act(() => bridge.handlers.get("workload://changed")?.({ payload: { ...normal, restricted: true } }));
+  expect(result.current.lightweight).toBe(false);
+  expect(api.workloadPollDelay(5000)).toBe(60_000);
+  act(() => bridge.handlers.get("workload://changed")?.({ payload: normal }));
+  expect(api.workloadPollDelay(5000)).toBe(5000);
+});
+it("does not optimistically report a failed settings write", async () => {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+  bridge.invoke.mockResolvedValueOnce(normal).mockRejectedValueOnce(new Error("disk"));
+  const api = await import("./workloadProfile");
+  const { result } = renderHook(api.useWorkloadProfile);
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  await act(() => api.updateWorkloadSettings({ lightweight: true }));
+  expect(result.current.lightweight).toBe(false);
+  expect(result.current.error).toContain("저장하지 못했습니다");
+});

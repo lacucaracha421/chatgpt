@@ -111,6 +111,7 @@ impl Library {
         key: Result<String, LibraryError>,
     ) -> Result<CollectionUpdateStatus, LibraryError> {
         let provider = valid_provider(provider)?;
+        if crate::workload::is_restricted() { return self.collection_update_status(provider); }
         self.run_collection_updates_with(provider, |id| {
             if provider == "mangadex" {
                 self.refresh_mangadex(id)?;
@@ -173,6 +174,7 @@ impl Library {
         let started = Instant::now();
         let metrics = provider_requests::metrics();
         for id in pending.iter().take(BATCH_SIZE) {
+            if crate::workload::is_restricted() { break; }
             if started.elapsed().as_secs() >= BATCH_SECONDS {
                 break;
             }

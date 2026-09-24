@@ -2233,6 +2233,7 @@ pub async fn run_due_online_catalog_update(
     transport: State<'_, CatalogTransport>,
     update_state: State<'_, CatalogUpdateState>,
 ) -> Result<Option<CatalogUpdateResult>, CommandError> {
+    if crate::workload::is_restricted() { return Ok(None); }
     let library = current_required(state.clone())?;
     let status = library.catalog_status().map_err(CommandError::from)?;
     let language = language.unwrap_or(CatalogLanguage::Korean);
@@ -3683,7 +3684,7 @@ mod catalog_admission_tests {
 #[tauri::command]
 pub async fn run_due_mobile_publications(state: State<'_, AppState>, order_ids: Vec<String>) -> Result<(),CommandError> {
     let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.run_due_mobile_publications(order_ids))
+    tauri::async_runtime::spawn_blocking(move || library.save_mobile_navigation_order(order_ids))
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }
 

@@ -1,3 +1,4 @@
+import { nativeWorkload, workloadPollDelay, getWorkloadProfile } from "./workloadProfile";
 import { useEffect, useRef } from "react";
 import type { CloudBackfillProgress, LibraryGateway } from "../library/types";
 
@@ -28,6 +29,7 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
     };
     const tick = async () => {
       if (disposed || checking) return;
+      if (getWorkloadProfile().hidden) { schedule(60_000); return; }
       checking = true;
       let nextDelay = INACTIVE_DELAY_MS;
       try {
@@ -37,14 +39,14 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
         const enabled = progress.replicationEnabled !== false && progress.controlState !== "paused";
         if (enabled && remainingWork(progress) > 0) {
           nextDelay = ACTIVE_DELAY_MS;
-          if (!workerActive) {
+          if (!workerActive && !nativeWorkload()) {
             // Keep the single status timer live while a long native cycle runs.
             const request = { gateway, root: libraryRoot, promise: gateway.cloudBackfillRunCycle() };
             worker.current = request;
             void request.promise.catch((error) => console.error("cloud replication failed", error))
               .finally(() => { if (worker.current === request) worker.current = null; });
           }
-        } else if (enabled && !workerActive && progress.controlState === "running") {
+        } else if (!nativeWorkload() && enabled && !workerActive && progress.controlState === "running") {
           await gateway.cloudBackfillSetControlState?.("idle");
           progress.controlState = "idle";
         }
@@ -53,7 +55,7 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
         console.error("cloud backfill supervisor failed", error);
       } finally {
         checking = false;
-        schedule(nextDelay);
+        schedule(workloadPollDelay(nextDelay));
       }
     };
     const wake = () => schedule(0);

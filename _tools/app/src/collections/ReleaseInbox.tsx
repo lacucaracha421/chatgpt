@@ -1,3 +1,4 @@
+import { useWorkloadProfile, getWorkloadProfile } from "../app/workloadProfile";
 import { useEffect, useRef, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { CollectionUpdateFailure, CollectionUpdateProvider, CollectionUpdateStatus, ReleaseInboxItem } from "../library/types";
@@ -40,7 +41,9 @@ export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision
   const generation = useRef(0);
   const label = provider === "mangadex" ? "MangaDex" : "Kakao";
   const waiting = Boolean(status?.retryAt && Date.parse(status.retryAt) > Date.now());
+  const { restricted, hidden } = useWorkloadProfile();
   useEffect(() => {
+    if (hidden) return;
     const current = ++generation.current;
     let loading = false;
     setItems(null); setStatus(null); setError(null); setBusy(false);
@@ -56,9 +59,9 @@ export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision
       } finally { loading = false; }
     };
     void load();
-    const timer = setInterval(() => void load(), 5_000);
+    const timer = setInterval(() => void load(), restricted ? 60_000 : 5_000);
     return () => { generation.current++; clearInterval(timer); };
-  }, [api, provider]);
+  }, [api, provider, restricted, hidden]);
   useEffect(() => {
     let active = true;
     if (api) void api.listInbox().then(next => { if (active) setItems(next); }).catch(() => undefined);
@@ -88,13 +91,14 @@ export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision
     finally { if (generation.current === current) setBusy(false); }
   }
   async function check() {
-    if (!api?.runUpdates || busy) return;
+    if (!api?.runUpdates || busy || restricted) return;
     const current = generation.current;
     setBusy(true); setError(null);
     try {
       // Continue small batches while this view remains open. The app's background
       // loop uses the same backend lock and independently resumes pending work.
       do {
+        if (getWorkloadProfile().restricted) break;
         const result = await api.runUpdates(provider);
         if (generation.current !== current) return;
         setStatus(result); setItems(await api.listInbox());
@@ -109,7 +113,7 @@ export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision
     <div className="release-inbox__toolbar">
       <strong>{label} 알림 <span>{groups.length}개 작품</span></strong>
       <div>
-        {api?.runUpdates && <Button size="sm" disabled={busy || waiting} onClick={() => void check()}>{busy ? "처리 중…" : waiting ? "재시도 대기" : "업데이트 확인"}</Button>}
+        {api?.runUpdates && <Button size="sm" disabled={busy || waiting || restricted} onClick={() => void check()}>{busy ? "처리 중…" : waiting ? "재시도 대기" : "업데이트 확인"}</Button>}
         <Button size="sm" disabled={busy || providerItems.length === 0} onClick={() => void acknowledgeAll()}>모두 확인</Button>
       </div>
     </div>

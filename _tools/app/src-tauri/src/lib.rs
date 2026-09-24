@@ -3,6 +3,7 @@ mod catalog_transport;
 mod cloud;
 mod collectible_cors;
 mod commands;
+mod workload;
 mod extension_api;
 pub mod library;
 pub use cloud::backfill::BackfillControlState;
@@ -30,6 +31,7 @@ pub fn run() {
         .manage(catalog_transport::CatalogTransport::default())
         .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
+            workload::setup(app.handle())?;
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
                 window.with_webview(|webview| {
@@ -99,6 +101,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "main" {
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        if workload::close_to_tray(window.app_handle()) { api.prevent_close(); }
+                    }
+                    tauri::WindowEvent::Focused(focused) => workload::activity(window.app_handle(), !window.is_visible().unwrap_or(true), *focused),
+                    _ => {}
+                }
+            }
             // Let the frontend flush pending note edits before destroying the window.
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
                 if let Some(library) = window
@@ -143,6 +154,9 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
+            workload::workload_profile,
+            workload::workload_quit, workload::workload_close_window,
+            workload::workload_cancel_scans,
             commands::open_library,
             commands::get_extension_connection,
             commands::get_internal_playback_url,

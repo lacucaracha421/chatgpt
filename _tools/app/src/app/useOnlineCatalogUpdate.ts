@@ -1,10 +1,13 @@
+import { useWorkloadProfile, getWorkloadProfile } from "../app/workloadProfile";
 import { useEffect } from "react";
 import type { LibraryGateway } from "../library/types";
 
 const DUE_CHECK_INTERVAL_MS = 3_600_000;
 
 export function useOnlineCatalogUpdate(gateway: LibraryGateway, libraryRoot: string) {
+  const { restricted } = useWorkloadProfile();
   useEffect(() => {
+    if (restricted) return;
     let active = true;
     let running = false;
     const run = async () => {
@@ -16,7 +19,7 @@ export function useOnlineCatalogUpdate(gateway: LibraryGateway, libraryRoot: str
         } catch {
           // The catalog screen and settings expose persisted Korean update errors.
         }
-        if (!active) return;
+        if (!active || getWorkloadProfile().restricted) return;
         try {
           await gateway.runDueOnlineCatalogUpdate("japanese");
         } catch {
@@ -32,5 +35,5 @@ export function useOnlineCatalogUpdate(gateway: LibraryGateway, libraryRoot: str
       active = false;
       window.clearInterval(timer);
     };
-  }, [gateway, libraryRoot]);
+  }, [gateway, libraryRoot, restricted]);
 }

@@ -4,12 +4,17 @@ use serde_json;
 use std::fmt;
 use zeroize::Zeroize;
 
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 pub(crate) use windows::WindowsCredentialBackend as OsCredentialBackend;
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(test)))]
 pub(crate) use linux::LinuxCredentialBackend as OsCredentialBackend;
+
+// Ordinary unit tests must never open the desktop credential store, including
+// indirect calls from Library methods. Native acceptance tests are explicitly ignored.
+#[cfg(test)]
+pub(crate) use test_support::IsolatedCredentialBackend as OsCredentialBackend;
 
 const KAKAO_TARGET: &str = "Lakomics/KakaoBooks";
 const ALADIN_TARGET: &str = "Lakomics/AladinTTB";
@@ -92,12 +97,16 @@ pub(crate) fn notes_key(target: &str) -> Result<Option<Vec<u8>>, LibraryError> {
 
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn set_notes_key(target: &str, value: &[u8]) -> Result<(), LibraryError> {
-    OsCredentialBackend.write(target, value).map_err(map_backend_error)
+    OsCredentialBackend
+        .write(target, value)
+        .map_err(map_backend_error)
 }
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 pub(crate) fn delete_notes_test_key(target: &str) {
-    OsCredentialBackend.delete(target).expect("remove isolated Notes test key");
+    OsCredentialBackend
+        .delete(target)
+        .expect("remove isolated Notes test key");
 }
 
 /// OS credential-store target of an encrypted Private Vault master key (ADR-0039).
@@ -358,7 +367,9 @@ pub(crate) fn read_cloud_api_token_os() -> Result<CloudCredential, LibraryError>
 /// invalidate the cache and go through [`read_cloud_api_token_os`].
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_cloud_api_token_from_store() -> Result<CloudCredential, LibraryError> {
-    Ok(CloudCredential::new(read_cloud_api_token(&OsCredentialBackend)?))
+    Ok(CloudCredential::new(read_cloud_api_token(
+        &OsCredentialBackend,
+    )?))
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -392,7 +403,9 @@ pub(crate) fn read_cloud_publisher_token_os() -> Result<CloudCredential, Library
 /// [`read_cloud_api_token_from_store`].
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_cloud_publisher_token_from_store() -> Result<CloudCredential, LibraryError> {
-    Ok(CloudCredential::new(read_cloud_publisher_token(&OsCredentialBackend)?))
+    Ok(CloudCredential::new(read_cloud_publisher_token(
+        &OsCredentialBackend,
+    )?))
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -556,9 +569,9 @@ mod tests {
     use std::{cell::RefCell, collections::HashMap};
 
     use super::{
-        read_cloud_api_token, read_cloud_publisher_token, read_igdb_credentials_with,
-        read_tmdb_token_with, set_cloud_api_token, set_cloud_publisher_token,
-        set_igdb_credentials_with, set_tmdb_token_with, cloud_publisher_token_status_with,
+        cloud_publisher_token_status_with, read_cloud_api_token, read_cloud_publisher_token,
+        read_igdb_credentials_with, read_tmdb_token_with, set_cloud_api_token,
+        set_cloud_publisher_token, set_igdb_credentials_with, set_tmdb_token_with,
         CredentialBackend, CredentialError, CredentialService, ALADIN_TARGET, CLOUD_API_TARGET,
         CLOUD_PUBLISHER_TARGET, TMDB_TARGET,
     };
@@ -715,10 +728,7 @@ mod tests {
         set_cloud_publisher_token(&backend, "publisher-credential").unwrap();
         // Each is readable under its own target and neither overwrites the other:
         // publication must not be authorized by the general client credential.
-        assert_eq!(
-            read_cloud_api_token(&backend).unwrap(),
-            "client-credential"
-        );
+        assert_eq!(read_cloud_api_token(&backend).unwrap(), "client-credential");
         assert_eq!(
             read_cloud_publisher_token(&backend).unwrap(),
             "publisher-credential"
@@ -782,13 +792,12 @@ fn set_secret<B: CredentialBackend>(
     token: &str,
 ) -> Result<(), LibraryError> {
     let token = validate_cloud_api_token(token)?;
-    backend.write(target, token.as_bytes()).map_err(map_backend_error)
+    backend
+        .write(target, token.as_bytes())
+        .map_err(map_backend_error)
 }
 
-fn read_secret<B: CredentialBackend>(
-    backend: &B,
-    target: &str,
-) -> Result<String, LibraryError> {
+fn read_secret<B: CredentialBackend>(backend: &B, target: &str) -> Result<String, LibraryError> {
     let value = backend
         .read(target)
         .map_err(map_backend_error)?
@@ -806,13 +815,13 @@ pub(crate) fn read_secret_for<B: CredentialBackend>(
     backend: &B,
     target: CredentialTarget,
 ) -> Result<CloudCredential, LibraryError> {
-    Ok(CloudCredential::new(read_secret(backend, target.store_key())?))
+    Ok(CloudCredential::new(read_secret(
+        backend,
+        target.store_key(),
+    )?))
 }
 
-fn secret_status<B: CredentialBackend>(
-    backend: &B,
-    target: &str,
-) -> Result<bool, LibraryError> {
+fn secret_status<B: CredentialBackend>(backend: &B, target: &str) -> Result<bool, LibraryError> {
     backend
         .read(target)
         .map(|value| value.is_some())
@@ -1049,6 +1058,55 @@ pub(crate) mod test_support {
     use super::{CredentialBackend, CredentialError};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex, PoisonError};
+
+    std::thread_local! {
+        static TEST_CREDENTIALS: std::cell::RefCell<HashMap<String, Vec<u8>>> = std::cell::RefCell::default();
+    }
+
+    /// Empty per test thread. Worker tests inject their own backend or token.
+    pub(crate) struct IsolatedCredentialBackend;
+    impl CredentialBackend for IsolatedCredentialBackend {
+        fn read(&self, target: &str) -> Result<Option<Vec<u8>>, CredentialError> {
+            Ok(TEST_CREDENTIALS.with(|store| store.borrow().get(target).cloned()))
+        }
+        fn write(&self, target: &str, value: &[u8]) -> Result<(), CredentialError> {
+            TEST_CREDENTIALS
+                .with(|store| store.borrow_mut().insert(target.to_owned(), value.to_vec()));
+            Ok(())
+        }
+        fn delete(&self, target: &str) -> Result<(), CredentialError> {
+            TEST_CREDENTIALS.with(|store| store.borrow_mut().remove(target));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn workload_credentials_are_isolated_from_os_and_other_threads() {
+        use super::{
+            cloud_api_token_status, delete_cloud_api_token_os, delete_cloud_publisher_token_os,
+            read_cloud_api_token_os, read_cloud_publisher_token_os, set_cloud_api_token_os,
+            set_cloud_publisher_token_os,
+        };
+        assert!(!cloud_api_token_status().unwrap());
+        set_cloud_api_token_os("fake-client").unwrap();
+        set_cloud_publisher_token_os("fake-publisher").unwrap();
+        assert_eq!(read_cloud_api_token_os().unwrap().expose(), "fake-client");
+        assert_eq!(
+            read_cloud_publisher_token_os().unwrap().expose(),
+            "fake-publisher"
+        );
+        std::thread::spawn(|| {
+            assert!(!cloud_api_token_status().unwrap());
+            assert!(read_cloud_api_token_os().is_err());
+            assert!(read_cloud_publisher_token_os().is_err());
+        })
+        .join()
+        .unwrap();
+        delete_cloud_api_token_os().unwrap();
+        delete_cloud_publisher_token_os().unwrap();
+        assert!(read_cloud_api_token_os().is_err());
+        assert!(read_cloud_publisher_token_os().is_err());
+    }
 
     #[derive(Default)]
     struct Store {

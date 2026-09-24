@@ -1,3 +1,5 @@
+import { WorkloadControls } from "./WorkloadControls";
+import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
 import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
@@ -147,6 +149,7 @@ function LibraryScreen({
 
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
   const { gateway } = useLibrary();
+  const workload = useWorkloadProfile();
   useOnlineCatalogUpdate(gateway, libraryRoot);
   useCloudBackfillSupervisor(gateway, libraryRoot);
   useMobilePublications(gateway, libraryRoot);
@@ -336,7 +339,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     return () => { active = false; unlisten?.(); };
   }, [subscribeExtensionIngest]);
   const videoPreparation = useVideoPreparation({
-    enabled: maintenance === null,
+    enabled: maintenance === null && !workload.restricted,
     trigger: videoPreparationTrigger,
     prepare: gateway.preparePendingVideos,
     retry: gateway.retryVideoPreparation,
@@ -423,6 +426,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     void refreshTrashCount().catch((error) => setMessage(commandErrorMessage(error, "휴지통 개수를 불러오지 못했습니다.")));
   }, [refreshReviewCount, refreshTrashCount]);
   useEffect(() => {
+    if (workload.restricted) return;
     let active = true;
     void (async () => {
       try {
@@ -430,6 +434,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       } catch (error) {
         if (active) appendMessage(commandErrorMessage(error, "관리 정보 자동 백업에 실패했습니다."));
       }
+      if (!active) return;
       try {
         const result = await gateway.purgeExpiredTrash();
         if (active && result.failedAssetIds.length > 0) {
@@ -442,7 +447,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       }
     })();
     return () => { active = false; };
-  }, [appendMessage, gateway, refreshTrashCount]);
+  }, [appendMessage, gateway, refreshTrashCount, workload.restricted]);
   useReleaseWatchCheck(gateway, libraryRoot, async (result) => {
     await refreshCollections();
     if (result.changedCollections > 0) appendMessage(`${result.provider === "mangadex" ? "MangaDex 새 권" : "Kakao 신간"} 정보가 있는 작품 ${result.changedCollections}개`);
@@ -792,7 +797,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           }
           content={
             <div className="workspace-content">
-              <div className="workspace-titlebar" data-tauri-drag-region="deep"><ChromeTarget name="header" className="workspace-titlebar__context" /><WindowControls /></div>
+              <div className="workspace-titlebar" data-tauri-drag-region="deep"><ChromeTarget name="header" className="workspace-titlebar__context" /><WorkloadControls compact /><WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
                 <Suspense fallback={<DeferredViewFallback />}>
