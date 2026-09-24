@@ -105,6 +105,17 @@ class MediaTicketCacheTests(AssetAuthorityFixture):
                 self.assertEqual(self.single(variant).status_code, 409)
             self.assertEqual(head.call_count, 6)
 
+    def test_tickets_never_send_a_null_digest(self):
+        # Installed Android builds read a JSON null through optString() as "null"
+        # and reject the download, so a missing digest must omit the key.
+        self.assertNotIn("sha256", self.batch("thumbnail"))
+        self.assertNotIn("sha256", self.single("thumbnail").json())
+        self.assertIn("sha256", self.batch("original"))
+        with api_app.get_db() as db:
+            db.execute("UPDATE assets SET sha256=NULL WHERE id=?", [self.aid])
+            db.commit()
+        self.assertNotIn("sha256", self.single("original").json())
+
     def test_verified_original_reuses_head_until_identity_changes(self):
         query = "?verify_digest=true"
         first = self.single("original", query)

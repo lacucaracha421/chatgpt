@@ -2522,6 +2522,13 @@ def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=
         verified_original=verified_original, fresh=fresh_head)
 
 
+def _ticket_digest(asset, variant):
+    # Omit the key rather than send null: installed Android builds read a JSON null
+    # through optString() as the text "null" and then reject every download.
+    digest = asset["sha256"] if variant == "original" else None
+    return {"sha256": digest} if isinstance(digest, str) and digest else {}
+
+
 @app.post("/v1/library/assets/{asset_id}/media-ticket")
 def create_mobile_media_ticket(
     asset_id: str,
@@ -2564,7 +2571,7 @@ def create_mobile_media_ticket(
         "variant": request.variant,
         "content_type": metadata.get("ContentType") or asset["content_type"],
         "size_bytes": metadata.get("ContentLength"),
-        "sha256": asset["sha256"] if request.variant == "original" else None,
+        **_ticket_digest(asset, request.variant),
     }
 
 
@@ -2643,7 +2650,7 @@ def create_mobile_media_tickets(
             "url": presign_get(object_key, MEDIA_TICKET_TTL_SECONDS),
             "content_type": metadata.get("ContentType") or asset["content_type"],
             "size_bytes": metadata.get("ContentLength"),
-            "sha256": asset["sha256"] if variant == "original" else None,
+            **_ticket_digest(asset, variant),
             "expires_at": expires_at.isoformat(),
         }
 
