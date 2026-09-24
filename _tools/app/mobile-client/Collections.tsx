@@ -1,5 +1,7 @@
 import {usePublicationCheck} from './usePublicationCheck';
 import {CollectionMetadata} from './CollectionMetadata';
+import {CollectionPersonal,type PersonalSheet} from './CollectionPersonal';
+import {useCollectionEdits} from './useCollectionEdits';
 import {FilmDetails} from './FilmDetails';
 import {useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
 import {ArrowLeftIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, StarIcon, XMarkIcon} from '@heroicons/react/24/outline';
@@ -285,6 +287,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const [refresh,setRefresh]=useState(0);
   const [showcaseOpen,setShowcaseOpen]=useState(false),[showcaseAll,setShowcaseAll]=useState(false);
   const [sheet,setSheet]=useState<'sort'|'rating'|null>(null);
+  const [personalSheet,setPersonalSheet]=useState<PersonalSheet>(null);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[volumeLimit,setVolumeLimit]=useState(96),[overview,setOverview]=useState(false);
   // The viewer opens covers in their physical form; the choice holds while browsing.
@@ -303,12 +306,14 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const listPull=usePullToRefresh(listRef,()=>setRefresh(n=>n+1),main.busy,!live||!!selected||showcaseAll);
   const showcasePull=usePullToRefresh(showcaseRef,()=>setRefresh(n=>n+1),showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
+  // An accepted personal edit changes what the server serves; re-read both views.
+  const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{setRefresh(n=>n+1);setDetailRefresh(n=>n+1);}});
 
   const detailKey=JSON.stringify([selected,detailRefresh]);
   const committedDetail=useRef('');
   useEffect(()=>{
     committedDetail.current='';setDetail(current=>current?.item.id===selected?current:null);
-    setDetailError('');setCoverIndex(null);setOverview(false);setVolumeLimit(96);
+    setDetailError('');setCoverIndex(null);setOverview(false);setVolumeLimit(96);setPersonalSheet(null);
     if(detailRef.current)detailRef.current.scrollTop=0;
   },[selected]);
   useEffect(()=>{
@@ -321,19 +326,20 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
     }).catch(reason=>{if(!controller.signal.aborted)setDetailError(errorText(reason));});
     return()=>controller.abort();
   },[active,paused,selected,detailKey]);
-  usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(_reply,changed)=>{if(!changed)return;setRefresh(n=>n+1);setDetailRefresh(n=>n+1);});
+  usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;setRefresh(n=>n+1);setDetailRefresh(n=>n+1);});
   // Restore the list position when its committed query is shown again.
   useEffect(()=>{if(!selected&&!showcaseAll&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,main.committed,active]);
 
   const back=useCallback(()=>{
     if(coverIndex!==null){setCoverIndex(null);return true;}
     if(sheet){setSheet(null);return true;}
+    if(personalSheet){setPersonalSheet(null);return true;}
     if(selected){setSelected(null);return true;}
     if(showcaseAll){setShowcaseAll(false);return true;}
     return false;
-  },[coverIndex,sheet,selected,showcaseAll]);
+  },[coverIndex,sheet,personalSheet,selected,showcaseAll]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
-  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet]);
+  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
 
   const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setTab(next);};
@@ -347,7 +353,11 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const maker=item?detailMaker(item):'';
   const revision=main.page?.revision??'';
   const sortLabel=`${SORT_LABELS[filters.sort]} · ${sortDirectionLabels(filters.sort)[filters.direction]}`;
-  const description=item&&item.type!=='manga'?(item.overview||item.description):null;
+  // The memo (`description`) has its own section; manga overviews are imported provider text.
+  const description=item&&item.type!=='manga'?item.overview:null;
+  const score=item?edits.visible(item.id,'myScore',item.myScore??null).value:null;
+  // A queued rating shows on the cards too, until the list re-reads the server.
+  const card=(work:CollectionSummary)=>{const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
   const header=selected
     ?<header className="collection-top"><IconButton label="뒤로" icon={ArrowLeftIcon} onClick={()=>setSelected(null)}/><div className="collection-top__titles"><span className="collection-top__crumbs">컬렉션 › {labels[type]}{showcaseAll?' › 쇼케이스':''}</span></div></header>
@@ -372,7 +382,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {unpublished(main)?unpublishedNotice:<>
         {!filtered&&<section className="collection-showcase-fold" aria-label="쇼케이스">
           <div className="collection-section"><button className="collection-fold" aria-expanded={showcaseOpen} onClick={()=>setShowcaseOpen(open=>!open)}><h2>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</h2><ChevronDownIcon aria-hidden="true"/></button>{showcaseOpen&&<Button variant="ghost" className="collection-more" onClick={()=>setShowcaseAll(true)}>전체 보기<ChevronRightIcon/></Button>}</div>
-          {showcaseOpen&&<div className="collection-shelf">{showcase.busy&&!showcase.items.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{!showcase.busy&&showcase.committed&&!showcase.items.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live&&!selected} meta={false} onOpen={openWork}/>)}</div>}
+          {showcaseOpen&&<div className="collection-shelf">{showcase.busy&&!showcase.items.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{!showcase.busy&&showcase.committed&&!showcase.items.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcase.items.map(work=><WorkCard key={work.id} work={card(work)} revision={showcase.page?.revision??''} active={live&&!selected} meta={false} onOpen={openWork}/>)}</div>}
         </section>}
         <div className="collection-section"><h2>{filtered?'검색 결과':'전체'}{main.page?.totalCount!=null&&<span className="numeric muted collection-total" aria-label="필터 결과 개수"> {main.page.totalCount.toLocaleString()}</span>}</h2></div>
         <div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
@@ -382,7 +392,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
         </div>
         {main.busy&&!main.items.length&&<p role="status" className="hint">컬렉션을 불러오는 중…</p>}
         {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
-        <div className={`collection-grid collection-grid-${type}`}>{main.items.map(work=><WorkCard key={work.id} work={work} revision={revision} active={live&&!selected} onOpen={openWork}/>)}</div>
+        <div className={`collection-grid collection-grid-${type}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected} onOpen={openWork}/>)}</div>
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
         {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
@@ -400,8 +410,9 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       <div className={`collection-detail-intro ${background?'has-backdrop':''}`}>
         <button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button>
         <div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}
-          <span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{item.myScore!=null?<Stars score={item.myScore}/>:<span>미평가</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span></div>
+          <span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{score!=null?<Stars score={score}/>:<span>미평가</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span></div>
       </div>
+      <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
       {volumes.length>0&&<section className="collection-block collection-volume-section" aria-label="권별 표지"><h2>{volumes.length}권</h2>
         {editionOptions.length>1&&<div className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setVolumeLimit(96);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}
         <div className="collection-volume-shelf">{volumes.slice(0,volumeLimit).map((volume,index)=><button key={volume.id} className="collection-tile" onClick={()=>setCoverIndex(index+1)}><Artwork item={item} id={volume.coverArtworkId} revision={detail!.revision} active={active&&!paused} label={volumeLabel(volume)}/><span>{volumeLabel(volume)}{volumeReleaseLabel(volume)&&<span className="collection-volume-date numeric"> · {volumeReleaseLabel(volume)}</span>}</span></button>)}</div>

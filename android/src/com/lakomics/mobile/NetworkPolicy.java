@@ -41,9 +41,12 @@ final class NetworkPolicy {
   // structural mutation through this path. Activate stays absent from every allowlist.
   boolean classificationPut=p.equals("/v1/classifications/authority/commands");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
-  get=get || p.equals("/v1/collections") || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}");
+  get=get || p.equals("/v1/collections") || (p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}") && !p.equals("/v1/collections/personal-edits"));
   get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");
   post=post || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}/artworks/[A-Za-z0-9_-]{1,128}/media-ticket");
+  // Personal Collection edits (rating, Showcase, memo): only the client command. The edit
+  // log is a publisher read and stays unreachable from here.
+  post=post || p.equals("/v1/collections/personal-edits");
   get=get || p.equals("/v1/mobile-catalog/refresh");
   post=post || p.equals("/v1/mobile-catalog/refresh");
   // The manual character exclusion accepted for this device: one named Asset in one named

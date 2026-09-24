@@ -13,6 +13,7 @@ from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+import collection_personal_edits as personal_edits
 import head_cache
 
 MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024
@@ -152,6 +153,10 @@ class Replica(StrictModel):
     version: Literal[1]
     baseRevision: Digest | None
     collections: list[Collection] = Field(max_length=10000)
+    # Personal-edit handshake from an upgraded PC (see collection_personal_edits).
+    personalEditVersion: Literal[1] | None = None
+    libraryId: personal_edits.LIBRARY | None = None
+    personalEditCursor: int | None = Field(default=None, ge=0, le=personal_edits.MAX_CURSOR)
 
 
 class TicketRequest(StrictModel):
@@ -185,7 +190,11 @@ def public_item(item: dict, detail: bool = False) -> dict:
     return result
 
 
-def register_collections(app, get_db, require_auth, storage, bucket, presign_get, presign_put):
+def register_collections(app, get_db, require_auth, storage, bucket, presign_get, presign_put,
+                         require_client=None, require_publisher=None):
+    reader = require_client or require_auth
+    publisher = require_publisher or require_auth
+
     def startup_collections():
         with get_db() as db:
             db.executescript("""
@@ -203,6 +212,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                     sha256 TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL, content_type TEXT NOT NULL
                 );
             """)
+            db.executescript(personal_edits.DDL)
             db.commit()
 
     lifecycle(app).on_startup(startup_collections)
@@ -210,6 +220,9 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     def state(db):
         row = db.execute("SELECT revision,published_at FROM mobile_collection_replica WHERE singleton=1").fetchone()
         return (row["revision"], row["published_at"]) if row else (None, None)
+
+    # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
+    personal_edits.register(app, get_db, reader, publisher, lambda db: state(db)[0])
 
     def head(blob: ArtworkUpload, *, ticket=False):
         key, storage_bucket = artwork_key(blob.sha256), bucket()
@@ -258,20 +271,27 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
 
     @app.put("/v1/collections/replica")
     async def publish_replica(request: Request, authorization: str | None = Header(default=None)):
-        require_auth(authorization)
+        reader(authorization)
         chunks = bytearray()
         async for chunk in request.stream():
             if len(chunks) + len(chunk) > MAX_SNAPSHOT_BYTES:
                 raise HTTPException(413, "Collection snapshot too large")
             chunks.extend(chunk)
-        return await run_in_threadpool(commit_snapshot, chunks)
-
-    def commit_snapshot(chunks):
         try:
             snapshot = Replica.model_validate_json(chunks)
         except ValidationError as exc:
             # Never echo a submitted local path, provider config or arbitrary payload.
             raise HTTPException(422, "Invalid collection snapshot") from exc
+        # The handshake reads the edit log, so it needs the publisher role; a legacy
+        # snapshot keeps the shared token until the first upgraded publication.
+        if snapshot.personalEditVersion is not None:
+            publisher(authorization)
+        else:
+            require_auth(authorization)
+        return await run_in_threadpool(commit_snapshot, snapshot)
+
+    def commit_snapshot(snapshot):
+        personal_edits.validate_handshake(snapshot)
         ids = [item.id for item in snapshot.collections]
         if len(set(ids)) != len(ids):
             raise HTTPException(422, "Duplicate collection IDs")
@@ -312,17 +332,26 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             if not head(blob):
                 raise HTTPException(409, "Upload all artwork before publishing")
         items = [item.model_dump() for item in sorted(snapshot.collections, key=lambda item: item.id)]
-        revision = hashlib.sha256(encode(items).encode()).hexdigest()
         published = datetime.now(timezone.utc).isoformat()
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
             if state(db)[0] != snapshot.baseRevision:
                 raise HTTPException(409, "Collection snapshot changed; refresh before publishing")
+            personal_edits.publication_guard(db, snapshot)
+            identity = items
+            if snapshot.personalEditVersion is not None:
+                # Pending edits re-applied below change what is served, so they are
+                # part of the revision too.
+                identity = {"collections": items, "libraryId": snapshot.libraryId,
+                            "personalEditCursor": snapshot.personalEditCursor,
+                            "lastPersonalEditSequence": personal_edits.last_sequence(db)}
+            revision = hashlib.sha256(encode(identity).encode()).hexdigest()
             db.execute("DELETE FROM mobile_collections")
             db.executemany("INSERT INTO mobile_collection_artwork VALUES (?,?,?) ON CONFLICT(sha256) DO UPDATE SET size_bytes=excluded.size_bytes,content_type=excluded.content_type", [(blob.sha256, blob.sizeBytes, blob.contentType) for blob in unconfirmed])
             db.executemany("INSERT INTO mobile_collections VALUES (?,?,?,?,?,?)", [
                 (item["id"], item["type"], item["name"], int(item["showcase"]), item["showcaseOrder"], encode(item)) for item in items
             ])
+            personal_edits.acknowledge_publication(db, snapshot)
             db.execute("INSERT INTO mobile_collection_replica VALUES (1,?,?) ON CONFLICT(singleton) DO UPDATE SET revision=excluded.revision,published_at=excluded.published_at", (revision, published))
             db.commit()
         return {"ok": True, "revision": revision, "publishedAt": published, "collections": len(items), "artworks": len(blobs)}
@@ -391,8 +420,10 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     def publication_status(authorization: str | None = Header(default=None)):
         require_auth(authorization)
         with get_db() as db:
+            db.execute("BEGIN")
             revision, published = state(db)
-        return {"revision": revision, "publishedAt": published}
+            advertisement = personal_edits.advertisement(db)
+        return {"revision": revision, "publishedAt": published, **advertisement}
 
     @app.get("/v1/collections/{collection_id}")
     def get_collection(collection_id: ID, authorization: str | None = Header(default=None)):

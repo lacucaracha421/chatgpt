@@ -3061,6 +3061,9 @@ from r2 import presign_put as _collection_presign_put
 startup_mobile_collections = register_collections(
     app, get_db, require_auth, lambda: _s3, lambda: R2_BUCKET,
     presign_get, _collection_presign_put,
+    # Late-bound like the character routes, so the shared token is read per request.
+    require_client=lambda authorization: client_guard(get_db, API_TOKEN)(authorization),
+    require_publisher=require_publisher,
 )
 
 from mobile_characters import register_characters

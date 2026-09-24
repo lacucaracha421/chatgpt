@@ -26,6 +26,7 @@ import './library.css';
 import {Gallery} from './Gallery';
 import {Home} from './Home';
 import {Collections} from './Collections';
+import {useCollectionEditBackgroundFlush} from './useCollectionEdits';
 import {Catalog} from './Catalog';
 import {readRecentFolders, rememberFolder, RECENT_FOLDERS_KEY} from './homeModel';
 import {Viewer} from './Viewer';
@@ -55,6 +56,8 @@ export function App() {
   const [librarySegment,setLibrarySegment]=useState<'folders'|'albums'>('folders');
   const viewerBack = useRef<(()=>boolean)|null>(null);
   const [status, setStatus] = useState<Status>({configured:false, endpoint:''});
+  // Queued personal Collection edits are sent on start and on return, whatever screen is open.
+  useCollectionEditBackgroundFlush(status.configured);
   const [checking, setChecking] = useState(true), [settings, setSettings] = useState(false);
   const [viewSettings, setViewSettings] = useState(false);
   // The committed query's filters. Owned here rather than inside a gallery so that a
