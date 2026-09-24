@@ -133,6 +133,7 @@ import json
 import re
 import sqlite3
 
+from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -1362,7 +1363,7 @@ def register_classification_authority(app, get_db, require_client, require_publi
     ``client_guard`` and is never a publisher, so it cannot acquire that capability
     through this route.
     """
-    app.on_event("startup")(lambda _event=None: startup(get_db))
+    lifecycle(app).on_startup(lambda _event=None: startup(get_db))
 
     @app.post(PREFIX + "/activate")
     async def activate_authority(request: Request, authorization: str | None = Header(default=None)):

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from botocore.exceptions import ClientError
+from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -172,7 +173,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             """)
             db.commit()
 
-    app.on_event("startup")(startup_collections)
+    lifecycle(app).on_startup(startup_collections)
 
     def state(db):
         row = db.execute("SELECT revision,published_at FROM mobile_collection_replica WHERE singleton=1").fetchone()

@@ -10,6 +10,7 @@ authority row exists it reports zero active domains, which is exactly the state 
 pre-cutover client must see.
 """
 import authority
+from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException
 
 PREFIX = "/v1/sync"
@@ -41,7 +42,7 @@ def register_sync_status(app, get_db, require_client):
     def startup():
         authority.startup(get_db)
 
-    app.on_event("startup")(startup)
+    lifecycle(app).on_startup(startup)
 
     @app.get(PREFIX + "/status")
     def sync_status(authorization: str | None = Header(default=None)):

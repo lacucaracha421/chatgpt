@@ -11,6 +11,7 @@ import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
+from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 import api_auth
@@ -180,7 +181,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         replica.startup(get_db)
         catalog_bookmarks.startup(get_db)
         api_auth.startup(get_db)
-    app.on_event("startup")(startup)
+    lifecycle(app).on_startup(startup)
     def root():
         return Path(artifact_root()).resolve()
     def sign(payload):

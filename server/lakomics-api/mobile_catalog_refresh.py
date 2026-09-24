@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 
+from app_lifecycle import lifecycle
 from fastapi import Header, Request
 import mobile_catalog_replica as replica
 from catalog_refresh_content import parse_page
@@ -305,8 +306,8 @@ class RefreshWorker:
 
 def register_refresh(app, get_db, root, require_auth, fetch_page):
     worker = RefreshWorker(get_db, root, fetch_page)
-    app.on_event("startup")(worker.startup)
-    app.on_event("shutdown")(worker.shutdown)
+    lifecycle(app).on_startup(worker.startup)
+    lifecycle(app).on_shutdown(worker.shutdown)
 
     @app.get("/v1/mobile-catalog/refresh")
     def status(authorization: str | None = Header(default=None)):

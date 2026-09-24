@@ -66,6 +66,7 @@ import json
 import re
 import sqlite3
 
+from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -1271,7 +1272,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
     # The FastAPI startup hook receives an event argument, while the closure returned
     # to the caller is invoked directly by tests like the other domain modules. They
     # are kept separate so neither signature surprises the other.
-    app.on_event("startup")(lambda _event=None: startup(get_db))
+    lifecycle(app).on_startup(lambda _event=None: startup(get_db))
 
     @app.post(PREFIX + "/authority/activate")
     async def activate_authority(request: Request, authorization: str | None = Header(default=None)):

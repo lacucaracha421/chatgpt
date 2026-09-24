@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
+from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -136,7 +137,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             db.executescript(character_exclusions.DDL)
             db.commit()
 
-    app.on_event("startup")(startup)
+    lifecycle(app).on_startup(startup)
 
     def state(db):
         return db.execute("SELECT * FROM mobile_character_state WHERE singleton=1").fetchone()

@@ -115,8 +115,8 @@ class ThumbnailApiTests(AssetAuthorityFixture):
             self.assertEqual(db.execute("SELECT COUNT(*) FROM assets").fetchone()[0], 0)
 
     def test_application_registers_worker_start_and_stop(self):
-        self.assertIn(api_app.startup_image_thumbnails, api_app.app.router.on_startup)
-        self.assertIn(api_app.shutdown_image_thumbnails, api_app.app.router.on_shutdown)
+        self.assertIn(api_app.startup_image_thumbnails, api_app.lifecycle(api_app.app).startup_handlers)
+        self.assertIn(api_app.shutdown_image_thumbnails, api_app.lifecycle(api_app.app).shutdown_handlers)
         with mock.patch.object(api_app, "_image_thumbnail_worker", None), mock.patch.object(
                 image_thumbnails, "ImageThumbnailWorker") as worker_type:
             api_app.startup_image_thumbnails()

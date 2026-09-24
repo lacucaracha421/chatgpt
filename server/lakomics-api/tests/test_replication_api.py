@@ -7,11 +7,13 @@ prepare → 업로드(기존 presign) → commit의 멱등성과, 커밋 전 자
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 import sqlite3
 
@@ -27,15 +29,69 @@ from fastapi.testclient import TestClient
 
 class ReplicationStartupTests(unittest.TestCase):
     def test_registered_startup_handlers_initialize_a_fresh_database(self):
+        hooks = api_app.lifecycle(api_app.app)
+        expected_startup = [
+            "app.startup",
+            "app.startup_replication",
+            "app.startup_captures",
+            "app.startup_classifications",
+            "app.startup_saved_x_media",
+            "app.startup_extension_profile",
+            "app.startup_extension_backup",
+            "app.startup_album_replica",
+            "notes.register_notes.<locals>.startup_notes",
+            "mobile_catalog.register_mobile_catalog.<locals>.startup",
+            "mobile_catalog_refresh.RefreshWorker.startup",
+            "mobile_collections.register_collections.<locals>.startup_collections",
+            "mobile_characters.register_characters.<locals>.startup",
+            "sync_status.register_sync_status.<locals>.startup",
+            "album_authority.register_album_authority.<locals>.<lambda>",
+            "classification_authority.register_classification_authority.<locals>.<lambda>",
+            "asset_authority.register_asset_authority.<locals>.<lambda>",
+            "app.startup_image_thumbnails",
+        ]
+        expected_shutdown = [
+            "mobile_catalog_refresh.RefreshWorker.shutdown",
+            "app.shutdown_image_thumbnails",
+        ]
+        calls = []
+
+        def record(handler):
+            def run():
+                handler()
+                calls.append(f"{handler.__module__}.{handler.__qualname__}")
+            return run
+
+        async def async_startup():
+            await asyncio.sleep(0)
+            calls.append("async_startup")
+
+        async def async_shutdown():
+            await asyncio.sleep(0)
+            calls.append("async_shutdown")
+
+        async def run_lifespan():
+            async with api_app.app.router.lifespan_context(api_app.app):
+                self.assertEqual(calls, expected_startup + ["async_startup"])
+            self.assertEqual(calls, expected_startup + ["async_startup"]
+                             + expected_shutdown + ["async_shutdown"])
+            self.assertIsNone(api_app._image_thumbnail_worker)
+
+        refresh_worker = next(handler.__self__ for handler in hooks.shutdown_handlers
+                              if handler.__module__ == "mobile_catalog_refresh")
+
         with tempfile.TemporaryDirectory() as temp_dir:
             original_database_path = api_app.DB_PATH
             api_app.DB_PATH = Path(temp_dir) / "lakomics.sqlite3"
             try:
-                for handler in api_app.app.router.on_startup:
-                    handler()
+                with mock.patch.object(hooks, "startup_handlers", [
+                    *map(record, hooks.startup_handlers), async_startup,
+                ]), mock.patch.object(hooks, "shutdown_handlers", [
+                    *map(record, hooks.shutdown_handlers), async_shutdown,
+                ]):
+                    asyncio.run(run_lifespan())
+                    self.assertFalse(refresh_worker.thread.is_alive())
             finally:
-                for handler in reversed(api_app.app.router.on_shutdown):
-                    handler()
                 api_app.DB_PATH = original_database_path
 
 

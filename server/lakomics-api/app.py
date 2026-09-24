@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from botocore.exceptions import ClientError
+from app_lifecycle import lifecycle
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
@@ -157,7 +158,7 @@ def startup_replication():
         db.commit()
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -210,7 +211,7 @@ def asset_list_generation(authorization: str | None = Header(default=None)):
             "filterVersion": asset_filters.FILTER_VERSION}
 
 
-app.on_event("startup")(startup_replication)
+lifecycle(app).on_startup(startup_replication)
 
 
 @app.get("/health")
@@ -565,7 +566,7 @@ class CaptureAcknowledge(BaseModel):
     imported_at: AwareDatetime
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup_captures():
     with get_db() as db:
         db.execute(
@@ -631,7 +632,7 @@ def startup_captures():
         db.commit()
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup_classifications():
     with get_db() as db:
         db.execute(
@@ -651,7 +652,7 @@ def startup_classifications():
         db.commit()
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup_saved_x_media():
     with get_db() as db:
         db.execute(
@@ -681,7 +682,7 @@ def _extension_public_origin(request: Request) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup_extension_profile():
     with get_db() as db:
         db.execute(
@@ -966,7 +967,7 @@ class ExtensionBackupSnapshot(BaseModel):
     ciphertext: str = Field(min_length=16, max_length=MAX_EXTENSION_BACKUP_BYTES * 2)
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup_extension_backup():
     with get_db() as db:
         db.execute(
@@ -2911,7 +2912,7 @@ class AlbumReplicaPublish(BaseModel):
         return 1 if self.snapshot_version is None else self.snapshot_version
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup_album_replica():
     with get_db() as db:
         db.execute("""CREATE TABLE IF NOT EXISTS album_replica (
@@ -3116,7 +3117,7 @@ import image_thumbnails
 _image_thumbnail_worker = None
 
 
-@app.on_event("startup")
+@lifecycle(app).on_startup
 def startup_image_thumbnails():
     global _image_thumbnail_worker
     from r2 import thumbnail_storage_client
@@ -3130,7 +3131,7 @@ def startup_image_thumbnails():
     _image_thumbnail_worker.start()
 
 
-@app.on_event("shutdown")
+@lifecycle(app).on_shutdown
 def shutdown_image_thumbnails():
     global _image_thumbnail_worker
     if _image_thumbnail_worker is not None and _image_thumbnail_worker.stop():

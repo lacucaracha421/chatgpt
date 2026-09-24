@@ -1150,7 +1150,7 @@ class StartupBootstrapTests(unittest.TestCase):
     """Deploying the module must create its tables without touching production state.
 
     Deliberately *not* built on AssetAuthorityFixture: that fixture calls the domain's
-    startup directly, which is exactly what hides a missing `on_event` registration. This
+    startup directly, which is exactly what hides a missing lifespan registration. This
     mirrors a real process - the base startups plus the registered route modules, then the
     app's own startup handlers - so removing the registration fails here.
     """
@@ -1191,7 +1191,7 @@ class StartupBootstrapTests(unittest.TestCase):
         # Pins the mechanism, so a direct call in a fixture cannot mask a regression.
         self.assertTrue(
             any("asset" in repr(handler) or handler.__module__.startswith("asset_authority")
-                for handler in api_app.app.router.on_startup),
+                for handler in api_app.lifecycle(api_app.app).startup_handlers),
             "the asset authority DDL must be registered as an app startup handler")
 
     def test_startup_does_not_activate_the_domain_or_populate_lifecycle(self):
@@ -1208,7 +1208,7 @@ class StartupBootstrapTests(unittest.TestCase):
                        " VALUES('legacy','image','fixture','2026','2026',1)")
             db.commit()
             before = [tuple(r) for r in db.execute("SELECT * FROM assets ORDER BY id")]
-        for handler in api_app.app.router.on_startup:
+        for handler in api_app.lifecycle(api_app.app).startup_handlers:
             handler()
         with api_app.get_db() as db:
             after = [tuple(r) for r in db.execute("SELECT * FROM assets ORDER BY id")]

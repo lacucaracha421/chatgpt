@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timezone
 from typing import Annotated
 
+from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -38,7 +39,7 @@ def register_notes(app, get_db, require_auth):
                 INSERT OR IGNORE INTO notes_sequence VALUES(1,0);
             """)
 
-    app.on_event("startup")(startup_notes)
+    lifecycle(app).on_startup(startup_notes)
 
     def public(row):
         return {"id": row["id"], "revision": row["revision"],

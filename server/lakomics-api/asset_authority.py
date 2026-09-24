@@ -42,6 +42,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from app_lifecycle import lifecycle
 from fastapi import HTTPException
 
 import authority
@@ -943,7 +944,7 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
     from fastapi import Header, Request
     from fastapi.concurrency import run_in_threadpool
 
-    app.on_event("startup")(lambda _event=None: startup(get_db))
+    lifecycle(app).on_startup(lambda _event=None: startup(get_db))
 
     @app.post(PREFIX + "/activate")
     async def activate_authority(request: Request, authorization: str | None = Header(default=None)):
