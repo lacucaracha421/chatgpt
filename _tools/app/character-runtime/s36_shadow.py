@@ -55,7 +55,7 @@ def extract_query(model, request, cancelled=lambda: False):
     return feature
 
 
-def score(data, features, query_hash, now, cancelled=lambda: False, groups=None):
+def score(data, features, query_hash, now, cancelled=lambda: False, groups=None, crops=None):
     # The calibration's group, reference resolution and witness implementation,
     # not a second approximate scorer. Import lazily: baseline never depends on it.
     from replay_eval import Replay, duplicate_groups, time_ns
@@ -74,8 +74,14 @@ def score(data, features, query_hash, now, cancelled=lambda: False, groups=None)
     for target in data["targets"]:
         check_cancel(cancelled)
         positive, _, _ = replay.gallery(target["id"], query_hash, now)
-        result[target["id"]] = (float(knn(query.vectors, np.stack(list(positive.values()))).min())
-                                 if query is not None and not query.fallback and positive else None)
+        if query is not None and not query.fallback and positive:
+            per_crop = knn(query.vectors, np.stack(list(positive.values())))
+            result[target["id"]] = float(per_crop.min())
+            if crops is not None:
+                # The person crop that decided the image score (one person, one character).
+                crops[target["id"]] = int(np.argmin(per_crop))
+        else:
+            result[target["id"]] = None
     return result
 
 
@@ -141,10 +147,12 @@ def handle(model, request, cancelled=lambda: False):
         model.shadow_groups = (group_key, groups)
     else:
         groups = saved[1]
+    crops = {}
+    scores = score(data, features, request["hash"], time_ns(request["scoredAt"]), cancelled, groups=groups, crops=crops)
     return {"type": "s36_shadow_result", "assetId": request["assetId"],
             "queryAvailable": query is not None and not query.fallback,
             "contentHash": request["hash"], "featureId": feature_id(),
-            "scores": score(data, features, request["hash"], time_ns(request["scoredAt"]), cancelled, groups=groups)}
+            "scores": scores, "crops": crops}
 
 
 MAX_BATCH_QUERIES = 32

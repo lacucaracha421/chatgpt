@@ -91,6 +91,8 @@ pub(super) struct Engine {
     prepared_references: Option<Arc<PreparedReferences>>,
     training: Option<AugmentationTraining>,
     shadow: std::collections::VecDeque<super::character_shadow::Pending>,
+    /// Assets already checked by the S36 catch-up in this run.
+    s36_checked: BTreeSet<String>,
 }
 #[cfg(test)]
 impl Engine {
@@ -790,11 +792,95 @@ impl Library {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .shadow
             .pop_front();
+        // Observations live in memory, so a restart or a settings change drops them.
+        // S36 series depend on the score for their membership: recover recent images.
+        let pending = pending.or_else(|| {
+            self.s36_catch_up(config).unwrap_or_else(|error| {
+                eprintln!("S36 catch-up skipped: {error}");
+                None
+            })
+        });
         let Some(pending) = pending else { return false };
         if let Err(error) = self.score_character_shadow(pending, config, stop) {
             eprintln!("S36 shadow scoring skipped: {error}");
         }
         true
+    }
+
+    /// One recently completed image in an S36 series that has no score under the
+    /// current policy. Each asset is checked at most once per queue run.
+    fn s36_catch_up(&self, config: &RuntimeConfig) -> Result<Option<super::character_shadow::Pending>> {
+        if config.s36.s36_series.is_empty() {
+            return Ok(None);
+        }
+        let version = serde_json::from_slice::<Value>(&std::fs::read(
+            config.script.with_file_name("s36_policy.json"),
+        )?)?["version"]
+            .as_str()
+            .ok_or(Error::Stale)?
+            .to_string();
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(14)).to_rfc3339();
+        let recent = self
+            .connection()?
+            .prepare(
+                "SELECT asset_id FROM character_autotag_jobs
+                 WHERE state='completed' AND updated_at>=?1 ORDER BY updated_at DESC LIMIT 500",
+            )?
+            .query_map([&cutoff], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let cache_path = self.root.join(".cache/characters/s36_shadow.sqlite");
+        let cache = cache_path
+            .is_file()
+            .then(|| {
+                rusqlite::Connection::open_with_flags(
+                    &cache_path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )
+            })
+            .transpose()?;
+        for asset in recent {
+            {
+                let mut engine = self
+                    .character_incremental
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !engine.s36_checked.insert(asset.clone()) {
+                    continue;
+                }
+            }
+            let Some(pending) = self.character_shadow_candidate(&asset)? else {
+                continue;
+            };
+            let owned = {
+                let c = self.connection()?;
+                let mut series = c.prepare(
+                    "SELECT series_classification_id FROM character_targets WHERE id=?1",
+                )?;
+                let mut owned = false;
+                for target in pending.outcomes.keys() {
+                    let id: Option<String> = series.query_row([target], |r| r.get(0)).optional()?;
+                    owned |= config.s36.owns(id.as_deref());
+                }
+                owned
+            };
+            if !owned {
+                continue;
+            }
+            let scored = match &cache {
+                Some(cache) => cache
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM scores WHERE asset_id=?1 AND policy_version=?2)",
+                        rusqlite::params![asset, version],
+                        |r| r.get::<_, bool>(0),
+                    )
+                    .unwrap_or(false),
+                None => false,
+            };
+            if !scored {
+                return Ok(Some(pending));
+            }
+        }
+        Ok(None)
     }
 
     pub(super) fn augmentation_idle_allowed(&self, stop: &AtomicBool) -> Result<bool> {

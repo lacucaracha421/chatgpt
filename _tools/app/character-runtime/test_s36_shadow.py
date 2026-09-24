@@ -275,7 +275,7 @@ class ShadowTests(unittest.TestCase):
             request = {"cachedOnly": True, "featureId": feature_id(), "targets": ["t"],
                        "snapshotPath": str(snapshot), "scoredAt": "2026-02-01T00:00:00Z"}
             queries = [{"assetId": str(i), "hash": h} for i, h in enumerate(hashes)]
-            expected = [handle(SimpleNamespace(cache_root=root / "cache"), {**request, **q}) for q in queries]
+            expected = [{k: v for k, v in handle(SimpleNamespace(cache_root=root / "cache"), {**request, **q}).items() if k != "crops"} for q in queries]
             model = SimpleNamespace(cache_root=root / "cache")
             original = s36_shadow.cached_feature
             with patch("s36_shadow.cached_feature", wraps=original) as read:
@@ -328,7 +328,7 @@ class ShadowTests(unittest.TestCase):
                 snapshot.write_text(json.dumps(data))
                 request = {"cachedOnly": True, "featureId": feature_id(), "targets": [target],
                            "snapshotPath": str(snapshot), "scoredAt": "2026-02-01T00:00:00Z"}
-                expected = [handle(SimpleNamespace(cache_root=root / "cache"), {**request, **q}) for q in queries]
+                expected = [{k: v for k, v in handle(SimpleNamespace(cache_root=root / "cache"), {**request, **q}).items() if k != "crops"} for q in queries]
                 warm = hasattr(model, "shadow_features")
                 with patch("s36_shadow.cached_feature", wraps=s36_shadow.cached_feature) as read:
                     self.assertEqual(handle(model, {**request, "queries": queries})["results"], expected)
