@@ -43,6 +43,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "mobile_catalog.register_mobile_catalog.<locals>.startup",
             "prune_catalog_artifacts.AutoPruner.start",
             "mobile_catalog_refresh.RefreshWorker.startup",
+            "catalog_duplicates.register.<locals>.startup",
             "mobile_collections.register_collections.<locals>.startup_collections",
             "mobile_characters.register_characters.<locals>.startup",
             "sync_status.register_sync_status.<locals>.startup",

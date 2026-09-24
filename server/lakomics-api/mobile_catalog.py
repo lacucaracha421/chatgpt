@@ -16,6 +16,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 import api_auth
 import catalog_bookmarks
+import catalog_duplicates
 import conditional
 import prune_catalog_artifacts as pruning
 import mobile_catalog_replica as replica
@@ -193,6 +194,9 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
     app.state.catalog_pruner = pruner
     lifecycle(app).on_startup(pruner.start)
     lifecycle(app).on_shutdown(pruner.stop)
+    # PC publications can change titles; refresh the duplicate title index in the background.
+    duplicate_index = catalog_duplicates.TitleIndexRebuilder(root, get_db)
+    app.state.catalog_duplicate_index = duplicate_index
     def sign(payload):
         encoded = base64.urlsafe_b64encode(replica.encode(payload).encode()).decode().rstrip("=")
         signature = hmac.new(secret().encode(), encoded.encode(), hashlib.sha256).hexdigest()
@@ -377,6 +381,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
         result = await run_in_threadpool(replica.publish, body, root(), get_db,
                                          external_publisher=True, publisher_library_id=library)
         pruner.trigger()
+        await run_in_threadpool(duplicate_index.trigger)
         return result
 
     def authority_read(db, library_id, epoch):

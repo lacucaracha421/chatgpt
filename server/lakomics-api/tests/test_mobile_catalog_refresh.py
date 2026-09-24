@@ -7,6 +7,7 @@ from unittest import mock
 
 from tests import test_mobile_catalog as base
 import mobile_catalog_replica as replica
+import catalog_duplicates
 from mobile_catalog_refresh import DDL, RefreshWorker, register_refresh
 from catalog_refresh_content import parse_page
 
@@ -198,3 +199,94 @@ class RefreshTests(unittest.TestCase):
         row = parse_page(page([1]), 'korean')[0]
         self.assertEqual(row['work']['Rating'], 4.5)
         self.assertEqual(row['work']['Posted'], 1800000000)
+
+
+def titled_page(*works):
+    """Refresh page rows: (id, title, pages, category, artist)."""
+    return json.dumps([{"id": str(i), "title": title, "filecount": str(pages), "category": category, "views": 1,
+                        "posted": 1800000000000, "tags": [{"tag": ["language", "korean"]}, {"tag": ["artist", artist]}]}
+                       for i, title, pages, category, artist in works])
+
+
+class RefreshDuplicateCheckTests(unittest.TestCase):
+    """The hourly refresh checks the works it added against the published catalog."""
+    setUp = base.MobileCatalogApiTests.setUp
+    tearDown = base.MobileCatalogApiTests.tearDown
+    publish = base.MobileCatalogApiTests.publish
+    search = base.MobileCatalogApiTests.search
+    worker = RefreshTests.worker
+    request = RefreshTests.request
+
+    def duplicates(self):
+        def auth(value):
+            if value != base.AUTH["Authorization"]:
+                replica.fail(401)
+        catalog_duplicates.register(self.app, self.get_db, auth, auth)()
+        response = self.client.get(catalog_duplicates.PREFIX, headers=base.AUTH)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_added_works_matching_existing_titles_become_server_candidates(self):
+        # Fixture work 3: "alpha beta", 120 pages, category 1, artist:foo, korean, group g3.
+        worker = self.worker(lambda *_: titled_page((1003, "Alpha  Beta", 120, 1, "foo"),
+                                                     (1002, "Brand new title", 30, 2, "kim"),
+                                                     (1001, "Brand new title", 30, 2, "kim")))
+        self.request(worker)
+        self.assertTrue(worker.run_once())
+        self.assertEqual(worker.status()["state"], "completed")
+        self.assertEqual(worker.status()["added"], 3)
+        listing = self.duplicates()
+        pairs = {(item["leftWorkId"], item["rightWorkId"]): item for item in listing["items"]}
+        self.assertEqual(set(pairs), {("1003", "3"), ("1001", "1002")})
+        self.assertEqual({item["source"] for item in listing["items"]}, {"server"})
+        self.assertEqual({item["reason"] for item in listing["items"]}, {"exactTitle"})
+        self.assertEqual(listing["counts"], {"undecided": 2, "decided": 0})
+        with self.get_db() as db:
+            state = db.execute("SELECT index_digest,index_built_at FROM catalog_duplicate_state").fetchone()
+            self.assertEqual(state[0], replica.current(db)["content_digest"])
+            self.assertIsNotNone(state[1])
+
+    def test_failing_duplicate_check_does_not_fail_the_refresh(self):
+        worker = self.worker(lambda *_: titled_page((1003, "alpha beta", 120, 1, "foo")))
+        before = self.search().json()["publicationRevision"]
+        self.request(worker)
+        with mock.patch.object(catalog_duplicates, "check_new_works", side_effect=RuntimeError("boom")) as check, \
+                self.assertLogs("mobile_catalog_refresh", "ERROR"):
+            self.assertTrue(worker.run_once())
+        check.assert_called_once()
+        self.assertEqual(worker.status()["state"], "completed")
+        self.assertEqual(worker.status()["added"], 1)
+        after = self.search().json()["publicationRevision"]
+        self.assertNotEqual(after, before)
+        self.assertEqual(worker.status()["publicationRevision"], after)
+        self.assertIn("1003", [row["providerWorkId"] for row in self.search().json()["items"]])
+        self.assertFalse(worker.run_once())
+
+    def test_refresh_without_new_works_skips_the_check(self):
+        worker = self.worker(lambda *_: titled_page((1003, "alpha beta", 120, 1, "foo")))
+        self.request(worker); worker.run_once()
+        worker.fetch_page = lambda *_: titled_page((1003, "alpha beta", 120, 1, "foo"))
+        with self.get_db() as db:
+            db.execute("DELETE FROM mobile_catalog_refresh_streams"); db.commit()
+        with mock.patch.object(catalog_duplicates, "check_new_works") as check:
+            self.request(worker); worker.run_once()
+        self.assertEqual(worker.status()["added"], 0)
+        check.assert_not_called()
+
+    def test_pc_publication_rebuilds_a_stale_index_in_the_background(self):
+        first = self.publish().json()["publicationRevision"]
+        rebuilder = self.app.state.catalog_duplicate_index
+        self.assertIsNone(rebuilder.thread)  # never built: the next refresh builds it lazily
+        with self.get_db() as db:
+            catalog_duplicates.startup_db(db)
+            db.execute("UPDATE catalog_duplicate_state SET index_digest='old',index_built_at='t'")
+            db.commit()
+        self.assertEqual(self.publish(first).status_code, 200)  # PC publication route triggers it
+        self.assertIsNotNone(rebuilder.thread)
+        rebuilder.thread.join(5)
+        with self.get_db() as db:
+            state = db.execute("SELECT index_digest,index_rows FROM catalog_duplicate_state").fetchone()
+            self.assertEqual(state[0], replica.current(db)["content_digest"])
+            self.assertEqual(state[1], db.execute("SELECT COUNT(*) FROM catalog_duplicate_title_index").fetchone()[0])
+            self.assertGreater(state[1], 0)
+        self.assertFalse(rebuilder.trigger())  # current: nothing to do

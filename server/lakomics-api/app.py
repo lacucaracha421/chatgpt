@@ -3183,6 +3183,13 @@ startup_mobile_catalog = register_mobile_catalog(
     refresh_fetcher=_catalog_refresh_page,
     require_client=require_client, require_publisher=require_publisher,
 )
+
+# Manga Catalog duplicate-edition candidates (PC-published) and shared review decisions.
+# Startup only creates empty tables; the refresh worker checks the works it adds.
+import catalog_duplicates
+
+startup_catalog_duplicates = catalog_duplicates.register(app, get_db, require_client, require_publisher)
+
 from r2 import presign_put as _collection_presign_put
 
 startup_mobile_collections = register_collections(

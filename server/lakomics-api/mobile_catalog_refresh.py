@@ -11,6 +11,7 @@ import uuid
 
 from app_lifecycle import lifecycle
 from fastapi import Header, Request
+import catalog_duplicates
 import mobile_catalog_replica as replica
 from catalog_refresh_content import parse_page
 
@@ -260,12 +261,13 @@ class RefreshWorker:
                     job = dict(db.execute("SELECT * FROM mobile_catalog_refresh_jobs WHERE id=?", [job["id"]]).fetchone())
                 if not done and self.stop.wait(0.4):
                     return True
-            self.publish(job, owner)
+            revision, new_rows = self.publish(job, owner)
             if self.on_published is not None:
                 try:
                     self.on_published()
                 except Exception:
                     LOG.error("Catalog refresh post-publish hook failed")
+            self.check_duplicates(revision, new_rows)
         except Exception:
             with self.get_db() as db:
                 changed = db.execute("UPDATE mobile_catalog_refresh_jobs SET state='failed',error=?,updated=? WHERE id=? AND owner=? AND state='running' AND lease>?", ["갱신하지 못했습니다. 기존 목록은 유지됩니다. 다시 시도해 주세요.", time.time(), job["id"], owner, time.time()]).rowcount
@@ -289,7 +291,8 @@ class RefreshWorker:
                 current = dict(replica.current(db))
                 users = json.loads(db.execute("SELECT payload FROM mobile_catalog_users WHERE revision=?", [current["user_revision"]]).fetchone()[0])
             with replica.open_publication(self.root(), self.get_db, current["revision"]) as (catalog, _):
-                added = sum(not catalog.execute("SELECT 1 FROM catalog.Works WHERE Id=?", [row["work"]["Id"]]).fetchone() for row in rows)
+                new_rows = [row for row in rows if not catalog.execute("SELECT 1 FROM catalog.Works WHERE Id=?", [row["work"]["Id"]]).fetchone()]
+            added = len(new_rows)
 
             def finalize(db, revision):
                 self.owned(db, job["id"], owner)
@@ -303,11 +306,30 @@ class RefreshWorker:
                 db.execute("DELETE FROM mobile_catalog_refresh_pages WHERE job_id=?", [job["id"]])
 
             try:
-                replica.publish({"version": 1, "baseRevision": current["revision"], "contentDigest": current["content_digest"], "userSnapshot": users}, self.root(), self.get_db, additions=rows, finalize=finalize)
-                return
+                result = replica.publish({"version": 1, "baseRevision": current["revision"], "contentDigest": current["content_digest"], "userSnapshot": users}, self.root(), self.get_db, additions=rows, finalize=finalize)
+                return result["publicationRevision"], new_rows
             except Exception as error:
                 if getattr(error, "status_code", None) != 409 or attempt == 2:
                     raise
+
+    def check_duplicates(self, revision, new_rows):
+        """Duplicate-edition check for the works this refresh added; best effort.
+
+        Runs after the job is committed as completed, outside the catalog lock (a
+        read-only publication handle keeps its files readable even if pruned), so a
+        failure here never fails, rolls back or re-queues the refresh.
+        """
+        if not new_rows:
+            return None
+        try:
+            with replica.open_publication(self.root(), self.get_db, revision) as (catalog, publication):
+                with self.get_db() as db:
+                    stats = catalog_duplicates.check_new_works(db, catalog, new_rows, digest=publication["content_digest"])
+            LOG.info("Catalog duplicate check: %d works, %d new candidates", stats["checked"], stats["candidates"])
+            return stats
+        except Exception:
+            LOG.error("Catalog duplicate check failed; the refreshed catalog is kept")
+            return None
 
 
 def register_refresh(app, get_db, root, require_auth, fetch_page, on_published=None):
