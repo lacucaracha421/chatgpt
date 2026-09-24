@@ -501,7 +501,7 @@ impl Library {
         read_outbox(&connection)
     }
 
-    fn pending_intent_count(&self) -> Result<usize, LibraryError> {
+    pub(crate) fn pending_intent_count(&self) -> Result<usize, LibraryError> {
         Ok(self.outbox_entries()?.len())
     }
 }
@@ -586,6 +586,8 @@ fn enqueue(
             created_at
         ],
     )?;
+    // Wake the coordinated authority pass instead of waiting out its idle backoff.
+    super::authority_pass::note_local_work();
     Ok(())
 }
 

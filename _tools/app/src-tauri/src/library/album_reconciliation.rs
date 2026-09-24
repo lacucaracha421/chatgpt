@@ -101,6 +101,27 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<AlbumReconciliation, LibraryError> {
+        self.reconcile_album_authority_with_status(
+            client,
+            token,
+            &|| client.sync_status(token),
+            false,
+        )
+    }
+
+    /// The receive half against a caller-supplied `/v1/sync/status` read.
+    ///
+    /// The coordinated authority pass shares one status read across every domain and
+    /// sets `skip_unchanged`: a domain whose stored cursor already equals the reported
+    /// one then skips its change feed. Explicit reconciliation passes `false` and still
+    /// reads and validates the feed.
+    pub(crate) fn reconcile_album_authority_with_status(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        read_status: &dyn Fn() -> Result<crate::cloud::client::SyncStatus, LibraryError>,
+        skip_unchanged: bool,
+    ) -> Result<AlbumReconciliation, LibraryError> {
         // The guard is scoped to the reads it protects: holding it across the network
         // round trip below would block every other database caller, and the helpers
         // this function calls take the same non-reentrant lock themselves.
@@ -125,7 +146,7 @@ impl Library {
         // cycle and is the only recovery for a withheld relation when the client never
         // needs another baseline.
         let rematerialized = self.materialize_deferred_album_memberships()?;
-        let status = client.sync_status(token)?;
+        let status = read_status()?;
         let remote = status
             .domains
             .iter()
@@ -180,7 +201,14 @@ impl Library {
         // nothing is applied, the cursor does not move, and the next pass flushes it first.
         // Converting it here keeps one meaning for the state instead of two near-identical
         // ones that differ only by which half of the receive produced it.
-        match self.receive_album_authority(client, token, remote, local.as_ref(), rematerialized) {
+        match self.receive_album_authority(
+            client,
+            token,
+            remote,
+            local.as_ref(),
+            skip_unchanged,
+            rematerialized,
+        ) {
             Err(LibraryError::AuthorityReceivePreconditionChanged { .. }) => {
                 Ok(AlbumReconciliation {
                     adopted: true,
@@ -204,6 +232,7 @@ impl Library {
         token: &str,
         remote: &crate::cloud::client::SyncAuthorityDomain,
         local: Option<&AlbumAuthority>,
+        skip_unchanged: bool,
         rematerialized: u32,
     ) -> Result<AlbumReconciliation, LibraryError> {
         match local {
@@ -214,6 +243,17 @@ impl Library {
                 // only correct response; there is no meaningful incremental path across
                 // epochs.
                 self.adopt_album_baseline(client, token, remote, true, Some(authority))
+            }
+            // Coordinated poll only: the shared status proves nothing moved since the
+            // stored cursor, so the change feed would be empty.
+            Some(authority) if skip_unchanged && authority.cursor == remote.cursor => {
+                Ok(AlbumReconciliation {
+                    adopted: true,
+                    server_cursor: Some(remote.cursor),
+                    local_cursor: Some(authority.cursor),
+                    rematerialized_memberships: rematerialized,
+                    ..Default::default()
+                })
             }
             Some(authority) => {
                 match self.apply_album_changes(client, token, authority) {

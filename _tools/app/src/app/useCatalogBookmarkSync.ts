@@ -1,4 +1,5 @@
-import { useWorkloadProfile } from "./workloadProfile";
+import { nativeWorkload, useWorkloadProfile } from "./workloadProfile";
+import { relayNativeAuthorityEvent } from "./nativeAuthorityEvents";
 import { useEffect } from "react";
 import type { LibraryGateway } from "../library/types";
 
@@ -8,6 +9,9 @@ const BOOKMARK_SYNC_INTERVAL_MS = 5_000;
 export function useCatalogBookmarkSync(gateway: LibraryGateway, libraryRoot: string) {
   const { restricted } = useWorkloadProfile();
   useEffect(() => {
+    if (nativeWorkload()) {
+      return relayNativeAuthorityEvent("library://catalog-bookmarks-changed", CATALOG_BOOKMARKS_CHANGED_EVENT);
+    }
     if (!gateway.reconcileCatalogBookmarks || !gateway.flushCatalogBookmarkOutbox) return;
     let active = true;
     let running = false;

@@ -350,6 +350,8 @@ fn enqueue_intent(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
         params![operation_id, command_type, album_id, asset_id, authority.epoch, encoded, created_at],
     )?;
+    // Wake the coordinated authority pass instead of waiting out its idle backoff.
+    super::authority_pass::note_local_work();
     Ok(())
 }
 

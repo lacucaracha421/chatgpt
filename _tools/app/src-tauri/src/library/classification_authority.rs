@@ -513,6 +513,8 @@ fn enqueue_intent(
             created_at
         ],
     )?;
+    // Wake the coordinated authority pass instead of waiting out its idle backoff.
+    super::authority_pass::note_local_work();
     Ok(())
 }
 

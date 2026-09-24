@@ -866,66 +866,66 @@ impl CloudClient {
     ///   `RestoreAuthorityUnknown`, since the client cannot tell whether a domain
     ///   it failed to parse is in fact active.
     pub(crate) fn sync_status(&self, token: &str) -> Result<SyncStatus, LibraryError> {
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Domain {
-            domain: String,
-            library_id: String,
-            epoch: i64,
-            contract_version: i64,
-            cursor: i64,
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Status {
-            protocol_version: i64,
-            active: bool,
-            library_id: Option<String>,
-            domains: Vec<Domain>,
-        }
         let mut response = self
             .agent
             .get(self.endpoint("/v1/sync/status")?)
             .header("Authorization", bearer(token)?)
             .call()
-            .map_err(|error| match error {
-                // An older server without the route cannot report its authority
-                // state, which is unknown rather than "none".
-                ureq::Error::StatusCode(404) => LibraryError::RestoreAuthorityUnknown,
-                // Authorization/transport problems are reported as themselves: the
-                // caller still refuses to restore, but the user gets an actionable
-                // reason instead of a misleading authority error.
-                other => map_api_error(other, |_| LibraryError::InvalidCloudResponse),
-            })?;
-        // A body this client cannot parse at all is an unreadable authority state.
-        let status = read_json::<Status>(&mut response).map_err(|_| LibraryError::RestoreAuthorityUnknown)?;
-        if status.protocol_version != SYNC_PROTOCOL_VERSION {
-            return Err(LibraryError::SyncProtocolUnsupported);
+            .map_err(map_sync_status_error)?;
+        let bytes = read_body_bounded(&mut response, MAX_RESPONSE_BYTES)
+            .map_err(|_| LibraryError::RestoreAuthorityUnknown)?;
+        parse_sync_status(&bytes)
+    }
+
+    /// The same document as [`Self::sync_status`], read with `If-None-Match`.
+    ///
+    /// Only the coordinated authority poll uses this. A `304` returns the body this
+    /// process last received for the same endpoint and credential, which the server's
+    /// tag (a hash of the body) proves is still current; a server without ETags keeps
+    /// answering `200` and simply costs a full read. The restore guard keeps the
+    /// unconditional read.
+    pub(crate) fn sync_status_conditional(&self, token: &str) -> Result<SyncStatus, LibraryError> {
+        let bytes = self.conditional_get("/v1/sync/status", token, map_sync_status_error)?;
+        parse_sync_status(&bytes)
+    }
+
+    /// A small JSON GET with a process-wide ETag cache (see [`ConditionalCache`]).
+    fn conditional_get(
+        &self,
+        path: &str,
+        token: &str,
+        map_error: fn(ureq::Error) -> LibraryError,
+    ) -> Result<Vec<u8>, LibraryError> {
+        let scope = conditional_scope(&self.base_url, token);
+        let cached = conditional_cache().lookup(&scope, path);
+        let mut request = self
+            .agent
+            .get(self.endpoint(path)?)
+            .header("Authorization", bearer(token)?);
+        if let Some((etag, _)) = &cached {
+            request = request.header("If-None-Match", etag.as_str());
         }
-        if status.domains.len() > MAX_SYNC_DOMAINS {
-            return Err(LibraryError::RestoreAuthorityUnknown);
+        let mut response = request.call().map_err(map_error)?;
+        if response.status().as_u16() == 304 {
+            // A 304 is only meaningful against the body its tag describes. Without one
+            // (evicted, or a server answering 304 unprompted) it is not a document.
+            return cached
+                .map(|(_, body)| body)
+                .ok_or(LibraryError::InvalidCloudResponse);
         }
-        let domains = status
-            .domains
-            .into_iter()
-            .map(|domain| SyncAuthorityDomain {
-                domain: domain.domain,
-                library_id: domain.library_id,
-                epoch: domain.epoch,
-                contract_version: domain.contract_version,
-                cursor: domain.cursor,
-            })
-            .collect::<Vec<_>>();
-        let status = SyncStatus {
-            protocol_version: status.protocol_version,
-            active: status.active,
-            library_id: status.library_id,
-            domains,
-        };
-        if !status.is_consistent() {
-            return Err(LibraryError::RestoreAuthorityUnknown);
+        if !response.status().is_success() {
+            return Err(map_error(ureq::Error::StatusCode(
+                response.status().as_u16(),
+            )));
         }
-        Ok(status)
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = read_body_bounded(&mut response, MAX_RESPONSE_BYTES)?;
+        conditional_cache().store(&scope, path, etag, &body);
+        Ok(body)
     }
 
     /// One Album baseline page against a frozen snapshot cursor.
@@ -1388,42 +1388,27 @@ impl CloudClient {
         &self,
         token: &str,
     ) -> Result<MobileCatalogAuthority, LibraryError> {
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Capabilities {
-            #[serde(default)]
-            bookmark_write: bool,
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Status {
-            authority_library_id: Option<String>,
-            authority_epoch: Option<i64>,
-            authority_contract_version: Option<i64>,
-            authority_cursor: Option<i64>,
-            // A server older than the capability field advertises nothing, which is
-            // read as "no write accepted" rather than as a malformed response.
-            #[serde(default)]
-            capabilities: Option<Capabilities>,
-        }
         let mut response = self
             .agent
             .get(self.endpoint("/v1/mobile-catalog/status")?)
             .header("Authorization", bearer(token)?)
             .call()
-            .map_err(|error| {
-                map_bookmark_read_error(error, LibraryError::CatalogBookmarkSyncRejected(409))
-            })?;
-        let status = read_json::<Status>(&mut response)?;
-        Ok(MobileCatalogAuthority {
-            library_id: status.authority_library_id,
-            epoch: status.authority_epoch,
-            contract_version: status.authority_contract_version,
-            cursor: status.authority_cursor,
-            bookmark_write: status
-                .capabilities
-                .is_some_and(|capabilities| capabilities.bookmark_write),
-        })
+            .map_err(map_bookmark_status_error)?;
+        parse_mobile_catalog_authority(&read_body_bounded(&mut response, MAX_RESPONSE_BYTES)?)
+    }
+
+    /// [`Self::mobile_catalog_authority`] read with `If-None-Match`, for the
+    /// coordinated authority poll. A `304` reuses the body the tag describes.
+    pub(crate) fn mobile_catalog_authority_conditional(
+        &self,
+        token: &str,
+    ) -> Result<MobileCatalogAuthority, LibraryError> {
+        let bytes = self.conditional_get(
+            "/v1/mobile-catalog/status",
+            token,
+            map_bookmark_status_error,
+        )?;
+        parse_mobile_catalog_authority(&bytes)
     }
 
     /// Full authoritative baseline. Used for the initial adoption and for an
@@ -2581,6 +2566,206 @@ fn read_json_bounded<T: serde::de::DeserializeOwned>(
         return Err(LibraryError::InvalidCloudResponse);
     }
     serde_json::from_slice(&bytes).map_err(|_| LibraryError::InvalidCloudResponse)
+}
+
+fn read_body_bounded(
+    response: &mut ureq::http::Response<ureq::Body>,
+    limit: usize,
+) -> Result<Vec<u8>, LibraryError> {
+    let mut bytes = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+    if bytes.len() > limit {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    Ok(bytes)
+}
+
+/// `/v1/sync/status` failures, shared by the plain and the conditional read.
+///
+/// * an older server without the route (404) cannot report its authority state, so it
+///   is `RestoreAuthorityUnknown`, never "no authority";
+/// * authorization/transport problems are reported as themselves: a restore still
+///   refuses, but the user gets an actionable reason instead of an authority error.
+fn map_sync_status_error(error: ureq::Error) -> LibraryError {
+    match error {
+        ureq::Error::StatusCode(404) => LibraryError::RestoreAuthorityUnknown,
+        other => map_api_error(other, |_| LibraryError::InvalidCloudResponse),
+    }
+}
+
+/// Parse and validate one `/v1/sync/status` document (see [`CloudClient::sync_status`]).
+fn parse_sync_status(bytes: &[u8]) -> Result<SyncStatus, LibraryError> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Domain {
+        domain: String,
+        library_id: String,
+        epoch: i64,
+        contract_version: i64,
+        cursor: i64,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Status {
+        protocol_version: i64,
+        active: bool,
+        library_id: Option<String>,
+        domains: Vec<Domain>,
+    }
+    // A body this client cannot parse at all is an unreadable authority state.
+    let status: Status =
+        serde_json::from_slice(bytes).map_err(|_| LibraryError::RestoreAuthorityUnknown)?;
+    if status.protocol_version != SYNC_PROTOCOL_VERSION {
+        return Err(LibraryError::SyncProtocolUnsupported);
+    }
+    if status.domains.len() > MAX_SYNC_DOMAINS {
+        return Err(LibraryError::RestoreAuthorityUnknown);
+    }
+    let domains = status
+        .domains
+        .into_iter()
+        .map(|domain| SyncAuthorityDomain {
+            domain: domain.domain,
+            library_id: domain.library_id,
+            epoch: domain.epoch,
+            contract_version: domain.contract_version,
+            cursor: domain.cursor,
+        })
+        .collect::<Vec<_>>();
+    let status = SyncStatus {
+        protocol_version: status.protocol_version,
+        active: status.active,
+        library_id: status.library_id,
+        domains,
+    };
+    if !status.is_consistent() {
+        return Err(LibraryError::RestoreAuthorityUnknown);
+    }
+    Ok(status)
+}
+
+/// Conditional-read scope: the endpoint base plus a digest of the credential, so a
+/// cached body is never presented across an account or endpoint change. The raw token
+/// is never kept.
+fn conditional_scope(base_url: &url::Url, token: &str) -> String {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(token.trim().as_bytes());
+    let hex: String = digest
+        .iter()
+        .take(12)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("{base_url}#{hex}")
+}
+
+/// Bounded, process-wide ETag cache for the small polled status documents.
+///
+/// `CloudClient` is built per call, so the cache cannot live on it. Entries are keyed
+/// by [`conditional_scope`] and path; storing an entry under a new credential for the
+/// same endpoint drops that endpoint's entries for every other credential, and the
+/// oldest entries are evicted beyond a small bound. Correctness never depends on an
+/// entry surviving: a missing entry just means an unconditional read.
+pub(crate) struct ConditionalCache {
+    entries: std::sync::Mutex<std::collections::VecDeque<ConditionalEntry>>,
+}
+
+struct ConditionalEntry {
+    scope: String,
+    path: String,
+    etag: String,
+    body: Vec<u8>,
+}
+
+const MAX_CONDITIONAL_ENTRIES: usize = 32;
+
+impl ConditionalCache {
+    fn lookup(&self, scope: &str, path: &str) -> Option<(String, Vec<u8>)> {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries
+            .iter()
+            .find(|entry| entry.scope == scope && entry.path == path)
+            .map(|entry| (entry.etag.clone(), entry.body.clone()))
+    }
+
+    fn store(&self, scope: &str, path: &str, etag: Option<String>, body: &[u8]) {
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let base = scope.rsplit_once('#').map_or(scope, |(base, _)| base);
+        entries.retain(|entry| {
+            let same_base = entry
+                .scope
+                .rsplit_once('#')
+                .map_or(entry.scope.as_str(), |(b, _)| b)
+                == base;
+            !(entry.scope == scope && entry.path == path) && !(same_base && entry.scope != scope)
+        });
+        // A server that sends no tag (an older build) is read unconditionally every time.
+        let Some(etag) = etag.filter(|etag| !etag.is_empty() && etag.len() <= 256) else {
+            return;
+        };
+        entries.push_back(ConditionalEntry {
+            scope: scope.to_owned(),
+            path: path.to_owned(),
+            etag,
+            body: body.to_vec(),
+        });
+        while entries.len() > MAX_CONDITIONAL_ENTRIES {
+            entries.pop_front();
+        }
+    }
+}
+
+fn conditional_cache() -> &'static ConditionalCache {
+    static CACHE: std::sync::OnceLock<ConditionalCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| ConditionalCache {
+        entries: std::sync::Mutex::new(std::collections::VecDeque::new()),
+    })
+}
+
+fn map_bookmark_status_error(error: ureq::Error) -> LibraryError {
+    map_bookmark_read_error(error, LibraryError::CatalogBookmarkSyncRejected(409))
+}
+
+fn parse_mobile_catalog_authority(bytes: &[u8]) -> Result<MobileCatalogAuthority, LibraryError> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Capabilities {
+        #[serde(default)]
+        bookmark_write: bool,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Status {
+        authority_library_id: Option<String>,
+        authority_epoch: Option<i64>,
+        authority_contract_version: Option<i64>,
+        authority_cursor: Option<i64>,
+        // A server older than the capability field advertises nothing, which is
+        // read as "no write accepted" rather than as a malformed response.
+        #[serde(default)]
+        capabilities: Option<Capabilities>,
+    }
+    let status: Status =
+        serde_json::from_slice(bytes).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    Ok(MobileCatalogAuthority {
+        library_id: status.authority_library_id,
+        epoch: status.authority_epoch,
+        contract_version: status.authority_contract_version,
+        cursor: status.authority_cursor,
+        bookmark_write: status
+            .capabilities
+            .is_some_and(|capabilities| capabilities.bookmark_write),
+    })
 }
 
 fn map_presign_error(error: ureq::Error) -> LibraryError {

@@ -1,4 +1,5 @@
-import { useWorkloadProfile } from "./workloadProfile";
+import { nativeWorkload, useWorkloadProfile } from "./workloadProfile";
+import { relayNativeAuthorityEvent } from "./nativeAuthorityEvents";
 import {useEffect} from 'react';
 import type {LibraryGateway} from '../library/types';
 
@@ -18,6 +19,9 @@ const ALBUM_SYNC_INTERVAL_MS = 5_000;
 export function useAlbumAuthoritySync(gateway: LibraryGateway, libraryRoot: string) {
   const { restricted } = useWorkloadProfile();
   useEffect(() => {
+    if (nativeWorkload()) {
+      return relayNativeAuthorityEvent("library://album-authority-changed", ALBUM_AUTHORITY_CHANGED_EVENT);
+    }
     if (!gateway.reconcileAlbumAuthority || !gateway.flushAlbumOutbox) return;
     let active = true;
     let running = false;

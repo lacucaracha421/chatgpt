@@ -243,6 +243,21 @@ impl Library {
         token: &str,
     ) -> Result<BookmarkReconciliation, LibraryError> {
         let authority = client.mobile_catalog_authority(token)?;
+        self.reconcile_catalog_bookmarks_from(client, token, authority, false)
+    }
+
+    /// The receive half against an already-read `/v1/mobile-catalog/status`.
+    ///
+    /// With `skip_unchanged` (the coordinated authority poll only) a stored cursor
+    /// equal to the advertised one skips the change feed; explicit reconciliation
+    /// passes `false` and still reads it.
+    pub(crate) fn reconcile_catalog_bookmarks_from(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        authority: crate::cloud::client::MobileCatalogAuthority,
+        skip_unchanged: bool,
+    ) -> Result<BookmarkReconciliation, LibraryError> {
         let Some(server_library_id) = authority.library_id else {
             // Still PC-owned: nothing to receive, and no local state is invented.
             return Ok(BookmarkReconciliation {
@@ -288,6 +303,24 @@ impl Library {
                     || state.cursor > server_cursor
             }
         };
+
+        if !needs_baseline
+            && skip_unchanged
+            && existing
+                .as_ref()
+                .is_some_and(|state| state.cursor == server_cursor)
+        {
+            return Ok(BookmarkReconciliation {
+                library_id: Some(server_library_id),
+                epoch: Some(epoch),
+                contract_version: Some(server_contract),
+                server_cursor: Some(server_cursor),
+                local_cursor: Some(server_cursor),
+                behind_by: 0,
+                applied_changes: 0,
+                adopted_baseline: false,
+            });
+        }
 
         let mut adopted_baseline = false;
         if needs_baseline {

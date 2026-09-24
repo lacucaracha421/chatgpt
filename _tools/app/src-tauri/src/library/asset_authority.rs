@@ -308,6 +308,7 @@ pub(crate) fn enqueue(
         }
         db.execute("INSERT INTO asset_lifecycle_outbox(operation_id,library_id,epoch,contract_version,asset_id,desired,expected_revision,created_at) VALUES(?,?,?,?,?,?,?,?)",params![uuid::Uuid::new_v4().to_string(),a.library,a.epoch,a.contract,id,desired,p.entity_revision,chrono::Utc::now().to_rfc3339()])?;
     }
+    super::authority_pass::note_local_work();
     Ok(())
 }
 
@@ -425,11 +426,32 @@ impl Library {
         publisher: Option<&str>,
         restricted: bool,
     ) -> Result<AssetSyncResult, LibraryError> {
+        self.sync_assets_with_status(
+            client,
+            token,
+            publisher,
+            restricted,
+            &|| client.sync_status(token),
+            false,
+        )
+    }
+    /// One Asset pass against a caller-supplied `/v1/sync/status` read. With
+    /// `skip_unchanged` (the coordinated poll only) an unmoved cursor skips the change
+    /// feed; queued lifecycle intents and materialization still run.
+    pub(crate) fn sync_assets_with_status(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        publisher: Option<&str>,
+        restricted: bool,
+        read_status: &dyn Fn() -> Result<crate::cloud::client::SyncStatus, LibraryError>,
+        skip_unchanged: bool,
+    ) -> Result<AssetSyncResult, LibraryError> {
         let _single = self
             .asset_sync_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let status = client.sync_status(token)?;
+        let status = read_status()?;
         let Some(remote) = status.domains.iter().find(|d| d.domain == "assets") else {
             if authority(&*self.connection()?)?.is_some() {
                 return invalid();
@@ -456,6 +478,8 @@ impl Library {
         if need_baseline {
             self.install_asset_baseline(client, token, &a)?;
             result.applied_changes += 1;
+        } else if skip_unchanged && local.as_ref().is_some_and(|l| l.cursor == a.cursor) {
+            // The shared status proves the feed has nothing after the stored cursor.
         } else {
             let cursor = local.unwrap().cursor;
             match self.catch_up_assets(client, token, &a, cursor) {

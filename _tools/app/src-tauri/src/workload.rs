@@ -1,4 +1,5 @@
 //! Machine-local workload policy and native owners of mobile-critical timers.
+use crate::library::authority_pass::{take_local_work, AuthoritySchedule};
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
@@ -318,19 +319,30 @@ fn start_timers(app: tauri::AppHandle) {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .profile();
         let mut publications = Instant::now() - Duration::from_secs(10);
-        let mut assets = publications;
         let mut replication = publications;
         static PUBLICATIONS_BUSY: AtomicBool = AtomicBool::new(false);
-        static ASSETS_BUSY: AtomicBool = AtomicBool::new(false);
         static REPLICATION_BUSY: AtomicBool = AtomicBool::new(false);
+        static ASSETS_BUSY: AtomicBool = AtomicBool::new(false);
+        // Shared-authority lane: one conditional status read per pass for every domain,
+        // with idle backoff (see `library::authority_pass`).
+        let authority = std::sync::Arc::new(Mutex::new(AuthoritySchedule::new(Instant::now())));
+        let mut was_focused = false;
+        let mut authority_root: Option<PathBuf> = None;
         loop {
             std::thread::sleep(Duration::from_secs(1));
+            let mut focused = false;
             if let Some(window) = app.get_webview_window("main") {
-                activity(
-                    &app,
-                    !window.is_visible().unwrap_or(true),
-                    window.is_focused().unwrap_or(false),
-                );
+                focused = window.is_focused().unwrap_or(false);
+                activity(&app, !window.is_visible().unwrap_or(true), focused);
+            }
+            // Returning to the window or queueing a local write wants fresh state now.
+            let gained_focus = focused && !was_focused;
+            was_focused = focused;
+            if take_local_work() || gained_focus {
+                authority
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .wake(Instant::now());
             }
             let auto = {
                 let state = runtime()
@@ -377,22 +389,64 @@ fn start_timers(app: tauri::AppHandle) {
                     let _ = lib.run_saved_mobile_publications();
                 });
             }
-            if assets.elapsed() >= Duration::from_secs(if profile.restricted { 20 } else { 5 })
-                && !ASSETS_BUSY.swap(true, Ordering::AcqRel)
-            {
-                assets = Instant::now();
+            let start_authority = {
+                let mut schedule = authority
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                // A newly opened library converges immediately, not after the old backoff.
+                if authority_root.as_deref() != Some(library.root()) {
+                    authority_root = Some(library.root().to_path_buf());
+                    schedule.wake(Instant::now());
+                }
+                let due = schedule.due(Instant::now());
+                if due {
+                    schedule.begin();
+                }
+                due
+            };
+            if start_authority {
                 let lib = library.clone();
                 let handle = app.clone();
+                let schedule = authority.clone();
+                let restricted = profile.restricted;
                 std::thread::spawn(move || {
-                    let _reset = Reset(&ASSETS_BUSY);
-                    if let Ok(result) = lib.sync_asset_authority() {
-                        if result.applied_changes > 0
-                            || result.materialized > 0
-                            || result.flushed > 0
-                        {
-                            let _ = handle.emit("library://asset-authority-changed", ());
+                    // Finishing in `Drop` keeps a panicking pass from stalling the lane.
+                    let mut finish = FinishPass {
+                        schedule: schedule.clone(),
+                        restricted,
+                        changed: false,
+                    };
+                    let (outcome, status) = lib.run_authority_pass().unwrap_or_default();
+                    finish.changed = outcome.changed();
+                    for (changed, event) in [
+                        (outcome.albums, "library://album-authority-changed"),
+                        (
+                            outcome.classifications,
+                            "library://classification-authority-changed",
+                        ),
+                        (outcome.bookmarks, "library://catalog-bookmarks-changed"),
+                    ] {
+                        if changed {
+                            let _ = handle.emit(event, ());
                         }
                     }
+                    // The Asset lane reuses this pass's status on its own single-flight
+                    // thread: a long media materialization must not hold up the metadata
+                    // lanes. A pass that finds it still busy leaves the work to it.
+                    let Some(status) = status else { return };
+                    if ASSETS_BUSY.swap(true, Ordering::AcqRel) {
+                        return;
+                    }
+                    std::thread::spawn(move || {
+                        let _reset = Reset(&ASSETS_BUSY);
+                        if lib.run_asset_lane(&status, restricted).unwrap_or(false) {
+                            let _ = handle.emit("library://asset-authority-changed", ());
+                            schedule
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .changed_elsewhere(Instant::now());
+                        }
+                    });
                 });
             }
             if replication.elapsed() >= Duration::from_secs(if profile.restricted { 10 } else { 2 })
@@ -406,6 +460,19 @@ fn start_timers(app: tauri::AppHandle) {
             }
         }
     });
+}
+struct FinishPass {
+    schedule: std::sync::Arc<Mutex<AuthoritySchedule>>,
+    restricted: bool,
+    changed: bool,
+}
+impl Drop for FinishPass {
+    fn drop(&mut self) {
+        self.schedule
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .finished(self.changed, self.restricted, Instant::now());
+    }
 }
 struct Reset(&'static AtomicBool);
 impl Drop for Reset {

@@ -11,6 +11,7 @@ pub(crate) mod album_reconciliation;
 mod album_reconciliation_tests;
 pub(crate) mod asset_authority;
 mod asset_metadata;
+pub(crate) mod authority_pass;
 pub(crate) mod av_artwork;
 pub(crate) mod av_collection;
 pub(crate) mod av_models;

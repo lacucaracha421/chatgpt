@@ -1,4 +1,5 @@
-import { useWorkloadProfile } from "./workloadProfile";
+import { nativeWorkload, useWorkloadProfile } from "./workloadProfile";
+import { relayNativeAuthorityEvent } from "./nativeAuthorityEvents";
 import {useEffect} from 'react';
 import type {LibraryGateway} from '../library/types';
 
@@ -27,6 +28,12 @@ const CLASSIFICATION_SYNC_INTERVAL_MS = 5_000;
 export function useClassificationAuthoritySync(gateway: LibraryGateway, libraryRoot: string) {
   const { restricted } = useWorkloadProfile();
   useEffect(() => {
+    if (nativeWorkload()) {
+      return relayNativeAuthorityEvent(
+        "library://classification-authority-changed",
+        CLASSIFICATION_AUTHORITY_CHANGED_EVENT,
+      );
+    }
     if (!gateway.reconcileClassificationAuthority || !gateway.flushClassificationOutbox) return;
     let active = true;
     let running = false;

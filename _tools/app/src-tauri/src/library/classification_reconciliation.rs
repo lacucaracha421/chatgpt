@@ -117,6 +117,27 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<ClassificationReconciliation, LibraryError> {
+        self.reconcile_classification_authority_with_status(
+            client,
+            token,
+            &|| client.sync_status(token),
+            false,
+        )
+    }
+
+    /// The receive half against a caller-supplied `/v1/sync/status` read.
+    ///
+    /// The coordinated authority pass shares one status read across every domain and
+    /// sets `skip_unchanged`: a domain whose stored cursor already equals the reported
+    /// one then skips its change feed. Explicit reconciliation passes `false` and still
+    /// reads and validates the feed.
+    pub(crate) fn reconcile_classification_authority_with_status(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        read_status: &dyn Fn() -> Result<crate::cloud::client::SyncStatus, LibraryError>,
+        skip_unchanged: bool,
+    ) -> Result<ClassificationReconciliation, LibraryError> {
         // The guard is scoped to the reads it protects: holding it across the network
         // round trip below would block every other database caller, and the helpers this
         // function calls take the same non-reentrant lock themselves.
@@ -151,7 +172,7 @@ impl Library {
         } else {
             0
         };
-        let status = client.sync_status(token)?;
+        let status = read_status()?;
         let remote = status
             .domains
             .iter()
@@ -193,8 +214,14 @@ impl Library {
                 return Err(LibraryError::ClassificationAuthorityMismatch);
             }
         }
-        match self.receive_classification_authority(client, token, remote, local.as_ref(),
-                                                    rematerialized) {
+        match self.receive_classification_authority(
+            client,
+            token,
+            remote,
+            local.as_ref(),
+            skip_unchanged,
+            rematerialized,
+        ) {
             // A local intent that appeared while a request was in flight — a change page or a
             // baseline walk — is the same condition: the intent is the user's current intent,
             // so nothing is applied, the cursor does not move, and the next pass flushes it
@@ -223,6 +250,7 @@ impl Library {
         token: &str,
         remote: &crate::cloud::client::SyncAuthorityDomain,
         local: Option<&ClassificationAuthority>,
+        skip_unchanged: bool,
         rematerialized: u32,
     ) -> Result<ClassificationReconciliation, LibraryError> {
         match local {
@@ -233,6 +261,17 @@ impl Library {
                 // describe something else. Re-adopting is the only correct response; there
                 // is no meaningful incremental path across epochs.
                 self.adopt_classification_baseline(client, token, remote, true, Some(authority))
+            }
+            // Coordinated poll only: the shared status proves nothing moved since the
+            // stored cursor, so the change feed would be empty.
+            Some(authority) if skip_unchanged && authority.cursor == remote.cursor => {
+                Ok(ClassificationReconciliation {
+                    adopted: true,
+                    server_cursor: Some(remote.cursor),
+                    local_cursor: Some(authority.cursor),
+                    rematerialized_assignments: rematerialized,
+                    ..Default::default()
+                })
             }
             Some(authority) => match self.apply_classification_changes(client, token, authority) {
                 Ok((applied, cursor)) => Ok(ClassificationReconciliation {
