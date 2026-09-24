@@ -111,10 +111,18 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
+    // Mobile decisions applied in the background change this list; reload when the
+    // inbound counter moves (the first read is only the baseline).
+    let inbound: number | null = null;
     async function poll() {
       try {
         const status = await api.status();
         if (!disposed) updateBackfill(status);
+        if (api.inboundStatus) {
+          const { applied } = await api.inboundStatus();
+          if (!disposed && inbound !== null && applied !== inbound) setReload(value => value + 1);
+          inbound = applied;
+        }
       } catch (e) {
         if (!disposed) setBackfillError(commandErrorMessage(e, "채점 상태를 불러오지 못했습니다."));
       } finally {
@@ -124,6 +132,13 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     void poll();
     return () => { disposed = true; clearTimeout(timer); };
   }, [api, updateBackfill]);
+
+  // Returning to the window may follow judgments made elsewhere (another window, mobile).
+  useEffect(() => {
+    const onFocus = () => setReload(value => value + 1);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   async function startBackfill() {
     if (starting || backfill?.running) return;

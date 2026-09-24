@@ -59,6 +59,8 @@ pub mod character_reference_refresh;
 #[cfg(test)]
 mod character_reference_refresh_bench;
 pub mod character_reference_regions;
+pub(crate) mod character_review_feed;
+pub(crate) mod character_review_sync;
 pub mod character_scan;
 mod character_scope;
 pub mod character_series_move;
@@ -82,6 +84,7 @@ pub(crate) mod classification_reconciliation;
 mod classification_reconciliation_tests;
 pub mod cloud_preflight;
 pub(crate) mod collection;
+pub(crate) mod collection_personal_edits;
 pub(crate) mod collection_source;
 mod collection_volume;
 pub(crate) mod credential;

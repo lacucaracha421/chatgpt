@@ -183,6 +183,20 @@ impl Library {
             }
         });
     }
+    /// The S36 series choice of the configured automation, or `None` before the automation
+    /// has been configured in this session (the choice is machine-local and only reaches the
+    /// library through the runtime configuration).
+    pub(crate) fn character_s36_series(&self) -> Option<BTreeSet<String>> {
+        let engine = self
+            .character_incremental
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        engine
+            .next_config
+            .as_ref()
+            .or(engine.config.as_ref())
+            .map(|config| config.s36.s36_series.clone())
+    }
     pub(crate) fn stop_character_incremental(&self) {
         self.character_shadow_backfill_cancel();
         let mut engine = self

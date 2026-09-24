@@ -221,6 +221,18 @@ impl From<LibraryError> for CommandError {
             LibraryError::CharacterExclusionProtectedReference => {
                 "character_exclusion_protected_reference"
             }
+            LibraryError::CollectionPersonalEditUnsupported => "collection_personal_edit_unsupported",
+            LibraryError::CollectionPersonalEditCursorRejected => {
+                "collection_personal_edit_cursor_rejected"
+            }
+            LibraryError::CollectionPersonalEditSyncRejected(_) => {
+                "collection_personal_edit_sync_rejected"
+            }
+            LibraryError::CollectionPersonalEditInvalid => "collection_personal_edit_invalid",
+            LibraryError::CharacterReviewUnsupported => "character_review_unsupported",
+            LibraryError::CharacterReviewCursorRejected => "character_review_cursor_rejected",
+            LibraryError::CharacterReviewSyncRejected(_) => "character_review_sync_rejected",
+            LibraryError::CharacterReviewInvalid => "character_review_invalid",
             LibraryError::CharacterPublicationRejected(_) => "character_publication_rejected",
             LibraryError::CharacterPublicationConflict => "character_publication_conflict",
             LibraryError::CharacterPublicationTooLarge => "character_publication_too_large",

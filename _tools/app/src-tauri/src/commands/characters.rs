@@ -336,6 +336,19 @@ pub async fn character_shadow_review_page(
         .map_err(Into::into)
 }
 
+/// Cheap counter of inbound mobile character decisions applied on this PC; the S36 review
+/// screen reloads when it changes.
+#[tauri::command]
+pub async fn character_review_inbound_status(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_review_sync::ReviewInboundStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_review_inbound_status())
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
 #[tauri::command]
 pub async fn character_s36_publication(
     app: tauri::AppHandle,

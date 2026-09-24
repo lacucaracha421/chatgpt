@@ -168,6 +168,15 @@ impl Library {
         let production_company = normalized_optional_text(request.production_company);
         let release_date = normalized_release_date(request.release_date)?;
         let my_score = validated_personal_rating(request.my_score)?;
+        // Write a personal field only when the user changed it in the dialog; an unchanged
+        // field keeps the stored value, which a mobile edit may have changed meanwhile.
+        let (write_description, write_score) = match &request.personal_base {
+            Some(base) => (
+                description != base.description.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned),
+                my_score != base.my_score,
+            ),
+            None => (true, true),
+        };
         let connection = self.connection()?;
         let current_type: Option<String> = connection.query_row("SELECT type FROM collections WHERE id=?1", [id], |r| r.get(0)).optional()?;
         if current_type.as_deref().is_some_and(|current| (current == "av") != (type_str == "av")) {
@@ -176,12 +185,12 @@ impl Library {
         let changed = connection
             .execute(
                 "UPDATE collections
-                 SET name = ?1, description = ?2, type = ?3,
+                 SET name = ?1, description = CASE WHEN ?18 THEN ?2 ELSE description END, type = ?3,
                      year = ?4, original_title = ?5, runtime_minutes = ?6,
                      author = ?7, director = ?8, developer = ?9,
                      publisher = ?10, platforms = ?11,
                      production_company = ?12, release_date = ?13,
-                     external_score = ?14, my_score = ?15,
+                     external_score = ?14, my_score = CASE WHEN ?19 THEN ?15 ELSE my_score END,
                      showcase_order = CASE
                          WHEN showcase = 1 AND type <> ?3 THEN (
                              SELECT COALESCE(MAX(other.showcase_order) + 1, 0)
@@ -212,6 +221,8 @@ impl Library {
                     my_score,
                     chrono::Utc::now().to_rfc3339(),
                     id,
+                    write_description,
+                    write_score,
                 ],
             )
             .map_err(map_duplicate_name)?;
@@ -386,7 +397,7 @@ pub(crate) fn normalized_name(name: String) -> Result<String, LibraryError> {
     Ok(name)
 }
 
-fn normalized_description(description: Option<String>) -> Result<Option<String>, LibraryError> {
+pub(crate) fn normalized_description(description: Option<String>) -> Result<Option<String>, LibraryError> {
     let description = description
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty());
@@ -684,6 +695,7 @@ mod tests {
                     release_date: None,
                     external_score: None,
                     my_score: None,
+                    personal_base: None,
                 },
             )
             .unwrap();
@@ -978,6 +990,7 @@ mod tests {
                     release_date: None,
                     external_score: Some(87),
                     my_score: Some(4.5),
+                    personal_base: None,
                 },
             )
             .unwrap();
@@ -1021,6 +1034,7 @@ mod tests {
                     release_date: Some("2019-08-30".into()),
                     external_score: Some(87),
                     my_score: Some(4.5),
+                    personal_base: None,
                 },
             )
             .unwrap();
@@ -1052,6 +1066,7 @@ mod tests {
             release_date: release_date.map(str::to_owned),
             external_score: None,
             my_score,
+            personal_base: None,
         };
 
         for date in ["2026-02-30", "2026-8-5", "+002026-01-01"] {
@@ -1204,6 +1219,7 @@ mod tests {
                     release_date: None,
                     external_score: None,
                     my_score: Some(4.5),
+                    personal_base: None,
                 },
             )
             .unwrap();

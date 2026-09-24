@@ -700,6 +700,9 @@ export type UpdateCollection = {
   director: string | null;
   externalScore: number | null;
   myScore: number | null;
+  /** Personal values the edit dialog loaded; unchanged fields keep the stored value
+   * (which a mobile edit may have changed meanwhile). Omit to write both fields. */
+  personalBase?: { myScore: number | null; description: string | null };
 };
 
 export type AssetCollectionPatch = {
@@ -1172,6 +1175,8 @@ export interface LibraryGateway {
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
   pushCloudCollections?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CloudCollectionsPublishResult>;
   runDueMobilePublications?(orderIds:string[]): Promise<void>;
+  /** Native signal that Collections changed in the background (mobile personal edits). */
+  subscribeCollectionsChanged?(handler: () => void): () => void;
   pushCloudCharacters?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<{revision: string; nodes: number}>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
   runDueCloudCaptureSync(onProgress?: (outcome: IngestOutcome) => void): Promise<CloudCaptureSyncResult>;

@@ -70,6 +70,7 @@ it("submits only fields owned by ordinary collection editing", async () => {
     developer: null,
     productionCompany: null,
     releaseDate: null,
+    personalBase: { myScore: null, description: "description" },
   });
 });
 
@@ -247,3 +248,14 @@ const collectionFixture: CollectionSummary = {
   createdAt: "2026-08-20T00:00:00Z",
   updatedAt: "2026-08-20T00:00:00Z",
 };
+
+it("sends the loaded rating and memo as the personal base so unchanged fields are not overwritten", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "edit", collection: { ...collectionFixture, type: "game", myScore: 3.5, description: "PC memo" } }} onClose={vi.fn()} onSubmit={onSubmit} />);
+
+  await user.selectOptions(screen.getByLabelText("내 별점"), "5");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ myScore: 5, description: "PC memo", personalBase: { myScore: 3.5, description: "PC memo" } }));
+});

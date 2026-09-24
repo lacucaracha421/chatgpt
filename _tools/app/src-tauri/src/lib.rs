@@ -82,6 +82,15 @@ pub fn run() {
                     }
                 })?;
             }
+            // Mobile personal Collection edits applied in the background refresh the UI.
+            let collections_handle = app.handle().clone();
+            library::collection_personal_edits::set_collections_changed_listener(move || {
+                let _ = tauri::Emitter::emit(
+                    &collections_handle,
+                    "library://collections-changed",
+                    (),
+                );
+            });
             extension_api::start(
                 app.handle().clone(),
                 app_state.clone(),
@@ -311,6 +320,7 @@ pub fn run() {
             commands::characters::set_character_s36_publication,
             commands::characters::clear_character_s36_automatic,
             commands::characters::character_s36_readiness,
+            commands::characters::character_review_inbound_status,
             commands::av::get_av_details,
             commands::av::save_av_details,
             commands::av::search_av_people,

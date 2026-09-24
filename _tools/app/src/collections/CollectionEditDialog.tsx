@@ -87,6 +87,9 @@ export function CollectionEditDialog({
       director: director.trim() || null,
       externalScore,
       myScore,
+      // Only fields changed from what the dialog loaded are written (mobile edits may
+      // have changed the others meanwhile).
+      ...(existing ? { personalBase: { myScore: existing.myScore ?? null, description: existing.description ?? null } } : {}),
     };
     setSaving(true);
     setError(null);

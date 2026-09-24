@@ -1080,6 +1080,18 @@ pub struct UpdateCollection {
     pub release_date: Option<String>,
     pub external_score: Option<i64>,
     pub my_score: Option<f64>,
+    /// The personal values the edit dialog loaded. When present, `my_score` and
+    /// `description` are written only if the user changed them from this base, so a stale
+    /// dialog cannot overwrite a value a mobile edit applied meanwhile. Absent = write both.
+    #[serde(default)]
+    pub personal_base: Option<CollectionPersonalBase>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionPersonalBase {
+    pub my_score: Option<f64>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

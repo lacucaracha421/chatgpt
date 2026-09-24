@@ -174,6 +174,100 @@ ORDER BY a.id
 LIMIT ?5
 "#;
 
+/// The durable "recommended" rows of one target without paging: the saved-prediction part
+/// of [`REVIEW_RECOMMENDED_DURABLE_SQL`], used to export B36 recommendations of every target.
+const B36_RECOMMENDED_TARGET_SQL: &str = r#"
+WITH RECURSIVE scope(id) AS (
+    SELECT id FROM classification_entries WHERE id=?1
+    UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
+), ancestors(id,parent_id) AS (
+    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
+)
+SELECT e.asset_id,e.content_hash,p.result_json
+FROM character_autotag_predictions p
+JOIN character_autotag_evidence e ON e.id=p.evidence_id
+JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
+JOIN assets a ON a.id=e.asset_id AND a.content_hash=e.content_hash
+WHERE p.series_id=?1 AND p.target_id=?2 AND p.target_fingerprint=?3
+  AND json_extract(p.result_json,'$.state')='recommended'
+  AND j.state<>'superseded' AND a.status='normal' AND a.media_kind='image'
+  AND NOT EXISTS(
+    SELECT 1 FROM character_autotag_evidence newer_e
+    JOIN character_autotag_predictions newer_p
+      ON newer_p.evidence_id=newer_e.id AND newer_p.target_id=?2
+    WHERE newer_e.asset_id=e.asset_id AND newer_e.source_generation=e.source_generation
+      AND newer_e.generation>e.generation
+  )
+  AND NOT EXISTS(SELECT 1 FROM character_references r WHERE r.target_id=?2 AND r.asset_id=a.id)
+  AND COALESCE((SELECT d.decision FROM character_decisions d
+      WHERE d.target_id=?2 AND d.source_asset_id=a.id
+      ORDER BY d.sequence DESC LIMIT 1),'') NOT IN ('accepted','rejected')
+  AND (
+    EXISTS(SELECT 1 FROM asset_classifications ac
+      WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
+    OR EXISTS(SELECT 1 FROM asset_classifications ac
+      WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors))
+  )
+ORDER BY a.id
+"#;
+
+impl Library {
+    /// Saved B36 recommendations of every enabled, ready character as `(target_id, asset_id)`
+    /// pairs, ordered by target and asset id.
+    ///
+    /// Same rows as the durable part of the per-target "recommended" review page for the
+    /// current target fingerprint. In-memory scan results and the media re-hash of the page
+    /// are deliberately left out: this feeds the mobile candidate feed, which only lists what
+    /// is saved and lets the PC re-validate every decision when it applies it.
+    pub(crate) fn b36_recommended_pairs(&self) -> Result<Vec<(String, String)>> {
+        let connection = self.connection()?;
+        let ids = connection
+            .prepare(
+                "SELECT id FROM character_targets
+                 WHERE enabled=1 AND series_classification_id IS NOT NULL ORDER BY id",
+            )?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut statement = connection.prepare(B36_RECOMMENDED_TARGET_SQL)?;
+        let mut pairs = Vec::new();
+        for id in ids {
+            let target = self.read_character_target(&connection, &id)?;
+            let Some(series) = target.series_classification_id.as_deref() else {
+                continue;
+            };
+            if !target.ready || !target.enabled {
+                continue;
+            }
+            let rows = statement
+                .query_map(params![series, target.id, target.fingerprint], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let mut last: Option<String> = None;
+            for (asset_id, content_hash, result_json) in rows {
+                let Ok(row) = serde_json::from_str::<ScanResult>(&result_json) else {
+                    continue;
+                };
+                if row.state != "recommended"
+                    || row.asset_id != asset_id
+                    || row.content_hash != content_hash
+                    || last.as_deref() == Some(asset_id.as_str())
+                {
+                    continue;
+                }
+                last = Some(asset_id.clone());
+                pairs.push((target.id.clone(), asset_id));
+            }
+        }
+        Ok(pairs)
+    }
+}
+
 impl Library {
     pub fn character_review_page(&self, query: ReviewQuery) -> Result<ReviewPage> {
         if query.filter == "recommended" {

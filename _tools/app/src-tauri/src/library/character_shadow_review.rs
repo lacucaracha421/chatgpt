@@ -103,9 +103,9 @@ struct ShadowRow {
     origin: String,
 }
 
-/// Rows of the newest policy version with a reviewable verdict, or `None`
-/// when the cache does not exist. The cache is opened read-only.
-fn shadow_rows(root: &Path, doubtful: bool) -> Result<Option<(String, Vec<ShadowRow>)>> {
+/// The S36 shadow cache opened read-only, or `None` when it does not exist or has no
+/// `scores` table yet.
+fn open_shadow_cache(root: &Path) -> Result<Option<Connection>> {
     let mut path = root.to_path_buf();
     for part in [".cache", "characters", "s36_shadow.sqlite"] {
         path.push(part);
@@ -139,9 +139,24 @@ fn shadow_rows(root: &Path, doubtful: bool) -> Result<Option<(String, Vec<Shadow
         }
         result => result?,
     };
-    if !has_table {
+    Ok(has_table.then_some(c))
+}
+
+/// The newest `scored_at` in the S36 shadow cache: a cheap change marker for the mobile
+/// candidate feed. `None` when there is no cache.
+pub(crate) fn shadow_cache_scored_marker(root: &Path) -> Result<Option<String>> {
+    let Some(c) = open_shadow_cache(root)? else {
         return Ok(None);
-    }
+    };
+    Ok(c.query_row("SELECT MAX(scored_at) FROM scores", [], |r| r.get(0))?)
+}
+
+/// Rows of the newest policy version with a reviewable verdict, or `None`
+/// when the cache does not exist. The cache is opened read-only.
+fn shadow_rows(root: &Path, doubtful: bool) -> Result<Option<(String, Vec<ShadowRow>)>> {
+    let Some(c) = open_shadow_cache(root)? else {
+        return Ok(None);
+    };
     let origin = if super::character_shadow::cache_has_origin(&c)? {
         "origin"
     } else {
@@ -201,22 +216,50 @@ struct TargetInfo {
     reference_asset_ids: Vec<String>,
 }
 
+/// Every pending item of one review list, in review order, with its summary.
+///
+/// The page command slices this list; the mobile candidate feed exports it whole, so the
+/// shadow cache and the per-pair decision checks are scanned once per list, not per page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadowReviewItems {
+    pub items: Vec<ShadowReviewItem>,
+    pub policy_version: Option<String>,
+    pub summary: ShadowReviewSummary,
+}
+
+fn shadow_review_mode(mode: Option<&str>) -> Result<bool> {
+    match mode {
+        None | Some("candidates") => Ok(false),
+        Some("doubtful") => Ok(true),
+        Some(_) => Err(Error::Invalid("알 수 없는 S36 확인 목록입니다.")),
+    }
+}
+
 impl Library {
     pub fn character_shadow_review_page(
         &self,
         query: ShadowReviewQuery,
     ) -> Result<ShadowReviewPage> {
-        let doubtful = match query.mode.as_deref() {
-            None | Some("candidates") => false,
-            Some("doubtful") => true,
-            Some(_) => return Err(Error::Invalid("알 수 없는 S36 확인 목록입니다.")),
-        };
+        shadow_review_mode(query.mode.as_deref())?;
         if query.limit == 0 || query.limit > MAX_PAGE {
             return Err(Error::Invalid("한 번에 1~200개 항목을 불러올 수 있습니다."));
         }
-        let mut page = ShadowReviewPage {
+        let all = self.shadow_review_items(query.mode.as_deref())?;
+        let start = (query.offset as usize).min(all.items.len());
+        let end = start.saturating_add(query.limit as usize).min(all.items.len());
+        Ok(ShadowReviewPage {
+            next_offset: (end < all.items.len()).then(|| query.offset + query.limit),
+            items: all.items[start..end].to_vec(),
+            policy_version: all.policy_version,
+            summary: all.summary,
+        })
+    }
+
+    /// All pending items of the `candidates` (default) or `doubtful` list.
+    pub(crate) fn shadow_review_items(&self, mode: Option<&str>) -> Result<ShadowReviewItems> {
+        let doubtful = shadow_review_mode(mode)?;
+        let mut page = ShadowReviewItems {
             items: Vec::new(),
-            next_offset: None,
             policy_version: None,
             summary: ShadowReviewSummary::default(),
         };
@@ -264,7 +307,6 @@ impl Library {
              WHERE target_id=?1 AND source_asset_id=?2 AND origin='manual'
              ORDER BY sequence DESC LIMIT 1",
         )?;
-        let mut pending_seen = 0u32;
         for row in rows {
             let origin_tiers = page
                 .summary
@@ -338,16 +380,6 @@ impl Library {
             counts.pending += 1;
             if !doubtful {
                 origin_counts.pending += 1;
-            }
-            pending_seen += 1;
-            if pending_seen <= query.offset {
-                continue;
-            }
-            if page.items.len() as u32 >= query.limit {
-                if page.next_offset.is_none() {
-                    page.next_offset = Some(query.offset + query.limit);
-                }
-                continue;
             }
             page.items.push(ShadowReviewItem {
                 asset_id: row.asset_id,

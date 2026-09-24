@@ -147,6 +147,22 @@ pub enum LibraryError {
     CharacterExclusionAssetChanged,
     #[error("기준 이미지로 쓰이는 자산은 제외할 수 없습니다.")]
     CharacterExclusionProtectedReference,
+    #[error("서버가 모바일 컬렉션 편집 기능을 제공하지 않거나 서버 라이브러리 연결이 필요합니다.")]
+    CollectionPersonalEditUnsupported,
+    #[error("서버 컬렉션 편집 이력과 이 PC의 위치 또는 라이브러리가 어긋납니다.")]
+    CollectionPersonalEditCursorRejected,
+    #[error("서버 컬렉션 편집 동기화 요청이 거부됐습니다: HTTP {0}")]
+    CollectionPersonalEditSyncRejected(u16),
+    #[error("서버 컬렉션 편집 항목이 올바르지 않습니다.")]
+    CollectionPersonalEditInvalid,
+    #[error("서버가 모바일 캐릭터 검토 기능을 제공하지 않거나 서버 라이브러리 연결이 필요합니다.")]
+    CharacterReviewUnsupported,
+    #[error("서버 캐릭터 검토 이력과 이 PC의 위치 또는 라이브러리가 어긋납니다.")]
+    CharacterReviewCursorRejected,
+    #[error("서버 캐릭터 검토 동기화 요청이 거부됐습니다: HTTP {0}")]
+    CharacterReviewSyncRejected(u16),
+    #[error("서버 캐릭터 검토 항목이 올바르지 않습니다.")]
+    CharacterReviewInvalid,
     #[error("서버 캐릭터 게시가 거부됐습니다: HTTP {0}")]
     CharacterPublicationRejected(u16),
     #[error("서버의 캐릭터 게시본이 먼저 변경되었습니다. 다시 게시해 주세요.")]

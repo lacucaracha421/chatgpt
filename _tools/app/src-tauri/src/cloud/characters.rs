@@ -70,6 +70,13 @@ pub(crate) struct Snapshot {
     library_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exclusion_cursor: Option<i64>,
+    /// The mobile character-review decision position these memberships reflect.
+    ///
+    /// Only sent with the manual-exclusion fields and only when the server has the review
+    /// log route (an older server refuses unknown fields). It is `0` before adoption, as the
+    /// server requires, and is read in the same transaction as the memberships.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_decision_cursor: Option<i64>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct CharacterPublishResult {
@@ -204,6 +211,8 @@ pub(crate) fn snapshot_from_connection(
 pub(crate) struct Feature {
     pub(crate) endpoint: String,
     pub(crate) library_id: String,
+    /// The endpoint also carries the mobile character-review cursor.
+    pub(crate) review_decisions: bool,
 }
 
 /// Build one publication snapshot.
@@ -224,6 +233,18 @@ pub(crate) fn snapshot_from_connection_with_feature(
     progress: Reporter<'_>,
 ) -> Result<Snapshot, LibraryError> {
     let tx = connection.transaction()?;
+    let review_decision_cursor = match feature.as_ref().filter(|f| f.review_decisions) {
+        Some(feature) => Some(
+            tx.query_row(
+                "SELECT received_cursor FROM mobile_character_review_sync WHERE endpoint=?1 AND library_id=?2",
+                params![&feature.endpoint, &feature.library_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .ok_or(LibraryError::CharacterReviewCursorRejected)?,
+        ),
+        None => None,
+    };
     let (manual_exclusion_version, library_id, exclusion_cursor) = match feature.as_ref() {
         Some(feature) => {
             let cursor: Option<i64> = tx
@@ -375,6 +396,7 @@ pub(crate) fn snapshot_from_connection_with_feature(
         manual_exclusion_version,
         library_id,
         exclusion_cursor,
+        review_decision_cursor,
     })
 }
 
@@ -567,6 +589,7 @@ mod tests {
             Some(Feature {
                 endpoint: "https://sync.example.test".into(),
                 library_id: library_id.clone(),
+                review_decisions: false,
             }),
             &|_| {},
         )
@@ -615,6 +638,7 @@ mod tests {
         let feature = || Feature {
             endpoint: endpoint.to_string(),
             library_id: library_id.clone(),
+            review_decisions: false,
         };
 
         // A cursor captured before the snapshot must not be what the snapshot reports: the
@@ -684,23 +708,45 @@ impl Library {
             .to_string();
         let client = CloudClient::new(&endpoint)?;
         let token = credential::read_cloud_api_token_os()?;
-        let token = token.expose();
+        // A PC with no publisher credential cannot read or bind the correction logs, so the
+        // features are simply unavailable to it; the legacy path stays open only while
+        // nothing is adopted.
+        let publisher_token = match credential::read_cloud_publisher_token_os() {
+            Ok(token) => Some(token),
+            Err(LibraryError::CloudCredentialNotConfigured) => None,
+            Err(error) => return Err(error),
+        };
+        let s36_series = self.character_s36_series();
+        self.push_cloud_characters_with(
+            &client,
+            &endpoint,
+            token.expose(),
+            publisher_token.as_ref().map(|token| token.expose()),
+            s36_series.as_ref(),
+            progress,
+        )
+    }
 
+    /// The publication with an injected transport and credentials, in the fixed order:
+    /// manual exclusions → review decisions → navigation snapshot → candidate feed.
+    pub(crate) fn push_cloud_characters_with(
+        &self,
+        client: &CloudClient,
+        endpoint: &str,
+        token: &str,
+        publisher_token: Option<&str>,
+        s36_series: Option<&std::collections::BTreeSet<String>>,
+        progress: Reporter<'_>,
+    ) -> Result<CharacterPublishResult, LibraryError> {
+        let endpoint = endpoint.to_string();
         // The exclusion log is a publisher read, and it must run *before* the revision and
         // snapshot are read. Recording a correction changes local character decisions, so a
         // publication that skipped this step would ship memberships computed before the
         // correction existed while advertising a position the server has not been told about.
         let adopted = self.character_exclusion_adoption(&endpoint)?;
         let local_library_id = self.library_id()?;
-        // A PC with no publisher credential cannot read or bind the log, so the feature is
-        // simply unavailable to it; the legacy path stays open only while nothing is adopted.
-        let publisher_token = match credential::read_cloud_publisher_token_os() {
-            Ok(token) => Some(token),
-            Err(LibraryError::CloudCredentialNotConfigured) => None,
-            Err(error) => return Err(error),
-        };
-        let feature = match (&adopted, publisher_token.as_ref()) {
-            (Some((library_id, _)), Some(_)) => {
+        let mut feature = match (&adopted, publisher_token) {
+            (Some((library_id, _)), Some(publisher)) => {
                 if *library_id != local_library_id {
                     // The endpoint is bound to another identity, so this library must not
                     // publish through it.
@@ -709,10 +755,11 @@ impl Library {
                 // Pull first. The persisted cursor is advanced in the apply transaction, so
                 // the snapshot below re-reads it inside its own transaction and cannot
                 // advertise a position the shipped memberships do not reflect.
-                self.receive_character_exclusions(&endpoint)?;
+                self.receive_character_exclusions_with(client, publisher, &endpoint)?;
                 Some(Feature {
                     endpoint: endpoint.clone(),
                     library_id: library_id.clone(),
+                    review_decisions: false,
                 })
             }
             (Some(_), None) => return Err(LibraryError::CloudCredentialNotConfigured),
@@ -722,23 +769,33 @@ impl Library {
                 // empty page even with nothing stored, so a successful read proves support
                 // without needing any capability flag the server could not honestly set
                 // before receiving a feature-aware snapshot.
-                let probe =
-                    client.character_exclusions(publisher.expose(), &local_library_id, 0, 1)?;
+                let probe = client.character_exclusions(publisher, &local_library_id, 0, 1)?;
                 match probe {
                     // Route absent: an older server, and this PC has nothing to lose.
                     None => None,
                     Some(_) => {
                         self.adopt_character_exclusion_library(&endpoint, &local_library_id)?;
-                        self.receive_character_exclusions(&endpoint)?;
+                        self.receive_character_exclusions_with(client, publisher, &endpoint)?;
                         Some(Feature {
                             endpoint: endpoint.clone(),
                             library_id: local_library_id.clone(),
+                            review_decisions: false,
                         })
                     }
                 }
             }
         };
-        let revision = client.character_revision(&token)?;
+        // Mobile review decisions come next, for the same reason. The review cursor requires
+        // the manual-exclusion fields, so it is only considered under that feature.
+        if let (Some(feature), Some(publisher)) = (feature.as_mut(), publisher_token) {
+            feature.review_decisions =
+                self.prepare_character_review(client, &endpoint, publisher)?;
+        }
+        let review = feature
+            .as_ref()
+            .filter(|feature| feature.review_decisions)
+            .map(|feature| feature.library_id.clone());
+        let revision = client.character_revision(token)?;
         // The snapshot is read over a read-only connection, deliberately: publishing must
         // never mutate the library.
         let mut connection = Connection::open_with_flags(
@@ -748,6 +805,7 @@ impl Library {
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         let snapshot =
             snapshot_from_connection_with_feature(&mut connection, revision, feature, progress)?;
+        drop(connection);
         let body = serde_json::to_vec(&snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
         if body.len() > MAX_BYTES {
             return Err(LibraryError::CharacterPublicationTooLarge);
@@ -761,12 +819,24 @@ impl Library {
         );
         // A feature-aware snapshot is a publisher operation. A legacy snapshot keeps the
         // shared credential, which is the only authorization an older server understands.
-        if snapshot.manual_exclusion_version.is_some() {
-            let publisher = credential::read_cloud_publisher_token_os()?;
-            let publisher = publisher.expose();
-            client.publish_characters(&publisher, &body)
+        let result = if snapshot.manual_exclusion_version.is_some() {
+            let publisher = publisher_token.ok_or(LibraryError::CloudCredentialNotConfigured)?;
+            client.publish_characters(publisher, &body)?
         } else {
-            client.publish_characters(&token, &body)
+            client.publish_characters(token, &body)?
+        };
+        if let (Some(library_id), Some(cursor), Some(publisher)) =
+            (review, snapshot.review_decision_cursor, publisher_token)
+        {
+            self.acknowledge_character_review_publication(&endpoint, &library_id, cursor)?;
+            // The feed follows the snapshot and carries the position it just acknowledged. It
+            // is optional: a failure is retried later and never fails the navigation result.
+            if let Err(error) = self.publish_due_character_review_feed_with(
+                client, publisher, token, &endpoint, s36_series,
+            ) {
+                eprintln!("character review feed: {error}");
+            }
         }
+        Ok(result)
     }
 }

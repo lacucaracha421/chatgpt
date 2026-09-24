@@ -37,14 +37,29 @@ impl Library {
         let config=self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref()!=Some(endpoint){return Ok(())}
         if kind == "characters" {
-            // Receive even when no local changes have dirtied the publication.
+            // Receive even when no local changes have dirtied the publication. Order:
+            // exclusions → mobile review decisions → snapshot → candidate feed.
             self.run_due_character_exclusions(endpoint)?;
+            self.run_due_character_review(endpoint)?;
+        } else if kind == "collections" {
+            // Same for mobile personal edits (at most once a minute, durably throttled).
+            // An applied edit dirties the lane through the 0074 triggers; the publication
+            // itself receives again before it reads the snapshot.
+            self.run_due_collection_personal_edits(endpoint)?;
         }
         let generation:Option<i64>={
             use rusqlite::OptionalExtension;
             self.connection()?.query_row("SELECT generation FROM mobile_publication_state WHERE kind=?1 AND endpoint=?2 AND generation<>published_generation AND retry_after<=unixepoch() AND (last_dirty<=unixepoch()-30 OR first_dirty<=unixepoch()-300)",params![kind,endpoint],|r|r.get(0)).optional()?
         };
-        let Some(generation)=generation else {return Ok(())};
+        let Some(generation)=generation else {
+            if kind=="characters" {
+                // No snapshot is due, but the candidate feed has its own schedule (the S36
+                // cache and saved B36 predictions change without dirtying this lane). A
+                // publication that is due republishes the feed itself, right after it.
+                if let Err(error)=self.publish_due_character_review_feed(endpoint) {eprintln!("character review feed: {error}");}
+            }
+            return Ok(())
+        };
         self.connection()?.execute("UPDATE mobile_publication_state SET retry_after=unixepoch()+60 WHERE kind=?1",[kind])?;
         let result=if kind=="collections" {self.push_cloud_collections(&|_|{}).map(|_|())} else {self.push_cloud_characters(&|_|{}).map(|_|())};
         if result.is_ok() {

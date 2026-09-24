@@ -31,7 +31,10 @@ export interface ShadowReviewApi {
   start(): Promise<ShadowBackfillStatus>;
   status(): Promise<ShadowBackfillStatus>;
   cancel(): Promise<ShadowBackfillStatus>;
+  /** Inbound mobile decisions applied on this PC; a change means the list moved under us. */
+  inboundStatus?(): Promise<ShadowInboundStatus>;
 }
+export type ShadowInboundStatus = { applied: number };
 
 /** Native shadow review and explicit cached history scoring; judgments use characterApi.decide. */
 export const shadowReviewApi: ShadowReviewApi = {
@@ -39,6 +42,7 @@ export const shadowReviewApi: ShadowReviewApi = {
   start: () => invoke("character_shadow_backfill_start"),
   status: () => invoke("character_shadow_backfill_status"),
   cancel: () => invoke("character_shadow_backfill_cancel"),
+  inboundStatus: () => invoke("character_review_inbound_status"),
 };
 
 const emptyTiers = (): ShadowTierCounts => ({ automatic: { pending: 0, accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 } });

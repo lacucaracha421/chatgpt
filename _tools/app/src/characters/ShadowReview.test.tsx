@@ -192,3 +192,15 @@ it("tells the reviewer when another character on the same image was already judg
   expect(await screen.findByRole("heading", { level: 3, name: "키사키" })).toBeInTheDocument();
   expect(screen.getByRole("note")).toHaveTextContent("앞에서 히나 맞음(으)로 판단했습니다");
 });
+
+it("reloads on window focus and when mobile decisions are applied in the background", async () => {
+  const page = vi.fn(async (): Promise<ShadowReviewPage> => ({ items: [item("a1", "automatic", 0.1)], nextOffset: null, policyVersion: "v1", summary: emptyShadowSummary() }));
+  const inboundStatus = vi.fn().mockResolvedValueOnce({ applied: 2 }).mockResolvedValueOnce({ applied: 2 }).mockResolvedValue({ applied: 3 });
+  render(<ShadowReview onClose={vi.fn()} api={{ ...idleApi(), page, inboundStatus }} decisions={{ decide: vi.fn() }} />);
+  await waitFor(() => expect(page).toHaveBeenCalledTimes(1));
+  window.dispatchEvent(new Event("focus"));
+  await waitFor(() => expect(page).toHaveBeenCalledTimes(2));
+  // Baseline 2, unchanged 2, then 3: exactly one more reload.
+  await waitFor(() => expect(page).toHaveBeenCalledTimes(3), { timeout: 3500 });
+  expect(inboundStatus.mock.calls.length).toBeGreaterThanOrEqual(3);
+});

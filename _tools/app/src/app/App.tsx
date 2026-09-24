@@ -227,6 +227,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const refreshCollections = useCallback(async () => {
     setCollections(await gateway.listCollections());
   }, [gateway]);
+  useEffect(() => gateway.subscribeCollectionsChanged?.(() => { void refreshCollections(); }), [gateway, refreshCollections]);
   const refreshSidebar = useCallback(async () => {
     const [nextEntries, nextAlbums, nextCollections] = await Promise.all([
       gateway.listClassifications(),

@@ -1618,6 +1618,66 @@ impl CloudClient {
             })?;
         Ok(read_json_bounded(&mut response,1024*1024)?)
     }
+    /// `/v1/collections/status`. A server without the personal-edit feature has no
+    /// `capabilities` object (and a very old one no route: `404` reads as that too).
+    pub(crate) fn collections_status(&self, token: &str) -> Result<CollectionsStatus, LibraryError> {
+        let response = self.agent.get(self.endpoint("/v1/collections/status")?)
+            .header("Authorization", bearer(token)?).call();
+        let mut response = match response {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return Ok(CollectionsStatus::default()),
+            Err(error) => return Err(map_registration_error(error)),
+        };
+        read_json_bounded(&mut response, 64 * 1024)
+    }
+
+    /// One page of the ordered personal-edit log (publisher token), or `None` when the
+    /// route is absent. A coded `409` distinguishes "server library not linked"
+    /// (`collectionPersonalEditUnsupported`) from a cursor/library rejection.
+    pub(crate) fn collection_personal_edits(
+        &self,
+        token: &str,
+        library_id: &str,
+        after: i64,
+        limit: i64,
+    ) -> Result<Option<crate::library::collection_personal_edits::PersonalEditPage>, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let path = format!("/v1/collections/personal-edits?libraryId={library_id}&after={after}&limit={limit}");
+        let mut response = agent.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call()
+            .map_err(|error| match error {
+                ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+                _ => LibraryError::CloudRequestUnavailable,
+            })?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            401 | 403 => return Err(LibraryError::CloudUnauthorized),
+            409 => {
+                #[derive(serde::Deserialize)]
+                struct Coded { detail: CodedDetail }
+                #[derive(serde::Deserialize)]
+                struct CodedDetail { code: String }
+                let code = read_json_bounded::<Coded>(&mut response, 16 * 1024).map(|body| body.detail.code);
+                return Err(match code.as_deref() {
+                    Ok("collectionPersonalEditUnsupported") => LibraryError::CollectionPersonalEditUnsupported,
+                    _ => LibraryError::CollectionPersonalEditCursorRejected,
+                });
+            }
+            status => return Err(LibraryError::CollectionPersonalEditSyncRejected(status)),
+        }
+        let page = read_json::<crate::library::collection_personal_edits::PersonalEditPage>(&mut response)?;
+        crate::library::collection_personal_edits::validate_page(&page, library_id, after, limit)?;
+        Ok(Some(page))
+    }
+
     pub(crate) fn collections_revision(&self, token: &str) -> Result<Option<String>, LibraryError> {
         #[derive(serde::Deserialize)]
         struct State { revision: Option<String> }
@@ -1688,8 +1748,35 @@ impl CloudClient {
         #[derive(serde::Deserialize)]
         struct Published { revision: String }
         if metadata.len() > super::collections::MAX_METADATA_BYTES { return Err(LibraryError::InvalidCloudResponse); }
-        let mut response = self.agent.put(self.endpoint("/v1/collections/replica")?)
+        // Status codes are read here so a coded personal-edit 409 (e.g. the server library
+        // is not linked) is distinguishable from a stale base revision.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
+            .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        let mut response = agent.put(self.endpoint("/v1/collections/replica")?)
             .header("Authorization", bearer(token)?).content_type("application/json").send(metadata).map_err(map_registration_error)?;
+        match response.status().as_u16() {
+            200 => {}
+            409 => {
+                #[derive(serde::Deserialize)]
+                struct Coded { detail: serde_json::Value }
+                let code = read_json_bounded::<Coded>(&mut response, 16 * 1024).ok()
+                    .and_then(|body| body.detail.get("code").and_then(|code| code.as_str()).map(str::to_owned));
+                return Err(match code.as_deref() {
+                    Some("collectionPersonalEditUnsupported") => LibraryError::CollectionPersonalEditUnsupported,
+                    Some("collectionPersonalEditCursorRejected" | "libraryMismatch") => LibraryError::CollectionPersonalEditCursorRejected,
+                    _ => LibraryError::CloudObjectKeyConflict,
+                });
+            }
+            status => return Err(map_registration_error(ureq::Error::StatusCode(status))),
+        }
         let result: Published = read_json(&mut response)?;
         if result.revision.is_empty() { return Err(LibraryError::InvalidCloudResponse); }
         Ok(result.revision)
@@ -1948,6 +2035,96 @@ impl CloudClient {
         let page = read_json::<super::characters::ExclusionPage>(&mut response)?;
         super::characters::validate_exclusion_page(&page, library_id, after, limit)?;
         Ok(Some(page))
+    }
+
+    /// One page of the ordered mobile character-review decision log (publisher token), or
+    /// `None` when the route is absent (an older server). A coded `409`
+    /// `characterReviewUnsupported` (server library not linked) is distinguished from a
+    /// cursor/library rejection.
+    pub(crate) fn character_review_decisions(
+        &self,
+        token: &str,
+        library_id: &str,
+        after: i64,
+        limit: i64,
+    ) -> Result<Option<crate::library::character_review_sync::ReviewDecisionPage>, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let path = format!("/v1/library/characters/review/decisions?libraryId={library_id}&after={after}&limit={limit}");
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            status => return Err(character_review_status_error(status, &mut response)),
+        }
+        let page = read_json::<crate::library::character_review_sync::ReviewDecisionPage>(&mut response)?;
+        crate::library::character_review_sync::validate_page(&page, library_id, after, limit)?;
+        Ok(Some(page))
+    }
+
+    /// Replace the server's candidate feed (publisher token). `None` when the route is
+    /// absent. A stale base is `Err(CharacterPublicationConflict)` so the caller can re-read
+    /// the server revision and retry.
+    pub(crate) fn publish_character_review_feed(
+        &self,
+        token: &str,
+        body: &[u8],
+    ) -> Result<Option<CharacterReviewFeedResult>, LibraryError> {
+        if body.len() > 8 * 1024 * 1024 {
+            return Err(LibraryError::CharacterPublicationTooLarge);
+        }
+        let request = self.coded_agent()?.put(self.endpoint("/v1/library/characters/review/feed")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(body);
+        let mut response = self.coded_request(request)?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            413 => return Err(LibraryError::CharacterPublicationTooLarge),
+            status => return Err(character_review_status_error(status, &mut response)),
+        }
+        let result: CharacterReviewFeedResult = read_json_bounded(&mut response, 64 * 1024)?;
+        if result.revision.len() != 64 || !result.revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(Some(result))
+    }
+
+    /// The server's current candidate-feed revision, read through the mobile route (shared
+    /// token). `None` before adoption.
+    pub(crate) fn character_review_feed_revision(&self, token: &str) -> Result<Option<String>, LibraryError> {
+        #[derive(serde::Deserialize)]
+        struct Feed { revision: Option<String> }
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint("/v1/library/characters/review?limit=1")?)
+            .header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            status => return Err(character_review_status_error(status, &mut response)),
+        }
+        Ok(read_json_bounded::<Feed>(&mut response, 1024 * 1024)?.revision)
+    }
+
+    fn coded_agent(&self) -> Result<ureq::Agent, LibraryError> {
+        Ok(ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
+            .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into())
+    }
+
+    fn coded_request(
+        &self,
+        response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    ) -> Result<ureq::http::Response<ureq::Body>, LibraryError> {
+        response.map_err(|error| match error {
+            ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
+            _ => LibraryError::CloudRequestUnavailable,
+        })
     }
 
     pub(crate) fn publish_album_replica(&self, token: &str, snapshot: &serde_json::Value) -> Result<(), LibraryError> {
@@ -2797,6 +2974,49 @@ fn map_upload_error(error: ureq::Error) -> LibraryError {
         ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
         _ => LibraryError::CloudRequestUnavailable,
     }
+}
+
+/// `PUT /v1/library/characters/review/feed` receipt.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(crate) struct CharacterReviewFeedResult {
+    pub revision: String,
+}
+
+/// Map a non-success status of the character review routes, reading a coded `409`.
+fn character_review_status_error(status: u16, response: &mut ureq::http::Response<ureq::Body>) -> LibraryError {
+    match status {
+        401 | 403 => LibraryError::CloudUnauthorized,
+        409 => {
+            #[derive(serde::Deserialize)]
+            struct Coded { detail: serde_json::Value }
+            let code = read_json_bounded::<Coded>(response, 16 * 1024).ok()
+                .and_then(|body| body.detail.get("code").and_then(|code| code.as_str()).map(str::to_owned));
+            match code.as_deref() {
+                Some("characterReviewUnsupported") => LibraryError::CharacterReviewUnsupported,
+                Some("characterReviewFeedChanged") => LibraryError::CharacterPublicationConflict,
+                _ => LibraryError::CharacterReviewCursorRejected,
+            }
+        }
+        422 => LibraryError::CharacterReviewInvalid,
+        status => LibraryError::CharacterReviewSyncRejected(status),
+    }
+}
+
+/// The parts of `/v1/collections/status` the publisher uses.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CollectionsStatus {
+    #[serde(default)]
+    pub capabilities: Option<CollectionsCapabilities>,
+    #[serde(default)]
+    pub library_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CollectionsCapabilities {
+    #[serde(default)]
+    pub collection_personal_edit: bool,
 }
 
 fn bearer(token: &str) -> Result<String, LibraryError> {

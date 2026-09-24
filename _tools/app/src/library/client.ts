@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   CatalogReviewPage,
   KakaoApplyRequest,
@@ -276,6 +277,14 @@ export const libraryGateway: LibraryGateway = {
     return invoke<CloudCollectionsPublishResult>("push_cloud_collections", { onProgress: channel });
   },
   runDueMobilePublications: (orderIds) => invoke<void>("run_due_mobile_publications", {orderIds}),
+  subscribeCollectionsChanged: (handler) => {
+    let stopped = false;
+    let unlisten: (() => void) | undefined;
+    void listen("library://collections-changed", () => handler())
+      .then((stop) => { if (stopped) stop(); else unlisten = stop; })
+      .catch(() => {});
+    return () => { stopped = true; unlisten?.(); };
+  },
   pushCloudCharacters: (onProgress) => {
     const channel = new Channel<import("./publicationJobs").PublishProgress>();
     channel.onmessage = (value) => onProgress?.(value);

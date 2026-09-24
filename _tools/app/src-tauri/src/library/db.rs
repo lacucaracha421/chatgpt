@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 90;
+pub(crate) const SCHEMA_VERSION: i64 = 92;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -528,6 +528,16 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0090_historical_similarity.sql"
             ))?;
         }
+        if version <= 90 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0091_mobile_collection_personal_edits.sql"
+            ))?;
+        }
+        if version <= 91 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0092_mobile_character_review.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -627,6 +637,102 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn v92_adds_empty_character_review_state_without_touching_decisions() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 91);
+        let decisions: i64 = connection
+            .query_row("SELECT COUNT(*) FROM character_decisions", [], |row| row.get(0))
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 91).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        for table in [
+            "mobile_character_review_sync",
+            "mobile_character_review_receipts",
+            "mobile_character_review_poll",
+            "mobile_character_review_feed_state",
+        ] {
+            let rows: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM character_decisions", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            decisions
+        );
+        let insert = |outcome: &str| {
+            connection.execute(
+                "INSERT INTO mobile_character_review_receipts
+                 (endpoint,library_id,operation_id,sequence,target_id,asset_id,asset_sha256,decision,origin,basis,outcome,decision_sequence,created_at)
+                 VALUES('e','0123456789abcdef0123456789abcdef',?1,1,'t','a','h','accepted','feed','0',?1,NULL,'now')",
+                [outcome],
+            )
+        };
+        assert!(insert("unknown").is_err());
+        assert!(insert("skipped:targetMissing").is_ok());
+    }
+
+    #[test]
+    fn v91_adds_empty_collection_personal_edit_state_without_touching_collections() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 90);
+        connection
+            .execute_batch(
+                "INSERT INTO collections(id,name,type,my_score,description,created_at,updated_at)
+                 VALUES('c','Work','manga',3.5,'memo','2026','2026');",
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 90).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        for table in [
+            "mobile_collection_personal_edit_sync",
+            "mobile_collection_personal_edit_receipts",
+            "mobile_collection_personal_edit_poll",
+        ] {
+            let rows: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
+        let kept: (f64, String) = connection
+            .query_row(
+                "SELECT my_score, description FROM collections WHERE id='c'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (3.5, "memo".to_string()));
+        assert!(connection
+            .execute(
+                "INSERT INTO mobile_collection_personal_edit_receipts
+                 VALUES('e','0123456789abcdef0123456789abcdef','op',1,'c','rating','1','null','applied','now')",
+                [],
+            )
+            .is_err());
     }
 
     #[test]

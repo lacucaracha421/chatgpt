@@ -1185,6 +1185,31 @@ mod tests {
     }
 
     #[test]
+    fn refresh_preserves_mobile_applied_personal_values() {
+        use crate::library::collection_personal_edits::tests::{entry, ENDPOINT};
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = apply_movie(&library, movie(), None, None, None, None);
+        let library_id = library.library_id().unwrap();
+        library.adopt_collection_personal_edit_library(ENDPOINT, &library_id).unwrap();
+        library.apply_collection_personal_edit_page(ENDPOINT, &library_id, &[
+            entry(1, &created.id, "myScore", serde_json::json!(4.5)),
+            entry(2, &created.id, "memo", serde_json::json!("폰 메모")),
+            entry(3, &created.id, "showcase", serde_json::json!(true)),
+        ]).unwrap();
+        let mut fetched = movie();
+        fetched.overview = Some("Updated overview".into());
+        fetched.external_score = Some(90);
+        fetched.snapshot_json = snapshot(&fetched);
+        let refreshed = library.refresh_fetched_tmdb_movie(&created.id, fetched).unwrap();
+        assert_eq!(refreshed.overview.as_deref(), Some("Updated overview"));
+        assert_eq!(refreshed.my_score, Some(4.5));
+        assert_eq!(refreshed.description.as_deref(), Some("폰 메모"));
+        assert!(refreshed.showcase);
+        assert_eq!(refreshed.showcase_order, Some(0));
+    }
+
+    #[test]
     fn imports_movie_binding_poster_and_backdrop_atomically() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();

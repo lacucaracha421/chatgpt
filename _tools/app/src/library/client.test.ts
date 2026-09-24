@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke, Channel: class { onmessage = () => {}; } }));
+const { listen } = vi.hoisted(() => ({ listen: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen }));
 
 import { libraryGateway } from "./client";
 import { Channel } from "@tauri-apps/api/core";
@@ -501,4 +503,25 @@ it("streams committed cloud captures through the native channel", async () => {
   const outcome = { status: "exact_duplicate", existingAssetId: "asset", classificationChanged: true };
   invoke.mock.lastCall![1].onProgress.onmessage(outcome);
   expect(onProgress).toHaveBeenCalledExactlyOnceWith(outcome);
+});
+
+it("forwards the native collections-changed event and unlistens on cleanup", async () => {
+  const unlisten = vi.fn();
+  let emit: () => void = () => {};
+  listen.mockImplementation(async (_name: string, callback: () => void) => { emit = callback; return unlisten; });
+  const handler = vi.fn();
+  const stop = libraryGateway.subscribeCollectionsChanged!(handler);
+  expect(listen).toHaveBeenCalledWith("library://collections-changed", expect.any(Function));
+  await Promise.resolve(); await Promise.resolve();
+  emit();
+  expect(handler).toHaveBeenCalledOnce();
+  stop();
+  expect(unlisten).toHaveBeenCalledOnce();
+});
+
+it("sends the edit dialog's personal base with a collection update", async () => {
+  const input = { name: "A", description: null, type: "manga" as const, year: null, author: null, developer: null, publisher: null, platforms: null,
+    productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: 4, personalBase: { myScore: 3, description: "memo" } };
+  await libraryGateway.updateCollection("c", input);
+  expect(invoke).toHaveBeenLastCalledWith("update_collection", { id: "c", request: input });
 });

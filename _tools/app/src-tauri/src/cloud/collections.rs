@@ -7,6 +7,7 @@ use super::client::CloudClient;
 use crate::library::{
     collection::{collection_from_row, COLLECTION_SUMMARY_SQL},
     collection_source::{collection_source_root, resolve_collection_dir, source_preview_path, source_volume_images, write_collection_thumbnail},
+    collection_personal_edits::PersonalEditFeature,
     credential,
     error::LibraryError,
     models::{CollectionSummary, CollectionVolume},
@@ -63,6 +64,17 @@ pub(crate) struct CollectionReplica {
     version: u8,
     pub base_revision: Option<String>,
     collections: Vec<ReplicaCollection>,
+    /// Personal-edit handshake: all present or all absent (absent = legacy snapshot).
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    personal_edit: Option<PersonalEditHandshake>,
+}
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PersonalEditHandshake {
+    personal_edit_version: u8,
+    library_id: String,
+    /// Read in the same transaction as the Collection rows it qualifies.
+    personal_edit_cursor: i64,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,16 +109,66 @@ impl Library {
         )?;
         let token = credential::read_cloud_api_token_os()?;
         let token = token.expose();
-        // Capture the remote generation before doing expensive local work. A competing
-        // publisher must result in a conflict, never silently overwrite its snapshot.
-        let base_revision = client.collections_revision(&token)?;
-        let snapshot = self.cloud_collections_snapshot(base_revision, progress)?;
-        publish_snapshot(&client, &token, snapshot, progress)
+        let publisher = match credential::read_cloud_publisher_token_os() {
+            Ok(token) => Some(token),
+            Err(LibraryError::CloudCredentialNotConfigured) => None,
+            Err(error) => return Err(error),
+        };
+        let endpoint = config.api_base_url.as_deref().unwrap_or_default();
+        self.push_cloud_collections_with(&client, endpoint, &token, publisher.as_ref().map(|p| p.expose()), progress)
     }
 
+    /// Receive mobile personal edits, then publish. The handshake rule lives in
+    /// `Library::prepare_collection_personal_edits`; a handshake snapshot is sent with the
+    /// publisher token, a legacy one with the shared token. Artwork routes always use the
+    /// shared token.
+    pub(crate) fn push_cloud_collections_with(
+        &self,
+        client: &CloudClient,
+        endpoint: &str,
+        token: &str,
+        publisher: Option<&str>,
+        progress: Reporter<'_>,
+    ) -> Result<CloudCollectionsPublishResult, LibraryError> {
+        let status = client.collections_status(token)?;
+        // Receive before the revision and snapshot are read, so the snapshot reflects every
+        // edit up to the cursor it advertises.
+        let feature = self.prepare_collection_personal_edits(client, endpoint, &status, publisher)?;
+        // Capture the remote generation before doing expensive local work. A competing
+        // publisher must result in a conflict, never silently overwrite its snapshot. Mobile
+        // edits also move it, so it is read after receiving.
+        let base_revision = client.collections_revision(token)?;
+        let mut snapshot = self.cloud_collections_snapshot_with_feature(base_revision, feature.as_ref(), progress)?;
+        let Some(publisher) = snapshot.replica.personal_edit.as_ref().and(publisher) else {
+            snapshot.replica.personal_edit = None;
+            return publish_snapshot_as(client, token, token, &snapshot, progress);
+        };
+        let active = status.capabilities.as_ref().is_some_and(|c| c.collection_personal_edit);
+        match publish_snapshot_as(client, token, publisher, &snapshot, progress) {
+            // The server refuses the handshake while it has no linked library (its state row
+            // does not exist yet, so it cannot have accepted any edit): publish the legacy
+            // form instead so Collection publication never breaks.
+            Err(LibraryError::CollectionPersonalEditUnsupported) if !active => {
+                snapshot.replica.personal_edit = None;
+                publish_snapshot_as(client, token, token, &snapshot, progress)
+            }
+            result => result,
+        }
+    }
+
+    #[cfg(test)]
     fn cloud_collections_snapshot(
         &self,
         base_revision: Option<String>,
+        progress: Reporter<'_>,
+    ) -> Result<Snapshot, LibraryError> {
+        self.cloud_collections_snapshot_with_feature(base_revision, None, progress)
+    }
+
+    fn cloud_collections_snapshot_with_feature(
+        &self,
+        base_revision: Option<String>,
+        feature: Option<&PersonalEditFeature>,
         progress: Reporter<'_>,
     ) -> Result<Snapshot, LibraryError> {
         let root = self
@@ -117,11 +179,17 @@ impl Library {
         let mut connection = rusqlite::Connection::open_with_flags(
             self.root().join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        snapshot_from_connection(&root, &mut connection, base_revision, progress)
+        snapshot_from_connection_with_feature(&root, &mut connection, base_revision, feature, progress)
     }
 }
 
+#[cfg(test)]
 fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot, progress: Reporter<'_>) -> Result<CloudCollectionsPublishResult, LibraryError> {
+    publish_snapshot_as(client, token, token, &snapshot, progress)
+}
+
+/// `token` authorizes the artwork routes; `replica_token` the replica PUT.
+fn publish_snapshot_as(client: &CloudClient, token: &str, replica_token: &str, snapshot: &Snapshot, progress: Reporter<'_>) -> Result<CloudCollectionsPublishResult, LibraryError> {
         let metadata = serde_json::to_vec(&snapshot.replica)
             .map_err(|_| LibraryError::InvalidCloudResponse)?;
         if metadata.len() > MAX_METADATA_BYTES {
@@ -159,7 +227,7 @@ fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot, progr
             workers.into_iter().map(|worker| worker.join().unwrap_or(Err(LibraryError::InvalidCloudResponse))).collect::<Result<Vec<_>, _>>()
         })?.into_iter().sum();
         report(progress, "publishing", 0, None, "items");
-        let revision = client.publish_collections(&metadata, &token)?;
+        let revision = client.publish_collections(&metadata, replica_token)?;
         Ok(CloudCollectionsPublishResult {
             collections: snapshot.replica.collections.len(),
             artworks: snapshot
@@ -182,8 +250,31 @@ fn upload_local_blob(client: &CloudClient, token: &str, local: &LocalBlob) -> Re
     client.upload_collection_artwork(&local.descriptor, &bytes, token)
 }
 
+#[cfg(test)]
 fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
+    snapshot_from_connection_with_feature(root, connection, base_revision, None, progress)
+}
+
+fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, feature: Option<&PersonalEditFeature>, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
         let transaction = connection.transaction()?;
+        // The received cursor is read in the same read transaction as the rows, so the
+        // snapshot never advertises edits its rows do not reflect. An adopted feature with
+        // no row is an inconsistency, not a reason to publish a legacy body.
+        let personal_edit = match feature {
+            Some(feature) => {
+                use rusqlite::OptionalExtension;
+                let cursor: i64 = transaction
+                    .query_row(
+                        "SELECT received_cursor FROM mobile_collection_personal_edit_sync WHERE endpoint=?1 AND library_id=?2",
+                        rusqlite::params![&feature.endpoint, &feature.library_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or(LibraryError::CollectionPersonalEditCursorRejected)?;
+                Some(PersonalEditHandshake { personal_edit_version: 1, library_id: feature.library_id.clone(), personal_edit_cursor: cursor })
+            }
+            None => None,
+        };
         let source_root = collection_source_root(&transaction, root)?;
         let mut files = BTreeMap::new();
         let mut total_bytes = 0;
@@ -274,6 +365,7 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
                 version: 1,
                 base_revision,
                 collections,
+                personal_edit,
             },
             files,
         })
@@ -698,7 +790,7 @@ mod tests {
             assert_eq!(request.url(), "/v1/collections/replica");
             request.respond(Response::from_string(json!({"revision":"published"}).to_string())).unwrap();
         });
-        let snapshot = Snapshot { files, replica: CollectionReplica {version:1,base_revision:None,collections:vec![]} };
+        let snapshot = Snapshot { files, replica: CollectionReplica {version:1,base_revision:None,collections:vec![],personal_edit:None} };
         let events = std::sync::Mutex::new(Vec::new());
         assert_eq!(publish_snapshot(&client, "test-token", snapshot, &|event| events.lock().unwrap().push(event)).unwrap().revision, "published");
         let events = events.into_inner().unwrap();
@@ -723,7 +815,7 @@ mod tests {
             assert_eq!(request.url(),"/v1/collections/replica");
             request.respond(Response::from_string(r#"{"revision":"published"}"#)).unwrap();
         });
-        let snapshot=Snapshot{files,replica:CollectionReplica{version:1,base_revision:None,collections:vec![]}};
+        let snapshot=Snapshot{files,replica:CollectionReplica{version:1,base_revision:None,collections:vec![],personal_edit:None}};
         assert_eq!(publish_snapshot(&client,"test-token",snapshot,&|_|{}).unwrap().uploaded,0);
         worker.join().unwrap();
     }
@@ -784,6 +876,139 @@ mod tests {
             Err(LibraryError::CloudObjectKeyConflict)
         ));
         thread.join().unwrap();
+    }
+
+    fn personal_edit_fixture() -> (tempfile::TempDir, Library) {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library.connection().unwrap().execute_batch(
+            "INSERT INTO collections(id,name,type,my_score,description,created_at,updated_at) VALUES('c','Work','manga',3.0,'PC memo','2026','2026')",
+        ).unwrap();
+        (temp, library)
+    }
+
+    #[test]
+    fn handshake_snapshot_reads_the_cursor_in_the_same_transaction_as_the_rows() {
+        let (_temp, library) = personal_edit_fixture();
+        let endpoint = "https://sync.example.test";
+        let library_id = library.library_id().unwrap();
+        library.adopt_collection_personal_edit_library(endpoint, &library_id).unwrap();
+        let feature = PersonalEditFeature { endpoint: endpoint.into(), library_id: library_id.clone() };
+        let legacy = serde_json::to_value(&library.cloud_collections_snapshot(None, &|_| {}).unwrap().replica).unwrap();
+        for field in ["personalEditVersion", "libraryId", "personalEditCursor"] {
+            assert!(legacy.get(field).is_none(), "legacy snapshot must omit {field}");
+        }
+        for cursor in [3, 9] {
+            library.connection().unwrap().execute("UPDATE mobile_collection_personal_edit_sync SET received_cursor=?1", [cursor]).unwrap();
+            let value = serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}).unwrap().replica).unwrap();
+            assert_eq!((value["personalEditVersion"].as_i64(), value["libraryId"].as_str(), value["personalEditCursor"].as_i64()), (Some(1), Some(library_id.as_str()), Some(cursor)));
+            assert_eq!(value["collections"][0]["id"], "c");
+        }
+        library.connection().unwrap().execute("DELETE FROM mobile_collection_personal_edit_sync", []).unwrap();
+        assert!(matches!(library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}), Err(LibraryError::CollectionPersonalEditCursorRejected)));
+    }
+
+    #[test]
+    fn publication_receives_edits_before_the_revision_and_sends_the_handshake_as_publisher() {
+        use crate::library::collection_personal_edits::tests::{configure, entry, scripted};
+        let (_temp, library) = personal_edit_fixture();
+        let id = library.library_id().unwrap();
+        let item = serde_json::to_string(&entry(1, "c", "myScore", json!(4.5))).unwrap();
+        let (base, handle) = scripted(vec![
+            ("/v1/collections/status", 200, json!({"revision":"r1","capabilities":{"collectionPersonalEdit":false}}).to_string()),
+            ("/v1/collections/personal-edits", 200, format!(r#"{{"version":1,"libraryId":"{id}","after":0,"nextCursor":1,"hasMore":false,"items":[{item}]}}"#)),
+            ("/v1/collections?limit=1", 200, json!({"revision":"r2"}).to_string()),
+            ("/v1/collections/replica", 200, json!({"revision":"r3"}).to_string()),
+        ]);
+        configure(&library, &base);
+        let client = CloudClient::new(&base).unwrap();
+        let result = library.push_cloud_collections_with(&client, &base, "shared", Some("publisher"), &|_| {}).unwrap();
+        assert_eq!(result.revision, "r3");
+        let seen = handle.join().unwrap();
+        assert_eq!(seen[0].1.as_deref(), Some("Bearer shared"));
+        assert_eq!(seen[1].1.as_deref(), Some("Bearer publisher"));
+        let (_, authorization, body) = &seen[3];
+        assert_eq!(authorization.as_deref(), Some("Bearer publisher"));
+        let body: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!((body["baseRevision"].as_str(), body["personalEditVersion"].as_i64(), body["libraryId"].as_str(), body["personalEditCursor"].as_i64()), (Some("r2"), Some(1), Some(id.as_str()), Some(1)));
+        assert_eq!(body["collections"][0]["myScore"], 4.5, "the received edit is in the published rows");
+    }
+
+    #[test]
+    fn an_old_server_gets_the_legacy_snapshot_with_the_shared_token() {
+        use crate::library::collection_personal_edits::tests::{configure, scripted};
+        let (_temp, library) = personal_edit_fixture();
+        let (base, handle) = scripted(vec![
+            ("/v1/collections/status", 200, json!({"revision":"r1","publishedAt":null}).to_string()),
+            ("/v1/collections?limit=1", 200, json!({"revision":"r1"}).to_string()),
+            ("/v1/collections/replica", 200, json!({"revision":"r2"}).to_string()),
+        ]);
+        configure(&library, &base);
+        let client = CloudClient::new(&base).unwrap();
+        library.push_cloud_collections_with(&client, &base, "shared", Some("publisher"), &|_| {}).unwrap();
+        let seen = handle.join().unwrap();
+        assert_eq!(seen[2].1.as_deref(), Some("Bearer shared"));
+        let body: serde_json::Value = serde_json::from_str(&seen[2].2).unwrap();
+        assert!(body.get("personalEditVersion").is_none() && body.get("personalEditCursor").is_none() && body.get("libraryId").is_none());
+        assert_eq!(library.collection_personal_edit_adoption(&base).unwrap(), None);
+    }
+
+    #[test]
+    fn an_unlinked_server_library_falls_back_to_the_legacy_snapshot() {
+        use crate::library::collection_personal_edits::tests::{configure, scripted};
+        let unsupported = json!({"detail":{"code":"collectionPersonalEditUnsupported","message":"x"}}).to_string();
+        let inactive = json!({"revision":null,"capabilities":{"collectionPersonalEdit":false}}).to_string();
+        // The feed already refuses: publish the legacy form directly.
+        let (_temp, library) = personal_edit_fixture();
+        let (base, handle) = scripted(vec![
+            ("/v1/collections/status", 200, inactive.clone()),
+            ("/v1/collections/personal-edits", 409, unsupported.clone()),
+            ("/v1/collections?limit=1", 200, json!({"revision":null}).to_string()),
+            ("/v1/collections/replica", 200, json!({"revision":"r1"}).to_string()),
+        ]);
+        configure(&library, &base);
+        let client = CloudClient::new(&base).unwrap();
+        library.push_cloud_collections_with(&client, &base, "shared", Some("publisher"), &|_| {}).unwrap();
+        let seen = handle.join().unwrap();
+        assert_eq!(seen[3].1.as_deref(), Some("Bearer shared"));
+        assert!(serde_json::from_str::<serde_json::Value>(&seen[3].2).unwrap().get("personalEditVersion").is_none());
+
+        // The handshake publication itself is refused (409 from the library check): retry
+        // once in the legacy form with the shared token.
+        let (_temp, library) = personal_edit_fixture();
+        let id = library.library_id().unwrap();
+        let (base, handle) = scripted(vec![
+            ("/v1/collections/status", 200, inactive),
+            ("/v1/collections/personal-edits", 200, format!(r#"{{"version":1,"libraryId":"{id}","after":0,"nextCursor":0,"hasMore":false,"items":[]}}"#)),
+            ("/v1/collections?limit=1", 200, json!({"revision":null}).to_string()),
+            ("/v1/collections/replica", 409, unsupported),
+            ("/v1/collections/replica", 200, json!({"revision":"r1"}).to_string()),
+        ]);
+        configure(&library, &base);
+        let client = CloudClient::new(&base).unwrap();
+        assert_eq!(library.push_cloud_collections_with(&client, &base, "shared", Some("publisher"), &|_| {}).unwrap().revision, "r1");
+        let seen = handle.join().unwrap();
+        assert_eq!(seen[3].1.as_deref(), Some("Bearer publisher"));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&seen[3].2).unwrap()["personalEditCursor"], 0);
+        assert_eq!(seen[4].1.as_deref(), Some("Bearer shared"));
+        assert!(serde_json::from_str::<serde_json::Value>(&seen[4].2).unwrap().get("personalEditVersion").is_none());
+    }
+
+    #[test]
+    fn once_active_a_refused_handshake_is_an_error_not_a_legacy_downgrade() {
+        use crate::library::collection_personal_edits::tests::{configure, scripted};
+        let (_temp, library) = personal_edit_fixture();
+        let id = library.library_id().unwrap();
+        let (base, handle) = scripted(vec![
+            ("/v1/collections/status", 200, json!({"revision":"r","capabilities":{"collectionPersonalEdit":true},"libraryId":id,"personalEditCursor":0,"appliedPersonalEditCursor":0}).to_string()),
+            ("/v1/collections/personal-edits", 200, format!(r#"{{"version":1,"libraryId":"{id}","after":0,"nextCursor":0,"hasMore":false,"items":[]}}"#)),
+            ("/v1/collections?limit=1", 200, json!({"revision":"r"}).to_string()),
+            ("/v1/collections/replica", 409, json!({"detail":{"code":"collectionPersonalEditCursorRejected","message":"x"}}).to_string()),
+        ]);
+        configure(&library, &base);
+        let client = CloudClient::new(&base).unwrap();
+        assert!(matches!(library.push_cloud_collections_with(&client, &base, "shared", Some("publisher"), &|_| {}), Err(LibraryError::CollectionPersonalEditCursorRejected)));
+        handle.join().unwrap();
     }
 
     #[test]

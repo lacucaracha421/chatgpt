@@ -1171,6 +1171,7 @@ mod tests {
                     release_date: None,
                     external_score: None,
                     my_score: Some(4.5),
+                    personal_base: None,
                 },
             )
             .unwrap();
@@ -1228,6 +1229,7 @@ mod tests {
                     release_date: created.release_date.clone(),
                     external_score: created.external_score,
                     my_score: created.my_score,
+                    personal_base: None,
                 },
             )
             .unwrap();
