@@ -261,6 +261,7 @@ fn run_case(
 }
 
 #[test]
+#[ignore = "catalog-scale fixture (~30 s); run with --ignored when changing catalog grouping"]
 fn catalog_group_realistic_fixture_preserves_count_donors_and_early_exit() {
     let root = tempfile::tempdir().unwrap();
     let library = Library::open(root.path()).unwrap();

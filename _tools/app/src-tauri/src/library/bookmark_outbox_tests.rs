@@ -205,10 +205,6 @@ enum Answer {
         desired: bool,
         revision: i64,
     },
-    /// Accept the request, then truncate the reply so the client never sees a
-    /// complete response. This is the lost-response case: the server has the
-    /// command, the client cannot tell.
-    Lose,
     /// Reject with this HTTP status and no body.
     Status(u16),
 }
@@ -287,20 +283,6 @@ impl Stub {
                                 revision_conflict(cursor, desired, revision),
                                 409,
                             ))
-                            .unwrap(),
-                        Answer::Lose => request
-                            .respond(
-                                Response::from_data(Vec::new())
-                                    .with_status_code(200)
-                                    // Declare a body that never arrives, then close:
-                                    // the client cannot observe a complete response.
-                                    .with_header(
-                                        Header::from_bytes("Content-Length", "4096").unwrap(),
-                                    )
-                                    .with_header(
-                                        Header::from_bytes("Connection", "close").unwrap(),
-                                    ),
-                            )
                             .unwrap(),
                         Answer::Status(code) => request.respond(Response::empty(code)).unwrap(),
                     }
@@ -863,6 +845,9 @@ fn a_restart_retries_with_the_same_durable_operation_id() {
 /// a second logical write.
 #[test]
 fn a_lost_response_retries_idempotently_and_does_not_duplicate() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{Shutdown, TcpListener};
+
     let (_temp, library) = open();
     let id = adopt(&library, 1, 0);
     bookmark(&library, 7, true);
@@ -871,18 +856,67 @@ fn a_lost_response_retries_idempotently_and_does_not_duplicate() {
         only_operation(&connection)
     };
 
-    let stub = Stub::new(
-        status_body(&id, 1, 0, true),
-        serde_json::Value::Null,
-        serde_json::Value::Null,
-        vec![
-            // Accepted, then the response never arrives.
-            Answer::Lose,
-            // The identical command arrives again.
-            Answer::Accept(command_result(&id, 1, "7", true, 1, true)),
-        ],
-    );
-    let client = stub.client();
+    // tiny_http ignores a response's Connection header and can keep a truncated
+    // response alive. Own the socket here so loss means EOF, not a 30s timeout.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = CloudClient::new(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+    let server = thread::spawn(move || {
+        let mut commands = Vec::<serde_json::Value>::new();
+        for attempt in 0..2 {
+            for is_command in [false, true] {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                let mut reader = BufReader::new(socket.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                assert_eq!(
+                    line,
+                    if is_command {
+                        "PUT /v1/mobile-catalog/bookmarks/kHentai/7 HTTP/1.1\r\n"
+                    } else {
+                        "GET /v1/mobile-catalog/status HTTP/1.1\r\n"
+                    }
+                );
+                let mut length = 0;
+                loop {
+                    line.clear();
+                    assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    let (name, value) = line.split_once(':').unwrap();
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+                assert!(length <= 4096);
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                if is_command {
+                    commands.push(serde_json::from_slice(&body).unwrap());
+                }
+                if is_command && attempt == 0 {
+                    // The server received the entire command but the client cannot
+                    // read a complete result. Closing the write half makes loss immediate.
+                    socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n{").unwrap();
+                } else {
+                    let result = if is_command {
+                        assert_eq!(commands[0], commands[1], "retry the entire same command");
+                        command_result(&id, 1, "7", true, 1, true)
+                    } else {
+                        status_body(&id, 1, 0, true)
+                    };
+                    let body = serde_json::to_vec(&result).unwrap();
+                    write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                    socket.write_all(&body).unwrap();
+                }
+                socket.shutdown(Shutdown::Write).unwrap();
+            }
+        }
+        commands
+    });
 
     // First pass: the transport fails, so the intent stays queued and unchanged.
     let error = library
@@ -901,10 +935,13 @@ fn a_lost_response_retries_idempotently_and_does_not_duplicate() {
     let outcome = library
         .flush_catalog_bookmark_outbox_with(&client, "test-token")
         .unwrap();
-    let seen = stub.finish();
+    let commands = server.join().unwrap();
 
     assert_eq!(outcome.sent, 1);
-    let ids = seen.operation_ids();
+    let ids: Vec<_> = commands
+        .iter()
+        .map(|command| command["operationId"].as_str().unwrap())
+        .collect();
     assert_eq!(ids.len(), 2, "two transport attempts");
     assert_eq!(ids[0], ids[1], "identical on the wire");
     assert_eq!(ids[0], operation);

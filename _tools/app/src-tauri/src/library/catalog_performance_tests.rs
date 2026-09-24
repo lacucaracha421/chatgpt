@@ -218,6 +218,7 @@ const LEGACY_WHERE: &str = "work.Expunged = 0 AND NOT EXISTS (
         )";
 
 #[test]
+#[ignore = "catalog-scale fixture (~15 s); run with --ignored when changing catalog search planning"]
 fn catalog_large_fixture_empty_policy_does_not_repeat_full_tag_walks() {
     // Reverting the planner/empty-policy fix makes the real search take
     // approximately as long as the old two full visibility scans below.

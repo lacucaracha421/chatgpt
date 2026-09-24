@@ -1542,19 +1542,14 @@ fn revisions_of_one_asset_are_serialized_and_superseded_pending_work_is_retired(
 
 #[test]
 fn legacy_server_pauses_replication_without_failing_the_queue() {
-    let server = Server::http("127.0.0.1:0").unwrap();
+    let server = std::sync::Arc::new(Server::http("127.0.0.1:0").unwrap());
+    let control = std::sync::Arc::clone(&server);
     let base_url = format!("http://{}", server.server_addr());
     let server_thread = thread::spawn(move || {
         let mut requests = 0;
-        loop {
-            // Under the full parallel suite, fixture ingestion can delay the first
-            // client request. Once traffic starts, keep the short idle shutdown.
-            let timeout = if requests == 0 {
-                std::time::Duration::from_secs(10)
-            } else {
-                std::time::Duration::from_secs(1)
-            };
-            let Some(mut request) = server.recv_timeout(timeout).unwrap() else { break; };
+        // The cycle joins all workers before returning; its caller explicitly
+        // unblocks this server after that point, without an idle shutdown delay.
+        while let Ok(mut request) = server.recv() {
             assert_eq!(request.url(), "/v1/replication/prepare");
             let body = read_json(&mut request);
             let id = body["asset_id"].as_str().unwrap();
@@ -1574,7 +1569,10 @@ fn legacy_server_pauses_replication_without_failing_the_queue() {
         fs::write(&path, png_bytes(i * 23)).unwrap();
         ingest_png(&library, &path, "2026-09-09T00:00:00Z");
     }
-    assert!(matches!(library.run_cloud_backfill_cycle_with_client(&CloudClient::new(&base_url).unwrap(),"test-token"), Err(LibraryError::CloudReplicationUpgradeRequired)));
+    let result = library.run_cloud_backfill_cycle_with_client(&CloudClient::new(&base_url).unwrap(), "test-token");
+    control.unblock();
+    let requests = server_thread.join().unwrap();
+    assert!(matches!(result, Err(LibraryError::CloudReplicationUpgradeRequired)));
     assert_eq!(library.cloud_backfill_control_state().unwrap(), BackfillControlState::Paused);
     let connection = library.connection().unwrap();
     let failed: i64 = connection.query_row("SELECT COUNT(*) FROM cloud_sync_queue WHERE status='failed'",[],|r|r.get(0)).unwrap();
@@ -1583,5 +1581,5 @@ fn legacy_server_pauses_replication_without_failing_the_queue() {
     assert_eq!(pending, 8);
     drop(connection);
     assert!(library.claim_next_backfill_for_test().unwrap().is_none());
-    assert!((1..=4).contains(&server_thread.join().unwrap()));
+    assert!((1..=4).contains(&requests));
 }

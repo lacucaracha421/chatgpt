@@ -641,14 +641,18 @@ mod tests {
                 ReleaseWatchRunStopReason::InvalidResponse,
             ),
         ];
+        // Provider-wide failures do not update subscriptions. Reuse the same
+        // due collections instead of migrating five otherwise identical databases.
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let mut collection_ids = Vec::new();
+        for query in ["first", "later"] {
+            let collection_id = create_collection(&library, query, CollectionType::Manga);
+            connect_aladin_with(&library, &collection_id, &format!("item-{query}"), query);
+            subscribe_at(&library, &collection_id, None);
+            collection_ids.push(collection_id);
+        }
         for (failure, expected_reason) in cases {
-            let temp = tempfile::tempdir().unwrap();
-            let library = Library::open(temp.path()).unwrap();
-            for query in ["first", "later"] {
-                let collection_id = create_collection(&library, query, CollectionType::Manga);
-                connect_aladin_with(&library, &collection_id, &format!("item-{query}"), query);
-                subscribe_at(&library, &collection_id, None);
-            }
             let mut calls = 0;
 
             let result = library
@@ -662,6 +666,11 @@ mod tests {
             assert_eq!(result.checked, 0);
             assert_eq!(result.skipped, 0);
             assert_eq!(result.stop_reason, Some(expected_reason));
+            for collection_id in &collection_ids {
+                let status = library.get_release_watch_status(collection_id).unwrap();
+                assert!(status.enabled);
+                assert_eq!(status.last_checked_at, None);
+            }
         }
     }
 

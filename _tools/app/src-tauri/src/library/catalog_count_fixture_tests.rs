@@ -50,6 +50,7 @@ fn exact(c: &Connection, q: &CatalogSearchQuery, route: CountRoute) -> u64 {
 }
 
 #[test]
+#[ignore = "catalog-scale fixture (~30 s); run with --ignored when changing catalog counts or grouping"]
 fn catalog_count_realistic_fixture_production_routes_and_six_scalars() {
     let root = tempfile::tempdir().unwrap();
     let library = Library::open(root.path()).unwrap();

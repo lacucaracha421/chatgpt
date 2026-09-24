@@ -84,6 +84,7 @@ fn capture_specific_ticket(server_addr: &str, capture_id: &str) -> Value {
 
 enum AcknowledgeMode {
     Succeed,
+    SucceedWithMetadata,
     AfterPublication(std::sync::Arc<std::sync::atomic::AtomicBool>, u16),
     FailWith(u16),
     Never,
@@ -108,7 +109,8 @@ fn serve_capture_flow(
     let (urls_tx, urls_rx) = std::sync::mpsc::channel::<String>();
     let handle = thread::spawn(move || {
         let mut seen = Vec::new();
-        for _ in 0..4 {
+        let publish_metadata = matches!(&acknowledge, AcknowledgeMode::SucceedWithMetadata);
+        for _ in 0..if publish_metadata { 7 } else { 4 } {
             let mut request = match server.recv() {
                 Ok(request) => request,
                 Err(_) => break,
@@ -150,7 +152,7 @@ fn serve_capture_flow(
                 }
                 "/v1/captures/capture-1/acknowledge" => {
                     match &acknowledge {
-                        AcknowledgeMode::Succeed => {
+                        AcknowledgeMode::Succeed | AcknowledgeMode::SucceedWithMetadata => {
                             request.respond(Response::empty(200)).unwrap();
                         }
                         AcknowledgeMode::FailWith(status) => {
@@ -162,7 +164,15 @@ fn serve_capture_flow(
                         }
                         AcknowledgeMode::Never => unreachable!("acknowledge should not be sent"),
                     }
-                    break;
+                    if !publish_metadata {
+                        break;
+                    }
+                }
+                "/v1/classifications" | "/v1/saved-x-media" | "/v1/library/album-snapshot"
+                    if publish_metadata =>
+                {
+                    assert_eq!(header_value(&request, "authorization"), Some("Bearer test-token"));
+                    request.respond(Response::empty(200)).unwrap();
                 }
                 _ => {
                     request.respond(Response::empty(404)).unwrap();
@@ -757,6 +767,29 @@ fn inbound_captures_and_outbound_queue_remain_independent() {
     handle.join().unwrap();
 }
 
+/// Keep serving until the synchronous client cycle has returned. An idle timeout
+/// both slows every successful test and races slow ingestion under parallel load.
+struct CaptureServer {
+    server: std::sync::Arc<Server>,
+    handle: Option<thread::JoinHandle<Vec<String>>>,
+}
+
+impl CaptureServer {
+    fn join(mut self) -> thread::Result<Vec<String>> {
+        self.server.unblock();
+        self.handle.take().unwrap().join()
+    }
+}
+
+impl Drop for CaptureServer {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            self.server.unblock();
+            let _ = handle.join();
+        }
+    }
+}
+
 /// 여러 캡처를 한 번의 목록으로 처리하는 범용 fake VPS. 목록 요청 1회에
 /// captures JSON을 응답하고, 이후 ticket/다운로드/ack를 각 캡처별로 순서대로
 /// 처리한다. failing_ticket_ids에 포함된 캡처의 티켓 요청은 500으로 거절한다.
@@ -766,27 +799,18 @@ fn serve_multi_capture_list(
     captures: Vec<Value>,
     failing_ticket_ids: &[&str],
     media_by_object_key: &[(String, Vec<u8>)],
-) -> (String, thread::JoinHandle<Vec<String>>) {
+) -> (String, CaptureServer) {
     let failing_ticket_ids: Vec<String> =
         failing_ticket_ids.iter().map(|id| id.to_string()).collect();
     let media_by_object_key: Vec<(String, Vec<u8>)> = media_by_object_key.to_vec();
-    let server = Server::http("127.0.0.1:0").unwrap();
+    let server = std::sync::Arc::new(Server::http("127.0.0.1:0").unwrap());
     let base_url = format!("http://{}/v1", server.server_addr());
     let addr = server.server_addr().to_string();
+    let control = std::sync::Arc::clone(&server);
     let handle = thread::spawn(move || {
         let mut seen = Vec::new();
-        let capture_count = captures.len();
         let captures = json!({ "captures": captures });
-        let mut list = server.recv().unwrap();
-        seen.push(list.url().to_string());
-        list.respond(json_response(captures.clone())).unwrap();
-        // 각 캡처의 ticket → download → acknowledge 순서를 상한까지 받는다.
-        for _ in 0..capture_count * 3 + 12 {
-            use std::time::Duration;
-            let mut request = match server.recv_timeout(Duration::from_secs(15)) {
-                Ok(Some(request)) => request,
-                _ => break,
-            };
+        while let Ok(request) = server.recv() {
             let url = request.url().to_string();
             let failing = failing_ticket_ids
                 .iter()
@@ -832,7 +856,7 @@ fn serve_multi_capture_list(
         }
         seen
     });
-    (base_url, handle)
+    (base_url, CaptureServer { server: control, handle: Some(handle) })
 }
 
 #[test]
@@ -1967,7 +1991,7 @@ fn a_warm_credential_cache_keeps_polling_captures_after_the_keyring_locks() {
         "capture-1",
         media.clone(),
         PendingListMode::OneCapture,
-        AcknowledgeMode::Succeed,
+        AcknowledgeMode::SucceedWithMetadata,
     );
 
     let temp = tempfile::tempdir().unwrap();
@@ -2007,6 +2031,9 @@ fn a_warm_credential_cache_keeps_polling_captures_after_the_keyring_locks() {
             "/v1/captures/capture-1/download",
             "/r2-download/capture-original",
             "/v1/captures/capture-1/acknowledge",
+            "/v1/classifications",
+            "/v1/saved-x-media",
+            "/v1/library/album-snapshot",
         ]
     );
     // The lock never caused another backend read: the session value carried the pass.
@@ -2073,17 +2100,15 @@ fn a_cold_locked_store_blocks_the_capture_poll_before_any_request() {
 /// shape.
 #[test]
 fn a_warm_credential_cache_keeps_publishing_metadata_after_the_keyring_locks() {
-    let server = Server::http("127.0.0.1:0").unwrap();
+    let server = std::sync::Arc::new(Server::http("127.0.0.1:0").unwrap());
+    let control = std::sync::Arc::clone(&server);
     let base_url = format!("http://{}/v1", server.server_addr());
     let handle = std::thread::spawn(move || {
         let mut seen = Vec::new();
-        // Serve until both requests this test asserts on have been made. A fixed idle
-        // timeout would be racy under a loaded parallel suite: library setup can outlast
-        // it and the fixture would close before the first request arrives.
-        loop {
-            let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_secs(60)) else {
-                break;
-            };
+        // The configured cycle also publishes saved media and albums. Keep the
+        // server alive for the entire cycle, including these later requests.
+        while let Ok(request) = server.recv() {
+            assert_eq!(header_value(&request, "authorization"), Some("Bearer test-token"));
             let url = request.url().to_owned();
             seen.push(url.clone());
             let response = if url.ends_with("/captures/pending") {
@@ -2092,16 +2117,11 @@ fn a_warm_credential_cache_keeps_publishing_metadata_after_the_keyring_locks() {
                 json_response(json!({}))
             };
             request.respond(response).unwrap();
-            // Order-independent: whichever of the two asserted requests arrives second
-            // ends the fixture, so the test does not idle until the timeout.
-            if seen.iter().any(|seen| seen.ends_with("/captures/pending"))
-                && seen.iter().any(|seen| seen.ends_with("/classifications"))
-            {
-                break;
-            }
         }
         seen
     });
+
+    let handle = CaptureServer { server: control, handle: Some(handle) };
 
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
