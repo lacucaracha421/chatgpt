@@ -102,7 +102,13 @@ fn publish(f: &Fixture, job: &Job, context: &Context, review: ReviewState) -> St
                 state: "unmatched".into(),
                 error: None,
                 evidence: Some(
-                    json!({"passed":false,"queryBoxes":[[0,0,10,10]],"wholeFallback":false}),
+                    json!({
+                        "passed": false,
+                        "queryBoxes": [[0,0,10,10]],
+                        "wholeFallback": false,
+                        "referenceHashes": t.usable_references().map(|r| &r.asset_hash).collect::<Vec<_>>(),
+                        "referenceSelections": t.usable_references().map(|r| &r.region).collect::<Vec<_>>()
+                    }),
                 ),
             },
         })
@@ -350,7 +356,7 @@ fn durable_review_survives_scan_loss_and_learning_reconsideration() {
         f.library
             .record_character_decisions(DecisionRequest {
                 target_id: target.id.clone(),
-                expected_fingerprint: target.fingerprint,
+                expected_fingerprint: target.fingerprint.clone(),
                 asset_ids: vec!["asset-5".into()],
                 decision: DecisionKind::Accepted,
                 baseline_fingerprint: Some("a".repeat(64)),
@@ -359,6 +365,11 @@ fn durable_review_survives_scan_loss_and_learning_reconsideration() {
             .unwrap(),
         1
     );
+    let decisions = f.library.list_character_decisions(&target.id, None, 10).unwrap();
+    assert_eq!(decisions.len(), 1);
+    let snapshot: Value = serde_json::from_str(&decisions[0].reference_snapshot).unwrap();
+    assert_eq!(snapshot["scanId"], id);
+    assert_eq!(snapshot["references"], json!(target.usable_references().collect::<Vec<_>>()));
     f.library.trash_assets(&["asset-5".into()]).unwrap();
     f.library.restore_assets(&["asset-5".into()]).unwrap();
     assert!(
@@ -442,12 +453,22 @@ fn consecutive_durable_approvals_preserve_used_reference_snapshot_without_learni
                     asset_ids: vec![asset.into()],
                     decision: DecisionKind::Accepted,
                     baseline_fingerprint: Some("a".repeat(64)),
-                    scan_id: Some(id)
+                    scan_id: Some(id.clone())
                 })
                 .unwrap(),
             1
         );
+        let decisions = f.library.list_character_decisions(&target.id, None, 10).unwrap();
+        let decision = decisions.iter().find(|row| row.source_asset_id == asset).unwrap();
+        let snapshot: Value = serde_json::from_str(&decision.reference_snapshot).unwrap();
+        assert_eq!(snapshot["scanId"], id);
+        assert_eq!(snapshot["references"], json!(target.usable_references().collect::<Vec<_>>()));
+        assert_eq!(
+            snapshot["prediction"]["referenceHashes"],
+            json!(target.usable_references().map(|r| &r.asset_hash).collect::<Vec<_>>())
+        );
     }
+    assert_eq!(f.library.list_character_decisions(&target.id, None, 10).unwrap().len(), 2);
     assert!(f
         .library
         .get_character_target(&target.id)

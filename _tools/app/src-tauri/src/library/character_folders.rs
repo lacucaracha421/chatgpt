@@ -388,14 +388,17 @@ mod tests {
     }
     #[test]
     fn character_folder_policy_upgrades_v70_and_survives_reopening() {
-        let f = Fixture::new();
-        f.ready("Pilot");
-        let folder_id = folder(&f, &f.series, "Machines");
-        let connection = f.library.connection().unwrap();
-        connection.execute_batch("DROP TRIGGER character_group_remove_empty; DROP VIEW character_excluded_folders; DROP TABLE character_folder_exclusions; PRAGMA user_version=70;").unwrap();
+        let (temp, connection) =
+            crate::library::characters::tests::historical_character_library(70);
+        let folder_id = "machines".to_string();
+        connection.execute(
+            "INSERT INTO classification_entries(id,kind,name,parent_id,created_at)
+             VALUES(?1,'tag','Machines','series','2026-09-08')",
+            [&folder_id],
+        ).unwrap();
         drop(connection);
-        drop(f.library);
-        let library = Library::open(f.temp.path()).unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        assert!(library.character_folder_exclusions().unwrap().is_empty());
         library
             .set_character_folder_excluded(FolderExclusionRequest {
                 classification_id: folder_id.clone(),
@@ -412,7 +415,7 @@ mod tests {
             1
         );
         drop(library);
-        let reopened = Library::open(f.temp.path()).unwrap();
+        let reopened = Library::open(temp.path()).unwrap();
         assert_eq!(
             reopened.character_folder_exclusions().unwrap(),
             vec![folder_id]

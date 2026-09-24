@@ -1568,35 +1568,60 @@ mod tests {
 
     #[test]
     fn successful_asset_commit_creates_one_pending_cloud_upsert() {
-        let fixture = IngestionFixture::new();
-        let IngestOutcome::Added { asset } = fixture.ingest() else {
-            panic!("expected added asset");
-        };
+        for registered_series in [false, true] {
+            let fixture = IngestionFixture::new();
+            let classification_id = registered_series.then(|| {
+                let series = fixture.library.create_classification(CreateClassification {
+                    kind: ClassificationKind::Root,
+                    name: "Cloud upsert fixture".into(),
+                    parent_id: None,
+                }).unwrap();
+                fixture.library.save_character_series(crate::library::character_hub::Series {
+                    classification_id: series.id.clone(),
+                    hero_asset_id: None,
+                    auto_classify: true,
+                }).unwrap();
+                series.id
+            });
+            let ingest = || match classification_id.as_deref() {
+                Some(id) => fixture.ingest_with_classification(id),
+                None => fixture.ingest(),
+            };
+            let IngestOutcome::Added { asset } = ingest() else {
+                panic!("expected added asset");
+            };
 
-        let count = || {
-            fixture
-                .library
-                .connection()
-                .unwrap()
-                .query_row(
-                    "SELECT COUNT(*) FROM cloud_sync_queue
-                     WHERE entity_type = 'asset' AND entity_id = ?1
-                       AND operation = 'upsert' AND status = 'pending' AND revision = 1",
-                    [&asset.id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap()
-        };
-        assert_eq!(count(), 1);
-        let character_job=fixture.library.character_autotag_job(&asset.id).unwrap().unwrap();
-        assert_eq!(character_job.state,"pending");
+            let count = || {
+                fixture
+                    .library
+                    .connection()
+                    .unwrap()
+                    .query_row(
+                        "SELECT COUNT(*) FROM cloud_sync_queue
+                         WHERE entity_type = 'asset' AND entity_id = ?1
+                           AND operation = 'upsert' AND status = 'pending' AND revision = 1",
+                        [&asset.id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(count(), 1);
+            let character_job = fixture.library.character_autotag_job(&asset.id).unwrap();
+            if registered_series {
+                let job = character_job.as_ref().expect("registered series must enqueue analysis");
+                assert_eq!(job.state, "pending");
+                assert_eq!(job.classification_ids, vec![classification_id.clone().unwrap()]);
+            } else {
+                assert!(character_job.is_none(), "unclassified images have no character scope");
+            }
 
-        assert!(matches!(
-            fixture.ingest(),
-            IngestOutcome::ExactDuplicate { .. }
-        ));
-        assert_eq!(count(), 1);
-        assert_eq!(fixture.library.character_autotag_job(&asset.id).unwrap().unwrap(),character_job);
+            assert!(matches!(
+                ingest(),
+                IngestOutcome::ExactDuplicate { .. }
+            ));
+            assert_eq!(count(), 1);
+            assert_eq!(fixture.library.character_autotag_job(&asset.id).unwrap(), character_job);
+        }
     }
 
     #[test]

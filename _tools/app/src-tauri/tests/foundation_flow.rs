@@ -275,6 +275,7 @@ fn migrates_v1_after_creating_a_verified_snapshot() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("library");
     fs::create_dir(&root).unwrap();
+    declare_migration_fixture(&root);
     let database_path = root.join("library.sqlite");
     let database = Connection::open(&database_path).unwrap();
     database
@@ -900,6 +901,7 @@ fn version_two_library() -> MigrationFixture {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("library");
     fs::create_dir(&root).unwrap();
+    declare_migration_fixture(&root);
     let database = Connection::open(root.join("library.sqlite")).unwrap();
     database
         .execute_batch(include_str!("../migrations/0001_initial.sql"))
@@ -999,6 +1001,12 @@ fn user_version(library: &Library) -> i64 {
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap()
+}
+
+fn declare_migration_fixture(root: &Path) {
+    // Integration tests link the normal debug library, where the development
+    // migration guard is active. Opt in only this disposable fixture.
+    fs::write(root.join(".lakomics-dev-library"), b"migration test fixture\n").unwrap();
 }
 
 fn current_schema_version() -> i64 {

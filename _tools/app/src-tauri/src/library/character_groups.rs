@@ -225,34 +225,49 @@ mod tests {
 
     #[test]
     fn empty_character_groups_migration_cleans_existing_empty_groups_only() {
-        let f = Fixture::new();
-        let target = f.ready("A");
-        save(&f, None, vec![target.id.clone()]).unwrap();
-        let c = f.library.connection().unwrap();
-        c.execute_batch("DROP TRIGGER character_group_remove_empty; PRAGMA user_version=71;")
+        let (temp, c) = crate::library::characters::tests::historical_character_library(71);
+        c.execute_batch(
+            "INSERT INTO character_groups(id,series_id,name) VALUES
+             ('populated','series','Group'),('empty','series','Empty');
+             INSERT INTO character_group_members(target_id,group_id) VALUES('target','populated');"
+        ).unwrap();
+        let references_before: Vec<(u32, String, String)> = c
+            .prepare("SELECT slot,asset_id,asset_hash FROM character_references WHERE target_id='target' ORDER BY slot")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
             .unwrap();
-        c.execute(
-            "INSERT INTO character_groups(id,series_id,name) VALUES('empty',?1,'Empty')",
-            [&f.series],
-        )
-        .unwrap();
         drop(c);
-        drop(f.library);
-        let reopened = Library::open(f.temp.path()).unwrap();
-        assert_eq!(reopened.character_groups(&f.series).unwrap().len(), 1);
+        let reopened = Library::open(temp.path()).unwrap();
+        let groups = reopened.character_groups("series").unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, "populated");
+        assert_eq!(groups[0].name, "Group");
+        assert_eq!(groups[0].revision, 1);
+        assert_eq!(groups[0].target_ids, vec!["target"]);
+        let target = reopened.get_character_target("target").unwrap();
+        assert_eq!(target.series_classification_id.as_deref(), Some("series"));
+        assert_eq!(target.linked_classification_id.as_deref(), Some("character"));
+        assert_eq!(target.display_name, "Pilot");
+        assert_eq!(target.revision, 3);
+        assert!(target.ready);
+        assert!(!target.manual_only);
+        assert_eq!(target.references.len(), references_before.len());
+        assert!(target.references.iter().all(|reference| reference.region.is_none()));
+        assert!(target.learned_references.is_empty());
         assert_eq!(
-            reopened
-                .get_character_target(&target.id)
-                .unwrap()
-                .fingerprint,
-            target.fingerprint
+            target.usable_references().map(|r| (r.slot, r.asset_id.clone().unwrap(), r.asset_hash.clone())).collect::<Vec<_>>(),
+            references_before
         );
         let c = reopened.connection().unwrap();
         assert_eq!(
             c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            72
+            super::super::db::SCHEMA_VERSION
         );
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0)).unwrap(), 5);
+        assert!(!c.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
         assert_eq!(
             c.query_row("SELECT COUNT(*) FROM character_autotag_jobs", [], |r| r
                 .get::<_, i64>(0))
@@ -265,6 +280,6 @@ mod tests {
         )
         .unwrap();
         drop(c);
-        assert!(reopened.character_groups(&f.series).unwrap().is_empty());
+        assert!(reopened.character_groups("series").unwrap().is_empty());
     }
 }

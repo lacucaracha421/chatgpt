@@ -236,6 +236,58 @@ fn edit(target: &Target) -> TargetDraft {
     }
 }
 
+pub(in crate::library) fn historical_character_library(
+    version: usize,
+) -> (tempfile::TempDir, rusqlite::Connection) {
+    // Apply only the historical prefix; never relabel a current database as old.
+    let temp = tempfile::tempdir().unwrap();
+    let mut connection = rusqlite::Connection::open(temp.path().join("library.sqlite")).unwrap();
+    let mut files = fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+        .collect::<Vec<_>>();
+    files.sort();
+    let transaction = connection.transaction().unwrap();
+    for file in files.iter().take(version) {
+        transaction.execute_batch(&fs::read_to_string(file).unwrap()).unwrap();
+    }
+    transaction.commit().unwrap();
+    assert_eq!(
+        connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),
+        version as i64
+    );
+    connection.pragma_update(None, "foreign_keys", "ON").unwrap();
+    connection.execute_batch(
+        "INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES
+         ('series','root','Series',NULL,'2026-09-08'),
+         ('character','tag','Character','series','2026-09-08');
+         INSERT INTO character_series(classification_id) VALUES('series');
+         INSERT INTO character_targets(id,series_classification_id,linked_classification_id,
+             display_name,enabled,revision,created_at,updated_at)
+         VALUES('target','series','character','Pilot',1,3,'2026-09-08','2026-09-08');"
+    ).unwrap();
+    fs::create_dir(temp.path().join("assets")).unwrap();
+    for slot in 0..5 {
+        let id = format!("reference-{slot}");
+        let hash = format!("hash-{slot}");
+        let path = format!("assets/{id}.png");
+        fs::write(temp.path().join(&path), id.as_bytes()).unwrap();
+        connection.execute(
+            "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,
+                thumbnail_relative_path,byte_size,width,height,collected_at)
+             VALUES(?1,?2,'image',?1,?3,?3,1,1,1,'2026-09-08')",
+            params![id, hash, path],
+        ).unwrap();
+        connection.execute("INSERT INTO asset_classifications VALUES(?1,'character')", [&id]).unwrap();
+        connection.execute(
+            "INSERT INTO character_references(target_id,slot,asset_id,asset_hash) VALUES('target',?1,?2,?3)",
+            params![slot, id, hash],
+        ).unwrap();
+    }
+    (temp, connection)
+}
+
 fn legacy_v43(path: &Path) {
     fs::create_dir_all(path.parent().unwrap().join("backups")).unwrap();
     let mut connection = rusqlite::Connection::open(path).unwrap();
