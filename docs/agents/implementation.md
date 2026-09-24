@@ -63,6 +63,12 @@ Use read-only Git inspection such as `show`, `log`, and `diff`; no fetch, checko
 
 ## Verification evidence
 
-`AGENTS.md` owns the risk-based verification policy. For each material claim, retain the command or manual check, scope, observed result, and the revision/files or inputs it covered. This may remain in the task conversation; no permanent test ledger is required.
+`AGENTS.md` owns the verification policy. For each material claim, keep the command or manual check, its scope, the observed result, and the revision or inputs it covered; the task conversation is enough, no permanent ledger is required.
 
-Reuse inspected evidence while relevant code, dependencies, configuration, fixtures, and runtime assumptions remain unchanged. If any of those invalidate it, repeat only the affected check. Never upgrade a focused test result to a full-suite claim, browser checks to native Tauri acceptance, or fixture success to a real deployment/data acceptance gate. State gaps without manufacturing new tests or silently writing to production data.
+## Performance work
+
+1. Pick a user-visible path (for example, opening the viewer, scrolling a large Library, first thumbnail on the tablet) and record a baseline on the real platform before changing code.
+2. Choose a metric that is deterministic enough to compare run to run: render/commit counts per interaction, function or query counts, layout recalculations, bytes transferred, or instruction counts. Wall-clock milliseconds are what users feel and belong in the report, but they are too noisy to be a pass/fail gate on their own.
+3. Confirm the metric moves with real latency on that path before relying on it; drop a metric that does not.
+4. After a verified improvement, lock it with a test or check whose threshold only tightens. A later change that raises the metric fails until it is justified and the threshold is deliberately updated.
+5. Report before/after numbers with platform and conditions. Browser or fixture numbers do not prove native Tauri or Galaxy Tab performance.

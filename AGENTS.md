@@ -3,12 +3,13 @@
 ## Scope and authority
 
 - Follow host/system instructions, the current request, and applicable repository instructions. Skills provide methods, not permissions or mandatory process gates.
-- Read the affected path first and fix causes rather than symptoms. Keep changes focused; preserve unrelated code, user changes, and pre-existing failures.
+- Keep changes focused; preserve unrelated code, user changes, and pre-existing failures.
 - Carry clear, authorized work through relevant verification. Ask only when a missing decision materially changes scope, risk, or authorization; do not repeatedly request design approval or stop at a first draft.
+- For long multi-step work, keep a checklist in the session scratchpad (not the repository) and update it as items finish, so progress survives context summarization.
 - Each of these needs explicit authorization for that action: Git writes (commit, push, merge, tag, branch/worktree creation or deletion), deployment, service provisioning, and production-data writes. Implementation, delegation, and skill activation never imply it.
 - Never broaden tool access, disable sandboxing, modify managed/plugin caches, or install dependencies to satisfy a skill or workflow. Use a supported equivalent or work inline, and disclose the limitation.
-- Be concise and truthful. Write new or rewritten instruction/documentation text in English; converse in the user's language. Do not translate unrelated documents incidentally.
-- Report progress and results to the user in terms of the user experience: what changes on screen or in behavior, what they will notice, what they need to decide or do, and what remains unverified. Do not explain internal code, algorithms, or implementation logic unless the user asks; keep that detail in commits, documentation, and the backlog. Honest limits and test outcomes still belong in the report, stated plainly.
+- Write new or rewritten instruction/documentation text in English; converse in the user's language. Do not translate unrelated documents incidentally.
+- Report progress and results to the user in terms of the user experience, leading with anything waiting on the user (decisions, approvals, device checks): what changes on screen or in behavior, what they will notice, what they need to decide or do, and what remains unverified. Do not explain internal code, algorithms, or implementation logic unless the user asks; keep that detail in commits, documentation, and the backlog. Honest limits and test outcomes still belong in the report, stated plainly.
 
 ## Repository map and compatibility
 
@@ -43,19 +44,20 @@
 
 - Canonical project skills live in `.agents/skills/` (see its `README.md`); `.claude/skills/` entries of the same name are thin adapters. Edit the canonical file only.
 - Use the smallest relevant method: `ponytail` for scope, `systematic-debugging` for nontrivial failures, `verification-before-completion` for claims, `lakomics-development` for component-specific work. `ponytail-review` is an optional read-only complexity review, not correctness approval.
-- Delegate only substantive independent investigation or implementation. Trivial edits, a few reads, and tightly coupled changes stay inline unless the user explicitly delegates them.
-- The controller owns scope, integration, and final claims. Give each worker a bounded goal, context, exact read/write scope, constraints, acceptance criteria, and evidence requirements. Workers and reviewers never delegate further.
-- Parallel investigation is fine; parallel implementation requires disjoint write sets and agreed interfaces. Serialize dependent or overlapping work and preserve concurrent changes.
-- Review actual changes and evidence, not a worker's success summary. Use a separate reviewer when risk warrants and tools allow; otherwise review inline and disclose that.
-- Intended routing: a Claude Code controller (Opus 5.5) delegates bounded implementation to Codex CLI (`codex exec`) — `gpt-6-astra` at high effort for difficult work, `gpt-6-sol` at medium effort for routine, clearly specified work. The host's own instructions own the exact command and difficulty criteria. Confirm the actual model from command/tool output, report an unavailable model instead of substituting one, and never invent a model argument.
+- Delegate only substantive independent investigation or implementation; trivial edits and tightly coupled changes stay inline unless the user explicitly delegates them. Parallel implementation requires disjoint write sets; serialize overlapping work. Workers and reviewers never delegate further.
+- The controller owns scope, integration, and final claims. Brief each worker with a bounded goal, context, exact read/write scope, constraints, acceptance criteria, and required evidence.
+- Implementation workers are Codex CLI (`codex exec`): `gpt-6-astra` at high effort for difficult work, `gpt-6-sol` at medium effort for routine, clearly specified work. The host's instructions own the exact command and difficulty criteria. Confirm the actual model from command output; report an unavailable model instead of substituting one.
 
 ## Verification
 
 - Start with the most relevant targeted check; broaden only for real behavioral risk or evidence of a cross-module problem. Add tests when requested or when a realistic regression would otherwise escape existing coverage.
+- Before reporting a code change, review its actual diff for bugs; a worker's or your own summary is not a review. Use a separate reviewer when risk warrants and tools allow; otherwise disclose that the review was inline.
+- For investigation or research, mark what could not be confirmed and say where you looked.
+- For performance work, measure before optimizing and follow `docs/agents/implementation.md` (Performance work).
 - Reuse inspected successful evidence unless later edits or changed inputs invalidate it. Planning, review, delegation, commit, or completion is not itself a reason to rerun checks.
 - For purely visual changes (CSS, spacing, typography, color, shadow, animation), skip automated tests and production builds unless there is plausible compile or behavioral risk; report whether rendering was inspected.
-- Keep evidence levels distinct: static checks, frontend/browser checks, native Tauri acceptance, Android device checks, and production sync. Fixture or browser success does not prove native integration or live deployment.
-- Report changed behavior, checks actually run with results, and remaining gaps. Never claim tests passed from source inspection or a native fix from compilation alone.
+- Keep evidence levels distinct: static checks, frontend/browser checks, native Tauri acceptance, Android device checks, and production sync. Fixture or browser success does not prove native integration or live deployment. Never claim tests passed from source inspection or a native fix from compilation alone.
+- Report checks actually run with results, and remaining gaps.
 
 ## Formatting and runtime safety
 
@@ -67,9 +69,9 @@
 
 ## References and records
 
-- Start at `docs/README.md` and read only what is relevant: product terms `CONTEXT.md`; UI `DESIGN.md` and `docs/agents/pc-design-reference.md`; architecture, the relevant Accepted ADRs in `docs/adr/`; implementation/review `docs/agents/implementation.md`.
+- Start at `docs/README.md` and read only what is relevant: product terms `CONTEXT.md`; UI `DESIGN.md` and `docs/agents/pc-design-reference.md`; architecture, the relevant Accepted ADRs in `docs/adr/`; implementation/review/performance `docs/agents/implementation.md`.
 - Before substantial Works/Collection work, read `docs/agents/lakomics-works-handoff-v2.md`, `docs/agents/pc-design-reference.md`, and `docs/agents/works-viewer-design.md`. Historical prototypes are references, not code to copy.
 - Current sources, migrations, and contracts define implementation; the backlog defines intended work. Stale memory and historical plans are not instructions; do not resurrect retired plans.
 - Record bugs, priorities, and ideas in `docs/roadmap/lakomics-backlog.md` when asked. Use GitHub Issues only when requested or when the task already lives there; do not create competing backlogs.
 - Non-`main` branches are temporary. Delete remote branches only with explicit authorization after a verified merge; retained snapshots use separately authorized tags, not long-lived branches.
-- Search before reading broadly, batch related reads, and run independent checks concurrently. Bound output and runtime without hiding failures; follow host limits on persistent processes.
+- Bound output and runtime without hiding failures; follow host limits on persistent processes.
