@@ -168,11 +168,25 @@ impl Library {
         binding
             .map(|(external_id, last_synced_at, snapshot)| {
                 let (media_type, movie_id) = parse_binding_identity(&external_id)?;
-                let series = snapshot.as_deref().map(serde_json::from_str::<serde_json::Value>).transpose()
-                    .map_err(|_| LibraryError::TmdbInvalidResponse)?
-                    .and_then(|value| value.get("series").cloned()).filter(|value| !value.is_null())
-                    .map(serde_json::from_value).transpose().map_err(|_| LibraryError::TmdbInvalidResponse)?;
-                Ok(TmdbConnection { movie_id, media_type: Some(media_type.into()), series, last_synced_at })
+                #[derive(Default, serde::Deserialize)]
+                struct DetailSnapshot {
+                    #[serde(default)]
+                    series: Option<super::models::TmdbSeriesData>,
+                    #[serde(default)]
+                    film: Option<super::models::TmdbFilmData>,
+                }
+                let details = snapshot.as_deref().map(serde_json::from_str::<DetailSnapshot>).transpose()
+                    .map_err(|_| LibraryError::TmdbInvalidResponse)?.unwrap_or_default();
+                let mut film = if media_type == "movie" { details.film } else { None };
+                if let Some(related) = film.as_mut().and_then(|film| film.related.as_mut()) {
+                    let mut query = connection.prepare(
+                        "SELECT collection_id FROM collection_external_bindings WHERE provider = 'tmdb' AND external_id = ?1"
+                    )?;
+                    for part in &mut related.parts {
+                        part.local_collection_id = query.query_row([part.movie_id.to_string()], |row| row.get(0)).optional()?;
+                    }
+                }
+                Ok(TmdbConnection { movie_id, media_type: Some(media_type.into()), series: details.series, film, last_synced_at })
             })
             .transpose()
     }
@@ -1084,6 +1098,41 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
+    }
+
+    #[test]
+    fn film_connection_reads_old_snapshots_and_resolves_current_local_bindings() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = apply_movie(&library, movie(), None, None, None, None);
+        assert!(library.get_tmdb_connection(&created.id).unwrap().unwrap().film.is_none());
+        let mut related = movie();
+        related.id = 55;
+        related.title = "Related film".into();
+        related.snapshot_json = snapshot(&related);
+        let local = apply_movie(&library, related, None, None, None, None);
+        let mut fetched = movie();
+        let mut json: serde_json::Value = serde_json::from_str(&fetched.snapshot_json).unwrap();
+        json["film"] = serde_json::json!({
+            "cast": [{"name": "Actor", "character": "Role"}],
+            "releases": [{"country": "KR", "releaseType": 3, "date": "1998-02-28", "certification": "15"}],
+            "related": {"collectionName": "Franchise", "parts": [
+                {"movieId": 55, "title": "Related film", "releaseDate": "2000-01-01", "posterPath": null},
+                {"movieId": 56, "title": "External film", "releaseDate": null, "posterPath": null, "localCollectionId": "stale"}]}
+        });
+        fetched.snapshot_json = json.to_string();
+        library.refresh_fetched_tmdb_movie(&created.id, fetched).unwrap();
+        let film = library.get_tmdb_connection(&created.id).unwrap().unwrap().film.unwrap();
+        assert_eq!(film.cast[0].character, "Role");
+        assert_eq!(film.releases[0].certification, "15");
+        let parts = film.related.unwrap().parts;
+        assert_eq!(parts[0].local_collection_id.as_deref(), Some(local.id.as_str()));
+        assert!(parts[1].local_collection_id.is_none());
+        library.connection().unwrap().execute(
+            "DELETE FROM collection_external_bindings WHERE collection_id = ?1", [&local.id]
+        ).unwrap();
+        let film = library.get_tmdb_connection(&created.id).unwrap().unwrap().film.unwrap();
+        assert!(film.related.unwrap().parts[0].local_collection_id.is_none());
     }
 
     #[test]

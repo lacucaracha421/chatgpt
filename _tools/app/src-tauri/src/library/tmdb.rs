@@ -5,7 +5,7 @@ use url::Url;
 
 use super::{
     error::LibraryError,
-    models::{TmdbCredentials, TmdbImageRef, TmdbRemoteMovie, TmdbSearchResult, TmdbSeriesData, TmdbSeason, TmdbEpisode},
+    models::{TmdbFilmData, TmdbFilmCast, TmdbFilmRelease, TmdbRelatedFilms, TmdbRelatedFilm, TmdbCredentials, TmdbImageRef, TmdbRemoteMovie, TmdbSearchResult, TmdbSeriesData, TmdbSeason, TmdbEpisode},
     work_artwork::MAX_WORK_ARTWORK_BYTES,
 };
 
@@ -169,7 +169,13 @@ impl TmdbClient {
         if let Some(english) = english {
             merge_raw_movie(&mut korean, english);
         }
-        normalize_raw_movie(korean)
+        normalize_with_related(korean, |collection_id| {
+            let mut url = Url::parse(&format!("{API_ORIGIN}/collection/{collection_id}"))
+                .expect("TMDB API origin is a compile-time-valid URL");
+            url.query_pairs_mut().append_pair("language", "ko-KR");
+            let mut response = self.get(&url, &token)?;
+            read_body(&mut response)
+        })
     }
 
     pub(crate) fn download_original(&self, file_path: &str) -> Result<Vec<u8>, LibraryError> {
@@ -233,6 +239,7 @@ struct RawMovie {
     credits: Option<RawCredits>,
     images: Option<RawImages>,
     release_dates: Option<RawReleaseDates>,
+    belongs_to_collection: Option<RawCollectionIdentity>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -244,12 +251,17 @@ struct RawReleaseDates {
 #[derive(Debug, Deserialize)]
 struct RawCountryReleases {
     #[serde(default)]
+    iso_3166_1: String,
+    #[serde(default)]
     release_dates: Vec<RawRelease>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawRelease {
     release_date: Option<String>,
+    #[serde(rename = "type")]
+    release_type: Option<u8>,
+    certification: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,7 +272,28 @@ struct RawName {
 #[derive(Debug, Deserialize)]
 struct RawCredits {
     #[serde(default)]
+    cast: Vec<RawCastMember>,
+    #[serde(default)]
     crew: Vec<RawCrewMember>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCastMember {
+    name: Option<String>,
+    character: Option<String>,
+    order: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCollectionIdentity {
+    id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCollection {
+    id: i64,
+    name: Option<String>,
+    parts: Vec<RawSearchMovie>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -286,6 +319,7 @@ struct RawImage {
 
 #[derive(Debug, Serialize)]
 struct TmdbSnapshot<'a> {
+    film: Option<&'a TmdbFilmData>,
     id: i64,
     title: &'a str,
     original_title: Option<&'a str>,
@@ -387,6 +421,7 @@ fn normalize_series(mut raw: serde_json::Value, mut seasons: Vec<TmdbSeason>) ->
     result.media_type = Some("tv".into());
     result.series = Some(series);
     let mut snapshot: serde_json::Value = serde_json::from_str(&result.snapshot_json).map_err(|_| LibraryError::TmdbInvalidResponse)?;
+    snapshot.as_object_mut().unwrap().remove("film");
     snapshot["media_type"] = serde_json::json!("tv");
     snapshot["directors"] = serde_json::json!(result.directors);
     snapshot["series"] = serde_json::json!(result.series);
@@ -470,7 +505,7 @@ fn normalize_movie(json: &str) -> Result<TmdbRemoteMovie, LibraryError> {
     normalize_raw_movie(parse_raw_movie(json)?)
 }
 
-fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
+fn normalize_raw_movie(mut raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
     if raw.id <= 0 {
         return Err(LibraryError::TmdbInvalidResponse);
     }
@@ -480,6 +515,21 @@ fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
         .ok_or(LibraryError::TmdbInvalidResponse)?;
     let original_title = original_title.filter(|original| original != &title);
     let overview = non_empty(raw.overview);
+    let mut cast = raw.credits.as_mut().map(|credits| std::mem::take(&mut credits.cast)).unwrap_or_default();
+    cast.sort_by_key(|person| person.order.unwrap_or(i64::MAX));
+    let cast = cast.into_iter().filter_map(|person| Some(TmdbFilmCast {
+        name: non_empty(person.name)?,
+        character: non_empty(person.character).unwrap_or_default(),
+    })).take(8).collect();
+    let mut releases: Vec<_> = raw.release_dates.iter().flat_map(|dates| &dates.results)
+        .flat_map(|country| country.release_dates.iter().filter_map(|release| Some(TmdbFilmRelease {
+            country: country.iso_3166_1.clone(),
+            release_type: release.release_type.filter(|kind| (1..=6).contains(kind))?,
+            date: normalized_date(release.release_date.as_deref())?,
+            certification: release.certification.as_deref().unwrap_or_default().trim().to_owned(),
+        }))).collect();
+    releases.sort_by(|a, b| a.date.cmp(&b.date));
+    let film = TmdbFilmData { cast, releases, related: None };
     let release_date = raw.release_dates.into_iter()
         .flat_map(|dates| dates.results)
         .flat_map(|country| country.release_dates)
@@ -547,6 +597,7 @@ fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
         snapshot_json: String::new(),
     };
     movie.snapshot_json = serde_json::to_string(&TmdbSnapshot {
+        film: Some(&film),
         id: movie.id,
         title: &movie.title,
         original_title: movie.original_title.as_deref(),
@@ -566,7 +617,53 @@ fn normalize_raw_movie(raw: RawMovie) -> Result<TmdbRemoteMovie, LibraryError> {
     Ok(movie)
 }
 
+fn normalized_date(value: Option<&str>) -> Option<String> {
+    chrono::NaiveDate::parse_from_str(value?.get(..10)?, "%Y-%m-%d")
+        .ok().map(|date| date.format("%Y-%m-%d").to_string())
+}
+
+// Collection enrichment is optional: its network or payload failure never rejects a film.
+fn normalize_with_related(
+    raw: RawMovie,
+    fetch_collection: impl FnOnce(i64) -> Result<String, LibraryError>,
+) -> Result<TmdbRemoteMovie, LibraryError> {
+    let collection_id = raw.belongs_to_collection.as_ref().map(|collection| collection.id).filter(|id| *id > 0);
+    let mut movie = normalize_raw_movie(raw)?;
+    if let Some(related) = collection_id.and_then(|id| {
+        fetch_collection(id).ok().and_then(|json| normalize_related(&json, id, movie.id).ok())
+    }) {
+        let mut snapshot: serde_json::Value = serde_json::from_str(&movie.snapshot_json)
+            .map_err(|_| LibraryError::TmdbInvalidResponse)?;
+        snapshot["film"]["related"] = serde_json::to_value(related)
+            .map_err(|_| LibraryError::TmdbInvalidResponse)?;
+        movie.snapshot_json = snapshot.to_string();
+    }
+    Ok(movie)
+}
+
+fn normalize_related(json: &str, collection_id: i64, movie_id: i64) -> Result<TmdbRelatedFilms, LibraryError> {
+    let raw: RawCollection = serde_json::from_str(json).map_err(|_| LibraryError::TmdbInvalidResponse)?;
+    if raw.id != collection_id { return Err(LibraryError::InvalidTmdbIdentity); }
+    let mut parts = raw.parts.into_iter().filter(|part| part.id > 0 && part.id != movie_id)
+        .filter_map(|part| Some(TmdbRelatedFilm {
+            movie_id: part.id,
+            title: non_empty(part.title).or_else(|| non_empty(part.original_title))?,
+            release_date: normalized_date(part.release_date.as_deref()),
+            poster_path: checked_optional_path(part.poster_path).ok().flatten(),
+            local_collection_id: None,
+        })).collect::<Vec<_>>();
+    parts.sort_by(|a, b| a.release_date.is_none().cmp(&b.release_date.is_none())
+        .then_with(|| a.release_date.cmp(&b.release_date)).then_with(|| a.movie_id.cmp(&b.movie_id)));
+    Ok(TmdbRelatedFilms {
+        collection_name: non_empty(raw.name).unwrap_or_default(),
+        parts,
+    })
+}
+
 fn merge_raw_movie(primary: &mut RawMovie, fallback: RawMovie) {
+    if primary.belongs_to_collection.is_none() {
+        primary.belongs_to_collection = fallback.belongs_to_collection;
+    }
     if primary.release_dates.is_none() {
         primary.release_dates = fallback.release_dates;
     }
@@ -775,6 +872,74 @@ fn push_unique_limited(mut values: Vec<String>, value: String) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn film_cast_order_limit_and_release_details() {
+        let cast: Vec<_> = (0..10).rev().map(|order| serde_json::json!({
+            "order": order, "name": format!("Actor {order}"), "character": format!("Role {order}")
+        })).collect();
+        let raw = serde_json::json!({"id": 1, "title": "Film", "release_date": "2025-02-01",
+            "credits": {"cast": cast, "crew": [{"job": "Director", "name": "Director"}]},
+            "release_dates": {"results": [
+                {"iso_3166_1": "KR", "release_dates": [
+                    {"type": 3, "release_date": "2025-02-02T00:00:00.000Z", "certification": "12"},
+                    {"type": 4, "release_date": "2025-03-01T00:00:00.000Z", "certification": ""}]},
+                {"iso_3166_1": "US", "release_dates": [
+                    {"type": 1, "release_date": "2025-01-01T00:00:00.000Z", "certification": "PG"},
+                    {"type": 3, "release_date": "invalid"}]}]}});
+        let movie = super::normalize_movie(&raw.to_string()).unwrap();
+        let snapshot: serde_json::Value = serde_json::from_str(&movie.snapshot_json).unwrap();
+        let film: super::TmdbFilmData = serde_json::from_value(snapshot["film"].clone()).unwrap();
+        assert_eq!(film.cast.len(), 8);
+        assert_eq!(film.cast[0].name, "Actor 0");
+        assert_eq!(film.cast[7].character, "Role 7");
+        assert_eq!(movie.directors, vec!["Director"]);
+        assert_eq!(movie.release_date.as_deref(), Some("2025-01-01"));
+        assert_eq!(film.releases.len(), 3);
+        assert_eq!(film.releases[0].country, "US");
+        assert_eq!(film.releases[1].release_type, 3);
+        assert_eq!(film.releases[1].date, "2025-02-02");
+        assert_eq!(film.releases[1].certification, "12");
+        assert_eq!(film.releases[2].certification, "");
+    }
+
+    #[test]
+    fn film_collection_identity_and_parts() {
+        let raw = super::parse_raw_movie(r#"{"id":1,"title":"Film","belongs_to_collection":{"id":7}}"#).unwrap();
+        let movie = super::normalize_with_related(raw, |id| {
+            assert_eq!(id, 7);
+            Ok(r#"{"id":7,"name":"Franchise","parts":[
+                {"id":4,"title":"Future","release_date":""},
+                {"id":3,"title":"Third","release_date":"2025-01-01","poster_path":"/third.jpg"},
+                {"id":1,"title":"Self","release_date":"2020-01-01"},
+                {"id":2,"title":"Second","release_date":"2022-01-01"}]}"#.into())
+        }).unwrap();
+        let snapshot: serde_json::Value = serde_json::from_str(&movie.snapshot_json).unwrap();
+        let film: super::TmdbFilmData = serde_json::from_value(snapshot["film"].clone()).unwrap();
+        let related = film.related.unwrap();
+        assert_eq!(related.collection_name, "Franchise");
+        assert_eq!(related.parts.iter().map(|part| part.movie_id).collect::<Vec<_>>(), vec![2, 3, 4]);
+        assert_eq!(related.parts[1].poster_path.as_deref(), Some("/third.jpg"));
+        let unconnected = super::parse_raw_movie(r#"{"id":1,"title":"Film"}"#).unwrap();
+        super::normalize_with_related(unconnected, |_| panic!("No collection to fetch")).unwrap();
+    }
+
+    #[test]
+    fn collection_fetch_failure_does_not_fail_film_apply_or_refresh() {
+        use crate::library::{Library, models::{TmdbApplyRequest, TmdbApplyTarget}};
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let fetched = |failure| super::normalize_with_related(
+            super::parse_raw_movie(r#"{"id":1,"title":"Film","belongs_to_collection":{"id":7}}"#).unwrap(),
+            |_| failure,
+        ).unwrap();
+        let created = library.apply_fetched_tmdb_movie(TmdbApplyRequest {
+            media_type: None, target: TmdbApplyTarget::New, movie_id: 1, poster_path: None, backdrop_path: None,
+        }, fetched(Err(LibraryError::TmdbUnavailable)), None, None).unwrap();
+        library.refresh_fetched_tmdb_movie(&created.id, fetched(Err(LibraryError::TmdbTimedOut))).unwrap();
+        library.refresh_fetched_tmdb_movie(&created.id, fetched(Ok("invalid JSON".into()))).unwrap();
+        assert!(library.get_tmdb_connection(&created.id).unwrap().unwrap().film.unwrap().related.is_none());
+    }
+
     #[test]
     fn tv_search_uses_names_and_air_dates_without_movie_id_collision() {
         let results = super::parse_search(r#"{"results":[{"id":12,"name":"시리즈","original_name":"Series","first_air_date":"2024-01-01"}]}"#).unwrap();

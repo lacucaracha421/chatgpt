@@ -1,7 +1,8 @@
 import { displayGenres } from "./displayGenres";
 import { displayDate } from "../shared/displayDate";
 import { useState } from "react";
-import type { CollectionSummary, TmdbSeriesData } from "../library/types";
+import type { CollectionSummary, TmdbFilmData, TmdbSeriesData } from "../library/types";
+import { FilmDetails } from "./FilmDetails";
 import { SeriesSeasons } from "./SeriesSeasons";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Menu } from "../shared/ui/Menu";
@@ -10,6 +11,8 @@ import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 
 export type MovieCollectionDetailProps = {
   series?: TmdbSeriesData | null;
+  film?: TmdbFilmData | null;
+  onOpenCollection?: (collectionId: string) => void;
   collection: CollectionSummary;
   posterUrl: string | null;
   backdropUrl: string | null;
@@ -26,6 +29,8 @@ export type MovieCollectionDetailProps = {
 
 export function MovieCollectionDetail({
   series,
+  film,
+  onOpenCollection,
   collection,
   posterUrl,
   backdropUrl,
@@ -85,14 +90,15 @@ export function MovieCollectionDetail({
             {collection.originalTitle?.trim() && collection.originalTitle !== collection.name && <p className="movie-collection-detail__original">{collection.originalTitle}</p>}
             {!sidebar && facts.length > 0 && <p className="movie-collection-detail__facts">{facts.join(" · ")}</p>}
             {!sidebar && <div className="movie-collection-detail__scores">
-              {collection.externalScore !== null && <span>TMDB {collection.externalScore}</span>}
-              {collection.myScore !== null && <span>내 평점 {collection.myScore}</span>}
+              {collection.myScore !== null && <strong className="movie-collection-detail__personal-score">내 평점 {collection.myScore}</strong>}
+              {collection.externalScore !== null && <span className="movie-collection-detail__external-score">TMDB {collection.externalScore}</span>}
             </div>}
           </div>
         </div>
       </section>
       {collection.description?.trim() && <p className="movie-collection-detail__description">{collection.description}</p>}
       {collection.overview?.trim() && <p className="movie-collection-detail__overview">{collection.overview}</p>}
+      {!series && film && <FilmDetails key={collection.id} film={film} onOpenCollection={onOpenCollection} />}
       {series && <SeriesSeasons key={collection.id} series={series} />}
       {providerError && <p className="movie-collection-detail__provider-error" role="alert">{providerError}</p>}
     </article>

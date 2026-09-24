@@ -142,10 +142,57 @@ pub struct TmdbImageCandidate {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TmdbConnection {
+    #[serde(default)]
+    pub film: Option<TmdbFilmData>,
     pub series: Option<TmdbSeriesData>,
     pub media_type: Option<String>,
     pub movie_id: i64,
     pub last_synced_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbFilmData {
+    #[serde(default)]
+    pub cast: Vec<TmdbFilmCast>,
+    #[serde(default)]
+    pub releases: Vec<TmdbFilmRelease>,
+    #[serde(default)]
+    pub related: Option<TmdbRelatedFilms>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbFilmCast {
+    pub name: String,
+    pub character: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbFilmRelease {
+    pub country: String,
+    pub release_type: u8,
+    pub date: String,
+    pub certification: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbRelatedFilms {
+    pub collection_name: String,
+    pub parts: Vec<TmdbRelatedFilm>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TmdbRelatedFilm {
+    pub movie_id: i64,
+    pub title: String,
+    pub release_date: Option<String>,
+    pub poster_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_collection_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

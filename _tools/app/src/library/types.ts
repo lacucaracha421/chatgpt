@@ -566,7 +566,23 @@ export type TmdbMoviePreview = {
   backdrops: TmdbImageCandidate[];
 };
 
+export type TmdbFilmData = {
+  cast: Array<{ name: string; character: string }>;
+  releases: Array<{ country: string; releaseType: number; date: string; certification: string }>;
+  related: {
+    collectionName: string;
+    parts: Array<{
+      movieId: number;
+      title: string;
+      releaseDate: string | null;
+      posterPath: string | null;
+      localCollectionId?: string | null;
+    }>;
+  } | null;
+};
+
 export type TmdbConnection = {
+  film?: TmdbFilmData | null;
   series?: TmdbSeriesData | null;
   mediaType?: "movie" | "tv" | null;
   movieId: number;

@@ -813,6 +813,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onTmdbSearchConsumed={() => setView(current => current.kind === "collection" ? { kind: "collection", collectionId: current.collectionId } : current)}
                     collections={collections}
                     onOpenSettings={() => navigateView({ kind: "settings", section: "catalog" })}
+                    onOpenCollection={(collectionId) => navigateView({ kind: "collection", collectionId })}
                     onExit={() => {
                       const detailCollection = collections.find((item) => item.id === view.collectionId);
                       navigateBack(collectionReturnViewRef.current ?? {

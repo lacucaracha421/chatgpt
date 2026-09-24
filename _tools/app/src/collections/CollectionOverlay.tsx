@@ -38,9 +38,10 @@ type CollectionOverlayProps = {
   onExit: () => void;
   onChanged: () => Promise<void>;
   onOpenSettings: () => void;
+  onOpenCollection?: (collectionId: string) => void;
 };
 
-export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearchConsumed, collections, onExit, onChanged, onOpenSettings }: CollectionOverlayProps) {
+export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearchConsumed, collections, onExit, onChanged, onOpenSettings, onOpenCollection }: CollectionOverlayProps) {
   const sidebar = Boolean(useWorkspaceChrome());
   const { gateway, library } = useLibrary();
   const { privacyMode } = usePrivacy();
@@ -569,6 +570,8 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
       ) : isMovie && collection ? (
         <MovieCollectionDetail
           series={tmdbConnection?.series}
+          film={tmdbConnection?.mediaType === "tv" ? null : tmdbConnection?.film}
+          onOpenCollection={onOpenCollection}
           collection={collection}
           posterUrl={moviePosterUrl}
           backdropUrl={movieBackdropUrl}
