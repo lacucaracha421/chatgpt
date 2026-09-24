@@ -4,13 +4,16 @@ Living source of truth for **active** Lakomics work only. Completed, superseded,
 
 Reconciled 2026-09-20 after the user separated completed server-authority rollouts from remaining client cleanup, accepted current media delivery, and closed the current character-accuracy improvement pass. See the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-20--authority-scope-split-and-product-acceptance). This is a scope/status reconciliation, not a new deployment or Windows full-system audit.
 
-Updated 2026-09-23 (evening): the Android 0.7 browse-first redesign, thumbnail loading work (0.7.4–0.7.6) and the in-range dependency update are archived in the [2026-09-23 evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-23-evening--mobile-07-thumbnails-and-dependencies). `CHAR-AUTO-007` reached stage 2d (shadow scoring); stage 3 now waits for reviewed shadow evidence.
+Updated 2026-09-23 (evening): the Android 0.7 browse-first redesign, thumbnail loading work (0.7.4–0.7.6) and the in-range dependency update are archived in the [2026-09-23 evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-23-evening--mobile-07-thumbnails-and-dependencies). `CHAR-AUTO-007` reached stage 2d (shadow scoring) that evening.
+
+Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is implemented; `DEV-TEST-001` is archived in the [2026-09-24 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-24--rust-test-runtime).
 
 ## Current priority
 
 1. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. Next: switch 젠레스 (시시아 excluded), 명조, 아이돌 and 리버스 on the user's PC, spot-check S36 acceptances, then widen.
 2. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
-3. **WORKS-001** — small Film polish: cast/director, release information, and related works.
+3. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
+4. **MOBILE-PARITY-001** — Film details, personal metadata edits, similarity review and Library Trash on Android, in that order.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
@@ -129,6 +132,18 @@ Status: `HOLD`
 Risk: HIGH.
 
 Global cross-device deletion remains intentionally deferred. Require tombstones, grace period, acknowledgement/reconciliation, explicit purge, conflict handling, and recovery before activation.
+
+## MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
+
+Status: `TODO` — user-selected scope, 2026-09-24. Each slice needs its own server/APK rollout authorization.
+
+The user chose these desktop features for Android, in this suggested order (smallest and safest first):
+1. **Film details** (read-only): show `WORKS-001` cast, release info and related works in mobile Collections. Publish the Film snapshot block alongside the TV `series` block (`src-tauri/src/cloud/collections.rs`, `committed_series`), then render it; local related works open the local work.
+2. **Personal Collection metadata edits**: my rating, Showcase and memo, through the `MOBILE-WRITE-002` durable intent / expected-revision / receipt model proven by bookmarks. Works with the PC off and appears on PC without a manual sync.
+3. **Similarity review**: mobile shows the open review pairs and records `keep_existing` / `replace_existing` / `keep_both`; the PC applies file-level results. A decision must never delete or replace an original before the PC applies it under the existing ADR-0007 rules.
+4. **Library Trash**: move assets to the Library Trash from mobile, and browse/restore it. This activates `MOBILE-003`: it must use the tombstone, grace-period, acknowledgement and recovery protocol, never immediate deletion. Emptying the trash stays PC-only unless separately decided.
+
+Deferred but wanted on mobile later: character registration and reference-character management. Keep them PC-only until the user reopens them.
 
 # Future-work notes — 2026-09-21
 
@@ -607,12 +622,6 @@ Status: `HOLD` — the client-side warm-up covers everyday browsing.
 
 On the tablet an uncached thumbnail takes about 1.5–2.4 s: the Tokyo API answers a ticket in about 0.07–0.1 s and the nearest Cloudflare edge (ICN) is 3 ms away, so the time is R2 storage response latency. 0.7.4 parallelised and prefetched; 0.7.6 warms the whole Library into the native cache (about 200 thumbnails/min). Remaining slow cases are newly captured images and a cleared cache. Options if they matter: serve thumbnails from the Tokyo server's disk (13 GB free on 2026-09-23; ~360 MB for the current library) in batched requests, or move derived thumbnails to an APAC-hinted bucket. Both need server work, a copy of production thumbnails and deployment approval.
 
-## DEV-TEST-001 — Rust test suite runtime
-
-Status: `TODO` — optional.
-
-`cargo test --lib -- --skip character_` takes about 4–5 minutes of run time plus about a minute to link a 574 MB debug test binary. Ignoring the three realistic-scale tests that exceeded 60 s did not help: alone they take 34 s and 10 s, so the wall time is aggregate CPU contention across ~1,280 tests on 12 threads. Measure per-test time (for example with `cargo-nextest`, which needs installation approval) before changing anything; a lighter test debuginfo profile is a separate link-time option.
-
 ## DEPS-001 — Vitest 5
 
 Status: `HOLD` — until `@testing-library/jest-dom` ships Vitest 5 matcher types.
@@ -625,7 +634,7 @@ The character UI/management workflow and current accuracy-improvement pass are a
 
 ## CHAR-AUTO-007 — Evidence-based accuracy plan (2026-09-23 re-analysis)
 
-Status: `IN_PROGRESS` — stages 1–2d done (2026-09-23): full-library S36 features extracted, a shadow policy pinned in `_tools/app/character-runtime/s36_policy.json` (automatic knn3 ≤ 0.1304 after ≥100 prior rejections, recommendations ≤ 0.1490), and in-app shadow scoring recording verdicts. The S36 review screen (stage 4 brought forward; series view → `S36 확인`) lets the user judge `automatic`/`recommended` shadow candidates through the normal manual decision path and shows running automatic precision and recommendation acceptance. Next: collect enough judgments, then the publication switch (stage 3), separately authorized.
+Status: `IN_PROGRESS` — stage 3 implemented 2026-09-24 as a machine-local per-series switch (see Current priority); next is enabling series on the user's PC and spot-checking S36 acceptances. Earlier: stages 1–2d done (2026-09-23): full-library S36 features extracted, a shadow policy pinned in `_tools/app/character-runtime/s36_policy.json` (automatic knn3 ≤ 0.1304 after ≥100 prior rejections, recommendations ≤ 0.1490), and in-app shadow scoring recording verdicts. The S36 review screen (stage 4 brought forward; series view → `S36 확인`) lets the user judge `automatic`/`recommended` shadow candidates through the normal manual decision path and shows running automatic precision and recommendation acceptance. Stage 3 used these judgments (232/241 correct at knn3 ≤ 0.1085).
 
 Two read-only analyses of the active library (an Opus pass and an independent Fable review; scripts in the session scratchpad, not tracked) found:
 - The CCIP metric model is exactly `0.5 × (1 − cosine)` of L2-normalized features, so comparisons need no ONNX batching.
@@ -809,7 +818,7 @@ Evaluate Zed on the Linux Lakomics checkout only as an editor/agent workflow imp
 
 This is guidance, not authorization to start or mutate production data.
 
-1. `CHAR-AUTO-007` shadow review until stage 3 can be decided.
+1. `CHAR-AUTO-007` enable S36 per series on the user's PC, spot-check acceptances, then widen.
 2. `CLOUD-POST-001` only the residual publication/compatibility scope, when its consumer and ownership prerequisites are met; do not repeat completed authority rollouts.
 3. `WORKS-001` small Film polish.
 4. `LONG-001` AV external-source / candidate chooser when AV entry friction is worth tackling.

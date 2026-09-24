@@ -2,6 +2,12 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-24 — Rust test runtime
+
+### DEV-TEST-001 — Rust test suite runtime
+
+Status: `DONE` — commit `38e411a` cut the full Rust suite from about 6 minutes to about 70 s: bundled SQLite built with `SQLITE_DEFAULT_MEMSTATUS=0` (the global memory-statistics mutex serialized test threads), test HTTP fixtures shut down explicitly instead of waiting for client/idle timeouts, and catalog-scale fixtures are `#[ignore]`d (run with `--ignored`). Previously measured: about 4–5 minutes of run time plus about a minute of linking.
+
 ## Closure checkpoint — 2026-09-23 (night) — Verification-only items
 
 The user closed the remaining verification-only items as complete on 2026-09-23 without a separately recorded acceptance run. Their last backlog text is kept below for reference; reopen with a concrete failure rather than reusing these IDs.
