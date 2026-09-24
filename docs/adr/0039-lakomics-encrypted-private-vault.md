@@ -1,6 +1,6 @@
 # Lakomics encrypts the Private Vault itself
 
-Status: Accepted
+Status: Accepted; amended 2026-09-24 (Android access via OTG, see the amendment at the end)
 
 Supersedes: the "Lakomics does not encrypt or unlock containers" rule of `docs/superpowers/specs/2026-09-13-private-vault-design.md` (LONG-003). The rest of that spec (desktop-only, never in the main library, cloud or Android) still applies unless changed below.
 
@@ -44,4 +44,47 @@ Does not protect: the existence of a Lakomics vault, its approximate total size 
 
 ## Boundaries
 
-Vault data still never enters the main library database, the cloud or Android. The main library keeps only the vault UUID and last root path. Native Windows/Linux credential storage, real USB removal and large-video playback are native acceptance items; fixture tests do not prove them.
+Vault data still never enters the main library database or the cloud. Android is excluded except through the 2026-09-24 amendment below (direct USB-C OTG access on the tablet). The main library keeps only the vault UUID and last root path. Native Windows/Linux credential storage, real USB removal and large-video playback are native acceptance items; fixture tests do not prove them.
+
+## Amendment (2026-09-24): Android access via OTG
+
+User decision (2026-09-24), following the accepted design in [`docs/research/mobile-private-vault-design-20260924.md`](../research/mobile-private-vault-design-20260924.md) (option A): the Android tablet may open the vault USB directly over USB-C OTG and decrypt on the tablet. The encrypted cloud copy (option B) is not adopted, and streaming through the PC (option C) stays rejected. Every PC rule above is unchanged.
+
+### Scope
+
+- Android tablet only, reading the vault USB through the Storage Access Framework (the user picks the USB root once; the tree permission is persisted).
+- First slice A1 is **read-only**: unlock with password or recovery key, list, view images and thumbnails, play videos with seeking, lock. The tablet writes nothing to the USB, not even orphan cleanup.
+- Writes (add, trash) are allowed only in a later slice A3, using a SAF write protocol (temporary document, rotate `index.prev.bin`, then rename) with the vault UUID re-checked in `vault.json` before every write, matching the PC write rules.
+
+### Still forbidden on Android
+
+- No cloud copy of the vault, its objects, its index or any key wrap.
+- No decrypted data at rest on the tablet: no plaintext temporary files, and the decrypted index lives only in memory.
+- The unlocked master key stays in native (Java) memory, is zeroed on lock, and is never passed to JavaScript.
+- Vault thumbnails and originals never go through the normal media cache or transfer paths (ThumbnailCache, MediaTransfer), the DocumentsProvider, share, the clipboard or temporary activities. Vault media is served only through a dedicated WebView route with `Cache-Control: no-store` and `nosniff`, with Range/206 support.
+
+### Unlock and remember
+
+- The tablet asks for the password or recovery key.
+- "Remember on this tablet" is **off by default**. When enabled, the master key is wrapped with a per-vault AndroidKeyStore key and stored only in that wrapped form, bound to the vault UUID. Optional biometric (fingerprint) unlock may gate the remembered key.
+- No automatic unlock until the vault USB is present again.
+
+### Auto-lock
+
+The vault locks, clearing the key and the vault UI, when:
+
+- the app has been in the background for 1 minute;
+- the screen turns off;
+- the OTG USB is detached;
+- a USB read or write fails with an I/O error;
+- the user chooses 잠그기.
+
+### Screens
+
+Vault screens set `FLAG_SECURE` (no screenshots or recents preview); on API 33+ recents screenshots are also disabled.
+
+### Format compatibility
+
+- Android follows the same format rules as the PC, with no Android-specific variant: header limits, AAD strings, HKDF info, nonce and AAD layout, final-chunk flag, length derivation, last-chunk authentication, recovery-key parsing, strict object ids, rejection of unknown index versions and tolerance of unknown JSON fields.
+- A golden fixture vault produced by the PC implementation is opened by both the PC and Android tests; any format change must keep both passing.
+- Real OTG/SAF random access, exFAT, unlock time, video seeking, unplug-to-lock, `FLAG_SECURE` and Keystore behaviour after reboot are device acceptance items; JVM and fixture tests do not prove them.
