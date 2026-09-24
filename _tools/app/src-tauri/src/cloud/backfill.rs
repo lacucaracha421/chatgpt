@@ -478,27 +478,35 @@ impl Library {
             [],
             |row| row.get::<_, i64>(0),
         )? != 0;
+        let queued = count("pending")?;
+        let failed = count("failed")?;
+        let replication_work_remains = queued + preparing + uploading + committing + failed > 0;
         let mut activity = super::activity::read_activity(&connection)?;
-        if !unresolved_replication_item_error {
-            if let Some(replication) = activity
-                .iter_mut()
-                .find(|item| item.direction == "replication")
-            {
-                if replication.last_error.as_deref() == Some(REPLICATION_ITEM_FAILURE_MESSAGE) {
-                    replication.last_error = None;
-                    replication.problems = 0;
-                }
+        if let Some(replication) = activity
+            .iter_mut()
+            .find(|item| item.direction == "replication")
+        {
+            let resolved_item_error = !unresolved_replication_item_error
+                && replication.last_error.as_deref() == Some(REPLICATION_ITEM_FAILURE_MESSAGE);
+            // A pass-level failure (it carries a reason code) is only recorded when a pass
+            // runs, and a pass runs only when there is work. Once no work remains, no later
+            // pass can clear it, so it would stay visible indefinitely.
+            let stale_pass_error = !replication_work_remains && replication.last_reason.is_some();
+            if resolved_item_error || stale_pass_error {
+                replication.last_error = None;
+                replication.last_reason = None;
+                replication.problems = 0;
             }
         }
         Ok(BackfillProgress {
             control_state: BackfillControlState::from_database(&control_value)?,
             total_assets,
-            queued: count("pending")?,
+            queued,
             preparing,
             uploading,
             committing,
             completed: count("synced")?,
-            failed: count("failed")?,
+            failed,
             active_workers: preparing + uploading + committing,
             last_error,
             activity,

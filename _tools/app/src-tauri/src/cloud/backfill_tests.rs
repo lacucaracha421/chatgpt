@@ -380,6 +380,62 @@ fn progress_hides_resolved_replication_item_activity_but_keeps_unresolved_retry_
 }
 
 #[test]
+fn progress_hides_stale_replication_pass_error_once_no_work_remains() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let source = temp.path().join("stale-pass-error.png");
+    fs::write(&source, png_bytes(36)).unwrap();
+    let id = ingest_png(&library, &source, "2026-09-02T00:00:00Z");
+    let pass_error =
+        "복제 연결을 확인하지 못했습니다. 서버 주소·연결 키와 네트워크를 확인해 주세요.";
+    let replication = |library: &Library| {
+        library
+            .cloud_backfill_progress()
+            .unwrap()
+            .activity
+            .into_iter()
+            .find(|item| item.direction == "replication")
+            .unwrap()
+    };
+
+    library.begin_cloud_activity("replication").unwrap();
+    library
+        .finish_cloud_activity_with(
+            "replication",
+            0,
+            1,
+            Some(pass_error),
+            Some(super::failure::CloudFailureReason::CredentialStoreLocked),
+        )
+        .unwrap();
+    let pending = replication(&library);
+    assert_eq!(pending.last_error.as_deref(), Some(pass_error));
+    assert_eq!(
+        pending.last_reason.as_deref(),
+        Some("credential_store_locked")
+    );
+    assert_eq!(pending.problems, 1);
+
+    library
+        .connection()
+        .unwrap()
+        .execute("UPDATE assets SET status='trash' WHERE id=?1", [&id])
+        .unwrap();
+    let idle = replication(&library);
+    assert_eq!(idle.last_error, None);
+    assert_eq!(idle.last_reason, None);
+    assert_eq!(idle.problems, 0);
+
+    // Without a reason code the failure is not a connection pass error (for example an
+    // upgrade pause), so it stays visible even with nothing left to send.
+    let upgrade = "서버 업데이트가 필요하여 동기화를 일시정지했습니다.";
+    library
+        .finish_cloud_activity("replication", 0, 1, Some(upgrade))
+        .unwrap();
+    assert_eq!(replication(&library).last_error.as_deref(), Some(upgrade));
+}
+
+#[test]
 fn bounded_scope_excludes_preexisting_pending_work_from_progress_and_claims() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
