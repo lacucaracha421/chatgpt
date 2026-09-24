@@ -162,6 +162,7 @@ Once the Linux PC publishes Collections with the personal-edit handshake, the ol
 - Collection publication resumes.
 - Private Vault on Windows: Credential Manager remember/auto-unlock, USB detection by drive letter, removal lock, in-app video playback.
 - FAULT game in WebView2 (`http://tauri.localhost` → `http://lakomics.localhost` original-image reads).
+- Collections authority (docs/research/collection-authority-design-20260924.md) may be activated before this update; the old Windows build is then fenced for Collections and its local-only edits are not carried over (the upgrade produces a salvage report).
 
 ## MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
 
