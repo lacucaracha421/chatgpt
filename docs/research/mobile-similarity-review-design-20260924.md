@@ -42,7 +42,7 @@ New server module `similarity_review.py`.
   - Refusals: `similarityReviewMissing`, `similarityAssetChanged`, `pendingSimilarityDecision`, `similarityAssetPendingTrash`.
   - Mobile Trash (slice 4) gets the mirror check.
 - **PC log:** `GET …/decisions?after&limit≤100`, publisher only.
-- **PC apply** (migration 0093: cursor, receipts, poll, feed state):
+- **PC apply** (migration 0094: cursor, receipts, poll, feed state, auto-compare queue):
   - Look ahead in the page for `withdrawn`.
   - Verify the local sha256 values, then call `decide_similarity_review` as-is.
   - A crash between the decision and the receipt is safe, because the same decision is idempotent.

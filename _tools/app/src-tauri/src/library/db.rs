@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 92;
+pub(crate) const SCHEMA_VERSION: i64 = 94;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -538,6 +538,16 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0092_mobile_character_review.sql"
             ))?;
         }
+        if version <= 92 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0093_trash_purge_pending.sql"
+            ))?;
+        }
+        if version <= 93 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0094_mobile_similarity_review.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -637,6 +647,98 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn v94_adds_empty_similarity_review_state_and_queues_only_new_materializations() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 93);
+        connection
+            .execute_batch(
+                "INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,projection,materialization)
+                 VALUES('done','normal',1,'{}','complete'),('later','normal',1,'{}','pending');",
+            )
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 93).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        for table in [
+            "mobile_similarity_review_sync",
+            "mobile_similarity_review_receipts",
+            "mobile_similarity_review_poll",
+            "mobile_similarity_review_feed_state",
+            "similarity_auto_compare_queue",
+        ] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "{table} starts empty");
+        }
+        // Existing complete Assets are not queued; a later pending -> complete transition is.
+        connection
+            .execute_batch(
+                "UPDATE asset_authority_state SET materialization='complete';",
+            )
+            .unwrap();
+        let queued: Vec<String> = connection
+            .prepare("SELECT asset_id FROM similarity_auto_compare_queue")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(queued, vec!["later".to_string()]);
+    }
+
+    #[test]
+    fn v93_adds_an_empty_purge_pending_table_without_touching_assets() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 92);
+        let assets: i64 = connection
+            .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get(0))
+            .unwrap();
+
+        migrate_to_latest(&mut connection, 92).unwrap();
+
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM asset_purge_pending", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            assets
+        );
+        // Paths are recorded only once the tombstone is accepted.
+        assert!(connection
+            .execute(
+                "INSERT INTO asset_purge_pending(asset_id,requested_at,relative_path)
+                 VALUES('a','now','assets/a.png')",
+                [],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO asset_purge_pending(asset_id,requested_at) VALUES('a','now')",
+                [],
+            )
+            .is_ok());
     }
 
     #[test]

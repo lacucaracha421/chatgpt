@@ -18,6 +18,7 @@ pub(crate) mod metadata_backup;
 mod metadata_backup_tests;
 pub(crate) mod models;
 pub(crate) mod queue;
+pub(crate) mod similarity_review;
 mod sync;
 pub(crate) mod thumbnail_refresh;
 

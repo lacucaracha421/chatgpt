@@ -133,6 +133,7 @@ pub(crate) mod restore_guard;
 mod revisit;
 mod revisit_color;
 mod similarity;
+pub(crate) mod similarity_review_sync;
 mod similarity_scan;
 mod source_group;
 pub mod statistics;

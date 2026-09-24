@@ -1232,6 +1232,8 @@ export interface LibraryGateway {
     reviewId: string;
     decision: SimilarityDecision;
   }): Promise<void>;
+  /** Mobile similarity decisions applied on this PC; a change means reviews and trash moved. */
+  similarityReviewInboundStatus?(): Promise<{ applied: number }>;
   getAsset(assetId: string): Promise<AssetSummary>;
   updateAssetMetadata(request: AssetMetadataPatch): Promise<AssetSummary>;
   trashAssets(assetIds: string[]): Promise<void>;

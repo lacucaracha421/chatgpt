@@ -391,6 +391,9 @@ pub(crate) enum AlbumCommandOutcome {
     /// The authority rejected the command on structural grounds. The intent must be
     /// preserved rather than rebased automatically.
     Conflict(AlbumConflict),
+    /// The Asset the command names is tombstoned (`assetTombstoned`). The intent can never
+    /// apply, so it is dropped rather than blocking the queue behind it.
+    Dropped,
 }
 
 /// Maximum domains accepted in one aggregate response. A bounded list keeps a
@@ -745,6 +748,9 @@ pub(crate) enum ClassificationCommandOutcome {
     /// rejection becomes a durable blocked row, and an assignment `revisionConflict` is
     /// rebased onto the authority's current revision.
     Conflict(ClassificationConflict),
+    /// The Asset the command names is tombstoned (`assetTombstoned`). The intent can never
+    /// apply, so it is dropped rather than blocking the queue behind it.
+    Dropped,
 }
 
 impl ClassificationCommandResult {
@@ -1251,6 +1257,7 @@ impl CloudClient {
                 code: rejected.to_owned(),
                 detail,
             })),
+            AlbumRejection::Dropped => Ok(AlbumCommandOutcome::Dropped),
             // An unrecognized code keeps the intent and retries with the identical
             // operation id. It must **not** fall through to a status-based mapping: doing
             // so would report an uncoded semantic 422 as `AlbumContractUnsupported` and
@@ -1327,6 +1334,7 @@ impl CloudClient {
                     detail,
                 }))
             }
+            ClassificationRejection::Dropped => Ok(ClassificationCommandOutcome::Dropped),
             // An unrecognized code keeps the intent and retries with the identical
             // operation id and payload. It must **not** fall through to a status-based
             // mapping: doing so would report an uncoded semantic 422 as a contract
@@ -2104,6 +2112,71 @@ impl CloudClient {
         Ok(read_json_bounded::<Feed>(&mut response, 1024 * 1024)?.revision)
     }
 
+    /// One page of the ordered mobile similarity-review decision log (publisher token), or
+    /// `None` when the route is absent (an older server). Before adoption the server answers
+    /// `200` with no items; a coded `409` `similarityReviewUnsupported` means the server
+    /// library is not linked yet.
+    pub(crate) fn similarity_review_decisions(
+        &self,
+        token: &str,
+        library_id: &str,
+        after: i64,
+        limit: i64,
+    ) -> Result<Option<super::similarity_review::DecisionPage>, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let path = format!("/v1/library/similarity/review/decisions?libraryId={library_id}&after={after}&limit={limit}");
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            status => return Err(similarity_review_status_error(status, &mut response)),
+        }
+        let page = read_json_bounded::<super::similarity_review::DecisionPage>(&mut response, 4 * 1024 * 1024)?;
+        super::similarity_review::validate_page(&page, library_id, after, limit)?;
+        Ok(Some(page))
+    }
+
+    /// Replace the server's similarity pair feed (publisher token). `None` when the route is
+    /// absent. A stale base is `Err(SimilarityReviewFeedConflict)`.
+    pub(crate) fn publish_similarity_review_feed(
+        &self,
+        token: &str,
+        body: &[u8],
+    ) -> Result<Option<super::similarity_review::FeedResult>, LibraryError> {
+        if body.len() > 8 * 1024 * 1024 {
+            return Err(LibraryError::SimilarityReviewSyncRejected(413));
+        }
+        let request = self.coded_agent()?.put(self.endpoint("/v1/library/similarity/review/feed")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(body);
+        let mut response = self.coded_request(request)?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            status => return Err(similarity_review_status_error(status, &mut response)),
+        }
+        let result: super::similarity_review::FeedResult = read_json_bounded(&mut response, 64 * 1024)?;
+        if !super::similarity_review::valid_sha256(&result.revision) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(Some(result))
+    }
+
+    /// The server's current pair-feed revision, read through the mobile route (shared token).
+    /// `None` before adoption.
+    pub(crate) fn similarity_review_feed_revision(&self, token: &str) -> Result<Option<String>, LibraryError> {
+        #[derive(serde::Deserialize)]
+        struct Feed { revision: Option<String> }
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint("/v1/library/similarity/review?limit=1")?)
+            .header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            status => return Err(similarity_review_status_error(status, &mut response)),
+        }
+        Ok(read_json_bounded::<Feed>(&mut response, 4 * 1024 * 1024)?.revision)
+    }
+
     fn coded_agent(&self) -> Result<ureq::Agent, LibraryError> {
         Ok(ureq::Agent::config_builder()
             .max_redirects(0)
@@ -2694,6 +2767,8 @@ enum AlbumRejection {
     /// No usable coded meaning: a lost or unknown result, which stays retryable with the
     /// identical operation id and payload so the server's receipt resolves it.
     Retryable,
+    /// The named Asset is tombstoned; the intent is obsolete and is dropped.
+    Dropped,
 }
 
 /// Map a coded Album rejection onto its handling.
@@ -2737,6 +2812,9 @@ fn classify_album_rejection(code: &str) -> AlbumRejection {
         "albumNotFound" => AlbumRejection::Structural("albumNotFound"),
         "invalidAlbumParent" => AlbumRejection::Structural("invalidAlbumParent"),
         "invalidAlbumMembership" => AlbumRejection::Structural("invalidAlbumMembership"),
+        // Definitive: a tombstoned Asset can never gain or lose membership, and retrying
+        // would block every later Album intent behind this one.
+        "assetTombstoned" => AlbumRejection::Dropped,
         // Activation-only codes. A command route returning one is an integrity failure, so
         // the intent is preserved rather than blocked on the user.
         "albumAuthorityActive" | "albumMembershipAssetsMissing" | "albumSnapshotNotAuthorityReady"
@@ -2764,6 +2842,8 @@ enum ClassificationRejection {
     /// No usable coded meaning, or a transient cross-domain state: the intent stays
     /// pending and retries with the identical operation id and payload.
     Retryable,
+    /// The named Asset is tombstoned; the intent is obsolete and is dropped.
+    Dropped,
 }
 
 /// Map a coded Classification rejection onto its handling.
@@ -2802,6 +2882,9 @@ fn classify_classification_rejection(code: &str) -> ClassificationRejection {
         // was refused, and the intent must be preserved for a decision. `revisionConflict`
         // reaches here for structural commands; the assignment lineage rebases it instead.
         "revisionConflict" => ClassificationRejection::Structural("revisionConflict"),
+        // Definitive: a tombstoned Asset can never be (re)assigned, and retrying would
+        // block every later Classification intent behind this one.
+        "assetTombstoned" => ClassificationRejection::Dropped,
         "duplicateClassificationName" => {
             ClassificationRejection::Structural("duplicateClassificationName")
         }
@@ -3002,6 +3085,26 @@ fn character_review_status_error(status: u16, response: &mut ureq::http::Respons
     }
 }
 
+/// Map a non-success status of the similarity review routes, reading a coded `409`.
+fn similarity_review_status_error(status: u16, response: &mut ureq::http::Response<ureq::Body>) -> LibraryError {
+    match status {
+        401 | 403 => LibraryError::CloudUnauthorized,
+        409 => {
+            #[derive(serde::Deserialize)]
+            struct Coded { detail: serde_json::Value }
+            let code = read_json_bounded::<Coded>(response, 16 * 1024).ok()
+                .and_then(|body| body.detail.get("code").and_then(|code| code.as_str()).map(str::to_owned));
+            match code.as_deref() {
+                Some("similarityReviewUnsupported") => LibraryError::SimilarityReviewUnsupported,
+                Some("similarityReviewFeedChanged") => LibraryError::SimilarityReviewFeedConflict,
+                _ => LibraryError::SimilarityReviewCursorRejected,
+            }
+        }
+        422 => LibraryError::SimilarityReviewInvalid,
+        status => LibraryError::SimilarityReviewSyncRejected(status),
+    }
+}
+
 /// The parts of `/v1/collections/status` the publisher uses.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3078,6 +3181,56 @@ impl Read for PublicationReader<'_> {
             self.reported = self.completed;
         }
         Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod asset_tombstoned_tests {
+    use super::*;
+
+    fn reject_once(code: &'static str) -> (CloudClient, std::thread::JoinHandle<()>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}", server.server_addr())).unwrap();
+        let worker = std::thread::spawn(move || {
+            let request = server.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            let body = serde_json::json!({"detail": {"code": code}}).to_string();
+            request
+                .respond(tiny_http::Response::from_string(body).with_status_code(409))
+                .unwrap();
+        });
+        (client, worker)
+    }
+
+    #[test]
+    fn a_classification_intent_for_a_tombstoned_asset_is_dropped_not_retried() {
+        let (client, worker) = reject_once("assetTombstoned");
+        let outcome = client
+            .classification_command(&serde_json::json!({"commandType": "setAssetClassification"}), "t")
+            .unwrap();
+        worker.join().unwrap();
+        assert!(matches!(outcome, ClassificationCommandOutcome::Dropped));
+    }
+
+    #[test]
+    fn an_album_intent_for_a_tombstoned_asset_is_dropped_not_retried() {
+        let (client, worker) = reject_once("assetTombstoned");
+        let outcome = client
+            .album_command(&serde_json::json!({"commandType": "setAlbumMembership"}), "t")
+            .unwrap();
+        worker.join().unwrap();
+        assert!(matches!(outcome, AlbumCommandOutcome::Dropped));
+    }
+
+    #[test]
+    fn other_codes_keep_their_existing_handling() {
+        assert!(matches!(
+            classify_classification_rejection("revisionConflict"),
+            ClassificationRejection::Structural("revisionConflict")
+        ));
+        assert!(matches!(
+            classify_album_rejection("unknownCode"),
+            AlbumRejection::Retryable
+        ));
     }
 }
 

@@ -13,6 +13,10 @@ const PAIRS_PER_BATCH: usize = 100_000;
 #[cfg(test)]
 const PAIRS_PER_BATCH: usize = 2;
 const MATCHES_PER_BATCH: usize = 128;
+/// Queued Assets one automatic comparison pass handles.
+const AUTO_ASSETS_PER_BATCH: usize = 16;
+/// Review pairs one newly materialized Asset may open, closest first.
+const AUTO_MATCHES_PER_ASSET: usize = 16;
 static SCAN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct ScanAsset {
@@ -120,30 +124,9 @@ impl Library {
         let mut created = 0;
         let now = chrono::Utc::now().to_rfc3339();
         for (a, b, distance) in matches {
-            let a = &assets[a];
-            let b = &assets[b];
-            if !input_is_current(&transaction, a)? || !input_is_current(&transaction, b)? {
-                continue;
+            if insert_historical_review(&transaction, &assets[a], &assets[b], distance, &now)? {
+                created += 1;
             }
-            // Covers both orientations, incoming reviews, and already decided pairs.
-            let known: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM similarity_reviews
-                 WHERE min(existing_asset_id, candidate_asset_id) = min(?1, ?2)
-                   AND max(existing_asset_id, candidate_asset_id) = max(?1, ?2)
-                   AND status != 'stale')",
-                params![a.id, b.id],
-                |row| row.get(0),
-            )?;
-            if known {
-                continue;
-            }
-            transaction.execute(
-                "INSERT INTO similarity_reviews
-                 (id, existing_asset_id, candidate_asset_id, distance, fingerprint_kind, review_kind, status, created_at)
-                 VALUES (?1, ?2, ?3, ?4, 'pdq-v1', 'historical', 'open', ?5)",
-                params![uuid::Uuid::new_v4().to_string(), a.id, b.id, distance, now],
-            )?;
-            created += 1;
         }
         transaction.execute(
             "UPDATE image_similarity_scan SET left_position = ?1, right_position = ?2,
@@ -163,6 +146,158 @@ impl Library {
         transaction.commit()?;
         Ok(progress)
     }
+}
+
+impl Library {
+    /// Automatic comparison of newly materialized Assets (user decision 2).
+    ///
+    /// Server-created Assets (mobile saves, cloud captures, another PC's uploads) skip the
+    /// similarity check at ingestion. Migration 0094 queues each one when its original bytes
+    /// land here (`asset_authority_state.materialization` turns `complete`). This pass is run
+    /// by the background `similarity` publication lane on every tick (at most every ten
+    /// seconds, never on the UI thread) and handles up to [`AUTO_ASSETS_PER_BATCH`] queued
+    /// Assets:
+    ///
+    /// * a missing PDQ hash is computed through the lazy indexing path (one decode each);
+    /// * each Asset is compared with every hashed library image using the explicit scan's
+    ///   gates (quality, aspect, distance), with the CPU work outside the database lock;
+    /// * matches become `historical` review pairs (the library image as `existing`, the new
+    ///   one as `candidate`) under the same dedupe rule as the scan, closest first and at most
+    ///   [`AUTO_MATCHES_PER_ASSET`] per Asset. Inputs are revalidated before insertion.
+    ///
+    /// Processed Assets leave the queue, including ones that cannot be compared (video, trash,
+    /// low-quality or undecodable images). Returns the number of pairs created.
+    pub(crate) fn run_similarity_auto_compare_batch(&self) -> Result<u64, LibraryError> {
+        let queued: Vec<String> = {
+            let connection = self.connection()?;
+            let mut statement = connection.prepare(
+                "SELECT asset_id FROM similarity_auto_compare_queue
+                 ORDER BY queued_at, asset_id LIMIT ?1",
+            )?;
+            let ids = statement
+                .query_map([AUTO_ASSETS_PER_BATCH as i64], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            ids
+        };
+        if queued.is_empty() {
+            return Ok(0);
+        }
+        for asset_id in &queued {
+            self.ensure_similarity_hash(asset_id)?;
+        }
+        let _guard = SCAN_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let library = {
+            let connection = self.connection()?;
+            load_comparable(&connection)?
+        };
+        let mut matches = Vec::new();
+        for target in library.iter().filter(|asset| queued.contains(&asset.id)) {
+            let mut found: Vec<(u32, &ScanAsset)> = library
+                .iter()
+                .filter(|other| other.id != target.id)
+                .filter(|other| dimensions_are_compatible(target.dimensions, other.dimensions))
+                .filter_map(|other| {
+                    let distance = minimum_distance(&target.fingerprint, &other.fingerprint);
+                    (distance <= PDQ_DISTANCE_MAX).then_some((distance, other))
+                })
+                .collect();
+            found.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.id.cmp(&right.1.id)));
+            found.truncate(AUTO_MATCHES_PER_ASSET);
+            matches.extend(
+                found
+                    .into_iter()
+                    .map(|(distance, other)| (other, target, distance)),
+            );
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut created = 0;
+        for (existing, candidate, distance) in matches {
+            if insert_historical_review(&transaction, existing, candidate, distance, &now)? {
+                created += 1;
+            }
+        }
+        for asset_id in &queued {
+            transaction.execute(
+                "DELETE FROM similarity_auto_compare_queue WHERE asset_id = ?1",
+                [asset_id],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(created)
+    }
+}
+
+/// Every image the explicit scan would compare, read now rather than from a frozen snapshot.
+fn load_comparable(connection: &Connection) -> Result<Vec<ScanAsset>, LibraryError> {
+    let mut statement = connection.prepare(
+        "SELECT id, content_hash, perceptual_hash, perceptual_hash_quality, width, height
+         FROM assets WHERE status = 'normal' AND media_kind IN ('image', 'gif')
+           AND length(perceptual_hash) = 64 AND perceptual_hash_quality >= ?1
+           AND width > 0 AND height > 0
+         ORDER BY collected_at, id",
+    )?;
+    let rows = statement.query_map([PDQ_QUALITY_MIN], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Vec<u8>>(2)?,
+            row.get::<_, u8>(3)?,
+            row.get::<_, u32>(4)?,
+            row.get::<_, u32>(5)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (id, content_hash, bytes, quality, width, height) = row?;
+        Ok(ScanAsset {
+            id,
+            content_hash,
+            fingerprint: ImageFingerprint::from_stored_bytes(&bytes, quality)?,
+            dimensions: (width, height),
+        })
+    })
+    .collect()
+}
+
+/// Record one historical pair unless an input changed or the pair is already known (either
+/// orientation, incoming reviews and decided pairs included). Returns whether it was created.
+fn insert_historical_review(
+    connection: &Connection,
+    existing: &ScanAsset,
+    candidate: &ScanAsset,
+    distance: u32,
+    now: &str,
+) -> Result<bool, LibraryError> {
+    if !input_is_current(connection, existing)? || !input_is_current(connection, candidate)? {
+        return Ok(false);
+    }
+    let known: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM similarity_reviews
+         WHERE min(existing_asset_id, candidate_asset_id) = min(?1, ?2)
+           AND max(existing_asset_id, candidate_asset_id) = max(?1, ?2)
+           AND status != 'stale')",
+        params![existing.id, candidate.id],
+        |row| row.get(0),
+    )?;
+    if known {
+        return Ok(false);
+    }
+    connection.execute(
+        "INSERT INTO similarity_reviews
+         (id, existing_asset_id, candidate_asset_id, distance, fingerprint_kind, review_kind, status, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'pdq-v1', 'historical', 'open', ?5)",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            existing.id,
+            candidate.id,
+            distance,
+            now
+        ],
+    )?;
+    Ok(true)
 }
 
 fn scan_progress(connection: &Connection) -> Result<Option<ImageSimilarityScan>, LibraryError> {

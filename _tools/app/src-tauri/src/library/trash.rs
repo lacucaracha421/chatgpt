@@ -38,10 +38,15 @@ struct TrashRow {
 }
 
 struct ManagedAssetPaths {
-    original: String,
+    original: Option<String>,
     thumbnail: Option<String>,
     video_directory: Option<String>,
 }
+
+/// Hidden from the trash: a server-known Asset whose purge waits for (or has passed) the
+/// server's tombstone acceptance. It keeps `status='trash'` until then.
+const NOT_PURGE_PENDING: &str =
+    "NOT EXISTS (SELECT 1 FROM asset_purge_pending pending WHERE pending.asset_id = assets.id)";
 
 impl Library {
     pub fn trash_assets(&self, asset_ids: &[String]) -> Result<(), LibraryError> {
@@ -84,12 +89,15 @@ impl Library {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let total_count: i64 = transaction.query_row(
-            "SELECT COUNT(*) FROM assets WHERE status = 'trash'",
+            &format!("SELECT COUNT(*) FROM assets WHERE status = 'trash' AND {NOT_PURGE_PENDING}"),
             [],
             |row| row.get(0),
         )?;
         let total_bytes: i64 = transaction.query_row(
-            "SELECT COALESCE(SUM(byte_size), 0) FROM assets WHERE status = 'trash'",
+            &format!(
+                "SELECT COALESCE(SUM(byte_size), 0) FROM assets
+                 WHERE status = 'trash' AND {NOT_PURGE_PENDING}"
+            ),
             [],
             |row| row.get(0),
         )?;
@@ -112,6 +120,8 @@ impl Library {
              FROM assets AS asset
              LEFT JOIN video_assets AS video ON video.asset_id = asset.id
              WHERE asset.status = 'trash'
+             AND NOT EXISTS (SELECT 1 FROM asset_purge_pending pending
+                             WHERE pending.asset_id = asset.id)
              AND (?1 IS NULL OR asset.trashed_at < ?1
                   OR (asset.trashed_at = ?1 AND asset.id < ?2))
              ORDER BY asset.trashed_at DESC, asset.id DESC LIMIT ?3",
@@ -159,13 +169,20 @@ impl Library {
             .trash_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.settle_purge_pending()?;
         let connection = self.connection()?;
         let asset_ids = connection
-            .prepare("SELECT id FROM assets WHERE status = 'trash'")?
+            .prepare(&format!(
+                "SELECT id FROM assets WHERE status = 'trash' AND {NOT_PURGE_PENDING}"
+            ))?
             .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<String>, _>>()?;
         drop(connection);
-        self.purge_candidates(asset_ids)
+        let mut summary = self.purge_candidates(asset_ids)?;
+        summary
+            .failed_asset_ids
+            .extend(self.delete_accepted_purge_files_locked()?);
+        Ok(summary)
     }
 
     pub fn purge_expired_trash(&self, now: DateTime<Utc>) -> Result<PurgeSummary, LibraryError> {
@@ -173,6 +190,10 @@ impl Library {
             .trash_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // App start: finish any purge whose tombstone was accepted before a crash, and
+        // settle purge-pending rows that lost their queued intent.
+        self.settle_purge_pending()?;
+        let pending_failures = self.delete_accepted_purge_files_locked()?;
         let connection = self.connection()?;
         let retention_days: Option<u32> = connection.query_row(
             "SELECT trash_retention_days FROM library_settings WHERE singleton = 1",
@@ -182,11 +203,13 @@ impl Library {
         let Some(retention_days) = retention_days else {
             return Ok(PurgeSummary {
                 deleted_count: 0,
-                failed_asset_ids: Vec::new(),
+                failed_asset_ids: pending_failures,
             });
         };
         let candidates = connection
-            .prepare("SELECT id, trashed_at FROM assets WHERE status = 'trash'")?
+            .prepare(&format!(
+                "SELECT id, trashed_at FROM assets WHERE status = 'trash' AND {NOT_PURGE_PENDING}"
+            ))?
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
@@ -202,7 +225,104 @@ impl Library {
             .filter_map(|(id, trashed_at)| (trashed_at <= cutoff).then_some(id))
             .collect();
         drop(connection);
-        self.purge_candidates(asset_ids)
+        let mut summary = self.purge_candidates(asset_ids)?;
+        summary.failed_asset_ids.extend(pending_failures);
+        Ok(summary)
+    }
+
+    fn settle_purge_pending(&self) -> Result<(), LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        super::asset_authority::reconcile_purge_pending(&transaction)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Delete the files of purges whose tombstone the server has accepted.
+    pub(crate) fn delete_accepted_purge_files(&self) -> Result<Vec<String>, LibraryError> {
+        let _trash_guard = self
+            .trash_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.delete_accepted_purge_files_locked()
+    }
+
+    /// Caller holds `trash_lock`. Returns the Asset ids whose deletion must be retried.
+    ///
+    /// Guards, each re-checked here rather than trusted from the acceptance step: the Asset
+    /// must be tombstoned in the confirmed server state and absent locally; every path is a
+    /// recorded path of this Asset, relative, inside the library root and not shared with any
+    /// other remaining record. The file primitives never follow a symlink out of the root.
+    #[cfg(any(windows, target_os = "linux"))]
+    fn delete_accepted_purge_files_locked(&self) -> Result<Vec<String>, LibraryError> {
+        let rows = {
+            let connection = self.connection()?;
+            let rows = connection
+                .prepare(
+                    "SELECT asset_id, relative_path, thumbnail_relative_path, video_directory
+                     FROM asset_purge_pending WHERE accepted_at IS NOT NULL ORDER BY asset_id",
+                )?
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        ManagedAssetPaths {
+                            original: row.get(1)?,
+                            thumbnail: row.get(2)?,
+                            video_directory: row.get(3)?,
+                        },
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        let mut failed = Vec::new();
+        let (mut removed, mut kept_shared) = (0_u32, 0_u32);
+        for (asset_id, recorded) in rows {
+            let paths = {
+                let connection = self.connection()?;
+                let tombstoned: bool = connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM asset_authority_state
+                                   WHERE asset_id = ?1 AND lifecycle = 'tombstoned')
+                        AND NOT EXISTS(SELECT 1 FROM assets WHERE id = ?1)",
+                    [&asset_id],
+                    |row| row.get(0),
+                )?;
+                if !tombstoned {
+                    // Not provably retired: never delete. The row is dropped so the files
+                    // simply stay, which is the pre-existing (safe) outcome.
+                    connection.execute(
+                        "DELETE FROM asset_purge_pending WHERE asset_id = ?1",
+                        [&asset_id],
+                    )?;
+                    continue;
+                }
+                let paths = unshared_paths(&connection, &asset_id, &recorded)?;
+                kept_shared += recorded.count() - paths.count();
+                paths
+            };
+            if self.remove_managed_paths(&paths).is_ok() {
+                removed += 1;
+                self.connection()?.execute(
+                    "DELETE FROM asset_purge_pending WHERE asset_id = ?1 AND accepted_at IS NOT NULL",
+                    [&asset_id],
+                )?;
+            } else {
+                failed.push(asset_id);
+            }
+        }
+        if !failed.is_empty() || kept_shared > 0 {
+            // Counts only: paths and ids stay out of logs.
+            eprintln!(
+                "trash purge: {removed} assets' files deleted, {} deferred, {kept_shared} shared files kept",
+                failed.len()
+            );
+        }
+        Ok(failed)
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    fn delete_accepted_purge_files_locked(&self) -> Result<Vec<String>, LibraryError> {
+        Ok(Vec::new())
     }
 
     fn update_trash_status(
@@ -250,7 +370,7 @@ impl Library {
                         |row| {
                             let media_kind = row.get::<_, String>(2)?;
                             Ok(ManagedAssetPaths {
-                                original: row.get(0)?,
+                                original: Some(row.get(0)?),
                                 thumbnail: row.get(1)?,
                                 video_directory: (media_kind == "video")
                                     .then(|| format!("video-media/{id}")),
@@ -259,6 +379,7 @@ impl Library {
                     )
                     .optional()?;
                 let Some(paths) = row else { continue };
+                let paths = unshared_paths(&tx, &id, &paths)?;
                 let owned = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM asset_authority_state WHERE asset_id=?)",
                     [&id],
@@ -284,18 +405,28 @@ impl Library {
         }
 
         let tx = connection.transaction()?;
-        // `enqueue` selects by canonical state, so the server-owned subset is exactly the
-        // set that receives a tombstone command.
-        super::asset_authority::enqueue(&tx, &server_known, "tombstoned")?;
+        let now = chrono::Utc::now().to_rfc3339();
         let mut deleted_count = server_known.len() as u64;
         for id in server_known.iter().chain(purged_local.iter()) {
             // A purged Asset must never be published afterwards, so any queued legacy
             // upload work and any non-tombstone lifecycle desire for it is cancelled.
             tx.execute("DELETE FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=?", [id])?;
             tx.execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=? AND desired<>'tombstoned'", [id])?;
-            // Canonical state is deliberately left in place, as `local_projection` leaves
-            // it for a logical delete: a tombstone must outlive the local row so an
-            // expired history cannot be read as "this Asset was never retired".
+        }
+        // Two-phase purge for server-owned Assets: the row and its files stay (hidden as
+        // purge pending) until the server accepts the tombstone; `retire_local_row` then
+        // deletes the row and records the files, which `delete_accepted_purge_files`
+        // removes. A restore on another device before acceptance therefore still wins.
+        // `enqueue` selects by canonical state, so the server-owned subset is exactly the
+        // set that receives a tombstone command.
+        for id in &server_known {
+            tx.execute(
+                "INSERT OR IGNORE INTO asset_purge_pending(asset_id, requested_at) VALUES(?1, ?2)",
+                params![id, now],
+            )?;
+        }
+        super::asset_authority::enqueue(&tx, &server_known, "tombstoned")?;
+        for id in &purged_local {
             tx.execute("DELETE FROM assets WHERE id=?", [id])?;
         }
         deleted_count += purged_local.len() as u64;
@@ -322,7 +453,7 @@ impl Library {
                     |row| {
                         let media_kind = row.get::<_, String>(2)?;
                         Ok(ManagedAssetPaths {
-                            original: row.get(0)?,
+                            original: Some(row.get(0)?),
                             thumbnail: row.get(1)?,
                             video_directory: (media_kind == "video")
                                 .then(|| format!("video-media/{asset_id}")),
@@ -333,6 +464,7 @@ impl Library {
             let Some(paths) = paths else {
                 continue;
             };
+            let paths = unshared_paths(&connection, &asset_id, &paths)?;
             if self.remove_managed_paths(&paths).is_err() {
                 failed_asset_ids.push(asset_id);
                 continue;
@@ -356,7 +488,9 @@ impl Library {
     #[cfg(any(windows, target_os = "linux"))]
     fn remove_managed_paths(&self, paths: &ManagedAssetPaths) -> Result<(), ()> {
         let canonical_root = fs::canonicalize(&self.root).map_err(|_| ())?;
-        delete_managed_file(&canonical_root, &paths.original)?;
+        if let Some(original) = &paths.original {
+            delete_managed_file(&canonical_root, original)?;
+        }
         if paths.video_directory.is_none() {
             if let Some(thumbnail) = &paths.thumbnail {
                 delete_managed_file(&canonical_root, thumbnail)?;
@@ -374,11 +508,98 @@ impl Library {
         thumbnail_relative_path: &str,
     ) -> Result<(), ()> {
         self.remove_managed_paths(&ManagedAssetPaths {
-            original: relative_path.to_owned(),
+            original: Some(relative_path.to_owned()),
             thumbnail: Some(thumbnail_relative_path.to_owned()),
             video_directory: None,
         })
     }
+}
+
+impl ManagedAssetPaths {
+    fn count(&self) -> u32 {
+        u32::from(self.original.is_some())
+            + u32::from(self.thumbnail.is_some() && self.video_directory.is_none())
+            + u32::from(self.video_directory.is_some())
+    }
+}
+
+/// Keep only the paths that belong to `owner` alone.
+///
+/// A path is dropped (its file kept) when it is not a plain relative path at least one
+/// directory deep, or when any other remaining record still names it: another Asset's
+/// original or thumbnail, a video derivative, or a manga thumbnail. Comparison ignores
+/// ASCII case and separator style so a Windows spelling cannot slip past it.
+fn unshared_paths(
+    db: &rusqlite::Connection,
+    owner: &str,
+    paths: &ManagedAssetPaths,
+) -> Result<ManagedAssetPaths, LibraryError> {
+    let file = |path: &Option<String>| -> Result<Option<String>, LibraryError> {
+        let Some(path) = path else { return Ok(None) };
+        if !deletable_shape(path) {
+            return Ok(None);
+        }
+        let key = comparable(path);
+        let shared: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE id <> ?2
+                  AND (lower(replace(relative_path, '\\', '/')) = ?1
+                       OR lower(replace(thumbnail_relative_path, '\\', '/')) = ?1))
+                 OR EXISTS(SELECT 1 FROM video_assets WHERE asset_id <> ?2
+                  AND (lower(replace(poster_relative_path, '\\', '/')) = ?1
+                       OR lower(replace(proxy_relative_path, '\\', '/')) = ?1))
+                 OR EXISTS(SELECT 1 FROM manga_series
+                  WHERE lower(replace(thumbnail_relative_path, '\\', '/')) = ?1)",
+            params![key, owner],
+            |row| row.get(0),
+        )?;
+        Ok((!shared).then(|| path.clone()))
+    };
+    let directory = match &paths.video_directory {
+        // The derivative directory is named after the Asset itself; anything else is not
+        // this Asset's to remove.
+        Some(directory) if comparable(directory) == comparable(&format!("video-media/{owner}")) => {
+            let prefix = format!("{}/%", comparable(directory));
+            let shared: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM assets WHERE id <> ?2
+                      AND (lower(replace(relative_path, '\\', '/')) LIKE ?1
+                           OR lower(replace(thumbnail_relative_path, '\\', '/')) LIKE ?1))
+                     OR EXISTS(SELECT 1 FROM video_assets WHERE asset_id <> ?2
+                      AND (lower(replace(poster_relative_path, '\\', '/')) LIKE ?1
+                           OR lower(replace(proxy_relative_path, '\\', '/')) LIKE ?1
+                           OR lower(replace(scrub_relative_dir, '\\', '/')) LIKE ?1))",
+                params![prefix, owner],
+                |row| row.get(0),
+            )?;
+            (!shared).then(|| directory.clone())
+        }
+        _ => None,
+    };
+    Ok(ManagedAssetPaths {
+        original: file(&paths.original)?,
+        // A video's thumbnail lives inside its derivative directory and goes with it.
+        thumbnail: if paths.video_directory.is_some() {
+            None
+        } else {
+            file(&paths.thumbnail)?
+        },
+        video_directory: directory,
+    })
+}
+
+fn comparable(path: &str) -> String {
+    path.replace('\\', "/").to_ascii_lowercase()
+}
+
+/// A recorded path we may delete: relative, no parent/root components, and inside a
+/// subdirectory, so no top-level library file (the database, lock, catalogs) can match.
+fn deletable_shape(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    checked_relative_path(&normalized).is_ok()
+        && Path::new(&normalized)
+            .components()
+            .filter(|c| matches!(c, std::path::Component::Normal(_)))
+            .count()
+            >= 2
 }
 
 /// Shares the existing trash semantics with callers that must atomically record a decision.
@@ -392,7 +613,8 @@ pub(crate) fn update_trash_status_in_transaction(
     let asset_ids = validated_asset_ids(transaction, asset_ids)?;
     for asset_id in asset_ids {
         let changed=transaction.execute(
-            "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2",
+            "UPDATE assets SET status = ?3, trashed_at = ?4 WHERE id = ?1 AND status = ?2
+             AND NOT EXISTS (SELECT 1 FROM asset_purge_pending WHERE asset_id = ?1)",
             params![asset_id, from_status, to_status, trashed_at],
         )?;
         if changed > 0 {
@@ -680,6 +902,156 @@ mod tests {
             .restore_assets(&["first".into(), "second".into()])
             .unwrap();
         assert_eq!(library.list_trash(None, 20).unwrap().total_count, 0);
+    }
+
+    /// An accepted purge of `id` recording the given paths, with confirmed `lifecycle`.
+    fn accepted_purge(library: &Library, id: &str, lifecycle: &str, original: &str, thumbnail: &str) {
+        let db = library.connection().unwrap();
+        db.execute(
+            "INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,projection)
+             VALUES(?1,?2,3,'{}')",
+            rusqlite::params![id, lifecycle],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO asset_purge_pending(asset_id,requested_at,accepted_at,relative_path,thumbnail_relative_path)
+             VALUES(?1,'2026','2026',?2,?3)",
+            rusqlite::params![id, original, thumbnail],
+        )
+        .unwrap();
+    }
+
+    fn write(library: &Library, relative: &str) -> std::path::PathBuf {
+        let path = library.root().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"bytes").unwrap();
+        path
+    }
+
+    fn pending(library: &Library) -> i64 {
+        library
+            .connection()
+            .unwrap()
+            .query_row("SELECT count(*) FROM asset_purge_pending", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn purge_deletes_only_the_accepted_assets_own_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let original = write(&library, "assets/aa/gone.png");
+        let thumbnail = write(&library, "thumbnails/aa/gone.webp");
+        let neighbour = write(&library, "assets/aa/neighbour.png");
+        accepted_purge(&library, "gone", "tombstoned", "assets/aa/gone.png", "thumbnails/aa/gone.webp");
+        assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+        assert!(!original.exists() && !thumbnail.exists());
+        assert!(neighbour.is_file());
+        assert_eq!(pending(&library), 0);
+    }
+
+    #[test]
+    fn purge_keeps_a_file_another_asset_still_references() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_normal_asset(&library, "keeper");
+        let shared = write(&library, "assets/keeper.png");
+        let own = write(&library, "thumbnails/aa/gone.webp");
+        // A different spelling of the same path must still be recognised as shared.
+        accepted_purge(&library, "gone", "tombstoned", r"Assets\KEEPER.png", "thumbnails/aa/gone.webp");
+        assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+        assert!(shared.is_file(), "a file named by another Asset is never deleted");
+        assert!(!own.exists());
+        assert_eq!(pending(&library), 0);
+    }
+
+    #[test]
+    fn purge_never_deletes_files_of_an_asset_that_is_not_tombstoned() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let original = write(&library, "assets/aa/gone.png");
+        accepted_purge(&library, "gone", "trash", "assets/aa/gone.png", "thumbnails/aa/none.webp");
+        library.delete_accepted_purge_files().unwrap();
+        assert!(original.is_file());
+        assert_eq!(pending(&library), 0);
+    }
+
+    #[test]
+    fn purge_never_deletes_files_while_the_local_row_still_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_normal_asset(&library, "gone");
+        let original = write(&library, "assets/gone.png");
+        accepted_purge(&library, "gone", "tombstoned", "assets/gone.png", "thumbnails/gone.webp");
+        library.delete_accepted_purge_files().unwrap();
+        assert!(original.is_file());
+    }
+
+    #[test]
+    fn purge_refuses_paths_outside_or_at_the_top_of_the_library() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        std::fs::create_dir_all(&root).unwrap();
+        let library = Library::open(&root).unwrap();
+        let outside = temp.path().join("outside.png");
+        std::fs::write(&outside, b"outside").unwrap();
+        let top_level = write(&library, "top.png");
+        accepted_purge(&library, "escape", "tombstoned", "../outside.png", "top.png");
+        accepted_purge(
+            &library,
+            "absolute",
+            "tombstoned",
+            outside.to_str().unwrap(),
+            "library.sqlite",
+        );
+        library.delete_accepted_purge_files().unwrap();
+        assert!(outside.is_file());
+        assert!(top_level.is_file());
+        assert!(root.join("library.sqlite").is_file());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn purge_never_follows_a_symlink_out_of_the_library() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let target = outside.path().join("victim.png");
+        std::fs::write(&target, b"outside").unwrap();
+        std::fs::create_dir_all(library.root().join("assets")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), library.root().join("assets/linked")).unwrap();
+        std::os::unix::fs::symlink(&target, library.root().join("assets/victim.png")).unwrap();
+        accepted_purge(&library, "via-dir", "tombstoned", "assets/linked/victim.png", "assets/linked/x.webp");
+        accepted_purge(&library, "via-file", "tombstoned", "assets/victim.png", "assets/none.webp");
+        let failed = library.delete_accepted_purge_files().unwrap();
+        assert!(target.is_file(), "a symlinked path must never reach a file outside the root");
+        assert!(failed.contains(&"via-dir".to_string()) && failed.contains(&"via-file".to_string()));
+        // Refused rows stay for a later retry rather than being reported as done.
+        assert_eq!(pending(&library), 2);
+    }
+
+    #[test]
+    fn a_local_only_purge_keeps_a_file_another_asset_references() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_trashed_asset(&library, "gone", "2026-08-02T00:00:00Z");
+        insert_normal_asset(&library, "keeper");
+        let own = write(&library, "assets/gone.png");
+        let shared = write(&library, "thumbnails/gone.webp");
+        // Another record (a video poster of `keeper`) still names the thumbnail.
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO video_assets(asset_id,duration_ms,container,video_codec,preparation_state,poster_relative_path)
+                 VALUES('keeper',1,'mp4','h264','pending','thumbnails/gone.webp')",
+                [],
+            )
+            .unwrap();
+        let summary = library.empty_trash().unwrap();
+        assert_eq!(summary.deleted_count, 1);
+        assert!(!own.exists());
+        assert!(shared.is_file());
     }
 
     fn insert_normal_asset(library: &Library, id: &str) {

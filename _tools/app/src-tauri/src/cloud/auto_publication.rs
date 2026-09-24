@@ -3,7 +3,7 @@ use crate::library::{Library,error::LibraryError};
 use rusqlite::params;
 use std::sync::Mutex;
 // Separate lanes prevent slow artwork uploads from blocking character/settings changes.
-static RUNNING: [Mutex<()>;3] = [Mutex::new(()),Mutex::new(()),Mutex::new(())];
+static RUNNING: [Mutex<()>;4] = [Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(())];
 fn dispatch(running: &'static Mutex<()>, work: impl FnOnce()+Send+'static) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new().name("mobile-publication".into()).spawn(move || {
         let Ok(_permit)=running.try_lock() else {return};
@@ -23,11 +23,17 @@ impl Library {
             if !config.enabled || endpoint.is_empty() {return Ok(())}
             db.execute("UPDATE mobile_publication_state SET endpoint=?1,generation=generation+1,first_dirty=0,last_dirty=0,retry_after=0 WHERE endpoint<>?1",[&endpoint])?;
         }
-        for (slot,kind) in ["collections","characters","visibility"].into_iter().enumerate() {
+        for (slot,kind) in ["collections","characters","visibility","similarity"].into_iter().enumerate() {
             let library=self.clone();let endpoint=endpoint.clone();
             // Return after dispatch so the frontend's next tick can service every free lane.
             dispatch(&RUNNING[slot],move || {
-                let _=if kind=="visibility" {library.publish_due_catalog_visibility(&endpoint)} else {library.publish_due_mobile_kind(kind,&endpoint)};
+                // `similarity`: automatic comparison of newly materialized Assets, then mobile
+                // similarity decisions and the pair feed (`similarity_review_sync.rs`).
+                let _=match kind {
+                    "visibility" => library.publish_due_catalog_visibility(&endpoint),
+                    "similarity" => library.run_due_similarity_review(&endpoint).map_err(|error| {eprintln!("similarity review: {error}");error}),
+                    _ => library.publish_due_mobile_kind(kind,&endpoint),
+                };
             }).map_err(|_|LibraryError::InvalidCloudResponse)?;
         }
         Ok(())

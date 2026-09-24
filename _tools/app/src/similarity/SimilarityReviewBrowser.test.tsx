@@ -5,6 +5,7 @@ import type { LibraryGateway, SimilarityReviewSummary } from "../library/types";
 import { assetUrl } from "../assets/mediaUrl";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { SimilarityReviewBrowser } from "./SimilarityReviewBrowser";
+import { SIMILARITY_REVIEW_CHANGED_EVENT } from "./useSimilarityReviewInbound";
 
 vi.mock("./video/VideoSimilarityPanel", () => ({ VideoSimilarityPanel: () => <section aria-label="영상 검토 테스트" /> }));
 
@@ -57,6 +58,22 @@ it("keeps the current pair and disables decisions while a decision is pending", 
   reject(new Error("conflict"));
   expect(await screen.findByRole("status")).toBeInTheDocument();
   expect(screen.getByText("candidate-review-1.png")).toBeInTheDocument();
+});
+
+it("reloads when a phone decision was applied underneath the screen", async () => {
+  const gateway = reviewGateway();
+  vi.mocked(gateway.listSimilarityReviews)
+    .mockResolvedValueOnce(reviewPage([review("review-1")], 2))
+    .mockResolvedValueOnce(reviewPage([review("review-2")], 1));
+  const onCountChange = vi.fn();
+  render(<SimilarityReviewBrowser gateway={gateway} onCountChange={onCountChange} onClose={vi.fn()} />);
+  await screen.findByText("candidate-review-1.png");
+
+  act(() => { window.dispatchEvent(new Event(SIMILARITY_REVIEW_CHANGED_EVENT)); });
+
+  expect(await screen.findByText("candidate-review-2.png")).toBeInTheDocument();
+  expect(gateway.decideSimilarityReview).not.toHaveBeenCalled();
+  expect(onCountChange).toHaveBeenLastCalledWith(1);
 });
 
 it("hides the position counter after the last review is resolved", async () => {

@@ -16,6 +16,7 @@ import { Toast } from "../shared/ui/Toast";
 import { Toggle } from "../shared/ui/Toggle";
 import { formatBytes } from "../assets/assetMetadata";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
+import { ASSET_LIFECYCLE_CHANGED_EVENT } from "../app/useAssetAuthoritySync";
 
 const MIN_RETENTION_DAYS = 1;
 const MAX_RETENTION_DAYS = 3650;
@@ -71,6 +72,12 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
   useEffect(() => {
     load();
     return () => { loadGenerationRef.current += 1; };
+  }, [load]);
+  // Remote trash/restore lands in the local replica while this view is open.
+  useEffect(() => {
+    const refresh = () => { if (!pendingMutationRef.current) load(); };
+    window.addEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
   }, [load]);
 
   function beginMutation(kind: "restore" | "policy" | "empty"): boolean {

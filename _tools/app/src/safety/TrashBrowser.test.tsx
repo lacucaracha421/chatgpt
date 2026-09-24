@@ -5,6 +5,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway, TrashPage } from "../library/types";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { TrashBrowser } from "./TrashBrowser";
+import { ASSET_LIFECYCLE_CHANGED_EVENT } from "../app/useAssetAuthoritySync";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 
 function renderTrash(ui: React.ReactElement, gateway?: LibraryGateway) {
@@ -41,6 +42,19 @@ it("reports the trash total count after each load", async () => {
   renderTrash(<TrashBrowser onCountChange={onCountChange} />, gateway);
 
   await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(7));
+});
+
+it("reloads when another device trashes or restores an asset", async () => {
+  const onCountChange = vi.fn();
+  const gateway = createGateway();
+  vi.mocked(gateway.listTrash).mockResolvedValue({ items: [], nextCursor: null, totalCount: 1, totalBytes: 0 });
+
+  renderTrash(<TrashBrowser onCountChange={onCountChange} />, gateway);
+  await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(1));
+  vi.mocked(gateway.listTrash).mockResolvedValue({ items: [], nextCursor: null, totalCount: 2, totalBytes: 0 });
+  act(() => { window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT)); });
+
+  await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(2));
 });
 
 it("keeps retention controls disabled until the policy is loaded", async () => {

@@ -152,14 +152,7 @@ impl Library {
             if actual_status != expected_status {
                 return Err(LibraryError::AssetNotFound);
             }
-            let format = Path::new(&asset.relative_path)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .map(|extension| match extension.to_ascii_uppercase().as_str() {
-                    "JPG" => "JPEG".to_owned(),
-                    other => other.to_owned(),
-                })
-                .unwrap_or_else(|| "IMAGE".to_owned());
+            let format = review_format(&asset.relative_path);
             Ok(SimilarityReviewAsset {
                 asset,
                 format,
@@ -578,6 +571,25 @@ impl Library {
         })
     }
 
+    /// Compute one Asset's missing PDQ hash through the lazy indexing path (same decode
+    /// bound, same failure codes). A hashed or failed Asset is left as it is.
+    pub(super) fn ensure_similarity_hash(&self, asset_id: &str) -> Result<(), LibraryError> {
+        let _index = INDEX_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let missing: bool = self.connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1 AND status = 'normal'
+             AND media_kind IN ('image', 'gif')
+             AND perceptual_hash IS NULL AND perceptual_hash_error IS NULL)",
+            [asset_id],
+            |row| row.get(0),
+        )?;
+        if missing {
+            self.index_similarity_asset(asset_id)?;
+        }
+        Ok(())
+    }
+
     fn index_similarity_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
         let result = self
             .resolve_media(asset_id, MediaVariant::Asset)
@@ -663,7 +675,7 @@ impl Library {
 /// 여러 자산의 요약을 한 번의 IN 쿼리로 로드한다(단건 쿼리 반복 제거).
 /// 상태 판정은 별도 배치 조회 결과로 수행한다. normal·review 자산이
 /// 한 페이지에 섞여 있기 때문이다.
-fn load_asset_summaries(
+pub(super) fn load_asset_summaries(
     connection: &Connection,
     asset_ids: &[String],
 ) -> Result<HashMap<String, AssetSummary>, LibraryError> {
@@ -733,7 +745,7 @@ fn load_asset_statuses(
 }
 
 /// 여러 자산의 분류를 한 번의 IN 쿼리로 로드한다(단건 쿼리 반복 제거).
-fn classifications_for_assets(
+pub(super) fn classifications_for_assets(
     connection: &Connection,
     asset_ids: &[String],
 ) -> Result<HashMap<String, Vec<ClassificationEntry>>, LibraryError> {
@@ -807,14 +819,7 @@ fn load_review_asset(
     expected_status: &str,
 ) -> Result<SimilarityReviewAsset, LibraryError> {
     let asset = load_asset_summary(connection, asset_id, expected_status)?;
-    let format = Path::new(&asset.relative_path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| match extension.to_ascii_uppercase().as_str() {
-            "JPG" => "JPEG".to_owned(),
-            other => other.to_owned(),
-        })
-        .unwrap_or_else(|| "IMAGE".to_owned());
+    let format = review_format(&asset.relative_path);
     let classifications = classifications_for_asset(connection, asset_id)?;
     Ok(SimilarityReviewAsset {
         asset,
@@ -847,7 +852,7 @@ fn load_asset_summary(
         .ok_or(LibraryError::AssetNotFound)
 }
 
-fn provenance_rank(asset: &AssetSummary) -> (bool, bool) {
+pub(super) fn provenance_rank(asset: &AssetSummary) -> (bool, bool) {
     let present =
         |value: &Option<String>| value.as_deref().is_some_and(|text| !text.trim().is_empty());
     (
@@ -856,6 +861,18 @@ fn provenance_rank(asset: &AssetSummary) -> (bool, bool) {
             || present(&asset.creator_handle)
             || present(&asset.creator_name),
     )
+}
+
+/// The format label shown for a review image: its file extension, `JPG` as `JPEG`.
+pub(super) fn review_format(relative_path: &str) -> String {
+    Path::new(relative_path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| match extension.to_ascii_uppercase().as_str() {
+            "JPG" => "JPEG".to_owned(),
+            other => other.to_owned(),
+        })
+        .unwrap_or_else(|| "IMAGE".to_owned())
 }
 
 fn decision_name(decision: SimilarityDecision) -> &'static str {

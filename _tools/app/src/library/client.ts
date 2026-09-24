@@ -374,6 +374,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<SimilarityReviewPage>("list_similarity_reviews", { after, limit }),
   decideSimilarityReview: (request) =>
     invoke("decide_similarity_review", { request }),
+  similarityReviewInboundStatus: () =>
+    invoke<{ applied: number }>("similarity_review_inbound_status"),
   getAsset: (assetId) => invoke<AssetSummary>("get_asset", { assetId }),
   updateAssetMetadata: (request: AssetMetadataPatch) =>
     invoke<AssetSummary>("update_asset_metadata", { request }),

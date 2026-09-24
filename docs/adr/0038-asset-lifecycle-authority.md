@@ -222,6 +222,27 @@ restore the server authority backup
 
 identical to the Classification and Album domains.
 
+### 7a. Local file deletion on the PC (clarification, 2026-09-24)
+
+§3 and §7 concern R2 objects. The PC's *local* copies are handled separately:
+
+* Emptying the trash (or retention expiry) for a server-owned Asset is two-phase. The PC
+  queues `tombstoned` and marks the Asset purge pending (`asset_purge_pending`), keeping the
+  local row and files. Only after the server accepts the tombstone does the PC delete the
+  row and the Asset's own local files (original, thumbnail, video derivatives).
+* If the tombstone meets a `revisionConflict` whose current state is `normal` (a restore
+  elsewhere won), the intent is dropped, not rebased, and the local row is restored or
+  re-materialized. A current state of `trash` rebases as before.
+* Files still referenced by another remaining record are kept. Deletion is limited to
+  recorded relative paths inside the library root and never follows symlinks out of it.
+  A crash between acceptance and deletion is finished on the next start.
+* A tombstone issued by another device is handled the same way once adopted: the local row
+  goes and this PC's own files for that Asset are deleted under the same guards and crash
+  recovery, so every PC removes its own copies once the tombstone is accepted.
+* A trash adopted from the server starts this PC's retention period at adoption time.
+* Classification and Album intents refused with `assetTombstoned` are dropped rather than
+  retried, so they cannot block later intents.
+
 ## Consequences
 
 * The server can create a canonical Asset with no PC involvement, so a mobile save is no

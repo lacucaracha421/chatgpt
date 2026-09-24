@@ -549,6 +549,16 @@ pub(super) fn flush_outbox(
                     report.no_op += 1;
                 }
             }
+            AlbumCommandOutcome::Dropped => {
+                // The Asset is tombstoned: the intent can never apply, so it is retired
+                // instead of blocking the queue.
+                library.connection()?.execute(
+                    "DELETE FROM album_authority_outbox WHERE operation_id = ?1",
+                    [&entry.operation_id],
+                )?;
+                report.pending -= 1;
+                report.no_op += 1;
+            }
             AlbumCommandOutcome::Conflict(conflict) => {
                 block_entry(library, entry.seq, &conflict.code, conflict.detail, now)?;
                 report.blocked += 1;

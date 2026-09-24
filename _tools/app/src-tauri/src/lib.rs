@@ -238,6 +238,7 @@ pub fn run() {
             commands::run_image_similarity_scan_batch,
             commands::list_similarity_reviews,
             commands::decide_similarity_review,
+            commands::similarity_review_inbound_status,
             commands::video_similarity::start_video_similarity_scan,
             commands::video_similarity::get_video_similarity_scan,
             commands::video_similarity::latest_video_similarity_scan,

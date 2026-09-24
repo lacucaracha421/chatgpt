@@ -102,15 +102,105 @@ fn local_projection(db: &Connection, id: &str) -> Result<(), LibraryError> {
             |r| r.get(0),
         )
         .optional()?;
-    let target = lifecycle.or(confirmed);
-    match target.as_deref() {
-        Some("tombstoned") => {
-            db.execute("DELETE FROM assets WHERE id=?", [id])?;
+    let target = match lifecycle {
+        // A queued tombstone is not a deletion yet: the row and its bytes stay (hidden as
+        // purge pending) until the server accepts it, so a restore elsewhere can still win.
+        Some(desired) if desired == "tombstoned" && confirmed.as_deref() != Some("tombstoned") => {
+            Some("trash".to_owned())
         }
+        lifecycle => lifecycle.or(confirmed),
+    };
+    match target.as_deref() {
+        Some("tombstoned") => retire_local_row(db, id)?,
         Some(status) => {
-            db.execute("UPDATE assets SET status=?1,trashed_at=CASE WHEN ?1='trash' THEN COALESCE(trashed_at,?2) ELSE NULL END WHERE id=?3",params![status,chrono::Utc::now().to_rfc3339(),id])?;
+            // Each PC starts its retention clock when it adopts a trash: a row that was not
+            // already in the trash gets the adoption time, never a stale earlier value.
+            db.execute("UPDATE assets SET status=?1,trashed_at=CASE WHEN ?1='trash' THEN CASE WHEN status='trash' THEN COALESCE(trashed_at,?2) ELSE ?2 END ELSE NULL END WHERE id=?3",params![status,chrono::Utc::now().to_rfc3339(),id])?;
         }
         None => {}
+    }
+    Ok(())
+}
+
+/// Delete the local row of a confirmed tombstone.
+///
+/// Whether this PC or another device asked for the purge, the Asset's own recorded file
+/// paths are captured in the same transaction that deletes the row, so the files can be
+/// removed after commit (under the guards of `delete_accepted_purge_files`) and a crash in
+/// between is finished on the next start.
+fn retire_local_row(db: &Connection, id: &str) -> Result<(), LibraryError> {
+    let paths: Option<(String, Option<String>, String)> = db
+        .query_row(
+            "SELECT relative_path,thumbnail_relative_path,media_kind FROM assets WHERE id=?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    match paths {
+        Some((original, thumbnail, media_kind)) => {
+            let video_directory = (media_kind == "video").then(|| format!("video-media/{id}"));
+            let now = chrono::Utc::now().to_rfc3339();
+            db.execute(
+                "INSERT INTO asset_purge_pending(asset_id,requested_at,accepted_at,relative_path,
+                                                 thumbnail_relative_path,video_directory)
+                 VALUES(?1,?2,?2,?3,?4,?5)
+                 ON CONFLICT(asset_id) DO UPDATE SET accepted_at=excluded.accepted_at,
+                   relative_path=excluded.relative_path,
+                   thumbnail_relative_path=excluded.thumbnail_relative_path,
+                   video_directory=excluded.video_directory
+                 WHERE asset_purge_pending.accepted_at IS NULL",
+                params![id, now, original, thumbnail, video_directory],
+            )?;
+        }
+        None => {
+            db.execute(
+                "DELETE FROM asset_purge_pending WHERE asset_id=? AND accepted_at IS NULL",
+                [id],
+            )?;
+        }
+    }
+    db.execute("DELETE FROM assets WHERE id=?", [id])?;
+    Ok(())
+}
+
+/// Settle purge-pending rows whose tombstone intent is no longer queued.
+///
+/// The normal path resolves a purge through the outbox; this covers the rest (an intent
+/// removed by a rebaseline, a lost `changed:false` receipt, a row whose Asset vanished) so
+/// no Asset stays hidden forever: a still-trashed Asset re-queues its tombstone, a restored
+/// one comes back, a tombstoned one is retired.
+pub(crate) fn reconcile_purge_pending(db: &Connection) -> Result<(), LibraryError> {
+    let orphaned = db
+        .prepare(
+            "SELECT p.asset_id FROM asset_purge_pending p
+             WHERE p.accepted_at IS NULL AND NOT EXISTS (
+               SELECT 1 FROM asset_lifecycle_outbox o
+               WHERE o.asset_id=p.asset_id AND o.desired='tombstoned')",
+        )?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for id in orphaned {
+        let confirmed: Option<String> = db
+            .query_row(
+                "SELECT lifecycle FROM asset_authority_state WHERE asset_id=?",
+                [&id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let present: bool =
+            db.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE id=?)", [&id], |r| r.get(0))?;
+        match confirmed.as_deref() {
+            Some("trash") if present && authority(db)?.is_some() => {
+                enqueue(db, &[id], "tombstoned")?;
+            }
+            Some("tombstoned") => retire_local_row(db, &id)?,
+            _ => {
+                db.execute("DELETE FROM asset_purge_pending WHERE asset_id=?", [&id])?;
+                if present {
+                    local_projection(db, &id)?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -260,6 +350,39 @@ fn reconcile_unsent_local_trash(
     }
     enqueue(db, &[asset_id.to_string()], "trash")
 }
+/// A queued purge lost its race: the server Asset is no longer in the trash.
+///
+/// * `normal` — another device restored it. Rebasing would tombstone an Asset the user
+///   just chose to keep, so the intent is dropped and the local row comes back (or is
+///   re-materialized if an older build already removed it).
+/// * `tombstoned` — someone else already retired it; the intent is done.
+fn resolve_tombstone_conflict(
+    db: &Connection,
+    seq: i64,
+    current: &AssetProjection,
+) -> Result<(), LibraryError> {
+    db.execute("DELETE FROM asset_lifecycle_outbox WHERE sequence=?", [seq])?;
+    if current.lifecycle == "normal" {
+        db.execute(
+            "DELETE FROM asset_purge_pending WHERE asset_id=? AND accepted_at IS NULL",
+            [&current.asset_id],
+        )?;
+    }
+    apply(db, current)?;
+    local_projection(db, &current.asset_id)?;
+    let present: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM assets WHERE id=?)",
+        [&current.asset_id],
+        |r| r.get(0),
+    )?;
+    if current.lifecycle == "normal" && !present {
+        db.execute(
+            "UPDATE asset_authority_state SET materialization='pending',last_error=NULL WHERE asset_id=?",
+            [&current.asset_id],
+        )?;
+    }
+    Ok(())
+}
 fn verify_envelope(value: &Value, a: &Authority) -> Result<(), LibraryError> {
     if value["libraryId"].as_str() != Some(&a.library)
         || value["epoch"].as_i64() != Some(a.epoch)
@@ -362,6 +485,8 @@ impl Library {
                 self.flush_assets(client, secret.expose(), &a, &mut result)?;
             }
         }
+        // Finish file deletion for purges the server has accepted (this pass or earlier).
+        self.delete_accepted_purge_files()?;
         self.materialize_candidates(client, token, &mut result)?;
         Ok(result)
     }
@@ -609,6 +734,12 @@ impl Library {
                     }
                     p.entity_revision = current_revision;
                     p.lifecycle = lifecycle.clone();
+                    if desired == "tombstoned" && lifecycle != "trash" {
+                        resolve_tombstone_conflict(&tx, seq, &p)?;
+                        tx.commit()?;
+                        result.applied_changes += 1;
+                        continue;
+                    }
                     apply(&tx, &p)?;
                     if lifecycle == "tombstoned" && desired != "tombstoned" {
                         tx.execute("UPDATE asset_lifecycle_outbox SET status='conflict',last_error='lifecycleTransitionRefused' WHERE sequence=?",[seq])?;
@@ -1091,10 +1222,16 @@ mod tests {
             .unwrap(),
             "tombstoned"
         );
+        // Two-phase purge: the row stays (hidden as purge pending) until acceptance.
         assert_eq!(
             db.query_row("SELECT count(*) FROM assets", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            0
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM asset_purge_pending", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
         );
         assert!(projection(&db, ID).unwrap().is_some());
     }
@@ -1637,6 +1774,397 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    fn count(library: &Library, sql: &str) -> i64 {
+        library
+            .connection()
+            .unwrap()
+            .query_row(sql, [], |r| r.get(0))
+            .unwrap()
+    }
+    fn files(library: &Library) -> (std::path::PathBuf, std::path::PathBuf) {
+        let db = library.connection().unwrap();
+        let (original, thumbnail): (String, String) = db
+            .query_row(
+                "SELECT relative_path,thumbnail_relative_path FROM assets WHERE id=?",
+                [ID],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        (library.root().join(original), library.root().join(thumbnail))
+    }
+    /// A server-known Asset whose trash the server already confirmed (revision 2).
+    fn confirmed_trash(library: &Library, p: &AssetProjection) {
+        let mut trashed = p.clone();
+        trashed.lifecycle = "trash".into();
+        trashed.entity_revision = 2;
+        apply(&library.connection().unwrap(), &trashed).unwrap();
+    }
+    fn authority_of(library: &Library) -> Authority {
+        authority(&library.connection().unwrap()).unwrap().unwrap()
+    }
+    /// Answer lifecycle commands in order; returns the command bodies received.
+    fn command_server(
+        responses: Vec<(u16, Value)>,
+    ) -> (CloudClient, std::thread::JoinHandle<Vec<Value>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}", server.server_addr())).unwrap();
+        let worker = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for (status, body) in responses {
+                let mut request = server
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(request.url(), "/v1/assets/authority/commands");
+                let mut raw = String::new();
+                request.as_reader().read_to_string(&mut raw).unwrap();
+                let sent: Value = serde_json::from_str(&raw).unwrap();
+                let body = if status == 200 {
+                    let mut body = body;
+                    body["operationId"] = sent["operationId"].clone();
+                    body
+                } else {
+                    body
+                };
+                bodies.push(sent);
+                request
+                    .respond(
+                        tiny_http::Response::from_string(body.to_string()).with_status_code(status),
+                    )
+                    .unwrap();
+            }
+            bodies
+        });
+        (client, worker)
+    }
+    fn accepted_tombstone(library: &Library, p: &AssetProjection, revision: i64) -> Value {
+        let mut tombstoned = p.clone();
+        tombstoned.lifecycle = "tombstoned".into();
+        tombstoned.entity_revision = revision;
+        json!({"libraryId":library.library_id().unwrap(),"epoch":1,"contractVersion":1,
+               "commandType":"tombstoneAsset","changed":true,"asset":tombstoned})
+    }
+    fn revision_conflict(revision: i64, lifecycle: &str) -> Value {
+        json!({"detail":{"code":"revisionConflict","assetId":ID,
+               "currentEntityRevision":revision,"lifecycle":lifecycle}})
+    }
+
+    #[test]
+    fn a_remote_trash_starts_the_retention_clock_at_adoption() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        // A stale timestamp on a normal row must never shorten the adopted retention.
+        library
+            .connection()
+            .unwrap()
+            .execute("UPDATE assets SET trashed_at='2020-01-01T00:00:00Z' WHERE id=?", [ID])
+            .unwrap();
+        let before = chrono::Utc::now();
+        confirmed_trash(&library, &p);
+        let trashed_at: String = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT trashed_at FROM assets WHERE id=?", [ID], |r| r.get(0))
+            .unwrap();
+        let adopted = chrono::DateTime::parse_from_rfc3339(&trashed_at).unwrap();
+        assert!(adopted >= before - chrono::Duration::seconds(1));
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 1);
+        // Default retention is 30 days, counted from adoption.
+        let early = library
+            .purge_expired_trash(before + chrono::Duration::days(29))
+            .unwrap();
+        assert_eq!(early.deleted_count, 0);
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 1);
+        let due = library
+            .purge_expired_trash(before + chrono::Duration::days(31))
+            .unwrap();
+        assert_eq!(due.deleted_count, 1);
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 0);
+        // Re-adopting the same trash keeps the first adoption time.
+        confirmed_trash(&library, &p);
+        let again: String = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT trashed_at FROM assets WHERE id=?", [ID], |r| r.get(0))
+            .unwrap();
+        assert_eq!(again, trashed_at);
+    }
+
+    #[test]
+    fn a_remote_restore_restores_the_local_row() {
+        let (_temp, library, mut p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        p.entity_revision = 3;
+        apply(&library.connection().unwrap(), &p).unwrap();
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM assets WHERE status='normal' AND trashed_at IS NULL"),
+            1
+        );
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 0);
+    }
+
+    #[test]
+    fn emptying_keeps_the_row_and_files_until_the_tombstone_is_accepted_then_deletes_both() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        let (original, thumbnail) = files(&library);
+        assert!(original.is_file() && thumbnail.is_file());
+
+        assert_eq!(library.empty_trash().unwrap().deleted_count, 1);
+        // Hidden from the trash, but nothing is deleted before acceptance.
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='trash'"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending WHERE accepted_at IS NULL"), 1);
+        assert!(original.is_file() && thumbnail.is_file());
+        // A second empty/purge does not queue a second tombstone or restore the row.
+        library.empty_trash().unwrap();
+        assert!(library.restore_assets(&[ID.into()]).is_ok());
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='trash'"), 1);
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM asset_lifecycle_outbox WHERE desired='tombstoned'"),
+            1
+        );
+        // An unrelated sync touching the Asset before acceptance keeps it intact.
+        confirmed_trash(&library, &p);
+        assert!(original.is_file());
+        assert_eq!(count(&library, "SELECT count(*) FROM assets"), 1);
+
+        let (client, worker) = command_server(vec![(200, accepted_tombstone(&library, &p, 3))]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        let sent = worker.join().unwrap();
+        assert_eq!(sent[0]["commandType"], "tombstoneAsset");
+        assert_eq!(sent[0]["expectedEntityRevision"], 2);
+        assert_eq!(result.flushed, 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending WHERE accepted_at IS NOT NULL"), 1);
+
+        assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+        assert!(!original.exists() && !thumbnail.exists());
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 0);
+    }
+
+    #[test]
+    fn a_crash_after_acceptance_finishes_file_deletion_on_the_next_start() {
+        let (temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        let (original, thumbnail) = files(&library);
+        library.empty_trash().unwrap();
+        let (client, worker) = command_server(vec![(200, accepted_tombstone(&library, &p, 3))]);
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut AssetSyncResult::default())
+            .unwrap();
+        worker.join().unwrap();
+        // "Crash": the process ends before the file step runs.
+        drop(library);
+        assert!(original.is_file() && thumbnail.is_file());
+        let reopened = Library::open(temp.path()).unwrap();
+        let summary = reopened.purge_expired_trash(chrono::Utc::now()).unwrap();
+        assert!(summary.failed_asset_ids.is_empty());
+        assert!(!original.exists() && !thumbnail.exists());
+        assert_eq!(count(&reopened, "SELECT count(*) FROM asset_purge_pending"), 0);
+    }
+
+    #[test]
+    fn a_crash_before_acceptance_leaves_the_asset_intact() {
+        let (temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        let (original, thumbnail) = files(&library);
+        library.empty_trash().unwrap();
+        drop(library);
+        let reopened = Library::open(temp.path()).unwrap();
+        reopened.purge_expired_trash(chrono::Utc::now()).unwrap();
+        assert!(original.is_file() && thumbnail.is_file());
+        assert_eq!(count(&reopened, "SELECT count(*) FROM assets WHERE status='trash'"), 1);
+        assert_eq!(
+            count(&reopened, "SELECT count(*) FROM asset_lifecycle_outbox WHERE desired='tombstoned'"),
+            1
+        );
+    }
+
+    #[test]
+    fn a_tombstone_that_loses_to_a_restore_is_dropped_and_the_asset_comes_back() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        let (original, _) = files(&library);
+        library.empty_trash().unwrap();
+        let (client, worker) = command_server(vec![(409, revision_conflict(3, "normal"))]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        assert_eq!(worker.join().unwrap().len(), 1, "the tombstone must not be re-sent");
+        assert_eq!(result.applied_changes, 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 0);
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM assets WHERE status='normal' AND trashed_at IS NULL"),
+            1
+        );
+        assert!(original.is_file());
+        assert_eq!(projection(&library.connection().unwrap(), ID).unwrap().unwrap().entity_revision, 3);
+        assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+        assert!(original.is_file());
+    }
+
+    #[test]
+    fn a_restore_that_wins_after_an_old_build_removed_the_row_re_materializes_it() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        library.empty_trash().unwrap();
+        // Older builds deleted the row as soon as the tombstone was queued.
+        library
+            .connection()
+            .unwrap()
+            .execute_batch("DELETE FROM asset_purge_pending; DELETE FROM assets;")
+            .unwrap();
+        let (client, worker) = command_server(vec![(409, revision_conflict(3, "normal"))]);
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut AssetSyncResult::default())
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM asset_authority_state WHERE materialization='pending' AND lifecycle='normal'"),
+            1
+        );
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+    }
+
+    #[test]
+    fn a_tombstone_conflicting_with_a_newer_trash_rebases_and_then_purges() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        let (original, _) = files(&library);
+        library.empty_trash().unwrap();
+        let (client, worker) = command_server(vec![
+            (409, revision_conflict(4, "trash")),
+            (200, accepted_tombstone(&library, &p, 5)),
+        ]);
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut AssetSyncResult::default())
+            .unwrap();
+        let sent = worker.join().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[1]["commandType"], "tombstoneAsset");
+        assert_eq!(sent[1]["expectedEntityRevision"], 4);
+        assert_ne!(sent[0]["operationId"], sent[1]["operationId"]);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets"), 0);
+        library.delete_accepted_purge_files().unwrap();
+        assert!(!original.exists());
+    }
+
+    fn remote_tombstone(library: &Library, p: &AssetProjection) {
+        let mut tombstoned = p.clone();
+        tombstoned.lifecycle = "tombstoned".into();
+        tombstoned.entity_revision = 3;
+        let mut db = library.connection().unwrap();
+        let tx = db.transaction().unwrap();
+        apply(&tx, &tombstoned).unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn a_tombstone_issued_elsewhere_deletes_this_pcs_own_files() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        let (original, thumbnail) = files(&library);
+        remote_tombstone(&library, &p);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets"), 0);
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM asset_purge_pending WHERE accepted_at IS NOT NULL"),
+            1
+        );
+        assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+        assert!(!original.exists() && !thumbnail.exists());
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+    }
+
+    #[test]
+    fn a_tombstone_issued_elsewhere_keeps_a_file_another_asset_references() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let (original, thumbnail) = files(&library);
+        let other = "80000000-0000-4000-8000-0000000000aa";
+        insert_local_only(&library, other, "normal", 'e');
+        let shared: String = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT thumbnail_relative_path FROM assets WHERE id=?", [ID], |r| r.get(0))
+            .unwrap();
+        remote_tombstone(&library, &p);
+        // Another remaining Asset names the same thumbnail file.
+        library
+            .connection()
+            .unwrap()
+            .execute("UPDATE assets SET thumbnail_relative_path=? WHERE id=?", params![shared, other])
+            .unwrap();
+        assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+        assert!(!original.exists(), "the Asset's own original goes");
+        assert!(thumbnail.is_file(), "a file another Asset still names is kept");
+    }
+
+    #[test]
+    fn a_crash_between_a_remote_tombstone_and_file_deletion_recovers_on_start() {
+        let (temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let (original, thumbnail) = files(&library);
+        remote_tombstone(&library, &p);
+        // "Crash" before the file step.
+        drop(library);
+        assert!(original.is_file() && thumbnail.is_file());
+        let reopened = Library::open(temp.path()).unwrap();
+        assert!(reopened
+            .purge_expired_trash(chrono::Utc::now())
+            .unwrap()
+            .failed_asset_ids
+            .is_empty());
+        assert!(!original.exists() && !thumbnail.exists());
+        assert_eq!(count(&reopened, "SELECT count(*) FROM asset_purge_pending"), 0);
+    }
+
+    #[test]
+    fn a_purge_pending_asset_without_its_intent_is_settled_not_stranded() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        confirmed_trash(&library, &p);
+        library.empty_trash().unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM asset_lifecycle_outbox", [])
+            .unwrap();
+        // Still trash on the server: the tombstone is re-queued, the row stays hidden.
+        library.purge_expired_trash(chrono::Utc::now()).unwrap();
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM asset_lifecycle_outbox WHERE desired='tombstoned'"),
+            1
+        );
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 0);
+        // Restored on the server with the intent gone: the Asset comes back.
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM asset_lifecycle_outbox", [])
+            .unwrap();
+        let mut normal = p.clone();
+        normal.entity_revision = 3;
+        apply(&library.connection().unwrap(), &normal).unwrap();
+        library.purge_expired_trash(chrono::Utc::now()).unwrap();
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='normal'"), 1);
     }
 
     #[test]

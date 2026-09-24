@@ -1,3 +1,10 @@
 # 자산은 즉시 삭제하지 않고 라이브러리 휴지통으로 보낸다
 
 사용자가 자산을 삭제하면 라이브러리에서는 숨기되 파일과 분류 정보는 앱 내부 휴지통에 유지한다. 기본 보존 기간은 30일이며 사용자는 자동 삭제를 끄거나 기간을 변경할 수 있다. 보존 기간이 지나면 다음 앱 실행 중 실제 파일을 제거하고, 휴지통 화면에는 영구 삭제까지 남은 기간을 표시한다. 사용자는 그전에 직접 복원하거나 휴지통을 비울 수 있으며, 삭제에 실패한 자산은 기록을 유지한 채 나중에 다시 시도한다.
+
+## Clarification (2026-09-24, mobile Library Trash)
+
+- For an Asset the server owns, emptying the trash or retention expiry first queues a tombstone and hides the Asset as "purge pending"; the local row and files stay untouched. The local row and the Asset's own files (original, thumbnail, video derivatives) are deleted only after the server accepts the tombstone. If another device restored the Asset first, the purge is dropped and the Asset returns. A crash after acceptance is finished on the next start; a crash before acceptance leaves the Asset intact.
+- When another device's tombstone is accepted (for example the other PC emptied its trash), this PC also deletes its own local copy of that Asset with the same safeguards and crash recovery, so every PC removes its own copies once the tombstone is accepted.
+- A file that another remaining record still references is kept. Only recorded paths inside the library root are deleted, and symlinks are never followed out of it.
+- A trash adopted from another device (e.g. the phone) starts this PC's retention period at adoption time, not at the original trash time.

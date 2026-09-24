@@ -163,6 +163,16 @@ pub enum LibraryError {
     CharacterReviewSyncRejected(u16),
     #[error("서버 캐릭터 검토 항목이 올바르지 않습니다.")]
     CharacterReviewInvalid,
+    #[error("서버가 모바일 유사 이미지 검토 기능을 제공하지 않거나 서버 라이브러리 연결이 필요합니다.")]
+    SimilarityReviewUnsupported,
+    #[error("서버 유사 이미지 검토 이력과 이 PC의 위치 또는 라이브러리가 어긋납니다.")]
+    SimilarityReviewCursorRejected,
+    #[error("서버 유사 이미지 검토 동기화 요청이 거부됐습니다: HTTP {0}")]
+    SimilarityReviewSyncRejected(u16),
+    #[error("서버 유사 이미지 검토 항목이 올바르지 않습니다.")]
+    SimilarityReviewInvalid,
+    #[error("서버의 유사 이미지 검토 목록이 먼저 변경되었습니다. 다시 게시해 주세요.")]
+    SimilarityReviewFeedConflict,
     #[error("서버 캐릭터 게시가 거부됐습니다: HTTP {0}")]
     CharacterPublicationRejected(u16),
     #[error("서버의 캐릭터 게시본이 먼저 변경되었습니다. 다시 게시해 주세요.")]

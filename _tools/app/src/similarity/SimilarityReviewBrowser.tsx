@@ -11,6 +11,7 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { VideoSimilarityPanel } from "./video/VideoSimilarityPanel";
+import { SIMILARITY_REVIEW_CHANGED_EVENT } from "./useSimilarityReviewInbound";
 
 type Props = {
   gateway: LibraryGateway;
@@ -69,6 +70,15 @@ function ImageSimilarityReviewBrowser({ gateway, onCountChange, onClose }: Props
     mountedRef.current = true;
     void load();
     return () => { mountedRef.current = false; generationRef.current += 1; };
+  }, [load]);
+
+  // Decisions made on a phone and applied here resolve pairs underneath this screen.
+  const pendingRef = useRef(false);
+  pendingRef.current = pending;
+  useEffect(() => {
+    const reload = () => { if (!pendingRef.current) void load(); };
+    window.addEventListener(SIMILARITY_REVIEW_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(SIMILARITY_REVIEW_CHANGED_EVENT, reload);
   }, [load]);
 
   useEffect(() => {

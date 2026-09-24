@@ -233,6 +233,11 @@ impl From<LibraryError> for CommandError {
             LibraryError::CharacterReviewCursorRejected => "character_review_cursor_rejected",
             LibraryError::CharacterReviewSyncRejected(_) => "character_review_sync_rejected",
             LibraryError::CharacterReviewInvalid => "character_review_invalid",
+            LibraryError::SimilarityReviewUnsupported => "similarity_review_unsupported",
+            LibraryError::SimilarityReviewCursorRejected => "similarity_review_cursor_rejected",
+            LibraryError::SimilarityReviewSyncRejected(_) => "similarity_review_sync_rejected",
+            LibraryError::SimilarityReviewInvalid => "similarity_review_invalid",
+            LibraryError::SimilarityReviewFeedConflict => "similarity_review_feed_conflict",
             LibraryError::CharacterPublicationRejected(_) => "character_publication_rejected",
             LibraryError::CharacterPublicationConflict => "character_publication_conflict",
             LibraryError::CharacterPublicationTooLarge => "character_publication_too_large",
@@ -854,6 +859,19 @@ pub async fn decide_similarity_review(
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.decide_similarity_review(request))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+/// Cheap counter of mobile similarity decisions applied on this PC; the desktop reloads the
+/// review screen and the trash count when it changes.
+#[tauri::command]
+pub async fn similarity_review_inbound_status(
+    state: State<'_, AppState>,
+) -> Result<crate::library::similarity_review_sync::SimilarityInboundStatus, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.similarity_review_inbound_status())
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

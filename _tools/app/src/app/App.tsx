@@ -1,4 +1,4 @@
-import {useAssetAuthoritySync} from './useAssetAuthoritySync';
+import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
 import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
 import {ALBUM_AUTHORITY_CHANGED_EVENT, useAlbumAuthoritySync} from './useAlbumAuthoritySync';
@@ -56,6 +56,7 @@ import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { DragLayer } from "../shared/ui/DragLayer";
 import { pointerDragReducer, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
+import { useSimilarityReviewInbound } from "../similarity/useSimilarityReviewInbound";
 import { useVideoPreparation } from "../video/useVideoPreparation";
 import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
@@ -307,6 +308,21 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     window.addEventListener(CLASSIFICATION_AUTHORITY_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(CLASSIFICATION_AUTHORITY_CHANGED_EVENT, refresh);
   }, [refreshClassifications]);
+  // A trash or restore from another device changes the trash count without a local action.
+  useEffect(() => {
+    const refresh = () => {
+      void refreshTrashCount().catch(() => undefined);
+      setAssetRefresh((current) => current + 1);
+    };
+    window.addEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
+  }, [refreshTrashCount]);
+  // A mobile similarity decision applied on this PC trashed an image and resolved a pair.
+  const handleSimilarityInbound = useCallback(() => {
+    void refreshReviewCount().catch(() => undefined);
+    window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT));
+  }, [refreshReviewCount]);
+  useSimilarityReviewInbound(gateway, handleSimilarityInbound);
   useCloudCaptureSync(gateway, libraryRoot, handleCloudCaptureSync);
   const handleIngestedRef = useRef(handleIngested);
   useLayoutEffect(() => { handleIngestedRef.current = handleIngested; }, [handleIngested]);

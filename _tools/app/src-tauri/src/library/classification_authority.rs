@@ -854,6 +854,16 @@ pub(super) fn flush_outbox(
                     report.no_op += 1;
                 }
             }
+            ClassificationCommandOutcome::Dropped => {
+                // The Asset is tombstoned: the intent can never apply, so it is retired
+                // instead of blocking the queue.
+                library.connection()?.execute(
+                    "DELETE FROM classification_authority_outbox WHERE operation_id = ?1",
+                    [&entry.operation_id],
+                )?;
+                report.pending -= 1;
+                report.no_op += 1;
+            }
             ClassificationCommandOutcome::Conflict(conflict) => {
                 if entry.is_assignment() && conflict.code == REVISION_CONFLICT {
                     // A desired-state scalar may be rebased when preserving the same
