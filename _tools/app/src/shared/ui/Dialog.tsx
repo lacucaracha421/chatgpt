@@ -7,13 +7,14 @@ type DialogProps = PropsWithChildren<{
   title: string;
   variant?: "default" | "medium" | "wide" | "fullscreen";
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
+  onKeyUp?: KeyboardEventHandler<HTMLDivElement>;
   onClose: () => void;
 }>;
 
 const SWIPE_BACK_PX = 80;
 const SWIPE_BACK_COOLDOWN_MS = 800;
 
-export function Dialog({ children, open, title, variant = "default", onKeyDown, onClose }: DialogProps) {
+export function Dialog({ children, open, title, variant = "default", onKeyDown, onKeyUp, onClose }: DialogProps) {
   const backNavigation = useBackNavigationContext();
   const requestBack = useBackRequest();
   const openerRef = useRef<HTMLElement | null>(null);
@@ -78,6 +79,7 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
             openerRef.current?.focus();
           }}
           onKeyDown={onKeyDown}
+          onKeyUp={onKeyUp}
           onWheel={swipeBack}
           onEscapeKeyDown={backNavigation ? (event) => {
             event.preventDefault();

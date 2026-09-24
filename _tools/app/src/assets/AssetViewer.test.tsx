@@ -38,11 +38,11 @@ it("supports buttons and Escape without wrapping at the final asset", async () =
   expect(onClose).toHaveBeenCalledOnce();
 });
 
-it("shows the current asset name and position without replacing the dialog label", () => {
+it("labels the dialog with the asset name and shows no top-left name overlay", () => {
   render(<AssetViewer items={[asset("a", "a.gif"), asset("b", "b.png")]} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
 
   expect(screen.getByRole("dialog", { name: "b.png" })).toBeInTheDocument();
-  expect(screen.getByRole("status", { name: "현재 자산" })).toHaveTextContent("b.png2 / 2");
+  expect(screen.queryByRole("status", { name: "현재 자산" })).not.toBeInTheDocument();
 });
 
 it("toggles favorite and moves to trash from the keyboard and buttons", () => {
@@ -142,6 +142,24 @@ it("seeks a video with Left/Right while the on-screen arrows still change assets
 
   fireEvent.click(screen.getByRole("button", { name: "다음 자산" }));
   expect(onActiveIdChange).toHaveBeenCalledWith("c");
+});
+
+it("plays/pauses a video with Space even while the next-asset button has focus", () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
+  const onActiveIdChange = vi.fn();
+  render(<AssetViewer items={[videoAsset("v", "v.webm"), asset("c", "c.png")]} activeId="v" onActiveIdChange={onActiveIdChange} onClose={vi.fn()} />);
+  const next = screen.getByRole("button", { name: "다음 자산" });
+  next.focus();
+
+  const down = fireEvent.keyDown(next, { key: " ", code: "Space" });
+  const up = fireEvent.keyUp(next, { key: " ", code: "Space" });
+
+  expect(play).toHaveBeenCalledOnce();
+  expect(down).toBe(false);
+  expect(up).toBe(false);
+  expect(onActiveIdChange).not.toHaveBeenCalled();
 });
 
 it("keeps Left/Right as previous/next for a video hidden by privacy mode", () => {

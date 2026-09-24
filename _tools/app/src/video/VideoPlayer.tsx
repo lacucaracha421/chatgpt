@@ -11,7 +11,9 @@ const CONTROLS_IDLE_MS = 1_800;
 export const VIDEO_SEEK_STEP_SECONDS = 5;
 
 /** Lets a host (the asset viewer) route arrow keys to the player while focus sits elsewhere. */
-export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void };
+export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void; togglePlayback: () => void };
+/** Longest time the pre-seek frame may cover the video if `seeked` never fires. */
+const SEEK_FREEZE_MAX_MS = 1_500;
 
 type PlaybackUrlResolver = (assetId: string) => Promise<string>;
 
@@ -40,6 +42,9 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
   const [controlsFocused, setControlsFocused] = useState(false);
   const [source, setSource] = useState<string | undefined>(() => protocolUrl(asset.id));
   const idleTimerRef = useRef<number | null>(null);
+  const freezeRef = useRef<HTMLCanvasElement>(null);
+  const freezeTimerRef = useRef<number | null>(null);
+  const [frozen, setFrozen] = useState(false);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
@@ -101,6 +106,26 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
     };
   }, [asset.id, asset.media.durationMs, protocolUrl, resolveHttpUrl]);
 
+  const releaseFrame = useCallback(() => {
+    if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
+    freezeTimerRef.current = null;
+    setFrozen(false);
+  }, []);
+  useEffect(() => releaseFrame, [releaseFrame]);
+  /** Some engines (WebKitGTK) show black while a seek flushes; hold the current frame over it until `seeked`. */
+  const holdFrame = () => {
+    const video = videoRef.current;
+    const canvas = freezeRef.current;
+    if (!video || !canvas || video.readyState < 2 || !video.videoWidth) return;
+    const context = canvas.getContext?.("2d");
+    if (!context) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    try { context.drawImage(video, 0, 0); } catch { return; }
+    setFrozen(true);
+    if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
+    freezeTimerRef.current = window.setTimeout(releaseFrame, SEEK_FREEZE_MAX_MS);
+  };
   const togglePlayback = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -119,11 +144,13 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
     const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : safeDuration;
     const from = Number.isFinite(video.currentTime) ? video.currentTime : 0;
     const next = Math.max(0, limit > 0 ? Math.min(limit, from + deltaSeconds) : from + deltaSeconds);
+    if (next === from) return;
+    holdFrame();
     video.currentTime = next;
     setCurrentTime(next);
     scheduleIdle();
   };
-  useImperativeHandle(ref, () => ({ seekBy }));
+  useImperativeHandle(ref, () => ({ seekBy, togglePlayback }));
   const hoverTime = hoverRatio === null || !timelineAvailable ? 0 : hoverRatio * safeDuration;
   const hoverFrame = timelineAvailable && hoverRatio !== null
     ? Math.round(hoverRatio * Math.max(0, asset.media.scrubFrameCount - 1))
@@ -164,10 +191,12 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
       onPlay={() => setPlaying(true)}
       onPause={() => setPlaying(false)}
       onEnded={() => setPlaying(false)}
+      onSeeked={releaseFrame}
       onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
       onDurationChange={(event) => setDuration(event.currentTarget.duration)}
       onVolumeChange={(event) => { setMuted(event.currentTarget.muted); setVolume(event.currentTarget.volume); }}
     />
+    <canvas ref={freezeRef} className="video-player__freeze" aria-hidden="true" hidden={!frozen} />
     <div
       className="video-player__controls"
       aria-hidden={!controlsVisible}
@@ -191,7 +220,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
           onChange={(event) => {
             if (!timelineAvailable) return;
             const next = Number(event.currentTarget.value);
-            if (videoRef.current) videoRef.current.currentTime = next;
+            if (videoRef.current) { holdFrame(); videoRef.current.currentTime = next; }
             setCurrentTime(next);
             scheduleIdle();
           }}

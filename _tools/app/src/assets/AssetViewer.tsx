@@ -74,12 +74,22 @@ export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAsse
     variant="fullscreen"
     title={asset.title || asset.originalName}
     onClose={onClose}
+    onKeyUp={(event) => {
+      // Buttons activate on Space keyup; the keydown above already handled it.
+      if (seekable && isSpace(event) && !typesText(event.target)) event.preventDefault();
+    }}
     onKeyDown={(event) => {
       const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
       // A video owns Left/Right for seeking; previous/next stays on the on-screen arrows.
       if (arrow && seekable && !event.altKey && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
         videoPlayerRef.current?.seekBy(event.key === "ArrowLeft" ? -VIDEO_SEEK_STEP_SECONDS : VIDEO_SEEK_STEP_SECONDS);
+        return;
+      }
+      // Space plays/pauses a video; it must never activate a focused viewer button such as "next".
+      if (seekable && isSpace(event) && !event.defaultPrevented && !typesText(event.target)) {
+        event.preventDefault();
+        videoPlayerRef.current?.togglePlayback();
         return;
       }
       if (event.key === "Tab") keyboardFocusRef.current = true;
@@ -96,10 +106,6 @@ export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAsse
       onPointerMove={() => { keyboardFocusRef.current = false; revealChrome(); }}
       onPointerDown={() => { keyboardFocusRef.current = false; }}
     >
-      <div className="asset-viewer__identity" role="status" aria-label="현재 자산">
-        <strong>{asset.title || asset.originalName}</strong>
-        <span>{index + 1} / {items.length}</span>
-      </div>
       <div ref={chromeRef} className="asset-viewer__chrome" onFocusCapture={revealChrome} onBlurCapture={revealChrome}>
       <div className="asset-viewer__navigation" aria-label="자산 이동" {...chromeHover}>
         <Button size="icon" variant="ghost" aria-label="이전 자산" aria-description="이전 자산" disabled={!previous} onClick={() => move(previous)}><ChevronLeftIcon aria-hidden="true" /></Button>
@@ -121,4 +127,12 @@ export function AssetViewer({ items, activeId, onActiveIdChange, onClose, onAsse
             : <StableImage className="asset-viewer__media" src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setImageFailed(true)} />}
     </div>
   </Dialog>;
+}
+
+function isSpace(event: { key: string; code: string }) {
+  return event.key === " " || event.code === "Space";
+}
+
+function typesText(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("input:not([type=range]),select,textarea,[contenteditable=true]"));
 }
