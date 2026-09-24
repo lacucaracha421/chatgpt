@@ -26,6 +26,26 @@ describe("AssetGallery", () => {
     expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("2026.09.23");
   });
 
+  it("labels date headings with the date, 오늘 or the weekday, and the group count", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 24, 9));
+    const items = [
+      { ...asset(0), collectedAt: new Date(2026, 8, 24, 8).toISOString() },
+      { ...asset(1), collectedAt: new Date(2026, 8, 24, 7).toISOString() },
+      { ...asset(2), collectedAt: new Date(2026, 8, 23, 21).toISOString() },
+    ];
+    const { container, rerender } = render(<AssetGallery layout="masonry" items={items} />);
+    const headings = [...container.querySelectorAll(".asset-gallery__date")];
+    expect(headings.map(heading => [
+      heading.querySelector(".asset-gallery__date-day")?.textContent,
+      heading.querySelector(".asset-gallery__date-weekday")?.textContent,
+      heading.querySelector(".asset-gallery__date-count")?.textContent,
+    ])).toEqual([["09.24", "오늘", "2"], ["09.23", "수", "1"]]);
+    rerender(<AssetGallery layout="masonry" items={items} fullDateHeadings />);
+    expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^2026\.09\.24$/);
+    expect(container.querySelector(".asset-gallery__date-weekday")).toHaveTextContent("오늘");
+  });
+
   it("leaves the missing creator caption empty while retaining time and its description", () => {
     const { container } = render(<AssetGallery layout="masonry" items={[asset(0)]} metadataVisible />);
     const caption = container.querySelector(".asset-gallery__metadata")!;

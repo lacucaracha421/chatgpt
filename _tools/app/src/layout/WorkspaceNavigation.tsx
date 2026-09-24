@@ -1,10 +1,13 @@
-import { BookOpenIcon, BookmarkIcon, CalendarIcon, InboxIcon, Cog6ToothIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
-import { useRef, type CSSProperties, type ReactNode } from "react";
+import { BookOpenIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
-import { Menu, type MenuItem } from "../shared/ui/Menu";
 import { useVaultExportJob, vaultExportProgressText } from "../external-vault/vaultExportJob";
 import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
+import { CommandPalette } from "./CommandPalette";
+import { MoreEntryList, MorePanel } from "./MorePanel";
+import { placeEntries, useNavigationEntries, type PlaceSources } from "./navigationEntries";
+import { modalDialogOpen } from "./modalDialog";
 import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
@@ -17,6 +20,14 @@ export function workspaceArea(view: AssetView): "assets" | "collections" | "mang
   if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
   return "assets";
 }
+type RailArea = "assets" | "collections" | "manga" | "notes";
+const RAIL_AREAS: { key: RailArea; label: string; Icon: typeof NoteIcon }[] = [
+  { key: "assets", label: "에셋", Icon: RectangleStackIcon },
+  { key: "collections", label: "컬렉션", Icon: BookOpenIcon },
+  { key: "manga", label: "망가", Icon: PhotoIcon },
+  { key: "notes", label: "메모", Icon: NoteIcon },
+];
+
 type Props = {
   view: AssetView;
   collectionType: CollectionType;
@@ -26,13 +37,21 @@ type Props = {
   assetNavigation: ReactNode;
   reviewCount: number;
   trashCount: number;
-  cloudProblemCount?: number;
+  /** Null until read; read again whenever 더보기 or the 찾기 palette opens. */
+  unsortedCount?: number | null;
+  onQueuesRequested?: () => void;
   privateVaultAvailable?: boolean;
   onImportFiles?: () => void;
-  renderManagement?: (items: MenuItem[]) => ReactNode;
+  /** Folders, albums and characters the 찾기 palette matches by name. */
+  places?: PlaceSources;
 };
 
-export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, cloudProblemCount = 0, privateVaultAvailable = false, onImportFiles, renderManagement }: Props) {
+function isEditing(target: EventTarget | null) {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement);
+}
+
+export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places }: Props) {
   const chrome = useWorkspaceChrome();
   const vaultImport = useVaultImportJob().job;
   const vaultExport = useVaultExportJob();
@@ -42,47 +61,60 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
   const collectionList = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   if (view.kind === "collections") collectionList.current = view;
-  const quickAssetView = view.kind === "revisit" || view.kind === "creator" || view.kind === "unsorted";
+  const quickAssetView = view.kind === "revisit" || view.kind === "creators" || view.kind === "creator" || view.kind === "calendar" || view.kind === "revisited-bundle" || view.kind === "unsorted";
   if (!quickAssetView) history.current[area] = view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
-  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", private_vault: "비밀", manage: "라이브러리 관리" }[area];
-  const enterArea = (next: "assets" | "collections" | "manga") => {
+  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", private_vault: "비밀", manage: "더보기" }[area];
+  const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : areaName;
+  const enterArea = (next: RailArea) => {
     if (next === "collections" && view.kind === "collection") {
       onNavigate(collectionList.current ?? { kind: "collections", typeFilter: collectionType, showcase: false });
       return;
     }
     if (next === area && !quickAssetView) return;
-    onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : { kind: "classification", classificationId: null }));
+    onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : next === "notes" ? { kind: "notes" } : { kind: "classification", classificationId: null }));
   };
-  const management = [
-    { id: "unsorted", label: "미분류", icon: <InboxIcon />, onSelect: () => onNavigate({ kind: "unsorted" }) },
-    { id: "trash", label: `휴지통 (${trashCount})`, icon: <TrashIcon />, onSelect: () => onNavigate({ kind: "trash" }) },
-    { id: "statistics", label: "통계", icon: <CalendarIcon />, onSelect: () => onNavigate({ kind: "statistics" }) },
-    { id: "review", label: `유사 검토 (${reviewCount})`, icon: <PhotoIcon />, onSelect: () => onNavigate({ kind: "similarity_review" }) },
-    { id: "settings", label: "설정", icon: <Cog6ToothIcon />, onSelect: () => onNavigate({ kind: "settings" }) },
-  ].map((item) => ({ ...item, selected: view.kind === (item.id === "review" ? "similarity_review" : item.id) }));
+  const entries = useNavigationEntries({ view, onNavigate, reviewCount, unsortedCount, trashCount, privateVaultAvailable, privateVaultActivity: vaultImportText, onImportFiles });
+  // 메모 is on the rail; the palette still finds it by name.
+  const moreEntries = entries.filter((entry) => entry.id !== "notes");
+  const searchInfo = chrome?.meta?.search ?? null;
+  const paletteSearch = searchInfo && chrome ? { info: searchInfo, apply: chrome.applySearch, open: chrome.openSearch } : null;
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteButton = useRef<HTMLButtonElement>(null);
+  const queuesRequested = useRef(onQueuesRequested);
+  queuesRequested.current = onQueuesRequested;
+  const openPalette = () => { setPaletteOpen(true); queuesRequested.current?.(); };
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if ((key !== "k" && key !== "f") || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      // Not over another dialog such as the asset viewer. Ctrl+K also waits while typing; Ctrl+F is the find key and works from a field.
+      if (event.defaultPrevented || modalDialogOpen() || (key === "k" && isEditing(event.target))) return;
+      event.preventDefault();
+      setPaletteOpen(true);
+      queuesRequested.current?.();
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
   return <div className="workspace-navigation">
     <nav className="workspace-rail" aria-label="주요 영역">
       <span className="workspace-mark"><img src={lakomicsMark} alt="Lakomics" width="32" height="32" /></span>
-      {(["assets", "collections", "manga"] as const).map((key) => {
-        const Icon = key === "assets" ? RectangleStackIcon : key === "collections" ? BookOpenIcon : PhotoIcon;
-        const label = { assets: "에셋", collections: "컬렉션", manga: "망가" }[key];
-        return <button key={key} type="button" className="workspace-rail__item" aria-current={area === key && !quickAssetView ? "page" : undefined} onClick={() => enterArea(key)}><Icon aria-hidden="true" /><span>{label}</span></button>;
-      })}
-      <button type="button" className="workspace-rail__item" aria-current={view.kind === "revisit" || view.kind === "creator" ? "page" : undefined} onClick={() => onNavigate({ kind: "revisit" })}><CalendarIcon aria-hidden="true" /><span>다시보기</span></button>
-      <button type="button" className="workspace-rail__item" aria-current={view.kind === "notes" ? "page" : undefined} onClick={() => onNavigate({kind:"notes"})}><NoteIcon aria-hidden="true"/><span>메모</span></button>
-      {privateVaultAvailable && <button type="button" className="workspace-rail__item" aria-current={view.kind === "private_vault" ? "page" : undefined} aria-description={vaultImportText} title={vaultImportText} onClick={() => onNavigate({ kind: "private_vault" })}><BookmarkIcon aria-hidden="true" /><span>비밀</span>{vaultImportText && <span className="workspace-rail__activity" aria-hidden="true" />}</button>}
+      {RAIL_AREAS.map(({ key, label, Icon }) =>
+        <button key={key} type="button" className="workspace-rail__item" aria-current={area === key ? "page" : undefined} onClick={() => enterArea(key)}><Icon aria-hidden="true" /><span>{label}</span></button>)}
       <div className="workspace-rail__tail">
-        {cloudProblemCount > 0 && <button type="button" className="workspace-rail__item" onClick={() => onNavigate({ kind: "settings", section: "cloud" })} aria-label={`동기화 문제 ${cloudProblemCount}개`}><span aria-hidden="true">!</span><span>동기화 문제 {cloudProblemCount}</span></button>}
-        {renderManagement ? renderManagement(management) : <Menu label="라이브러리 관리" trigger={<><EllipsisHorizontalIcon aria-hidden="true" /><span>관리</span>{reviewCount > 0 && <span className="workspace-rail__review-alert" role="img" aria-label={`유사 검토 ${reviewCount}개 대기`} aria-description={`유사 검토 ${reviewCount}개 대기`}>!</span>}</>} items={management} />}
+        <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+K Control+F"
+          aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+K)` : "이름으로 이동하거나 명령 실행 (Ctrl+K)"} onClick={openPalette}>
+          <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl K</kbd>
+        </button>
+        <MorePanel entries={moreEntries} current={area === "private_vault" || area === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
     <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
+        <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
         <div className="workspace-index__head-actions">
-          {view.kind === "settings" && <span className="workspace-section-label">설정</span>}
           <ChromeTarget name="search" />
-          {view.kind !== "settings" && !chrome?.meta?.search && <span aria-description="이 화면에는 별도의 텍스트 검색이 없습니다"><button type="button" className="ui-button ui-button--icon ui-button--ghost ui-button--unsupported" aria-disabled="true" aria-label="검색 미지원" onClick={(event) => event.preventDefault()}><MagnifyingGlassIcon aria-hidden="true" /></button></span>}
           <ChromeTarget name="actions" />
           {area === "assets" && !chrome?.meta?.actions && onImportFiles && <button type="button" className="ui-button ui-button--icon ui-button--ghost" aria-label="파일 가져오기" aria-description="선택한 파일을 라이브러리로 가져오기" onClick={onImportFiles}><PlusIcon aria-hidden="true" /></button>}
         </div>
@@ -91,7 +123,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         <div hidden={area !== "assets"} className="workspace-index__assets">{assetNavigation}</div>
         <ChromeTarget name="navigation" className="workspace-index__view-navigation" />
         {view.kind === "collections" && !chrome?.meta?.navigation && <div className="workspace-index__fallback"><span className="workspace-section-label">작품 유형</span>{(["game", "manga", "movie", "av"] as const).map((type) => <button key={type} type="button" className="workspace-index-link" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>{({ game: "게임", manga: "만화", movie: "영화", av: "AV" })[type]}</button>)}</div>}
-        {area === "manage" && view.kind !== "settings" && <div className="workspace-index__fallback">{management.map((item) => <button key={item.id} type="button" className="workspace-index-link" aria-current={(item.id === "review" ? view.kind === "similarity_review" : view.kind === item.id) ? "page" : undefined} onClick={item.onSelect}>{item.icon}{item.label}</button>)}</div>}
+        {area === "manage" && view.kind !== "settings" && <div className="workspace-index__fallback"><MoreEntryList entries={moreEntries.filter((entry) => entry.group === "queue" || entry.group === "go")} heading="더보기" /></div>}
         {view.kind === "collection" && <ChromeTarget name="details" className="collection-detail-sidebar" />}
       </div>
       <ChromeSettingsDock />
@@ -108,5 +140,6 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         }}
       />
     </aside>
+    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={entries} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} fallbackFocus={() => paletteButton.current} />
   </div>;
 }

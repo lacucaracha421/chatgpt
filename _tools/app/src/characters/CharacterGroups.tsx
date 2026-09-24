@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PhotoIcon, UserGroupIcon } from "@heroicons/react/24/outline";
-import { PencilIcon } from "../shared/ui/ArchiveIcons";
+import { PhotoIcon } from "@heroicons/react/24/outline";
+import { PencilIcon, PeopleIcon } from "../shared/ui/ArchiveIcons";
 import { Dialog } from "../shared/ui/Dialog";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
@@ -19,10 +19,18 @@ type Props = {
   onOpenGroup?: (groupId: string | null) => void;
   onGroupsChanged?: () => void;
   folderCards?: ReactNode[];
+  /** Quiet action on the right of the series count line (e.g. waiting S36 candidates). */
+  headerAccessory?: ReactNode;
+  /** Incremented by the owner's "그룹 만들기" command; each change opens a new group draft. */
+  groupCreateRequest?: number;
+  /** Increments open the current group's editor (the titlebar 그룹 더보기 menu owns the entry). */
+  groupEditRequest?: number;
+  /** Card rows per page; further cards page with the 1 2 … control. */
+  rows?: number;
   children: (members: CharacterTarget[]) => ReactNode;
 };
 
-export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, children }: Props) {
+export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, rows = 2, children }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [columns, setColumns] = useState(1);
   const [pagination, setPagination] = useState({ scope: "", page: 0 });
@@ -46,6 +54,19 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   const [draft, setDraft] = useState<Group | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const seenCreateRequest = useRef(groupCreateRequest);
+  useEffect(() => {
+    if (groupCreateRequest === seenCreateRequest.current) return;
+    seenCreateRequest.current = groupCreateRequest;
+    setDraft({ id: "", name: "", revision: 0, targetIds: [] });
+  }, [groupCreateRequest]);
+  const seenEditRequest = useRef(groupEditRequest);
+  useEffect(() => {
+    if (groupEditRequest === seenEditRequest.current) return;
+    seenEditRequest.current = groupEditRequest;
+    const group = groups.find(item => item.id === activeGroupId);
+    if (group) setDraft({ ...group, targetIds: [...group.targetIds] });
+  }, [groupEditRequest]);
   useEffect(() => {
     if (providedGroups) return;
     let alive = true;
@@ -66,7 +87,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   const scope = `${seriesId}:${current?.id ?? ""}`;
   const rootGroups = current ? [] : groups;
   const rootFolders = current ? [] : (folderCards ?? []).filter(Boolean);
-  const pageSize = columns * 2;
+  const pageSize = columns * rows;
   const pageCount = Math.max(1, Math.ceil((rootGroups.length + visibleMembers.length + rootFolders.length) / pageSize));
   const page = Math.min(pagination.scope === scope ? pagination.page : 0, pageCount - 1);
   const start = page * pageSize;
@@ -98,17 +119,17 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   }
 
   return <>
-    <div className="series-gallery-heading character-group-heading">
-      <h3 aria-label={current ? `그룹 · ${current.name}` : undefined}>{current ? <>{`그룹 · ${current.name}`}<small aria-hidden="true">{visibleMembers.length}</small></> : <>
-        {groups.length > 0 && <>그룹 {groups.length.toLocaleString()} · </>}캐릭터 {members.length.toLocaleString()}{rootFolders.length > 0 && <> · 폴더 {rootFolders.length.toLocaleString()}</>}
-      </>}</h3>
-      {current ? <>
-        <Button size="sm" variant="ghost" onClick={() => onOpenGroup?.(null)}>시리즈로</Button>
-        <Button size="sm" variant="ghost" onClick={() => setDraft({ ...current, targetIds: [...current.targetIds] })}>그룹 편집</Button>
-      </> : <Button size="sm" variant="ghost" onClick={() => setDraft({ id: "", name: "", revision: 0, targetIds: [] })}>그룹 만들기</Button>}
-    </div>
+    {/* A group view starts with its member tiles: the breadcrumb returns to the series and 그룹 편집 lives in the titlebar menu. */}
+    {!current && <div className="series-gallery-heading character-group-heading">
+      <h3><span className="character-group-heading__counts">
+        캐릭터 <span className="character-group-heading__count">{members.length.toLocaleString()}</span>
+        {groups.length > 0 && <> · 그룹 <span className="character-group-heading__count">{groups.length.toLocaleString()}</span></>}
+        {rootFolders.length > 0 && <> · 폴더 <span className="character-group-heading__count">{rootFolders.length.toLocaleString()}</span></>}
+      </span></h3>
+      {headerAccessory && <div className="character-group-heading__aside">{headerAccessory}</div>}
+    </div>}
     {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => setRevision(value => value + 1)}>다시 불러오기</Button></p>}
-    <div ref={gridRef} className={`series-characters${pageCount > 1 ? " series-characters--paged" : ""}`} aria-label={current ? `${current.name} 그룹 캐릭터` : folderCards?.length ? "캐릭터와 일반 폴더" : "등록 캐릭터"}>
+    <div ref={gridRef} className={`series-characters${pageCount > 1 ? " series-characters--paged" : ""}`} style={{ "--series-card-rows": rows } as CSSProperties} aria-label={current ? `${current.name} 그룹 캐릭터` : folderCards?.length ? "캐릭터와 일반 폴더" : "등록 캐릭터"}>
       {pageGroups.map(group => <CharacterGroupCard key={group.id} group={group} members={members} privacyMode={privacyMode} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />)}
       {children(pageMembers)}
       {pageFolders}
@@ -135,15 +156,14 @@ function CharacterGroupCard({ group, members, privacyMode, onOpen, onEdit }: { g
   const groupMembers = group.targetIds.map(id => members.find(member => member.id === id)).filter((member): member is CharacterTarget => Boolean(member));
   const previews = groupMembers.slice(0, 4);
   return <article className="series-character series-character--group">
-    <button className="series-character__open" aria-label={`${group.name} 그룹 열기`} onClick={onOpen}>
+    <button className="series-character__open" aria-label={`${group.name} 그룹 열기`} aria-description={`${group.targetIds.length.toLocaleString()}명${groupMembers.length ? ` · ${groupMembers.map(member => member.displayName).join(" · ")}` : ""}`} onClick={onOpen}>
       <span className="character-group-card__mosaic" data-count={Math.max(1, previews.length)}>
         {previews.length ? previews.map(target => {
           const assetId = target.thumbnailAssetId ?? target.references.find(reference => reference.status === "ready")?.assetId;
           return assetId ? <img key={target.id} loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(assetId)} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
-        }) : <span className="character-group-card__slot"><UserGroupIcon aria-hidden="true" /></span>}
+        }) : <span className="character-group-card__slot"><PeopleIcon aria-hidden="true" /></span>}
       </span>
-      <strong><UserGroupIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
-      <small>{group.targetIds.length.toLocaleString()}명{groupMembers.length ? ` · ${groupMembers.slice(0, 3).map(member => member.displayName).join(" · ")}${groupMembers.length > 3 ? "…" : ""}` : ""}</small>
+      <strong><PeopleIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
     </button>
     <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${group.name} 그룹 편집`} aria-description="그룹 편집" onClick={onEdit}><PencilIcon aria-hidden="true" /></Button>
   </article>;

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
+import { Menu } from "../shared/ui/Menu";
+import { EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ActivityStatistic, DerivativeStorage, LibraryStatistics, StatisticCount } from "./types";
 import "./statistics.css";
@@ -54,11 +56,14 @@ export function StatisticsPanel() {
     return () => { cancelled = true; };
   }, [gateway, library?.root, revision]);
   return <main className="statistics-panel" aria-label="개인 통계">
-    <ViewToolbar title="통계" chrome={{ actions: <Button disabled={!library || loading} onClick={() => setRevision(value => value + 1)}>새로고침</Button> }} />
+    {/* Statistics load on open; a manual refresh stays one step away in the overflow. */}
+    <ViewToolbar title="통계" chrome={{ actions: <Menu label="통계 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+      { id: "refresh", label: "통계 새로고침", disabled: !library || loading, onSelect: () => setRevision(value => value + 1) },
+    ]} /> }} />
     <p>현재 보관 상태와 실제로 기록된 열기 활동입니다.</p>
     {!library && <p>라이브러리를 열면 통계를 볼 수 있습니다.</p>}
     {loading && <p role="status">통계를 확인하고 있습니다.</p>}
-    {error && <p role="alert">{error}</p>}
+    {error && <p role="alert">{error}{library && gateway.getLibraryStatistics && <> <Button size="sm" disabled={loading} onClick={() => setRevision(value => value + 1)}>다시 시도</Button></>}</p>}
     {data && <>
       <section className="statistics-section"><h2>보관 현황</h2><p>정상 상태의 자산만 집계합니다. 휴지통·검토 대상은 제외합니다. 컬렉션은 전체 개수입니다.</p>
         <dl className="statistics-totals">{[["자산", data.assets], ["컬렉션", data.collections], ["즐겨찾는 자산", data.favorites], ["미분류 자산", data.unclassified]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{number(Number(value))}</dd></div>)}</dl>

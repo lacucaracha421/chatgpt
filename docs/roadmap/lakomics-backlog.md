@@ -204,11 +204,20 @@ NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009
 
 ## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)
 
-Status: `TODO` — concepts in `docs/prototypes/pc-declutter-20260924/` (README, index.html, PNGs); the user likes all three (2026-09-24). Staged plan combining them:
+Status: `IN PROGRESS` — stages C and A implemented 2026-09-24/25 (not yet native-accepted on Windows), plus user feedback rounds: 메모 back on the rail; 이동 and search merged into one 찾기 palette (Ctrl+K/Ctrl+F, also jumps to folder/album/character names); larger date headings; series view reduced to one header line + compact character tiles; group view opens on member tiles with 그룹 더보기 › 그룹 편집; character 더보기 panel rebuilt around references and crops; collections 내 별점 select; asset tree shows subtree totals ("N장 · 이 폴더만 M장"), quick views above pins, pins as chips, one expanded character series at a time, groups as single rows with members hidden; simpler person/group glyphs; scrollbars styled only via ::-webkit-scrollbar (standard scrollbar-width/color make WebKitGTK draw outlined native bars); online catalog tiles simplified like mobile, rare actions under 카탈로그 더보기, "N분 전 갱신" next to 망가. Stage B still waits for the Revisit rebuild. Concepts in `docs/prototypes/pc-declutter-20260924/` (README, index.html, PNGs); the user likes all three (2026-09-24). Staged plan combining them:
 1. **C — Quiet chrome first** (lowest risk, mostly moving things): one top bar merging title bar and list header; one status indicator ("작업 N") opening a single panel for sync, running jobs, review queues and lightweight mode; selection bar that appears only while selecting; merged release notices; Settings › 일반 trimmed to ~7 items with maintenance/diagnostics under 고급 › 복구·진단; experimental/recovery buttons off the character series header.
 2. **A — Focused navigation**: rail reduced to 에셋 · 컬렉션 · 망가; everything else via a `Ctrl+K` 이동 palette and 더보기, with review-queue counts shown only when non-zero; Revisit folded into the asset index for now.
 3. **B — Task-first Home**: together with the Revisit rebuild (PC and mobile) — 이어 보기 as the hero, 확인할 것 queues that disappear at zero, tools in one row. Needs resume-position data and queue counts first; avoid a dashboard feel (DESIGN.md).
 Ideas to carry to mobile (MOBILE-DESIGN-001): single status indicator, zero-hiding queues, neutral filters, search icon only where searchable, conclusion-first settings, continue-watching.
+
+## CHAR-REVIEW-001 — Per-series S36 candidate review
+
+Status: `TODO` — user chose this on 2026-09-24; start after PC-DECLUTTER-001 stage A.
+
+The S36 candidate queue (자동 후보 + 추천 awaiting a judgment) is one list across all series. After stage C, the series header shows `후보 확인 · N`, but N is the global pending count (`character_shadow_review_page` summary), and the review opens the global list. Once S36 is enabled for more than one series, candidates from other series mix in.
+- Native: let the shadow review page query accept an optional series scope, and return that series' pending counts (filter by the target character's series).
+- PC: the series header count and the review opened from it use the series scope. A global entry (e.g. the status panel's 확인할 것 queue) can keep the all-series list.
+- Mobile review of the same queue: check whether it should get the same filter and whether that touches the server path.
 
 ## MOBILE-DESIGN-001 — Premium mobile layout pass (Galaxy Tab S11 portrait)
 

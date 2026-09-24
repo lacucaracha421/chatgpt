@@ -1,7 +1,7 @@
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { ChevronRightIcon, FolderIcon, PhotoIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { EllipsisHorizontalIcon, PencilIcon } from "../shared/ui/ArchiveIcons";
+import { EllipsisHorizontalIcon, PencilIcon, PeopleIcon } from "../shared/ui/ArchiveIcons";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -22,7 +22,7 @@ import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { ViewToolbar } from "../layout/ViewToolbar";
-import { collectPages, faultAssets, FaultPlayButton, faultSelectionItem, useFaultGame, type FaultScope } from "../games/FaultGame";
+import { collectPages, faultAssets, faultSelectionItem, useFaultGame, type FaultScope } from "../games/FaultGame";
 import { CharacterRegistry, characterDraft, updateCharacterReferences, activeCharacterReferences, MAX_CHARACTER_REFERENCES, type CharacterEditorDraft } from "./CharacterRegistry";
 import { CharacterConversion } from "./CharacterConversion";
 import { needsReferenceConfirmation, useReferenceRegionInspection } from "./ReferenceRegionChoices";
@@ -30,7 +30,8 @@ import { folderExclusionItem } from "./folderExclusion";
 import { CharacterGroups } from "./CharacterGroups";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
 import { ShadowReview } from "./ShadowReview";
-import { S36CharacterExclusion, S36SeriesControl, readinessLabel, useS36Publication, useS36Readiness, s36PublicationApi } from "./S36Publication";
+import { shadowReviewApi, type ShadowReviewApi } from "./shadowReviewApi";
+import { S36CharacterExclusion, S36SeriesControl, readinessLabel, useS36Publication, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
 import { characterApi, draftReferenceRegions, type CharacterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
@@ -47,7 +48,7 @@ type Props = {
   metadataVisible: boolean; onMetadataVisibleChange: (value: boolean) => void;
   thumbnailRowHeight: number; onThumbnailRowHeightChange: (value: number) => void; refreshVersion: number;
   onNavigate: (view: AssetView) => void; onChanged: () => void;
-  api?: CharacterApi; hubApi?: CharacterHubApi;
+  api?: CharacterApi; hubApi?: CharacterHubApi; shadowApi?: ShadowReviewApi;
 };
 type Editor = { target: CharacterTarget | null; draft: CharacterEditorDraft };
 type Picking = { kind: "thumbnail" | "references" | "hero"; ids: string[]; previousAll: boolean };
@@ -56,12 +57,28 @@ const ordinarySeriesGalleryViews: { value: SeriesGalleryView; label: string }[] 
   { value: "unclassified", label: "미분류" },
   { value: "all", label: "전체 이미지" },
 ];
+/** Character panel trigger: a framed figure, distinct from the generic overflow squares. */
+const CharacterPanelIcon = (props: ComponentProps<"svg">) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="square" strokeLinejoin="miter" {...props}>
+  <path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5M10 7h4v4h-4zM7 17l2-3h6l2 3" />
+</svg>;
 const emptyPage = (): CharacterBrowsePage => ({ items: [], nextCursor: null, totalCount: 0 });
+/** Status that used to sit under each character card; tiles now show only a warning mark when something is wrong. */
+function characterStatus(target: CharacterTarget, readiness: S36Readiness | undefined, s36Driven: boolean): { detail: string[]; warning: boolean } {
+  const references = activeCharacterReferences(target).length;
+  const detail = !target.enabled ? ["자동 분석 꺼짐"] : references < 6 ? [`레퍼런스 ${references}장 · 자동 확정 보류`] : [];
+  const s36 = target.enabled && !s36Driven ? readiness : undefined;
+  if (s36) detail.push(readinessLabel(s36));
+  return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
+}
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi }: Props) {
   const { gateway } = useLibrary();
   const [folders, setFolders] = useState<SeriesFolder[]>([]);
   const [shadowReview, setShadowReview] = useState(false);
+  const [s36Setup, setS36Setup] = useState(false);
+  const [candidateCount, setCandidateCount] = useState(0);
+  const [groupCreateRequest, setGroupCreateRequest] = useState(0);
+  const [groupEditRequest, setGroupEditRequest] = useState(0);
   const [readinessVersion, setReadinessVersion] = useState(0);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
@@ -109,7 +126,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     : ordinarySeriesGalleryViews;
   const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
   const readiness = useS36Readiness(series.classificationId, readinessVersion);
-  const { settings: s36Settings } = useS36Publication(s36PublicationApi);
+  const { settings: s36Settings, error: s36Error } = useS36Publication(s36PublicationApi);
   const s36Driven = (targetId: string) => Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.excludedTargets.includes(targetId));
   const name = classifications.find(c => c.id === series.classificationId)?.name ?? "시리즈";
   const pickerScope = picking && picking.kind !== "hero" ? `${series.classificationId}:${editor?.target?.id ?? "new"}:${pickFromSeries ? "series" : "character"}:${all}` : null;
@@ -182,6 +199,16 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     }).catch(error => { if (active) setFolderError(commandErrorMessage(error, "하위 폴더를 불러오지 못했습니다.")); });
     return () => { active = false; };
   }, [hubApi, series.classificationId, targetId, currentGroup?.id, Boolean(picking), refreshVersion, reload]);
+  useEffect(() => {
+    // Pending S36 candidates (automatic + recommended) drive the quiet 후보 N 확인 action
+    // on the series count line. Without the runtime the action stays hidden.
+    if (targetId || currentGroup || picking) return;
+    let active = true;
+    void shadowApi.page({ offset: 0, limit: 1 })
+      .then(result => { if (active) setCandidateCount(result.summary.automatic.pending + result.summary.recommended.pending); })
+      .catch(() => { if (active) setCandidateCount(0); });
+    return () => { active = false; };
+  }, [shadowApi, series.classificationId, targetId, currentGroup?.id, Boolean(picking), readinessVersion]);
   useEffect(() => { setAssignTo([]); setAssignmentQuery(""); }, [series.classificationId]);
   useEffect(() => setSelection(emptySelection()), [clearSelectionRequest]);
   useEffect(() => { if (requestedAsset) { setExternalAsset(requestedAsset); setViewer(requestedAsset.id); onRequestedAssetHandled?.(); } }, [requestedAsset]);
@@ -264,26 +291,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       setEditorError(commandErrorMessage(reason, "과거 이미지 갱신을 예약하지 못했습니다."));
     } finally { setBusy(false); }
   }
-  const editorPanel = <AnchoredPanel open={Boolean(editor) && !picking} onOpenChange={open => { if (open) openEditor(current ?? null); else if (!picking && !busy) setEditor(null); }} title={editor?.target ? `${editor.target.displayName} · 캐릭터 정보` : "새 캐릭터"}
-    trigger={<Button size={current ? "icon" : "sm"} variant="ghost" className="character-info-trigger" aria-label={current ? "캐릭터 더보기" : "캐릭터 만들기"} aria-description={characterAttention ?? (current ? "캐릭터 더보기" : undefined)}>{current ? <><EllipsisHorizontalIcon aria-hidden="true" />{characterAttention && <span className="character-info-attention" aria-hidden="true">!</span>}</> : <><PlusIcon aria-hidden="true" />캐릭터 만들기</>}</Button>}>
-    {editor && <><CharacterRegistry draft={editor.draft} target={editor.target} seriesId={series.classificationId} privacyMode={privacyMode} busy={busy} error={editorError} api={api} inspection={referenceInspection}
-      onOpenReference={assetId => void (async () => {
-        try { const asset = await gateway.getAsset(assetId); setExternalAsset(asset); setViewer(assetId); }
-        catch (error) { setEditorError(commandErrorMessage(error, "원본을 열지 못했습니다.")); }
-      })()}
-      onChange={draft => setEditor({ ...editor, draft })} onPick={beginPick} onSave={() => void saveEditor()}
-      onRecommendReferences={editor.target ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined} />
-      {current && <details className="character-registry__section">
-        <summary><span>추가 관리</span></summary>
-        <div className="character-registry__section-body">
-          {current.ready && !current.manualOnly && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void requestHistoricalRefresh(current)}>과거 미분류 이미지 갱신</Button>}
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setEditor(null); setConverting(true); }}>일반 폴더로 전환</Button>
-          <S36CharacterExclusion seriesId={series.classificationId} targetId={current.id} disabled={busy} />
-        </div>
-      </details>}
-    </>}
-  </AnchoredPanel>;
-  const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 분류 다시 켜기</Button> : null;
   // FAULT: the character, group or series gallery offers its whole scope (read the same way as the gallery).
   const playFault = useFaultGame();
   const faultScope: FaultScope | null = !picking && (faultAssets(page.items).length > 0 || page.nextCursor !== null)
@@ -292,6 +299,33 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       : hubApi.browse({ seriesId: series.classificationId, targetId: targetId ?? null, groupId: currentGroup?.id ?? null,
         ...(!targetId && !currentGroup ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter, all: seriesGalleryView === "all" } : { all }), after, limit: 100 }), signal)
     : null;
+  const editorTarget = editor?.target ?? null;
+  const editorS36 = editorTarget
+    ? s36Driven(editorTarget.id) ? "S36 자동 분류 중" : readiness.get(editorTarget.id) ? readinessLabel(readiness.get(editorTarget.id)!) : null
+    : null;
+  const editorDirty = Boolean(editor && editor.target && JSON.stringify(editor.draft) !== JSON.stringify(characterDraft(editor.target)));
+  const editorPanel = <AnchoredPanel open={Boolean(editor) && !picking} onOpenChange={open => { if (open) openEditor(current ?? null); else if (!picking && !busy) setEditor(null); }} title={editor?.target ? `${editor.target.displayName} · 캐릭터 정보` : "새 캐릭터"}
+    trigger={current ? <Button size="icon" variant="ghost" className="character-info-trigger" aria-label="캐릭터 더보기" aria-description={characterAttention ?? "레퍼런스·크롭·관리"}><CharacterPanelIcon aria-hidden="true" />{characterAttention && <span className="character-info-attention" aria-hidden="true">!</span>}</Button>
+      : <Button size="icon" variant="ghost" className="character-info-trigger" aria-label="캐릭터 만들기" aria-description="캐릭터 만들기"><PlusIcon aria-hidden="true" /></Button>}
+    footer={editor ? <>
+      <span role="status">{editorDirty ? "저장하지 않은 변경" : ""}</span>
+      <Button size="sm" variant={editorDirty || !editor.target ? "primary" : "secondary"} disabled={busy || !editor.draft.name.trim()} onClick={() => void saveEditor()}>{editor.target ? "저장" : "캐릭터 만들기"}</Button>
+    </> : undefined}>
+    {editor && <CharacterRegistry draft={editor.draft} target={editor.target} seriesId={series.classificationId} privacyMode={privacyMode} busy={busy} error={editorError} api={api} inspection={referenceInspection}
+      automationStatus={editorS36}
+      onOpenReference={assetId => void (async () => {
+        try { const asset = await gateway.getAsset(assetId); setExternalAsset(asset); setViewer(assetId); }
+        catch (error) { setEditorError(commandErrorMessage(error, "원본을 열지 못했습니다.")); }
+      })()}
+      onChange={draft => setEditor({ ...editor, draft })} onPick={beginPick}
+      onRecommendReferences={editor.target ? () => { setReferenceSuggestionTarget(editor.target); setEditor(null); } : undefined}
+      management={current && editor.target?.id === current.id ? <>
+        {current.ready && !current.manualOnly && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void requestHistoricalRefresh(current)}>과거 미분류 이미지 갱신</Button>}
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setEditor(null); setConverting(true); }}>일반 폴더로 전환</Button>
+        <S36CharacterExclusion seriesId={series.classificationId} targetId={current.id} disabled={busy} />
+        {playFault && faultScope && <Button size="sm" variant="ghost" aria-description="이 캐릭터의 이미지 중 24장을 무작위로 골라 FAULT를 시작합니다" onClick={() => { setEditor(null); playFault(faultScope); }}>FAULT로 플레이</Button>}
+      </> : undefined} />}
+  </AnchoredPanel>;
   const contextItems: ContextMenuItem[] = picking ? [
     { id: "cancel-pick", label: "이미지 선택 취소", onSelect: () => finishPick(false) },
   ] : [
@@ -303,26 +337,41 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     { id: "refresh", label: "새로고침", onSelect: refresh },
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: busy || !selectedIds.length, onSelect: () => void action(async () => { await gateway.trashAssets(selectedIds); setUndo(selectedIds); setSelection(emptySelection()); }) },
   ];
+  const faultItem = playFault && faultScope ? [{ id: "fault", label: "FAULT로 플레이", onSelect: () => playFault(faultScope) }] : [];
+  const seriesMenuItems = [
+    ...(!excludedOnly ? [{ id: "create-group", label: "그룹 만들기", onSelect: () => setGroupCreateRequest(v => v + 1) }] : []),
+    { id: "pick-cover", label: "시리즈 표지 선택", onSelect: () => beginPick("hero") },
+    ...(series.heroAssetId ? [{ id: "clear-cover", label: "시리즈 표지 해제", onSelect: () => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null })) }] : []),
+    ...(s36Settings || s36Error ? [{ id: "s36-setup", label: "S36 자동 분류 설정", onSelect: () => setS36Setup(true) }] : []),
+    { id: "s36-review", label: "S36 시험 채점 확인", onSelect: () => setShadowReview(true) },
+    ...faultItem,
+  ];
+  const s36Stalled = Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.scoringEnabled);
+  // Recovery surfaces only while automation is actually off or stalled.
+  const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 분류 다시 켜기</Button>
+    : s36Stalled && !current && !currentGroup ? <small className="s36-series__warning" role="status">S36 시험 채점이 꺼져 자동 분류가 멈춰 있습니다</small> : null;
   const focusedName = current?.displayName ?? currentGroup?.name;
+  const currentStatus = current ? characterStatus(current, readiness.get(current.id), s36Driven(current.id)) : null;
+  const candidateReview = !picking && !current && !currentGroup && candidateCount > 0 && s36Settings?.series.includes(series.classificationId)
+    ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="S36 자동 분류가 판단을 기다리는 후보를 하나씩 확인" onClick={() => setShadowReview(true)}>후보 {candidateCount.toLocaleString()} 확인</Button>
+    : null;
   return <section className="series-browser" aria-label={focusedName ?? name}>
     <ViewToolbar title={focusedName ? `${name} / ${focusedName}` : name} ariaLabel="시리즈 도구"
       titleContent={focusedName ? <span className="series-breadcrumb"><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId })}>{name}</button><ChevronRightIcon aria-hidden="true" /><span>{focusedName}</span><small className="series-header-count">{page.totalCount.toLocaleString()}장</small></span> : name}
       titleAccessory={<div className="series-header-actions">
-        {!picking && current && (selectedIds.length > 0 ? <>
+        {!picking && current && selectedIds.length > 0 && <>
           <small className="series-selection-count">{selectedIds.length.toLocaleString()}장 선택</small>
           <Button size="icon" variant="ghost" aria-label="선택 해제" aria-description="선택 해제" onClick={() => setSelection(emptySelection())}><XMarkIcon aria-hidden="true" /></Button>
           {selectedReferenceCount > 0 ? <Button size="sm" variant="ghost" disabled={busy} aria-description="선택에 참조 이미지가 포함되어 있습니다. 설정에서 먼저 해제·교체해 주세요." onClick={() => openEditor(current)}>참조 설정 · {selectedReferenceCount.toLocaleString()}</Button> : <Button size="sm" variant="ghost" disabled={busy || selectedIds.length > 200} aria-description="한 번에 최대 200장" onClick={() => void action(async () => {
             await api.decide({ targetId: current.id, expectedFingerprint: current.fingerprint, assetIds: selectedIds, decision: "rejected", baselineFingerprint: null, scanId: null });
             setSelection(emptySelection());
           })}>이 캐릭터에서 제외</Button>}
-        </> : <>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => beginPick("references", openEditor(current))}>레퍼런스 추가</Button>
-        </>)}
+        </>}
         {!picking && !currentGroup && editorPanel}
-        <FaultPlayButton scope={faultScope} />
-        {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
-          { id: "pick-cover", label: "시리즈 표지 선택", onSelect: () => beginPick("hero") },
-          ...(series.heroAssetId ? [{ id: "clear-cover", label: "시리즈 표지 해제", onSelect: () => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null })) }] : []),
+        {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={seriesMenuItems} />}
+        {currentGroup && !picking && <Menu label="그룹 더보기" disabled={busy} trigger={<PeopleIcon aria-hidden="true" />} items={[
+          { id: "edit-group", label: "그룹 편집", icon: <PencilIcon aria-hidden="true" />, onSelect: () => setGroupEditRequest(v => v + 1) },
+          ...faultItem,
         ]} />}
       </div>}
       chrome={{
@@ -381,36 +430,38 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && !current && !excludedOnly && <div className="series-browser__overview">
           {!currentGroup && series.heroAssetId && <img className={`series-hero${privacyMode ? " character-private" : ""}`} src={assetUrl(series.heroAssetId)} alt={`${name} 히어로 이미지`} />}
-          <CharacterGroups key={`${series.classificationId}:${currentGroup?.id ?? "series"}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode}
+          <CharacterGroups key={`${series.classificationId}:${currentGroup?.id ?? "series"}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} rows={1}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
-            onGroupsChanged={onChanged}
+            onGroupsChanged={onChanged} headerAccessory={candidateReview} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest}
             folderCards={folders.length > 0 ? folders.map(item => {
               const folder = classifications.find(folder => folder.id === item.classificationId);
               if (!folder) return null;
               const exclusion = folderExclusionItem(folder.id, classifications, folderExclusions, excluded => void action(() => hubApi.setFolderExcluded(folder.id, excluded)));
               const excluded = folderExclusions.includes(folder.id) || exclusion.disabled;
-              return <article className="series-character" key={folder.id}>
-                <button className="series-character__open" aria-label={`${folder.name} 폴더 열기`} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
+              return <article className={`series-character${excluded ? " series-character--excluded" : ""}`} key={folder.id}>
+                <button className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
                   {item.thumbnailAssetId ? <img loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
+                  {excluded && <span className="series-character__tag" aria-hidden="true">제외</span>}
                   <strong><FolderIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{folder.name}</span></strong>
-                  <small>{excluded ? "캐릭터 분류 제외" : "일반 폴더"}</small>
                 </button>
                 <Menu label={`${folder.name} 폴더 더보기`} triggerClassName="series-character__info" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[exclusion]} />
               </article>;
-            }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => <article className="series-character" key={target.id}>
-              <button className="series-character__open" aria-label={`${target.displayName} 열기`} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
+            }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => {
+              const status = characterStatus(target, readiness.get(target.id), s36Driven(target.id));
+              const description = [...(status.warning ? ["확인 필요"] : []), ...status.detail].join(" · ");
+              return <article className="series-character" key={target.id}>
+              <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
                 {(target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
-                <strong><span className="series-character__name">{target.displayName}</span></strong>
-                {!target.enabled ? <small className="series-character__status">자동 분석 꺼짐</small> : activeCharacterReferences(target).length < 6 && <small className="series-character__status">레퍼런스 {activeCharacterReferences(target).length}장 · 자동 확정 보류</small>}
-                {target.enabled && !s36Driven(target.id) && readiness.get(target.id) && <small className={`series-character__s36 series-character__s36--${readiness.get(target.id)!.status}`}>{readinessLabel(readiness.get(target.id)!)}</small>}
+                <strong>{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
               </button>
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
-            </article>)}</>}</CharacterGroups>
+            </article>;
+            })}</>}</CharacterGroups>
         </div>}
         {folderError && <p className="character-message" role="alert">{folderError}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
+        {!picking && currentStatus && currentStatus.detail.length > 0 && <p className={`series-character-status${currentStatus.warning ? " series-character-status--warning" : ""}`}>{currentStatus.detail.join(" · ")}</p>}
         {!picking && current?.description && <p className="series-description">{current.description}</p>}
         {picking && picking.kind !== "hero" && editor?.target ? <div className="series-gallery-heading"><h3>{pickFromSeries ? "시리즈에서 이미지 선택" : `${editor.target.displayName} 캐릭터 폴더`}<small>{page.totalCount}</small></h3><Button size="sm" variant="ghost" onClick={() => setPickFromSeries(v => !v)}>{pickFromSeries ? "캐릭터 폴더로 돌아가기" : "시리즈에서 이미지 찾기"}</Button></div>
-          : currentGroup && !picking ? <div className="series-gallery-heading"><h3>{currentGroup.name} 이미지<small>{page.totalCount}</small></h3></div>
           : !picking && !current ? <div className="series-gallery-heading series-gallery-heading--filters">
             <fieldset className="series-gallery-filters" role="radiogroup" aria-label="시리즈 이미지 필터">
               {seriesGalleryViews.map(filter => <label key={filter.value}>
@@ -419,8 +470,6 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               </label>)}
             </fieldset>
             <div className="series-gallery-heading__aside">
-              <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
-              <Button size="sm" variant="ghost" disabled={busy} aria-description="S36 시험 채점 후보를 하나씩 확인" onClick={() => setShadowReview(true)}>S36 확인</Button>
               <small className="series-gallery-filter-count" aria-live="polite">{page.totalCount.toLocaleString()}장</small>
             </div>
           </div>
@@ -453,7 +502,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       onSaved={() => { setReferenceSuggestionTarget(null); refresh(); }}
     />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
-    {shadowReview && <ShadowReview onClose={() => { setShadowReview(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} decisions={api} />}
+    {shadowReview && <ShadowReview onClose={() => { setShadowReview(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} api={shadowApi} decisions={api} />}
+    {s36Setup && <Dialog open title="S36 자동 분류" onClose={() => setS36Setup(false)}>
+      <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
+    </Dialog>}
     <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />
   </section>;

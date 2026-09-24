@@ -19,9 +19,11 @@ it("creates a display group and keeps its characters accessible",async()=>{
     if(command==="character_groups")return [...groups];
     if(command==="save_character_group")groups.push({id:"g",name:args.request.name,revision:1,targetIds:args.request.targetIds});
   });
-  render(<CharacterGroups seriesId="series" members={[fixtureTarget()]}>{members=><div>{members.map(target=><span key={target.id}>{target.displayName} 카드</span>)}</div>}</CharacterGroups>);
+  const card=(members:ReturnType<typeof fixtureTarget>[])=><div>{members.map(target=><span key={target.id}>{target.displayName} 카드</span>)}</div>;
+  // 그룹 만들기 lives in the owner's series overflow, which bumps groupCreateRequest.
+  const view=render(<CharacterGroups seriesId="series" members={[fixtureTarget()]}>{card}</CharacterGroups>);
   const user=userEvent.setup();
-  await user.click(screen.getByRole("button",{name:"그룹 만들기"}));
+  view.rerender(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groupCreateRequest={1}>{card}</CharacterGroups>);
   await user.type(screen.getByRole("textbox",{name:"그룹 이름"}),"학생회");
   expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
   await user.click(screen.getByRole("checkbox",{name:"히나"}));
@@ -37,9 +39,11 @@ it("creates a display group and keeps its characters accessible",async()=>{
 it("dissolves an active group after its last member is unchecked and returns to the series", async () => {
   const onOpenGroup = vi.fn(), onGroupsChanged = vi.fn();
   vi.mocked(invoke).mockResolvedValue(undefined);
-  render(<CharacterGroups seriesId="series" members={[fixtureTarget()]} groups={[{ id: "g", name: "학생회", revision: 2, targetIds: ["hina"] }]} activeGroupId="g" onOpenGroup={onOpenGroup} onGroupsChanged={onGroupsChanged}>{() => null}</CharacterGroups>);
+  const props = { seriesId: "series", members: [fixtureTarget()], groups: [{ id: "g", name: "학생회", revision: 2, targetIds: ["hina"] }], activeGroupId: "g", onOpenGroup, onGroupsChanged };
+  const { rerender } = render(<CharacterGroups {...props}>{() => null}</CharacterGroups>);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "그룹 편집" }));
+  // The titlebar 그룹 더보기 › 그룹 편집 item sends an edit request.
+  rerender(<CharacterGroups {...props} groupEditRequest={1}>{() => null}</CharacterGroups>);
   await user.click(screen.getByRole("checkbox", { name: "히나" }));
   await user.click(screen.getByRole("button", { name: "빈 그룹 해제" }));
   await waitFor(() => expect(onOpenGroup).toHaveBeenCalledWith(null));

@@ -1,0 +1,1 @@
+.collection-browser__segment-button--quiet:not([aria-pressed="true"]) { color: var(--color-text-muted); }

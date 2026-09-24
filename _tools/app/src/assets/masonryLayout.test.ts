@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
-import { buildMasonryLayout, collectedDate, masonryMove } from "./masonryLayout";
+import { buildMasonryLayout, collectedDate, headingWeekday, masonryMove } from "./masonryLayout";
 
 const item = (id: string, day = 5, height = 300) => ({ id, width: 200, height, collectedAt: new Date(2026, 8, day, 21, 7).toISOString() } as AssetSummary);
 afterEach(() => vi.useRealTimers());
@@ -20,6 +20,13 @@ describe("date masonry", () => {
     expect(next.headings.map(heading => heading.label)).toEqual(["2026.09.05", "2026.09.04"]);
     expect(next.tiles).toEqual(current.tiles);
     expect(next.headings.map(({ label: _label, ...heading }) => heading)).toEqual(current.headings.map(({ label: _label, ...heading }) => heading));
+  });
+  it("marks today and otherwise the local weekday, with the group count", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 5, 23));
+    const result = buildMasonryLayout([item("a"), item("b"), item("c", 4)], 640, 180, 20, true, true);
+    expect(result.headings.map(({ weekday, count }) => [weekday, count])).toEqual([["오늘", 2], ["금", 1]]);
+    expect(headingWeekday("")).toBe("");
   });
   it("shares a row between sparse dates and wraps below the tallest group", () => {
     const result = buildMasonryLayout([item("a", 5, 80), item("b", 4, 300), item("c", 3), item("d", 2)], 640, 180, 20, true, true);

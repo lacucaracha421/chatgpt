@@ -1,14 +1,14 @@
-import { ArrowDownTrayIcon, ArrowPathIcon, CircleStackIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { SearchSurface } from "../layout/SearchSurface";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
-import { Toggle } from "../shared/ui/Toggle";
+import { Menu } from "../shared/ui/Menu";
 import { useLibrary } from "../library/LibraryContext";
 import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
-import { catalogStreamStatus } from "../library/catalogStreams";
+import { catalogStreamStatus, latestCatalogUpdate } from "../library/catalogStreams";
 import { commandErrorMessage } from "../library/errorMessage";
 import type {
   CatalogLanguage,
@@ -35,6 +35,7 @@ import { CatalogReviewDialog } from "./CatalogReviewDialog";
 import { OnlineCatalogCard } from "./OnlineCatalogCard";
 import { OnlineCatalogDetailDialog } from "./OnlineCatalogDetailDialog";
 import { catalogIdentityKey, catalogIdentityOf } from "./catalogIdentity";
+import { catalogRefreshAgeLabel } from "./catalogRefreshAge";
 
 const CATALOG_PAGE_SIZE = 48;
 
@@ -109,6 +110,23 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
   const bookmarkRequests = useRef(new Set<string>());
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
+  const latestUpdate = status?.installed ? latestCatalogUpdate(status) : null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // Recompute the "N분 전 갱신" label from the stored timestamp once a minute while this view is
+    // mounted and the window is visible; no status request is made here.
+    if (!latestUpdate) return;
+    let timer: number | null = null;
+    const tick = () => setNow(Date.now());
+    const start = () => { if (timer === null && document.visibilityState !== "hidden") timer = window.setInterval(tick, 60_000); };
+    const stop = () => { if (timer !== null) window.clearInterval(timer); timer = null; };
+    const visibilityChanged = () => { if (document.visibilityState === "hidden") stop(); else { tick(); start(); } };
+    tick();
+    start();
+    document.addEventListener("visibilitychange", visibilityChanged);
+    return () => { stop(); document.removeEventListener("visibilitychange", visibilityChanged); };
+  }, [latestUpdate]);
+  const refreshAge = catalogRefreshAgeLabel(latestUpdate, now);
 
   useEffect(() => {
     mounted.current = true;
@@ -426,7 +444,6 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
 
   const catalogControls = status?.installed ? <fieldset className="chrome-settings-group"><legend>정렬 · 표시</legend>
           <Select label="정렬" value={sort} disabled={loading} onChange={(event) => { const next = event.target.value as CatalogSort; setSort(next); void search(appliedQuery, next, scope, 0); }}><option value="latest">최신순</option><option value="views">조회순</option><option value="hotDay">오늘 인기</option><option value="hotWeek">주간 인기</option><option value="hotMonth">월간 인기</option></Select>
-          <Toggle aria-label="숨긴 결과 표시" checked={revealBlocked} disabled={loading} onChange={toggleRevealBlocked}>숨긴 결과 표시</Toggle>
         </fieldset> : undefined;
   const catalogNavigation = <>
         <MangaSourceTabs
@@ -456,8 +473,15 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
           <option value="korean">한국어</option>
           <option value="japanese">일본어</option>
         </Select>
-        {workspace && status?.installed && <div className="chrome-index-controls chrome-settings-controls">{catalogControls}<Button size="sm" variant="ghost" onClick={() => setReviewOpen(true)}>중복 후보 검토</Button><Button size="sm" variant="ghost" disabled={loading} onClick={() => refreshSearch.current()}><ArrowPathIcon aria-hidden="true" />새로고침</Button><Button size="sm" variant="ghost" disabled={updating} onClick={() => void updateCatalog()}><ArrowDownTrayIcon aria-hidden="true" />{updating ? "갱신 중…" : "신규 작품 갱신"}</Button></div>}
+        {workspace && status?.installed && <div className="chrome-index-controls chrome-settings-controls">{catalogControls}</div>}
   </>;
+  // Rarely used catalog actions share one overflow menu in the top bar; the catalog also refreshes hourly on its own.
+  const catalogMenu = status?.installed ? <Menu label="카탈로그 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+    { id: "reveal", label: "숨긴 결과 표시", checked: revealBlocked, disabled: loading, onSelect: toggleRevealBlocked },
+    { id: "refresh", label: "새로고침", disabled: loading, onSelect: () => void refreshSearch.current() },
+    { id: "update", label: updating ? "갱신 중…" : "신규 작품 갱신", disabled: updating, onSelect: () => void updateCatalog() },
+    { id: "review", label: "중복 후보 검토", onSelect: () => setReviewOpen(true) },
+  ]} /> : undefined;
   const searchForm = (status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
           <MagnifyingGlassIcon aria-hidden="true" />
           <input
@@ -496,29 +520,31 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
           </div>}
         </form>);
 
-  const completedUpdates = [status?.lastSuccessAt, ...(status?.streams ?? []).map((stream) => stream.lastCompletedAt)]
-    .filter((value): value is string => Boolean(value) && Number.isFinite(Date.parse(value!)));
-  const latestUpdate = completedUpdates.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  const searchScope = scope === "bookmarked" ? "망가 북마크" : "온라인 카탈로그";
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     <ViewToolbar
       title="망가"
-      titleAccessory={status?.installed && <span className="online-catalog__updated-at" aria-description="카탈로그 데이터베이스 갱신 시각 (현지 시간)">
-        <CircleStackIcon aria-hidden="true" />
-        {latestUpdate ? <time dateTime={latestUpdate} aria-label="최근 DB 갱신" aria-description="카탈로그 데이터베이스 갱신 시각 (현지 시간)">{new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(latestUpdate))}</time> : "갱신 기록 없음"}
-      </span>}
+      titleAccessory={refreshAge && latestUpdate && <time className="online-catalog__refresh-age" dateTime={latestUpdate}
+        aria-description={`카탈로그 DB 갱신 ${localDateTime(latestUpdate)}`}>{refreshAge}</time>}
       ariaLabel="온라인 망가 도구"
+      actions={catalogMenu}
       chrome={{
         navigation: catalogNavigation,
+        actions: catalogMenu,
         summary: `${catalogSortLabel(sort)} · ${language === "korean" ? "한국어" : "일본어"}${revealBlocked ? " · 숨김 포함" : ""}`,
         status: <><ChromeQueryBadge search={{ scope: "온라인 카탈로그", label: "온라인 만화 검색", query: appliedQuery, onApply: (text) => { setQuery(text); void search(text); } }} /><span>{totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : ""}</span></>,
-        searchSurface: status?.installed ? <SearchSurface label="온라인 만화 검색" scope={scope === "bookmarked" ? "망가 북마크" : "온라인 카탈로그"} active={Boolean(appliedQuery)} open={searchOpen}
-          onOpen={() => { setQuery(appliedQuery); setSearchOpen(true); }} onClose={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>
-          {searchForm}<div className="ui-dialog__actions"><Button type="button" variant="ghost" onClick={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>취소</Button><Button type="button" variant="primary" onClick={() => { closeSuggestions(); void search(query.trim()); }}>검색</Button></div>
-        </SearchSurface> : undefined,
+        searchSurface: status?.installed ? {
+          scope: searchScope, label: "온라인 만화 검색", query: appliedQuery, onApply: (text) => { setQuery(text); void search(text); },
+          // The 찾기 palette passes what the user typed there as the starting draft.
+          open: (draft) => { setQuery(draft.trim() || appliedQuery); setSearchOpen(true); },
+          content: <SearchSurface label="온라인 만화 검색" scope={searchScope} active={Boolean(appliedQuery)} open={searchOpen}
+            onOpen={() => { setQuery(appliedQuery); setSearchOpen(true); }} onClose={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>
+            {searchForm}<div className="ui-dialog__actions"><Button type="button" variant="ghost" onClick={() => { setSearchOpen(false); setQuery(appliedQuery); closeSuggestions(); }}>취소</Button><Button type="button" variant="primary" onClick={() => { closeSuggestions(); void search(query.trim()); }}>검색</Button></div>
+          </SearchSurface>,
+        } : undefined,
       }}
     />
     {status?.installed && <div className="online-catalog__sync-summary">
-      {!workspace && <Button size="sm" variant="ghost" onClick={() => setReviewOpen(true)}>중복 후보 검토</Button>}
       {reviewOpen && <CatalogReviewDialog onClose={() => setReviewOpen(false)} onChange={() => refreshSearch.current()} />}
       {revealBlocked && <span className="online-catalog__visibility-status" role="status">숨긴 분류와 차단 태그를 표시 중입니다</span>}
       {catalogStreamStatus(status, language).lastError ? <span className="online-catalog__sync-status" role="alert">마지막 갱신 실패 — {catalogStreamStatus(status, language).lastError}</span>

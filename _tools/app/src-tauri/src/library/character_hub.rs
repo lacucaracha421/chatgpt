@@ -47,6 +47,14 @@ impl SeriesGalleryFilter {
         }
     }
 }
+/// Per-character and per-group Asset counts for the folder tree, using the same
+/// membership rules as opening that character or group without filters.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarCounts {
+    pub targets: std::collections::HashMap<String, u64>,
+    pub groups: std::collections::HashMap<String, u64>,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowsePage {
@@ -155,6 +163,34 @@ pub(super) fn validate_art(connection: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 impl Library {
+    pub fn character_sidebar_counts(&self) -> Result<SidebarCounts> {
+        let connection = self.connection()?;
+        let mut counts = SidebarCounts::default();
+        let targets = connection
+            .prepare("SELECT id,series_classification_id FROM character_targets WHERE series_classification_id IS NOT NULL")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut target_count = connection.prepare(TARGET_GALLERY_COUNT_SQL)?;
+        for (target_id, series_id) in targets {
+            let total: i64 = target_count.query_row(params![series_id, target_id], |r| r.get(0))?;
+            counts
+                .targets
+                .insert(target_id, u64::try_from(total).unwrap_or(0));
+        }
+        let groups = connection
+            .prepare("SELECT id,series_id FROM character_groups")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut group_count =
+            connection.prepare(&format!("SELECT COUNT(*) FROM ({GROUP_GALLERY_SCOPE})"))?;
+        for (group_id, series_id) in groups {
+            let total: i64 = group_count.query_row(params![series_id, group_id], |r| r.get(0))?;
+            counts
+                .groups
+                .insert(group_id, u64::try_from(total).unwrap_or(0));
+        }
+        Ok(counts)
+    }
     pub fn character_series(&self) -> Result<Vec<Series>> {
         let connection = self.connection()?;
         let mut query = connection.prepare("SELECT classification_id,(SELECT a.id FROM assets a WHERE a.id=hero_asset_id AND a.status='normal'),auto_classify FROM character_series ORDER BY classification_id")?;
@@ -1089,8 +1125,12 @@ mod tests {
         assert!(unclassified.items.iter().all(|asset| asset.id != "asset-5"));
 
         let group_id = super::super::character_groups::save_character_group_in(&f.library.connection().unwrap(), super::super::character_groups::GroupDraft { id:None, series_id:f.series.clone(), expected_revision:None, name:"A only".into(), target_ids:vec![a.id.clone()], delete:false }).unwrap();
-        let group_page = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:Some(group_id), reference_target_id:None, after:None, limit:100, all:false, series_filter:None }).unwrap();
+        let group_page = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:Some(group_id.clone()), reference_target_id:None, after:None, limit:100, all:false, series_filter:None }).unwrap();
         assert!(group_page.items.iter().any(|asset| asset.id == "asset-5"));
+        // Sidebar counts use the same membership as opening the character or group.
+        let counts = f.library.character_sidebar_counts().unwrap();
+        assert_eq!(counts.targets[&a.id], target_page.total_count);
+        assert_eq!(counts.groups[&group_id], group_page.total_count);
 
         let picker = f.library.browse_character_assets(BrowseQuery { series_id:f.series.clone(), target_id:None, group_id:None, reference_target_id:Some(b.id.clone()), after:None, limit:100, all:true, series_filter:None }).unwrap();
         assert!(picker.items.iter().all(|asset| asset.id != "asset-5"));

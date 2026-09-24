@@ -743,8 +743,13 @@ pub struct ClassificationEntry {
     pub parent_id: Option<String>,
     pub icon_key: Option<String>,
     pub color_key: Option<String>,
+    /// Normal-status Assets linked directly to this entry.
     #[serde(default)]
     pub asset_count: u64,
+    /// Distinct normal-status Assets in this entry and all its descendants. Only the
+    /// full tree listing computes it; single-entry reads leave it `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_asset_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1787,6 +1792,7 @@ mod tests {
                 icon_key: None,
                 color_key: None,
                 asset_count: 0,
+                total_asset_count: None,
             }],
         };
         let value = serde_json::to_value(SimilarityReviewSummary {

@@ -10,24 +10,31 @@ export function cloudProblemCount(progress: CloudBackfillProgress): number {
     + (item.metadataLastError ? 1 : 0), 0);
 }
 
-export function useCloudProblems(gateway: LibraryGateway, libraryRoot: string) {
-  const [count, setCount] = useState(0);
+export type CloudSyncStatus = { problemCount: number; progress: CloudBackfillProgress | null };
+
+/** The latest cloud replication snapshot, shared by the status panel and its problem count. */
+export function useCloudSyncStatus(gateway: LibraryGateway, libraryRoot: string): CloudSyncStatus {
+  const [progress, setProgress] = useState<CloudBackfillProgress | null>(null);
   useEffect(() => {
     let active = true;
     let receivedUpdate = false;
-    setCount(0);
+    setProgress(null);
     const receive = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail.gateway === gateway && detail.libraryRoot === libraryRoot) {
         receivedUpdate = true;
-        setCount(cloudProblemCount(detail.progress));
+        setProgress(detail.progress);
       }
     };
     window.addEventListener(CLOUD_PROGRESS_EVENT, receive);
     void Promise.resolve().then(() => gateway.cloudBackfillProgress()).then(progress => {
-      if (active && !receivedUpdate && progress) setCount(cloudProblemCount(progress));
+      if (active && !receivedUpdate && progress) setProgress(progress);
     }).catch(() => undefined);
     return () => { active = false; window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); };
   }, [gateway, libraryRoot]);
-  return count;
+  return { problemCount: progress ? cloudProblemCount(progress) : 0, progress };
+}
+
+export function useCloudProblems(gateway: LibraryGateway, libraryRoot: string) {
+  return useCloudSyncStatus(gateway, libraryRoot).problemCount;
 }

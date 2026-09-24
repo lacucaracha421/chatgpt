@@ -109,8 +109,8 @@ export function S36CharacterExclusion({ seriesId, targetId, disabled, api = s36P
   const excluded = settings.excludedTargets.includes(targetId);
   const next = excluded ? settings.excludedTargets.filter(id => id !== targetId) : [...settings.excludedTargets, targetId];
   return <label className="s36-exclusion">
-    <input type="checkbox" checked={excluded} disabled={disabled} onChange={() => void save(settings.series, next)} />
-    <span>S36 제외<small>이 캐릭터는 자동 분류하지 않고 직접 확인과 추천만 사용합니다.</small>{error && <small role="status">{error}</small>}</span>
+    <input type="checkbox" checked={excluded} disabled={disabled} aria-description="이 캐릭터는 S36 자동 분류 대신 직접 확인과 추천만 사용합니다" onChange={() => void save(settings.series, next)} />
+    <span>S36 제외{error && <small role="status">{error}</small>}</span>
   </label>;
 }
 

@@ -270,7 +270,8 @@ it("keeps an inferred common-person crop correctable without prompting", async (
   const api = vi.fn(async () => [...six.map(id => inspection(id, "single")), inspection("g", "automatic", multi, 1)]);
   const user = userEvent.setup();
   render(<Harness assetIds={[...six, "g"]} respond={api} />);
-  expect(await screen.findByText(/공통 인물이 확인된 이미지 1장/)).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "인물 영역 조정" })).toBeInTheDocument();
+  expect(screen.queryByText(/공통 인물이 확인된/)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "필요한 인물만 확인" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "인물 영역 조정" }));
   const summary = await screen.findByRole("region", { name: "인물 영역 목록" });

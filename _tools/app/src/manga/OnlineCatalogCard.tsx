@@ -1,7 +1,6 @@
 import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
 import { catalogDisplayTitle } from "./catalogDisplayTitle";
 import type { CatalogGroupedWork, CatalogWork, CatalogWorkIdentity } from "../library/types";
-import { Button } from "../shared/ui/Button";
 import { catalogIdentityOf } from "./catalogIdentity";
 import { CatalogThumbnail } from "./CatalogThumbnail";
 
@@ -14,8 +13,14 @@ type OnlineCatalogCardProps = {
   onBookmark: (identity: CatalogWorkIdentity, bookmarked: boolean) => void;
 };
 
+/**
+ * Cover-led tile matching the mobile catalog: cover, title and artist. Views, series and tags
+ * live in the detail dialog; the page count, editions and bookmark sit quietly on the cover.
+ */
 export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark, onEditions }: OnlineCatalogCardProps) {
-  const byline = [...work.artists, ...work.series].join(" · ") || "작가 정보 없음";
+  const artists = work.artists.join(" · ") || "작가 정보 없음";
+  const displayTitle = catalogDisplayTitle(work.title);
+  const savedEdition = work.hasBookmarkedVersion && !work.bookmarked;
 
   return <article className="online-catalog-card">
     <button
@@ -25,31 +30,32 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
       disabled={opening}
       onClick={() => onOpen(work)}
     >
-      <CatalogThumbnail
-        className="online-catalog-card__cover"
-        src={work.thumbnailUrl}
-        title={work.title}
-        pageCount={work.fileCount}
-      />
-      <span className="online-catalog-card__metadata">
-        <strong aria-description={opening ? undefined : work.title}>{opening ? "작품을 여는 중…" : catalogDisplayTitle(work.title)}</strong>
-        <span aria-description={byline}>{byline}</span>
-        <small>조회 {work.views.toLocaleString()} · {work.fileCount}페이지</small>
+      <span className="online-catalog-card__frame">
+        <CatalogThumbnail
+          className="online-catalog-card__cover"
+          src={work.thumbnailUrl}
+          title={work.title}
+          pageCount={work.fileCount}
+        />
+        <span className="online-catalog-card__pages" aria-hidden="true">{work.fileCount}p</span>
       </span>
+      <strong aria-description={opening || displayTitle === work.title ? undefined : work.title}>{opening ? "작품을 여는 중…" : displayTitle}</strong>
+      <span className="online-catalog-card__byline">{artists}</span>
     </button>
-    <div className="online-catalog-card__footer">
-    {work.versionCount >= 2 && <Button size="sm" variant="ghost" className="online-catalog-card__editions" onClick={() => onEditions(work)}>{work.versionCount}개 판본</Button>}
-    <button
-      type="button"
-      className="online-catalog-card__bookmark"
-      aria-label={`${work.title} ${work.bookmarked ? "북마크 해제" : "북마크"}`}
-      aria-pressed={work.bookmarked}
-      disabled={bookmarkPending}
-      onClick={() => onBookmark(catalogIdentityOf(work), !work.bookmarked)}
-    >
-      <BookmarkIcon aria-hidden="true" />
-    </button>
+    <div className="online-catalog-card__overlay">
+      {work.versionCount >= 2 && <button type="button" className="online-catalog-card__editions" aria-label={`${work.versionCount}개 판본`} onClick={() => onEditions(work)}>판본 {work.versionCount}</button>}
+      <button
+        type="button"
+        className="online-catalog-card__bookmark"
+        aria-label={`${work.title} ${work.bookmarked ? "북마크 해제" : "북마크"}`}
+        aria-description={savedEdition ? "북마크된 판본 있음" : undefined}
+        aria-pressed={work.bookmarked}
+        data-saved-edition={savedEdition || undefined}
+        disabled={bookmarkPending}
+        onClick={() => onBookmark(catalogIdentityOf(work), !work.bookmarked)}
+      >
+        <BookmarkIcon aria-hidden="true" />
+      </button>
     </div>
-    {work.hasBookmarkedVersion && !work.bookmarked && <span className="online-catalog-card__saved-edition">북마크된 판본 있음</span>}
   </article>;
 }

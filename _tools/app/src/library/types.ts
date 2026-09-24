@@ -324,7 +324,7 @@ export type AssetView =
   | { kind: "statistics" }
   | { kind: "notes" }
   | { kind: "private_vault" }
-  | { kind: "settings"; section?: "general" | "cloud" | "catalog" | "external_services" | "data" | "about" }
+  | { kind: "settings"; section?: "general" | "library" | "cloud" | "catalog" | "external_services" | "data" | "about" | "advanced" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
@@ -337,8 +337,14 @@ export type ClassificationEntry = {
   parentId: string | null;
   iconKey: string | null;
   colorKey: string | null;
+  /** Normal-status assets linked directly to this entry ("이 폴더만"). */
   assetCount?: number;
+  /** Distinct normal-status assets in this entry and all descendants (the default folder view). Only the tree listing fills it. */
+  totalAssetCount?: number;
 };
+
+/** Per-character and per-group asset counts for the folder tree. */
+export type CharacterSidebarCounts = { targets: Record<string, number>; groups: Record<string, number> };
 
 export type AlbumEntry = {
   id: string;
@@ -1205,6 +1211,7 @@ export interface LibraryGateway {
   clearRemoteMangaCache(): Promise<void>;
   getExtensionConnection(): Promise<ExtensionConnection>;
   listClassifications(): Promise<ClassificationEntry[]>;
+  characterSidebarCounts?(): Promise<CharacterSidebarCounts>;
   createClassification(input: CreateClassification): Promise<ClassificationEntry>;
   renameClassification(id: string, name: string): Promise<void>;
   moveClassification(id: string, parentId: string | null): Promise<void>;

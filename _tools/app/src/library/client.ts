@@ -8,6 +8,7 @@ import type {
   KakaoSeriesCandidate,
   KakaoSyncResult,
   AlbumEntry,
+  CharacterSidebarCounts,
   AssetAlbumPatch,
   AssetCollectionPatch,
   AssetCreatorSummary,
@@ -324,6 +325,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<ExtensionConnection>("get_extension_connection"),
   listClassifications: () =>
     invoke<ClassificationEntry[]>("list_classifications"),
+  characterSidebarCounts: () =>
+    invoke<CharacterSidebarCounts>("character_sidebar_counts"),
   createClassification: (request: CreateClassification) =>
     classificationMutation(() => invoke<ClassificationEntry>("create_classification", { request })),
   renameClassification: (id, name) =>

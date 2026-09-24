@@ -800,6 +800,7 @@ pub(super) fn classifications_for_assets(
             icon_key,
             color_key,
             asset_count: asset_count.max(0) as u64,
+            total_asset_count: None,
         });
     }
     Ok(map)

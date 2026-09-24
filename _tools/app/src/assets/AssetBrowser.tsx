@@ -19,6 +19,7 @@ import { AssetGallery } from "./AssetGallery";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
 import { AssetViewer } from "./AssetViewer";
+import { SelectionBar } from "./SelectionBar";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
@@ -264,6 +265,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       setMessage(commandErrorMessage(error, "즐겨찾기를 변경하지 못했습니다."));
     }
   })();
+  const setSelectionFavorite = (favorite: boolean) => void runBatch(() => gateway.setAssetsFavorite(selectedIds, favorite), "즐겨찾기를 변경하지 못했습니다.");
   const removeFromCollection = () => void (async () => {
     if (view.kind !== "collection") return;
     await runBatch(() => gateway.patchAssetCollections({
@@ -393,6 +395,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
           privacyMode={privacyMode}
           cellSize={thumbnailRowHeight}
         /> : assetResults}
+        <SelectionBar view={view} selectedCount={selectedIds.length} inspectorOpen={inspectorOpen} batchPending={batchPending} onInspectorToggle={() => setInspectorOpen((open) => !open)} onFavorite={setSelectionFavorite} onRemoveFromCollection={removeFromCollection} onSetCover={() => selectedIds[0] && setCover(selectedIds[0])} onTrash={trashSelection} onClearSelection={clearSelection} />
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>

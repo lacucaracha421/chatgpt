@@ -1,4 +1,3 @@
-import { WorkloadControls } from "../app/WorkloadControls";
 import { publicationProgressText, startPublication, usePublicationJobs } from "../library/publicationJobs";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -6,7 +5,7 @@ import { useEffect, useState } from "react";
 import { VaultSettings } from "../external-vault/VaultSettings";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import { catalogStreamStatus } from "../library/catalogStreams";
+import { catalogStreamStatus, latestCatalogUpdate } from "../library/catalogStreams";
 import type { CatalogLanguage, CatalogStatus, CatalogStreamStatus, CloudCaptureSettings, CloudCaptureSyncResult, CloudLibraryRestoreReport, ExtensionConnection, ExtensionPairingLink, LegacyPackageMigrationPlan, LegacyPackageMigrationReport, MetadataBackup } from "../library/types";
 import { formatBytes } from "../assets/assetMetadata";
 import { notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
@@ -18,7 +17,8 @@ import { Select } from "../shared/ui/Select";
 import { Toast } from "../shared/ui/Toast";
 import { Toggle } from "../shared/ui/Toggle";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
-import { CloudBackfillSettings } from "./CloudBackfillSettings";
+import { CloudBackfillMaintenance, CloudBackfillSettings } from "./CloudBackfillSettings";
+import { LightweightModeSettings } from "./LightweightModeSettings";
 import { ExtensionPairingQr } from "./ExtensionPairingQr";
 import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
 import { MobileCatalogPublishSettings } from "./MobileCatalogPublishSettings";
@@ -37,6 +37,8 @@ type SettingsViewProps = {
   onRestoreCloudMetadata?: () => Promise<CloudLibraryRestoreReport>;
   onPrivateVaultChanged?: () => void | Promise<void>;
   initialSection?: SettingsSection;
+  /** Changes each time navigation asks for `initialSection`, so a repeated request still applies. */
+  sectionRequest?: number;
   privacyMode?: boolean;
   onPrivacyModeChange?: (privacyMode: boolean) => void;
   appZoom?: number;
@@ -44,21 +46,22 @@ type SettingsViewProps = {
   appZoomError?: string | null;
 };
 
-type SettingsSection = "general" | "cloud" | "catalog" | "external_services" | "data" | "about";
+/** Deep-linkable ids (see `View` in library/types.ts) plus Settings-only sections. */
+export type SettingsSection = "general" | "library" | "cloud" | "catalog" | "external_services" | "data" | "about" | "advanced";
 const SECTIONS: { id: SettingsSection; label: string }[] = [
-  { id: "general", label: "일반" }, { id: "cloud", label: "클라우드" },
+  { id: "general", label: "일반" }, { id: "library", label: "라이브러리" }, { id: "cloud", label: "클라우드" },
   { id: "catalog", label: "온라인 카탈로그" }, { id: "external_services", label: "연결" },
-  { id: "data", label: "데이터 관리" }, { id: "about", label: "정보·도움말" },
+  { id: "data", label: "데이터 관리" }, { id: "about", label: "정보·도움말" }, { id: "advanced", label: "고급" },
 ];
 
 const METADATA_IMPORT_FOLDER_KEY = "lakomics.metadataImportFolder";
 
-export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, onPrivateVaultChanged, initialSection, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
+export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, onPrivateVaultChanged, initialSection, sectionRequest, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
   const workspace = useWorkspaceChrome();
   const { collections: collectionPublication, characters: characterPublication } = usePublicationJobs();
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
   const [section, setSection] = useState<SettingsSection>(() => initialSection ?? "general");
-  useEffect(() => { if (initialSection) setSection(initialSection); }, [initialSection]);
+  useEffect(() => { if (initialSection) setSection(initialSection); }, [initialSection, sectionRequest]);
   const [saved, setSaved] = useState<string | null>(null);
   const [lastImportFolder, setLastImportFolder] = useState(() => localStorage.getItem(METADATA_IMPORT_FOLDER_KEY));
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -141,7 +144,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         if (active) setOtherMachineMangaRoot(other ?? null);
       })
       .catch((error) => { if (active) setMangaRootError(commandErrorMessage(error, "망가 폴더를 확인하지 못했습니다.")); });
-    if (section === "data") void gateway.getCollectionSourceRoot()
+    if (section === "advanced") void gateway.getCollectionSourceRoot()
       .then((root) => { if (active) setCollectionSourceRootState(root); })
       .catch((error) => { if (active) setCollectionSourceError(commandErrorMessage(error, "구버전 소스 폴더를 확인하지 못했습니다.")); });
     return () => { active = false; };
@@ -188,7 +191,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   }, [gateway, section]);
 
   useEffect(() => {
-    if (section !== "catalog") return;
+    if (section !== "catalog" && section !== "advanced") return;
     let active = true;
     void gateway.getOnlineCatalogStatus().then((status) => {
       if (active) setCatalogStatus(status);
@@ -198,7 +201,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     return () => { active = false; };
   }, [gateway, section]);
   useEffect(() => {
-    if (section !== "cloud" && section !== "data") return;
+    if (section !== "cloud" && section !== "advanced") return;
     if (cloudSettings) return;
     let active = true;
     void gateway.getCloudCaptureSettings().then((status) => {
@@ -215,7 +218,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     if (section === "about") void getVersion().then(setAppVersion).catch(() => setAppVersion(null));
   }, [section]);
   useEffect(() => {
-    if (section !== "data") return;
+    if (section !== "advanced") return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void gateway.listMetadataBackups().then((nextBackups) => {
@@ -738,8 +741,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  function openSection(next: SettingsSection) {
+    setSection(next);
+    setSaved(null);
+  }
+
+  const catalogDbUpdatedAt = catalogStatus ? latestCatalogUpdate(catalogStatus) : null;
   const navigation = <nav className="settings-view__navigation" aria-label="설정 구역">
-    {SECTIONS.map(({ id, label }) => <Button key={id} className="settings-view__section-button" variant="ghost" aria-current={section === id ? "page" : undefined} onClick={() => { setSection(id); setSaved(null); }}>{label}</Button>)}
+    {SECTIONS.map(({ id, label }) => <Button key={id} className="settings-view__section-button" variant="ghost" aria-current={section === id ? "page" : undefined} onClick={() => openSection(id)}>{label}</Button>)}
   </nav>;
   return <section className="settings-view" aria-label="설정" >
     <ViewToolbar title={`설정 · ${SECTIONS.find((item) => item.id === section)?.label}`} chrome={{ navigation }} />
@@ -750,7 +759,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     {section === "general" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>일반</h2></header>
-        <WorkloadControls />
         <dl className="settings-view__property">
           <dt>화면 배율</dt>
           <dd className="settings-view__credential-status">글자, 버튼, 이미지 등 앱 전체 크기를 조절합니다. 변경 즉시 적용되며 다음 실행에도 유지됩니다.</dd>
@@ -765,8 +773,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <dd className="settings-view__credential-status">모든 이미지와 영상을 자리표시로 가립니다. 화면 공유 중에 내용이 보이지 않습니다.</dd>
           <Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => { onPrivacyModeChange(event.target.checked); setSaved("비공개 모드 설정을 저장했습니다"); }}>{privacyMode ? "켜짐" : "꺼짐"}</Toggle>
         </dl>
-        {library && <CharacterAutomationSettings key={library.root} disabled={pending} onBusyChange={setCharacterAutomationBusy} />}
-        {library && <CharacterAugmentationSettings key={`augmentation:${library.root}`} disabled={pending} onBusyChange={setCharacterAugmentationBusy} />}
+        <LightweightModeSettings />
         <dl className="settings-view__property">
           <dt>라이브러리 폴더</dt>
           <dd className="settings-view__path">{library?.root ?? "알 수 없음"}</dd>
@@ -775,8 +782,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </Button>
           {libraryError && <dd className="settings-view__row-message" role="alert">{libraryError}</dd>}
         </dl>
-
-
         <dl className="settings-view__property">
           <dt>망가 폴더</dt>
           <dd className="settings-view__path">{mangaRoot ?? "이 PC에서는 설정되지 않음"}</dd>
@@ -786,6 +791,15 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           )}
           {mangaRootError && <dd className="settings-view__row-message" role="alert">{mangaRootError}</dd>}
         </dl>
+      </div>
+    )}
+    {section === "library" && (
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>라이브러리</h2></header>
+        <h3 className="settings-view__group-title">캐릭터 분석</h3>
+        {library ? <CharacterAutomationSettings key={library.root} disabled={pending} onBusyChange={setCharacterAutomationBusy} />
+          : <p className="settings-view__row-note">라이브러리를 연 뒤 설정할 수 있습니다.</p>}
+        <p className="settings-view__row-note">S36 시험 채점과 캐릭터 누락 보완은 <AdvancedLink onOpen={() => openSection("advanced")} />에 있습니다.</p>
       </div>
     )}
     {section === "about" && (
@@ -941,8 +955,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     {section === "cloud" && <div className="settings-view__section">
       <header className="settings-view__header"><h2>클라우드</h2></header>
       {cloudError && <Toast tone="error" onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
-      {cloudBusy ? <p role="status">처리 중…</p> : cloudMessage && <p role="status">{cloudMessage}</p>}
-
+      <CloudBackfillSettings connectionReady={cloudSettings ? Boolean(cloudSettings.apiBaseUrl && cloudSettings.tokenConfigured) : null}>
+        {cloudBusy ? <p role="status">처리 중…</p> : cloudMessage && <p role="status">{cloudMessage}</p>}
         {!cloudSettings ? (
           <Skeleton className="settings-view__skeleton" label="클라우드 설정을 불러오는 중" />
         ) : (
@@ -957,6 +971,19 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
               <dd><Toggle checked={cloudSettings.enabled} disabled={cloudBusy || !cloudSettings.apiBaseUrl} onChange={(event) => void saveCloudSettings(event.target.checked)}>자동 복제</Toggle></dd>
               <dd className="settings-view__row-note">끄면 진행 중인 전송을 마친 뒤 멈춥니다. 저장된 사본과 대기 자료는 유지됩니다.</dd>
             </dl>
+            <div className="settings-view__actions">
+              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing("pc")}>PC 확장 연결</Button>
+              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing("qr")}>태블릿 QR 연결</Button>
+            </div>
+            {extensionPairingQr && (
+              <ExtensionPairingQr
+                value={extensionPairingQr}
+                mode={extensionPairingMode}
+                onCopy={copyListExtensionPairing}
+                onRefresh={() => createListExtensionPairing(extensionPairingMode)}
+                onClose={() => setExtensionPairingQr(null)}
+              />
+            )}
             <details className="settings-view__advanced"><summary>서버 연결 설정</summary>
             <dl className="settings-view__property">
               <dt>서버 주소{cloudApiBaseUrl.trim() !== (cloudSettings.apiBaseUrl ?? "") && <span className="settings-view__row-note"> · 저장 전</span>}</dt>
@@ -973,26 +1000,15 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
                 {cloudSettings.tokenConfigured && <Button size="sm" variant="danger" disabled={cloudBusy} onClick={() => void deleteCloudToken()}>토큰 삭제</Button>}
               </dd>
             </dl>
-            </details>
             <div className="settings-view__actions">
-              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing("pc")}>PC 확장 연결</Button>
-              <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.createExtensionPairing} onClick={() => void createListExtensionPairing("qr")}>태블릿 QR 연결</Button>
               <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>
               <Button size="sm" variant="primary" disabled={cloudBusy || !(cloudSettings.captureEnabled ?? cloudSettings.enabled) || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void syncCloudNow()}>지금 수신</Button>
             </div>
-            {extensionPairingQr && (
-              <ExtensionPairingQr
-                value={extensionPairingQr}
-                mode={extensionPairingMode}
-                onCopy={copyListExtensionPairing}
-                onRefresh={() => createListExtensionPairing(extensionPairingMode)}
-                onClose={() => setExtensionPairingQr(null)}
-              />
-            )}
-
+            </details>
           </>
         )}
-        <CloudBackfillSettings />
+      </CloudBackfillSettings>
+      <p className="settings-view__row-note">사전 점검·전체 업로드·상태 복구와 서버 복구 지점은 <AdvancedLink onOpen={() => openSection("advanced")} />에 있습니다.</p>
     </div>}
     {section === "catalog" && <div className="settings-view__section">
       <header className="settings-view__header"><h2>온라인 카탈로그</h2></header>
@@ -1001,6 +1017,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {catalogStatus && <dl className="settings-view__property">
           <dt>카탈로그 상태</dt>
           <dd>{catalogStatus.installed ? `설치됨 · ${catalogStatus.workCount.toLocaleString()}개 작품` : "미설치"}</dd>
+        </dl>}
+
+        {catalogStatus?.installed && <dl className="settings-view__property">
+          <dt>최근 DB 갱신</dt>
+          <dd>{catalogDbUpdatedAt ? <time dateTime={catalogDbUpdatedAt}>{localDateTime(catalogDbUpdatedAt)}</time> : "갱신 기록 없음"}</dd>
         </dl>}
 
         {catalogStatus && <dl className="settings-view__property">
@@ -1013,7 +1034,6 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </Select>
         </dl>}
         <CatalogVisibilitySettings />
-        <MobileCatalogPublishSettings />
         <dl className="settings-view__property">
           <dt>온라인 이미지 캐시</dt>
           <dd>열어 본 온라인 작품의 페이지 이미지만 삭제합니다.</dd>
@@ -1028,8 +1048,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             </span>
           )}
         </dl>
-        <details className="settings-view__advanced"><summary>수집 상세·카탈로그 복구</summary>
-        {catalogStatus?.installed && <>
+        {catalogStatus?.installed && <details className="settings-view__advanced"><summary>수집 상세</summary>
           <CatalogStreamSettings
             stream={catalogStreamStatus(catalogStatus, "korean")}
             busy={catalogBusy}
@@ -1040,37 +1059,97 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             busy={catalogBusy}
             onUpdate={updateCatalogStream}
           />
-          <dl className="settings-view__property">
-            <dt>일본어 체크포인트</dt>
-            <dd className="settings-view__row-note">초기 수집 위치만 재설정하며 기존 카탈로그와 사용자 데이터는 유지합니다.</dd>
-            {!catalogCheckpointConfirming ? (
-              <Button size="sm" disabled={catalogBusy} onClick={() => setCatalogCheckpointConfirming(true)}>일본어 체크포인트 재설정</Button>
-            ) : (
-              <span className="settings-view__credential-actions">
-                <Button size="sm" disabled={catalogBusy} onClick={() => setCatalogCheckpointConfirming(false)}>취소</Button>
-                <Button size="sm" variant="danger" disabled={catalogBusy} onClick={() => void resetJapaneseCatalogCheckpoint()}>체크포인트 재설정 확인</Button>
-              </span>
-            )}
-            {catalogCheckpointConfirming && <dd className="settings-view__row-message">일본어 카탈로그 체크포인트만 재설정할까요? 기존 카탈로그와 북마크·읽기 기록은 그대로 유지됩니다.</dd>}
-          </dl>
-        </>}
-        {catalogStatus?.installed && <dl className="settings-view__property">
-          <dt>카탈로그 교체·복구</dt>
-          <dd className="settings-view__row-note">VCK 원본 폴더를 다시 선택하면 검증 후 전체 카탈로그를 교체합니다. 북마크와 읽기 기록은 유지됩니다.</dd>
-          <Button size="sm" disabled={catalogRestoreBusy} onClick={() => void restoreCatalogFromVck()}>
-            {catalogRestoreBusy ? "교체 중…" : "VCK 폴더 다시 선택"}
-          </Button>
-          {catalogRestoreMessage && <dd className="settings-view__row-message">{catalogRestoreMessage}</dd>}
-        </dl>}
-        </details>
+        </details>}
         {catalogCacheMessage && <Toast onDismiss={() => setCatalogCacheMessage(null)}>{catalogCacheMessage}</Toast>}
+        <p className="settings-view__row-note">모바일 카탈로그 게시, 일본어 체크포인트 재설정, 카탈로그 교체·복구는 <AdvancedLink onOpen={() => openSection("advanced")} />에 있습니다.</p>
     </div>}
     {section === "data" && (
       <div className="settings-view__section">
         <header className="settings-view__header"><h2>데이터 관리</h2></header>
         <h3 className="settings-view__group-title">비밀 보관함</h3>
         <VaultSettings onChanged={onPrivateVaultChanged} onSaved={setSaved} />
-        <h3 className="settings-view__group-title">컬렉션 가져오기</h3>
+        <p className="settings-view__row-note">가져오기, 서버·로컬 백업 복구, 모바일 게시는 <AdvancedLink onOpen={() => openSection("advanced")} />에 있습니다.</p>
+      </div>
+    )}
+    {section === "advanced" && (
+      <div className="settings-view__section">
+        <header className="settings-view__header"><h2>고급</h2></header>
+        <p className="settings-view__row-note">평소에는 필요 없는 실험 기능과 복구·진단 도구입니다. 위험한 작업은 실행 전에 확인을 거칩니다.</p>
+        <h3 className="settings-view__group-title">캐릭터 분석 실험</h3>
+        {library ? <CharacterAugmentationSettings key={`augmentation:${library.root}`} disabled={pending} onBusyChange={setCharacterAugmentationBusy} />
+          : <p className="settings-view__row-note">라이브러리를 연 뒤 설정할 수 있습니다.</p>}
+        <section aria-labelledby="settings-recovery-title">
+        <h3 className="settings-view__group-title" id="settings-recovery-title">복구·진단</h3>
+        <p className="settings-view__row-note">문제가 생겼거나 처음 설정할 때만 사용합니다.</p>
+        <h4 className="settings-view__group-title">동기화 점검·복구</h4>
+        <CloudBackfillMaintenance />
+        <h4 className="settings-view__group-title">서버 백업·복원</h4>
+        {cloudError && <Toast tone="error" onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
+        {cloudBusy ? <p role="status">처리 중…</p> : cloudMessage && <p role="status">{cloudMessage}</p>}
+        {cloudSettings && <dl className="settings-view__property">
+              <dt>PC 복구 지점</dt>
+              <dd className="settings-view__row-note">라이브러리 관리 정보를 서버에 백업합니다. 복원 시 서버에 보관된 자료도 내려받습니다. 외부 망가 폴더는 포함되지 않습니다.</dd>
+              <dd className="settings-view__actions">
+                <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void pushCloudMetadataBackup()}>서버 복구 지점 만들기</Button>
+                <Button size="sm" variant="danger" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void restoreCloudMetadataBackup()}>서버에서 PC 복원</Button>
+              </dd>
+            </dl>}
+        <h4 className="settings-view__group-title">로컬 백업 복구</h4>
+        <div className="settings-view__safety">
+        {confirmingId ? (
+          <div className="settings-view__safety-confirm">
+            <p>현재 상태를 별도로 보존한 뒤 선택한 시점으로 관리 정보를 복구합니다.</p>
+            {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
+            <div className="ui-dialog__actions">
+              <Button disabled={pending} onClick={() => setConfirmingId(null)}>취소</Button>
+              <Button variant="primary" disabled={pending} onClick={() => void restore()}>
+                {pending ? "복구 중…" : "복구 시작"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {error && <div className="settings-view__safety-error"><Toast tone="error">{error}</Toast><Button onClick={() => { setError(null); setBackups(null); setBackupRetryVersion((version) => version + 1); }}>다시 시도</Button></div>}
+            {!backups && !error ? (
+              <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" />
+            ) : backups?.length === 0 ? (
+              <p>사용할 수 있는 백업이 없습니다.</p>
+            ) : backups ? (
+              <ul className="settings-view__safety-list">
+                {backups.map((backup) => (
+                  <li key={backup.id} className="settings-view__safety-item">
+                    <div>
+                      <strong>{localDate(backup.createdAt)}</strong>
+                      <span>{kindLabel(backup.kind)}</span>
+                      <span>{backup.byteSize.toLocaleString("ko-KR")} B</span>
+                    </div>
+                    <Button disabled={pending} onClick={() => setConfirmingId(backup.id)}>이 시점으로 복구</Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </>
+        )}
+        </div>
+        <h4 className="settings-view__group-title">모바일 게시</h4>
+        {cloudSettings && <dl className="settings-view__property">
+          <dt>모바일 컬렉션</dt>
+          <dd className="settings-view__row-note">현재 PC의 컬렉션 정보와 보관된 이미지를 서버에 게시합니다. PC가 꺼져 있어도 모바일에서 감상할 수 있습니다.</dd>
+          <dd className="settings-view__actions">
+            <Button size="sm" disabled={cloudBusy || collectionPublication?.running || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.pushCloudCollections} onClick={() => void pushCloudCollections()}>{collectionPublication?.running ? "모바일 컬렉션 업데이트 중…" : "모바일 컬렉션 업데이트"}</Button>
+            {collectionPublication && <p role={collectionPublication.error ? "alert" : "status"}>{collectionPublication.running ? publicationProgressText(collectionPublication.progress) : collectionPublication.message}</p>}
+          </dd>
+        </dl>}
+        {cloudSettings && <dl className="settings-view__property">
+          <dt>모바일 캐릭터</dt>
+          <dd className="settings-view__row-note">현재 시리즈·그룹·캐릭터와 폴더의 보기 목록을 게시합니다. 이미 서버에 보관된 자산을 모바일에서 감상할 수 있습니다.</dd>
+          <dd className="settings-view__actions">
+            <Button size="sm" disabled={cloudBusy || characterPublication?.running || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.pushCloudCharacters} onClick={() => void startPublication("characters", progress => gateway.pushCloudCharacters!(progress), result => `${result.nodes.toLocaleString()}개 보기 게시 완료`)}>{characterPublication?.running ? "모바일 캐릭터 업데이트 중…" : "모바일 캐릭터 업데이트"}</Button>
+            {characterPublication && <p role={characterPublication.error ? "alert" : "status"}>{characterPublication.running ? publicationProgressText(characterPublication.progress) : characterPublication.message}</p>}
+          </dd>
+        </dl>}
+        <MobileCatalogPublishSettings />
+        <h4 className="settings-view__group-title">컬렉션 가져오기</h4>
         <dl className="settings-view__property">
           <dt>book 폴더</dt>
           <dd className="settings-view__path">book 폴더의 info.txt에서 게임/만화/영화 컬렉션을 가져옵니다.</dd>
@@ -1079,7 +1158,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </Button>
           {bookImportMessage && <dd className="settings-view__row-message" role="alert">{bookImportMessage}</dd>}
         </dl>
-        <h3 className="settings-view__group-title">메타데이터 가져오기</h3>
+        <h4 className="settings-view__group-title">메타데이터 가져오기</h4>
         <dl className="settings-view__property">
           <dt>최근 가져오기 폴더</dt>
           <dd className="settings-view__path">{lastImportFolder ?? "아직 없음"}</dd>
@@ -1097,7 +1176,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           {collectionSourceError && <dd className="settings-view__row-message" role="alert">{collectionSourceError}</dd>}
         </dl>
         {collectionSourceMessage && <Toast onDismiss={() => setCollectionSourceMessage(null)}>{collectionSourceMessage}</Toast>}
-        <h3 className="settings-view__group-title">레거시 패키지 가져오기</h3>
+        <h4 className="settings-view__group-title">레거시 패키지 가져오기</h4>
         {legacyError && <Toast tone="error" onDismiss={() => setLegacyError(null)}>{legacyError}</Toast>}
         <dl className="settings-view__property">
           <dt>패키지 폴더</dt>
@@ -1122,7 +1201,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         )}
         {legacyPlan && (
           <div className="settings-view__legacy-plan">
-            <h3 className="settings-view__group-title">검사 결과</h3>
+            <h4 className="settings-view__group-title">검사 결과</h4>
             <dl className="settings-view__property">
               <dt>라이브러리 ID</dt>
               <dd className="settings-view__path">{legacyPlan.source.libraryId}</dd>
@@ -1164,7 +1243,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         )}
         {legacyReport && (
           <div className="settings-view__legacy-report">
-            <h3 className="settings-view__group-title">가져오기 결과</h3>
+            <h4 className="settings-view__group-title">가져오기 결과</h4>
             <dl className="settings-view__property">
               <dt>자산</dt>
               <dd>추가 {legacyReport.added} · 대상 재사용 {legacyReport.exactTargetReused} · 중복 재사용 {legacyReport.sourceDuplicatesReused} · 이미 매핑 {legacyReport.alreadyMapped} · 실패 {legacyReport.failed}</dd>
@@ -1187,70 +1266,33 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </div>
         )}
         </details>
-        <h3 className="settings-view__group-title">서버 백업·복원</h3>
-        {cloudError && <Toast tone="error" onDismiss={() => setCloudError(null)}>{cloudError}</Toast>}
-        {cloudBusy ? <p role="status">처리 중…</p> : cloudMessage && <p role="status">{cloudMessage}</p>}
-        {cloudSettings && <>            <dl className="settings-view__property">
-              <dt>PC 복구 지점</dt>
-              <dd className="settings-view__row-note">라이브러리 관리 정보를 서버에 백업합니다. 복원 시 서버에 보관된 자료도 내려받습니다. 외부 망가 폴더는 포함되지 않습니다.</dd>
-              <dd className="settings-view__actions">
-                <Button size="sm" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void pushCloudMetadataBackup()}>서버 복구 지점 만들기</Button>
-                <Button size="sm" variant="danger" disabled={cloudBusy || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured} onClick={() => void restoreCloudMetadataBackup()}>서버에서 PC 복원</Button>
-              </dd>
-            </dl></>}
-        {cloudSettings && <dl className="settings-view__property">
-          <dt>모바일 컬렉션</dt>
-          <dd className="settings-view__row-note">현재 PC의 컬렉션 정보와 보관된 이미지를 서버에 게시합니다. PC가 꺼져 있어도 모바일에서 감상할 수 있습니다.</dd>
-          <dd className="settings-view__actions">
-            <Button size="sm" disabled={cloudBusy || collectionPublication?.running || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.pushCloudCollections} onClick={() => void pushCloudCollections()}>{collectionPublication?.running ? "모바일 컬렉션 업데이트 중…" : "모바일 컬렉션 업데이트"}</Button>
-            {collectionPublication && <p role={collectionPublication.error ? "alert" : "status"}>{collectionPublication.running ? publicationProgressText(collectionPublication.progress) : collectionPublication.message}</p>}
-          </dd>
-        </dl>}
-        {cloudSettings && <dl className="settings-view__property">
-          <dt>모바일 캐릭터</dt>
-          <dd className="settings-view__row-note">현재 시리즈·그룹·캐릭터와 폴더의 보기 목록을 게시합니다. 이미 서버에 보관된 자산을 모바일에서 감상할 수 있습니다.</dd>
-          <dd className="settings-view__actions">
-            <Button size="sm" disabled={cloudBusy || characterPublication?.running || !cloudSettings.apiBaseUrl || !cloudSettings.tokenConfigured || !gateway.pushCloudCharacters} onClick={() => void startPublication("characters", progress => gateway.pushCloudCharacters!(progress), result => `${result.nodes.toLocaleString()}개 보기 게시 완료`)}>{characterPublication?.running ? "모바일 캐릭터 업데이트 중…" : "모바일 캐릭터 업데이트"}</Button>
-            {characterPublication && <p role={characterPublication.error ? "alert" : "status"}>{characterPublication.running ? publicationProgressText(characterPublication.progress) : characterPublication.message}</p>}
-          </dd>
-        </dl>}
-        <h3 className="settings-view__group-title">로컬 백업 복구</h3>
-        <div className="settings-view__safety">
-        {confirmingId ? (
-          <div className="settings-view__safety-confirm">
-            <p>현재 상태를 별도로 보존한 뒤 선택한 시점으로 관리 정보를 복구합니다.</p>
-            {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
-            <div className="ui-dialog__actions">
-              <Button disabled={pending} onClick={() => setConfirmingId(null)}>취소</Button>
-              <Button variant="primary" disabled={pending} onClick={() => void restore()}>
-                {pending ? "복구 중…" : "복구 시작"}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {error && <div className="settings-view__safety-error"><Toast tone="error">{error}</Toast><Button onClick={() => { setError(null); setBackups(null); setBackupRetryVersion((version) => version + 1); }}>다시 시도</Button></div>}
-            {!backups && !error ? (
-              <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" />
-            ) : backups?.length === 0 ? (
-              <p>사용할 수 있는 백업이 없습니다.</p>
-            ) : backups ? (
-              <ul className="settings-view__safety-list">
-                {backups.map((backup) => (
-                  <li key={backup.id} className="settings-view__safety-item">
-                    <div>
-                      <strong>{localDate(backup.createdAt)}</strong>
-                      <span>{kindLabel(backup.kind)}</span>
-                      <span>{backup.byteSize.toLocaleString("ko-KR")} B</span>
-                    </div>
-                    <Button disabled={pending} onClick={() => setConfirmingId(backup.id)}>이 시점으로 복구</Button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </>
-        )}
-        </div>
+        <h4 className="settings-view__group-title">온라인 카탈로그 복구</h4>
+        {catalogError && <Toast tone="error" onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
+        {!catalogStatus?.installed && <p className="settings-view__row-note">{catalogStatus ? "온라인 카탈로그가 설치되어 있지 않습니다." : "카탈로그 상태를 확인하는 중…"}</p>}
+        {catalogStatus?.installed && <>
+          <dl className="settings-view__property">
+            <dt>일본어 체크포인트</dt>
+            <dd className="settings-view__row-note">초기 수집 위치만 재설정하며 기존 카탈로그와 사용자 데이터는 유지합니다.</dd>
+            {!catalogCheckpointConfirming ? (
+              <Button size="sm" disabled={catalogBusy} onClick={() => setCatalogCheckpointConfirming(true)}>일본어 체크포인트 재설정</Button>
+            ) : (
+              <span className="settings-view__credential-actions">
+                <Button size="sm" disabled={catalogBusy} onClick={() => setCatalogCheckpointConfirming(false)}>취소</Button>
+                <Button size="sm" variant="danger" disabled={catalogBusy} onClick={() => void resetJapaneseCatalogCheckpoint()}>체크포인트 재설정 확인</Button>
+              </span>
+            )}
+            {catalogCheckpointConfirming && <dd className="settings-view__row-message">일본어 카탈로그 체크포인트만 재설정할까요? 기존 카탈로그와 북마크·읽기 기록은 그대로 유지됩니다.</dd>}
+          </dl>
+          <dl className="settings-view__property">
+          <dt>카탈로그 교체·복구</dt>
+          <dd className="settings-view__row-note">VCK 원본 폴더를 다시 선택하면 검증 후 전체 카탈로그를 교체합니다. 북마크와 읽기 기록은 유지됩니다.</dd>
+          <Button size="sm" disabled={catalogRestoreBusy} onClick={() => void restoreCatalogFromVck()}>
+            {catalogRestoreBusy ? "교체 중…" : "VCK 폴더 다시 선택"}
+          </Button>
+          {catalogRestoreMessage && <dd className="settings-view__row-message">{catalogRestoreMessage}</dd>}
+          </dl>
+        </>}
+        </section>
       </div>
     )}
     </div>
@@ -1287,6 +1329,11 @@ function CatalogStreamSettings({ stream, busy, onUpdate }: {
     </dd>
     <Button size="sm" disabled={busy} onClick={() => void onUpdate(stream.language, maxPages)}>{updateLabel}</Button>
   </dl>;
+}
+
+/** Same source as the former manga-title DB timestamp: newest full or per-stream completed update. */
+function AdvancedLink({ onOpen }: { onOpen: () => void }) {
+  return <Button size="sm" variant="ghost" onClick={onOpen}>고급 설정</Button>;
 }
 
 function catalogLanguageLabel(language: CatalogLanguage): string {

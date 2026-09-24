@@ -14,6 +14,14 @@ function collectedDateKey(value: string) {
   return date && Number.isFinite(date.getTime()) ? dateKey(date) : "unknown";
 }
 
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+/** Muted day marker beside a date heading: "오늘" for today, otherwise the local weekday. */
+export function headingWeekday(value: string | null | undefined, now = new Date()) {
+  const date = value ? new Date(value) : null;
+  if (!date || !Number.isFinite(date.getTime())) return "";
+  return dateKey(date) === dateKey(now) ? "오늘" : WEEKDAYS[date.getDay()];
+}
+
 // Date headings and captions deliberately share the same local timestamp.
 export function collectedDate(value: string | null | undefined) {
   const date = value ? new Date(value) : null;
@@ -24,7 +32,7 @@ export function collectedDate(value: string | null | undefined) {
 
 export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, captions: boolean, groupDates: boolean, fullDateHeadings = false) {
   const tiles: MasonryTile[] = [];
-  const headings: Array<{ key: string; label: string; top: number; left: number; width: number }> = [];
+  const headings: Array<{ key: string; label: string; weekday: string; count: number; top: number; left: number; width: number }> = [];
   if (width <= 0 || targetWidth <= 0) return { tiles, headings, height: 0 };
   const columns = Math.max(1, Math.floor((width + gap) / (targetWidth + gap)));
   const tileWidth = (width - gap * (columns - 1)) / columns;
@@ -48,6 +56,7 @@ export function buildMasonryLayout(items: AssetSummary[], width: number, targetW
     const left = usedColumns * (tileWidth + gap);
     if (groupDates) headings.push({
       key: group.items[0].id, label: fullDateHeadings ? group.key === "unknown" ? "수집일 미상" : group.key : collectedDate(group.items[0].collectedAt).label,
+      weekday: headingWeekday(group.items[0].collectedAt), count: group.items.length,
       top: rowTop, left, width: span * (tileWidth + gap) - gap,
     });
     const bottoms = Array<number>(span).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));

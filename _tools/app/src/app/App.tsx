@@ -1,4 +1,3 @@
-import { WorkloadControls } from "./WorkloadControls";
 import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
@@ -30,13 +29,12 @@ import {
   useFileDrop,
 } from "../ingestion/useFileDrop";
 import { DropOverlay } from "../ingestion/DropOverlay";
-import { WorkTray } from "../ingestion/WorkTray";
 import { executeMetadataImport, type MetadataImportWork } from "../ingestion/metadataImport";
 import { AppShell } from "../layout/AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WorkspaceNavigation } from "../layout/WorkspaceNavigation";
 import { WindowControls } from "../layout/WindowControls";
-import { WorkStatusCenter } from "../layout/WorkStatusCenter";
+import { StatusCenter, type StatusCenterProps } from "../layout/StatusCenter";
 import { libraryGateway } from "../library/client";
 import { commandErrorMessage } from "../library/errorMessage";
 import { LibraryProvider, useLibrary } from "../library/LibraryContext";
@@ -64,7 +62,7 @@ import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
 import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
-import { useCloudProblems } from "./useCloudProblems";
+import { useCloudSyncStatus } from "./useCloudProblems";
 import { useCollectionOpen } from "../statistics/useCollectionOpen";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
@@ -99,9 +97,10 @@ type AppProps = {
 
 function backNavigationTab(view: AssetView): string {
   switch (view.kind) {
-    case "classification": case "album": return "assets";
+    // Revisit is an asset quick view: back from it returns to the folder it was opened from.
+    case "classification": case "album":
+    case "revisit": case "creators": case "creator": case "calendar": case "revisited-bundle": return "assets";
     case "collection": case "collections": return "collections";
-    case "revisit": case "creators": case "creator": case "calendar": case "revisited-bundle": return "revisit";
     default: return view.kind;
   }
 }
@@ -157,7 +156,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useAssetAuthoritySync(gateway, libraryRoot);
   useAlbumAuthoritySync(gateway, libraryRoot);
   useClassificationAuthoritySync(gateway, libraryRoot);
-  const cloudProblems = useCloudProblems(gateway, libraryRoot);
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
@@ -245,6 +243,17 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const refreshReviewCount = useCallback(async () => {
     const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
     setReviewCount(page.totalCount);
+  }, [gateway]);
+  const [unsortedCount, setUnsortedCount] = useState<number | null>(null);
+  const [settingsSectionRequest, setSettingsSectionRequest] = useState(0);
+  const unsortedGatewayRef = useRef(gateway);
+  useEffect(() => { unsortedGatewayRef.current = gateway; setUnsortedCount(null); }, [gateway]);
+  // Read only when the status panel, 더보기 or the 찾기 palette opens: the unsorted queue count is a COUNT over the library.
+  const refreshUnsortedCount = useCallback(async () => {
+    const page = await gateway.listAssets({ classificationId: null, albumId: null, collectionId: null, directOnly: false, unclassifiedOnly: true, mediaKind: null, aspectRatio: null, sort: "newest", randomPivot: null, after: null, limit: 1 });
+    // A late answer from a previous gateway must not overwrite the reset.
+    if (unsortedGatewayRef.current !== gateway) return;
+    setUnsortedCount(page.totalCount ?? null);
   }, [gateway]);
   const refreshTrashCount = useCallback(async () => {
     const page = await gateway.listTrash({ after: null, limit: 1 });
@@ -527,6 +536,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   function navigateView(next: AssetView) {
+    // Re-opening a settings section must switch to it even when the view object is unchanged.
+    if (next.kind === "settings") setSettingsSectionRequest((current) => current + 1);
     if (next.kind === "collection" && view.kind === "collections") collectionReturnViewRef.current = view;
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
@@ -758,10 +769,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
             <WorkspaceNavigation view={view} collectionType={preferences.collectionType}
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
-              cloudProblemCount={cloudProblems}
+              unsortedCount={unsortedCount} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
               privateVaultAvailable={privateVaultVisible}
-              renderManagement={(items) => <WorkStatusCenter managementItems={items} reviewCount={reviewCount} characterAutomation={characterAutomation} progress={dropState.progress}
-                similarityIndex={similarityIndex} browserStatus={browserStatus} dropEnabled={dropEnabled} />}
+              places={{ classifications: entries, albums, characters: characterHub.targets, characterGroups: characterHub.groups }}
               assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets} characterGroups={characterHub.groups}
               entries={entries}
               albums={albums}
@@ -797,7 +807,15 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           }
           content={
             <div className="workspace-content">
-              <div className="workspace-titlebar" data-tauri-drag-region="deep"><ChromeTarget name="header" className="workspace-titlebar__context" /><WorkloadControls compact /><WindowControls /></div>
+              <div className="workspace-titlebar" data-tauri-drag-region="deep"><ChromeTarget name="header" className="workspace-titlebar__context" />
+                <CloudStatusCenter gateway={gateway} libraryRoot={libraryRoot} characterAutomation={characterAutomation} progress={dropState.progress} similarityIndex={similarityIndex}
+                  browserStatus={browserStatus} dropEnabled={dropEnabled}
+                  works={[...dropState.works, ...nativeDragWorks, ...metadataImportWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
+                  retryWork={retryWork} dismissWork={dismissWork} openExisting={(assetId) => void openExisting(assetId)}
+                  reviewCount={reviewCount} unsortedCount={unsortedCount}
+                  onOpenChange={(open) => { if (open) void refreshUnsortedCount().catch(() => undefined); }}
+                  onNavigate={navigateView} />
+                <WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
                 <Suspense fallback={<DeferredViewFallback />}>
@@ -818,6 +836,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onRestoreCloudMetadata={restoreCloudMetadataBackup}
                     onPrivateVaultChanged={async () => { await refreshPrivateVaultStatus(); }}
                     initialSection={view.section}
+                    sectionRequest={settingsSectionRequest}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
                     appZoom={preferences.appZoom}
@@ -915,13 +934,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           }
         />
         </WorkspaceChromeProvider>
-        <WorkTray
-          works={[...dropState.works, ...nativeDragWorks, ...metadataImportWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
-          retryFailed={retryWork}
-          dismissWork={dismissWork}
-          openReview={() => navigateView({ kind: "similarity_review" })}
-          openExisting={(assetId) => void openExisting(assetId)}
-        />
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
@@ -929,6 +941,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       </FaultGameProvider>
     </PrivacyProvider>
   );
+}
+
+// Owns the cloud snapshot so each progress event re-renders only the status indicator, not the workspace.
+function CloudStatusCenter({ gateway, libraryRoot, ...props }: Omit<StatusCenterProps, "cloud"> & { gateway: LibraryGateway; libraryRoot: string }) {
+  return <StatusCenter {...props} cloud={useCloudSyncStatus(gateway, libraryRoot)} />;
 }
 
 function DeferredViewFallback() {

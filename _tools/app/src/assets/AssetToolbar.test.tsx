@@ -156,3 +156,23 @@ it("leaves information visible when Hide information is off", async () => {
   await user.click(screen.getByLabelText("정보 숨기기"));
   expect(onMetadataVisibleChange).toHaveBeenLastCalledWith(false);
 });
+it("shows the folder count with subfolders and the direct-only count, with thousands separators", () => {
+  const classifications = [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null, assetCount: 428, totalAssetCount: 12345 }];
+  const view = { kind: "classification", classificationId: "game" } as AssetView;
+  const { rerender } = renderChrome(<AssetToolbar {...baseProps} view={view} classifications={classifications} />);
+  expect(screen.getByText("12,345장 · 이 폴더만 428장")).toBeVisible();
+  rerender(<WorkspaceChromeProvider scope="assets-test"><aside aria-label="index"><ChromeTarget name="header" /><ChromeSettingsDock /></aside><AssetToolbar {...baseProps} view={view} classifications={classifications} directOnly /></WorkspaceChromeProvider>);
+  expect(screen.getByText("이 폴더만 428장 표시 · 하위 포함 12,345장")).toBeVisible();
+});
+
+it("shows no folder count for 전체 or a character view", () => {
+  const classifications = [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null, assetCount: 3, totalAssetCount: 5 }];
+  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game", characterId: "c1" }} classifications={classifications} />);
+  expect(screen.queryByText(/장/)).not.toBeInTheDocument();
+});
+
+it("hides the unfiltered folder count while a media or aspect filter is active", () => {
+  const classifications = [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null, assetCount: 3, totalAssetCount: 5 }];
+  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} classifications={classifications} mediaFilter="videos" />);
+  expect(screen.queryByText(/5장/)).not.toBeInTheDocument();
+});

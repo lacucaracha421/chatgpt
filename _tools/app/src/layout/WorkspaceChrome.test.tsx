@@ -7,6 +7,7 @@ import { Menu } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "./WorkspaceChrome";
 import { ViewToolbar } from "./ViewToolbar";
+import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 
 let mounts = 0;
 function Gallery() {
@@ -14,7 +15,12 @@ function Gallery() {
   const [selected, setSelected] = useState(true);
   return <div data-testid="gallery"><label><input type="checkbox" checked={selected} onChange={(event) => setSelected(event.target.checked)} />선택한 자산</label></div>;
 }
-function Harness() {
+function SearchProbe() {
+  const chrome = useWorkspaceChrome();
+  return <><output data-testid="search-info">{JSON.stringify(chrome?.meta?.search ?? null)}</output>
+    <button onClick={() => chrome?.applySearch("라쿠")}>라쿠 적용</button></>;
+}
+function Harness({ probe = false }: { probe?: boolean }) {
   const [scope, setScope] = useState("첫 화면");
   const [sort, setSort] = useState("newest");
   const [query, setQuery] = useState("");
@@ -26,6 +32,7 @@ function Harness() {
       <Menu label="하위 메뉴" trigger={<>옵션</>} items={[{ id: "oldest", label: "오래된순 적용", onSelect: () => setSort("oldest") }]} />
     </> }} />
     <Gallery />
+    {probe && <SearchProbe />}
     <button onClick={() => setOutside((value) => value + 1)}>바깥 동작 {outside}</button>
     <button onClick={() => setScope((value) => value === "첫 화면" ? "다른 화면" : "첫 화면")}>범위 이동</button>
   </WorkspaceChromeProvider></BackNavigationProvider>;
@@ -79,35 +86,17 @@ describe("Chrome 03b workspace", () => {
     await user.click(screen.getByRole("button", { name: "범위 이동" }));
     expect(screen.queryByRole("dialog", { name: "보기 설정" })).not.toBeInTheDocument();
   });
-  it("separates search draft cancellation, apply, and clearing", async () => {
-    const user = userEvent.setup(); render(<Harness />);
-    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
-    await user.keyboard("{Control>}f{/Control}");
-    await user.type(await screen.findByRole("searchbox", { name: "제목 검색" }), "라쿠");
-    await user.click(screen.getByRole("button", { name: "취소" }));
-    expect(screen.queryByRole("button", { name: "검색 해제" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "제목 검색" }));
-    await user.type(await screen.findByRole("searchbox", { name: "제목 검색" }), "만화{Enter}");
-    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+  it("exposes a plain search to the palette through the chrome handle, without its own trigger", async () => {
+    const user = userEvent.setup(); render(<Harness probe />);
+    expect(screen.queryByRole("button", { name: "제목 검색" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("search-info")).toHaveTextContent('{"kind":"query","scope":"첫 화면","label":"제목 검색","query":""}');
+    await user.click(screen.getByRole("button", { name: "라쿠 적용" }));
+    expect(screen.getByTestId("search-info")).toHaveTextContent('"query":"라쿠"');
     expect(screen.getByRole("button", { name: "검색 해제" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "제목 검색" }));
-    expect(await screen.findByRole("searchbox")).toHaveValue("만화");
-    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "검색 해제" }));
     expect(screen.queryByRole("button", { name: "검색 해제" })).not.toBeInTheDocument();
-  });
-  it("keeps search accessible without hover or keyboard tooltips", async () => {
-    const user = userEvent.setup(); render(<Harness />);
-    await user.tab();
-    const search = screen.getByRole("button", { name: "제목 검색" });
-    expect(search).toHaveFocus();
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    await user.hover(search);
-    await new Promise(resolve => setTimeout(resolve, 450));
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    expect(search).not.toHaveAttribute("title");
-    await user.keyboard("{Enter}");
-    expect(await screen.findByRole("searchbox", { name: "제목 검색" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "범위 이동" }));
+    expect(screen.getByTestId("search-info")).toHaveTextContent('"scope":"다른 화면"');
   });
 
 });

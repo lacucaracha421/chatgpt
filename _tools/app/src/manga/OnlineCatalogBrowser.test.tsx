@@ -72,7 +72,11 @@ describe("OnlineCatalogBrowser", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "오래된 제독 북마크" })).toBeEnabled());
     expect(grid.scrollTop).toBe(200);
   });
-  it("shows the latest completed DB update beside the title, not a later failed attempt", async () => {
+  it("shows how long ago the catalog DB was refreshed beside the title and ticks each minute", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-06T10:05:30Z"));
+    const intervals = vi.spyOn(window, "setInterval");
+    onTestFinished(() => intervals.mockRestore());
     const gateway = createGateway(true);
     const status = await gateway.getOnlineCatalogStatus();
     vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({ ...status,
@@ -80,14 +84,40 @@ describe("OnlineCatalogBrowser", () => {
       lastAttemptAt: "2026-09-06T10:00:00Z",
       streams: [{ provider: "kHentai", language: "japanese", hasState: true, initialComplete: true,
         watermark: 0, cursor: null, pendingMax: 0, lastAttemptAt: "2026-09-06T10:00:00Z",
-        lastProgressAt: "2026-09-06T09:00:00Z", lastCompletedAt: "2026-09-06T02:30:00Z", lastAdded: 0, lastError: null }],
+        lastProgressAt: "2026-09-06T09:00:00Z", lastCompletedAt: "2026-09-06T10:00:00Z", lastAdded: 0, lastError: null }],
     });
     renderBrowser(gateway);
-    const time = await screen.findByLabelText("최근 DB 갱신");
-    expect(time).toHaveAttribute("datetime", "2026-09-06T02:30:00Z");
-    expect(time).toHaveAttribute("aria-description", "카탈로그 데이터베이스 갱신 시각 (현지 시간)");
-    expect(time.previousElementSibling?.tagName.toLowerCase()).toBe("svg");
-    expect(time.closest(".view-toolbar")).toContainElement(screen.getByRole("heading", { name: "망가" }));
+    const toolbar = await screen.findByRole("toolbar", { name: "온라인 망가 도구" });
+    const age = await within(toolbar).findByText("5분 전 갱신");
+    expect(age).toHaveAttribute("datetime", "2026-09-06T10:00:00Z");
+    const minute = intervals.mock.calls.find(([, delay]) => delay === 60_000);
+    expect(minute).toBeDefined();
+    vi.setSystemTime(new Date("2026-09-06T11:10:00Z"));
+    act(() => (minute![0] as () => void)());
+    expect(within(toolbar).getByText("1시간 전 갱신")).toBeVisible();
+    expect(gateway.getOnlineCatalogStatus).toHaveBeenCalledTimes(2);
+  });
+  it("keeps rare catalog actions in one top-bar overflow menu", async () => {
+    const gateway = createGateway(true);
+    gateway.listCatalogReview = vi.fn().mockResolvedValue({ rows: [], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
+    renderBrowser(gateway);
+    await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+    const index = screen.getByRole("complementary", { name: "카탈로그 인덱스" });
+    const trigger = within(index).getByRole("button", { name: "카탈로그 더보기" });
+    expect(within(index).queryByRole("button", { name: "중복 후보 검토" })).not.toBeInTheDocument();
+    await userEvent.click(trigger);
+    expect(screen.getByRole("menuitemcheckbox", { name: "숨긴 결과 표시" })).not.toBeChecked();
+    expect(screen.getByRole("menuitem", { name: "새로고침" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "신규 작품 갱신" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("menuitem", { name: "중복 후보 검토" }));
+    expect(await screen.findByRole("dialog", { name: "중복 후보 검토" })).toBeVisible();
+    expect(gateway.listCatalogReview).toHaveBeenCalled();
+  });
+  it("hides the refresh age when no catalog update has completed", async () => {
+    const gateway = createGateway(true);
+    renderBrowser(gateway);
+    await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+    expect(document.querySelector(".online-catalog__refresh-age")).toBeNull();
   });
   it("keeps bookmark flags and pagination stable until the refreshed page arrives", async () => {
     const gateway = createGateway(true);
@@ -106,7 +136,8 @@ describe("OnlineCatalogBrowser", () => {
     expect(footer.textContent).toBe(before);
     expect(screen.getByRole("button", { name: "다음 결과" })).toBeEnabled();
     expect(screen.getByRole("combobox", { name: "카탈로그 언어" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+    expect(await catalogMenuItem("새로고침")).toBeEnabled();
+    await userEvent.keyboard("{Escape}");
     await act(async () => pending.resolve({ works: [{ ...work, bookmarked: false }], totalCount: 60, page: 0, pageSize: 48 }));
     expect(await screen.findByRole("button", { name: "오래된 제독 북마크" })).toBeEnabled();
     expect(screen.queryByText("북마크된 판본 있음")).not.toBeInTheDocument();
@@ -123,8 +154,9 @@ describe("OnlineCatalogBrowser", () => {
     </WorkspaceChromeProvider></LibraryProvider>);
     const index = screen.getByRole("complementary", { name: "카탈로그 인덱스" });
     expect(await within(index).findByLabelText("정렬")).toBeVisible();
-    expect(within(index).getByRole("button", { name: "신규 작품 갱신" })).toBeVisible();
-    expect(within(index).getByRole("button", { name: "중복 후보 검토" })).toBeVisible();
+    expect(within(index).queryByRole("button", { name: "신규 작품 갱신" })).not.toBeInTheDocument();
+    expect(within(index).queryByRole("button", { name: "중복 후보 검토" })).not.toBeInTheDocument();
+    expect(within(index).queryByRole("checkbox", { name: "숨긴 결과 표시" })).not.toBeInTheDocument();
     expect(within(index).getByRole("button", { name: "카탈로그" })).toBeVisible();
     expect(screen.getAllByRole("button", { name: "창 닫기" })).toHaveLength(1);
     expect(screen.getByTestId("shared-titlebar")).toContainElement(screen.getByRole("toolbar"));
@@ -168,7 +200,7 @@ describe("OnlineCatalogBrowser", () => {
     const language = screen.getByRole("combobox", { name: "카탈로그 언어" });
     await userEvent.selectOptions(language, "japanese");
     expect(await screen.findByRole("button", { name: "일본어 결과 상세 보기" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "신규 작품 갱신" }));
+    await userEvent.click(await catalogMenuItem("신규 작품 갱신"));
 
     await userEvent.selectOptions(language, "korean");
     expect(await screen.findByRole("button", { name: "한국어 결과 상세 보기" })).toBeVisible();
@@ -197,7 +229,7 @@ describe("OnlineCatalogBrowser", () => {
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ language: "japanese" }),
     ));
-    await userEvent.click(screen.getByRole("button", { name: "신규 작품 갱신" }));
+    await userEvent.click(await catalogMenuItem("신규 작품 갱신"));
 
     expect(gateway.updateOnlineCatalog).toHaveBeenCalledWith("japanese", 40);
   });
@@ -212,7 +244,7 @@ describe("OnlineCatalogBrowser", () => {
     }));
     renderBrowser(gateway);
 
-    const reveal = await screen.findByRole("checkbox", { name: "숨긴 결과 표시" });
+    const reveal = await catalogMenuItem("숨긴 결과 표시", "menuitemcheckbox");
     expect(reveal).not.toBeChecked();
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ revealBlocked: false }),
@@ -223,7 +255,8 @@ describe("OnlineCatalogBrowser", () => {
     await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(
       expect.objectContaining({ revealBlocked: true, page: 0 }),
     ));
-    expect(reveal).toBeChecked();
+    expect(await catalogMenuItem("숨긴 결과 표시", "menuitemcheckbox")).toBeChecked();
+    await userEvent.keyboard("{Escape}");
     expect(await screen.findByText("숨긴 분류와 차단 태그를 표시 중입니다")).toBeVisible();
     expect(screen.getByText("3개 결과")).toBeVisible();
   });
@@ -432,7 +465,7 @@ describe("OnlineCatalogBrowser", () => {
     const refresh = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
     vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(refresh.promise);
 
-    await userEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await userEvent.click(await catalogMenuItem("새로고침"));
     expect(screen.getByRole("button", { name: "오래된 제독 상세 보기" })).toBeVisible();
     await act(async () => refresh.reject(new Error("연결 시간이 초과되었습니다")));
     expect(await screen.findByText("연결 시간이 초과되었습니다")).toBeVisible();
@@ -468,7 +501,10 @@ describe("OnlineCatalogBrowser", () => {
     const card = cover.closest("article")!;
     expect(cover).toHaveAttribute("src", work.thumbnailUrl);
     expect(within(card).getByText("오래된 제독")).not.toHaveAttribute("title");
-    expect(within(card).getByText("artist · series")).not.toHaveAttribute("title");
+    // Mobile-like tile: cover, title and artist only; views and series live in the detail dialog.
+    expect(within(card).getByText("artist")).toBeVisible();
+    expect(within(card).queryByText(/series/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/조회/)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "오래된 제독 북마크" }));
     expect(gateway.setOnlineCatalogBookmark).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" }, true);
@@ -576,31 +612,10 @@ describe("OnlineCatalogBrowser", () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
 
-    await userEvent.click(await screen.findByRole("button", { name: "신규 작품 갱신" }));
+    await userEvent.click(await catalogMenuItem("신규 작품 갱신"));
 
     expect(gateway.updateOnlineCatalog).toHaveBeenCalledOnce();
     expect(await screen.findByText("3개 작품을 갱신했습니다")).toBeInTheDocument();
-  });
-
-  it("shows the last catalog sync status next to the manual update command", async () => {
-    const gateway = createGateway(true);
-    vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
-      installed: true,
-      workCount: 1,
-      updateEnabled: true,
-      updateIntervalSeconds: 3600,
-      lastAttemptAt: "2026-08-28T09:00:00Z",
-      lastSuccessAt: "2026-08-28T09:00:00Z",
-      lastAdded: 3,
-      lastError: null,
-      streams: [],
-    });
-    renderBrowser(gateway);
-
-    expect(await screen.findByRole("time", { name: "최근 DB 갱신" })).toHaveAttribute(
-      "datetime",
-      "2026-08-28T09:00:00Z",
-    );
   });
 
   it("surfaces the last catalog update error instead of the success time", async () => {
@@ -629,7 +644,7 @@ describe("OnlineCatalogBrowser", () => {
     });
     renderBrowser(gateway);
 
-    await userEvent.click(await screen.findByRole("button", { name: "신규 작품 갱신" }));
+    await userEvent.click(await catalogMenuItem("신규 작품 갱신"));
 
     expect(await screen.findByText("온라인 카탈로그 응답을 처리할 수 없습니다")).toBeInTheDocument();
   });
@@ -681,6 +696,12 @@ it("quietly refreshes when background bookmark reconciliation changes local stat
 
   await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(before + 1));
 });
+
+/** Opens the top-bar overflow menu (when closed) and returns one of its items. */
+async function catalogMenuItem(name: string, role: "menuitem" | "menuitemcheckbox" = "menuitem") {
+  if (!screen.queryByRole("menu")) await userEvent.click(await screen.findByRole("button", { name: "카탈로그 더보기" }));
+  return screen.findByRole(role, { name });
+}
 
 function renderBrowser(gateway: LibraryGateway, initialScope: "all" | "bookmarked" = "all") {
   return render(
@@ -891,7 +912,7 @@ it("invalidates pending counts on bookmark and reveal changes and retains cards 
   await act(async () => bookmark.resolve());
   act(() => events[1]({ type: "count", totalCount: 200 }));
   expect(screen.getByText("200개 결과")).toBeVisible();
-  await userEvent.click(screen.getByRole("checkbox", { name: "숨긴 결과 표시" }));
+  await userEvent.click(await catalogMenuItem("숨긴 결과 표시", "menuitemcheckbox"));
   expect(screen.queryByText("200개 결과")).not.toBeInTheDocument();
   act(() => { events[1]({ type: "count", totalCount: 999 }); events[2]({ type: "countError", message: "snapshot changed" }); });
   expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();

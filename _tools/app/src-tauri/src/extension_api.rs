@@ -701,11 +701,10 @@ fn ingest_x_image(
     if !matches!(request.source.as_str(), "x" | "arca" | "dcinside" | "web") || request.classification_id.trim().is_empty() {
         return Err(ApiError::InvalidRequest);
     }
+    // A direct probe: the full tree listing also computes subtree totals.
     let classification_exists = library
-        .list_classifications()
-        .map_err(|_| ApiError::Internal)?
-        .iter()
-        .any(|entry| entry.id == request.classification_id);
+        .classification_exists(&request.classification_id)
+        .map_err(|_| ApiError::Internal)?;
     if !classification_exists {
         return Err(ApiError::ClassificationNotFound);
     }

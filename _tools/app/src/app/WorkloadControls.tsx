@@ -1,13 +1,42 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { Button } from "../shared/ui/Button";
 import { Toggle } from "../shared/ui/Toggle";
 import { TextField } from "../shared/ui/TextField";
 import { useWorkloadProfile, updateWorkloadSettings, nativeWorkload } from "./workloadProfile";
 
-export function WorkloadControls({ compact = false }: { compact?: boolean }) {
+function requestScanCancellation(setNotice: (notice: string) => void) {
+  return invoke("workload_cancel_scans").then(() => {
+    window.dispatchEvent(new Event("lakomics:cancel-user-scans"));
+    setNotice("진행 중인 검사가 안전한 지점에서 중단됩니다.");
+  }, () => setNotice("검사 중단 요청을 보내지 못했습니다."));
+}
+
+/** The instant lightweight-mode switch shown in the status panel; automatic switching stays in Settings. */
+export function LightweightModeToggle() {
+  const profile = useWorkloadProfile();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  useAutoDismiss(notice, setNotice);
+  if (!nativeWorkload()) return null;
+  const toggle = async () => {
+    setBusy(true);
+    try { await updateWorkloadSettings({ lightweight: !profile.lightweight }); }
+    finally { setBusy(false); }
+  };
+  return <div className="lightweight-toggle">
+    <div className="chrome-settings-controls">
+      <Toggle checked={profile.lightweight} disabled={busy || !profile.ready} onChange={() => void toggle()}>가벼운 모드</Toggle>
+    </div>
+    <p className="chrome-settings-note">{profile.lightweight ? "분석·정리를 줄이고 모바일 동기화만 유지합니다." : profile.restricted ? "일반 모드 · 천천히 재개 중" : "켜면 분석·정리를 줄이고 모바일 동기화만 유지합니다."}</p>
+    {profile.lightweight && <Button size="sm" variant="ghost" onClick={() => void requestScanCancellation(setNotice)}>검사 중단 요청</Button>}
+    {profile.error && <p role="alert" className="chrome-settings-note">{profile.error}</p>}
+    {notice && <p role="status" className="chrome-settings-note">{notice}</p>}
+  </div>;
+}
+
+export function WorkloadControls() {
   const profile = useWorkloadProfile();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -20,19 +49,8 @@ export function WorkloadControls({ compact = false }: { compact?: boolean }) {
     try { await updateWorkloadSettings({ lightweight: !profile.lightweight }); }
     finally { setBusy(false); }
   };
-  const cancelScans = async () => {
-    try {
-      await invoke("workload_cancel_scans");
-      window.dispatchEvent(new Event("lakomics:cancel-user-scans"));
-      setNotice("진행 중인 검사가 안전한 지점에서 중단됩니다.");
-    } catch { setNotice("검사 중단 요청을 보내지 못했습니다."); }
-  };
+  const cancelScans = () => requestScanCancellation(setNotice);
   const label = profile.lightweight ? "가벼운 모드 켜짐" : profile.restricted ? "일반 모드 · 천천히 재개 중" : "가벼운 모드";
-  if (compact) return <>
-    <Button size="sm" variant="ghost" disabled={busy || !profile.ready} aria-pressed={profile.lightweight} onClick={() => void toggle()}>{label}</Button>
-    {profile.lightweight && <Button size="sm" variant="ghost" onClick={() => void cancelScans()}>검사 중단 요청</Button>}
-    {notice && <Toast onDismiss={() => setNotice(null)}>{notice}</Toast>}
-  </>;
   return <section aria-label="가벼운 모드" className="settings-view__section">
     <header className="settings-view__header"><h2>가벼운 모드</h2></header>
     <dl className="settings-view__property">

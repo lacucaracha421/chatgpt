@@ -1,13 +1,12 @@
 import { PlusIcon } from "@heroicons/react/24/outline";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AssetView, CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
+import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CreateCollection, ReleaseInboxItem, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Select } from "../shared/ui/Select";
-import { Slider } from "../shared/ui/Slider";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
@@ -22,8 +21,9 @@ import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditD
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { TmdbMovieDialog } from "./TmdbMovieDialog";
-import { ReleaseInbox } from "./ReleaseInbox";
+import { ReleaseInbox, inboxProvider } from "./ReleaseInbox";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
+import "./CollectionBrowser.css";
 
 const TYPE_LABEL: Record<CollectionType, string> = {
   game: "게임",
@@ -34,7 +34,7 @@ const TYPE_LABEL: Record<CollectionType, string> = {
 export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
 
 type CollectionBrowserProps = {
-  releaseProvider?: import("../library/types").CollectionUpdateProvider;
+  releaseProvider?: CollectionUpdateProvider;
   navigationMemory?: CollectionNavigationMemory;
   collections: CollectionSummary[];
   typeFilter: CollectionType;
@@ -65,6 +65,20 @@ export function CollectionBrowser({
 
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const tracking = gateway.collectionTracking;
+  const alertsAvailable = Boolean(tracking) && typeFilter === "manga" && !showcase;
+  const [inbox, setInbox] = useState<ReleaseInboxItem[]>([]);
+  useEffect(() => {
+    if (!tracking || !alertsAvailable) { setInbox([]); return; }
+    let active = true;
+    void tracking.listInbox().then(items => { if (active) setInbox(items); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [tracking, alertsAvailable, collections, releaseProvider]);
+  // Unread works per provider (the inbox lists one row per work).
+  const unread = { mangadex: 0, kakao: 0 };
+  for (const key of new Set(inbox.map(item => `${inboxProvider(item)}:${item.collectionId}`))) unread[key.startsWith("mangadex:") ? "mangadex" : "kakao"] += 1;
+  const unreadTotal = unread.mangadex + unread.kakao;
+  const openInbox = (provider: CollectionUpdateProvider) => onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider });
   const libraryStateRef = useRef(libraryState);
   libraryStateRef.current = libraryState;
   useAutoDismiss(message, setMessage);
@@ -199,8 +213,10 @@ export function CollectionBrowser({
         );
 
   const indexControls = <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
-            <Select label="정렬" value={libraryState.sort} onChange={(event) => patchLibraryState({ sort: event.target.value as CollectionLibrarySort })}><option value="media_date">출시·출간·개봉일</option><option value="recent">최근 추가</option><option value="name">제목</option></Select>
-            <Select label="방향" value={libraryState.direction} onChange={(event) => patchLibraryState({ direction: event.target.value as "asc" | "desc" })}><option value="desc">내림차순</option><option value="asc">오름차순</option></Select>
+            <Select label="정렬" value={`${libraryState.sort}:${libraryState.direction}`} onChange={(event) => {
+              const [sort, direction] = event.target.value.split(":") as [CollectionLibrarySort, "asc" | "desc"];
+              patchLibraryState({ sort, direction });
+            }}>{SORT_OPTIONS.map(([sort, direction, label]) => <option key={`${sort}:${direction}`} value={`${sort}:${direction}`}>{label}</option>)}</Select>
             <RatingFilter rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
           </fieldset>;
 
@@ -215,21 +231,19 @@ export function CollectionBrowser({
             <ModeSegment showcase={showcase} onChange={setShowcase} />
             <span className="workspace-section-label">{showcase ? "전시관" : "작품 유형"}</span>
             <TypeSegment current={releaseProvider ? undefined : typeFilter} onChange={setTypeFilter} />
-            {gateway.collectionTracking && typeFilter === "manga" && !showcase && <>
-              <span className="workspace-section-label">업데이트 알림</span>
-              <div className="collection-browser__segment" role="group" aria-label="만화 업데이트 알림">
-                {(["mangadex", "kakao"] as const).map(provider => <button
-                  key={provider}
-                  type="button"
-                  className="collection-browser__segment-button"
-                  aria-pressed={releaseProvider === provider}
-                  onClick={() => onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider })}
-                >{provider === "mangadex" ? "MangaDex" : "Kakao"}</button>)}
+            {alertsAvailable && <>
+              <span className="workspace-section-label">신간</span>
+              {/* Unread alerts get the 새 알림 row; at zero only a quiet inbox entry remains for a manual check. */}
+              <div className="collection-browser__segment" role="group" aria-label="신간 알림">
+                <button type="button" className={`collection-browser__segment-button${unreadTotal > 0 ? "" : " collection-browser__segment-button--quiet"}`} aria-pressed={Boolean(releaseProvider)}
+                  aria-description={unreadTotal > 0 ? undefined : "확인하지 않은 알림이 없습니다. 알림함에서 업데이트를 직접 확인할 수 있습니다."}
+                  onClick={() => openInbox(releaseProvider ?? (unread.kakao > unread.mangadex ? "kakao" : "mangadex"))}
+                >{unreadTotal > 0 ? `새 알림 ${unreadTotal.toLocaleString()}` : "알림함"}</button>
               </div>
             </>}
             {!showcase && !releaseProvider && <div className="chrome-index-controls chrome-settings-controls">{indexControls}</div>}
           </>,
-          summary: `${sortLabel(libraryState.sort)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
+          summary: `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
           status: releaseProvider ? undefined : <span>{showcase ? "선정 작품" : "작품"} {visible.length}개</span>,
           search: showcase ? undefined : { scope: `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
         }}
@@ -250,7 +264,7 @@ export function CollectionBrowser({
             setEditMode({ kind: "create", type: typeFilter });
           }}
         >
-          {releaseProvider && <ReleaseInbox provider={releaseProvider} query={libraryState.query} revision={collections} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} />}
+          {releaseProvider && <ReleaseInbox provider={releaseProvider} query={libraryState.query} revision={collections} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} onProviderChange={openInbox} />}
           {!releaseProvider && visible.length > 0 && (showcase ?
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={renderCollection} scrollRef={stageRef} /> :
             <VirtualCoverGrid items={visible} itemKey={collection => collection.id} render={renderCollection} legacyMetrics={typeFilter !== "manga"} metadataHeight={56} label={`${sectionLabel} 작품 목록`} scrollRef={stageRef} />)}
@@ -335,29 +349,33 @@ export function CollectionBrowser({
   );
 }
 
-function sortLabel(sort: CollectionLibrarySort): string {
-  return sort === "media_date" ? "출시·출간·개봉일" : sort === "name" ? "제목" : "최근 추가";
+const SORT_OPTIONS: Array<[CollectionLibrarySort, "asc" | "desc", string]> = [
+  ["media_date", "desc", "출시·출간·개봉일 · 최신순"],
+  ["media_date", "asc", "출시·출간·개봉일 · 오래된순"],
+  ["recent", "desc", "최근 추가 · 최신순"],
+  ["recent", "asc", "최근 추가 · 오래된순"],
+  ["name", "asc", "제목 · 가나다순"],
+  ["name", "desc", "제목 · 역순"],
+];
+
+function sortLabel(sort: CollectionLibrarySort, direction: "asc" | "desc"): string {
+  return SORT_OPTIONS.find(([value, order]) => value === sort && order === direction)?.[2] ?? "최근 추가";
 }
+
+const RATING_OPTIONS: Array<CollectionLibraryState["rating"]> = ["all", 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, "unrated"];
 
 function ratingLabel(rating: CollectionLibraryState["rating"]): string {
   return rating === "all" ? "전체" : rating === "unrated" ? "미평가" : rating.toFixed(1);
 }
 
 function RatingFilter({ rating, onChange }: { rating: CollectionLibraryState["rating"]; onChange: (rating: CollectionLibraryState["rating"]) => void }) {
-  const commit = (value: number) => { if (rating !== value) onChange(value); };
-  return <div className="collection-rating-filter">
-    <span className="collection-rating-filter__value" aria-hidden="true">{typeof rating === "number" ? `${rating.toFixed(1)}점` : ratingLabel(rating)}</span>
-    <Slider label="내 별점" min={0} max={5} step={0.5} value={typeof rating === "number" ? rating : 0}
-      aria-valuetext={typeof rating === "number" ? `${rating.toFixed(1)}점` : ratingLabel(rating)}
-      onChange={event => commit(Number(event.target.value))}
-      onPointerUp={event => commit(Number(event.currentTarget.value))}
-      onKeyUp={event => { if (["Home", "End", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) commit(Number(event.currentTarget.value)); }}
-    />
-    <div className="collection-rating-filter__presets" role="group" aria-label="별점 필터 범위">
-      <button type="button" aria-pressed={rating === "all"} onClick={() => onChange("all")}>전체</button>
-      <button type="button" aria-pressed={rating === "unrated"} onClick={() => onChange("unrated")}>미평가</button>
-    </div>
-  </div>;
+  // One select beside 정렬 (exact match); a saved value outside the presets keeps its own option.
+  const options = RATING_OPTIONS.includes(rating) ? RATING_OPTIONS : [...RATING_OPTIONS.slice(0, -1), rating, "unrated" as const];
+  return <Select label="내 별점" value={String(rating)} onChange={event => {
+    const value = event.target.value;
+    const next: CollectionLibraryState["rating"] = value === "all" || value === "unrated" ? value : Number(value);
+    if (next !== rating) onChange(next);
+  }}>{options.map(value => <option key={String(value)} value={String(value)}>{typeof value === "number" ? `★ ${value.toFixed(1)}` : ratingLabel(value)}</option>)}</Select>;
 }
 
 function TypeSegment({

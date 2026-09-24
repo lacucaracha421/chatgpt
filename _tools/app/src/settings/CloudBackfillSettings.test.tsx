@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import { libraryGateway } from "../library/client";
-import { CloudBackfillSettings } from "./CloudBackfillSettings";
+import { CloudBackfillMaintenance, CloudBackfillSettings } from "./CloudBackfillSettings";
 
 const inactive = {
   controlState: "idle" as const,
@@ -18,7 +18,7 @@ const inactive = {
   lastError: null,
 };
 
-function renderSection(overrides: Record<string, unknown> = {}) {
+function renderSection(overrides: Record<string, unknown> = {}, Section: typeof CloudBackfillSettings = CloudBackfillSettings) {
   const gateway = {
     ...libraryGateway,
     cloudBackfillPreflight: vi.fn().mockResolvedValue({
@@ -38,7 +38,7 @@ function renderSection(overrides: Record<string, unknown> = {}) {
     cloudBackfillRetryFailed: vi.fn().mockResolvedValue({ retried: 0 }),
     ...overrides,
   };
-  render(<LibraryProvider gateway={gateway as typeof libraryGateway}><CloudBackfillSettings /></LibraryProvider>);
+  render(<LibraryProvider gateway={gateway as typeof libraryGateway}><Section /></LibraryProvider>);
   return gateway;
 }
 
@@ -46,7 +46,7 @@ beforeEach(() => localStorage.clear());
 afterEach(() => cleanup());
 
 it("renders the compact read-only preflight summary", async () => {
-  renderSection();
+  renderSection({}, CloudBackfillMaintenance);
   await userEvent.click(screen.getByRole("button", { name: "사전 점검" }));
   const summary = await screen.findByLabelText("모바일 동기화 사전 점검 결과");
   expect(within(summary).getByText("전체 10개")).toBeInTheDocument();
@@ -64,7 +64,7 @@ it("does not seed or run work while initially inactive", async () => {
 });
 
 it("starts only after explicit confirmation and reports seed counts", async () => {
-  const gateway = renderSection();
+  const gateway = renderSection({}, CloudBackfillMaintenance);
   await userEvent.click(await screen.findByRole("button", { name: "전체 라이브러리 업로드 준비" }));
   await userEvent.click(screen.getByRole("button", { name: "업로드 시작 확인" }));
   await waitFor(() => expect(gateway.cloudBackfillSetControlState).toHaveBeenCalledWith("running"));
@@ -118,7 +118,7 @@ it("distinguishes clean completion from completion with problems", async () => {
 
 it("reports both interrupted and missing-queue recovery", async () => {
   const reconcile = vi.fn().mockResolvedValue({ requeued: 2, seededMissing: 1 });
-  renderSection({ cloudBackfillReconcile: reconcile });
+  renderSection({ cloudBackfillReconcile: reconcile }, CloudBackfillMaintenance);
   await userEvent.click(await screen.findByRole("button", { name: "동기화 상태 복구" }));
   expect(reconcile).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("중단된 작업 2개 · 누락 복제 1개를 대기열로 복구했습니다.")).toBeInTheDocument();
@@ -128,7 +128,7 @@ it("refreshes persistent counts immediately after an operator action", async () 
   const progress = vi.fn()
     .mockResolvedValueOnce({ ...inactive, totalAssets: 5, queued: 5 })
     .mockResolvedValue({ ...inactive, totalAssets: 5, completed: 5 });
-  renderSection({ cloudBackfillProgress: progress, cloudBackfillReconcile: vi.fn().mockResolvedValue({ requeued: 0, seededMissing: 0 }) });
+  renderSection({ cloudBackfillProgress: progress, cloudBackfillReconcile: vi.fn().mockResolvedValue({ requeued: 0, seededMissing: 0 }) }, CloudBackfillMaintenance);
   expect(await screen.findByText("0 / 5개 (0%)")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "동기화 상태 복구" }));
   expect(await screen.findByText("5 / 5개 (100%)")).toBeInTheDocument();
@@ -161,4 +161,19 @@ it("resumes an enabled paused queue without reseeding", async () => {
   await userEvent.click(screen.getByRole("button", { name: "동기화 계속" }));
   expect(gateway.cloudBackfillSetControlState).toHaveBeenCalledWith("running");
   expect(gateway.cloudBackfillSeed).not.toHaveBeenCalled();
+});
+
+it("keeps maintenance tools out of the everyday status and leads with a one-line conclusion", async () => {
+  renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, completed: 10 }) });
+  const conclusion = await screen.findByText("동기화됨 · 문제 없음");
+  expect(document.body.querySelector("p")).toContainElement(conclusion);
+  for (const name of ["사전 점검", "전체 라이브러리 업로드 준비", "동기화 상태 복구"]) {
+    expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+  }
+});
+
+it("shows current counts beside the maintenance tools", async () => {
+  renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, totalAssets: 4, completed: 1, queued: 3 }) }, CloudBackfillMaintenance);
+  expect(await screen.findByText("1 / 4개 (25%)")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "사전 점검" })).toBeEnabled();
 });

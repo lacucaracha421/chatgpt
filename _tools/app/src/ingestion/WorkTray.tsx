@@ -18,9 +18,10 @@ const AUTO_DISMISS_MS = 8_000;
 export function WorkTray({ works, retryFailed, dismissWork, openReview, openExisting }: WorkTrayProps) {
   const visible = works.filter((work) => work.kind !== "drag_out" || work.status !== "completed");
   if (visible.length === 0) return null;
-  return <aside className="work-tray" aria-label="가져오기 작업">
+  // Rendered inside the titlebar status panel; a finished result starts its dismiss timer once shown.
+  return <div className="work-tray" role="group" aria-label="가져오기 작업">
     {visible.map((work) => <WorkTrayRow key={work.id} work={work} retryFailed={retryFailed} dismissWork={dismissWork} openReview={openReview} openExisting={openExisting} />)}
-  </aside>;
+  </div>;
 }
 
 function WorkTrayRow({ work, retryFailed, dismissWork, openReview, openExisting }: {

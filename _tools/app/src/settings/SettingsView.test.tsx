@@ -17,12 +17,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 afterEach(() => { vi.useRealTimers(); localStorage.clear(); cleanup(); dismissPublication("characters"); });
 
-it("exposes persisted whole-engine automation in general settings without using history pause", async () => {
+it("exposes persisted whole-engine automation in library settings without using history pause", async () => {
   localStorage.setItem("lakomics.libraryPath", "C:\\Current");
   vi.mocked(invoke).mockClear();
   const gateway = createGateway();
   vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
-  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="library" /></LibraryProvider>);
   const toggle = await screen.findByRole("checkbox", { name: "캐릭터 자동 분류" });
   await waitFor(() => expect(toggle).toBeEnabled());
   expect(toggle).not.toBeChecked();
@@ -57,7 +57,7 @@ it("keeps automation off and shows an error if the native setting cannot be save
   localStorage.setItem("lakomics.libraryPath", "C:\\Current");
   const gateway = createGateway();
   vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
-  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="library" /></LibraryProvider>);
   const toggle = await screen.findByRole("checkbox", { name: "캐릭터 자동 분류" });
   await waitFor(() => expect(toggle).toBeEnabled());
   vi.mocked(invoke).mockRejectedValueOnce(new Error("설정을 저장하지 못했습니다."));
@@ -67,18 +67,20 @@ it("keeps automation off and shows an error if the native setting cannot be save
   expect(toggle).toBeEnabled();
 });
 
-it("blocks duplicate automation saves and library switching until the save finishes", async () => {
+it("blocks duplicate automation saves and leaving settings until the save finishes", async () => {
   localStorage.setItem("lakomics.libraryPath", "C:\\Current");
   const gateway = createGateway();
+  const onExit = vi.fn();
   vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
-  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={onExit} initialSection="library" /></LibraryProvider>);
   const toggle = await screen.findByRole("checkbox", { name: "캐릭터 자동 분류" });
   await waitFor(() => expect(toggle).toBeEnabled());
   let finish!: () => void;
   vi.mocked(invoke).mockClear().mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
   await userEvent.click(toggle);
   expect(toggle).toBeDisabled();
-  expect(screen.getByRole("button", { name: "다른 저장소 열기" })).toBeDisabled();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onExit).not.toHaveBeenCalled();
   await userEvent.click(toggle);
   expect(invoke).toHaveBeenCalledTimes(1);
   await act(async () => finish());
@@ -91,7 +93,7 @@ it("disables unknown automation state and allows retrying a failed read", async 
   const gateway = createGateway();
   vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
   vi.mocked(invoke).mockRejectedValueOnce(new Error("설정 읽기 실패"));
-  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="library" /></LibraryProvider>);
   expect(await screen.findByRole("alert")).toHaveTextContent("설정 읽기 실패");
   const toggle = screen.getByRole("checkbox", { name: "캐릭터 자동 분류" });
   expect(toggle).toBeDisabled();
@@ -174,7 +176,7 @@ it("starts a repeatable metadata folder import and remembers the selected folder
       <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onImportFolder={onImportFolder} />
     </LibraryProvider>,
   );
-  await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
+  await userEvent.click(screen.getByRole("button", { name: "고급" }));
   const metadataRow = (await screen.findByText("최근 가져오기 폴더")).parentElement;
   await userEvent.click(within(metadataRow!).getByRole("button", { name: "폴더 선택" }));
   await waitFor(() => expect(onImportFolder).toHaveBeenCalledWith("C:\\exports\\lakomics"));
@@ -223,10 +225,11 @@ it("uses desktop settings navigation and compact property rows", async () => {
   await userEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
   expect(screen.getByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "데이터 관리" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("heading", { name: "메타데이터 가져오기", level: 3 })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "비밀 보관함", level: 3 })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "메타데이터 가져오기" })).not.toBeInTheDocument();
 });
 
-it("groups data import and backup restore under 데이터 관리", async () => {
+it("keeps only vault setup in 데이터 관리 and groups imports and restores under 고급 › 복구·진단", async () => {
   const gateway = createGateway();
   render(
     <LibraryProvider gateway={gateway}>
@@ -235,9 +238,46 @@ it("groups data import and backup restore under 데이터 관리", async () => {
   );
 
   expect(await screen.findByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
-  for (const group of ["컬렉션 가져오기", "메타데이터 가져오기", "레거시 패키지 가져오기", "로컬 백업 복구"]) {
-    expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "비밀 보관함", level: 3 })).toBeInTheDocument();
+  for (const moved of ["컬렉션 가져오기", "메타데이터 가져오기", "레거시 패키지 가져오기", "로컬 백업 복구", "서버 백업·복원"]) {
+    expect(screen.queryByRole("heading", { name: moved })).not.toBeInTheDocument();
   }
+  expect(gateway.listMetadataBackups).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole("button", { name: "고급 설정" }));
+  expect(screen.getByRole("button", { name: "고급" })).toHaveAttribute("aria-current", "page");
+  const recovery = screen.getByRole("region", { name: "복구·진단" });
+  for (const group of ["동기화 점검·복구", "서버 백업·복원", "로컬 백업 복구", "모바일 게시", "컬렉션 가져오기", "메타데이터 가져오기", "레거시 패키지 가져오기", "온라인 카탈로그 복구"]) {
+    expect(within(recovery).getByRole("heading", { name: group, level: 4 })).toBeInTheDocument();
+  }
+  expect(within(recovery).getByRole("button", { name: "사전 점검" })).toBeInTheDocument();
+  expect(within(recovery).getByRole("button", { name: "동기화 상태 복구" })).toBeInTheDocument();
+  expect(within(recovery).getByRole("button", { name: "모바일에 카탈로그 게시" })).toBeInTheDocument();
+  await waitFor(() => expect(gateway.listMetadataBackups).toHaveBeenCalledTimes(1));
+});
+
+it("keeps 일반 to everyday rows and moves S36 and augmentation to 고급", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} /></LibraryProvider>);
+  await screen.findByText("C:\\Current");
+  expect(screen.getByRole("heading", { name: "일반" })).toBeInTheDocument();
+  expect(screen.getByRole("combobox", { name: "앱 전체 배율" })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "비공개 모드" })).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox", { name: "S36 시험 채점" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox", { name: "캐릭터 누락 보완" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox", { name: "캐릭터 자동 분류" })).not.toBeInTheDocument();
+  expect(screen.queryByText("S36 시험 채점")).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "라이브러리" }));
+  expect(await screen.findByRole("checkbox", { name: "캐릭터 자동 분류" })).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox", { name: "S36 시험 채점" })).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "고급" }));
+  expect(screen.getByRole("heading", { name: "고급" })).toBeInTheDocument();
+  expect(await screen.findByRole("checkbox", { name: "S36 시험 채점" })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "캐릭터 누락 보완" })).toBeInTheDocument();
 });
 
 it("creates an encrypted vault and requires confirming the recovery key", async () => {
@@ -423,7 +463,7 @@ it("loads the collection source root, backfills legacy kinds, and reports the co
   vi.mocked(open).mockResolvedValue("C:\\lakomics\\book");
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onCollectionsChanged={onCollectionsChanged} />
+      <SettingsView initialSection="advanced" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} onCollectionsChanged={onCollectionsChanged} />
     </LibraryProvider>,
   );
   await userEvent.click(screen.getByText("구버전 자료 가져오기"));
@@ -444,7 +484,7 @@ it("keeps the current collection source root when the folder picker is cancelled
   vi.mocked(open).mockResolvedValue(null);
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+      <SettingsView initialSection="advanced" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
     </LibraryProvider>,
   );
   await userEvent.click(screen.getByText("구버전 자료 가져오기"));
@@ -464,7 +504,7 @@ it("shows an error when the collection source root cannot be saved", async () =>
   vi.mocked(open).mockResolvedValue("C:\\book");
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView initialSection="data" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
+      <SettingsView initialSection="advanced" restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
     </LibraryProvider>,
   );
   await userEvent.click(screen.getByText("구버전 자료 가져오기"));
@@ -488,7 +528,7 @@ it("keeps backup load errors visible for retry", async () => {
     </LibraryProvider>,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "데이터 관리" }));
+  fireEvent.click(screen.getByRole("button", { name: "고급" }));
   act(() => vi.advanceTimersByTime(0));
   await act(async () => { rejectBackups(new Error("backup failed")); await failed.catch(() => undefined); });
   act(() => vi.advanceTimersByTime(5_000));
@@ -788,7 +828,7 @@ it("shows separate catalog stream progress and bounds an incomplete Japanese upd
     </LibraryProvider>,
   );
   await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
-  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
+  await userEvent.click(await screen.findByText("수집 상세"));
 
   expect((await screen.findByText("한국어 카탈로그")).parentElement).toHaveTextContent("초기 수집 완료 · 대기 5개");
   const japaneseRow = screen.getByText("일본어 카탈로그").parentElement;
@@ -817,7 +857,7 @@ it("bounds a completed Japanese settings update to forty pages", async () => {
     </LibraryProvider>,
   );
   await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
-  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
+  await userEvent.click(await screen.findByText("수집 상세"));
 
   const japaneseRow = (await screen.findByText("일본어 카탈로그")).parentElement;
   await userEvent.click(within(japaneseRow!).getByRole("button", { name: "일본어 신규 작품 갱신" }));
@@ -843,11 +883,9 @@ it("confirms a Japanese checkpoint-only reset and keeps catalog data wording exp
   vi.mocked(gateway.resetJapaneseCatalogCheckpoint).mockResolvedValue(resetStatus);
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="advanced" />
     </LibraryProvider>,
   );
-  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
-  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
 
   await user.click(await screen.findByRole("button", { name: "일본어 체크포인트 재설정" }));
   expect(gateway.resetJapaneseCatalogCheckpoint).not.toHaveBeenCalled();
@@ -856,6 +894,8 @@ it("confirms a Japanese checkpoint-only reset and keeps catalog data wording exp
   await user.click(screen.getByRole("button", { name: "체크포인트 재설정 확인" }));
 
   expect(gateway.resetJapaneseCatalogCheckpoint).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  await user.click(await screen.findByText("수집 상세"));
   expect(screen.getByText("일본어 카탈로그").parentElement).toHaveTextContent("초기 수집 전");
 });
 
@@ -891,18 +931,19 @@ it("shows catalog status and restores the catalog from a re-selected VCK folder"
       <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} />
     </LibraryProvider>,
   );
-  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
-  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
-
   await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
   expect(await screen.findByText("설치됨 · 100개 작품")).toBeVisible();
+  await user.click(screen.getByText("수집 상세"));
   expect(screen.getByText("한국어 카탈로그").parentElement).toHaveTextContent("신규 3개");
+  expect(screen.queryByRole("button", { name: "VCK 폴더 다시 선택" })).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", { name: "VCK 폴더 다시 선택" }));
+  await user.click(screen.getByRole("button", { name: "고급" }));
+  await user.click(await screen.findByRole("button", { name: "VCK 폴더 다시 선택" }));
 
   expect(gateway.importVckCatalog).toHaveBeenCalledWith("D:\\VCK");
-  expect(await screen.findByText(/카탈로그를 교체했습니다/)).toBeVisible();
-  expect(screen.getByText("설치됨 · 200개 작품")).toBeVisible();
+  expect(await screen.findByText("카탈로그를 교체했습니다 · 200개 작품")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
+  expect(await screen.findByText("설치됨 · 100개 작품")).toBeVisible();
 });
 
 it("keeps the catalog error message when the VCK restore fails", async () => {
@@ -914,11 +955,9 @@ it("keeps the catalog error message when the VCK restore fails", async () => {
   vi.mocked(open).mockResolvedValue("D:\\Broken");
   render(
     <LibraryProvider gateway={gateway}>
-      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" />
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="advanced" />
     </LibraryProvider>,
   );
-  await userEvent.click(screen.getByRole("button", { name: "온라인 카탈로그" }));
-  await userEvent.click(await screen.findByText("수집 상세·카탈로그 복구"));
 
   await user.click(await screen.findByRole("button", { name: "VCK 폴더 다시 선택" }));
 
@@ -953,7 +992,7 @@ it("publishes character views explicitly, blocks duplicate clicks and preserves 
     progress?.({ phase: "preparing", completed: 2, total: 4, unit: "items" });
     return new Promise<{ revision: string; nodes: number }>(resolve => { finish = resolve; });
   });
-  const view = () => <LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="data" /></LibraryProvider>;
+  const view = () => <LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="advanced" /></LibraryProvider>;
   const mounted = render(view());
   const button = await screen.findByRole("button", { name: "모바일 캐릭터 업데이트" });
   await waitFor(() => expect(button).toBeEnabled());
@@ -1099,7 +1138,7 @@ function catalogStatusWithJapanese(initialComplete: boolean): CatalogStatus {
 }
 
 
-it("uses the existing sidebar and avoids backup work outside data management", async () => {
+it("uses the existing sidebar and avoids backup work outside 고급", async () => {
   const gateway = createGateway();
   const { container } = render(<LibraryProvider gateway={gateway}>
     <WorkspaceChromeProvider scope="settings">
@@ -1115,6 +1154,8 @@ it("uses the existing sidebar and avoids backup work outside data management", a
   await userEvent.click(within(sidebar).getByRole("button", { name: "정보·도움말" }));
   expect(gateway.listMetadataBackups).not.toHaveBeenCalled();
   await userEvent.click(within(sidebar).getByRole("button", { name: "데이터 관리" }));
+  expect(gateway.listMetadataBackups).not.toHaveBeenCalled();
+  await userEvent.click(within(sidebar).getByRole("button", { name: "고급" }));
   await waitFor(() => expect(gateway.listMetadataBackups).toHaveBeenCalledTimes(1));
 });
 
@@ -1151,4 +1192,52 @@ it("copies a PC extension pairing link and shows setup instructions without requ
   expect(gateway.createExtensionPairing).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole("img", { name: "Lakomics 확장 연결 QR 코드" })).not.toBeInTheDocument();
   expect(document.body.textContent).not.toContain("BBBBBBBBBBBBBBBBBBBB");
+});
+
+
+it("shows the online catalog DB update time read-only in 온라인 카탈로그", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getOnlineCatalogStatus).mockResolvedValue({
+    ...catalogStatusWithJapanese(true),
+    lastSuccessAt: "2026-09-01T00:00:00Z",
+  });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="catalog" /></LibraryProvider>);
+  const row = (await screen.findByText("최근 DB 갱신")).parentElement!;
+  expect(within(row).getByText((_, element) => element?.tagName === "TIME")).toHaveAttribute("dateTime", "2026-09-05T01:00:00Z");
+  expect(screen.queryByRole("button", { name: "모바일에 카탈로그 게시" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "일본어 체크포인트 재설정" })).not.toBeInTheDocument();
+});
+
+it("opens 클라우드 with a one-line sync conclusion and keeps connection details collapsed", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.getCloudCaptureSettings).mockResolvedValue({ enabled: true, captureEnabled: true, apiBaseUrl: "https://cloud.example.test", tokenConfigured: true });
+  vi.mocked(gateway.cloudBackfillProgress).mockResolvedValue({ controlState: "idle", totalAssets: 10, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 8, failed: 2, activeWorkers: 0, lastError: null });
+  const { container } = render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" /></LibraryProvider>);
+  expect(await screen.findByText("동기화 문제 2개 · 아래에서 확인하세요")).toBeVisible();
+  const section = container.querySelector(".settings-view__section")!;
+  expect(section.querySelector("header + p, header + * + p")?.textContent).toBe("동기화 문제 2개 · 아래에서 확인하세요");
+  const connection = screen.getByText("서버 연결 설정").closest("details")!;
+  expect(connection).not.toHaveAttribute("open");
+  expect(within(connection).getByRole("button", { name: "지금 수신" })).not.toBeVisible();
+  expect(within(connection).getByRole("button", { name: "연결 확인" })).not.toBeVisible();
+  expect(screen.queryByRole("button", { name: "사전 점검" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "서버에서 PC 복원" })).not.toBeInTheDocument();
+});
+
+it("reports a missing server connection as the cloud conclusion", async () => {
+  const gateway = createGateway();
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" /></LibraryProvider>);
+  expect(await screen.findByText("서버 연결 정보가 필요합니다 · 아래 서버 연결 설정을 확인하세요")).toBeVisible();
+});
+
+it("applies a repeated section request after the user moved to another section", async () => {
+  const gateway = createGateway();
+  const view = (request: number) => <LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="cloud" sectionRequest={request} /></LibraryProvider>;
+  const { rerender } = render(view(1));
+  const cloud = screen.getByRole("button", { name: "클라우드" });
+  expect(cloud).toHaveAttribute("aria-current", "page");
+  await userEvent.click(screen.getByRole("button", { name: "고급" }));
+  expect(cloud).not.toHaveAttribute("aria-current");
+  rerender(view(2));
+  await waitFor(() => expect(screen.getByRole("button", { name: "클라우드" })).toHaveAttribute("aria-current", "page"));
 });

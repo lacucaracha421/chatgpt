@@ -6,8 +6,15 @@ import type { LibraryGateway, MangaSeries } from "../library/types";
 import { MangaBrowser } from "./MangaBrowser";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WindowControls } from "../layout/WindowControls";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 
 afterEach(cleanup);
+
+/** Stands in for the 찾기 palette: applies text through the view's registered search. */
+function SearchProbe() {
+  const chrome = useWorkspaceChrome();
+  return <button type="button" onClick={() => chrome?.applySearch("b")}>팔레트 검색 b</button>;
+}
 
 function renderBrowser(gateway: LibraryGateway, onOpenSeries?: (series: MangaSeries) => void) {
   return render(
@@ -21,6 +28,7 @@ function renderBrowser(gateway: LibraryGateway, onOpenSeries?: (series: MangaSer
         </aside>
         <div data-testid="shared-titlebar"><ChromeTarget name="header" /><WindowControls /></div>
         <MangaBrowser onOpenSeries={onOpenSeries} />
+        <SearchProbe />
       </WorkspaceChromeProvider>
     </LibraryProvider>,
   );
@@ -83,9 +91,8 @@ describe("MangaBrowser", () => {
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
 
     expect(await screen.findByText("2개 작품")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "망가 검색" }));
-    await user.type(await screen.findByRole("searchbox", { name: "망가 검색" }), "b");
-    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(screen.queryByRole("button", { name: "망가 검색" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "팔레트 검색 b" }));
 
     expect(screen.queryByText("T1")).not.toBeInTheDocument();
     expect(screen.getByText("T2")).toBeVisible();

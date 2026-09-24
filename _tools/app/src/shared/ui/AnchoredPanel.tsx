@@ -61,7 +61,11 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
     <RadixDialog.Portal>
       <RadixDialog.Content ref={attachContent} className="ui-anchored-panel"
         style={position} data-workspace-popover={id} aria-modal={false} aria-describedby={undefined}
-        onOpenAutoFocus={(event) => { event.preventDefault(); requestAnimationFrame(() => (contentRef.current?.querySelector<HTMLElement>("select:not(:disabled), input:not(:disabled)") ?? contentRef.current?.querySelector<HTMLElement>("button:not(:disabled)") ?? contentRef.current)?.focus({ preventScroll: true })); }}
+        onOpenAutoFocus={(event) => { event.preventDefault(); requestAnimationFrame(() => {
+          // Skip controls inside closed <details> or otherwise hidden, which cannot take focus.
+          const first = (selector: string) => [...contentRef.current?.querySelectorAll<HTMLElement>(selector) ?? []].find(node => node.checkVisibility?.() ?? true);
+          (first("select:not(:disabled), input:not(:disabled)") ?? first("button:not(:disabled)") ?? contentRef.current)?.focus({ preventScroll: true });
+        }); }}
         onEscapeKeyDown={(event) => { event.preventDefault(); event.stopPropagation(); onOpenChange(false); }}
         onInteractOutside={(event) => {
           const target = event.target;

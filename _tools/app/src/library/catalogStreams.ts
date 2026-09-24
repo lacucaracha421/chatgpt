@@ -38,3 +38,10 @@ export function catalogStreamStatus(status: CatalogStatus, language: CatalogLang
     lastError: null,
   };
 }
+
+/** The newest completed catalog DB update across the legacy field and every stream. */
+export function latestCatalogUpdate(status: CatalogStatus): string | null {
+  const completed = [status.lastSuccessAt, ...(status.streams ?? []).map((stream) => stream.lastCompletedAt)]
+    .filter((value): value is string => Boolean(value) && Number.isFinite(Date.parse(value!)));
+  return completed.sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null;
+}

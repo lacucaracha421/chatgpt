@@ -5,13 +5,14 @@ vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
-import type { CollectionSummary, LibraryGateway } from "../library/types";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
+import type { CollectionSummary, CollectionTrackingGateway, CollectionUpdateProvider, LibraryGateway, ReleaseInboxItem } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
 import { coverSourceUrl } from "./physical/collectibleRuntime";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
@@ -57,11 +58,14 @@ function renderBrowser(props: {
   onChanged?: () => Promise<void>;
   libraryState?: ReturnType<typeof createDefaultCollectionLibraryState>["game"];
   onLibraryStateChange?: (next: ReturnType<typeof createDefaultCollectionLibraryState>["game"]) => void;
+  tracking?: CollectionTrackingGateway;
+  releaseProvider?: CollectionUpdateProvider;
 }) {
   const gateway = createGateway();
+  if (props.tracking) gateway.collectionTracking = props.tracking;
   function Harness() {
     const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
-    return <LibraryProvider gateway={gateway}><CollectionBrowser
+    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider}
       collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
       onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
       libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
@@ -75,10 +79,18 @@ function renderBrowser(props: {
         <ChromeTarget name="search" />
         <ChromeTarget name="navigation" />
       </aside>
+      <SearchProbe />
       <Harness />
     </WorkspaceChromeProvider>,
   );
   return gateway;
+}
+
+/** Stands in for the 찾기 palette: exposes the registered search label and applies a query. */
+function SearchProbe() {
+  const chrome = useWorkspaceChrome();
+  return <><output data-testid="search-label">{chrome?.meta?.search?.label ?? ""}</output>
+    <button type="button" onClick={() => chrome?.applySearch("nier")}>팔레트 검색 적용</button></>;
 }
 
 describe("CollectionBrowser", () => {
@@ -103,39 +115,99 @@ describe("CollectionBrowser", () => {
     expect(screen.getByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("group", { name: "보기" })).toHaveClass("collection-browser__segment--context");
     expect(screen.getByRole("group", { name: "유형" })).not.toHaveClass("collection-browser__segment--context");
-    expect(screen.getByRole("button", { name: "제목 검색" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("media_date");
-    expect(screen.getByRole("combobox", { name: "방향" })).toHaveValue("desc");
-    expect(screen.getByRole("slider", { name: "내 별점" })).toHaveAttribute("aria-valuetext", "전체");
+    expect(screen.getByTestId("search-label")).toHaveTextContent("제목 검색");
+    expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("media_date:desc");
+    expect(screen.queryByRole("combobox", { name: "방향" })).not.toBeInTheDocument();
+    const rating = screen.getByRole("combobox", { name: "내 별점" });
+    expect(rating).toHaveValue("all");
+    expect(within(rating).getAllByRole("option").map(option => option.textContent)).toEqual(["전체", "★ 5.0", "★ 4.5", "★ 4.0", "★ 3.5", "★ 3.0", "★ 2.5", "★ 2.0", "★ 1.5", "★ 1.0", "★ 0.5", "미평가"]);
+    expect(screen.queryByRole("group", { name: "내 별점" })).not.toBeInTheDocument();
+  });
+
+  it("shows a saved rating outside the presets as the selected option", () => {
+    const defaults = createDefaultCollectionLibraryState();
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: { ...defaults.game, rating: 0 } });
+    const rating = screen.getByRole("combobox", { name: "내 별점" });
+    expect(rating).toHaveValue("0");
+    expect(within(rating).getByRole("option", { name: "★ 0.0" })).toBeInTheDocument();
   });
 
   it("updates only the active media browse state", async () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "제목 검색" }));
-    await user.type(await screen.findByRole("searchbox", { name: "제목 검색" }), "nier");
     expect(onLibraryStateChange).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.click(screen.getByRole("button", { name: "팔레트 검색 적용" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, query: "nier" });
   });
 
-  it("toggles direction and converts rating values", async () => {
+  it("sets sort and direction from one select and filters rating from one select", async () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByRole("combobox", { name: "방향" }), "asc");
-    expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc" });
-    const rating = screen.getByRole("slider", { name: "내 별점" });
-    expect(screen.getByRole("button", { name: "미평가" })).toBeInTheDocument();
-    fireEvent.change(rating, {target:{value:"4.5"}});
-    expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, direction: "asc", rating: 4.5 });
-    await user.click(screen.getByRole("button", {name:"미평가"}));
+    await user.selectOptions(screen.getByRole("combobox", { name: "정렬" }), "name:asc");
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, sort: "name", direction: "asc" });
+    const rating = screen.getByRole("combobox", { name: "내 별점" });
+    expect(rating).toHaveValue("all");
+    expect(within(rating).getAllByRole("option").map(option => option.textContent)).toEqual(["전체", "★ 5.0", "★ 4.5", "★ 4.0", "★ 3.5", "★ 3.0", "★ 2.5", "★ 2.0", "★ 1.5", "★ 1.0", "★ 0.5", "미평가"]);
+    await user.selectOptions(rating, "★ 4.5");
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "name", direction: "asc", rating: 4.5 }));
+    expect(rating).toHaveValue("4.5");
+    await user.selectOptions(rating, "미평가");
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"unrated"}));
-    await user.click(screen.getByRole("button", {name:"전체"}));
+    await user.selectOptions(rating, "전체");
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"all"}));
-    fireEvent.pointerUp(rating);
-    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:0}));
+  });
+
+  const inboxItem = (collectionId: string, provider: ReleaseInboxItem["provider"], id = collectionId): ReleaseInboxItem => ({ collectionId, collectionName: collectionId, provider,
+    event: { id, kind: "new_volume", volumeNumber: 2, previousValue: null, currentValue: null, detectedAt: "2026-09-20T00:00:00Z" } });
+  const trackingWith = (items: ReleaseInboxItem[]) => ({ listInbox: vi.fn().mockResolvedValue(items), acknowledge: vi.fn(), setOwnedCount: vi.fn(), listOwnership: vi.fn(), setOwnership: vi.fn() }) as unknown as CollectionTrackingGateway;
+  const manga = { ...sample, id: "m1", type: "manga" as const };
+
+  it("hides the 새 알림 row when nothing is unread", async () => {
+    const tracking = trackingWith([]);
+    renderBrowser({ collections: [manga], typeFilter: "manga", showcase: false, tracking });
+    await waitFor(() => expect(tracking.listInbox).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /새 알림/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "MangaDex" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Kakao" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a quiet inbox entry at zero so updates can be checked by hand", async () => {
+    const onViewChange = vi.fn();
+    const tracking = trackingWith([]);
+    renderBrowser({ collections: [manga], typeFilter: "manga", showcase: false, tracking, onViewChange });
+    await waitFor(() => expect(tracking.listInbox).toHaveBeenCalled());
+    const entry = screen.getByRole("button", { name: "알림함" });
+    expect(entry).toHaveClass("collection-browser__segment-button--quiet");
+    await userEvent.setup().click(entry);
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "mangadex" });
+  });
+
+  it("offers the manual update check inside the inbox with zero unread", async () => {
+    const tracking = { ...trackingWith([]), runUpdates: vi.fn(), updateStatus: vi.fn().mockResolvedValue(undefined) } as unknown as CollectionTrackingGateway;
+    renderBrowser({ collections: [manga], typeFilter: "manga", showcase: false, tracking, releaseProvider: "kakao" });
+    expect(await screen.findByRole("button", { name: "업데이트 확인" })).toBeInTheDocument();
+    expect(await screen.findByText("확인하지 않은 신간 알림이 없습니다.")).toBeInTheDocument();
+  });
+
+  it("shows one 새 알림 row with the unread work count and opens the busier provider", async () => {
+    const onViewChange = vi.fn();
+    const tracking = trackingWith([inboxItem("a", "mangadex"), inboxItem("a", "mangadex", "a2"), inboxItem("b", "kakao"), inboxItem("c", "aladin")]);
+    renderBrowser({ collections: [manga], typeFilter: "manga", showcase: false, tracking, onViewChange });
+    const row = await screen.findByRole("button", { name: "새 알림 3" });
+    await userEvent.setup().click(row);
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" });
+  });
+
+  it("lets the inbox switch providers", async () => {
+    const onViewChange = vi.fn();
+    const tracking = trackingWith([inboxItem("a", "mangadex"), inboxItem("b", "kakao")]);
+    renderBrowser({ collections: [manga], typeFilter: "manga", showcase: false, tracking, onViewChange, releaseProvider: "mangadex" });
+    const providers = await screen.findByRole("group", { name: "알림 공급처" });
+    expect(within(providers).getByRole("button", { name: "MangaDex 1" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.setup().click(within(providers).getByRole("button", { name: "Kakao 1" }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" });
   });
 
   it("renders a grid of collection cards", () => {

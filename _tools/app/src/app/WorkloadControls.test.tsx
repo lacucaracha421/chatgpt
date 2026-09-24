@@ -6,16 +6,19 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("./workloadProfile", () => ({ nativeWorkload: () => true, useWorkloadProfile: () => mocks.profile, updateWorkloadSettings: mocks.update }));
-import { WorkloadControls } from "./WorkloadControls";
+import { LightweightModeToggle, WorkloadControls } from "./WorkloadControls";
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
-it("offers cancellation without stopping user scans merely on entering light mode", async () => {
+it("offers cancellation from the panel toggle without stopping user scans merely on entering light mode", async () => {
   const cancel = vi.fn(); window.addEventListener("lakomics:cancel-user-scans", cancel);
-  render(<WorkloadControls compact />);
+  render(<LightweightModeToggle />);
   expect(mocks.invoke).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "가벼운 모드 켜짐" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("checkbox", { name: "가벼운 모드" })).toBeChecked();
   fireEvent.click(screen.getByRole("button", { name: "검사 중단 요청" }));
   await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
   expect(mocks.invoke).toHaveBeenCalledWith("workload_cancel_scans");
+  expect(await screen.findByRole("status")).toHaveTextContent("진행 중인 검사가 안전한 지점에서 중단됩니다.");
+  fireEvent.click(screen.getByRole("checkbox", { name: "가벼운 모드" }));
+  expect(mocks.update).toHaveBeenCalledWith({ lightweight: false });
   window.removeEventListener("lakomics:cancel-user-scans", cancel);
 });
 it("saves a bounded auto-entry delay and close preference", () => {

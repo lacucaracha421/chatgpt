@@ -294,6 +294,7 @@ pub fn run() {
             commands::characters::set_character_folder_excluded,
             commands::characters::character_series_excluded_assets,
             commands::characters::character_groups,
+            commands::characters::character_sidebar_counts,
             commands::characters::save_character_group,
             commands::characters::character_conversion_preview,
             commands::characters::character_series_move_preview,

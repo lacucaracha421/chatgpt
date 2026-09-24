@@ -65,6 +65,7 @@ impl Library {
             icon_key: None,
             color_key: None,
             asset_count: 0,
+            total_asset_count: None,
         };
         transaction
             .execute(
@@ -241,9 +242,25 @@ impl Library {
         Ok(())
     }
 
+    pub fn classification_exists(&self, id: &str) -> Result<bool, LibraryError> {
+        Ok(self.connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id = ?1)",
+            [id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// The folder tree for the app: direct counts plus subtree totals. The cloud
+    /// classification snapshot reads `list_classifications_in` and keeps its payload.
     pub fn list_classifications(&self) -> Result<Vec<ClassificationEntry>, LibraryError> {
-        let connection = self.connection()?;
-        list_classifications_in(&connection)
+        let mut connection = self.connection()?;
+        // One read transaction: the direct counts and the multi-link correction must see
+        // the same snapshot, or a concurrent write could skew (or underflow) the totals.
+        let transaction = connection.transaction()?;
+        let mut entries = list_classifications_in(&transaction)?;
+        apply_subtree_asset_counts(&transaction, &mut entries)?;
+        transaction.commit()?;
+        Ok(entries)
     }
 
     pub fn delete_classification(&self, id: &str) -> Result<(), LibraryError> {
@@ -582,6 +599,93 @@ pub(crate) fn list_classifications_in(
     read_entries(&mut statement, [])
 }
 
+/// Fills `total_asset_count`: distinct normal-status Assets in each entry and all its
+/// descendants, matching what opening a folder shows by default (descendants included).
+///
+/// Summing the direct counts up the tree is exact for Assets linked once; the few Assets
+/// linked to several entries are then corrected so each counts once per ancestor. This
+/// avoids a recursive closure joined against every link, which is several times slower
+/// on a large library, and the tree loads on every refresh.
+fn apply_subtree_asset_counts(
+    connection: &Connection,
+    entries: &mut [ClassificationEntry],
+) -> Result<(), LibraryError> {
+    let index: std::collections::HashMap<String, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(position, entry)| (entry.id.clone(), position))
+        .collect();
+    let parents: Vec<Option<usize>> = entries
+        .iter()
+        .map(|entry| {
+            entry
+                .parent_id
+                .as_ref()
+                .and_then(|id| index.get(id).copied())
+        })
+        .collect();
+    // Self first, then each ancestor once; a corrupt parent cycle stops at a repeat.
+    let lineage = |position: usize| {
+        let mut chain = vec![position];
+        let mut current = parents[position];
+        while let Some(parent) = current {
+            if chain.contains(&parent) {
+                break;
+            }
+            chain.push(parent);
+            current = parents[parent];
+        }
+        chain
+    };
+    let mut totals = vec![0u64; entries.len()];
+    for (position, entry) in entries.iter().enumerate() {
+        if entry.asset_count > 0 {
+            for ancestor in lineage(position) {
+                totals[ancestor] += entry.asset_count;
+            }
+        }
+    }
+    let mut statement = connection.prepare(
+        "SELECT link.asset_id, link.classification_id
+         FROM asset_classifications AS link
+         JOIN assets AS asset ON asset.id = link.asset_id
+         WHERE asset.status = 'normal'
+           AND link.asset_id IN (
+               SELECT asset_id FROM asset_classifications
+               GROUP BY asset_id HAVING COUNT(*) > 1
+           )
+         ORDER BY link.asset_id",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut current_asset: Option<String> = None;
+    let mut hits: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
+    let mut settle = |hits: &mut std::collections::HashMap<usize, u64>| {
+        for (ancestor, count) in hits.drain() {
+            if count > 1 {
+                totals[ancestor] = totals[ancestor].saturating_sub(count - 1);
+            }
+        }
+    };
+    while let Some(row) = rows.next()? {
+        let asset_id: String = row.get(0)?;
+        let classification_id: String = row.get(1)?;
+        if current_asset.as_deref() != Some(asset_id.as_str()) {
+            settle(&mut hits);
+            current_asset = Some(asset_id);
+        }
+        if let Some(&position) = index.get(&classification_id) {
+            for ancestor in lineage(position) {
+                *hits.entry(ancestor).or_default() += 1;
+            }
+        }
+    }
+    settle(&mut hits);
+    for (entry, total) in entries.iter_mut().zip(totals) {
+        entry.total_asset_count = Some(total);
+    }
+    Ok(())
+}
+
 fn find_classification(
     connection: &Connection,
     id: &str,
@@ -659,6 +763,7 @@ fn entry_from_values(
         icon_key,
         color_key,
         asset_count: u64::try_from(asset_count).unwrap_or(0),
+        total_asset_count: None,
     })
 }
 
@@ -1254,6 +1359,112 @@ mod tests {
             .find(|entry| entry.id == fixture.parent_tag.id)
             .unwrap();
         assert_eq!(parent.asset_count, 0);
+    }
+
+    #[test]
+    fn list_classifications_totals_count_each_subtree_asset_once() {
+        let fixture = ClassificationFixture::new();
+        for (id, status) in [
+            ("asset-a", "normal"),
+            ("asset-b", "normal"),
+            ("asset-trash", "trash"),
+        ] {
+            insert_asset(&fixture.library, id);
+            fixture
+                .library
+                .connection()
+                .unwrap()
+                .execute("UPDATE assets SET status = ?1 WHERE id = ?2", [status, id])
+                .unwrap();
+        }
+        fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-a".into(), "asset-b".into(), "asset-trash".into()],
+                add_classification_ids: vec![fixture.child_tag.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+        // asset-b is linked to both the child and its parent: one Asset for the parent.
+        fixture
+            .library
+            .patch_asset_classifications(AssetClassificationPatch {
+                asset_ids: vec!["asset-b".into()],
+                add_classification_ids: vec![fixture.parent_tag.id.clone()],
+                remove_classification_ids: vec![],
+            })
+            .unwrap();
+
+        let entries = fixture.library.list_classifications().unwrap();
+        let counts = |id: &str| {
+            let entry = entries.iter().find(|entry| entry.id == id).unwrap();
+            (entry.asset_count, entry.total_asset_count)
+        };
+        assert_eq!(counts(&fixture.child_tag.id), (2, Some(2)));
+        assert_eq!(counts(&fixture.parent_tag.id), (1, Some(2)));
+        assert_eq!(counts(&fixture.root.id), (0, Some(2)));
+        let work = entries
+            .iter()
+            .find(|entry| entry.name == "Blue Archive")
+            .unwrap();
+        assert_eq!(work.total_asset_count, Some(2));
+        assert!(entries
+            .iter()
+            .filter(|entry| entry.asset_count == 0
+                && entry.parent_id.is_none()
+                && entry.id != fixture.root.id)
+            .all(|entry| entry.total_asset_count == Some(0)));
+    }
+
+    #[test]
+    fn list_classifications_totals_handle_siblings_and_deep_chains() {
+        let fixture = ClassificationFixture::new();
+        let tag = |name: &str, parent: &str| {
+            fixture
+                .library
+                .create_classification(CreateClassification {
+                    kind: ClassificationKind::Tag,
+                    name: name.into(),
+                    parent_id: Some(parent.into()),
+                })
+                .unwrap()
+                .id
+        };
+        // child_tag (Aru) > deep > deeper; sibling sits beside child_tag under parent_tag.
+        let deep = tag("Deep", &fixture.child_tag.id);
+        let deeper = tag("Deeper", &deep);
+        let sibling = tag("Sibling", &fixture.parent_tag.id);
+        let link = |asset: &str, ids: &[&str]| {
+            fixture
+                .library
+                .patch_asset_classifications(AssetClassificationPatch {
+                    asset_ids: vec![asset.into()],
+                    add_classification_ids: ids.iter().map(|id| id.to_string()).collect(),
+                    remove_classification_ids: vec![],
+                })
+                .unwrap();
+        };
+        for id in ["x", "y", "z"] {
+            insert_asset(&fixture.library, id);
+        }
+        link("x", &[&deeper, &sibling]); // across siblings
+        link("y", &[&deep, &deeper]); // twice on one chain
+        link("z", &[&fixture.child_tag.id]);
+
+        let entries = fixture.library.list_classifications().unwrap();
+        let total = |id: &str| {
+            entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .unwrap()
+                .total_asset_count
+        };
+        assert_eq!(total(&deeper), Some(2));
+        assert_eq!(total(&deep), Some(2));
+        assert_eq!(total(&fixture.child_tag.id), Some(3));
+        assert_eq!(total(&sibling), Some(1));
+        assert_eq!(total(&fixture.parent_tag.id), Some(3));
+        assert_eq!(total(&fixture.root.id), Some(3));
     }
 
     #[test]

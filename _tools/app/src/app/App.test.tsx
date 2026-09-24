@@ -132,7 +132,7 @@ function gateway(): LibraryGateway {
     getTmdbConnection: vi.fn().mockResolvedValue(null),
     replaceTmdbMovieArtwork: vi.fn(),
     openLibrary: vi.fn().mockResolvedValue(summary),
-    importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(), generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn(), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(),
+    importVckCatalog: vi.fn(), getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }), searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(), generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(), updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(), getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: false, apiBaseUrl: null, tokenConfigured: false }), setCloudCaptureSettings: vi.fn(), setCloudApiToken: vi.fn(), deleteCloudApiToken: vi.fn(), testCloudCaptureConnection: vi.fn().mockResolvedValue({ pendingCount: 0 }), runDueCloudCaptureSync: vi.fn().mockResolvedValue({ attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0, classificationChanged: 0 }), cloudBackfillPreflight: vi.fn(), cloudBackfillSeed: vi.fn(), cloudBackfillRunCycle: vi.fn(), cloudBackfillProgress: vi.fn().mockResolvedValue({ controlState: "idle", replicationEnabled: false, totalAssets: 0, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 0, failed: 0, activeWorkers: 0, lastError: null, activity: [] }), cloudBackfillRetryFailed: vi.fn(), getOnlineCatalogWorkDetail: vi.fn(), setOnlineCatalogBookmark: vi.fn(), resolveOnlineCatalogWork: vi.fn(), getRemoteReadingProgress: vi.fn(), saveRemoteReadingProgress: vi.fn(), clearRemoteMangaCache: vi.fn(),
     getExtensionConnection: vi.fn(),
     listClassifications: vi.fn().mockResolvedValue([]),
     listAlbums: vi.fn().mockResolvedValue([]),
@@ -199,9 +199,15 @@ function gateway(): LibraryGateway {
   };
 }
 
+async function openStatusPanel(user: ReturnType<typeof userEvent.setup>, gateway: LibraryGateway) {
+  await user.click(screen.getByRole("button", { name: /^상태/ }));
+  await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ unclassifiedOnly: true, limit: 1 })));
+  await act(async () => { await Promise.resolve(); });
+}
+
 async function openManagementItem(name: string) {
-  await userEvent.click(await screen.findByRole("button", { name: "라이브러리 관리" }));
-  const panel = await screen.findByRole("dialog", { name: "라이브러리 관리" });
+  await userEvent.click(await screen.findByRole("button", { name: /^더보기/ }));
+  const panel = await screen.findByRole("dialog", { name: "더보기" });
   await userEvent.click(within(panel).getByRole("button", { name }));
 }
 
@@ -266,15 +272,16 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
 
-    const secret = await screen.findByRole("button", { name: "비밀" });
-    await userEvent.click(secret);
+    await userEvent.click(await screen.findByRole("button", { name: /^더보기/ }));
+    await userEvent.click(await within(await screen.findByRole("dialog", { name: "더보기" })).findByRole("button", { name: "비밀" }));
     const view = await screen.findByRole("region", { name: "비밀" });
     expect(within(view).getByLabelText("비밀번호")).toBeVisible();
     expect(libraryGateway.listEncryptedVaultItems).not.toHaveBeenCalled();
 
     act(() => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "비밀" })).not.toBeInTheDocument());
     await waitFor(() => expect(screen.queryByRole("region", { name: "비밀" })).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /^더보기/ }));
+    expect(within(await screen.findByRole("dialog", { name: "더보기" })).queryByRole("button", { name: "비밀" })).not.toBeInTheDocument();
     expect(await screen.findByText("비밀 보관함의 연결이 끊겼습니다.")).toBeVisible();
   });
 
@@ -357,7 +364,7 @@ describe("App", () => {
     const libraryGateway = gateway();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
-    await openManagementItem("휴지통 (0)");
+    await openManagementItem("휴지통");
 
     await waitFor(() => expect(libraryGateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
   });
@@ -372,7 +379,7 @@ describe("App", () => {
     const libraryGateway = gateway();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
-    await openManagementItem("휴지통 (0)");
+    await openManagementItem("휴지통");
     await waitFor(() => expect(drop).toBeDefined());
     act(() => drop?.(["C:\\images\\ignored.png"]));
 
@@ -469,10 +476,12 @@ describe("App", () => {
     await screen.findByRole("main", { name: "라이브러리 작업 공간" });
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
     const classificationCalls = vi.mocked(libraryGateway.listClassifications).mock.calls.length;
-    const assetCalls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
+    // Opening 더보기 also reads the unsorted queue count; only page reads count here.
+    const pageCalls = () => vi.mocked(libraryGateway.listAssets).mock.calls.filter(([query]) => !(query.unclassifiedOnly && query.limit === 1)).length;
+    const assetCalls = pageCalls();
 
     await openSettings();
-    await user.click(await screen.findByRole("button", { name: "데이터 관리" }));
+    await user.click(await screen.findByRole("button", { name: "고급" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
@@ -481,7 +490,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "이 시점으로 복구" })).toBeEnabled());
     await user.keyboard("{Escape}");
     await waitFor(() => expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(classificationCalls + 1));
-    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledTimes(assetCalls + 1));
+    await waitFor(() => expect(pageCalls()).toBe(assetCalls + 1));
   });
 
   it("makes the workspace inert while backup restore is pending", async () => {
@@ -494,7 +503,7 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await openSettings();
-    await user.click(await screen.findByRole("button", { name: "데이터 관리" }));
+    await user.click(await screen.findByRole("button", { name: "고급" }));
     await user.click(await screen.findByRole("button", { name: "이 시점으로 복구" }));
     await user.click(screen.getByRole("button", { name: "복구 시작" }));
 
@@ -521,7 +530,7 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: /작업 센터/ })).not.toBeInTheDocument();
     expect(within(content).queryByRole("button", { name: "설정" })).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "주요 영역" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "라이브러리 관리" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^더보기/ })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "창 닫기" })).toHaveLength(1);
     expect(screen.queryByRole("heading", { name: "Lakomics" })).not.toBeInTheDocument();
   });
@@ -544,7 +553,7 @@ describe("App", () => {
     })));
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     const rail = screen.getByRole("navigation", { name: "주요 영역" });
-    expect(within(rail).getAllByRole("button").map((button) => button.textContent)).toEqual(["에셋", "컬렉션", "망가", "다시보기", "메모", expect.stringMatching(/^관리/)]);
+    expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["에셋", "컬렉션", "망가", "메모", "찾기", expect.stringMatching(/^더보기/)]);
     expect(screen.queryByRole("navigation", { name: "빠른 보기" })).not.toBeInTheDocument();
 
     await openManagementItem("미분류");
@@ -563,12 +572,68 @@ describe("App", () => {
     for (const name of ["컬렉션", "망가", "미분류", "컬렉션"]) {
       if (name === "미분류") await openManagementItem(name);
       else await user.click(await screen.findByRole("button", { name }));
-      const currentName = name === "미분류" ? "라이브러리 관리" : name;
+      const currentName = name === "미분류" ? "에셋" : name;
       fireEvent.mouseUp(window, { button: 3 });
       expect(screen.getByRole("button", { name: currentName })).toHaveAttribute("aria-current", "page");
       await user.keyboard("{Escape}");
       expect(screen.getByRole("button", { name: currentName })).toHaveAttribute("aria-current", "page");
     }
+  });
+
+  it("opens the 찾기 palette with Ctrl+K and keeps the existing quick-view shortcuts", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await screen.findByRole("main", { name: "라이브러리 작업 공간" });
+
+    await user.keyboard("{Control>}k{/Control}");
+    const palette = await screen.findByRole("dialog", { name: "찾기" });
+    await user.type(within(palette).getByRole("combobox"), "휴지");
+    // Assets have no text search, so the palette offers names only.
+    expect(within(palette).queryByRole("option", { name: /에서 검색/ })).not.toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(libraryGateway.listTrash).toHaveBeenCalledWith({ after: null, limit: 100 }));
+    expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "더보기" })).toHaveAttribute("aria-current", "page");
+
+    await user.keyboard("{Control>}2{/Control}");
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ unclassifiedOnly: true })));
+    expect(screen.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page");
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(within(await screen.findByRole("dialog", { name: "찾기" })).getByRole("combobox"), "고급");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("설정 · 고급")).toBeInTheDocument();
+  });
+
+  it("opens 메모 from the rail and marks it current", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+    await user.click(within(rail).getByRole("button", { name: "메모" }));
+    await waitFor(() => expect(within(rail).getByRole("button", { name: "메모" })).toHaveAttribute("aria-current", "page"));
+    expect(within(rail).getByRole("button", { name: /^더보기/ })).not.toHaveAttribute("aria-current");
+    await user.click(within(rail).getByRole("button", { name: /^더보기/ }));
+    expect(within(await screen.findByRole("dialog", { name: "더보기" })).queryByRole("button", { name: "메모" })).not.toBeInTheDocument();
+  });
+
+  it("opens 다시보기 from the asset index and returns to the folder with back", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    const all = await screen.findByRole("button", { name: "전체" });
+    expect(all).toHaveAttribute("aria-current", "page");
+
+    const revisit = screen.getByRole("button", { name: "다시보기" });
+    await user.click(revisit);
+    expect(revisit).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page");
+    fireEvent.mouseUp(window, { button: 3 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page"));
   });
 
   it("stores drops from broad views in the unclassified destination", async () => {
@@ -780,7 +845,8 @@ describe("App", () => {
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("추가 1");
+      await user.click(screen.getByRole("button", { name: /^상태/ }));
+      expect(screen.getByRole("group", { name: "가져오기 작업" })).toHaveTextContent("추가 1");
   });
 
   it("shows setup and an error when restoring the saved library fails", async () => {
@@ -887,14 +953,14 @@ describe("App", () => {
       }),
     );
     await waitFor(() => expect(drop).toBeDefined());
+    await openStatusPanel(user, libraryGateway);
     const callsBeforeDrop = vi.mocked(libraryGateway.listAssets).mock.calls
       .length;
 
     act(() => drop?.(["C:\\images\\arona.png"]));
 
-    await user.click(screen.getByRole("button", { name: "라이브러리 관리" }));
     expect(
-      await screen.findByText("파일 가져오기 1 / 1"),
+      await screen.findByText(/가져오는 중 \d \/ 1|파일 가져오기 1 \/ 1/),
     ).toBeInTheDocument();
     expect(libraryGateway.ingestMedia).toHaveBeenCalledWith({
       sourcePath: "C:\\images\\arona.png",
@@ -979,6 +1045,7 @@ describe("App", () => {
         limit: 100,
       }),
     );
+    await openStatusPanel(user, libraryGateway);
     const callsBeforeDrop = vi.mocked(libraryGateway.listAssets).mock.calls
       .length;
 
@@ -1351,8 +1418,10 @@ describe("App", () => {
 
     fireEvent.pointerDown(tile, { button: 0, pointerId: 11, clientX: 100, clientY: 100 });
     fireEvent.pointerMove(tile, { pointerId: 11, clientX: 1001, clientY: 100 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "실패 파일 다시 시도" })).toBeVisible());
-    expect(screen.getByRole("complementary", { name: "가져오기 작업" })).toHaveTextContent("탐색기 복사 실패");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^상태 · 문제/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^상태 · 문제/ }));
+    expect(await screen.findByRole("button", { name: "실패 파일 다시 시도" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "가져오기 작업" })).toHaveTextContent("탐색기 복사 실패");
   });
 
   it("opens the manga browser and scans the manga folder", async () => {
@@ -1460,17 +1529,20 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     const index = screen.getByRole("complementary", { name: "탐색 인덱스" });
-    expect(await within(index).findByRole("button", { name: "제목 검색" })).toBeVisible();
-    expect(within(index).getByLabelText("내 별점")).toBeVisible();
-    expect(screen.queryByRole("searchbox", { name: "제목 검색" })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "제목 검색" }));
-    const search = await screen.findByRole("searchbox", { name: "제목 검색" });
-    await user.type(search, "nier{Enter}");
+    expect(await within(index).findByLabelText("내 별점")).toBeVisible();
+    // Plain title search lives in the 찾기 palette; the index head has no separate magnifier.
+    expect(within(index).queryByRole("button", { name: "제목 검색" })).not.toBeInTheDocument();
+    await user.keyboard("{Control>}f{/Control}");
+    const search = within(await screen.findByRole("dialog", { name: "찾기" })).getByRole("combobox");
+    await user.type(search, "nier");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(/‘nier’ — .*컬렉션에서 검색/);
+    await user.keyboard("{Enter}");
     await user.click(await screen.findByText("NieR: Automata"));
     await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }, { timeout: 5_000 }));
     expect(await screen.findByRole("button", { name: "검색 해제" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "제목 검색" }));
-    expect(await screen.findByRole("searchbox", { name: "제목 검색" })).toHaveValue("nier");
+    expect(screen.getByText("nier")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "찾기" }));
+    expect(within(await screen.findByRole("dialog", { name: "찾기" })).getAllByRole("option")[0]).toHaveTextContent("검색 해제");
   });
 
   it("returns from a manga Collection detail to the manga list", async () => {

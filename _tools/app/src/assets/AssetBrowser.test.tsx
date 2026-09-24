@@ -692,7 +692,7 @@ describe("AssetBrowser", () => {
       after: null,
     })));
     if (layout === "masonry") {
-      await waitFor(() => expect(container.querySelector(".asset-gallery__date")).toHaveTextContent(/^2026\.\d{2}\.\d{2}$/));
+      await waitFor(() => expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^2026\.\d{2}\.\d{2}$/));
     }
   });
 
@@ -944,6 +944,24 @@ describe("AssetBrowser", () => {
     writeText.mockRestore();
   });
 
+  it("shows the floating selection bar only while assets are selected", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    render(
+      <LibraryProvider gateway={gateway}>
+        <AssetBrowser galleryLayout="justified" view={{ kind: "classification", classificationId: null }} classifications={[]} albums={[]} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />
+      </LibraryProvider>,
+    );
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
+    first.focus();
+    await user.keyboard("{Control>}a{/Control}");
+    await user.click(within(screen.getByRole("toolbar", { name: "선택 작업" })).getByRole("button", { name: "좋아요 켜기" }));
+    expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
+    await user.click(screen.getByRole("button", { name: "선택 해제" }));
+    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
+  });
+
   it("runs keyboard selection, trash, and undo actions", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
@@ -955,7 +973,8 @@ describe("AssetBrowser", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     first.focus();
     await user.keyboard("{Control>}a{/Control}");
-    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
+    const selectionBar = screen.getByRole("toolbar", { name: "선택 작업" });
+    expect(selectionBar).toHaveTextContent("2개 선택");
 
     await user.click(await selectionAction("휴지통으로 이동"));
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0", "asset-1"]);

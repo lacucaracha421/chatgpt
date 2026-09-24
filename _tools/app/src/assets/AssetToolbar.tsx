@@ -45,12 +45,14 @@ export function AssetToolbar({
     : rawView;
   const recent = view.kind === "revisit";
   const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
+  // Folder counts are unfiltered, so they are hidden while a media or aspect filter narrows the view.
+  const countSummary = mediaFilter === "all" && aspectFilter === "all" ? folderCountSummary(rawView, classifications, directOnly) : null;
   const location = view.kind === "revisit" ? "다시보기" : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체";
 
   return (
     <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={playAction ? <>{registration}{playAction}</> : registration} chrome={{
       summary: [!recent ? ({ newest: "최신순", oldest: "오래된순", favorites: "좋아요순", random: "랜덤" })[sort] : "다시보기", galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all" || directOnly) ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all") + Number(directOnly)}` : "", privacyMode ? "비공개" : ""].filter(Boolean).join(" · "),
-      status: privacyMode ? <span>비공개 모드</span> : undefined,
+      status: countSummary || privacyMode ? <>{countSummary && <span className="asset-toolbar__count">{countSummary}</span>}{privacyMode && <span>비공개 모드</span>}</> : undefined,
       settings: <>
         {!recent && <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
           <Select label="정렬" value={sort} onChange={(event) => onSortChange(event.target.value as AssetSort)}><option value="newest">최신순</option><option value="oldest">오래된순</option><option value="favorites">좋아요순</option><option value="random">랜덤</option></Select>
@@ -68,4 +70,20 @@ export function AssetToolbar({
       </>,
     }} />
   );
+}
+
+const formatCount = (count: number) => count.toLocaleString("ko-KR");
+
+/**
+ * Header count for a folder: everything the folder view shows by default (with subfolders),
+ * plus the direct-only number. When 이 폴더만 is on, the shown number comes first and says so.
+ */
+export function folderCountSummary(view: AssetView, classifications: ClassificationEntry[], directOnly: boolean): string | null {
+  if (view.kind !== "classification" || !view.classificationId || view.characterId || view.characterGroupId) return null;
+  const entry = classifications.find((candidate) => candidate.id === view.classificationId);
+  if (!entry || entry.assetCount === undefined) return null;
+  const direct = entry.assetCount;
+  const total = entry.totalAssetCount ?? direct;
+  if (directOnly) return total === direct ? `이 폴더만 ${formatCount(direct)}장` : `이 폴더만 ${formatCount(direct)}장 표시 · 하위 포함 ${formatCount(total)}장`;
+  return total === direct ? `${formatCount(total)}장` : `${formatCount(total)}장 · 이 폴더만 ${formatCount(direct)}장`;
 }

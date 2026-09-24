@@ -23,15 +23,21 @@ function failureDescription(failure: CollectionUpdateFailure): string {
   } as Record<string, string>)[failure.kind] ?? "상세 원인을 확인하지 못했습니다";
   return `${stage} · ${message}`;
 }
+/** Aladin/Kakao-sourced events share the Kakao inbox; only MangaDex has its own. */
+export const inboxProvider = (item: ReleaseInboxItem): CollectionUpdateProvider => item.provider === "mangadex" ? "mangadex" : "kakao";
+const PROVIDERS: CollectionUpdateProvider[] = ["mangadex", "kakao"];
+
 type Props = {
   provider: CollectionUpdateProvider;
   onOpen: (collectionId: string) => void;
   onChanged: () => void | Promise<void>;
   query?: string;
   revision?: unknown;
+  /** Provider choice lives inside the inbox; omitted, the inbox shows one provider only. */
+  onProviderChange?: (provider: CollectionUpdateProvider) => void;
 };
 
-export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision }: Props) {
+export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision, onProviderChange }: Props) {
   const { gateway } = useLibrary();
   const api = gateway.collectionTracking;
   const [items, setItems] = useState<ReleaseInboxItem[] | null>(null);
@@ -68,7 +74,8 @@ export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision
     return () => { active = false; };
   }, [api, revision]);
 
-  const providerItems = items?.filter(item => (item.provider === "mangadex" ? "mangadex" : "kakao") === provider) ?? [];
+  const providerItems = items?.filter(item => inboxProvider(item) === provider) ?? [];
+  const unreadWorks = (value: CollectionUpdateProvider) => new Set(items?.filter(item => inboxProvider(item) === value).map(item => item.collectionId)).size;
   const groups = [...new Map(providerItems.map(item => [item.collectionId, item])).values()]
     .filter(item => item.collectionName.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 
@@ -111,7 +118,11 @@ export function ReleaseInbox({ provider, onOpen, onChanged, query = "", revision
   }
   return <section className="release-inbox" aria-label={`${label} 알림`}>
     <div className="release-inbox__toolbar">
-      <strong>{label} 알림 <span>{groups.length}개 작품</span></strong>
+      {onProviderChange ? <div className="release-inbox__providers" role="group" aria-label="알림 공급처">
+        {PROVIDERS.map(value => <button key={value} type="button" className="release-inbox__provider" aria-pressed={value === provider} onClick={() => { if (value !== provider) onProviderChange(value); }}>
+          {`${value === "mangadex" ? "MangaDex" : "Kakao"}${items ? ` ${unreadWorks(value).toLocaleString()}` : ""}`}
+        </button>)}
+      </div> : <strong>{label} 알림 <span>{groups.length}개 작품</span></strong>}
       <div>
         {api?.runUpdates && <Button size="sm" disabled={busy || waiting || restricted} onClick={() => void check()}>{busy ? "처리 중…" : waiting ? "재시도 대기" : "업데이트 확인"}</Button>}
         <Button size="sm" disabled={busy || providerItems.length === 0} onClick={() => void acknowledgeAll()}>모두 확인</Button>

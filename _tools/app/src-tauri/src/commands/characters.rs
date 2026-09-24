@@ -873,6 +873,17 @@ pub async fn exclude_character_reference(
 }
 
 #[tauri::command]
+pub async fn character_sidebar_counts(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_hub::SidebarCounts, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_sidebar_counts())
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn character_groups(
     series_id: String,
     state: State<'_, AppState>,
