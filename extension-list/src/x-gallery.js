@@ -36,6 +36,11 @@
   const ARTIST_AFFINITY_MAX_ITEMS = 2000;
   const ARTIST_AFFINITY_MAX_SCORE = 4;
   const RECOMMENDED_FILTER_MIN_SCORE = 2;
+  // The right-side "추천 이미지" gallery button is switched off for now (2026-09-24).
+  // Collection, saved badges and the gallery code keep running; set this to true to
+  // show the button again. Tests opt back in with __LAKOMICS_X_GALLERY_TRIGGER__.
+  const GALLERY_TRIGGER_ENABLED = false;
+  const galleryTriggerEnabled = GALLERY_TRIGGER_ENABLED || globalThis.__LAKOMICS_X_GALLERY_TRIGGER__ === true;
 
   function parseStatusHref(value) {
     let url;
@@ -557,6 +562,7 @@
       GALLERY_FILTER_RECOMMENDED,
       LIKE_FILTER_THRESHOLDS,
       RECOMMENDED_FILTER_MIN_SCORE,
+      GALLERY_TRIGGER_ENABLED,
       createGalleryStore,
       galleryItemKey,
       extractLikeCount,
@@ -936,7 +942,7 @@
       const pathname = location.pathname;
       const routeChanged = pathname !== lastPathname;
       lastPathname = pathname;
-      ui.trigger.hidden = overlayOpen || !isHomeRoute(pathname);
+      ui.trigger.hidden = !galleryTriggerEnabled || overlayOpen || !isHomeRoute(pathname);
       if (!isHomeRoute(pathname) && overlayOpen) closeGallery();
       if (harvest?.running && !isForYouTimeline(document)) {
         stopAutoHarvest("추천 탭을 벗어나 자동 수집을 중지했습니다", true);
@@ -963,7 +969,7 @@
       if (harvest?.running) stopAutoHarvest("자동 수집을 중지했습니다", true);
       ui.overlay.hidden = true;
       hideUndo();
-      ui.trigger.hidden = !isHomeRoute(location.pathname);
+      ui.trigger.hidden = !galleryTriggerEnabled || !isHomeRoute(location.pathname);
       ui.trigger.setAttribute("aria-expanded", "false");
       if (!ui.trigger.hidden) ui.trigger.focus({ preventScroll: true });
     }
@@ -1689,7 +1695,7 @@
           #${GALLERY_ROOT_ID} * { scroll-behavior: auto !important; transition: none !important; }
         }
       </style>
-      <button class="lakomics-x-gallery-trigger" type="button" aria-label="추천 이미지 갤러리" aria-expanded="false">
+      <button class="lakomics-x-gallery-trigger" type="button" aria-label="추천 이미지 갤러리" aria-expanded="false"${galleryTriggerEnabled ? "" : " hidden"}>
         <span class="lakomics-x-gallery-trigger-icon" aria-hidden="true">▦</span>
         <span class="lakomics-x-gallery-trigger-count">0</span>
       </button>

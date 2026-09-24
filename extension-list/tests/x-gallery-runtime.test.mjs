@@ -53,7 +53,7 @@ function article(id, { author = 'artist', photo = 1, likes = '1,234', image = `I
     + `<button data-testid="like" aria-label="${likes} Likes"></button></article>`;
 }
 
-function tab(shared, { articles = [article('100')], messages = [] } = {}) {
+function tab(shared, { articles = [article('100')], messages = [], trigger = true } = {}) {
   const dom = new JSDOM(`<body><div data-testid="primaryColumn"><div role="tablist"><div role="tab" aria-selected="true">추천</div><div role="tab" aria-selected="false">팔로잉</div></div><div id="timeline">${articles.join('')}</div></div></body>`,
     { url: 'https://x.com/home', runScripts: 'outside-only' });
   const w = dom.window; windows.push(w);
@@ -67,6 +67,8 @@ function tab(shared, { articles = [article('100')], messages = [] } = {}) {
   w.scrollBy = () => {};
   w.IntersectionObserver = class { constructor(callback) { this.callback = callback; } observe(target) { w.setTimeout(() => this.callback([{ target, isIntersecting: true, intersectionRatio: 1 }]), 0); } unobserve() {} };
   w.chrome = { runtime: { sendMessage(message, callback) { messages.push(message.type); w.setTimeout(() => callback({ ok: false }), 0); } }, storage: shared.storage(w) };
+  // The gallery button ships disabled; these tests exercise it by opting back in.
+  if (trigger) w.__LAKOMICS_X_GALLERY_TRIGGER__ = true;
   w.eval(sourceScript); w.eval(galleryScript);
   const root = w.document.getElementById('lakomics-x-recommendation-gallery');
   return { w, root, scrolls, messages, $: selector => root.querySelector(selector), $$: selector => [...root.querySelectorAll(selector)] };
@@ -106,6 +108,16 @@ test('the store looks items up by key and evicts only the oldest images it may d
   assert.deepEqual(evicted, ['2:1:' + media('2')]);
   assert.equal(store.get(keepKey).tweetId, '1');
   assert.equal(store.get('2:1:' + media('2')), null);
+});
+
+test('the recommended-images button stays hidden while its flag is off', async () => {
+  assert.equal(helpers().LakomicsXGallery.GALLERY_TRIGGER_ENABLED, false);
+  const t = tab(sharedStorage(), { trigger: false });
+  await until(() => t.$('.lakomics-x-gallery-summary').textContent === '이미지 1장 · 게시물 1개');
+  assert.equal(t.$('.lakomics-x-gallery-trigger').hidden, true);
+  t.w.history.pushState({}, '', '/elonmusk'); t.w.history.pushState({}, '', '/home');
+  t.w.dispatchEvent(new t.w.PopStateEvent('popstate'));
+  assert.equal(t.$('.lakomics-x-gallery-trigger').hidden, true);
 });
 
 test('gallery chrome is Korean, tooltip-free, hides its trigger while open and traps focus', async () => {

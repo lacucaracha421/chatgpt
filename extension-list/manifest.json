@@ -64,6 +64,7 @@
         "src/classification-tree.js",
         "src/x-source.js",
         "src/x-gallery.js",
+        "src/x-home-refresh.js",
         "src/arc-collector.js",
         "src/content.js"
       ],
