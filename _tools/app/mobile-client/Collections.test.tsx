@@ -298,6 +298,24 @@ describe('read-only collections',()=>{
     pressTab('만화');await screen.findByText('밤의 도서관');
     await act(async()=>resolveOld({...page,items:[{...item,id:'stale',name:'오래된 게임'}]}));expect(screen.queryByText('오래된 게임')).toBeNull();
   });
+  it('keeps the type switch in the list bar, including while searching, and not in the scrolled list',async()=>{
+    render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const switcher=()=>screen.getByRole('tablist',{name:'컬렉션 유형'});
+    expect(switcher().closest('header.top-bar')).toBeTruthy();
+    expect(list().querySelector('[role=tablist]')).toBeNull();
+    expect(screen.getAllByRole('tablist',{name:'컬렉션 유형'})).toHaveLength(1);
+    const listPaths=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.startsWith('/v1/collections?'));
+    fireEvent.change(searchBox(),{target:{value:'밤'}});fireEvent.submit(searchBox().closest('form')!);
+    await waitFor(()=>expect(listPaths().at(-1)).toContain('q=%EB%B0%A4'));
+    expect(switcher().closest('header.top-bar.is-search')).toBeTruthy();
+    // Switching type still clears the query, as it did from the list.
+    pressTab('만화');
+    await waitFor(()=>expect(listPaths().at(-1)).toContain('type=manga'));
+    expect(listPaths().at(-1)).toContain('q=&');
+    expect(searchBox().value).toBe('');
+    expect(screen.getByRole('tab',{name:'만화'}).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab',{name:'게임'}).getAttribute('aria-selected')).toBe('false');
+  });
   it('shows an AV tab that waits for the PC without requesting an unsupported type',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     expect(screen.getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['게임','만화','영화','AV']);

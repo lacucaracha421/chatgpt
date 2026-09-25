@@ -215,7 +215,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    <p class="item-guide-intro">떨어지는 모양 그대로, 패들로 받기.</p>
    <div id="item-list" role="list" aria-label="아이템 능력"></div>
    <p class="item-guide-note">시간제·횟수제 아이템은 다시 받으면 남은 양을 새로 채웁니다. 목숨을 잃거나 웨이브를 넘기면 효과는 종료됩니다.</p>
-   <p class="item-guide-note">벽돌을 깨면 아래쪽 SP 게이지가 찹니다. 콤보가 높을수록 빨리 차요. 한 칸 이상 차면 화면을 두 번 톡(키보드 S)해서 필살기를 씁니다. 게이지는 전부 소모되며, 찬 칸 수에 따라 1칸은 벽돌을 꿰뚫는 파워볼 1개, 2칸은 파워볼 3갈래, 3칸은 모든 벽돌을 한 번씩 때리는 충격파입니다. 파워볼은 핵을 겨냥해 날아가고, 패들에 튕기지 않고 아래로 빠지지만 목숨은 줄지 않습니다.</p>
+   <p class="item-guide-note">벽돌을 깨면 아래쪽 SP 게이지가 찹니다. 콤보가 높을수록 빨리 차요. 한 칸 이상 차면 화면을 두 번 톡(키보드 S)해서 필살기를 씁니다. 게이지는 전부 소모되며, 다 찬 칸 수(오른쪽 LV 표시)만큼의 필살기가 나갑니다. 1칸은 장갑 벽돌까지 꿰뚫는 파워볼 1개(4초), 2칸은 파워볼 3갈래(3.5초), 3칸은 모든 벽돌을 한 번씩 때리는 충격파와 큰 파워볼 3갈래(5초)입니다. 파워볼은 핵을 겨냥해 날아가고, 시간이 다할 때까지 패들 높이에서 되튀다가 아래로 빠지며 목숨은 줄지 않습니다.</p>
    <p class="item-guide-note">웨이브 동안 공을 한 번도 놓치지 않으면 PERFECT 보너스를 받습니다.</p>
    <p class="item-guide-note">6·12·18·24 스테이지의 마지막 웨이브는 보스전입니다. 장갑 두른 핵은 공을 튕겨 내니 폭탄, 충격탄, 필살기(파워볼 포함)로 장갑부터 깨세요. 같은 쪽 벽돌을 모두 없애도 장갑이 떨어집니다.</p>
    <p class="item-guide-note">사진은 아홉 조각으로 덮여 있고 웨이브마다 세 조각씩 열립니다. 가운데 조각의 핵은 마지막 웨이브에서 좌우 핵을 모두 깬 뒤에야 잠금이 풀립니다.</p>
@@ -342,8 +342,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    description:'12초 동안 패들 폭이 1.55배로 넓어집니다.',
    body:'M-22 0L-14 -8L-14 -4L14 -4L14 -8L22 0L14 8L14 4L-14 4L-14 8Z',
    detail:'M-9 0L9 0'},
-  {id:'pierce',name:'관통',tag:'7초',duration:7,color:'#d82800',rx:10,ry:18,
-   description:'7초 동안 강철을 제외한 벽돌과 핵을 한 번에 관통 파괴합니다.',
+  {id:'pierce',name:'관통',tag:'4초',duration:4,weight:.5,color:'#d82800',rx:10,ry:18,
+   description:'4초 동안 한 번에 깨지는 벽돌은 튕기지 않고 뚫고 지나갑니다. 장갑·강철 벽돌과 핵에서는 튕깁니다.',
    body:'M0 -18L10 -4L4 -6L4 10L7 16L0 13L-7 16L-4 10L-4 -6L-10 -4Z',
    detail:'M0 -9L0 8'},
   {id:'slow',name:'감속',tag:'9초',duration:9,scale:.72,color:'#fca044',rx:12,ry:16,
@@ -365,6 +365,9 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
  ].map(Object.freeze);
  const byId=Object.freeze(Object.assign(Object.create(null),Object.fromEntries(all.map(item=>[item.id,item]))));
  const timedKeys=Object.freeze(all.filter(i=>i.duration).map(i=>i.id));
+ // Drop table: every item weighs 1 unless it says otherwise; r is a uniform draw in [0,1).
+ const totalWeight=all.reduce((n,i)=>n+(i.weight??1),0);
+ function pick(r){let left=r*totalWeight;for(const i of all){left-=i.weight??1;if(left<0)return i.id;}return all[all.length-1].id;}
  function freshBuffs(){return Object.fromEntries(timedKeys.map(id=>[id,0]));}
  function freshCharges(){return {shock:0,magnet:0};}
  function active(g){
@@ -374,7 +377,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
   if(g.charges?.magnet||g.balls.some(b=>b.held))result.push({item:byId.magnet,value:g.charges?.magnet||0,held:g.balls.some(b=>b.held)});
   return result;
  }
- return Object.freeze({all:Object.freeze(all),byId,timedKeys,freshBuffs,freshCharges,active});
+ return Object.freeze({all:Object.freeze(all),byId,timedKeys,freshBuffs,freshCharges,active,pick});
 });
 
 </script>
@@ -388,6 +391,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
 })(typeof globalThis!=='undefined'?globalThis:this,function(Levels,Items){
   'use strict';
   const WIDTH=480,MAX_BALLS=5,EPS=1e-7;
+  // Item drops: a guaranteed capsule every DROP_EVERY broken bricks of a wave, plus a DROP_CHANCE roll on the others.
+  const DROP_EVERY=20,DROP_CHANCE=.035;
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const finite=(v)=>typeof v==='number'&&Number.isFinite(v);
   const copy=(v)=>JSON.parse(JSON.stringify(v));
@@ -549,6 +554,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
           const p=this.paddle;
           if(!ball.power&&ball.y-ball.r<=p.y+p.h/2)offer(sweepCircleRect(ball.x,ball.y,dx,dy,ball.r,{x:p.x-p.w/2,y:p.y,w:p.w,h:p.h}),'paddle');
           if(this.shield>0)offer({t:(this.height-22-ball.r-ball.y)/dy,nx:0,ny:-1},'shield');
+          // A live super ball rebounds off the paddle line instead of leaving; once its life ends it drops out.
+          if(ball.power&&ball.age<(ball.life||0))offer({t:(this.paddle.y-ball.r-ball.y)/dy,nx:0,ny:-1},'floor');
         }
         for(const brick of this.bricks){
           if(!brick.alive)continue;
@@ -568,11 +575,13 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
           ball.y=Math.min(ball.y,p.y-ball.r-.1);p.hit=1;this.combo=0;
           this.emit('paddle',{x:ball.x,y:p.y,edge:Math.abs(offset)>.8});
         }else if(best.type==='brick'){
-          const brick=best.brick,piercing=brick.kind!=='steel'&&!brick.shell&&!brick.locked&&(this.buffs.pierce>0||(ball.power&&brick.kind!=='core'));
+          // Super balls smash through every plain or armored brick. The pierce item only slips through bricks one hit would break anyway.
+          const brick=best.brick,open=brick.kind!=='steel'&&brick.kind!=='core'&&!brick.shell&&!brick.locked;
+          const piercing=open&&(!!ball.power||(this.buffs.pierce>0&&brick.hp<=1));
           const charged=brick.kind!=='steel'&&this.charges.shock>0;
           if(charged)this.charges.shock--;
           const blastX=brick.x+brick.w/2,blastY=brick.y+brick.h/2;
-          this.damageBrick(brick,piercing?brick.hp:ball.power?2:1,{x:ball.x,y:ball.y,vx:ball.vx,vy:ball.vy,power:!!ball.power});best.pierced=piercing;
+          this.damageBrick(brick,piercing?brick.hp:ball.power?(ball.damage||2):1,{x:ball.x,y:ball.y,vx:ball.vx,vy:ball.vy,power:!!ball.power});best.pierced=piercing;
           if(charged)this.shockBlast(blastX,blastY);
           if(!piercing){const dot=ball.vx*best.nx+ball.vy*best.ny;ball.vx-=2*dot*best.nx;ball.vy-=2*dot*best.ny;}
           else {ball.x+=ball.vx*.00002;ball.y+=ball.vy*.00002;}
@@ -580,6 +589,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
         }else{
           const dot=ball.vx*best.nx+ball.vy*best.ny;ball.vx-=2*dot*best.nx;ball.vy-=2*dot*best.ny;
           if(best.type==='shield'){this.shield=0;this.emit('shield',{x:ball.x,y:ball.y});}
+          else if(best.type==='floor')this.emit('floor',{x:ball.x,y:ball.y,level:ball.power});
           else this.emit('wall',{x:ball.x,y:ball.y});
         }
         if(!(best.type==='brick'&&best.pierced)){ball.x+=best.nx*.08;ball.y+=best.ny*.08;}
@@ -606,12 +616,13 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
       }else if(brick.kind==='split'){
         this.addBalls(2);this.emit('split',where);
       }
-      if(this.destroyed%11===0||this.random()<.065){
-        const kinds=Items.all.map(i=>i.id);
-        this.drops.push({id:this.nextId++,x:brick.x+brick.w/2,y:brick.y+brick.h,kind:kinds[Math.floor(this.random()*kinds.length)],age:0});
+      if(this.canDrop(impact)&&(this.destroyed%DROP_EVERY===0||this.random()<DROP_CHANCE)){
+        this.drops.push({id:this.nextId++,x:brick.x+brick.w/2,y:brick.y+brick.h,kind:Items.pick(this.random()),age:0});
         if(this.drops.length>14)this.drops.shift();
       }
     }
+    /** Bricks smashed by a super ball never drop capsules. */
+    canDrop(impact){return !impact.power;}
     addBalls(count=2){
       const src=this.balls.find(b=>!b.held&&b.y<this.paddle.y)||this.balls[0];if(!src)return;
       const angle=Math.atan2(src.vy||-this.speed,src.vx||100);
@@ -674,7 +685,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
           }else if(!savedReady&&['playing','paused'].includes(s.status)&&Math.hypot(b.vx,b.vy)<100)return false;
           if(b.x<15||b.x>465||b.y<80||b.y>s.height+20||Math.abs(b.vx)>1300||Math.abs(b.vy)>1300||b.r<3||b.r>9)return false;
         }
-        if(!s.buffs||!Items.timedKeys.every(k=>finite(s.buffs[k])&&s.buffs[k]>=0&&s.buffs[k]<=Items.byId[k].duration)||![0,1].includes(s.shield))return false;
+        // Timers above an item's current duration come from an older build and are clamped below.
+        if(!s.buffs||!Items.timedKeys.every(k=>finite(s.buffs[k])&&s.buffs[k]>=0)||![0,1].includes(s.shield))return false;
         const charges=s.charges===undefined?Items.freshCharges():s.charges;
         if(!charges||!['shock','magnet'].every(k=>Number.isInteger(charges[k])&&charges[k]>=0&&charges[k]<=Items.byId[k].charges))return false;
         const level=this.makeLevel(s.level,s.difficulty);
@@ -685,7 +697,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
         const keepHeight=this.height;
         this.difficulty=s.difficulty;this.loadLevel(s.level);
         for(const k of ['score','lives','clock','speed','seed','nextId','combo','maxCombo','destroyed','shield'])this[k]=s[k];
-        this.aim=s.aim===undefined?-.22:s.aim;this.buffs=copy(s.buffs);this.charges=copy(charges);this.balls=copy(s.balls).map(b=>({...b,held:b.held===true,holdOffset:b.held?b.holdOffset:0}));this.drops=copy(s.drops);
+        this.aim=s.aim===undefined?-.22:s.aim;this.buffs=Object.fromEntries(Items.timedKeys.map(k=>[k,Math.min(s.buffs[k],Items.byId[k].duration)]));this.charges=copy(charges);this.balls=copy(s.balls).map(b=>({...b,held:b.held===true,holdOffset:b.held?b.holdOffset:0}));this.drops=copy(s.drops);
         const saved=new Map(s.bricks.map(b=>[b.id,b]));for(const b of this.bricks)Object.assign(b,saved.get(b.id));
         this.paddle.x=s.paddle.x;this.paddle.target=clamp(s.paddle.target,20,460);this.paddle.w=this.config().paddle*(this.buffs.wide>0?Items.byId.wide.scale:1);
         this.height=s.height;this.resize(keepHeight);this.updateBricks();
@@ -696,7 +708,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
       }catch(_){return false;}
     }
   }
-  return{Engine,sweepCircleRect,normalizeVelocity,WIDTH,MAX_BALLS,clamp};
+  return{Engine,sweepCircleRect,normalizeVelocity,WIDTH,MAX_BALLS,DROP_EVERY,DROP_CHANCE,clamp};
 });
 
 </script>
@@ -718,6 +730,13 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
  };
  const fresh=()=>({wave:0,opened:[],remaining:0,baseScore:0,baseMaxCombo:0,misses:0,power:0,basePower:0,shells:[]});
  const SUPER_STEP=25,SUPER_MAX=75,isBoss=(index,wave)=>wave===2&&index%6===5;
+ // What each gauge level fires. Every level launches piercing super balls: they smash straight through plain and
+ // armored bricks, hit a core for `core` damage and rebound off the paddle line for `life` seconds before dropping out.
+ // LV3 also sends a screen-wide shock that hits every brick once and cracks boss armor.
+ const SUPER_ATTACKS=Object.freeze([null,
+  Object.freeze({level:1,angles:Object.freeze([0]),r:8,speed:1.15,life:4,core:2,shock:false}),
+  Object.freeze({level:2,angles:Object.freeze([-.3,0,.3]),r:8,speed:1.15,life:3.5,core:2,shock:false}),
+  Object.freeze({level:3,angles:Object.freeze([-.3,0,.3]),r:9,speed:1.2,life:5,core:3,shock:true})]);
  function makeLevel(index=0,difficulty=1,wave=0){
    const l=Levels.makeWave(index,difficulty,wave),order=panelOrder(index);
    for(const b of l.bricks){b.group=b.col<3?0:b.col<7?1:2;b.panel=order[wave*3+b.group];}
@@ -760,21 +779,26 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    emit(type,data={}){if(type==='miss'&&this.reveal)this.reveal.misses=(this.reveal.misses||0)+1;return super.emit(type,data);}
    get isBossWave(){return !!this.reveal&&isBoss(this.level,this.reveal.wave);}
    superLevel(){return Math.floor((this.reveal?.power||0)/SUPER_STEP);}
-   // Spends the whole gauge. LV1: one piercing power ball. LV2: three in a fan. LV3: a screen-wide shock that hits every brick once.
+   // Spends the whole gauge on the attack of the level it has reached (see SUPER_ATTACKS).
    fireSuper(){
-     if(this.status!=='playing'||!this.reveal)return false;const level=this.superLevel();if(level<1)return false;
-     this.reveal.power=0;const p=this.paddle;this.emit('super',{level,x:p.x,y:p.y});
-     if(level<3){
-       const cores=this.bricks.filter(b=>b.alive&&b.kind==='core'&&!b.locked),aimAt=cores.sort((a,b)=>Math.abs(a.x+a.w/2-p.x)-Math.abs(b.x+b.w/2-p.x))[0];
-       const base=aimAt?Core.clamp(Math.atan2(aimAt.x+aimAt.w/2-p.x,p.y-(aimAt.y+aimAt.h/2)),-.6,.6):0;
-       for(const off of level===1?[0]:[-.32,0,.32]){const a=base+off,b=this.newBall(p.x,p.y-12,Math.sin(a)*this.speed*1.1,-Math.cos(a)*this.speed*1.1);b.power=true;b.r=8;this.balls.push(b);}
-       return true;
+     if(this.status!=='playing'||!this.reveal)return false;const level=Math.min(SUPER_ATTACKS.length-1,this.superLevel());if(level<1)return false;
+     const attack=SUPER_ATTACKS[level];this.reveal.power=0;const p=this.paddle;this.emit('super',{level,x:p.x,y:p.y});
+     if(attack.shock){
+       this.supering=true;
+       const targets=this.bricks.filter(b=>b.alive&&b.kind!=='steel').sort((a,b)=>(a.kind==='core')-(b.kind==='core'));
+       for(const b of targets)if(b.alive)this.damageBrick(b,1,{source:'super'});
+       this.supering=false;this.freeze=Math.max(this.freeze,.06);
+       if(this.status!=='playing')return true;
      }
-     this.supering=true;
-     const targets=this.bricks.filter(b=>b.alive&&b.kind!=='steel').sort((a,b)=>(a.kind==='core')-(b.kind==='core'));
-     for(const b of targets)if(b.alive)this.damageBrick(b,1,{source:'super'});
-     this.supering=false;this.freeze=Math.max(this.freeze,.06);return true;
+     const cores=this.bricks.filter(b=>b.alive&&b.kind==='core'&&!b.locked),aimAt=cores.sort((a,b)=>Math.abs(a.x+a.w/2-p.x)-Math.abs(b.x+b.w/2-p.x))[0];
+     const base=aimAt?Core.clamp(Math.atan2(aimAt.x+aimAt.w/2-p.x,p.y-(aimAt.y+aimAt.h/2)),-.6,.6):0,v=this.speed*attack.speed;
+     for(const off of attack.angles){
+       const a=base+off,b=this.newBall(p.x,p.y-attack.r-4,Math.sin(a)*v,-Math.cos(a)*v);
+       b.power=level;b.r=attack.r;b.life=attack.life;b.damage=attack.core;this.balls.push(b);
+     }
+     return true;
    }
+   canDrop(impact){return !this.supering&&super.canDrop(impact);}
    breakShell(b){if(!b.shell)return;b.shell=0;b.flash=1;if(!this.reveal.shells.includes(b.id))this.reveal.shells.push(b.id);this.emit('shell-break',{x:b.x+b.w/2,y:b.y+b.h/2});}
    updateBricks(){super.updateBricks();if(!this.isBossWave)return;for(const b of this.bricks)if(b.boss&&b.alive)b.x=b.bx+Math.sin(this.clock*(.9+this.difficulty*.15)+b.phase)*22;}
    damageBrick(brick,damage=1,impact={}){
@@ -879,7 +903,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
      }catch(_){return false;}
    }
  }
- return {Engine,makeLevel,panelOrder,panels,SUPER_STEP,SUPER_MAX,isBoss,PANELS,CENTER};
+ return {Engine,makeLevel,panelOrder,panels,SUPER_STEP,SUPER_MAX,SUPER_ATTACKS,isBoss,PANELS,CENTER};
 });
 
 </script>
@@ -892,6 +916,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
   const NES={K:'#000000',W:'#fcfcfc',S:'#bcbcbc',G:'#7c7c7c',D:'#404040',R:'#d82800',O:'#fc7460',Y:'#f8b800',L:'#fca044',B:'#0078f8',C:'#3cbcfc',P:'#fc74b4',M:'#940084',V:'#6844fc',E:'#58d854',N:'#00a800',A:'#f0bc3c'};
   const PALETTES=[[NES.R,NES.Y,NES.C,NES.E],[NES.P,NES.B,NES.L,NES.N],[NES.O,NES.V,NES.E,NES.W]];
   const SPECIAL={bomb:NES.R,split:NES.W,steel:NES.A,armor:NES.S};
+  // Super ball colours by gauge level, matching the gauge segments: LV1 cyan, LV2 gold, LV3 red.
+  const SUPER_COLORS=[{a:NES.C,b:NES.B,trail:NES.C},{a:NES.Y,b:NES.O,trail:NES.Y},{a:NES.O,b:NES.R,trail:NES.R}];
   const Items=root.FaultItems,powerColor=Object.fromEntries(Items.all.map(i=>[i.id,i.color]));
   const LETTER={multi:'M',wide:'E',pierce:'P',slow:'S',shield:'B',shock:'X',magnet:'C'};
   // 3x5 capsule glyphs, arcade-style.
@@ -982,9 +1008,21 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
       if(b.kind==='steel'){this.P(c,x0+2,y0+H-4,1,1,NES.W);this.P(c,x0+3,y0+H-5,1,1,NES.W);this.P(c,x0+4,y0+H-6,1,1,NES.W);}
       else if(b.kind==='bomb'){this.P(c,cx-2,cy-1,4,3,NES.K);this.P(c,cx-1,cy-2,2,5,NES.K);this.P(c,cx,cy-3,1,1,NES.Y);this.P(c,cx-1,cy-1,1,1,NES.G);}
       else if(b.kind==='split'){for(const [dx,dy] of [[-3,0],[0,-2],[3,0]])this.P(c,cx+dx-1,cy+dy,2,2,NES.B);}
-      else if(b.maxHp>1){for(let i=0;i<b.hp;i++)this.P(c,Math.round(cx-b.hp*1.5+i*3),cy,2,1,NES.D);if(b.hp<b.maxHp){this.P(c,cx+2,y0+1,1,2,NES.D);this.P(c,cx+1,y0+3,1,2,NES.D);}}
+      else if(b.maxHp>1){if(b.hp<b.maxHp)this.brickCracks(c,b,x0,y0,W,H,color);for(let i=0;i<b.hp;i++)this.P(c,Math.round(cx-b.hp*1.5+i*3),cy,2,1,NES.D);}
       if(b.moving){this.P(c,x0+1,cy,1,1,NES.K);this.P(c,x0+W-3,cy,1,1,NES.K);}
       c.globalAlpha=1;
+    }
+    // Pixel fracture on a damaged armored brick: a jagged main crack from a per-brick impact column that runs further,
+    // forks and finally chips a corner as the damage grows. Dark crack pixels get a lit edge so they read as cut in.
+    brickCracks(c,b,x0,y0,W,H,color){
+      const d=Math.min(3,b.maxHp-b.hp),dark=shade(color,-.62),lit=shade(color,.5),seed=(b.id*2654435761)>>>0;
+      const bit=n=>(seed>>>n)&1,col=3+(seed%Math.max(1,W-7)),len=Math.min(H-2,d===1?Math.ceil(H*.55):H-2);
+      let x=x0+col;for(let j=0;j<len;j++){
+        if(j&&bit(j%24))x+=bit((j+7)%24)?1:-1;x=Math.max(x0+2,Math.min(x0+W-3,x));
+        this.P(c,x,y0+1+j,1,1,dark);this.P(c,x+1,y0+1+j,1,1,lit);
+        if(d>=2&&j===2){const s=bit(3)?1:-1;for(let k=1;k<5;k++){const bx=x+s*k,by=y0+3+j+(k>>1);if(bx<=x0+1||bx>=x0+W-2||by>=y0+H-2)break;this.P(c,bx,by,1,1,dark);this.P(c,bx,by+1,1,1,lit);}}
+      }
+      if(d>=3){const right=bit(5),cx=right?x0+W-4:x0+1,cy=bit(6)?y0+H-4:y0+1;this.P(c,cx,cy,2,2,NES.K);this.P(c,right?cx-1:cx+2,cy,1,2,dark);}
     }
     camera(c){if(this.settings.shake&&!this.settings.lowEffects&&this.shake>.4)c.translate(Math.round((this.random()-.5)*this.shake*this.sx)/this.sx,Math.round((this.random()-.5)*this.shake*.65*this.sy)/this.sy);}
     drawWalls(c,H){
@@ -1007,6 +1045,9 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
       if(g.status!=='home'){
         const p=g.paddle;
         if(g.shield){for(let x=26;x<454;x+=4*u)this.R(c,x,H-22,2*u,u,Math.floor(this.time*8)%2?NES.C:NES.B);}
+        // Live super balls rebound off the paddle line; it blinks during the last second.
+        let floor=0,floorLevel=1;for(const b of g.balls)if(b.power&&b.age<(b.life||0)&&b.life-b.age>floor){floor=b.life-b.age;floorLevel=b.power;}
+        if(floor&&(floor>1||Math.floor(this.time*10)%2)){const col=SUPER_COLORS[Math.min(3,floorLevel)-1].trail;for(let x=26;x<454;x+=6*u)this.R(c,x,p.y-u,2*u,u,col);}
         // Vaus-style paddle: red caps, blue joints, silver body.
         const [PX,PY,PW,PH]=this.R(c,p.x-p.w/2,p.y,p.w,p.h,NES.K),body=g.buffs.pierce>0?NES.L:NES.S;
         this.P(c,PX+3,PY,PW-6,PH,body);this.P(c,PX+3,PY,PW-6,1,NES.W);this.P(c,PX+3,PY+PH-1,PW-6,1,NES.G);
@@ -1019,8 +1060,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
         for(const b of g.balls){
           if(g.charges.shock&&!b.held){for(let k=0;k<4;k++){const a=k*Math.PI/2+this.time*4;this.R(c,b.x+Math.cos(a)*10,b.y+Math.sin(a)*10,u,u,powerColor.shock);}}
           if(b.held){for(const [dx,dy] of [[-8,-8],[6,-8],[-8,6],[6,6]])this.R(c,b.x+dx,b.y+dy,2*u,2*u,powerColor.magnet);}
-          if(b.power){const pts=this.trails.get(b.id)||[];c.globalAlpha=.5;for(const q of pts)this.sprite(c,q.x,q.y,['.RR.','RRRR','RRRR','.RR.'],{R:NES.R});c.globalAlpha=1;
-            const flip=Math.floor(this.time*15)%2;this.sprite(c,b.x,b.y,POWER,{K:NES.K,Y:flip?NES.Y:NES.W,W:NES.W,R:flip?NES.R:NES.Y});}
+          if(b.power){const pal=SUPER_COLORS[Math.min(3,b.power|0||1)-1],pts=this.trails.get(b.id)||[];c.globalAlpha=.5;for(const q of pts)this.sprite(c,q.x,q.y,['.RR.','RRRR','RRRR','.RR.'],{R:pal.trail});c.globalAlpha=1;
+            const flip=Math.floor(this.time*15)%2;this.sprite(c,b.x,b.y,POWER,{K:NES.K,Y:flip?pal.a:NES.W,W:NES.W,R:flip?pal.b:pal.a});}
           else{if(!b.held&&!ready){const pts=this.trails.get(b.id)||[];c.globalAlpha=.5;for(let k=Math.max(0,pts.length-3);k<pts.length-1;k++)this.sprite(c,pts[k].x,pts[k].y,['.CC.','CCCC','CCCC','.CC.'],{C:g.buffs.pierce>0?NES.L:NES.C});c.globalAlpha=1;}
             this.sprite(c,b.x,b.y,BALL,{K:NES.K,W:NES.W,S:g.buffs.pierce>0?NES.L:NES.S});}
         }
@@ -1062,8 +1103,32 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
  function path(c,p){c.beginPath();p.forEach((v,i)=>i?c.lineTo(v[0],v[1]):c.moveTo(v[0],v[1]));c.closePath();}
  function polyArea(p){let a=0;for(let i=0;i<p.length;i++){const u=p[i],v=p[(i+1)%p.length];a+=u[0]*v[1]-v[0]*u[1];}return Math.abs(a)/2;}
  function center(p){return p.reduce((a,v)=>[a[0]+v[0]/p.length,a[1]+v[1]/p.length],[0,0]);}
+ // Fracture pattern around one impact point, built once: radial cracks that wander and fork, then web rings that
+ // bridge neighbouring rays. segs is flat [x1,y1,x2,y2,stage,width,...]; a segment shows once the impact's
+ // growth passes its stage, so repeated hits lengthen the rays and close the web. hub is the crushed zone outline.
+ const FRACTURE_MAX=3,FRACTURE_REACH=46,FRACTURE_LEVELS=5;
+ function fractureTree(x,y,seed){
+  let st=seed>>>0||1;const rnd=()=>{st=(st+0x6D2B79F5)>>>0;let t=Math.imul(st^st>>>15,1|st);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};
+  const segs=[],hub=[],rays=5+Math.floor(rnd()*2),nodes=[],spin=rnd()*tau;
+  for(let k=0;k<rays;k++){
+   let a=spin+(k+(rnd()-.5)*.55)/rays*tau,px=x,py=y;const row=[];
+   for(let s=0;s<5;s++){
+    const len=(s?9:6)+rnd()*9+s*1.5;a+=(rnd()-.5)*.62;const nx=px+Math.cos(a)*len,ny=py+Math.sin(a)*len*.92;
+    segs.push(px,py,nx,ny,s,s<2?2:1);row.push([nx,ny]);if(s===0)hub.push([px+(nx-px)*.55,py+(ny-py)*.55]);
+    if(s>=1&&s<4&&rnd()<.5){let ba=a+(rnd()<.5?-1:1)*(.45+rnd()*.5),bx=nx,by=ny;
+     for(let j=0;j<2;j++){const bl=(5+rnd()*6)*(j?.7:1);ba+=(rnd()-.5)*.5;const ex=bx+Math.cos(ba)*bl,ey=by+Math.sin(ba)*bl*.92;segs.push(bx,by,ex,ey,s+1+j,1);bx=ex;by=ey;}}
+    px=nx;py=ny;
+   }
+   nodes.push(row);
+  }
+  for(const ring of [1,3])for(let k=0;k<rays;k++){
+   const a=nodes[k][ring],b=nodes[(k+1)%rays][ring],mx=(a[0]+b[0])/2+(rnd()-.5)*6,my=(a[1]+b[1])/2+(rnd()-.5)*6,stage=ring+1.4+rnd()*.8;
+   segs.push(a[0],a[1],mx,my,stage,1,mx,my,b[0],b[1],stage+.3,1);
+  }
+  return {x,y,level:0,grow:0,segs,hub};
+ }
  class Renderer extends root.FaultRenderer{
-  constructor(canvas,engine,settings,cover){super(canvas,engine,settings);this.cover=cover;this.cc=cover.getContext('2d',{alpha:true,willReadFrequently:true});this.seals=[];this.ruptures=[];this.links=[];this.cracks=Array(9).fill(0);this.energy=Array(9).fill(0);this.kick={x:0,y:0,vx:0,vy:0};this.kickPower=0;this.windows=new Map();this.banners=[];this.flash=0;}
+  constructor(canvas,engine,settings,cover){super(canvas,engine,settings);this.cover=cover;this.cc=cover.getContext('2d',{alpha:true,willReadFrequently:true});this.seals=[];this.ruptures=[];this.links=[];this.fractures=Array.from({length:9},()=>[]);this.energy=Array(9).fill(0);this.kick={x:0,y:0,vx:0,vy:0};this.kickPower=0;this.windows=new Map();this.banners=[];this.flash=0;}
   resize(w,h){super.resize(w,h);this.cover.width=this.canvas.width;this.cover.height=this.canvas.height;this.sealKey=null;this.ensureSeals();}
   // Plate cuts are seeded per stage, so every stage breaks along different lines.
   ensureSeals(){const key=this.g.level+':'+this.g.height+':'+this.sx;if(key===this.sealKey&&this.seals.length)return;this.sealKey=key;this.seals=root.FaultReveal.panels(480,this.g.height,this.g.level);this.sealAreas=this.seals.map(polyArea);this.tiles=this.seals.map((_,id)=>this.tile(id));}
@@ -1079,7 +1144,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    for(let id=0;id<9;id++){if(g.reveal.opened.includes(id))continue;const w=this.windowShape(id);if(w)seen+=Math.min(this.sealAreas[id],polyArea(w.pts));}
    return clamp(seen/total*100,0,100);
   }
-  reset(){super.reset();this.ruptures=[];this.links=[];this.cracks=Array(9).fill(0);this.energy=Array(9).fill(0);this.kick={x:0,y:0,vx:0,vy:0};this.kickPower=0;this.windows.clear();this.banners=[];this.flash=0;}
+  reset(){super.reset();this.ruptures=[];this.links=[];this.fractures=Array.from({length:9},()=>[]);this.energy=Array(9).fill(0);this.kick={x:0,y:0,vx:0,vy:0};this.kickPower=0;this.windows.clear();this.banners=[];this.flash=0;}
   strength(){return [.5,1,1.55][this.settings.impact??2];}
   impulse(x,y,power){const k=this.strength();this.kick.vx+=clamp((240-x)/170,-1,1)*power*k*32;this.kick.vy+=clamp((this.g.height*.6-y)/280,-1,1)*power*k*23;this.kick.vx=clamp(this.kick.vx,-230,230);this.kick.vy=clamp(this.kick.vy,-210,210);this.kickPower=Math.max(this.kickPower,power);}
   camera(c){if(this.settings.shake&&!this.settings.lowEffects)c.translate(Math.round(this.kick.x*this.sx)/this.sx,Math.round(this.kick.y*this.sy)/this.sy);}
@@ -1105,7 +1170,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    if(e.type==='magnet-release')this.impulse(e.x,e.y,2.2);
    if(e.type==='miss')this.impulse(240,this.g.height-100,5);
    if(e.type==='fracture'&&Number.isInteger(e.panel)){
-    this.cracks[e.panel]=Math.min(12,this.cracks[e.panel]+(e.core?2:1));this.energy[e.panel]=e.core?1:.5;
+    this.crack(e.panel,e.x,e.y,e.core?2:1);this.energy[e.panel]=e.core?1:.5;
     if(e.core){const to=center(this.seals[e.panel]);this.links.push({x:e.x,y:e.y,to,life:.36});if(this.links.length>8)this.links.shift();}
    }
    if(e.type==='collapse'){
@@ -1130,6 +1195,8 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    if(this.g.status!=='paused'){for(const r of this.ruptures)r.age+=dt;this.easeWindows(dt);}
    this.ruptures=this.ruptures.filter(r=>r.age<r.ttl);
    for(let i=0;i<9;i++)this.energy[i]=Math.max(0,this.energy[i]-dt*2.4);
+   // Cracks run out over a few frames instead of popping in.
+   const ease=Math.min(1,dt*9);for(const list of this.fractures)for(const f of list){const target=f.level?.6+f.level*1.25:0;if(f.grow<target)f.grow=Math.min(target,f.grow+Math.max(.02,(target-f.grow)*ease));}
    for(const l of this.links)l.life-=dt;this.links=this.links.filter(l=>l.life>0);
   }
   drawBrick(c,b,alpha=1){
@@ -1146,6 +1213,14 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    this.P(c,X+1,Y+1,W-2,H-2,b.flash>.45?N.W:cyc);this.P(c,X+3,Y+3,W-6,H-6,N.K);
    const cx=X+(W>>1),cy=Y+(H>>1);for(let k=0;k<3;k++){this.P(c,cx-k,cy-2+k,1,1,cyc);this.P(c,cx+k,cy-2+k,1,1,cyc);this.P(c,cx-k,cy+2-k,1,1,cyc);this.P(c,cx+k,cy+2-k,1,1,cyc);}
    for(let i=0;i<b.maxHp;i++)this.P(c,cx-b.maxHp*2+i*4+1,Y+H+1,2,1,i<b.hp?N.Y:N.D);
+  }
+  // Hits near an existing impact deepen it; others start a new one until the plate holds FRACTURE_MAX of them.
+  crack(id,x,y,steps){
+   const list=this.fractures[id];let best=null,dist=1e9;
+   for(const f of list){const d=Math.hypot(f.x-x,f.y-y);if(d<dist){dist=d;best=f;}}
+   if(!best||(dist>FRACTURE_REACH&&list.length<FRACTURE_MAX)){best=fractureTree(x,y,(id+1)*7919+Math.round(x)*131+Math.round(y)*31+list.length*977);list.push(best);}
+   const before=best.level;best.level=Math.min(FRACTURE_LEVELS,best.level+steps);
+   if(best.level>before&&!this.settings.lowEffects)this.spawn(best.x,best.y,'#aeb4c2',best.level>=3?4:2,.55);
   }
   winKey(id){return this.g.level+':'+(this.g.reveal?.wave||0)+':'+id;}
   // One window per plate that widens as its bricks fall; it opens toward where you have been hitting.
@@ -1177,8 +1252,7 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
   plate(c,p,id,opacity=1){
    const N=root.FaultRenderer.NES,o=center(p),u=this.u;c.save();path(c,p);c.clip();c.globalAlpha=opacity;
    c.fillStyle=this.tiles?.[id]||'#24188c';c.fillRect(0,0,480,this.g.height);
-   const n=this.cracks[id]||0;if(n){c.strokeStyle=this.energy[id]>.3?N.W:N.K;c.lineWidth=u;c.beginPath();
-    let x=o[0]-24,y=o[1]-38;c.moveTo(x,y);for(let i=0;i<Math.min(8,n+1);i++){x+=Math.sin((id+1)*7+i*9)*26;y+=14+Math.cos(i*7+id)*8;c.lineTo(x,y);if(i%2){c.moveTo(x,y);c.lineTo(x+22,y-14);c.moveTo(x,y);}}c.stroke();}
+   if(this.fractures[id].length)this.drawFractures(c,id,opacity);
    const win=this.windowShape(id);
    if(win){
     c.globalCompositeOperation='destination-out';c.globalAlpha=1;c.fillStyle='#000';path(c,win.pts);c.fill();
@@ -1187,6 +1261,21 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    }
    c.restore();c.save();c.globalAlpha=opacity;path(c,p);c.lineWidth=3*u;c.strokeStyle=N.K;c.stroke();
    path(c,p);c.lineWidth=u;c.strokeStyle=this.energy[id]>.05&&Math.floor(this.time*20)%2?N.Y:N.S;c.stroke();c.restore();
+  }
+  // Crushed zone, then each visible crack as a lit lower edge under a dark cut; the main rays near the hub are wider.
+  drawFractures(c,id,opacity){
+   const N=root.FaultRenderer.NES,u=this.u,list=this.fractures[id],hot=this.energy[id]>.3;
+   c.globalAlpha=opacity*.4;c.fillStyle=N.K;
+   for(const f of list){const k=Math.min(1,f.grow/2.5),h=f.hub;if(k<=0)continue;c.beginPath();for(let i=0;i<h.length;i++){const x=f.x+(h[i][0]-f.x)*k,y=f.y+(h[i][1]-f.y)*k;if(i)c.lineTo(x,y);else c.moveTo(x,y);}c.closePath();c.fill();}
+   c.globalAlpha=opacity;
+   for(let pass=0;pass<3;pass++){
+    const off=pass===0?u:0;c.beginPath();
+    for(const f of list){const s=f.segs,g=f.grow;for(let i=0;i<s.length;i+=6){
+     const stage=s[i+4];if(stage>=g||(pass===2&&s[i+5]<2))continue;const t=Math.min(1,g-stage);
+     c.moveTo(s[i]+off,s[i+1]+off);c.lineTo(s[i]+(s[i+2]-s[i])*t+off,s[i+1]+(s[i+3]-s[i+1])*t+off);
+    }}
+    c.lineWidth=pass===2?2*u:u;c.strokeStyle=pass===0?'#8d93a3':hot?N.W:N.K;c.stroke();
+   }
   }
   drawCovers(){
    const c=this.cc,N=root.FaultRenderer.NES,u=this.u;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,this.cover.width,this.cover.height);c.setTransform(this.sx,0,0,this.sy,0,0);
@@ -1229,9 +1318,10 @@ body.host-lakomics .image-actions,body.host-lakomics #home-image{display:none!im
    const g=this.g;if(!g.reveal||g.status==='home')return;const c=this.c,N=root.FaultRenderer.NES,F=root.FaultReveal,H=g.height,y=H-64,u=this.u,cell=u,x0=240-(F.SUPER_MAX*(cell+u)+6*u)/2,power=g.reveal.power||0,lv=Math.floor(power/F.SUPER_STEP),blink=Math.floor(this.time*4)%2;
    c.save();c.setTransform(this.sx,0,0,this.sy,0,0);
    this.R(c,x0-2*u,y-2*u,F.SUPER_MAX*(cell+u)+10*u,7*u,N.K);
-   for(let i=0;i<F.SUPER_MAX;i++){const seg=Math.floor(i/F.SUPER_STEP),x=x0+i*(cell+u)+seg*3*u,on=i<power;this.R(c,x,y,cell,3*u,on?(seg<lv?[N.C,N.Y,N.R][seg]:N.B):N.D);}
+   for(let i=0;i<F.SUPER_MAX;i++){const seg=Math.floor(i/F.SUPER_STEP),x=x0+i*(cell+u)+seg*3*u,on=i<power;this.R(c,x,y,cell,3*u,on?(seg<lv?[N.C,N.Y,N.R][seg]:N.G):N.D);}
    this.text(c,'SP',x0-5*u,y-5*u,{color:lv?N.C:N.G,align:'right'});
-   if(lv&&(blink||g.status!=='playing'))this.text(c,'LV'+lv,x0+F.SUPER_MAX*(cell+u)+12*u,y-5*u,{color:N.Y});
+   // The label is the level a double tap fires right now; a part-filled segment stays grey until it completes.
+   if(lv)this.text(c,'LV'+lv,x0+F.SUPER_MAX*(cell+u)+12*u,y-5*u,{color:blink&&g.status==='playing'?N.W:[N.C,N.Y,N.R][Math.min(3,lv)-1]});
    c.restore();
   }
   drawBanners(c){

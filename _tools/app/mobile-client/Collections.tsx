@@ -434,6 +434,9 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
+  // The type switch lives in the list bar (also while searching) so it stays in reach after
+  // scrolling; 신간 and search keep the right edge like the other tabs' actions.
+  const typeSwitch=<div className="library-segments collection-type-switch" role="tablist" aria-label="컬렉션 유형">{TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>chooseTab(value)}>{labels[value]}</button>)}</div>;
   const header=selected
     ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
     :inboxOpen
@@ -444,8 +447,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
         ?<TopBarSearch title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
-        </form></TopBarSearch>
-        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={<><button className="collection-release-chip" aria-label={releases.unread>0?`신간 보기, 새 알림 ${releases.unread}개`:'신간 보기'} onClick={openInbox}>신간{releases.unread>0&&<span className="collection-release-count numeric">{releases.unread.toLocaleString()}</span>}</button>{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}</>}/>;
+        </form>{typeSwitch}</TopBarSearch>
+        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{typeSwitch}<button className="collection-release-chip" aria-label={releases.unread>0?`신간 보기, 새 알림 ${releases.unread}개`:'신간 보기'} onClick={openInbox}>신간{releases.unread>0&&<span className="collection-release-count numeric">{releases.unread.toLocaleString()}</span>}</button>{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}</>}/>;
 
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{main.legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>;
@@ -456,7 +459,6 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
     {header}
     <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll||inboxOpen?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
-      <div className="library-segments collection-segments" role="tablist" aria-label="컬렉션 유형">{TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>chooseTab(value)}>{labels[value]}</button>)}</div>
       {tab==='av'?<div className="empty-state"><RectangleStackIcon/><h2>AV 컬렉션은 준비 중입니다</h2><p>PC 앱에서 AV 컬렉션이 준비되면 여기에 표시됩니다.</p></div>:<>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:<>

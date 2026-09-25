@@ -76,9 +76,15 @@ public final class MainActivity extends Activity {
  @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);vault=new PrivateVault(this,state->emit("lakomics-vault",state));
   try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
   getWindow().setStatusBarColor(Color.rgb(16,17,18));getWindow().setNavigationBarColor(Color.rgb(16,17,18));
-  web=new WebView(this);web.setBackgroundColor(Color.rgb(16,17,18));setContentView(web);
+  web=new WebView(this);web.setBackgroundColor(Color.rgb(16,17,18));
+  android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.setBackgroundColor(Color.rgb(16,17,18));frame.addView(web,new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));setContentView(frame);
   hideStatusBar();
-  web.setOnApplyWindowInsetsListener((v,insets)->{if(Build.VERSION.SDK_INT>=30){android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.ime());v.setPadding(i.left,i.top,i.right,i.bottom);}else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
+  // Edge-to-edge (targetSdk 35 on Android 15+) no longer resizes the window for the soft
+  // keyboard, and a WebView ignores its own padding, so the page never learned the keyboard
+  // covered it. The frame pads the keyboard's height below the WebView, shrinking the page
+  // above the keyboard as adjustResize did, and hands the WebView the insets without it.
+  if(Build.VERSION.SDK_INT>=30)frame.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(0,0,0,insets.getInsets(WindowInsets.Type.ime()).bottom);return new WindowInsets.Builder(insets).setInsets(WindowInsets.Type.ime(),android.graphics.Insets.NONE).build();});
+  web.setOnApplyWindowInsetsListener((v,insets)->{if(Build.VERSION.SDK_INT>=30){android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(i.left,i.top,i.right,i.bottom);}else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
   WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);s.setJavaScriptCanOpenWindowsAutomatically(false);s.setSupportMultipleWindows(false);s.setSaveFormData(false);s.setSafeBrowsingEnabled(true);
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(false);
   web.addJavascriptInterface(new Bridge(),"LakomicsNative");ExchangeService.get(this).addListener(exchangeListener);

@@ -755,3 +755,65 @@ test('posts just below the viewport are translated ahead, after the ones on scre
   assert.deepEqual(sent,['On screen post','Ahead post']);
   assert.equal(options.rootMargin,'25% 0px 150% 0px'); w.close();
 });
+
+function showMoreWindow(url, html) {
+  const dom=new JSDOM(html,{url,runScripts:'outside-only'}); const w=dom.window, clock=fakeTimers(w), sent=[];
+  for(const [i,el] of [...w.document.querySelectorAll('[data-testid="tweetText"]')].entries()) el.getBoundingClientRect=()=>({width:300,height:30,top:10+i*40,bottom:40+i*40});
+  w.IntersectionObserver=class{observe(){} unobserve(){}};
+  w.chrome={runtime:{sendMessage(message,callback){
+    if(message.type==='translation:settings') return callback({ok:true,enabled:true,hasApiKey:true});
+    if(message.type==='translation:request'){sent.push(message.text); return callback({ok:true,text:'번역'});}
+    sent.push(...message.items.map(item=>item.text)); callback({ok:true,items:message.items.map(item=>({id:item.id,ok:true,text:'번역'}))});
+  }},storage:{onChanged:{addListener(){}}}};
+  return {w,clock,sent};
+}
+const mainTweet=(more,quote='')=>`<article data-testid="tweet" tabindex="-1"><div data-testid="tweetText" lang="en" id="main">Beginning of a long post</div>${more}${quote}<a href="/author/status/100"><time>now</time></a></article>`;
+const reply=`<article data-testid="tweet" tabindex="0"><div data-testid="tweetText" lang="en" id="reply">A truncated reply</div><button data-testid="tweet-text-show-more-link" id="reply-more">Show more</button><a href="/other/status/200"><time>now</time></a></article>`;
+const quoteCard=`<div role="link" tabindex="0"><div data-testid="tweetText" lang="en" id="quote">A truncated quote</div><button data-testid="tweet-text-show-more-link" id="quote-more">Show more</button></div>`;
+
+test('the main tweet on its own page is expanded in place before its full text is translated; replies and quotes are untouched',async()=>{
+  const {w,clock,sent}=showMoreWindow('https://x.com/author/status/100',mainTweet('<button data-testid="tweet-text-show-more-link" id="more">Show more</button>',quoteCard)+reply);
+  const clicks=[];
+  for(const id of ['more','reply-more','quote-more']) w.document.getElementById(id).addEventListener('click',()=>{clicks.push(id);});
+  // X swaps in the full text a moment later and drops the control.
+  w.document.getElementById('more').addEventListener('click',()=>w.setTimeout(()=>{
+    w.document.getElementById('main').textContent='Beginning of a long post and the rest of it'; w.document.getElementById('more').remove();
+  },300));
+  w.eval(content); await clock.advance(1000);
+  assert.deepEqual(clicks,['more']);
+  assert.equal(sent.includes('Beginning of a long post'),false,'the truncated text must not be sent');
+  assert.equal(sent.filter(text=>text==='Beginning of a long post and the rest of it').length,1);
+  assert.ok(sent.includes('A truncated reply')); assert.ok(sent.includes('A truncated quote'));
+  assert.equal(w.document.getElementById('main').nextElementSibling.textContent,'번역'); w.close();
+});
+
+test('the main tweet falls back to its visible text when Show more does not expand it',async()=>{
+  const {w,clock,sent}=showMoreWindow('https://x.com/author/status/100',mainTweet('<button data-testid="tweet-text-show-more-link" id="more">Show more</button>'));
+  let clicks=0; w.document.getElementById('more').addEventListener('click',()=>{clicks+=1;});
+  w.eval(content); await clock.advance(1000);
+  assert.equal(clicks,1); assert.deepEqual(sent,[]);
+  await clock.advance(1000);
+  assert.deepEqual(sent,['Beginning of a long post']); assert.equal(clicks,1);
+  await clock.advance(2000); assert.equal(clicks,1,'expansion is attempted once'); w.close();
+});
+
+test('Show more is never pressed when it would navigate: links, timeline posts and non-main tweets',async()=>{
+  const cases=[
+    ['https://x.com/author/status/100',mainTweet('<a href="/author/status/100" data-testid="tweet-text-show-more-link" id="more">Show more</a>')],
+    ['https://x.com/home',mainTweet('<button data-testid="tweet-text-show-more-link" id="more">Show more</button>').replace('tabindex="-1"','tabindex="0"')],
+    ['https://x.com/author/status/999',mainTweet('<button data-testid="tweet-text-show-more-link" id="more">Show more</button>').replace('tabindex="-1"','tabindex="0"')],
+  ];
+  for(const [url,html] of cases){
+    const {w,clock,sent}=showMoreWindow(url,html);
+    let clicks=0; w.document.getElementById('more').addEventListener('click',event=>{clicks+=1; event.preventDefault();});
+    w.eval(content); await clock.advance(200);
+    assert.equal(clicks,0,url); assert.deepEqual(sent,['Beginning of a long post'],url); w.close();
+  }
+});
+
+test('the main tweet is recognized by its own timestamp link when X drops the focus marker',async()=>{
+  const {w,clock,sent}=showMoreWindow('https://x.com/author/status/100',mainTweet('<button data-testid="tweet-text-show-more-link" id="more">Show more</button>').replace('tabindex="-1"','tabindex="0"'));
+  let clicks=0; w.document.getElementById('more').addEventListener('click',()=>{clicks+=1;});
+  w.eval(content); await clock.advance(200);
+  assert.equal(clicks,1); assert.deepEqual(sent,[]); w.close();
+});

@@ -239,3 +239,16 @@
 .collection-bar-pending{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:50%;background:transparent;pointer-events:none}
 .collection-bar-action.is-pending .collection-bar-pending{background:var(--color-text)}
 .collection-toast{position:fixed;z-index:190;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));width:max-content;max-width:calc(100vw - 2*var(--mobile-gutter,16px));margin:0;padding:10px 14px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-sidebar);color:var(--color-text);box-shadow:var(--shadow-dialog);font-size:13px}
+/* 게임 / 만화 / 영화 / AV: the library segment look, compacted into the list bar before its
+   actions. The segments are 40px tall; each hit area extends to 56px so the bar stays one row. */
+.top-bar .collection-type-switch{flex-shrink:0;margin:0 8px 0 0;overflow:visible}
+.top-bar.is-search .collection-type-switch{margin:0 0 0 4px}
+.top-bar.is-search:has(>.collection-type-switch){padding-right:6px}
+.top-bar .collection-type-switch button{position:relative;flex:0 0 auto;min-width:58px;min-height:40px;padding:0 14px;font:inherit;font-size:14px;cursor:pointer}
+.top-bar .collection-type-switch button::before{content:'';position:absolute;inset:-8px 0}
+.top-bar .collection-type-switch button:first-child{border-radius:3px 0 0 3px}
+.top-bar .collection-type-switch button:last-child{border-radius:0 3px 3px 0}
+.top-bar .collection-type-switch button:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px;z-index:1}
+.collection-list{padding-top:6px}
+/* Narrow phones: tighter segments; while searching the field keeps the room. */
+@media(max-width:600px){.top-bar .collection-type-switch button{min-width:0;padding:0 10px}.top-bar.is-search .collection-type-switch{display:none}}

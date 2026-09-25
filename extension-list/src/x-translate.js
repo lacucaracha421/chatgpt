@@ -9,6 +9,8 @@
   const RETRY_DELAY_CAP_MS = 60000;
   const RETRY_DELAY_DEFAULT_MS = 1500;
   const MAX_IN_FLIGHT = 2;
+  const SHOW_MORE = '[data-testid="tweet-text-show-more-link"]';
+  const EXPAND_WAIT_MS = 1500;
   let enabled = false, hasApiKey = false, blocked = false, epoch = 0, running = false, timer = null, requestSerial = 0, fastLanePending = true, inFlight = 0;
   let initialSettings = null;
   // requested holds elements whose request (or queued fallback) is outstanding, so the
@@ -16,6 +18,8 @@
   const pending = new Set(), observed = new Set(), requested = new Set(), fallbacks = [];
   let completed = new WeakMap(), failures = new WeakMap(), outsideViewport = new WeakSet(), intersection, ui;
   const rendered = new Map(), toggles = new Map();
+  // Main-tweet articles whose "Show more" was pressed, with the time to stop waiting.
+  const expansions = new WeakMap();
 
   function send(message) {
     return new Promise(resolve => {
@@ -53,6 +57,43 @@
     if (lang && lang !== "und" && lang !== "zxx") return true;
     const korean = prose.match(/[가-힣ㄱ-ㅎㅏ-ㅣ]/g) || [];
     return korean.length / letters.length < 0.55;
+  }
+  // On a post's own page the main tweet may be cut short behind "Show more", which there
+  // expands in place. Only that tweet is expanded, never replies, quotes or timeline
+  // posts (where the control can open the post), and never through a link.
+  function insideQuote(node, article) {
+    const quote = node.closest('[role="link"]');
+    return Boolean(quote && article.contains(quote));
+  }
+  function mainArticle(element) {
+    const id = location.pathname.match(/^\/[^/]+\/status\/(\d+)/)?.[1];
+    const article = id && element.closest('article[data-testid="tweet"]');
+    if (!article || insideQuote(element, article)) return null;
+    if (article.getAttribute("tabindex") === "-1") return article;
+    const own = [...article.querySelectorAll('a[href*="/status/"]')].some(link => {
+      if (!link.querySelector("time") || insideQuote(link, article)) return false;
+      try { return new URL(link.href, location.href).pathname.match(/\/status\/(\d+)\/?$/)?.[1] === id; } catch { return false; }
+    });
+    return own ? article : null;
+  }
+  function inlineShowMore(element) {
+    const article = mainArticle(element);
+    if (!article) return null;
+    const control = [...article.querySelectorAll(SHOW_MORE)].find(node => !insideQuote(node, article));
+    return control && !control.closest('a[href], [role="link"]') ? control : null;
+  }
+  // True while the main tweet's full text is still being revealed; after the bounded
+  // wait the visible text is translated instead.
+  function holdForExpansion(element) {
+    const control = inlineShowMore(element);
+    if (!control) return false;
+    const article = control.closest('article');
+    const state = expansions.get(article);
+    if (state) return Date.now() < state.until;
+    expansions.set(article, { until: Date.now() + EXPAND_WAIT_MS });
+    try { control.click(); } catch {}
+    setTimeout(() => scan(), EXPAND_WAIT_MS + 20);
+    return true;
   }
   // Posts up to 1.5 screens below (and a quarter screen above) are translated ahead
   // while the slots are free, so they are usually ready on arrival; posts on screen
@@ -218,6 +259,8 @@
       // is dropped and the new text is requested once the slot frees.
       if (requested.has(element)) continue;
       pending.delete(element);
+      // A rescan re-queues it once the expanded text renders or the wait runs out.
+      if (holdForExpansion(element)) continue;
       const snapshot = source(element);
       // DOM scans must not bypass a cooldown or retry an unchanged failed post.
       if (failuresFor(element, snapshot.signature)?.nextAttemptAt > Date.now()) continue;
