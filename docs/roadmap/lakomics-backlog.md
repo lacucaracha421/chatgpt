@@ -177,23 +177,23 @@ NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009
 
 ## USER-REQ-20260926 — User requests, 2026-09-26
 
-Status: `TODO` — recorded as given; scope and priority to be confirmed per item. NovelAI app items are in `nai_frontend/docs/BACKLOG.md` (NAI-011).
+Status: `TODO` — details clarified by the user 2026-09-26. NovelAI app items are in `nai_frontend/docs/BACKLOG.md` (NAI-011).
 
 Collector (`extension-list/`):
-- Translation: translate a tweet based on its fully expanded text (all "show more" / truncated parts expanded first).
+- Translation of long tweets: when the main tweet is truncated, the translation covers only the visible part; the user must press "더 보기" first to get a full translation. Expand the main tweet's full text before translating (main tweet only).
 
 Fault game (`_tools/app/mobile-client/FaultGame.tsx`):
-- Too many items drop.
-- The crack effect looks poor; redo it.
-- The power ball is too strong.
-- Lv1 is too weak.
-- Check whether using a skill at Lv3 actually fires the Lv3 version.
+- Item drops are too frequent overall; reduce across the board.
+- The crack effect looks fake; make it more convincing.
+- The piercing ball item is far too strong; nerf it.
+- The special attack (fires a strong ball) is too weak at Lv1; consider moving piercing to the special attack instead of the item.
+- Bug: using the special attack at Lv2/Lv3 does not seem to fire that level's attack; verify and fix so the current level's attack fires.
 
 Mobile app:
-- Video playback delay (slow start).
-- Move the 게임 / 만화 / 영화 / AV filter into the top bar.
-- Notes: the editor is still covered by the keyboard in places; make it possible to scroll down so the text being typed stays visible.
-- Covers load slowly right after the app starts (check during PERF-ALL-001).
+- Bug (current, high): videos never start — endless loading in the viewer.
+- Collections: move the 게임 / 만화 / 영화 / AV type switch into the top bar so it stays reachable after scrolling (the user switches often).
+- Notes (text/checklist notes; the ledger is fine): with the keyboard open, content below the visible area cannot be scrolled into view, so the lower part of a long note stays hidden behind the keyboard while editing. Make the editor scroll so every line can be brought above the keyboard.
+- Covers load slowly right after the app starts (details not given yet; check during PERF-ALL-001).
 
 ## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)
 
