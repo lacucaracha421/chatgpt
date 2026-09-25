@@ -216,3 +216,33 @@ describe('artwork across a confirmed Showcase edit',()=>{
     artwork().slice(0,1).forEach((image,index)=>expect(image).toBe(before[index]));
   });
 });
+
+it('moves the Showcase switch once: no flip back between the server receipt and the refreshed detail',async()=>{
+  await openDetail();
+  // The refreshed detail arrives late, so the screen still holds the pre-edit value after the receipt.
+  let release!:()=>void;const late=new Promise<void>(resolve=>{release=resolve;});
+  const fallback=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string,signal:unknown,body?:Record<string,unknown>)=>{
+    if(path==='/v1/collections/w'){await late;}
+    return fallback(path,signal,body);
+  });
+  const button=within(personal()).getByRole('button',{name:'쇼케이스'});
+  const knob=button.querySelector('.collection-personal-switch')!,slot=button.querySelector('.collection-personal-pending')!;
+  const pressed:(string|null)[]=[];
+  const observer=new MutationObserver(()=>pressed.push(button.getAttribute('aria-pressed')));
+  observer.observe(button,{attributes:true,attributeFilter:['aria-pressed']});
+  fireEvent.click(button);
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  await waitFor(()=>expect(commands()).toHaveLength(1));
+  await waitFor(()=>expect(readCollectionEdits()).toEqual({}));
+  // Confirmed, detail not yet re-read: still on, same switch and the same (now empty) pending slot.
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  expect(slot.textContent).toBe('');
+  await act(async()=>{release();});
+  await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/w').length).toBeGreaterThan(1));
+  expect(within(personal()).getByRole('button',{name:'쇼케이스'})).toBe(button);
+  expect(button.querySelector('.collection-personal-switch')).toBe(knob);expect(button.querySelector('.collection-personal-pending')).toBe(slot);
+  observer.disconnect();
+  expect(pressed.every(value=>value==='true')).toBe(true);
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+});

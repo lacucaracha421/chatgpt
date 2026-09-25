@@ -19,6 +19,8 @@ export type PersonalEdits = {
 
 export const scoreText = (score: number | null) => score === null ? '미평가' : `★ ${score.toFixed(1)} / 5`;
 const Pending = () => <span className="collection-personal-pending" role="status">전송 대기</span>;
+/** A row's pending slot is always there at a fixed width, so 전송 대기 never moves the value or switch. */
+const PendingSlot = ({shown}: {shown: boolean}) => <span className="collection-personal-pending is-slot" role="status">{shown ? '전송 대기' : ''}</span>;
 
 /**
  * My rating, Showcase membership and memo. They are editable only while the server
@@ -40,12 +42,12 @@ export function CollectionPersonal({item, edits, sheet, onSheet}: {item: Collect
     <section className="collection-block collection-personal" aria-label="내 기록">
       {editable
         ? <button className={`collection-personal-row${score.pending ? ' is-pending' : ''}`} aria-label={`내 평점 ${scoreText(score.value)}${score.pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet('rating')}>
-            <span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}
+            <span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span><PendingSlot shown={score.pending}/>
           </button>
         : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
       {editable
         ? <button className={`collection-personal-row${showcase.pending ? ' is-pending' : ''}`} aria-pressed={showcase.value} aria-label={`쇼케이스${showcase.pending ? ', 전송 대기' : ''}`} onClick={() => edits.edit(item.id, 'showcase', !showcase.value, item.showcase)}>
-            <span className="collection-personal-label">쇼케이스</span><span className="collection-personal-value">{showcase.value ? '추가됨' : '추가 안 함'}</span>{showcase.pending && <Pending/>}<span className="collection-personal-switch" aria-hidden="true"/>
+            <span className="collection-personal-label">쇼케이스</span><span className="collection-personal-value">{showcase.value ? '추가됨' : '추가 안 함'}</span><PendingSlot shown={showcase.pending}/><span className="collection-personal-switch" aria-hidden="true"/>
           </button>
         : (showcase.value || showcase.pending) && <div className={`collection-personal-row${showcase.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">쇼케이스</span><span className="collection-personal-value">{showcase.value ? '추가됨' : '추가 안 함'}</span>{showcase.pending && <Pending/>}</div>}
       {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}

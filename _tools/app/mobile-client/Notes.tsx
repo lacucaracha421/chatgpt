@@ -219,7 +219,7 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
         // focus moving to the header (help, colour) keeps editing.
         onBlur={event=>{const next=event.relatedTarget as Node|null;if(next?pane.current?.contains(next):document.hasFocus())setEditingBody(false);}}/>;
   return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:selected&&note?editorHeight:undefined}} aria-label="메모">
-    {!state.ready?<p className="hint notes-loading">메모를 불러오는 중…</p>:!state.unlocked?<>
+    {!state.ready?<TopBar title="메모" loading="메모 불러오는 중"/>:!state.unlocked?<>
       <TopBar title="메모"/>
       <form className="notes-unlock" onSubmit={event=>{event.preventDefault();void store.unlock(key).then(ok=>{if(ok)setKey('');});}}><h2>메모 연결</h2><p>PC 메모에서 사용하는 복구 키를 한 번 입력하세요.</p><input type="password" aria-label="메모 복구 키" value={key} autoComplete="off" spellCheck={false} autoCapitalize="none" onChange={event=>setKey(event.target.value)}/><Button type="submit" variant="primary" disabled={key.trim().length!==64}>메모 열기</Button></form>
     </>:null}

@@ -161,3 +161,8 @@
 .collection-rating-filter{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
 .collection-rating-filter .step-slider{align-self:stretch}
 .collection-rating-filter .step-slider.is-idle input{opacity:.45}
+/* The showcase switch moves once: the track colour eases with the knob, and the pending slot
+   beside it keeps one width whether or not 전송 대기 shows. */
+.collection-personal-pending.is-slot{display:inline-block;min-width:4.5em;text-align:right}
+.collection-personal-switch{transition:background-color .15s var(--ease-standard),border-color .15s var(--ease-standard)}
+.collection-personal-switch::after{transition:transform .15s var(--ease-standard),background-color .15s var(--ease-standard)}

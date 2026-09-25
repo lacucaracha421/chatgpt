@@ -6,11 +6,18 @@ import {IconButton,Mark} from './ui';
  * actions that belong to that screen. Every tab uses the same 56px bar, so switching tabs never
  * moves the content.
  */
-export function TopBar({title,count,crumbs,back,actions,className=''}:{title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string}) {
+/**
+ * The one place a page or scope load shows: a thin line on the bar's bottom edge. It is laid
+ * over the bar's border, so appearing and disappearing never moves anything.
+ */
+export function BarProgress({label}:{label:string|false|undefined}) {
+  return label?<span className="loading-line top-bar__progress" role="status" aria-label={label}/>:null;
+}
+export function TopBar({title,count,crumbs,back,actions,className='',loading}:{title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false}) {
   return <header className={`top-bar${className?` ${className}`:''}`}>
     {back?<IconButton label={back.label} icon={ArrowLeftIcon} onClick={back.onClick}/>:<span className="top-bar__brand"><Mark/></span>}
     <div className="top-bar__titles">{crumbs}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{count}</span>}</div>}</div>
-    <span className="top-bar__space"/>{actions}
+    <span className="top-bar__space"/>{actions}<BarProgress label={loading}/>
   </header>;
 }
 /** Open search bars, so the system Back can close the visible one before navigating. */
@@ -29,7 +36,7 @@ const INTERACTIVE='button,a,input,textarea,select,label,[role="option"],[role="l
  * `onClose` (the ← button, Back, or a tap on empty space outside the bar) closes the bar and
  * clears the query, so no hidden query keeps narrowing the list.
  */
-export function TopBarSearch({title,onClose,children}:{title:string;onClose():void;children:ReactNode}) {
+export function TopBarSearch({title,onClose,children,loading}:{title:string;onClose():void;children:ReactNode;loading?:string|false}) {
   const bar=useRef<HTMLElement>(null);
   const close=useRef(onClose);close.current=onClose;
   useEffect(()=>{
@@ -43,7 +50,7 @@ export function TopBarSearch({title,onClose,children}:{title:string;onClose():vo
     document.addEventListener('pointerdown',outside,true);
     return()=>{openSearches.delete(entry);document.removeEventListener('pointerdown',outside,true);};
   },[]);
-  return <header ref={bar} className="top-bar is-search"><h1 className="sr-only">{title}</h1><IconButton label="검색 닫기" icon={ArrowLeftIcon} onClick={onClose}/>{children}</header>;
+  return <header ref={bar} className="top-bar is-search"><h1 className="sr-only">{title}</h1><IconButton label="검색 닫기" icon={ArrowLeftIcon} onClick={onClose}/>{children}<BarProgress label={loading}/></header>;
 }
 export function SearchButton({onClick}:{onClick():void}) {
   return <IconButton label="검색" icon={MagnifyingGlassIcon} onClick={onClick}/>;

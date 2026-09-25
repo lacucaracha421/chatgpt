@@ -28,6 +28,12 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   const [supported, setSupported] = useState(false);
   const [failure, setFailure] = useState('');
   const [notice, setNotice] = useState('');
+  /**
+   * Values the server just confirmed, kept until the screen's own copy catches up. Between the
+   * confirmation (the intent leaves the queue) and the refreshed detail, the screen still holds
+   * the pre-edit value; without this the control would flip back and then forward again.
+   */
+  const [confirmed, setConfirmed] = useState<Record<string, {value: CollectionEditValue; expected: CollectionEditValue}>>({});
   const mounted = useRef(true);
   const settled = useRef(onSettled);
   settled.current = onSettled;
@@ -46,8 +52,15 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
 
   const flush = useCallback(async () => {
     try {
+      const before = readCollectionEdits();
       const report = await flushCollectionEdits();
       if (!mounted.current) return;
+      const accepted = report.outcomes.filter(({key, outcome}) => (outcome === 'confirmed' || outcome === 'already-current') && before[key]);
+      if (accepted.length) setConfirmed(current => {
+        const next = {...current};
+        for (const {key} of accepted) next[key] = {value: before[key].value, expected: before[key].expected};
+        return next;
+      });
       // Waiting for a PC/server upgrade is not an error; the value stays "전송 대기".
       setFailure(report.error ? errorText(report.error) : '');
       const rejected = report.outcomes.find(({outcome, message}) => outcome === 'rejected' && message);
@@ -87,11 +100,16 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   }, [flush]);
 
   const visible = useCallback(<T extends CollectionEditValue>(collectionId: string, field: CollectionEditField, authoritative: T) => {
-    const intent = intents[collectionEditKey(collectionId, field)];
-    return intent
-      ? {value: intent.value as T, pending: true, conflict: intent.conflict ? {current: intent.conflict.current} : null}
-      : {value: authoritative, pending: false, conflict: null};
-  }, [intents]);
+    const key = collectionEditKey(collectionId, field);
+    const intent = intents[key];
+    if (intent) return {value: intent.value as T, pending: true, conflict: intent.conflict ? {current: intent.conflict.current} : null};
+    // Confirmed but not yet re-read: show the confirmed value while the screen still holds the
+    // exact pre-edit value. Any other value (the refresh, or a later PC change) wins.
+    const settledValue = confirmed[key];
+    if (settledValue && Object.is(authoritative, settledValue.expected) && !Object.is(authoritative, settledValue.value))
+      return {value: settledValue.value as T, pending: false, conflict: null};
+    return {value: authoritative, pending: false, conflict: null};
+  }, [intents, confirmed]);
 
   const pending = Object.values(intents).some(intent => !intent.conflict);
   usePendingRetry(active, pending, flush);

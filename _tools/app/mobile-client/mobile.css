@@ -370,3 +370,6 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .step-slider input[type=range]:focus-visible { outline:none; }
 .step-slider input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 2px var(--color-focus); }
 .step-slider__default { position:absolute; top:calc(50% + 7px); left:calc(11px + var(--step-at) * (100% - 22px)); width:2px; height:6px; margin-left:-1px; background:var(--color-muted); pointer-events:none; }
+/* Page and scope loads show only here: over the bar's bottom border, never inside the content. */
+.top-bar__progress, .app-header .top-bar__progress { position:absolute; left:0; right:0; bottom:-1px; margin:0; z-index:4; }
+.app-header { position:relative; }

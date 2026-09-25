@@ -114,12 +114,38 @@ describe('catalog bookmark toggle',()=>{
     fireEvent.click(await screen.findByText('밤의 도서관'));
     await screen.findByRole('region',{name:'카탈로그 판본'});
     fireEvent.click(await screen.findByRole('button',{name:'북마크'}));
-    expect(await screen.findByText('40p · 북마크 · 저장 대기')).toBeTruthy();
+    expect(await screen.findByLabelText('40p · 북마크 · 저장 대기')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'카탈로그 목록으로'}));
     expect(document.querySelector('.catalog-saved')).toBeTruthy();
     await act(async()=>reply.resolve(accepted));
     await waitFor(()=>expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toBe('{}'));
     expect(document.querySelector('.catalog-saved')).toBeTruthy();
+  });
+
+  it('keeps each edition card on one line with the same elements from pending to saved',async()=>{
+    const reply=Promise.withResolvers<unknown>();
+    mocks.native.mockImplementation(async(operation:string,payload:Record<string,unknown>)=>{
+      if(operation==='api'&&payload.path==='/v1/mobile-catalog/status')return status();
+      if(operation==='bookmarkCommand')return reply.promise;
+      return {url:'data:image/gif;base64,R0lGODlhAQABAAAAACw='};
+    });
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return status();
+      if(path.includes('/works/'))return {publicationRevision:'p1',item:detail};
+      if(path.includes('/editions?'))return {publicationRevision:'p1',groupId:'group',selectedProviderWorkId:null,items:[item],nextCursor:null,totalCount:1};
+      return page;
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByText('밤의 도서관'));
+    const meta=await screen.findByLabelText('40p');
+    const mark=meta.querySelector('.catalog-edition-mark')!,text=meta.textContent;
+    fireEvent.click(await screen.findByRole('button',{name:'북마크'}));
+    expect(await screen.findByLabelText('40p · 북마크 · 저장 대기')).toBe(meta);
+    expect(meta.textContent).toBe(text);expect(meta.querySelector('.catalog-edition-mark')).toBe(mark);
+    await act(async()=>reply.resolve(accepted));
+    expect(await screen.findByLabelText('40p · 북마크')).toBe(meta);
+    // Only the mark lights up; the visible text and the element count never change.
+    expect(meta.textContent).toBe(text);expect(meta.childElementCount).toBe(2);expect(mark.classList.contains('is-on')).toBe(true);
   });
 
   it('projects a pending removal out of a single-version edition and cover',async()=>{
@@ -139,9 +165,9 @@ describe('catalog bookmark toggle',()=>{
     });
     render(<Catalog active paused={false} backRef={{current:null}}/>);
     fireEvent.click(await screen.findByText('밤의 도서관'));
-    await screen.findByText('40p · 북마크');
+    await screen.findByLabelText('40p · 북마크');
     fireEvent.click(await screen.findByRole('button',{name:'북마크 해제'}));
-    await waitFor(()=>expect(screen.queryByText('40p · 북마크')).toBeNull());
+    await waitFor(()=>expect(screen.queryByLabelText('40p · 북마크')).toBeNull());
     fireEvent.click(screen.getByRole('button',{name:'카탈로그 목록으로'}));
     expect(document.querySelector('.catalog-saved')).toBeNull();
     await act(async()=>reply.resolve({...accepted,desiredState:false,entityRevision:2}));

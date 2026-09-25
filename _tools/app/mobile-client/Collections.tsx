@@ -410,13 +410,13 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const header=selected
     ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {labels[type]}{showcaseAll?' › 쇼케이스':''}</span>}/>
     :showcaseAll
-      ?<TopBar back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</>}/>
+      ?<TopBar loading={showcase.busy&&'쇼케이스 불러오는 중'} back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</>}/>
       :searching&&tab!=='av'
-        ?<TopBarSearch title="컬렉션" onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
+        ?<TopBarSearch title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
-        :<TopBar title="컬렉션" actions={tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}/>;
+        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}/>;
 
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{main.legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>;
@@ -441,7 +441,6 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
           <button className={`filter-chip ${filters.rating!=='all'?'selected':''}`} onClick={()=>setSheet('rating')}>{filters.rating==='all'?'내 별점':ratingLabel(filters.rating)}<ChevronDownIcon aria-hidden="true"/></button>
           {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
         </div></div>
-        {main.busy&&!main.items.length&&<p role="status" className="hint">컬렉션을 불러오는 중…</p>}
         {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
         <div className={`collection-grid collection-grid-${type}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected} onOpen={openWork}/>)}</div>
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}

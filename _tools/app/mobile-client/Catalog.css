@@ -118,3 +118,9 @@
    resizes when the state flips. */
 .catalog-primary-actions .catalog-bookmark-action{flex:none;min-width:8.5em;justify-content:flex-start}
 .catalog-bookmark-label{display:inline-block;min-width:4.2em;text-align:left}
+/* An edition's page count and bookmark mark share one fixed line: a pending or saved bookmark
+   only lights the mark, so the card never grows a second line and nothing below moves. */
+.catalog-edition-meta{display:flex;align-items:center;gap:6px;height:18px;white-space:nowrap;overflow:hidden}
+.catalog-edition-mark{width:12px;height:12px;flex:none;color:var(--color-accent);visibility:hidden}
+.catalog-edition-mark.is-on{visibility:visible}
+.catalog-edition-mark.is-pending{opacity:.5}

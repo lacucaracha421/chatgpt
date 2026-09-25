@@ -304,3 +304,22 @@ it('marks the open series with the people glyph in the bar',async()=>{
   const heading=await screen.findByRole('heading',{name:'Series'});
   expect(heading.querySelector('svg.character-glyph')).not.toBeNull();
 });
+it('shows a scope or filter load only as the line in the top bar, never inside the content',async()=>{
+  const held:((p:CharacterPage)=>void)[]=[];let hold=true;
+  mocks.api.mockImplementation((path:string)=>{
+    if(path.endsWith('/characters'))return Promise.resolve(structuredClone(index));
+    return hold?new Promise<CharacterPage>(resolve=>{held.push(resolve);}):Promise.resolve(page(['a1']));
+  });
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  const inBar=()=>waitFor(()=>{
+    const line=screen.getByRole('status',{name:'캐릭터 보기 불러오는 중'});
+    expect(line.closest('header.top-bar')).not.toBeNull();
+    expect(line.closest('[aria-label="character gallery"]')).toBeNull();
+    expect(document.querySelectorAll('.loading-line:not(.is-bottom)')).toHaveLength(1);
+  });
+  await inBar();
+  hold=false;await act(async()=>held.splice(0).forEach(resolve=>resolve(page(['a1']))));
+  await waitFor(()=>expect(screen.queryByRole('status',{name:'캐릭터 보기 불러오는 중'})).toBeNull());
+  hold=true;fireEvent.click(screen.getByRole('button',{name:'전체 이미지'}));
+  await inBar();
+});
