@@ -193,7 +193,7 @@ Mobile app:
 - Bug (current, high): videos never start — endless loading in the viewer.
 - Collections: move the 게임 / 만화 / 영화 / AV type switch into the top bar so it stays reachable after scrolling (the user switches often).
 - Notes (text/checklist notes; the ledger is fine): with the keyboard open, content below the visible area cannot be scrolled into view, so the lower part of a long note stays hidden behind the keyboard while editing. Make the editor scroll so every line can be brought above the keyboard.
-- Covers load slowly right after the app starts (details not given yet; check during PERF-ALL-001).
+- Collections covers right after app start (possibly only right after installing a new build): missing covers stay blank for a while in the Collections tab; after visiting other screens and coming back, missing covers load fairly quickly. Suspect a cold-start ticket/cache warm-up or an image-request queue stall; measure and fix during PERF-ALL-001.
 
 ## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)
 
