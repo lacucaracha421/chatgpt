@@ -62,6 +62,10 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::cloud::client::{ClassificationCommandOutcome, CloudClient};
 
+use super::album_authority::{
+    asset_waiting_sql, read_dropped_intents, record_dropped_intents, AssetIntentReadiness,
+    PassReadiness, DROP_ASSET_TOMBSTONED,
+};
 use super::error::LibraryError;
 use super::{credential, Library};
 
@@ -88,10 +92,11 @@ pub(crate) const REVISION_CONFLICT: &str = "revisionConflict";
 
 /// The code the server returns when an assignment names an Asset it has not committed.
 ///
-/// This is a legitimate transient cross-domain ordering state — the Asset exists
-/// locally and the assignment intent is queued, but Asset replication has not reached
-/// the server yet — so it stays pending and retries with the identical operation id
-/// rather than blocking the user's intent.
+/// On the command route it means only that the server does not hold the Asset as
+/// linkable. An Asset whose upload is still outstanding makes this a transient ordering
+/// state, so the intent waits (see [`asset_intent_readiness`](super::album_authority::asset_intent_readiness)) without holding up other
+/// intents or receive; otherwise the intent can never apply and is retired with this
+/// code as its recorded reason.
 pub(crate) const INVALID_ASSIGNMENT: &str = "invalidClassificationAssignment";
 
 /// The adopted Classification authority, or `None` while the domain is still PC-owned.
@@ -146,6 +151,11 @@ pub struct ClassificationSyncStatus {
     pub cursor: Option<i64>,
     pub pending_count: u32,
     pub blocked_count: u32,
+    /// Pending assignment intents waiting for their Asset's upload to commit.
+    pub waiting_count: u32,
+    /// Intents retired without delivery since this library began recording them.
+    pub dropped_count: u32,
+    pub last_drop_reason: Option<String>,
     pub oldest_pending_operation_id: Option<String>,
 }
 
@@ -163,6 +173,11 @@ pub struct ClassificationOutboxFlush {
     pub rebased: u32,
     pub blocked: u32,
     pub pending: u32,
+    /// Assignment intents left pending because their Asset's upload has not committed.
+    /// They neither stop the pass nor defer receive.
+    pub waiting: u32,
+    /// Intents retired without delivery (recorded in `authority_intent_drops`).
+    pub dropped: u32,
     pub stopped: bool,
 }
 
@@ -603,6 +618,17 @@ impl Library {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
+        let waiting: i64 = connection.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM classification_authority_outbox o
+                 WHERE o.state = 'pending' AND o.command_type = '{ASSIGNMENT}' AND {waiting}",
+                waiting = asset_waiting_sql("o.asset_id"),
+            ),
+            [],
+            |row| row.get(0),
+        )?;
+        let (dropped, last_drop_reason) =
+            read_dropped_intents(&connection, CLASSIFICATION_DOMAIN)?;
         Ok(ClassificationSyncStatus {
             adopted: authority.is_some(),
             library_id: authority.as_ref().map(|value| value.library_id.clone()),
@@ -611,6 +637,9 @@ impl Library {
             cursor: authority.as_ref().map(|value| value.cursor),
             pending_count: pending,
             blocked_count: blocked,
+            waiting_count: u32::try_from(waiting).unwrap_or(u32::MAX),
+            dropped_count: dropped,
+            last_drop_reason,
             oldest_pending_operation_id: oldest,
         })
     }
@@ -780,6 +809,11 @@ impl CredentialSource for FixedCredentials<'_> {
 /// around a blocked or unresolved intent could apply a rename before its create, or let
 /// a later assignment present a revision the queue ahead of it owns. A retry of one
 /// logical operation always presents the same operation id and the same stored bytes.
+///
+/// One exception: an assignment whose Asset's upload has not committed is skipped (it
+/// *waits*) rather than stopping the pass, and one that can never apply is retired with
+/// a recorded reason. See [`asset_intent_readiness`](super::album_authority::asset_intent_readiness). Every intent for that Asset shares
+/// its readiness, so one Asset's assignments never overtake each other.
 pub(super) fn flush_outbox(
     library: &Library,
     client: &CloudClient,
@@ -812,12 +846,36 @@ pub(super) fn flush_outbox(
         // "nothing to send".
         return Err(LibraryError::ClassificationAuthorityInactive);
     };
+    let mut readiness_by_asset = PassReadiness::default();
     for entry in entries {
         if entry.is_blocked() {
             // An unresolved structural conflict stops delivery: a later operation may
             // depend on this one, and receiving over the optimistic state would hide it.
             report.stopped = true;
             return Ok(report);
+        }
+        let mut entry = entry;
+        if entry.is_assignment() {
+            // An assignment depends only on its own Asset's earlier assignments and on the
+            // create of the Classification it names, which is always ahead of it. Every
+            // intent for one Asset shares the Asset's readiness, so skipping a waiting one
+            // keeps its later intents behind it while other Assets and structural commands
+            // proceed.
+            let readiness = readiness_by_asset.get(library, entry.asset_id.as_deref())?;
+            match readiness {
+                AssetIntentReadiness::Wait => {
+                    report.waiting += 1;
+                    continue;
+                }
+                AssetIntentReadiness::Drop(reason) => {
+                    drop_entry(library, &entry, reason, now)?;
+                    report.pending -= 1;
+                    report.dropped += 1;
+                    continue;
+                }
+                AssetIntentReadiness::Send => {}
+            }
+            retarget_overtaken_assignment(library, &mut entry)?;
         }
         if entry.epoch != authority.epoch {
             // Revisions are only comparable inside one epoch, so an intent composed
@@ -859,12 +917,32 @@ pub(super) fn flush_outbox(
             ClassificationCommandOutcome::Dropped => {
                 // The Asset is tombstoned: the intent can never apply, so it is retired
                 // instead of blocking the queue.
-                library.connection()?.execute(
-                    "DELETE FROM classification_authority_outbox WHERE operation_id = ?1",
-                    [&entry.operation_id],
-                )?;
+                drop_entry(library, &entry, DROP_ASSET_TOMBSTONED, now)?;
                 report.pending -= 1;
                 report.no_op += 1;
+                report.dropped += 1;
+            }
+            ClassificationCommandOutcome::Conflict(conflict)
+                if entry.is_assignment() && conflict.code == INVALID_ASSIGNMENT =>
+            {
+                // The server does not hold the Asset as linkable. An upload still in flight
+                // waits; otherwise nothing this PC can do will make the server know the
+                // Asset, so the intent is retired with a recorded reason rather than
+                // retried forever at the head of the queue.
+                let readiness = readiness_by_asset.refresh(library, entry.asset_id.as_deref())?;
+                match readiness {
+                    AssetIntentReadiness::Wait => report.waiting += 1,
+                    AssetIntentReadiness::Drop(reason) => {
+                        drop_entry(library, &entry, reason, now)?;
+                        report.pending -= 1;
+                        report.dropped += 1;
+                    }
+                    AssetIntentReadiness::Send => {
+                        drop_entry(library, &entry, INVALID_ASSIGNMENT, now)?;
+                        report.pending -= 1;
+                        report.dropped += 1;
+                    }
+                }
             }
             ClassificationCommandOutcome::Conflict(conflict) => {
                 if entry.is_assignment() && conflict.code == REVISION_CONFLICT {
@@ -1237,6 +1315,135 @@ pub(super) fn move_assignments_naming(
         params![from, to, now],
     )?;
     Ok(moved)
+}
+
+/// Retire one intent that can never apply, and record why, in one transaction.
+fn drop_entry(
+    library: &Library,
+    entry: &ClassificationOutboxEntry,
+    reason: &str,
+    now: &str,
+) -> Result<(), LibraryError> {
+    let mut connection = library.connection()?;
+    let transaction = connection.transaction()?;
+    let deleted = transaction.execute(
+        "DELETE FROM classification_authority_outbox WHERE operation_id = ?1",
+        [&entry.operation_id],
+    )?;
+    record_dropped_intents(
+        &transaction,
+        CLASSIFICATION_DOMAIN,
+        deleted,
+        reason,
+        Some(&entry.operation_id),
+        now,
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Re-point an assignment that waited past the delete of the Classification it names.
+///
+/// Strict FIFO normally sends an assignment before any later delete of its target. Only an
+/// assignment that waited for its Asset's upload can be overtaken, and the server would
+/// then refuse it with `classificationNotFound` — a block that would stop the domain. The
+/// local delete already moved the Asset's visible assignment to what the server's own
+/// delete does for the Assets it knows (the parent, or unassigned), so that current local
+/// value is the intent the user now holds.
+///
+/// The rewritten payload gets a **new operation id**. This outbox does not record whether an
+/// entry was ever sent, and an earlier attempt may have ended with an unknown outcome; the
+/// server would then answer the old id with its receipt or `operationConflict` (which blocks
+/// the domain), never with the new value. A fresh id is safe either way: if the old command
+/// was accepted before the delete, the delete already moved the Asset to the same value, so
+/// the new command is an idempotent no-op; otherwise it applies the new value. This differs
+/// from the `revisionConflict` rebase, which keeps the id because a coded rejection proves
+/// the old id was never receipted.
+fn retarget_overtaken_assignment(
+    library: &Library,
+    entry: &mut ClassificationOutboxEntry,
+) -> Result<(), LibraryError> {
+    let Some(target) = entry
+        .payload
+        .get("classificationId")
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+    else {
+        return Ok(());
+    };
+    let Some(asset_id) = entry.asset_id.clone() else {
+        return Ok(());
+    };
+    let connection = library.connection()?;
+    if !matches!(read_classification_revision(&connection, &target)?, Some((_, true))) {
+        return Ok(());
+    }
+    let current: Option<String> = connection
+        .query_row(
+            "SELECT classification_id FROM asset_classifications WHERE asset_id = ?1
+             ORDER BY classification_id LIMIT 1",
+            [&asset_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let body = entry
+        .payload
+        .as_object_mut()
+        .ok_or(LibraryError::InvalidCloudResponse)?;
+    body.insert(
+        "classificationId".into(),
+        match current {
+            Some(classification_id) => classification_id.into(),
+            None => serde_json::Value::Null,
+        },
+    );
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    body.insert("operationId".into(), operation_id.clone().into());
+    let encoded =
+        serde_json::to_string(&entry.payload).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    connection.execute(
+        "UPDATE classification_authority_outbox SET operation_id = ?2, payload = ?3
+         WHERE operation_id = ?1",
+        params![entry.operation_id, operation_id, encoded],
+    )?;
+    entry.operation_id = operation_id;
+    Ok(())
+}
+
+/// Whether any Classification intent still stands between the replica and a receive.
+///
+/// Assignment intents waiting for their Asset's upload do not count: the server cannot
+/// describe that Asset yet, so no received assignment change can overwrite their
+/// optimistic effect.
+pub(super) fn has_unresolved_intents(connection: &Connection) -> Result<bool, LibraryError> {
+    Ok(connection.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM classification_authority_outbox o
+                 WHERE NOT (o.state = 'pending' AND o.command_type = '{ASSIGNMENT}'
+                            AND {waiting}))",
+            waiting = asset_waiting_sql("o.asset_id"),
+        ),
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+/// Retire every assignment intent naming one of `asset_ids`, in the caller's transaction,
+/// and record the drop. Used when a never-committed Asset is purged.
+pub(super) fn drop_classification_intents_for_assets(
+    connection: &Connection,
+    asset_ids: &[String],
+    reason: &str,
+    now: &str,
+) -> Result<(), LibraryError> {
+    let mut dropped = 0;
+    for asset_id in asset_ids {
+        dropped += connection.execute(
+            "DELETE FROM classification_authority_outbox WHERE command_type = ?1 AND asset_id = ?2",
+            params![ASSIGNMENT, asset_id],
+        )?;
+    }
+    record_dropped_intents(connection, CLASSIFICATION_DOMAIN, dropped, reason, None, now)
 }
 
 /// Preserve an intent the authority rejected on structural grounds.

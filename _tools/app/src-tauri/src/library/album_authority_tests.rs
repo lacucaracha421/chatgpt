@@ -1168,3 +1168,350 @@ mod integration {
         assert!(outbox(&shared.connection().unwrap()).is_empty());
     }
 }
+
+/// H1 coverage: a membership for an Asset whose upload has not committed waits for it.
+///
+/// The server refuses to add a relation to an Asset it has not committed, so sending the
+/// intent early would be rejected, and blocking on that rejection would stop every later
+/// Album intent and the receive half.
+mod waiting_for_asset_upload {
+    use super::*;
+    use crate::cloud::client::{SyncAuthorityDomain, SyncStatus};
+
+    fn read_body(request: &mut tiny_http::Request) -> serde_json::Value {
+        let mut body = String::new();
+        request.as_reader().read_to_string(&mut body).unwrap();
+        serde_json::from_str(&body).unwrap()
+    }
+
+    /// Accepts every membership command it receives until the flush goes quiet.
+    fn accepting_server() -> (String, Arc<Mutex<Vec<serde_json::Value>>>, thread::JoinHandle<()>) {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&seen);
+        let handle = thread::spawn(move || {
+            for sequence in 1..=8i64 {
+                let Ok(Some(mut request)) =
+                    server.recv_timeout(std::time::Duration::from_millis(400))
+                else {
+                    return;
+                };
+                assert_eq!(request.method(), &Method::Put);
+                let body = read_body(&mut request);
+                assert_eq!(body["commandType"], "setAlbumMembership");
+                log.lock().unwrap().push(body.clone());
+                let result = serde_json::json!({
+                    "libraryId": body["libraryId"],
+                    "epoch": body["epoch"],
+                    "contractVersion": 1,
+                    "commandType": "setAlbumMembership",
+                    "operationId": body["operationId"],
+                    "changed": true,
+                    "changeSequence": sequence,
+                    "authorityCursor": sequence,
+                    "album": null,
+                    "membership": {
+                        "albumId": body["albumId"],
+                        "assetId": body["assetId"],
+                        "desiredState": body["desiredState"],
+                        "entityRevision": 1
+                    },
+                    "updatedAt": "2026-09-25T00:00:00Z"
+                });
+                request
+                    .respond(
+                        Response::from_data(serde_json::to_vec(&result).unwrap()).with_header(
+                            Header::from_bytes("Content-Type", "application/json").unwrap(),
+                        ),
+                    )
+                    .unwrap();
+            }
+        });
+        (base, seen, handle)
+    }
+
+    fn upload(library: &Library, asset_id: &str, status: &str) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO cloud_sync_queue
+                    (id, entity_type, entity_id, operation, status, revision, updated_at)
+                 VALUES (?1, 'asset', ?2, 'upsert', ?3, 1, '2026-09-25T00:00:00Z')",
+                rusqlite::params![format!("queue-{asset_id}"), asset_id, status],
+            )
+            .unwrap();
+    }
+
+    fn add(library: &Library, asset_id: &str, album_id: &str) {
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec![asset_id.to_owned()],
+                add_album_ids: vec![album_id.to_owned()],
+                remove_album_ids: Vec::new(),
+            })
+            .unwrap();
+    }
+
+    fn album(library: &Library, name: &str) -> String {
+        library
+            .create_album(CreateAlbum {
+                name: name.into(),
+                parent_id: None,
+            })
+            .unwrap()
+            .id
+    }
+
+    /// Albums created before adoption queue nothing, so the queue holds only memberships.
+    fn setup() -> (tempfile::TempDir, Library, String, String) {
+        let (temp, library) = open();
+        let first = album(&library, "새로 가져옴");
+        let second = album(&library, "예전 자료");
+        let library_id = library.library_id().unwrap();
+        library
+            .adopt_album_authority_for_test(&library_id, 1, 1, 0)
+            .unwrap();
+        (temp, library, first, second)
+    }
+
+    fn drops(library: &Library) -> Option<(i64, String)> {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT dropped_count, last_reason FROM authority_intent_drops WHERE domain = 'albums'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok()
+    }
+
+    fn receive_is_not_deferred(library: &Library, client: &CloudClient) {
+        let status = SyncStatus {
+            protocol_version: 1,
+            active: true,
+            library_id: Some(library.library_id().unwrap()),
+            domains: vec![SyncAuthorityDomain {
+                domain: "albums".into(),
+                library_id: library.library_id().unwrap(),
+                epoch: 1,
+                contract_version: 1,
+                cursor: 0,
+            }],
+        };
+        let received = library
+            .reconcile_album_authority_with_status(client, "token", &|| Ok(status.clone()), true)
+            .unwrap();
+        assert!(
+            !received.deferred_to_outbox,
+            "a membership waiting for its Asset must not stop receive"
+        );
+    }
+
+    #[test]
+    fn a_membership_for_an_uncommitted_asset_waits_without_blocking_others() {
+        let (_temp, library, first, second) = setup();
+        insert_asset(&library, "fresh");
+        upload(&library, "fresh", "pending");
+        insert_asset(&library, "old");
+        upload(&library, "old", "synced");
+        // The fresh import is added first, so a strict FIFO would stop behind it.
+        add(&library, "fresh", &first);
+        add(&library, "old", &second);
+
+        let (base, seen, handle) = accepting_server();
+        let client = CloudClient::new(&base).unwrap();
+        let report = library.flush_album_outbox_with(&client, "token").unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(report.sent, 1);
+        assert_eq!(report.waiting, 1);
+        assert_eq!(report.blocked, 0);
+        assert!(!report.stopped, "a waiting membership must not stop the pass");
+        {
+            let sent = seen.lock().unwrap();
+            assert_eq!(sent.len(), 1, "the waiting intent is not sent early");
+            assert_eq!(sent[0]["assetId"], "old");
+        }
+        let status = library.album_sync_status().unwrap();
+        assert_eq!((status.pending_count, status.waiting_count, status.blocked_count), (1, 1, 0));
+        receive_is_not_deferred(&library, &client);
+        // The optimistic membership stays visible while it waits.
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM asset_albums WHERE asset_id = 'fresh' AND album_id = ?1",
+                    [&first],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+
+        // Once the upload commits, the membership is sent normally.
+        library
+            .connection()
+            .unwrap()
+            .execute("UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = 'fresh'", [])
+            .unwrap();
+        let (base, seen, handle) = accepting_server();
+        let client = CloudClient::new(&base).unwrap();
+        let report = library.flush_album_outbox_with(&client, "token").unwrap();
+        handle.join().unwrap();
+        assert_eq!((report.sent, report.waiting, report.dropped), (1, 0, 0));
+        assert_eq!(seen.lock().unwrap()[0]["assetId"], "fresh");
+        assert!(outbox(&library.connection().unwrap()).is_empty());
+        assert_eq!(drops(&library), None);
+    }
+
+    #[test]
+    fn a_membership_is_dropped_when_its_asset_is_trashed_before_upload() {
+        let (_temp, library, first, _) = setup();
+        insert_asset(&library, "fresh");
+        upload(&library, "fresh", "pending");
+        add(&library, "fresh", &first);
+        library.trash_assets(&["fresh".to_owned()]).unwrap();
+
+        // No request can be made: the intent is retired before anything is sent.
+        let client = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+        let report = library.flush_album_outbox_with(&client, "token").unwrap();
+        assert_eq!((report.dropped, report.waiting, report.pending), (1, 0, 0));
+        assert!(!report.stopped);
+        assert!(outbox(&library.connection().unwrap()).is_empty());
+        assert_eq!(drops(&library), Some((1, "assetTrashedBeforeUpload".to_owned())));
+        let status = library.album_sync_status().unwrap();
+        assert_eq!(status.dropped_count, 1);
+        assert_eq!(status.last_drop_reason.as_deref(), Some("assetTrashedBeforeUpload"));
+
+        // Restoring resumes the upload, so the relation the Asset still holds is queued
+        // again and waits for that upload.
+        library.restore_assets(&["fresh".to_owned()]).unwrap();
+        let queued = outbox(&library.connection().unwrap());
+        assert_eq!(queued.len(), 1);
+        let payload: serde_json::Value = serde_json::from_str(&queued[0].2).unwrap();
+        assert_eq!(payload["assetId"], "fresh");
+        assert_eq!(payload["albumId"], first.as_str());
+        assert_eq!(payload["desiredState"], true);
+        assert_eq!(library.album_sync_status().unwrap().waiting_count, 1);
+    }
+
+    #[test]
+    fn a_waiting_membership_whose_album_was_deleted_is_dropped_not_blocked() {
+        let (_temp, library, first, _) = setup();
+        insert_asset(&library, "fresh");
+        upload(&library, "fresh", "pending");
+        add(&library, "fresh", &first);
+        // The Album's delete reached the server while the membership waited.
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO album_authority_revisions (album_id, entity_revision, deleted, updated_at)
+                 VALUES (?1, 2, 1, '2026-09-25T00:00:00Z')",
+                [&first],
+            )
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute("UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = 'fresh'", [])
+            .unwrap();
+
+        let client = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+        let report = library.flush_album_outbox_with(&client, "token").unwrap();
+        assert_eq!((report.dropped, report.blocked), (1, 0));
+        assert!(!report.stopped);
+        assert_eq!(drops(&library), Some((1, "albumDeleted".to_owned())));
+    }
+
+    /// Readiness is decided once per Asset per pass: if the upload commits mid-pass, a
+    /// later remove for the same relation must not overtake the add that already waited.
+    #[test]
+    fn an_upload_committing_mid_pass_does_not_reorder_one_relation() {
+        let (temp, library, first, second) = setup();
+        insert_asset(&library, "fresh");
+        upload(&library, "fresh", "pending");
+        insert_asset(&library, "old");
+        upload(&library, "old", "synced");
+        add(&library, "fresh", &first);
+        add(&library, "old", &second);
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["fresh".into()],
+                add_album_ids: Vec::new(),
+                remove_album_ids: vec![first.clone()],
+            })
+            .unwrap();
+
+        // The server commits the fresh upload while it handles the other Asset's command.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let database = temp.path().join("library.sqlite");
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&seen);
+        let handle = thread::spawn(move || {
+            while let Ok(Some(mut request)) =
+                server.recv_timeout(std::time::Duration::from_millis(400))
+            {
+                let body = read_body(&mut request);
+                rusqlite::Connection::open(&database)
+                    .unwrap()
+                    .execute(
+                        "UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = 'fresh'",
+                        [],
+                    )
+                    .unwrap();
+                log.lock().unwrap().push(body.clone());
+                let result = serde_json::json!({
+                    "libraryId": body["libraryId"],
+                    "epoch": body["epoch"],
+                    "contractVersion": 1,
+                    "commandType": "setAlbumMembership",
+                    "operationId": body["operationId"],
+                    "changed": true,
+                    "changeSequence": 1,
+                    "authorityCursor": 1,
+                    "album": null,
+                    "membership": {
+                        "albumId": body["albumId"],
+                        "assetId": body["assetId"],
+                        "desiredState": body["desiredState"],
+                        "entityRevision": 1
+                    },
+                    "updatedAt": "2026-09-25T00:00:00Z"
+                });
+                request
+                    .respond(
+                        Response::from_data(serde_json::to_vec(&result).unwrap()).with_header(
+                            Header::from_bytes("Content-Type", "application/json").unwrap(),
+                        ),
+                    )
+                    .unwrap();
+            }
+        });
+        let client = CloudClient::new(&base).unwrap();
+        let report = library.flush_album_outbox_with(&client, "token").unwrap();
+        handle.join().unwrap();
+        {
+            let sent = seen.lock().unwrap();
+            assert_eq!(sent.len(), 1, "the fresh Asset's intents stay held for this pass");
+            assert_eq!(sent[0]["assetId"], "old");
+        }
+        assert_eq!((report.sent, report.waiting), (1, 2));
+
+        // Next pass: add, then remove, in queue order.
+        let (base, seen, handle) = accepting_server();
+        let client = CloudClient::new(&base).unwrap();
+        library.flush_album_outbox_with(&client, "token").unwrap();
+        handle.join().unwrap();
+        let sent = seen.lock().unwrap();
+        assert_eq!(
+            sent.iter().map(|body| body["desiredState"].as_bool().unwrap()).collect::<Vec<_>>(),
+            [true, false]
+        );
+    }
+}

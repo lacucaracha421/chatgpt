@@ -45,6 +45,9 @@ pub(crate) const APPEARANCE: &str = "updateAlbumAppearance";
 pub(crate) const DELETE: &str = "deleteAlbum";
 pub(crate) const MEMBERSHIP: &str = "setAlbumMembership";
 
+/// The server's refusal of a membership whose Asset it does not hold as linkable.
+const INVALID_MEMBERSHIP: &str = "invalidAlbumMembership";
+
 /// The adopted Album authority, or `None` while the domain is still PC-owned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AlbumAuthority {
@@ -89,6 +92,11 @@ pub struct AlbumSyncStatus {
     pub cursor: Option<i64>,
     pub pending_count: u32,
     pub blocked_count: u32,
+    /// Pending membership intents waiting for their Asset's upload to commit.
+    pub waiting_count: u32,
+    /// Intents retired without delivery since this library began recording them.
+    pub dropped_count: u32,
+    pub last_drop_reason: Option<String>,
     pub oldest_pending_operation_id: Option<String>,
 }
 
@@ -100,7 +108,228 @@ pub struct AlbumOutboxFlush {
     pub no_op: u32,
     pub blocked: u32,
     pub pending: u32,
+    /// Membership intents left pending because their Asset's upload has not committed.
+    /// They neither stop the pass nor defer receive.
+    pub waiting: u32,
+    /// Intents retired without delivery (see [`record_dropped_intents`]).
+    pub dropped: u32,
     pub stopped: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Asset-subject intents that wait for Asset replication
+// ---------------------------------------------------------------------------
+//
+// Album membership and Classification assignment intents name an Asset. A locally
+// ingested Asset exists on the server only after its replication upload commits, and the
+// server refuses to *add* a relation to an Asset it has not committed. Such an intent is
+// not a conflict: it waits for the upload without holding up intents for other Assets
+// and without stopping receive. The rules are shared by both domains so they cannot
+// drift apart.
+
+/// Drop reason: the Asset row no longer exists locally (purged or deleted).
+pub(super) const DROP_ASSET_DELETED: &str = "assetDeleted";
+/// Drop reason: the Asset went to the trash before its upload ever committed.
+pub(super) const DROP_ASSET_TRASHED_BEFORE_UPLOAD: &str = "assetTrashedBeforeUpload";
+/// Drop reason: the purge of a never-committed Asset retired its intents.
+pub(super) const DROP_ASSET_PURGED: &str = "assetPurged";
+/// Drop reason: the server tombstoned the Asset (`assetTombstoned`).
+pub(super) const DROP_ASSET_TOMBSTONED: &str = "assetTombstoned";
+/// Drop reason: the Album was deleted while the membership waited for its Asset.
+pub(super) const DROP_ALBUM_DELETED: &str = "albumDeleted";
+
+/// What the send half may do with an Asset-subject intent right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AssetIntentReadiness {
+    /// The server has the Asset, or nothing local says it does not: send.
+    Send,
+    /// The Asset's upload is still outstanding: keep the intent, skip it this pass.
+    Wait,
+    /// The intent can never apply; retire it with this reason.
+    Drop(&'static str),
+}
+
+/// Whether the server is known to hold this Asset: its replication upload committed, or
+/// the Asset authority reported it. Either is written only after the server committed.
+const ASSET_COMMITTED_SQL: &str = "(EXISTS(SELECT 1 FROM cloud_sync_queue q
+        WHERE q.entity_type = 'asset' AND q.entity_id = {asset} AND q.operation = 'upsert'
+          AND q.status = 'synced')
+     OR EXISTS(SELECT 1 FROM asset_authority_state s WHERE s.asset_id = {asset}))";
+
+/// SQL predicate: the Asset named by `column` is waiting for its upload to commit.
+///
+/// Mirrors [`asset_intent_readiness`] returning [`AssetIntentReadiness::Wait`]: the Asset
+/// exists locally and is not in the trash, the server is not known to hold it, and an
+/// upload is still queued (pending, in flight or failed — a failed upload can still be
+/// retried by the user). An Asset with no upload row at all is *not* waiting: nothing
+/// local says the server lacks it, so its intents are sent as before.
+pub(super) fn asset_waiting_sql(column: &str) -> String {
+    format!(
+        "(EXISTS(SELECT 1 FROM assets w WHERE w.id = {column} AND w.status <> 'trash')
+          AND NOT {committed}
+          AND EXISTS(SELECT 1 FROM cloud_sync_queue u
+              WHERE u.entity_type = 'asset' AND u.entity_id = {column}
+                AND u.operation = 'upsert' AND u.status <> 'synced'))",
+        committed = ASSET_COMMITTED_SQL.replace("{asset}", column),
+    )
+}
+
+/// Decide whether an intent naming `asset_id` may be sent now.
+pub(super) fn asset_intent_readiness(
+    connection: &Connection,
+    asset_id: &str,
+) -> Result<AssetIntentReadiness, LibraryError> {
+    let status: Option<String> = connection
+        .query_row("SELECT status FROM assets WHERE id = ?1", [asset_id], |row| row.get(0))
+        .optional()?;
+    let Some(status) = status else {
+        // Intents are only ever enqueued for a local Asset, so a missing row means it was
+        // purged or deleted here. Whatever the server holds, this PC has nothing left to
+        // relate, and a tombstoned Asset would be refused anyway.
+        return Ok(AssetIntentReadiness::Drop(DROP_ASSET_DELETED));
+    };
+    let (committed, outstanding): (bool, bool) = connection.query_row(
+        &format!(
+            "SELECT {committed}, EXISTS(SELECT 1 FROM cloud_sync_queue u
+                 WHERE u.entity_type = 'asset' AND u.entity_id = ?1
+                   AND u.operation = 'upsert' AND u.status <> 'synced')",
+            committed = ASSET_COMMITTED_SQL.replace("{asset}", "?1"),
+        ),
+        [asset_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if committed || !outstanding {
+        return Ok(AssetIntentReadiness::Send);
+    }
+    if status == "trash" {
+        // Replication claims only `normal` Assets, so a trashed never-committed Asset will
+        // not reach the server while it stays in the trash.
+        return Ok(AssetIntentReadiness::Drop(DROP_ASSET_TRASHED_BEFORE_UPLOAD));
+    }
+    Ok(AssetIntentReadiness::Wait)
+}
+
+/// Readiness decided once per Asset for one whole flush pass.
+///
+/// The upload lane runs concurrently, so re-reading readiness per entry could let an Asset
+/// commit mid-pass: an earlier add would be skipped as waiting while a later remove for the
+/// same relation went out, and the next pass would then apply the add over it. Deciding
+/// once per Asset per pass keeps all of one Asset's intents either held or sent in order.
+#[derive(Default)]
+pub(super) struct PassReadiness(std::collections::HashMap<String, AssetIntentReadiness>);
+
+impl PassReadiness {
+    /// The pass's decision for this Asset, reading it from the database the first time.
+    pub(super) fn get(
+        &mut self,
+        library: &Library,
+        asset_id: Option<&str>,
+    ) -> Result<AssetIntentReadiness, LibraryError> {
+        let Some(asset_id) = asset_id else {
+            return Ok(AssetIntentReadiness::Send);
+        };
+        if let Some(readiness) = self.0.get(asset_id) {
+            return Ok(*readiness);
+        }
+        let readiness = asset_intent_readiness(&*library.connection()?, asset_id)?;
+        self.0.insert(asset_id.to_owned(), readiness);
+        Ok(readiness)
+    }
+
+    /// Re-read after the server refused an intent for this Asset, and make that the
+    /// decision for the rest of the pass.
+    pub(super) fn refresh(
+        &mut self,
+        library: &Library,
+        asset_id: Option<&str>,
+    ) -> Result<AssetIntentReadiness, LibraryError> {
+        if let Some(asset_id) = asset_id {
+            self.0.remove(asset_id);
+        }
+        self.get(library, asset_id)
+    }
+}
+
+/// Durably count intents retired without delivery, per domain, with the latest reason.
+///
+/// The row is what a later status surface reads; it survives re-adoption because it is
+/// not part of the replica.
+pub(super) fn record_dropped_intents(
+    connection: &Connection,
+    domain: &str,
+    count: usize,
+    reason: &str,
+    operation_id: Option<&str>,
+    now: &str,
+) -> Result<(), LibraryError> {
+    if count == 0 {
+        return Ok(());
+    }
+    connection.execute(
+        "INSERT INTO authority_intent_drops
+            (domain, dropped_count, last_reason, last_operation_id, last_dropped_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(domain) DO UPDATE SET dropped_count = dropped_count + excluded.dropped_count,
+             last_reason = excluded.last_reason, last_operation_id = excluded.last_operation_id,
+             last_dropped_at = excluded.last_dropped_at",
+        params![domain, i64::try_from(count).unwrap_or(i64::MAX), reason, operation_id, now],
+    )?;
+    Ok(())
+}
+
+/// The durable drop record for one domain: `(count, last reason)`.
+pub(super) fn read_dropped_intents(
+    connection: &Connection,
+    domain: &str,
+) -> Result<(u32, Option<String>), LibraryError> {
+    Ok(connection
+        .query_row(
+            "SELECT dropped_count, last_reason FROM authority_intent_drops WHERE domain = ?1",
+            [domain],
+            |row| {
+                Ok((
+                    u32::try_from(row.get::<_, i64>(0)?).unwrap_or(u32::MAX),
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .optional()?
+        .unwrap_or((0, None)))
+}
+
+/// Retire every Album membership intent naming one of `asset_ids`, in the caller's
+/// transaction, and record the drop. Used when a never-committed Asset is purged.
+pub(super) fn drop_album_intents_for_assets(
+    connection: &Connection,
+    asset_ids: &[String],
+    reason: &str,
+    now: &str,
+) -> Result<(), LibraryError> {
+    let mut dropped = 0;
+    for asset_id in asset_ids {
+        dropped += connection.execute(
+            "DELETE FROM album_authority_outbox WHERE command_type = ?1 AND asset_id = ?2",
+            params![MEMBERSHIP, asset_id],
+        )?;
+    }
+    record_dropped_intents(connection, ALBUM_DOMAIN, dropped, reason, None, now)
+}
+
+/// Whether any Album intent still stands between the replica and a receive.
+///
+/// Membership intents waiting for their Asset's upload do not count: the server cannot
+/// describe that Asset yet, so no received change can overwrite their optimistic effect.
+pub(super) fn has_unresolved_intents(connection: &Connection) -> Result<bool, LibraryError> {
+    Ok(connection.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM album_authority_outbox o
+                 WHERE NOT (o.state = 'pending' AND o.command_type = '{MEMBERSHIP}'
+                            AND {waiting}))",
+            waiting = asset_waiting_sql("o.asset_id"),
+        ),
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +658,16 @@ impl Library {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
+        let waiting: i64 = connection.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM album_authority_outbox o
+                 WHERE o.state = 'pending' AND o.command_type = '{MEMBERSHIP}' AND {waiting}",
+                waiting = asset_waiting_sql("o.asset_id"),
+            ),
+            [],
+            |row| row.get(0),
+        )?;
+        let (dropped, last_drop_reason) = read_dropped_intents(&connection, ALBUM_DOMAIN)?;
         Ok(AlbumSyncStatus {
             adopted: authority.is_some(),
             library_id: authority.as_ref().map(|value| value.library_id.clone()),
@@ -437,6 +676,9 @@ impl Library {
             cursor: authority.as_ref().map(|value| value.cursor),
             pending_count: pending,
             blocked_count: blocked,
+            waiting_count: u32::try_from(waiting).unwrap_or(u32::MAX),
+            dropped_count: dropped,
+            last_drop_reason,
             oldest_pending_operation_id: oldest,
         })
     }
@@ -487,6 +729,11 @@ impl Library {
 /// around a blocked or unresolved intent could apply a rename before its create. A
 /// retry of one logical operation always presents the same operation id and the same
 /// stored bytes.
+///
+/// One exception: a membership whose Asset's upload has not committed is skipped (it
+/// *waits*) rather than stopping the pass, and one that can never apply is retired with
+/// a recorded reason. See [`asset_intent_readiness`]. Every intent for that Asset shares
+/// its readiness, so a relation's own intents never overtake each other.
 pub(super) fn flush_outbox(
     library: &Library,
     client: &CloudClient,
@@ -523,12 +770,43 @@ pub(super) fn flush_outbox(
         // an inconsistent database rather than "nothing to send".
         return Err(LibraryError::AlbumAuthorityInactive);
     };
+    let mut readiness_by_asset = PassReadiness::default();
     for entry in entries {
         if entry.is_blocked() {
             // An unresolved structural conflict stops delivery: a later operation may
             // depend on this one, and receiving over the optimistic state would hide it.
             report.stopped = true;
             return Ok(report);
+        }
+        if entry.command_type == MEMBERSHIP {
+            // A membership depends only on its own relation's earlier intents and on its
+            // Album's create, which is always ahead of it. Every intent for one Asset
+            // shares the Asset's readiness, so skipping a waiting one keeps its later
+            // intents behind it while other Assets and Albums proceed.
+            let readiness = readiness_by_asset.get(library, entry.asset_id.as_deref())?;
+            match readiness {
+                AssetIntentReadiness::Wait => {
+                    report.waiting += 1;
+                    continue;
+                }
+                AssetIntentReadiness::Drop(reason) => {
+                    drop_entry(library, &entry, reason, now)?;
+                    report.pending -= 1;
+                    report.dropped += 1;
+                    continue;
+                }
+                AssetIntentReadiness::Send => {}
+            }
+            // A waiting membership can be overtaken by a later delete of its Album. The
+            // relation then has nothing to belong to: the server would refuse it with
+            // `albumNotFound`, and blocking on that would stop the whole domain.
+            let album = read_album_revision(&*library.connection()?, &entry.album_id)?;
+            if matches!(album, Some((_, true))) {
+                drop_entry(library, &entry, DROP_ALBUM_DELETED, now)?;
+                report.pending -= 1;
+                report.dropped += 1;
+                continue;
+            }
         }
         if entry.epoch != authority.epoch {
             // Revisions are only comparable inside one epoch, so an intent composed
@@ -554,12 +832,35 @@ pub(super) fn flush_outbox(
             AlbumCommandOutcome::Dropped => {
                 // The Asset is tombstoned: the intent can never apply, so it is retired
                 // instead of blocking the queue.
-                library.connection()?.execute(
-                    "DELETE FROM album_authority_outbox WHERE operation_id = ?1",
-                    [&entry.operation_id],
-                )?;
+                drop_entry(library, &entry, DROP_ASSET_TOMBSTONED, now)?;
                 report.pending -= 1;
                 report.no_op += 1;
+                report.dropped += 1;
+            }
+            AlbumCommandOutcome::Conflict(conflict)
+                if entry.command_type == MEMBERSHIP && conflict.code == INVALID_MEMBERSHIP =>
+            {
+                // On the command route the server raises this code only when it does not
+                // hold the Asset as a linkable (committed, not tombstoned) Asset; a missing
+                // Album is `albumNotFound` and a tombstone is `assetTombstoned`. It is
+                // therefore never a user-resolvable content conflict. An upload still in
+                // flight waits; otherwise nothing this PC can do will make the server know
+                // the Asset, so the intent is retired with a recorded reason instead of
+                // blocking every later Album intent and the receive half.
+                let readiness = readiness_by_asset.refresh(library, entry.asset_id.as_deref())?;
+                match readiness {
+                    AssetIntentReadiness::Wait => report.waiting += 1,
+                    AssetIntentReadiness::Drop(reason) => {
+                        drop_entry(library, &entry, reason, now)?;
+                        report.pending -= 1;
+                        report.dropped += 1;
+                    }
+                    AssetIntentReadiness::Send => {
+                        drop_entry(library, &entry, INVALID_MEMBERSHIP, now)?;
+                        report.pending -= 1;
+                        report.dropped += 1;
+                    }
+                }
             }
             AlbumCommandOutcome::Conflict(conflict) => {
                 block_entry(library, entry.seq, &conflict.code, conflict.detail, now)?;
@@ -611,6 +912,31 @@ fn confirm(
     transaction.execute(
         "DELETE FROM album_authority_outbox WHERE operation_id = ?1",
         [&entry.operation_id],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Retire one intent that can never apply, and record why, in one transaction.
+fn drop_entry(
+    library: &Library,
+    entry: &AlbumOutboxEntry,
+    reason: &str,
+    now: &str,
+) -> Result<(), LibraryError> {
+    let mut connection = library.connection()?;
+    let transaction = connection.transaction()?;
+    let deleted = transaction.execute(
+        "DELETE FROM album_authority_outbox WHERE operation_id = ?1",
+        [&entry.operation_id],
+    )?;
+    record_dropped_intents(
+        &transaction,
+        ALBUM_DOMAIN,
+        deleted,
+        reason,
+        Some(&entry.operation_id),
+        now,
     )?;
     transaction.commit()?;
     Ok(())

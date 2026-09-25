@@ -3094,13 +3094,17 @@ fn classify_classification_rejection(code: &str) -> ClassificationRejection {
         "classificationNameTooLong" => {
             ClassificationRejection::Structural("classificationNameTooLong")
         }
-        // Everything else — `invalidClassificationAssignment` (a transient cross-domain
-        // ordering state: the Asset exists locally and this intent is queued, but Asset
-        // replication has not reached the server yet), the activation-only codes, and any
-        // code this build does not recognize — stays pending and retries with the
-        // identical operation id and payload. Blocking `invalidClassificationAssignment`
-        // would permanently refuse a legitimate user intent on a condition that resolves
-        // itself once Asset replication catches up.
+        // The server does not hold the named Asset as linkable (not committed yet, or
+        // unknown). This is a cross-domain ordering state, not a user conflict, so it is
+        // returned as a coded outcome and the send half decides per intent: an Asset whose
+        // upload is still outstanding waits without holding up other intents, and an
+        // assignment that can never apply is retired with a recorded reason.
+        "invalidClassificationAssignment" => {
+            ClassificationRejection::Structural("invalidClassificationAssignment")
+        }
+        // Everything else — the activation-only codes and any code this build does not
+        // recognize — stays pending and retries with the identical operation id and
+        // payload.
         _ => ClassificationRejection::Retryable,
     }
 }

@@ -430,6 +430,21 @@ impl Library {
         for id in &purged_local {
             tx.execute("DELETE FROM assets WHERE id=?", [id])?;
         }
+        // A purged Asset the server never owned can never receive a relation, so its
+        // queued Album/Classification intents are retired now instead of waiting at the
+        // send half for an upload that was just cancelled.
+        super::album_authority::drop_album_intents_for_assets(
+            &tx,
+            &purged_local,
+            super::album_authority::DROP_ASSET_PURGED,
+            &now,
+        )?;
+        super::classification_authority::drop_classification_intents_for_assets(
+            &tx,
+            &purged_local,
+            super::album_authority::DROP_ASSET_PURGED,
+            &now,
+        )?;
         deleted_count += purged_local.len() as u64;
         tx.commit()?;
         Ok(PurgeSummary { deleted_count, failed_asset_ids })
@@ -470,10 +485,29 @@ impl Library {
                 failed_asset_ids.push(asset_id);
                 continue;
             }
-            deleted_count += connection.execute(
+            let deleted = connection.execute(
                 "DELETE FROM assets WHERE id = ?1 AND status = 'trash'",
                 [&asset_id],
-            )? as u64;
+            )?;
+            if deleted > 0 {
+                // Same rule as the authority path: a purged Asset's queued relation
+                // intents can never apply, so they are retired with the purge.
+                let now = chrono::Utc::now().to_rfc3339();
+                let purged = [asset_id.clone()];
+                super::album_authority::drop_album_intents_for_assets(
+                    &connection,
+                    &purged,
+                    super::album_authority::DROP_ASSET_PURGED,
+                    &now,
+                )?;
+                super::classification_authority::drop_classification_intents_for_assets(
+                    &connection,
+                    &purged,
+                    super::album_authority::DROP_ASSET_PURGED,
+                    &now,
+                )?;
+            }
+            deleted_count += deleted as u64;
         }
         Ok(PurgeSummary {
             deleted_count,
@@ -623,6 +657,62 @@ pub(crate) fn update_trash_status_in_transaction(
         }
         if changed > 0 && to_status == "normal" && from_status != "normal" {
             super::character_autotag::enqueue(transaction,asset_id,super::character_autotag::Cause::Restore)?;
+        }
+        if changed > 0 && to_status == "normal" && from_status == "trash" {
+            requeue_relation_intents_after_restore(transaction, asset_id)?;
+        }
+    }
+    Ok(())
+}
+
+/// Re-queue the Album/Classification intents of a restored, never-committed Asset.
+///
+/// The send half retires the relation intents of an Asset trashed before its upload
+/// committed (`assetTrashedBeforeUpload`), because replication does not upload a trashed
+/// Asset. Restoring it resumes the upload, so the relations it still holds locally are
+/// queued again and reach the server once it commits. Relations that still have a queued
+/// intent (the send half had not retired it yet) are left alone, so nothing is doubled.
+fn requeue_relation_intents_after_restore(
+    transaction: &rusqlite::Transaction<'_>,
+    asset_id: &str,
+) -> Result<(), LibraryError> {
+    use super::album_authority::{asset_intent_readiness, AssetIntentReadiness, MEMBERSHIP};
+    if asset_intent_readiness(transaction, asset_id)? != AssetIntentReadiness::Wait {
+        return Ok(());
+    }
+    let albums: Vec<String> = transaction
+        .prepare(
+            "SELECT album_id FROM asset_albums m WHERE m.asset_id = ?1
+             AND NOT EXISTS (SELECT 1 FROM album_authority_outbox o
+                 WHERE o.command_type = ?2 AND o.album_id = m.album_id AND o.asset_id = ?1)
+             ORDER BY album_id",
+        )?
+        .query_map(params![asset_id, MEMBERSHIP], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for album_id in albums {
+        Library::enqueue_album_membership_intent(transaction, &album_id, asset_id, true)?;
+    }
+    let queued: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM classification_authority_outbox
+             WHERE command_type = ?1 AND asset_id = ?2)",
+        params![super::classification_authority::ASSIGNMENT, asset_id],
+        |row| row.get(0),
+    )?;
+    if !queued {
+        let current: Option<String> = transaction
+            .query_row(
+                "SELECT classification_id FROM asset_classifications WHERE asset_id = ?1
+                 ORDER BY classification_id LIMIT 1",
+                [asset_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(classification_id) = current {
+            Library::enqueue_classification_assignment_intent(
+                transaction,
+                asset_id,
+                Some(&classification_id),
+            )?;
         }
     }
     Ok(())

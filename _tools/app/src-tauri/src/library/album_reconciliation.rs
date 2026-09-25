@@ -29,8 +29,9 @@ use crate::cloud::client::{
 };
 
 use super::album_authority::{
-    read_authority, read_outbox, write_album_revision, write_authority,
-    write_membership_revision, AlbumAuthority, ALBUM_CONTRACT_VERSION, ALBUM_DOMAIN,
+    asset_waiting_sql, has_unresolved_intents, read_authority, write_album_revision,
+    write_authority, write_membership_revision, AlbumAuthority, ALBUM_CONTRACT_VERSION,
+    ALBUM_DOMAIN, MEMBERSHIP,
 };
 use super::error::LibraryError;
 use super::Library;
@@ -128,7 +129,7 @@ impl Library {
         let (outbox_clean, local) = {
             let connection = self.connection()?;
             (
-                read_outbox(&connection)?.is_empty(),
+                !has_unresolved_intents(&connection)?,
                 read_authority(&connection)?,
             )
         };
@@ -542,6 +543,7 @@ impl Library {
                 materialize_membership(&transaction, &membership.album_id, &membership.asset_id)?;
             }
         }
+        reapply_waiting_memberships(&transaction)?;
         let authority = AlbumAuthority {
             library_id: remote.library_id.clone(),
             epoch: remote.epoch,
@@ -628,7 +630,7 @@ impl Library {
         transaction.pragma_update(None, "defer_foreign_keys", "ON")?;
         let stored = read_authority(&transaction)?
             .ok_or(LibraryError::AlbumAuthorityInactive)?;
-        if !read_outbox(&transaction)?.is_empty() {
+        if has_unresolved_intents(&transaction)? {
             // A local edit appeared while this page was in flight. That edit is the user's
             // current intent, so the page must not be applied over it; the caller reports
             // the same "intent takes precedence this cycle" state the pre-request check
@@ -713,7 +715,7 @@ impl Library {
     /// intent is the user's current intent and must keep winning over confirmed state.
     pub(crate) fn materialize_deferred_album_memberships(&self) -> Result<u32, LibraryError> {
         let connection = self.connection()?;
-        if !read_outbox(&connection)?.is_empty() {
+        if has_unresolved_intents(&connection)? {
             return Ok(0);
         }
         let inserted = connection.execute(
@@ -753,7 +755,7 @@ fn require_clean_baseline_receive(
         library_id: library_id.to_owned(),
         cursor,
     };
-    if !read_outbox(transaction)?.is_empty() {
+    if has_unresolved_intents(transaction)? {
         return Err(refused(
             library_id,
             stored.as_ref().map(|authority| authority.cursor).unwrap_or(0),
@@ -788,6 +790,55 @@ fn require_clean_baseline_receive(
             .map(|authority| authority.library_id.clone())
             .unwrap_or_else(|| library_id.to_owned());
         return Err(refused(&library_id, cursor));
+    }
+    Ok(())
+}
+
+/// Re-apply the optimistic effect of membership intents still waiting for their Asset.
+///
+/// A baseline replaces `asset_albums` wholesale, but a membership waiting for its Asset's
+/// upload is the user's current intent and the server cannot describe that Asset yet, so
+/// the replaced table would silently lose the user's choice until the upload commits.
+/// Replaying the waiting intents in queue order keeps the visible state on the intent.
+fn reapply_waiting_memberships(transaction: &Transaction<'_>) -> Result<(), LibraryError> {
+    let mut statement = transaction.prepare(&format!(
+        "SELECT o.album_id, o.asset_id, o.payload FROM album_authority_outbox o
+         WHERE o.state = 'pending' AND o.command_type = '{MEMBERSHIP}' AND {waiting}
+         ORDER BY o.seq",
+        waiting = asset_waiting_sql("o.asset_id"),
+    ))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (album_id, asset_id, payload) in rows {
+        let desired = serde_json::from_str::<serde_json::Value>(&payload)
+            .ok()
+            .and_then(|body| body.get("desiredState").and_then(|value| value.as_bool()));
+        match desired {
+            Some(true) => {
+                let album_exists: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM albums WHERE id = ?1)",
+                    [&album_id],
+                    |row| row.get(0),
+                )?;
+                if album_exists {
+                    materialize_membership(transaction, &album_id, &asset_id)?;
+                }
+            }
+            Some(false) => {
+                transaction.execute(
+                    "DELETE FROM asset_albums WHERE album_id = ?1 AND asset_id = ?2",
+                    params![album_id, asset_id],
+                )?;
+            }
+            None => {}
+        }
     }
     Ok(())
 }

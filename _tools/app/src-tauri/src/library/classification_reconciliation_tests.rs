@@ -6549,3 +6549,111 @@ fn a_clean_pass_rewrites_no_assignment_rows() {
         "the projection is still correct"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Assignments waiting for their Asset's upload (review H2)
+// ---------------------------------------------------------------------------
+
+/// A local-only Asset whose upload is still queued, with its assignment intent queued.
+fn waiting_assignment(library: &Library, asset_id: &str, classification_id: &str) {
+    insert_asset(library, asset_id);
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO cloud_sync_queue
+                (id, entity_type, entity_id, operation, status, revision, updated_at)
+             VALUES (?1, 'asset', ?2, 'upsert', 'pending', 1, '2026-09-25T00:00:00Z')",
+            rusqlite::params![format!("queue-{asset_id}"), asset_id],
+        )
+        .unwrap();
+    library.queue_local_assignment_for_test(asset_id, classification_id);
+}
+
+/// A waiting assignment does not stop a received delete of its target. The local relation
+/// follows the same transition the authority applied to the Assets it knows, so the
+/// `RESTRICT` relation cannot refuse the page forever.
+#[test]
+fn a_received_delete_moves_a_waiting_assets_local_assignment() {
+    let (_temp, library) = open();
+    pin_library_id(&library);
+    library
+        .install_classification_baseline_for_test(
+            &[
+                classification("originals", "오리지널", None, 1),
+                classification("doomed", "삭제될", None, 1),
+            ],
+            &[],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    waiting_assignment(&library, "fresh", "doomed");
+
+    library
+        .apply_classification_page_for_test(
+            &[delete_change(
+                2,
+                tombstone("doomed", "삭제될", 2),
+                transition("doomed", None, 0),
+            )],
+            2,
+        )
+        .unwrap();
+
+    let connection = library.connection().unwrap();
+    assert!(projections(&connection).is_empty(), "moved to unassigned");
+    let exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id = 'doomed')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!exists);
+}
+
+/// A baseline replaces the relation table wholesale, but a waiting assignment is the
+/// user's current intent for an Asset the authority cannot describe yet, so it survives.
+#[test]
+fn a_baseline_keeps_a_waiting_assignment_visible() {
+    let (_temp, library) = open();
+    pin_library_id(&library);
+    let classes = [
+        classification("originals", "오리지널", None, 1),
+        classification("games", "게임", None, 1),
+    ];
+    library
+        .install_classification_baseline_for_test(
+            &classes,
+            &[],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+    waiting_assignment(&library, "fresh", "games");
+
+    library
+        .install_classification_baseline_for_test(
+            &classes,
+            &[],
+            &[originals("originals")],
+            LIBRARY,
+            1,
+            1,
+            5,
+        )
+        .unwrap();
+
+    let connection = library.connection().unwrap();
+    assert_eq!(
+        projections(&connection),
+        vec![("fresh".to_owned(), "games".to_owned())]
+    );
+}

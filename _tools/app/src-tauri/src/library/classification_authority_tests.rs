@@ -1881,13 +1881,56 @@ mod integration {
         assert_eq!(payload["expectedRevision"], 0);
     }
 
-    /// A transient `invalidClassificationAssignment` stays pending and stops the pass.
+    /// An assignment whose Asset upload is still outstanding waits without being sent.
     ///
     /// The Asset exists locally and this intent is queued, but Asset replication has not
-    /// reached the server yet. Blocking would permanently refuse a legitimate intent on a
-    /// condition that resolves itself.
+    /// reached the server yet. Sending would be refused with
+    /// `invalidClassificationAssignment`; blocking would permanently refuse a legitimate
+    /// intent, and retrying at the head of the queue would stop every later intent.
     #[test]
-    fn a_transient_invalid_assignment_stays_pending() {
+    fn an_assignment_for_an_uploading_asset_waits_without_stopping_the_pass() {
+        let (_temp, library) = open();
+        adopt(&library, 1, 0);
+        let root = create_root(&library, "게임");
+        asset_with_legacy_queue(&library, "asset-1");
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM classification_authority_outbox", [])
+            .unwrap();
+        library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec!["asset-1".into()],
+                classification_id: Some(root),
+            })
+            .unwrap();
+
+        let (base, receiver, handle) = coded_rejection_server("invalidClassificationAssignment", 422, None);
+        let client = CloudClient::new(&base).unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        handle.join().unwrap();
+        assert!(received(&receiver).is_empty(), "a waiting intent is not sent early");
+        assert_eq!((report.waiting, report.pending, report.blocked), (1, 1, 0));
+        assert!(!report.stopped);
+
+        let connection = library.connection().unwrap();
+        let (state, code): (String, Option<String>) = connection
+            .query_row(
+                "SELECT state, conflict_code FROM classification_authority_outbox",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(state, "pending", "a self-resolving state must not block");
+        assert_eq!(code, None);
+    }
+
+    /// `invalidClassificationAssignment` for an Asset with no upload left to wait for is
+    /// retired with a recorded reason instead of wedging the head of the queue.
+    #[test]
+    fn an_invalid_assignment_with_nothing_to_wait_for_is_dropped_and_recorded() {
         let (_temp, library) = open();
         adopt(&library, 1, 0);
         let root = create_root(&library, "게임");
@@ -1906,25 +1949,20 @@ mod integration {
 
         let (base, receiver, handle) = coded_rejection_server("invalidClassificationAssignment", 422, None);
         let client = CloudClient::new(&base).unwrap();
-        let error = library
+        let report = library
             .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
-            .unwrap_err();
-        handle.join().unwrap();
-        assert!(matches!(
-            error,
-            LibraryError::ClassificationCommandOutcomeUnknown
-        ));
-
-        let connection = library.connection().unwrap();
-        let (state, code): (String, Option<String>) = connection
-            .query_row(
-                "SELECT state, conflict_code FROM classification_authority_outbox",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
             .unwrap();
-        assert_eq!(state, "pending", "a self-resolving state must not block");
-        assert_eq!(code, None);
+        handle.join().unwrap();
+        assert_eq!(received(&receiver).len(), 1);
+        assert_eq!((report.dropped, report.blocked, report.pending), (1, 0, 0));
+        assert!(!report.stopped);
+        assert!(outbox(&library.connection().unwrap()).is_empty());
+        let status = library.classification_sync_status().unwrap();
+        assert_eq!(status.dropped_count, 1);
+        assert_eq!(
+            status.last_drop_reason.as_deref(),
+            Some("invalidClassificationAssignment")
+        );
     }
 
     /// An authority mismatch is a typed error, never a stored user conflict.
@@ -2802,5 +2840,322 @@ mod integration {
         assert_eq!(report.sent, 1, "the gate was released by the failed pass");
         assert_eq!(received(&receiver).len(), 1);
         assert!(outbox(&library.connection().unwrap()).is_empty());
+    }
+
+    // -----------------------------------------------------------------------------
+    // H2: an assignment for an Asset that never uploads must not wedge the domain
+    // -----------------------------------------------------------------------------
+
+    fn adopt_own(library: &Library) -> String {
+        let library_id = library.library_id().unwrap();
+        library
+            .adopt_classification_authority_for_test(&library_id, 1, 1, 0)
+            .unwrap();
+        library_id
+    }
+
+    fn upload(library: &Library, asset_id: &str, status: &str) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO cloud_sync_queue
+                    (id, entity_type, entity_id, operation, status, revision, updated_at)
+                 VALUES (?1, 'asset', ?2, 'upsert', ?3, 1, '2026-09-25T00:00:00Z')",
+                rusqlite::params![format!("queue-{asset_id}"), asset_id, status],
+            )
+            .unwrap();
+    }
+
+    fn assign(library: &Library, asset_id: &str, classification_id: &str) {
+        library
+            .set_asset_classification(SetAssetClassification {
+                asset_ids: vec![asset_id.to_owned()],
+                classification_id: Some(classification_id.to_owned()),
+            })
+            .unwrap();
+    }
+
+    fn receive_is_not_deferred(library: &Library, client: &CloudClient, library_id: &str) {
+        let status = crate::cloud::client::SyncStatus {
+            protocol_version: 1,
+            active: true,
+            library_id: Some(library_id.to_owned()),
+            domains: vec![crate::cloud::client::SyncAuthorityDomain {
+                domain: "classifications".into(),
+                library_id: library_id.to_owned(),
+                epoch: 1,
+                contract_version: 1,
+                cursor: 0,
+            }],
+        };
+        let received = library
+            .reconcile_classification_authority_with_status(
+                client,
+                "token",
+                &|| Ok(status.clone()),
+                true,
+            )
+            .unwrap();
+        assert!(
+            !received.deferred_to_outbox,
+            "an assignment that cannot be delivered yet must not stop receive"
+        );
+    }
+
+    /// Purging a never-uploaded Asset retires its queued assignment, so the assignments
+    /// behind it are delivered and receive runs. Covers both purge paths: the legacy one
+    /// (no Asset authority) and the authority one (local-only Asset).
+    #[test]
+    fn purging_an_unuploaded_asset_retires_its_assignment_and_unblocks_the_domain() {
+        for asset_authority in [false, true] {
+            let (temp, library) = open();
+            // Created before adoption, so the queue holds only the assignments below.
+            let root = create_root(&library, "게임");
+            let library_id = adopt_own(&library);
+            if asset_authority {
+                library
+                    .connection()
+                    .unwrap()
+                    .execute("INSERT INTO asset_authority VALUES(1, ?1, 1, 1, 0)", [&library_id])
+                    .unwrap();
+            }
+            insert_asset(&library, "gone");
+            upload(&library, "gone", "pending");
+            for relative in ["assets/gone.png", "thumbnails/gone.webp"] {
+                let path = temp.path().join(relative);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, b"bytes").unwrap();
+            }
+            insert_asset(&library, "kept");
+            upload(&library, "kept", "synced");
+            // The doomed Asset's assignment is at the head of the queue.
+            assign(&library, "gone", &root);
+            assign(&library, "kept", &root);
+
+            library.trash_assets(&["gone".to_owned()]).unwrap();
+            let purged = library.empty_trash().unwrap();
+            assert_eq!(purged.deleted_count, 1, "asset authority: {asset_authority}");
+
+            let queued = payloads(&library.connection().unwrap());
+            assert_eq!(queued.len(), 1, "the purged Asset's assignment is gone");
+            assert_eq!(queued[0]["assetId"], "kept");
+            let status = library.classification_sync_status().unwrap();
+            assert_eq!(status.dropped_count, 1);
+            assert_eq!(status.last_drop_reason.as_deref(), Some("assetPurged"));
+
+            let (base, receiver, handle) = accepting_server(library_id.clone());
+            let client = CloudClient::new(&base).unwrap();
+            let report = library
+                .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+                .unwrap();
+            handle.join().unwrap();
+            assert_eq!((report.sent, report.blocked, report.waiting), (1, 0, 0));
+            assert!(!report.stopped);
+            assert_eq!(received(&receiver).len(), 1);
+            assert!(outbox(&library.connection().unwrap()).is_empty());
+            receive_is_not_deferred(&library, &client, &library_id);
+        }
+    }
+
+    /// An assignment whose Asset is purged by another path (the row is simply gone) is
+    /// retired by the send half itself, without a request.
+    #[test]
+    fn an_assignment_for_a_deleted_asset_is_dropped_before_sending() {
+        let (_temp, library) = open();
+        let root = create_root(&library, "게임");
+        adopt_own(&library);
+        insert_asset(&library, "gone");
+        upload(&library, "gone", "pending");
+        assign(&library, "gone", &root);
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM assets WHERE id = 'gone'", [])
+            .unwrap();
+
+        let client = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        assert_eq!((report.dropped, report.pending), (1, 0));
+        assert!(outbox(&library.connection().unwrap()).is_empty());
+        assert_eq!(
+            library.classification_sync_status().unwrap().last_drop_reason.as_deref(),
+            Some("assetDeleted")
+        );
+    }
+
+    /// A permanently failed upload keeps its assignment waiting (a later retry may still
+    /// upload the Asset) without holding up other Assets' assignments or receive.
+    #[test]
+    fn a_failed_upload_keeps_its_assignment_waiting_without_blocking_others() {
+        let (_temp, library) = open();
+        let root = create_root(&library, "게임");
+        let library_id = adopt_own(&library);
+        insert_asset(&library, "failed");
+        upload(&library, "failed", "failed");
+        insert_asset(&library, "other");
+        upload(&library, "other", "synced");
+        assign(&library, "failed", &root);
+        assign(&library, "other", &root);
+
+        let (base, receiver, handle) = accepting_server(library_id.clone());
+        let client = CloudClient::new(&base).unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        handle.join().unwrap();
+        assert_eq!((report.sent, report.waiting, report.blocked, report.dropped), (1, 1, 0, 0));
+        assert!(!report.stopped);
+        let sent = received(&receiver);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].body["assetId"], "other");
+
+        let queued = payloads(&library.connection().unwrap());
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0]["assetId"], "failed");
+        let status = library.classification_sync_status().unwrap();
+        assert_eq!((status.pending_count, status.waiting_count), (1, 1));
+        receive_is_not_deferred(&library, &client, &library_id);
+    }
+
+    /// A waiting assignment overtaken by the delete of its target is re-pointed at the
+    /// Asset's current local value (where the local delete moved it) instead of being
+    /// refused with `classificationNotFound` and blocking the domain.
+    #[test]
+    fn a_waiting_assignment_overtaken_by_its_targets_delete_follows_the_local_move() {
+        let (_temp, library) = open();
+        let root = create_root(&library, "게임");
+        let child = library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Tag,
+                name: "하위".into(),
+                parent_id: Some(root.clone()),
+            })
+            .unwrap()
+            .id;
+        let library_id = adopt_own(&library);
+        insert_asset(&library, "fresh");
+        upload(&library, "fresh", "pending");
+        assign(&library, "fresh", &child);
+        let original_operation = outbox(&library.connection().unwrap())[0].0.clone();
+        library.delete_classification(&child).unwrap();
+
+        let (base, receiver, handle) = accepting_server(library_id.clone());
+        let client = CloudClient::new(&base).unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        handle.join().unwrap();
+        assert_eq!((report.sent, report.waiting), (1, 1));
+        assert_eq!(received(&receiver)[0].body["commandType"], "deleteClassification");
+
+        library
+            .connection()
+            .unwrap()
+            .execute("UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = 'fresh'", [])
+            .unwrap();
+        let (base, receiver, handle) = accepting_server(library_id);
+        let client = CloudClient::new(&base).unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        handle.join().unwrap();
+        assert_eq!((report.sent, report.blocked), (1, 0));
+        let sent = received(&receiver);
+        assert_eq!(sent[0].body["assetId"], "fresh");
+        assert_eq!(sent[0].body["classificationId"], root.as_str());
+        // The rewritten payload never reuses the old id: an earlier attempt may have had an
+        // unknown outcome, and the server would answer that id with its old receipt or
+        // `operationConflict` rather than the new value.
+        assert_ne!(sent[0].body["operationId"].as_str().unwrap(), original_operation);
+        assert!(outbox(&library.connection().unwrap()).is_empty());
+    }
+
+    /// A server that accepts every command and, when it sees `trigger_asset`'s command,
+    /// commits `commit_asset`'s upload in the library database before answering — the
+    /// upload lane finishing in the middle of a flush pass.
+    fn committing_server(
+        library_id: String,
+        database: std::path::PathBuf,
+        trigger_asset: &'static str,
+        commit_asset: &'static str,
+    ) -> (String, mpsc::Receiver<Received>, thread::JoinHandle<()>) {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", server.server_addr());
+        let (sender, receiver) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            for revision in 1..=8i64 {
+                let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_millis(500))
+                else {
+                    return;
+                };
+                let body = read_body(&mut request);
+                if body["assetId"] == trigger_asset {
+                    rusqlite::Connection::open(&database)
+                        .unwrap()
+                        .execute(
+                            "UPDATE cloud_sync_queue SET status = 'synced' WHERE entity_id = ?1",
+                            [commit_asset],
+                        )
+                        .unwrap();
+                }
+                let _ = sender.send(Received { body: body.clone(), token: String::new() });
+                let mut result = accepted_result(&body, revision);
+                result["libraryId"] = library_id.clone().into();
+                request.respond(json_response(result)).unwrap();
+            }
+        });
+        (base, receiver, handle)
+    }
+
+    /// Readiness is decided once per Asset per pass. If the upload commits mid-pass, a later
+    /// assignment for the same Asset must not overtake the earlier one that already waited,
+    /// or the next pass would apply the older value over the newer one.
+    #[test]
+    fn an_upload_committing_mid_pass_does_not_reorder_one_assets_assignments() {
+        let (temp, library) = open();
+        let first = create_root(&library, "먼저");
+        let second = create_root(&library, "나중");
+        let library_id = adopt_own(&library);
+        insert_asset(&library, "fresh");
+        upload(&library, "fresh", "pending");
+        insert_asset(&library, "other");
+        upload(&library, "other", "synced");
+        assign(&library, "fresh", &first);
+        assign(&library, "other", &first);
+        assign(&library, "fresh", &second);
+
+        let (base, receiver, handle) = committing_server(
+            library_id.clone(),
+            temp.path().join("library.sqlite"),
+            "other",
+            "fresh",
+        );
+        let client = CloudClient::new(&base).unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        handle.join().unwrap();
+        let sent = received(&receiver);
+        assert_eq!(sent.len(), 1, "only the other Asset is sent in this pass");
+        assert_eq!(sent[0].body["assetId"], "other");
+        assert_eq!((report.sent, report.waiting), (1, 2));
+
+        // Next pass: both of the Asset's assignments go out in queue order.
+        let (base, receiver, handle) = accepting_server(library_id);
+        let client = CloudClient::new(&base).unwrap();
+        library
+            .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
+            .unwrap();
+        handle.join().unwrap();
+        let sent = received(&receiver);
+        assert_eq!(
+            sent.iter()
+                .map(|request| request.body["classificationId"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>(),
+            [first, second]
+        );
     }
 }

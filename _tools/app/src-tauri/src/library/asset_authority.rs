@@ -384,6 +384,164 @@ fn resolve_tombstone_conflict(
     }
     Ok(())
 }
+/// Prefix of `asset_authority_state.last_error` for a lifecycle intent that was dropped
+/// because the server state won (a coded rejection, a tombstone, or an authority epoch
+/// change). The row keeps the server's state; this records why the user's choice did not
+/// stick, so the count and reasons stay queryable:
+/// `SELECT asset_id,last_error FROM asset_authority_state WHERE last_error LIKE 'lifecycleRejected:%'`.
+pub(crate) const LIFECYCLE_REJECTED: &str = "lifecycleRejected:";
+fn record_rejection(db: &Connection, id: &str, reason: &str) -> Result<(), LibraryError> {
+    db.execute(
+        "UPDATE asset_authority_state SET last_error=? WHERE asset_id=?",
+        params![format!("{LIFECYCLE_REJECTED}{reason}"), id],
+    )?;
+    Ok(())
+}
+/// A dropped tombstone intent leaves no purge behind: unless another queued tombstone
+/// still carries it, the Asset leaves the hidden purge-pending state.
+fn settle_dropped_tombstone(db: &Connection, id: &str) -> Result<(), LibraryError> {
+    db.execute(
+        "DELETE FROM asset_purge_pending WHERE asset_id=?1 AND accepted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM asset_lifecycle_outbox WHERE asset_id=?1 AND desired='tombstoned')",
+        [id],
+    )?;
+    Ok(())
+}
+/// The server no longer knows this Asset (absent from a new baseline, or `assetNotFound`).
+///
+/// This PC may hold the only copy, so the local row is never deleted for that reason. It
+/// becomes a PC-only Asset again, exactly like one that was never committed: its stale
+/// confirmed state and its lifecycle commands go (no revision exists to present), its local
+/// status stays as it is, and a fresh replication upload is queued so the server gets it
+/// back. The replication lane uploads only `normal` Assets, so a locally trashed one waits
+/// in the queue until it is restored.
+///
+/// An Asset the user already chose to delete (confirmed tombstone, a purge pending, or a
+/// queued tombstone) is never uploaded again: its purge is finished locally exactly as an
+/// accepted tombstone is (`retire_local_row`, then `delete_accepted_purge_files`).
+fn release_to_local(tx: &Transaction, id: &str) -> Result<(), LibraryError> {
+    let purged: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM asset_authority_state WHERE asset_id=?1 AND lifecycle='tombstoned')
+             OR EXISTS(SELECT 1 FROM asset_purge_pending WHERE asset_id=?1)
+             OR EXISTS(SELECT 1 FROM asset_lifecycle_outbox WHERE asset_id=?1 AND desired='tombstoned')",
+        [id],
+        |r| r.get(0),
+    )?;
+    tx.execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=?", [id])?;
+    if purged {
+        tx.execute("DELETE FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=?", [id])?;
+        let finished: bool = tx.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM assets WHERE id=?1)
+                AND NOT EXISTS(SELECT 1 FROM asset_purge_pending WHERE asset_id=?1)",
+            [id],
+            |r| r.get(0),
+        )?;
+        if finished {
+            // Nothing local is left to delete; the stale state row can go.
+            tx.execute("DELETE FROM asset_authority_state WHERE asset_id=?", [id])?;
+            return Ok(());
+        }
+        // The file-deletion step only acts on a confirmed tombstone, so the purge is
+        // recorded as one. Its revision is the maximum so no later change for this id can
+        // revive it through the change feed (which would otherwise fail every pass); only a
+        // future baseline that lists the id again replaces it (`apply_baseline`).
+        if let Some(mut p) = projection(tx, id)? {
+            p.lifecycle = "tombstoned".into();
+            p.entity_revision = i64::MAX;
+            tx.execute(
+                "UPDATE asset_authority_state SET lifecycle='tombstoned',entity_revision=?,projection=? WHERE asset_id=?",
+                params![p.entity_revision, serde_json::to_string(&p).map_err(|_| LibraryError::InvalidCloudResponse)?, id],
+            )?;
+        }
+        return retire_local_row(tx, id);
+    }
+    tx.execute("DELETE FROM asset_authority_state WHERE asset_id=?", [id])?;
+    // A `synced` upload row is what other domains read as "the server holds this Asset"
+    // (Album/Classification readiness, the backfill seeders). It is derived queue state and
+    // no longer true, so it goes; an upload still in flight is left to its worker.
+    tx.execute(
+        "DELETE FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=? AND operation='upsert' AND status='synced'",
+        [id],
+    )?;
+    let present: bool =
+        tx.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE id=?)", [id], |r| r.get(0))?;
+    if present {
+        crate::cloud::queue::enqueue_asset_upsert(tx, id, &chrono::Utc::now().to_rfc3339())?;
+    }
+    Ok(())
+}
+/// A baseline is complete server truth, not a replayed change. After an authority backup
+/// restore it can be *older* than what this replica had confirmed (a lower revision, or a
+/// tombstone that the restored server never recorded), and it still replaces confirmed
+/// state; otherwise every later command would present a revision the server never issued.
+fn apply_baseline(db: &Connection, p: &AssetProjection) -> Result<(), LibraryError> {
+    p.validate()?;
+    let Some(old) = projection(db, &p.asset_id)? else {
+        return apply(db, p);
+    };
+    let regressed = old.entity_revision > p.entity_revision
+        || (old.lifecycle == "tombstoned" && p.lifecycle != "tombstoned");
+    if !regressed {
+        return apply(db, p);
+    }
+    let local: Option<String> = db
+        .query_row("SELECT content_hash FROM assets WHERE id=?", [&p.asset_id], |r| r.get(0))
+        .optional()?;
+    if (old.sha256.is_some() && old.sha256 != p.sha256)
+        || local.as_ref().is_some_and(|hash| p.sha256.as_ref().is_some_and(|s| s != hash))
+    {
+        return invalid();
+    }
+    db.execute("UPDATE asset_authority_state SET lifecycle=?,entity_revision=?,sha256=?,size_bytes=?,projection=?,materialization=CASE WHEN ? THEN materialization ELSE 'pending' END WHERE asset_id=?",params![p.lifecycle,p.entity_revision,p.sha256,p.size_bytes.map(|size|size as i64),serde_json::to_string(p).map_err(|_|LibraryError::InvalidCloudResponse)?,local.is_some(),p.asset_id])?;
+    local_projection(db, &p.asset_id)
+}
+/// Re-issue or drop lifecycle intents composed for another authority identity.
+///
+/// ADR-0038 §5: a command from another epoch cannot present a meaningful revision, so an
+/// old-epoch row is never sent as is, and it must not block the new baseline either. Asset
+/// lifecycle is a desired state, so where the user's choice is still a legal transition
+/// from the new confirmed state it is re-issued against the new baseline (new operation id,
+/// new identity, the baseline's revision). It is dropped when it is already satisfied, when
+/// the new state is a tombstone, when it is a purge of an Asset the new baseline has as
+/// `normal` (a restore wins, as in §7a), or when it belongs to another library (a different
+/// revision lineage). Dropped choices the server overrode are recorded on the Asset.
+fn rebase_foreign_intents(tx: &Transaction, a: &Authority) -> Result<(), LibraryError> {
+    let rows = tx
+        .prepare("SELECT sequence,asset_id,desired,library_id FROM asset_lifecycle_outbox WHERE asset_id IN (SELECT asset_id FROM asset_lifecycle_outbox WHERE library_id<>?1 OR epoch<>?2 OR contract_version<>?3) ORDER BY sequence")?
+        .query_map(params![a.library, a.epoch, a.contract], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut simulated: std::collections::HashMap<String, Option<(String, i64)>> = Default::default();
+    for (seq, id, desired, library) in rows {
+        if !simulated.contains_key(&id) {
+            let current = projection(tx, &id)?.map(|p| (p.lifecycle, p.entity_revision));
+            simulated.insert(id.clone(), current);
+        }
+        let state = simulated.get_mut(&id).unwrap();
+        let keep = library == a.library
+            && state.as_ref().is_some_and(|(lifecycle, _)| {
+                lifecycle != "tombstoned"
+                    && *lifecycle != desired
+                    && (desired != "tombstoned" || lifecycle == "trash")
+            });
+        if keep {
+            let revision = state.as_ref().unwrap().1;
+            tx.execute("UPDATE asset_lifecycle_outbox SET operation_id=?,library_id=?,epoch=?,contract_version=?,expected_revision=?,status='pending',last_error=NULL WHERE sequence=?",params![uuid::Uuid::new_v4().to_string(),a.library,a.epoch,a.contract,revision,seq])?;
+            state.as_mut().unwrap().0 = desired;
+        } else {
+            tx.execute("DELETE FROM asset_lifecycle_outbox WHERE sequence=?", [seq])?;
+            if state.as_ref().is_some_and(|(lifecycle, _)| *lifecycle != desired) {
+                record_rejection(tx, &id, "epochChanged")?;
+            }
+        }
+    }
+    for id in simulated.keys() {
+        settle_dropped_tombstone(tx, id)?;
+        local_projection(tx, id)?;
+    }
+    Ok(())
+}
 fn verify_envelope(value: &Value, a: &Authority) -> Result<(), LibraryError> {
     if value["libraryId"].as_str() != Some(&a.library)
         || value["epoch"].as_i64() != Some(a.epoch)
@@ -571,29 +729,22 @@ impl Library {
             if !more {
                 let mut db = self.connection()?;
                 let tx = db.transaction()?;
-                if tx.query_row("SELECT EXISTS(SELECT 1 FROM asset_lifecycle_outbox WHERE library_id<>? OR epoch<>? OR contract_version<>?)",params![a.library,a.epoch,a.contract],|r|r.get::<_,bool>(0))?{return invalid();}
-                let old = tx
-                    .prepare("SELECT asset_id FROM asset_authority_state")?
-                    .query_map([], |r| r.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                for id in old {
-                    if !seen.contains(&id) {
-                        tx.execute("DELETE FROM assets WHERE id=?", [&id])?;
-                    }
-                }
                 // Keep byte-progress for identities present in both snapshots; replace confirmed rows only.
                 for p in &all {
-                    apply(&tx, p)?;
+                    apply_baseline(&tx, p)?;
                 }
+                // Absence from the new baseline never deletes a local Asset (review H4).
                 let old = tx
                     .prepare("SELECT asset_id FROM asset_authority_state")?
                     .query_map([], |r| r.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()?;
                 for id in old {
                     if !seen.contains(&id) {
-                        tx.execute("DELETE FROM asset_authority_state WHERE asset_id=?", [id])?;
+                        release_to_local(&tx, &id)?;
                     }
                 }
+                // Old-identity intents are rebased or dropped here, never left to block (review M1).
+                rebase_foreign_intents(&tx, a)?;
                 tx.execute("INSERT INTO asset_authority VALUES(1,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET library_id=excluded.library_id,epoch=excluded.epoch,contract_version=excluded.contract_version,cursor=excluded.cursor",params![a.library,a.epoch,a.contract,cursor.unwrap()])?;
                 tx.commit()?;
                 return Ok(());
@@ -685,14 +836,13 @@ impl Library {
         result: &mut AssetSyncResult,
     ) -> Result<(), LibraryError> {
         for _ in 0..100 {
-            let row:Option<(i64,String,String,String,i64,String)>=self.connection()?.query_row("SELECT sequence,operation_id,asset_id,desired,expected_revision,status FROM asset_lifecycle_outbox ORDER BY sequence LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
-            let Some((seq, operation, id, desired, expected, status)) = row else {
+            let row:Option<(i64,String,String,String,i64)>=self.connection()?.query_row("SELECT sequence,operation_id,asset_id,desired,expected_revision FROM asset_lifecycle_outbox ORDER BY sequence LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
+            let Some((seq, operation, id, desired, expected)) = row else {
                 return Ok(());
             };
-            if status == "conflict" {
-                result.stopped = true;
-                return Ok(());
-            }
+            // A row an older build parked as `conflict` is simply re-sent under its own
+            // operation id: the server replays its receipt or the same rejection, which is
+            // now resolved below instead of stopping the queue.
             self.connection()?.execute(
                 "UPDATE asset_lifecycle_outbox SET status='sending' WHERE sequence=?",
                 [seq],
@@ -765,22 +915,54 @@ impl Library {
                         result.applied_changes += 1;
                         continue;
                     }
-                    apply(&tx, &p)?;
-                    if lifecycle == "tombstoned" && desired != "tombstoned" {
-                        tx.execute("UPDATE asset_lifecycle_outbox SET status='conflict',last_error='lifecycleTransitionRefused' WHERE sequence=?",[seq])?;
+                    if lifecycle == "tombstoned" {
+                        // A tombstone is terminal: no queued trash or restore for this Asset
+                        // can ever be accepted. Adopt it (the local row retires through the
+                        // purge path) and drop every intent for the Asset (review H3).
+                        tx.execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=?", [&id])?;
+                        apply(&tx, &p)?;
+                        record_rejection(&tx, &id, "assetTombstoned")?;
                         tx.commit()?;
-                        result.stopped = true;
-                        return Ok(());
+                        result.applied_changes += 1;
+                        continue;
                     }
+                    apply(&tx, &p)?;
                     tx.execute("UPDATE asset_lifecycle_outbox SET operation_id=?,expected_revision=?,status='pending',last_error=NULL WHERE sequence=?",params![uuid::Uuid::new_v4().to_string(),current_revision,seq])?;
                     tx.commit()?;
                 }
                 Err(LibraryError::AssetAuthorityRejected { code, .. }) => {
-                    // A coded rejection is definitive. Preserve intent and expose a durable blocked row;
-                    // uncertain transport outcomes keep the exact operation and payload for receipt retry.
-                    self.connection()?.execute("UPDATE asset_lifecycle_outbox SET status='conflict',last_error=? WHERE sequence=?",params![code,seq])?;
-                    result.stopped = true;
-                    return Ok(());
+                    if !matches!(
+                        code.as_str(),
+                        "assetNotFound" | "lifecycleTransitionRefused" | "operationConflict"
+                    ) {
+                        // Not a definitive answer about this intent: the domain identity moved
+                        // under this pass (the next pass's status check re-baselines and
+                        // rebases the row), or the answer is uncoded / unknown (a misrouted
+                        // or rolled-back server, a request-schema 422). The row keeps its
+                        // exact operation and payload and is retried next pass; a server
+                        // fault is never turned into lost user intent.
+                        result.stopped = true;
+                        return Ok(());
+                    }
+                    // The command handler's definitive coded rejections (server
+                    // `asset_authority.apply_command`) end this intent, and lifecycle commands
+                    // for different Assets are independent, so it must not stop the queue
+                    // (review H3). The rejection carries no usable server state and no
+                    // single-Asset read exists, so the Asset falls back to its confirmed
+                    // replica state (kept current by the change feed) and the intent is
+                    // dropped with a durable reason. Uncertain transport outcomes still keep
+                    // the exact operation and payload for receipt retry (the arm below).
+                    let mut db = self.connection()?;
+                    let tx = db.transaction()?;
+                    if code == "assetNotFound" {
+                        release_to_local(&tx, &id)?;
+                    } else {
+                        tx.execute("DELETE FROM asset_lifecycle_outbox WHERE sequence=?", [seq])?;
+                        settle_dropped_tombstone(&tx, &id)?;
+                        local_projection(&tx, &id)?;
+                        record_rejection(&tx, &id, &code)?;
+                    }
+                    tx.commit()?;
                 }
                 Err(LibraryError::CloudUnauthorized) => {
                     super::credential_broker::broker()
@@ -2241,6 +2423,336 @@ mod tests {
             projection(&db, ID).unwrap().unwrap().lifecycle,
             "tombstoned"
         );
+    }
+
+    const OTHER: &str = "80000000-0000-4000-8000-0000000000b2";
+    /// A second server-known Asset (a clone of the ingested row with its own bytes).
+    fn second_projection() -> AssetProjection {
+        let mut other = asset(&media());
+        other.asset_id = OTHER.into();
+        other.sha256 = Some("b".repeat(64));
+        other
+    }
+    fn second_asset(library: &Library, status: &str) -> AssetProjection {
+        insert_local_only(library, OTHER, status, 'b');
+        let mut other = second_projection();
+        other.lifecycle = status.into();
+        apply(&library.connection().unwrap(), &other).unwrap();
+        other
+    }
+    /// Answer baseline reads with one complete page for `epoch`.
+    fn baseline_server(
+        library: &Library,
+        epoch: i64,
+        items: Vec<AssetProjection>,
+    ) -> (CloudClient, std::thread::JoinHandle<()>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}", server.server_addr())).unwrap();
+        let body = json!({"libraryId":library.library_id().unwrap(),"epoch":epoch,"contractVersion":1,
+                          "cursor":7,"items":items,"hasMore":false});
+        let worker = std::thread::spawn(move || {
+            let request = server
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .unwrap();
+            assert!(request.url().starts_with("/v1/assets/authority/baseline?"));
+            request
+                .respond(tiny_http::Response::from_string(body.to_string()))
+                .unwrap();
+        });
+        (client, worker)
+    }
+    fn rebaseline(library: &Library, epoch: i64, items: Vec<AssetProjection>) {
+        let (client, worker) = baseline_server(library, epoch, items);
+        let mut a = authority_of(library);
+        a.epoch = epoch;
+        library.install_asset_baseline(&client, "token", &a).unwrap();
+        worker.join().unwrap();
+    }
+    fn trash_accepted(library: &Library, p: &AssetProjection, revision: i64) -> Value {
+        let mut trashed = p.clone();
+        trashed.lifecycle = "trash".into();
+        trashed.entity_revision = revision;
+        json!({"libraryId":library.library_id().unwrap(),"epoch":1,"contractVersion":1,
+               "commandType":"trashAsset","changed":true,"asset":trashed})
+    }
+
+    #[test]
+    fn a_rebaseline_keeps_local_assets_it_does_not_list_and_requeues_their_upload() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        second_asset(&library, "trash");
+        {
+            let db = library.connection().unwrap();
+            db.execute("INSERT INTO albums(id,name,created_at) VALUES('album','Album','2026')", []).unwrap();
+            db.execute("INSERT INTO asset_albums(asset_id,album_id) VALUES(?,'album')", [ID]).unwrap();
+            db.execute("INSERT INTO classification_entries(id,kind,name,created_at) VALUES('class','root','Class','2026')", []).unwrap();
+            db.execute("INSERT OR IGNORE INTO asset_classifications(asset_id,classification_id) VALUES(?,'class')", [ID]).unwrap();
+            // Both were replicated before: the old queue rows say `synced`.
+            for (n, id) in [ID, OTHER].iter().enumerate() {
+                db.execute("INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at) VALUES(?,'asset',?,'upsert','synced',1,'2026')", params![format!("q{n}"), id]).unwrap();
+            }
+        }
+        library.trash_assets(&[OTHER.into()]).unwrap();
+        // A restored server authority backup that predates both Assets.
+        rebaseline(&library, 2, vec![]);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets"), 2, "no local Asset is deleted");
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE id='80000000-0000-4000-8000-000000000001' AND status='normal'"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE id='80000000-0000-4000-8000-0000000000b2' AND status='trash'"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_albums"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_classifications"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_authority_state"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        assert_eq!(count(&library, "SELECT epoch FROM asset_authority"), 2);
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM cloud_sync_queue WHERE status='pending'"),
+            2,
+            "both get a fresh upload"
+        );
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM cloud_sync_queue WHERE status='synced'"),
+            0,
+            "no stale evidence that the server still holds them"
+        );
+        // Other domains now see the Asset as not yet on the server, so their relation
+        // intents wait for the re-upload instead of being sent and refused.
+        {
+            use crate::library::album_authority::{asset_intent_readiness, AssetIntentReadiness};
+            let db = library.connection().unwrap();
+            assert!(asset_intent_readiness(&db, ID).unwrap() == AssetIntentReadiness::Wait);
+        }
+        // Only the normal Asset is uploadable; the trashed one waits until it is restored.
+        let claimed = library.claim_next_backfill_for_test().unwrap().unwrap();
+        assert_eq!(claimed.queue.entity_id, ID);
+        assert!(library.claim_next_backfill_for_test().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_new_epoch_rebases_or_drops_queued_intents_instead_of_failing_every_pass() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let other = second_asset(&library, "normal");
+        // Epoch 1: ID's trash is confirmed at r2 and a restore is queued; OTHER is
+        // trashed and emptied (the purge replaces its queued trash with a tombstone).
+        confirmed_trash(&library, &p);
+        library.restore_assets(&[ID.into()]).unwrap();
+        library.trash_assets(&[OTHER.into()]).unwrap();
+        library.empty_trash().unwrap();
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 2);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 1);
+        let old_ops: Vec<String> = library.connection().unwrap()
+            .prepare("SELECT operation_id FROM asset_lifecycle_outbox").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+        // Epoch 2 comes from an older backup: ID is trash at r1 (lower than confirmed),
+        // OTHER is trash at r1.
+        let mut id_trash = p.clone();
+        id_trash.lifecycle = "trash".into();
+        let mut other_trash = other.clone();
+        other_trash.lifecycle = "trash".into();
+        rebaseline(&library, 2, vec![id_trash, other_trash]);
+        let rows: Vec<(String, String, i64, i64, String)> = library.connection().unwrap()
+            .prepare("SELECT asset_id,desired,epoch,expected_revision,operation_id FROM asset_lifecycle_outbox ORDER BY sequence").unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap()
+            .collect::<Result<_, _>>().unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        // ID's restore is re-issued against the new baseline revision.
+        assert_eq!((rows[0].0.as_str(), rows[0].1.as_str(), rows[0].2, rows[0].3), (ID, "normal", 2, 1));
+        // OTHER's purge is re-issued against its new trash revision.
+        assert_eq!((rows[1].0.as_str(), rows[1].1.as_str(), rows[1].2, rows[1].3), (OTHER, "tombstoned", 2, 1));
+        assert!(rows.iter().all(|r| !old_ops.contains(&r.4)), "re-issued intents get new operation ids");
+        assert_eq!(projection(&library.connection().unwrap(), ID).unwrap().unwrap().entity_revision, 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='normal'"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='trash'"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 1);
+
+        // A purge against an Asset the new baseline has as `normal` is dropped (restore wins).
+        library.connection().unwrap()
+            .execute("UPDATE asset_lifecycle_outbox SET epoch=1", []).unwrap();
+        library.connection().unwrap()
+            .execute("DELETE FROM asset_lifecycle_outbox WHERE asset_id=?", [ID]).unwrap();
+        library.connection().unwrap()
+            .execute("UPDATE asset_authority SET epoch=1", []).unwrap();
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox WHERE desired='tombstoned'"), 1);
+        let mut other_normal = asset(&media());
+        other_normal.asset_id = OTHER.into();
+        other_normal.sha256 = Some("b".repeat(64));
+        let mut id_normal = p.clone();
+        id_normal.entity_revision = 1;
+        rebaseline(&library, 3, vec![id_normal, other_normal]);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_purge_pending"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='normal'"), 2);
+        assert_eq!(
+            count(&library, "SELECT count(*) FROM asset_authority_state WHERE last_error='lifecycleRejected:epochChanged'"),
+            1
+        );
+    }
+
+    #[test]
+    fn a_tombstone_conflict_at_the_head_is_adopted_and_later_intents_still_flush() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let other = second_asset(&library, "normal");
+        library.trash_assets(&[ID.into()]).unwrap();
+        library.trash_assets(&[OTHER.into()]).unwrap();
+        // An older build parked this row; it must not stop the queue any more.
+        library.connection().unwrap()
+            .execute("UPDATE asset_lifecycle_outbox SET status='conflict' WHERE asset_id=?", [ID]).unwrap();
+        let (client, worker) = command_server(vec![
+            (409, revision_conflict(3, "tombstoned")),
+            (200, trash_accepted(&library, &other, 2)),
+        ]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        let sent = worker.join().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[1]["assetId"], OTHER);
+        assert!(!result.stopped);
+        assert_eq!(result.flushed, 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        let db = library.connection().unwrap();
+        let state = projection(&db, ID).unwrap().unwrap();
+        assert_eq!((state.lifecycle.as_str(), state.entity_revision), ("tombstoned", 3));
+        assert_eq!(db.query_row("SELECT count(*) FROM assets WHERE id=?", [ID], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            db.query_row("SELECT last_error FROM asset_authority_state WHERE asset_id=?", [ID], |r| r.get::<_, String>(0)).unwrap(),
+            "lifecycleRejected:assetTombstoned"
+        );
+        assert_eq!(db.query_row("SELECT status FROM assets WHERE id=?", [OTHER], |r| r.get::<_, String>(0)).unwrap(), "trash");
+    }
+
+    #[test]
+    fn a_refused_head_intent_falls_back_to_server_state_and_does_not_block() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let other = second_asset(&library, "normal");
+        library.trash_assets(&[ID.into()]).unwrap();
+        library.trash_assets(&[OTHER.into()]).unwrap();
+        let (client, worker) = command_server(vec![
+            (409, json!({"detail":{"code":"lifecycleTransitionRefused","assetId":ID}})),
+            (200, trash_accepted(&library, &other, 2)),
+        ]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        assert_eq!(worker.join().unwrap().len(), 2);
+        assert!(!result.stopped);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        let db = library.connection().unwrap();
+        assert_eq!(db.query_row("SELECT status FROM assets WHERE id=?", [ID], |r| r.get::<_, String>(0)).unwrap(), "normal",
+                   "the confirmed server state wins over the refused trash");
+        assert_eq!(
+            db.query_row("SELECT last_error FROM asset_authority_state WHERE asset_id=?", [ID], |r| r.get::<_, String>(0)).unwrap(),
+            "lifecycleRejected:lifecycleTransitionRefused"
+        );
+        assert_eq!(db.query_row("SELECT status FROM assets WHERE id=?", [OTHER], |r| r.get::<_, String>(0)).unwrap(), "trash");
+    }
+
+    #[test]
+    fn an_asset_the_server_no_longer_knows_is_requeued_for_upload_not_blocking() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        library.trash_assets(&[ID.into()]).unwrap();
+        library.restore_assets(&[ID.into()]).unwrap();
+        let (client, worker) = command_server(vec![(404, json!({"detail":{"code":"assetNotFound"}}))]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        assert_eq!(worker.join().unwrap().len(), 1, "the restore behind it is dropped with the Asset's server state");
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_authority_state"), 0);
+        assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='normal'"), 1);
+        assert_eq!(count(&library, "SELECT count(*) FROM cloud_sync_queue WHERE status='pending'"), 1);
+    }
+
+    /// The user already emptied this Asset from the trash; only the server's answer is pending.
+    fn purge_pending(library: &Library, p: &AssetProjection) -> (std::path::PathBuf, std::path::PathBuf) {
+        ingest(library, p, &media()).unwrap();
+        confirmed_trash(library, p);
+        let paths = files(library);
+        library.connection().unwrap()
+            .execute("INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at) VALUES('q','asset',?,'upsert','synced',1,'2026')", [ID]).unwrap();
+        library.empty_trash().unwrap();
+        assert_eq!(count(library, "SELECT count(*) FROM asset_purge_pending WHERE accepted_at IS NULL"), 1);
+        paths
+    }
+    fn assert_purge_finished_locally(library: &Library, original: &std::path::Path, thumbnail: &std::path::Path) {
+        assert_eq!(count(library, "SELECT count(*) FROM assets"), 0, "a purged Asset never comes back");
+        assert_eq!(count(library, "SELECT count(*) FROM cloud_sync_queue"), 0, "and is never re-uploaded");
+        assert_eq!(count(library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
+        assert_eq!(count(library, "SELECT count(*) FROM asset_purge_pending WHERE accepted_at IS NULL"), 0);
+        assert!(library.delete_accepted_purge_files().unwrap().is_empty());
+        assert!(!original.exists() && !thumbnail.exists());
+        assert_eq!(count(library, "SELECT count(*) FROM asset_purge_pending"), 0);
+    }
+
+    #[test]
+    fn a_rebaseline_without_a_purge_pending_asset_finishes_the_purge_instead_of_uploading() {
+        let (_temp, library, p) = setup();
+        let (original, thumbnail) = purge_pending(&library, &p);
+        rebaseline(&library, 2, vec![]);
+        assert_purge_finished_locally(&library, &original, &thumbnail);
+        // Once nothing local is left, a later baseline drops the stale state row.
+        rebaseline(&library, 3, vec![]);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_authority_state"), 0);
+    }
+
+    #[test]
+    fn asset_not_found_answering_a_purge_finishes_it_locally_instead_of_uploading() {
+        let (_temp, library, p) = setup();
+        let (original, thumbnail) = purge_pending(&library, &p);
+        let (client, worker) = command_server(vec![(404, json!({"detail":{"code":"assetNotFound"}}))]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        assert_eq!(worker.join().unwrap()[0]["commandType"], "tombstoneAsset");
+        assert!(!result.stopped);
+        assert_purge_finished_locally(&library, &original, &thumbnail);
+    }
+
+    #[test]
+    fn an_uncoded_or_unknown_rejection_keeps_the_intent_and_retries_it_next_pass() {
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        second_asset(&library, "normal");
+        library.trash_assets(&[ID.into()]).unwrap();
+        library.trash_assets(&[OTHER.into()]).unwrap();
+        for response in [
+            (404, json!({"detail":"Not Found"})),
+            (422, json!({"detail":[{"loc":["body"],"msg":"field required"}]})),
+            (409, json!({"detail":{"code":"someFutureCode"}})),
+        ] {
+            let (client, worker) = command_server(vec![response]);
+            let mut result = AssetSyncResult::default();
+            library
+                .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+                .unwrap();
+            assert_eq!(worker.join().unwrap().len(), 1, "the pass stops at the head");
+            assert!(result.stopped);
+            assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 2);
+            assert_eq!(count(&library, "SELECT count(*) FROM assets WHERE status='trash'"), 2,
+                       "a server fault never undoes the user's trash");
+            assert_eq!(count(&library, "SELECT count(*) FROM asset_authority_state WHERE last_error IS NOT NULL"), 0);
+        }
+        let operation: String = library.connection().unwrap()
+            .query_row("SELECT operation_id FROM asset_lifecycle_outbox ORDER BY sequence LIMIT 1", [], |r| r.get(0)).unwrap();
+        let (client, worker) = command_server(vec![
+            (200, trash_accepted(&library, &p, 2)),
+            (200, trash_accepted(&library, &second_projection(), 2)),
+        ]);
+        let mut result = AssetSyncResult::default();
+        library
+            .flush_assets(&client, "publisher", &authority_of(&library), &mut result)
+            .unwrap();
+        let sent = worker.join().unwrap();
+        assert_eq!(sent[0]["operationId"], operation, "the retry presents the same operation");
+        assert_eq!(result.flushed, 2);
+        assert_eq!(count(&library, "SELECT count(*) FROM asset_lifecycle_outbox"), 0);
     }
 }
 

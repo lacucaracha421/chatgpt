@@ -52,12 +52,12 @@ use crate::cloud::client::{
     CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION, CLASSIFICATION_BASELINE_SECTIONS_SECTION,
 };
 use crate::library::classification_authority::{
-    assignments_naming, read_authority, read_classification_revision, read_outbox,
+    assignments_naming, has_unresolved_intents, read_authority, read_classification_revision,
     preapplied_delete_covers, read_preapplied_delete,
     retire_preapplied_delete, write_assignment_revision, PreappliedDelete,
     write_authority, write_classification_revision, write_role, ClassificationAuthority,
-    ClassificationReconciliation, CLASSIFICATION_CONTRACT_VERSION, CLASSIFICATION_DOMAIN,
-    ORIGINALS_ROLE,
+    ClassificationReconciliation, ASSIGNMENT, CLASSIFICATION_CONTRACT_VERSION,
+    CLASSIFICATION_DOMAIN, ORIGINALS_ROLE,
 };
 use crate::library::{credential, error::LibraryError, Library};
 
@@ -144,7 +144,7 @@ impl Library {
         let (outbox_clean, local) = {
             let connection = self.connection()?;
             (
-                read_outbox(&connection)?.is_empty(),
+                !has_unresolved_intents(&connection)?,
                 read_authority(&connection)?,
             )
         };
@@ -600,6 +600,10 @@ impl Library {
                 },
             )?;
         }
+        // Assignments waiting for their Asset's upload are the user's current intent and
+        // the authority cannot describe those Assets yet, so the wholesale clear above must
+        // not erase them.
+        reapply_waiting_assignments(&transaction)?;
         // Character reconsideration is owed exactly for the locally materialized Assets
         // whose effective assignment this rebase actually changed. Comparing the whole
         // state once covers every transition — including an authoritative *absence* of a
@@ -721,7 +725,7 @@ impl Library {
             .ok_or(LibraryError::ClassificationAuthorityInactive)?;
         require_clean_receive(
             &transaction,
-            |transaction| Ok(read_outbox(transaction)?.is_empty()),
+            |transaction| Ok(!has_unresolved_intents(transaction)?),
             &stored.library_id,
             stored.cursor,
         )?;
@@ -786,6 +790,16 @@ impl Library {
                 )?;
                 // The change is now behind the cursor, so its record has served its purpose.
                 retire_preapplied_delete(&transaction, &change.operation_id, stored.epoch)?;
+                // An Asset the authority does not know yet (its assignment waits for the
+                // upload) can still name the deleted Classification locally. It follows the
+                // same transition the authority applied to the Assets it knows; otherwise
+                // the `RESTRICT` relation would refuse this page forever.
+                move_unconfirmed_assignments(
+                    &transaction,
+                    transition,
+                    stored.epoch,
+                    change.sequence,
+                )?;
                 transaction.execute(
                     "DELETE FROM classification_entries WHERE id = ?1",
                     [&transition.from_classification_id],
@@ -832,7 +846,7 @@ impl Library {
         // Confirmed state must never overwrite the user's pending edit. The caller
         // already defers on an unresolved queue, but this is a public entry point, so it
         // enforces the same precondition itself rather than trusting every caller.
-        if !read_outbox(&connection)?.is_empty() {
+        if has_unresolved_intents(&connection)? {
             return Ok(0);
         }
         // A projection with no ordering claim still has to attribute its target check to the
@@ -975,7 +989,7 @@ fn require_clean_baseline_receive(
         library_id: library_id.to_owned(),
         cursor,
     };
-    if !read_outbox(transaction)?.is_empty() {
+    if has_unresolved_intents(transaction)? {
         return Err(refused(
             library_id,
             stored.as_ref().map(|authority| authority.cursor).unwrap_or(0),
@@ -1381,6 +1395,76 @@ fn apply_assignment_transition(
                 sequence: Some(sequence),
             },
         )?;
+    }
+    Ok(())
+}
+
+/// Move local relations still naming a deleted Classification that no cached lineage
+/// covered, exactly as the authority's delete moved the lineages it knows.
+fn move_unconfirmed_assignments(
+    transaction: &Transaction<'_>,
+    transition: &ClassificationAssignmentTransition,
+    epoch: i64,
+    sequence: i64,
+) -> Result<(), LibraryError> {
+    let remaining: Vec<String> = transaction
+        .prepare("SELECT asset_id FROM asset_classifications WHERE classification_id = ?1")?
+        .query_map([&transition.from_classification_id], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for asset_id in &remaining {
+        materialize_assignment(
+            transaction,
+            asset_id,
+            transition.to_classification_id.as_deref(),
+            ProjectionContext {
+                epoch,
+                sequence: Some(sequence),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Re-apply the optimistic effect of assignment intents still waiting for their Asset.
+///
+/// A baseline rebuilds `asset_classifications` from authority state, which cannot describe
+/// an Asset whose upload has not committed. The newest waiting intent per Asset is the
+/// user's current choice, so it is written back; a target the baseline no longer carries
+/// leaves the Asset unassigned rather than failing the install on the `RESTRICT` relation.
+fn reapply_waiting_assignments(transaction: &Transaction<'_>) -> Result<(), LibraryError> {
+    let rows: Vec<(String, String)> = transaction
+        .prepare(&format!(
+            "SELECT o.asset_id, o.payload FROM classification_authority_outbox o
+             WHERE o.state = 'pending' AND o.command_type = '{ASSIGNMENT}' AND {waiting}
+             ORDER BY o.seq",
+            waiting = crate::library::album_authority::asset_waiting_sql("o.asset_id"),
+        ))?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut desired: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
+    for (asset_id, payload) in rows {
+        let Ok(body) = serde_json::from_str::<serde_json::Value>(&payload) else {
+            continue;
+        };
+        let target = body
+            .get("classificationId")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned);
+        desired.insert(asset_id, target);
+    }
+    for (asset_id, target) in desired {
+        transaction.execute(
+            "DELETE FROM asset_classifications WHERE asset_id = ?1",
+            [&asset_id],
+        )?;
+        if let Some(target) = target {
+            transaction.execute(
+                "INSERT INTO asset_classifications (asset_id, classification_id)
+                 SELECT ?1, id FROM classification_entries WHERE id = ?2",
+                params![asset_id, target],
+            )?;
+        }
     }
     Ok(())
 }

@@ -1681,3 +1681,44 @@ fn rematerialization_includes_a_trashed_asset() {
         "the relation was projected on accept, and trash must not hide it"
     );
 }
+
+/// A membership waiting for its Asset's upload does not defer a baseline, and the
+/// baseline's wholesale replace keeps the waiting relation visible: it is the user's
+/// current intent for an Asset the authority cannot describe yet.
+#[test]
+fn a_baseline_keeps_a_membership_waiting_for_its_asset_upload() {
+    let (_temp, library) = open();
+    library
+        .install_album_baseline_for_test(&[album("album-a", "여행", None, 1)], &[], LIBRARY, 1, 1, 1)
+        .unwrap();
+    insert_asset(&library, "fresh");
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO cloud_sync_queue
+                (id, entity_type, entity_id, operation, status, revision, updated_at)
+             VALUES ('queue-fresh', 'asset', 'fresh', 'upsert', 'pending', 1, '2026-09-25T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    library
+        .patch_asset_albums(AssetAlbumPatch {
+            asset_ids: vec!["fresh".into()],
+            add_album_ids: vec!["album-a".into()],
+            remove_album_ids: Vec::new(),
+        })
+        .unwrap();
+    assert_eq!(outbox_len(&library.connection().unwrap()), 1);
+
+    library
+        .install_album_baseline_for_test(&[album("album-a", "여행", None, 1)], &[], LIBRARY, 1, 1, 4)
+        .unwrap();
+
+    let connection = library.connection().unwrap();
+    assert_eq!(
+        memberships(&connection),
+        vec![("album-a".to_owned(), "fresh".to_owned())]
+    );
+    assert_eq!(outbox_len(&connection), 1, "the waiting intent is untouched");
+}

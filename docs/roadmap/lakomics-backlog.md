@@ -253,7 +253,7 @@ With the app idle for 15 minutes, these endpoints are still read about once a mi
 
 ## PC-REVIEW-001 — Fix findings of the 2026-09-25 PC app review
 
-Status: `TODO` — review done 2026-09-25 (read-only, 8 Opus reviewers); report with all findings: [`docs/research/pc-app-review-2026-09-25.md`](../research/pc-app-review-2026-09-25.md). 10 high (controller-verified), 31 medium, 49 low (medium/low unverified unless marked). Nothing was blocked in the Linux library at review time.
+Status: `IN PROGRESS` — items 1–4 fixed 2026-09-25 (tests only; native/live-server check pending); items 5–10 and the sync-state UI remain. Review done 2026-09-25 (read-only, 8 Opus reviewers); report with all findings: [`docs/research/pc-app-review-2026-09-25.md`](../research/pc-app-review-2026-09-25.md). 10 high (controller-verified), 31 medium, 49 low (medium/low unverified unless marked). Nothing was blocked in the Linux library at review time.
 
 Suggested order (high findings; details and file:line in the report):
 1. Asset re-baseline hard-deletes local Assets absent from the new baseline (server DB restore → PC data loss, never re-uploaded). Until fixed, do not roll the server DB back.
@@ -267,6 +267,8 @@ Suggested order (high findings; details and file:line in the report):
 8. Similarity review list fails as a whole when one open review's existing Asset left `normal`.
 9. IGDB import/hero change fails when a screenshot is chosen as the hero.
 10. Viewer stops opening after trashing an asset opened via "open existing".
+
+Open from the 1–4 fix (2026-09-25): after a server authority restore, a re-uploaded Asset loses its Album/Classification relations, because the Album/Classification baselines are installed before the Asset lane learns which Assets the server lost (needs the Asset re-baseline to run first, or relation baselines to keep relations of unconfirmed Assets); a content-hash mismatch in the Asset baseline or change feed still fails the Asset lane on every pass (pre-existing). Dropped intents are recorded in `authority_intent_drops` (Album/Classification) and `asset_authority_state.last_error` (`lifecycleRejected:*`) but not yet shown in the UI.
 
 Notable medium follow-ups: restore guard lacks an Asset authority probe (two reviewers); library open, trash purge and scan cancel block the UI thread; Linux provider-credential commands can block the GTK thread up to 10 s; every window focus reloads sidebar, galleries and trash; Aladin/Kakao volume renumbering fails refreshes forever; artwork cleanup can delete an in-flight import's files; a locked leftover file (drag-out staging or artwork) can stop the library from opening on Windows; long HEVC/ProRes videos hit the 30-minute ffmpeg cap; S36 rollback stops on a trashed auto-accepted image.
 
