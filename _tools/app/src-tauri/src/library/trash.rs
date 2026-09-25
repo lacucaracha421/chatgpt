@@ -360,6 +360,7 @@ impl Library {
         // server's own GC, exactly as before.
         let mut server_known: Vec<String> = Vec::new();
         let mut local_only_paths: Vec<(String, ManagedAssetPaths)> = Vec::new();
+        let mut failed_asset_ids = Vec::new();
         {
             let tx = connection.transaction()?;
             // An open incoming review would make deleting its existing Asset fail the
@@ -382,14 +383,18 @@ impl Library {
                         },
                     )
                     .optional()?;
-                let Some(paths) = row else { continue };
-                let paths = unshared_paths(&tx, &id, &paths)?;
+                let Some(recorded) = row else { continue };
+                let paths = unshared_paths(&tx, &id, &recorded)?;
                 let owned = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM asset_authority_state WHERE asset_id=?)",
                     [&id],
                     |r| r.get::<_, bool>(0))?;
                 if owned {
                     server_known.push(id);
+                } else if !recorded_paths_deletable(&recorded) {
+                    // The row is still ours: refuse and keep it (ADR-0011), never drop it
+                    // silently while its file stays behind.
+                    failed_asset_ids.push(id);
                 } else {
                     local_only_paths.push((id, paths));
                 }
@@ -398,7 +403,6 @@ impl Library {
         }
 
         // File removal happens outside the transaction, as in the legacy path.
-        let mut failed_asset_ids = Vec::new();
         let mut purged_local: Vec<String> = Vec::new();
         for (id, paths) in local_only_paths {
             if self.remove_managed_paths(&paths).is_ok() {
@@ -486,6 +490,10 @@ impl Library {
             let Some(paths) = paths else {
                 continue;
             };
+            if !recorded_paths_deletable(&paths) {
+                failed_asset_ids.push(asset_id);
+                continue;
+            }
             let paths = unshared_paths(&connection, &asset_id, &paths)?;
             if self.remove_managed_paths(&paths).is_err() {
                 failed_asset_ids.push(asset_id);
@@ -641,6 +649,18 @@ fn deletable_shape(path: &str) -> bool {
             .filter(|c| matches!(c, std::path::Component::Normal(_)))
             .count()
             >= 2
+}
+
+/// Whether every recorded file path of a still-present Asset has a deletable shape.
+///
+/// A purge that still owns the row must report such an Asset as failed and keep its record,
+/// unlike the post-acceptance deletion, where the row is already gone and the path is just
+/// skipped.
+fn recorded_paths_deletable(paths: &ManagedAssetPaths) -> bool {
+    [&paths.original, &paths.thumbnail]
+        .into_iter()
+        .flatten()
+        .all(|path| deletable_shape(path))
 }
 
 /// Shares the existing trash semantics with callers that must atomically record a decision.
@@ -1153,6 +1173,53 @@ mod tests {
         assert_eq!(summary.deleted_count, 1);
         assert!(!own.exists());
         assert!(shared.is_file());
+    }
+
+    /// With the authority adopted, a never-committed Asset whose recorded path escapes the
+    /// library is refused as a whole: reported failed, record and every file kept.
+    #[test]
+    fn a_local_only_purge_refuses_an_unsafe_recorded_path_and_keeps_the_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        std::fs::create_dir_all(&root).unwrap();
+        let library = Library::open(&root).unwrap();
+        let library_id = library.library_id().unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO asset_authority VALUES(1,?1,1,1,0)",
+                [&library_id],
+            )
+            .unwrap();
+        insert_trashed_asset(&library, "escape", "2026-08-02T00:00:00Z");
+        let outside = temp.path().join("outside.png");
+        std::fs::write(&outside, b"user-owned").unwrap();
+        let thumbnail = write(&library, "thumbnails/escape.webp");
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET relative_path = '../outside.png' WHERE id = 'escape'",
+                [],
+            )
+            .unwrap();
+
+        let summary = library.empty_trash().unwrap();
+
+        assert_eq!(summary.deleted_count, 0);
+        assert_eq!(summary.failed_asset_ids, vec!["escape".to_string()]);
+        assert_eq!(std::fs::read(&outside).unwrap(), b"user-owned");
+        assert!(
+            thumbnail.is_file(),
+            "no partial deletion of the refused Asset"
+        );
+        assert_eq!(library.list_trash(None, 20).unwrap().total_count, 1);
+        assert_eq!(
+            pending(&library),
+            0,
+            "a local-only Asset is never purge pending"
+        );
     }
 
     fn insert_normal_asset(library: &Library, id: &str) {

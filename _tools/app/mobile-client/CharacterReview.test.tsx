@@ -51,7 +51,8 @@ describe('character review screen',()=>{
     expect(screen.getByText('S36 추천')).toBeTruthy();
     expect(screen.getAllByLabelText('기준 이미지 크게 보기')).toHaveLength(1);
     expect(screen.getByText('0 / 3')).toBeTruthy();
-    expect(vi.mocked(warmThumbnail).mock.calls.map(([a])=>a.id)).toEqual(['a2','a3']);
+    // Warming runs in a passive effect, which React may flush after the DOM this test waited for.
+    await waitFor(()=>expect(vi.mocked(warmThumbnail).mock.calls.map(([a])=>a.id)).toEqual(['a2','a3']));
   });
   it('queues 맞음/아님 from buttons and swipes, skips locally, and hides queued pairs',async()=>{
     install(feed());mount();

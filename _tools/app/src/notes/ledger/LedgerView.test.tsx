@@ -239,8 +239,10 @@ it("shows the limit or size message instead of saving, and keeps what was typed"
   expect(within(row).getByRole("textbox", { name: "금액" })).toHaveValue("12,000");
   expect(within(row).getByRole("textbox", { name: "이름" })).toHaveValue("커피");
   // Whole-note size: 300 plans with long memos pass the item limits but not 256 KiB.
-  await userEvent.click(screen.getByRole("button", { name: "계획" }));
-  await userEvent.click(screen.getByRole("button", { name: "계획 추가" }));
+  // Scoped queries: a page-wide getByRole("button") computes the accessible name of every
+  // button in the ~300 rendered rows, which took over a second and timed the test out under load.
+  await userEvent.click(within(screen.getByRole("group", { name: "가계부 보기" })).getByRole("button", { name: "계획" }));
+  await userEvent.click(screen.getByText("계획 추가", { selector: "button" }));
   const form = screen.getByRole("group", { name: "계획 추가" });
   await userEvent.type(within(form).getByLabelText("이름"), "텐트");
   await userEvent.type(within(form).getByRole("textbox", { name: "금액" }), "300000");

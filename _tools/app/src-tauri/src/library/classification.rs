@@ -975,9 +975,14 @@ mod tests {
         assert_eq!(moved.kind, ClassificationKind::Tag);
         assert_eq!(moved.parent_id, Some(destination.id));
         assert_eq!(preserved_child.parent_id, Some(moved.id.clone()));
+        assert_eq!(moved.total_asset_count, Some(1));
+        // Only the tree listing computes subtree totals; a per-Asset read leaves them unset.
         assert_eq!(
             library.get_asset_classifications("asset-a").unwrap(),
-            vec![moved.clone()]
+            vec![crate::library::models::ClassificationEntry {
+                total_asset_count: None,
+                ..moved.clone()
+            }]
         );
     }
 
@@ -1025,9 +1030,14 @@ mod tests {
         assert_eq!(moved.kind, ClassificationKind::Root);
         assert_eq!(moved.parent_id, None);
         assert_eq!(preserved_child.parent_id, Some(moved.id.clone()));
+        assert_eq!(moved.total_asset_count, Some(1));
+        // Only the tree listing computes subtree totals; a per-Asset read leaves them unset.
         assert_eq!(
             library.get_asset_classifications("asset-a").unwrap(),
-            vec![moved.clone()]
+            vec![crate::library::models::ClassificationEntry {
+                total_asset_count: None,
+                ..moved.clone()
+            }]
         );
     }
 

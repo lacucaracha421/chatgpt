@@ -56,7 +56,8 @@ describe('similarity review screen',()=>{
     expect(screen.getByRole('button',{name:/B 유지 · A 휴지통/}).textContent).not.toContain('권장');
     expect(screen.getByText('PC가 반영하기 전까지 원본은 바뀌지 않습니다. 버린 이미지는 휴지통으로 갑니다.')).toBeTruthy();
     expect(screen.getByText('0 / 3 · PC 반영 대기 4 · 건너뜀 2')).toBeTruthy();
-    expect(vi.mocked(warmThumbnail).mock.calls.map(([asset])=>asset.id)).toEqual(['s1','s2','s3','s4']);
+    // Warming runs in a passive effect, which React may flush after the DOM this test waited for.
+    await waitFor(()=>expect(vi.mocked(warmThumbnail).mock.calls.map(([asset])=>asset.id)).toEqual(['s1','s2','s3','s4']));
     // Thumbnails only until zoom.
     expect(mediaTicket).not.toHaveBeenCalled();
   });

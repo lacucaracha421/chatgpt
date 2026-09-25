@@ -170,10 +170,27 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(false),
             Err(error) => return Err(error),
         };
-        let publisher = publisher.expose();
-        let library_id = self.library_id()?;
         let client = CloudClient::new(endpoint)?;
-        match client.character_exclusions(publisher, &library_id, 0, 1)? {
+        self.bootstrap_character_exclusions_with(&client, publisher.expose(), endpoint)
+    }
+
+    /// The probe-and-adopt step with an injected transport and token, so a scripted server
+    /// drives the real path without reading this machine's OS credential store.
+    pub(crate) fn bootstrap_character_exclusions_with(
+        &self,
+        client: &CloudClient,
+        publisher_token: &str,
+        endpoint: &str,
+    ) -> Result<bool, LibraryError> {
+        if self.character_exclusion_adoption(endpoint)?.is_some() {
+            return Ok(true);
+        }
+        let config = self.cloud_sync_config()?;
+        if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
+            return Ok(false);
+        }
+        let library_id = self.library_id()?;
+        match client.character_exclusions(publisher_token, &library_id, 0, 1)? {
             None => Ok(false),
             Some(_) => {
                 self.adopt_character_exclusion_library(endpoint, &library_id)?;

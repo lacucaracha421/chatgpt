@@ -13,6 +13,20 @@ from tests.test_image_thumbnails import Fixture, Image, png_bytes, requires_pill
 import image_thumbnails as worker_module
 
 
+def _process_alive(pid):
+    """True while ``pid`` exists and is not a zombie.
+
+    The process can exit and be reaped between any two reads, so a missing
+    ``/proc/<pid>/stat`` at any point means the process is gone.
+    """
+    try:
+        stat = (Path('/proc') / str(pid) / 'stat').read_text()
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    # The comm field is parenthesized and may contain spaces; the state follows it.
+    return stat.rsplit(')', 1)[1].split()[0] != 'Z'
+
+
 def gif_bytes():
     sink = io.BytesIO()
     frames = [Image.new('RGB', (800, 400), color) for color in ('red', 'blue')]
@@ -211,8 +225,7 @@ class MediaWorkerTests(Fixture):
                         with self.assertRaises(worker_module._TransientError):
                             worker._encode('test', 'unused', 'unused')
                 pid = int(pid_file.read_text())
-                state_path = Path('/proc') / str(pid) / 'stat'
                 deadline = time.monotonic() + 2
-                while state_path.exists() and state_path.read_text().split()[2] != 'Z' and time.monotonic() < deadline:
+                while _process_alive(pid) and time.monotonic() < deadline:
                     time.sleep(0.02)
-                self.assertTrue(not state_path.exists() or state_path.read_text().split()[2] == 'Z', 'tool survived encoder cleanup')
+                self.assertFalse(_process_alive(pid), 'tool survived encoder cleanup')

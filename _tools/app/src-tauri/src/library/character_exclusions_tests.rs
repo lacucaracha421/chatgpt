@@ -959,7 +959,11 @@ fn bootstrap_adopts_a_capable_server_and_records_absence_for_a_legacy_one() {
     // An older server has no route, so nothing is adopted and the legacy path stays open.
     let (legacy_base, legacy) = scripted(404, "");
     configure(&library, &legacy_base);
-    assert!(!library.bootstrap_character_exclusions(&legacy_base).unwrap());
+    // The token is injected: the OS credential store must never decide this test.
+    let legacy_client = crate::cloud::client::CloudClient::new(&legacy_base).unwrap();
+    assert!(!library
+        .bootstrap_character_exclusions_with(&legacy_client, "publisher-token", &legacy_base)
+        .unwrap());
     assert_eq!(
         library.character_exclusion_adoption(&legacy_base).unwrap(),
         None
@@ -970,7 +974,10 @@ fn bootstrap_adopts_a_capable_server_and_records_absence_for_a_legacy_one() {
     let body: &'static str = Box::leak(page_body(&id, 0, 0, false, "").into_boxed_str());
     let (capable_base, capable) = scripted(200, body);
     configure(&library, &capable_base);
-    assert!(library.bootstrap_character_exclusions(&capable_base).unwrap());
+    let capable_client = crate::cloud::client::CloudClient::new(&capable_base).unwrap();
+    assert!(library
+        .bootstrap_character_exclusions_with(&capable_client, "publisher-token", &capable_base)
+        .unwrap());
     assert_eq!(
         library.character_exclusion_adoption(&capable_base).unwrap(),
         Some((id, 0)),
