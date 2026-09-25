@@ -3,7 +3,7 @@ use crate::library::{Library,error::LibraryError};
 use rusqlite::params;
 use std::sync::Mutex;
 // Separate lanes prevent slow artwork uploads from blocking character/settings changes.
-static RUNNING: [Mutex<()>;6] = [Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(())];
+static RUNNING: [Mutex<()>;7] = [Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(()),Mutex::new(())];
 fn dispatch(running: &'static Mutex<()>, work: impl FnOnce()+Send+'static) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new().name("mobile-publication".into()).spawn(move || {
         let Ok(_permit)=running.try_lock() else {return};
@@ -50,7 +50,7 @@ impl Library {
         let endpoint=config.api_base_url.unwrap_or_default();
         if !config.enabled || endpoint.is_empty() {return Ok(())}
         self.connection()?.execute("UPDATE mobile_publication_state SET endpoint=?1,generation=generation+1,first_dirty=0,last_dirty=0,retry_after=0 WHERE endpoint<>?1",[&endpoint])?;
-        for (slot,kind) in ["collections","characters","visibility","similarity","catalogDuplicates","releases"].into_iter().enumerate() {
+        for (slot,kind) in ["collections","characters","visibility","similarity","catalogDuplicates","releases","bindings"].into_iter().enumerate() {
             let library=self.clone();let endpoint=endpoint.clone();
             // Return after dispatch so the native owner's next tick can service every free lane.
             dispatch(&RUNNING[slot],move || {
@@ -63,6 +63,8 @@ impl Library {
                     "catalogDuplicates" => library.run_due_catalog_duplicates(&endpoint).map_err(|error| {eprintln!("catalog duplicates: {error}");error}),
                     // Manga release notifications shared with mobile (`collection_release_sync.rs`).
                     "releases" => library.run_due_collection_releases(&endpoint).map_err(|error| {eprintln!("collection releases: {error}");error}),
+                    // Tablet-requested MangaDex / Kakao connections (`collection_binding_sync.rs`).
+                    "bindings" => library.run_due_collection_bindings(&endpoint).map_err(|error| {eprintln!("collection bindings: {error}");error}),
                     _ => library.publish_due_mobile_kind(kind,&endpoint),
                 };
             }).map_err(|_|LibraryError::InvalidCloudResponse)?;

@@ -191,6 +191,12 @@ pub enum LibraryError {
     ReleaseCursorRejected,
     #[error("서버에 더 새로운 신간 알림 목록이 이미 게시되었습니다.")]
     ReleaseGenerationStale,
+    #[error("서버 작품 연결 요청 동기화가 거부됐습니다: HTTP {0}")]
+    BindingSyncRejected(u16),
+    #[error("서버 작품 연결 요청 동기화 응답이 올바르지 않습니다.")]
+    BindingSyncInvalid,
+    #[error("서버 작품 연결 요청 기록의 위치가 이 PC와 어긋납니다.")]
+    BindingCursorRejected,
     #[error("서버 캐릭터 게시가 거부됐습니다: HTTP {0}")]
     CharacterPublicationRejected(u16),
     #[error("서버의 캐릭터 게시본이 먼저 변경되었습니다. 다시 게시해 주세요.")]

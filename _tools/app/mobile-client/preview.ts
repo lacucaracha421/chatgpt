@@ -25,6 +25,8 @@ let refreshDemo:{job:RefreshJob;started:number}|null=null;
  */
 import type {Asset} from './types';
 import type {CollectionDetail} from './collectionModel';
+import {ApiError} from './transport';
+import type {BindRequest, KakaoCandidate, MangaDexCandidate} from './collectionBindings';
 const palettes = [['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3']];
 function art(index: number, w: number, h: number) {
   const p = palettes[index % palettes.length];
@@ -126,6 +128,46 @@ let demoReleases=[
   {eventId:'demo-release-5',collectionId:'collection-manga-3',kind:'new_volume',volumeNumber:8,previousValue:null,currentValue:null,detectedAt:'2026-09-25T08:00:00Z',provider:'mangadex'},
   {eventId:'demo-release-6',collectionId:'collection-manga-6',kind:'release_status_changed',volumeNumber:6,previousValue:'upcoming',currentValue:'released',detectedAt:'2026-09-21T09:00:00Z',provider:'kakao'},
 ].map(event=>({provider:'kakao',...event,collectionName:collections.find(item=>item.id===event.collectionId)!.name,read:false,readAt:null}));
+// MangaDex / 카카오 연결: server-side search results and bind requests. 밤의 도서관 2 (manga-4) has
+// a MangaDex pick waiting for the PC and 푸른 궤도 (manga-2) a Kakao pick the PC could not apply.
+// Searching "제한" answers the rate limit, "너무" too broad, and "없음" no results.
+const demoBindTime='2026-09-25T10:00:00Z';
+let demoBindSequence=2;
+let demoBindRequests:BindRequest[]=[
+  {requestId:2,operationId:'00000000-0000-4000-8000-000000000002',collectionId:'collection-manga-4',provider:'mangadex',choice:{mangaId:'5b1c1c6a-3f7e-4bd1-9d55-2d1b8f7a4a10',title:'The Night Library',coverUrl:null},expected:{externalId:null},state:'pending',reason:null,replaces:null,createdAt:demoBindTime,updatedAt:demoBindTime,resolvedAt:null},
+  {requestId:1,operationId:'00000000-0000-4000-8000-000000000001',collectionId:'collection-manga-2',provider:'kakao',choice:{query:'푸른 궤도',anchorItemId:'demo-kakao-1',groupFingerprint:'a'.repeat(64),title:'푸른 궤도'},expected:{externalId:null},state:'failed',reason:{code:'groupNotFound',message:'카카오에서 같은 시리즈를 다시 찾지 못했어요.'},replaces:null,createdAt:demoBindTime,updatedAt:demoBindTime,resolvedAt:demoBindTime},
+];
+const demoMangaDex=(query:string):MangaDexCandidate[]=>[
+  {mangaId:'5b1c1c6a-3f7e-4bd1-9d55-2d1b8f7a4a10',title:query,alternateTitles:['The Night Library','夜の図書館','Yoru no Toshokan'],author:'서유진',year:2021,status:'ongoing',primaryCoverFileName:null,coverUrl:art(1,256,384)},
+  {mangaId:'9c0a2f4e-7d1b-4c3a-8e6f-1a2b3c4d5e6f',title:`${query} 외전`,alternateTitles:['Side Stories'],author:'서유진',year:2023,status:'completed',primaryCoverFileName:null,coverUrl:art(2,256,384)},
+  {mangaId:'1e2d3c4b-5a69-4788-9a0b-c1d2e3f4a5b6',title:`${query}의 밤`,alternateTitles:[],author:'Haru',year:2019,status:'hiatus',primaryCoverFileName:null,coverUrl:null},
+];
+const demoKakao=(query:string):KakaoCandidate[]=>[
+  {anchorItemId:'demo-kakao-1',groupFingerprint:'1'.repeat(64),title:query,author:'서유진',publisher:'대원씨아이',volumes:[],ignoredCount:0,volumeCount:12,firstVolume:1,lastVolume:12,knownItemIds:[],thumbnailUrl:art(3,120,174)},
+  {anchorItemId:'demo-kakao-2',groupFingerprint:'2'.repeat(64),title:`${query} 애장판`,author:'서유진',publisher:'학산문화사',volumes:[],ignoredCount:1,volumeCount:5,firstVolume:1,lastVolume:6,knownItemIds:[],thumbnailUrl:art(0,120,174)},
+  {anchorItemId:'demo-kakao-3',groupFingerprint:'3'.repeat(64),title:`${query} 소설`,author:'하루',publisher:null,volumes:[],ignoredCount:0,volumeCount:1,firstVolume:1,lastVolume:1,knownItemIds:[],thumbnailUrl:null},
+];
+function demoBindings(url:URL,payload:Record<string,unknown>):unknown{
+  if(url.pathname.endsWith('/status'))return {version:1,mangadexSearch:true,kakaoSearch:true,bindRequests:true,publisherSeenAt:'2026-09-25T09:30:00Z'};
+  if(url.pathname.includes('/search/')){
+    const provider=url.pathname.endsWith('kakao')?'kakao':'mangadex',query=(url.searchParams.get('query')??'').trim();
+    const fail=(status:number,code:string,message:string,extra={})=>new ApiError(message,status,{detail:{code,message,provider,...extra}});
+    if(query.includes('제한'))throw fail(429,'bindSearchRateLimited','검색을 너무 자주 했어요.',{retryAfter:12});
+    if(query.includes('너무'))throw fail(422,'kakaoSearchTooBroad','검색 결과가 너무 많습니다.');
+    return new Promise(resolve=>setTimeout(()=>resolve({version:1,provider,query,items:query.includes('없음')?[]:provider==='kakao'?demoKakao(query):demoMangaDex(query)}),500));
+  }
+  if(payload.method==='POST'){
+    const body=payload.body as {operationId:string;collectionId:string;provider:'mangadex'|'kakao';choice:Record<string,unknown>;expected?:{externalId:string|null}};
+    const now=new Date().toISOString(),previous=demoBindRequests.find(entry=>entry.collectionId===body.collectionId&&entry.provider===body.provider&&entry.state==='pending');
+    if(previous)previous.state='superseded';
+    const request:BindRequest={requestId:++demoBindSequence,operationId:body.operationId,collectionId:body.collectionId,provider:body.provider,choice:body.choice,expected:body.expected??null,state:'pending',reason:null,replaces:previous?.requestId??null,createdAt:now,updatedAt:now,resolvedAt:null};
+    demoBindRequests=[request,...demoBindRequests];
+    return {version:1,request};
+  }
+  const collectionId=url.searchParams.get('collectionId'),items=demoBindRequests.filter(entry=>!collectionId||entry.collectionId===collectionId);
+  const pending=(provider:'mangadex'|'kakao')=>items.find(entry=>entry.provider===provider&&entry.state==='pending')??null;
+  return {version:1,items,pending:collectionId?{mangadex:pending('mangadex'),kakao:pending('kakao')}:null};
+}
 function demoReleaseList(){
   const counts=new Map<string,number>();for(const event of demoReleases)counts.set(event.collectionId,(counts.get(event.collectionId)??0)+1);
   return {version:1,revision:demoReleases.length,generation:'demo',publishedAt:'2026-09-25T09:00:00Z',counts:{unread:demoReleases.length,collections:[...counts].sort().map(([collectionId,unread])=>({collectionId,unread}))},items:demoReleases,nextCursor:null,hasMore:false};
@@ -203,6 +245,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     const offset=Number(url.searchParams.get('cursor')??0),limit=40;
     return {revision,items:selected.slice(offset,offset+limit),totalCount:selected.length,sourceCount:selected.length,has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
   }
+  if(url.pathname.startsWith('/v1/collections/bindings/'))return demoBindings(url,payload);
   if(url.pathname==='/v1/collections/status')return {revision:'demo-1',capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true},libraryId:demoLibraryId};
   if(url.pathname==='/v1/collections/releases')return demoReleaseList();
   if(url.pathname==='/v1/collections/releases/acknowledge'){

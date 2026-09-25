@@ -53,6 +53,12 @@ final class NetworkPolicy {
   // the single-segment Collection read above does not match them either.
   get=get || p.equals("/v1/collections/releases");
   post=post || p.equals("/v1/collections/releases/acknowledge");
+  // Collection bindings (MangaDex / Kakao 연결): the capability status, the two provider
+  // searches, and filing/reading bind requests, and nothing else. The request log GET and the
+  // per-request result POST are publisher-only (the PC applies the choice) and stay unreachable:
+  // `/bindings/log` and `/bindings/requests/{id}/result` match none of these exact paths.
+  get=get || p.equals("/v1/collections/bindings/status") || p.equals("/v1/collections/bindings/search/mangadex") || p.equals("/v1/collections/bindings/search/kakao") || p.equals("/v1/collections/bindings/requests");
+  post=post || p.equals("/v1/collections/bindings/requests");
   get=get || p.equals("/v1/mobile-catalog/refresh");
   post=post || p.equals("/v1/mobile-catalog/refresh");
   // The manual character exclusion accepted for this device: one named Asset in one named

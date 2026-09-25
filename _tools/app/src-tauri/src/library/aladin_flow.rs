@@ -92,6 +92,18 @@ impl Library {
     ) -> Result<Option<AladinConnection>, LibraryError> {
         self.book_flow("kakao").get_aladin_connection(collection_id)
     }
+    /// [`Self::apply_kakao`] for a pick the tablet made earlier (`collection_binding_sync.rs`):
+    /// the same search and apply, tolerating anchor drift (see
+    /// [`BookFlow::apply_requested_items`]).
+    pub(crate) fn apply_requested_kakao(
+        &self,
+        key: &str,
+        request: AladinApplyRequest,
+    ) -> Result<AladinSyncResult, LibraryError> {
+        let flow = self.book_flow("kakao");
+        let items = flow.search_items(key, &request.query)?;
+        flow.apply_requested_items(request, items)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +328,35 @@ impl BookFlow<'_> {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
         self.reconcile_aladin(request, selected.unwrap(), known_item_ids)
+    }
+
+    /// The PC apply, except that a pick whose anchor no longer matches the fresh search
+    /// (the tablet's pick may be applied days later) binds the one group with the picked
+    /// fingerprint, anchored at that group's current anchor. The PC UI keeps the strict
+    /// [`Self::apply_aladin_items`].
+    pub(super) fn apply_requested_items(
+        &self,
+        mut request: AladinApplyRequest,
+        items: Vec<AladinItem>,
+    ) -> Result<AladinSyncResult, LibraryError> {
+        let groups = grouped_items(items);
+        let exact = groups.iter().any(|group| {
+            group.candidate.anchor_item_id == request.anchor_item_id
+                && group.candidate.group_fingerprint == request.group_fingerprint
+        });
+        if !exact {
+            let mut drifted = groups
+                .iter()
+                .filter(|group| group.candidate.group_fingerprint == request.group_fingerprint);
+            match (drifted.next(), drifted.next()) {
+                (Some(group), None) => {
+                    request.anchor_item_id = group.candidate.anchor_item_id.clone()
+                }
+                _ => return Err(LibraryError::AmbiguousAladinBinding),
+            }
+        }
+        let items = groups.into_iter().flat_map(|group| group.items).collect();
+        self.apply_aladin_items(request, items, Vec::new())
     }
 
     fn reconcile_aladin(
@@ -561,7 +602,7 @@ fn map_source_write_error(error: rusqlite::Error) -> LibraryError {
     }
 }
 
-fn group_items(items: Vec<AladinItem>) -> Vec<AladinSeriesCandidate> {
+pub(super) fn group_items(items: Vec<AladinItem>) -> Vec<AladinSeriesCandidate> {
     grouped_items(items)
         .into_iter()
         .map(|group| group.candidate)

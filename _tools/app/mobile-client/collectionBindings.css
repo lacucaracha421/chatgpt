@@ -1,0 +1,43 @@
+/* 연결 (MangaDex / 카카오) beside the manga cover, and its search-and-pick sheet. */
+.collection-bindings{margin-top:14px;border-top:1px solid var(--color-border)}
+.collection-bindings-title{margin:10px 2px 2px;font-size:12px;font-weight:500;color:var(--color-muted)}
+.collection-binding-row{display:flex;align-items:center;gap:12px;min-height:var(--touch,44px);padding:6px 2px;border-bottom:1px solid var(--color-border)}
+.collection-binding-value{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.collection-binding-value small{font-size:12px;color:var(--color-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.collection-binding-row.is-idle .collection-binding-state{color:var(--color-muted)}
+.collection-binding-row.is-pending .collection-binding-state{font-size:13px}
+.collection-binding-row.is-failed .collection-binding-state,.collection-binding-row.is-failed small{color:var(--color-danger)}
+.collection-binding-row.is-failed small{white-space:normal}
+.collection-binding-row .ui-button{flex:none}
+.collection-bindings-note{margin:8px 2px 0;font-size:12px;color:var(--color-muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.collection-bindings-note.is-error{color:var(--color-danger)}
+
+.bind-sheet{display:flex;flex-direction:column;gap:12px}
+.bind-sheet>*{flex:none}
+.bind-sheet>.bind-results{flex:0 1 auto}
+.bind-search{display:flex;align-items:center;gap:8px;height:48px;padding:0 4px 0 12px;background:var(--color-bg);border:1px solid var(--color-border-strong,var(--color-border));border-radius:var(--radius-sm)}
+.bind-search>svg{width:18px;height:18px;flex:none;color:var(--color-muted)}
+.bind-search input{flex:1;min-width:0;height:100%;border:0;background:transparent;color:inherit;font:inherit;font-size:16px;outline:none}
+.bind-search input::-webkit-search-cancel-button{display:none}
+.bind-search .ui-button{min-height:40px}
+.bind-message{margin:0;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bind-message.is-error{color:var(--color-danger)}
+.bind-empty{margin:8px 0}
+.bind-results{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-top:1px solid var(--color-border);overflow:auto;min-height:0}
+.bind-results[aria-busy]{opacity:.55}
+.bind-result{display:flex;align-items:flex-start;gap:14px;width:100%;padding:10px 2px;background:transparent;border:0;border-bottom:1px solid var(--color-border);color:inherit;font:inherit;text-align:left}
+.bind-result:not(.is-static):active{background:var(--color-control-pressed,var(--color-surface))}
+.bind-result:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px}
+.bind-result.is-static{border:0;padding:4px 0 8px}
+.bind-result-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;padding-top:2px}
+.bind-result-text strong{font-weight:600;font-size:15px;line-height:1.3;overflow-wrap:anywhere}
+.bind-result-text small,.bind-result-alt{font-size:12px;color:var(--color-muted);line-height:1.4}
+.bind-result-alt{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bind-thumb{flex:none;width:56px;aspect-ratio:2/3;background:var(--color-surface);border:1px solid var(--color-border);border-radius:1px;overflow:hidden;display:flex}
+.bind-thumb img{width:100%;height:100%;object-fit:cover}
+.bind-thumb-placeholder{margin:auto;color:var(--color-muted)}
+.bind-thumb-placeholder svg{width:20px;height:20px}
+.bind-confirm{display:flex;flex-direction:column;gap:10px}
+.ui-dialog:has(>.bind-sheet){display:flex;flex-direction:column;height:85dvh;overflow:hidden}
+.ui-dialog:has(>.bind-sheet)>.bind-sheet{flex:1;min-height:0}
+.bind-sheet>.ui-button{margin-top:auto;flex:none}

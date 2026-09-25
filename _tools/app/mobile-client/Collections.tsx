@@ -6,6 +6,8 @@ import {useCollectionEdits} from './useCollectionEdits';
 import {CollectionReleases} from './CollectionReleases';
 import {NO_RELEASES, RELEASE_COUNTS_PATH, releaseCounts, type ReleaseCounts} from './collectionReleases';
 import {FilmDetails} from './FilmDetails';
+import {CollectionBindings} from './CollectionBindings';
+import type {BindProvider} from './collectionBindings';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
 import {useLevelMotion} from './motion';
 import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
@@ -344,6 +346,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const [showcaseOpen,setShowcaseOpen]=useState(false),[showcaseAll,setShowcaseAll]=useState(false);
   const [sheet,setSheet]=useState<'sort'|'rating'|null>(null);
   const [personalSheet,setPersonalSheet]=useState<PersonalSheet>(null);
+  // MangaDex / 카카오 연결: the open search sheet in the manga detail.
+  const [bindSheet,setBindSheet]=useState<BindProvider|null>(null);
   // 신간: unread counts for the entry badge and manga card badges, and the 신간 screen level (Collections tab only).
   const [releases,setReleases]=useState<ReleaseCounts>(NO_RELEASES),[inboxOpen,setInboxOpen]=useState(false);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
@@ -371,7 +375,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const committedDetail=useRef('');
   useEffect(()=>{
     committedDetail.current='';setDetail(current=>current?.item.id===selected?current:null);
-    setDetailError('');setCoverIndex(null);setOverview(false);setVolumeLimit(96);setPersonalSheet(null);
+    setDetailError('');setCoverIndex(null);setOverview(false);setVolumeLimit(96);setPersonalSheet(null);setBindSheet(null);
     if(detailRef.current)detailRef.current.scrollTop=0;
   },[selected]);
   useEffect(()=>{
@@ -395,13 +399,14 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
     if(coverIndex!==null){setCoverIndex(null);return true;}
     if(sheet){setSheet(null);return true;}
     if(personalSheet){setPersonalSheet(null);return true;}
+    if(bindSheet){setBindSheet(null);return true;}
     if(selected){setSelected(null);return true;}
     if(inboxOpen){setInboxOpen(false);return true;}
     if(showcaseAll){setShowcaseAll(false);return true;}
     return false;
-  },[coverIndex,sheet,personalSheet,selected,inboxOpen,showcaseAll]);
+  },[coverIndex,sheet,personalSheet,bindSheet,selected,inboxOpen,showcaseAll]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
-  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet]);
+  useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
 
   const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setTab(next);};
@@ -487,7 +492,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
         <button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button>
         <div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}
           {item.type==='manga'?<MangaFacts item={item}/>:<span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span>}
-          <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/></div>
+          <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>
+          {item.type==='manga'&&<CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet}/>}</div>
       </div>
       <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
       {volumes.length>0&&<section className="collection-block collection-volume-section" aria-label="권별 표지"><h2>{volumes.length}권</h2>

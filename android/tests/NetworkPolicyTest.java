@@ -86,6 +86,17 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/collections/releases/../replica","PUT"));
  for(String method:new String[]{"PUT","DELETE","PATCH","POST"})reject(()->NetworkPolicy.api("/v1/collections/releases",method));
  for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/releases/acknowledge",method));
+ // Collection bindings: client status/search/request routes only; the publisher log and result stay out.
+ pass(()->NetworkPolicy.api("/v1/collections/bindings/status","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/bindings/search/mangadex?query=%EB%B0%A4%EC%9D%98","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/bindings/search/kakao?query=abc","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/bindings/requests","POST"));
+ pass(()->NetworkPolicy.api("/v1/collections/bindings/requests?collectionId=work-1&state=all&limit=20","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})for(String p:new String[]{"/v1/collections/bindings/status","/v1/collections/bindings/search/mangadex","/v1/collections/bindings/search/kakao"})reject(()->NetworkPolicy.api(p,method));
+ for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/bindings/requests",method));
+ for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/collections/bindings/log?after=0&limit=100",method));
+ for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/collections/bindings/requests/1/result",method));
+ for(String p:new String[]{"/v1/collections/bindings/search","/v1/collections/bindings/search/aladin","/v1/collections/bindings/search/kakao/","/v1/collections/bindings/requests/1","/v1/collections/bindings/../replica","/v1/collections/bindings/search/../log"})for(String method:new String[]{"GET","POST"})reject(()->NetworkPolicy.api(p,method));
  // Album authority replication keeps its read paths. 2C-3 adds exactly the domain's
  // one typed mutation route, PUT /v1/albums/commands, and no other Album write.
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/albums/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));

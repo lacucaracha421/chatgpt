@@ -2293,6 +2293,77 @@ impl CloudClient {
             .transpose()
     }
 
+    /// One page of the bind-request log (publisher token), `after` exclusive. With `etag`
+    /// (the tag of the page last read at this `after`) an unchanged log answers `NotModified`.
+    pub(crate) fn collection_binding_log(
+        &self,
+        token: &str,
+        after: i64,
+        limit: i64,
+        etag: Option<&str>,
+    ) -> Result<super::collection_bindings::LogRead, LibraryError> {
+        use super::collection_bindings::{validate_log_page, BindLogPage, LogRead, MAX_CURSOR};
+        if !(0..=MAX_CURSOR).contains(&after) || !(1..=200).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let path = format!("/v1/collections/bindings/log?after={after}&limit={limit}");
+        let mut request = self.coded_agent()?.get(self.endpoint(&path)?).header("Authorization", bearer(token)?);
+        if let Some(etag) = etag {
+            request = request.header("If-None-Match", etag);
+        }
+        let mut response = self.coded_request(request.call())?;
+        match response.status().as_u16() {
+            200 => {}
+            304 if etag.is_some() => return Ok(LogRead::NotModified),
+            404 => return Ok(LogRead::Unsupported),
+            status => return Err(binding_status_error(status, &mut response)),
+        }
+        let etag = response.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_owned);
+        let page = read_json_bounded::<BindLogPage>(&mut response, 2 * 1024 * 1024)?;
+        validate_log_page(&page, after, limit)?;
+        Ok(LogRead::Page { page, etag })
+    }
+
+    /// Report the PC's outcome of one bind request (publisher token).
+    pub(crate) fn report_collection_binding_result(
+        &self,
+        token: &str,
+        request_id: i64,
+        result: &super::collection_bindings::BindResult,
+    ) -> Result<super::collection_bindings::ResultOutcome, LibraryError> {
+        use super::collection_bindings::{ResultOutcome, MAX_CURSOR};
+        if !(1..=MAX_CURSOR).contains(&request_id) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let body = serde_json::to_vec(result).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let path = format!("/v1/collections/bindings/requests/{request_id}/result");
+        let request = self.coded_agent()?.post(self.endpoint(&path)?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(&body);
+        let mut response = self.coded_request(request)?;
+        match response.status().as_u16() {
+            200 => Ok(ResultOutcome::Recorded),
+            status => {
+                #[derive(serde::Deserialize)]
+                struct Coded { detail: serde_json::Value }
+                let code = if matches!(status, 404 | 409) {
+                    read_json_bounded::<Coded>(&mut response, 16 * 1024).ok()
+                        .and_then(|body| body.detail.get("code").and_then(|c| c.as_str()).map(str::to_owned))
+                } else {
+                    None
+                };
+                match (status, code.as_deref()) {
+                    (409, Some("bindResultConflict")) => Ok(ResultOutcome::Conflict),
+                    (404, Some("bindRequestNotFound")) => Ok(ResultOutcome::NotFound),
+                    // A plain 404 is an older server without the route.
+                    (404, _) => Ok(ResultOutcome::Unsupported),
+                    (401 | 403, _) => Err(LibraryError::CloudUnauthorized),
+                    (422, _) => Err(LibraryError::BindingSyncInvalid),
+                    (status, _) => Err(LibraryError::BindingSyncRejected(status)),
+                }
+            }
+        }
+    }
+
     fn coded_agent(&self) -> Result<ureq::Agent, LibraryError> {
         Ok(ureq::Agent::config_builder()
             .max_redirects(0)
@@ -3445,6 +3516,25 @@ fn catalog_duplicate_status_error(
         }
         422 => (None, LibraryError::CatalogDuplicateInvalid),
         status => (None, LibraryError::CatalogDuplicateSyncRejected(status)),
+    }
+}
+
+/// Map a non-success status of the bind-request log, reading a coded `409`.
+fn binding_status_error(status: u16, response: &mut ureq::http::Response<ureq::Body>) -> LibraryError {
+    match status {
+        401 | 403 => LibraryError::CloudUnauthorized,
+        409 => {
+            #[derive(serde::Deserialize)]
+            struct Coded { detail: serde_json::Value }
+            let code = read_json_bounded::<Coded>(response, 16 * 1024).ok()
+                .and_then(|body| body.detail.get("code").and_then(|c| c.as_str()).map(str::to_owned));
+            match code.as_deref() {
+                Some("bindCursorRejected") => LibraryError::BindingCursorRejected,
+                _ => LibraryError::BindingSyncRejected(409),
+            }
+        }
+        422 => LibraryError::BindingSyncInvalid,
+        status => LibraryError::BindingSyncRejected(status),
     }
 }
 
