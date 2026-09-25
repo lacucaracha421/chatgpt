@@ -124,9 +124,9 @@ impl Library {
                         "INSERT INTO collections (
                             id, name, description, type, cover_asset_id,
                             year, author, director, external_score, my_score,
-                            genres, overview, showcase, created_at, updated_at
+                            genres, overview, showcase, created_at, updated_at, original_title
                          ) VALUES (?1, ?2, NULL, 'manga', NULL,
-                            ?3, ?4, NULL, NULL, NULL, ?5, ?6, 0, ?7, ?7)",
+                            ?3, ?4, NULL, NULL, NULL, ?5, ?6, 0, ?7, ?7, ?8)",
                         params![
                             collection_id,
                             name,
@@ -135,6 +135,7 @@ impl Library {
                             preview.genres,
                             preview.overview,
                             now,
+                            preview.japanese_title,
                         ],
                     )
                     .map_err(map_duplicate_name)?;
@@ -258,6 +259,7 @@ fn fill_blank_provider_fields(
             author = CASE WHEN author IS NULL OR trim(author) = '' THEN ?2 ELSE author END,
             genres = CASE WHEN genres IS NULL OR trim(genres) = '' THEN ?3 ELSE genres END,
             overview = CASE WHEN overview IS NULL OR trim(overview) = '' THEN ?4 ELSE overview END,
+            original_title = CASE WHEN original_title IS NULL OR trim(original_title) = '' THEN ?7 ELSE original_title END,
             updated_at = ?5
          WHERE id = ?6",
         params![
@@ -267,6 +269,7 @@ fn fill_blank_provider_fields(
             preview.overview,
             now,
             collection_id,
+            preview.japanese_title,
         ],
     )?;
     Ok(())
@@ -556,6 +559,163 @@ mod tests {
             )
             .unwrap();
         assert_eq!(snapshot, "snapshot-v2");
+    }
+
+    fn original_title(library: &Library, id: &str) -> Option<String> {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT original_title FROM collections WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn existing_manga(library: &Library, original: Option<&str>) -> String {
+        let existing = library
+            .create_collection(CreateCollection {
+                name: "던전밥".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET original_title = ?1 WHERE id = ?2",
+                rusqlite::params![original, existing.id],
+            )
+            .unwrap();
+        existing.id
+    }
+
+    fn apply_existing(library: &Library, id: &str, work: MangaDexFetchedWork) {
+        library
+            .apply_fetched_mangadex(
+                MangaDexApplyRequest {
+                    target: MangaDexApplyTarget::Existing {
+                        collection_id: id.into(),
+                    },
+                    manga_id: MANGA_ID.into(),
+                },
+                work,
+                Some(&cover_bytes()),
+            )
+            .unwrap();
+    }
+
+    fn mark_published(library: &Library) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE mobile_publication_state SET published_generation=generation",
+                [],
+            )
+            .unwrap();
+    }
+
+    fn collections_dirty(library: &Library) -> bool {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT generation>published_generation FROM mobile_publication_state WHERE kind='collections'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn apply_fills_a_blank_original_title_with_the_japanese_title() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_mangadex(
+                request("던전밥"),
+                fetched("snapshot-v1"),
+                Some(&cover_bytes()),
+            )
+            .unwrap();
+        assert_eq!(created.original_title.as_deref(), Some("ダンジョン飯"));
+    }
+
+    #[test]
+    fn existing_apply_fills_a_whitespace_original_title_and_marks_the_publication_dirty() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let blank = existing_manga(&library, Some("  "));
+        mark_published(&library);
+        apply_existing(&library, &blank, fetched("snapshot-v1"));
+        assert_eq!(
+            original_title(&library, &blank).as_deref(),
+            Some("ダンジョン飯")
+        );
+        assert!(
+            collections_dirty(&library),
+            "the new original title must reach the tablet"
+        );
+    }
+
+    #[test]
+    fn apply_never_overwrites_a_user_original_title() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = existing_manga(&library, Some("내가 쓴 원제"));
+        apply_existing(&library, &id, fetched("snapshot-v1"));
+        assert_eq!(
+            original_title(&library, &id).as_deref(),
+            Some("내가 쓴 원제")
+        );
+    }
+
+    #[test]
+    fn apply_without_a_japanese_title_leaves_original_title_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = existing_manga(&library, None);
+        let mut work = fetched("snapshot-v1");
+        work.preview.japanese_title = None;
+        apply_existing(&library, &id, work);
+        assert_eq!(original_title(&library, &id), None);
+    }
+
+    #[test]
+    fn refresh_backfills_only_a_blank_original_title_and_marks_the_publication_dirty() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = existing_manga(&library, None);
+        let mut work = fetched("snapshot-v1");
+        work.preview.japanese_title = None;
+        apply_existing(&library, &id, work);
+        assert_eq!(original_title(&library, &id), None);
+        mark_published(&library);
+
+        library
+            .refresh_fetched_mangadex(&id, fetched("snapshot-v2"))
+            .unwrap();
+        assert_eq!(
+            original_title(&library, &id).as_deref(),
+            Some("ダンジョン飯")
+        );
+        assert!(collections_dirty(&library));
+
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET original_title = '고친 원제' WHERE id = ?1",
+                [&id],
+            )
+            .unwrap();
+        library
+            .refresh_fetched_mangadex(&id, fetched("snapshot-v3"))
+            .unwrap();
+        assert_eq!(original_title(&library, &id).as_deref(), Some("고친 원제"));
     }
 
     fn artwork_file_count(library: &Library) -> usize {

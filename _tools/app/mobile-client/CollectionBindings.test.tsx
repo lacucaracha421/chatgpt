@@ -139,6 +139,18 @@ it('searches MangaDex for the title, lists covers and details, and files the con
   await waitFor(() => expect(calls('/requests?').length).toBeGreaterThanOrEqual(2));
 });
 
+it('starts the MangaDex search from the original title and the Kakao search from the title', async () => {
+  await renderArea({...base, originalTitle: ' 夜の図書館 '});
+  const sheet = await openSheet('MangaDex');
+  expect((within(sheet).getByRole('searchbox', {name: 'MangaDex 검색어'}) as HTMLInputElement).value).toBe('夜の図書館');
+  await within(sheet).findByRole('list', {name: 'MangaDex 검색 결과'});
+  expect(new URL(calls('/search/mangadex')[0][0], 'https://x').searchParams.get('query')).toBe('夜の図書館');
+  fireEvent.click(within(sheet).getByRole('button', {name: '닫기'}));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const kakao = await openSheet('카카오');
+  expect((within(kakao).getByRole('searchbox', {name: '카카오 검색어'}) as HTMLInputElement).value).toBe('밤의 도서관');
+});
+
 it('searches Kakao and sends back the normalized query with the exact group fields', async () => {
   routes.kakao = {version: 1, provider: 'kakao', query: '밤의 도서관 (normalized)', items: kakaoItems};
   await renderArea({...base, releaseWatch: {enabled: false, available: true}, releaseSchedule: {kakao: {editionIndex: 0, checkedAt: null, volumes: []}, mangadex: null}});

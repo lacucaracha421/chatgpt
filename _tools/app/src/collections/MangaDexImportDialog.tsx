@@ -20,7 +20,8 @@ type Props = {
 
 export function MangaDexImportDialog({ open, target, onClose, onApplied }: Props) {
   const { gateway } = useLibrary();
-  const [query, setQuery] = useState("");
+  // Connecting an existing manga starts from its 원제 (usually the Japanese title MangaDex knows).
+  const [query, setQuery] = useState(() => target.kind === "existing" ? target.collection.originalTitle?.trim() ?? "" : "");
   const [results, setResults] = useState<MangaDexSearchResult[]>([]);
   const [selected, setSelected] = useState<MangaDexSearchResult | null>(null);
   const [busy, setBusy] = useState<"search" | "apply" | null>(null);

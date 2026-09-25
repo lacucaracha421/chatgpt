@@ -16,3 +16,12 @@ it("leaves other Collection types' genres to their own display", () => {
   render(<CollectionInfoPanel collection={{ ...base, type: "game" }} />);
   expect(screen.getByText("Action, Romance, Isekai, action, 판타지")).toBeInTheDocument();
 });
+
+it("lists a manga 원제 only when it differs from the name", () => {
+  render(<CollectionInfoPanel collection={{ ...base, type: "manga", originalTitle: "夜の図書館" }} />);
+  expect(screen.getByText("원제")).toBeInTheDocument();
+  expect(screen.getByText("夜の図書館")).toBeInTheDocument();
+  cleanup();
+  render(<CollectionInfoPanel collection={{ ...base, type: "manga", originalTitle: "밤의 도서관" }} />);
+  expect(screen.queryByText("원제")).not.toBeInTheDocument();
+});

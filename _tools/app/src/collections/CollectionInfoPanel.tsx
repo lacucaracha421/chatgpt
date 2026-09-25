@@ -11,6 +11,8 @@ type CollectionInfoPanelProps = {
 export function CollectionInfoPanel({ collection, compact = false }: CollectionInfoPanelProps) {
   const showDescription = !compact && collection.type !== "game" && collection.type !== "manga";
   const rows: Array<[string, string]> = [];
+  const originalTitle = collection.originalTitle?.trim();
+  if (collection.type === "manga" && originalTitle && originalTitle !== collection.name) rows.push(["원제", originalTitle]);
   if (collection.author) rows.push(["작가", collection.author]);
   if (collection.developer) rows.push(["개발사", collection.developer]);
   if (collection.publisher) rows.push([collection.type === "game" ? "배급사" : "출판사", collection.publisher]);

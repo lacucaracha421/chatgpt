@@ -945,6 +945,10 @@ pub struct MangaDexWorkPreview {
     pub manga_id: String,
     pub proposed_title: String,
     pub alternate_titles: Vec<String>,
+    /// The Japanese title (native `ja`, else romanized `ja-ro`), filled into a blank
+    /// Collection `original_title` on apply and refresh.
+    #[serde(default)]
+    pub japanese_title: Option<String>,
     pub author: Option<String>,
     pub year: Option<i64>,
     pub status: Option<String>,

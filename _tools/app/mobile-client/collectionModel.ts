@@ -5,6 +5,8 @@ export type CollectionVolume = {id:string; volumeNumber:number; editionIndex:num
 export type CollectionSummary = {
   artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null}>;
   id:string; name:string; type:CollectionKind; description?:string|null; overview?:string|null;
+  /** 원제: for manga, usually the Japanese title the PC filled from MangaDex. */
+  originalTitle?:string|null;
   coverAssetId?:string|null; selectedWorkArtworkId?:string|null; selectedHeroArtworkId?:string|null; selectedBackdropArtworkId?:string|null;
   author?:string|null; developer?:string|null; director?:string|null; publisher?:string|null; year?:number|null; runtimeMinutes?:number|null;
   platforms?:string|null; genres?:string|null; productionCompany?:string|null; externalScore?:number|null; seasonDateRange?:string[]|null;
@@ -49,6 +51,8 @@ export function volumeLabel(volume:CollectionVolume) {
   return !label ? `${volume.volumeNumber}권` : /^\d+(?:\.\d+)?$/.test(label) ? `${label}권` : label;
 }
 
+/** The 원제 worth showing beside the title: present and not just the title again. */
+export function originalTitle(item:CollectionSummary){const value=item.originalTitle?.trim()??'';return value&&value!==item.name.trim()?value:'';}
 export function collectionCardCredit(item:CollectionSummary){return (item.type==='movie'?item.productionCompany:item.type==='game'?item.developer:item.author)?.trim()??'';}
 export function collectionCardDate(item:CollectionSummary){
   const short=(date:string)=>{const [y,m,d]=date.split('-');return `${y.slice(-2)}.${Number(m)}.${Number(d)}`;};

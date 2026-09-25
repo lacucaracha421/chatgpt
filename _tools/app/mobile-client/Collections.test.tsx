@@ -454,3 +454,22 @@ it('shows each volume release date beside its number when the publication has on
   fireEvent.click(region.querySelector('.collection-tile')!);
   expect(within(await screen.findByRole('dialog')).getByText('1권 · 2024.3.5')).toBeTruthy();
 });
+
+it('shows a manga 원제 small under the title only when it differs from the title',async()=>{
+  const open=async(detail:CollectionDetail)=>{
+    mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[detail]}:{revision:'r1',item:detail});
+    const view=render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(detail.name));
+    await screen.findByRole('heading',{level:1,name:detail.name});
+    return view;
+  };
+  const manga:CollectionDetail={...item,type:'manga',originalTitle:'夜の図書館'};
+  let view=await open(manga);
+  const line=document.querySelector('.collection-detail-identity h1 + .collection-detail-original');
+  expect(line?.textContent).toBe('夜の図書館');
+  view.unmount();
+  for(const originalTitle of [null,'  ',' 밤의 도서관 ']){
+    view=await open({...manga,originalTitle});
+    expect(document.querySelector('.collection-detail-original')).toBeNull();
+    view.unmount();
+  }
+});

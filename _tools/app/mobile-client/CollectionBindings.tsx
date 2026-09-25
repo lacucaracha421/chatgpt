@@ -103,7 +103,9 @@ type Picked = {
 export function BindSearchSheet({item, provider, status, connection, onClose, onRequested}: {item: CollectionDetail; provider: BindProvider; status: BindStatus | null; connection: Connection; onClose(): void; onRequested(request: BindRequest): void}) {
   const name = PROVIDER_NAMES[provider];
   const input = useRef<HTMLInputElement>(null), search = useRef<AbortController | null>(null), send = useRef<AbortController | null>(null);
-  const [query, setQuery] = useState(item.name);
+  // MangaDex knows a manga by its original (Japanese) title; Kakao by the Korean edition title.
+  const [initialQuery] = useState(() => (provider === 'mangadex' && item.originalTitle?.trim()) || item.name);
+  const [query, setQuery] = useState(initialQuery);
   const [busy, setBusy] = useState(false), [found, setFound] = useState<Found | null>(null), [failure, setFailure] = useState<BindFailure | null>(null);
   const [waitUntil, setWaitUntil] = useState(0), [now, setNow] = useState(() => Date.now());
   const [picked, setPicked] = useState<Picked | null>(null), [sending, setSending] = useState(false), [sendFailure, setSendFailure] = useState<BindFailure | null>(null);
@@ -133,10 +135,10 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
       if (next.waitSeconds) { setNow(Date.now()); setWaitUntil(Date.now() + next.waitSeconds * 1000); }
     });
   };
-  // The sheet opens already searching for the Collection's own title. Focus rests on the sheet,
+  // The sheet opens already searching for the prefilled title. Focus rests on the sheet,
   // not the field, so the keyboard does not cover the first results.
   useEffect(() => {
-    if (!unavailable) run(item.name);
+    if (!unavailable) run(initialQuery);
     const frame = requestAnimationFrame(() => { if (document.activeElement === input.current) (input.current?.closest('[role=dialog]') as HTMLElement | null)?.focus(); });
     return () => cancelAnimationFrame(frame);
   }, []);

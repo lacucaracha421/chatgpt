@@ -24,7 +24,7 @@ import {drawGameCase, GAME_CASE_REST} from '../src/collections/drawGameCase';
 
 import {api, errorText, native} from './transport';
 import {mediaTicket} from './media';
-import {collectionCardCredit, collectionCardDate, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
+import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
 import type {Ticket} from './types';
 import './library.css';
@@ -490,7 +490,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}
       <div className={`collection-detail-intro ${background?'has-backdrop':''}`}>
         <button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button>
-        <div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}
+        <div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{item.type==='manga'&&originalTitle(item)&&<span className="collection-detail-original">{originalTitle(item)}</span>}{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}
           {item.type==='manga'?<MangaFacts item={item}/>:<span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span>}
           <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>
           {item.type==='manga'&&<CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet}/>}</div>

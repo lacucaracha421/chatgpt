@@ -358,6 +358,17 @@ fn a_pending_mangadex_request_is_applied_with_the_pc_code_and_reported() {
     let seen = handle.join().unwrap();
     assert_eq!(fake.calls(), [format!("mangadex:{MANGA_ID}")]);
     assert_eq!(binding(&library, "mangadex").as_deref(), Some(MANGA_ID));
+    // The blank 원제 took the MangaDex Japanese title.
+    let original: Option<String> = library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT original_title FROM collections WHERE id='m'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(original.as_deref(), Some("ダンジョン飯"));
     assert_eq!(
         results(&seen)[0].1,
         json!({"version":1,"state":"applied","reason":null})

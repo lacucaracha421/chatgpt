@@ -79,6 +79,24 @@ describe("MangaDexImportDialog", () => {
     expect(onApplied).toHaveBeenCalledWith(collection);
   });
 
+  it("prefills the search with the original title when connecting an existing manga", async () => {
+    const user = userEvent.setup();
+    const { gateway } = renderDialog({ kind: "existing", collection: { ...collection, originalTitle: " ダンジョン飯 " } });
+
+    const box = screen.getByRole("searchbox", { name: "만화 검색" });
+    expect(box).toHaveValue("ダンジョン飯");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(gateway.searchMangaDex).toHaveBeenCalledWith("ダンジョン飯");
+  });
+
+  it("starts empty for a new work or a manga without an original title", () => {
+    renderDialog({ kind: "existing", collection: { ...collection, originalTitle: null } });
+    expect(screen.getByRole("searchbox", { name: "만화 검색" })).toHaveValue("");
+    cleanup();
+    renderDialog();
+    expect(screen.getByRole("searchbox", { name: "만화 검색" })).toHaveValue("");
+  });
+
   it("keeps the selected preview when applying to an existing collection fails", async () => {
     const user = userEvent.setup();
     const existing = { ...collection, id: "collection-9" };

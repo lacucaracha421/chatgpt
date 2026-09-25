@@ -188,6 +188,10 @@ pub(crate) fn parse_work_preview(
     }
     let genres = localized_tags(&detail.data.attributes.tags);
     let overview = localized_value(&detail.data.attributes.description);
+    let japanese_title = japanese_title(
+        &detail.data.attributes.title,
+        &detail.data.attributes.alt_titles,
+    );
     let result = map_search_result(detail.data)?;
     let covers = covers
         .data
@@ -212,6 +216,7 @@ pub(crate) fn parse_work_preview(
         manga_id: result.manga_id,
         proposed_title: result.title,
         alternate_titles: result.alternate_titles,
+        japanese_title,
         author: result.author,
         year: result.year,
         status: result.status,
@@ -502,6 +507,19 @@ fn preferred_title(
     })
 }
 
+/// The Japanese title: native script `ja` (main title first, then alternates), else the
+/// romanized `ja-ro`; `None` when MangaDex lists neither.
+fn japanese_title(
+    title: &BTreeMap<String, String>,
+    alternates: &[BTreeMap<String, String>],
+) -> Option<String> {
+    ["ja", "ja-ro"].iter().find_map(|locale| {
+        std::iter::once(title)
+            .chain(alternates)
+            .find_map(|values| nonempty(values.get(*locale)))
+    })
+}
+
 fn alternate_titles(
     selected: &str,
     title: &BTreeMap<String, String>,
@@ -554,9 +572,11 @@ fn nonempty(value: Option<&String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::{
-        cover_url, map_status_code, parse_search, parse_snapshot_covers, parse_work_preview,
-        search_url, validate_cover_identity, validate_query,
+        cover_url, japanese_title, map_status_code, parse_search, parse_snapshot_covers,
+        parse_work_preview, search_url, validate_cover_identity, validate_query,
     };
     use crate::library::error::LibraryError;
 
@@ -597,12 +617,51 @@ mod tests {
             Some("던전을 탐험하며 마물을 요리하는 이야기.")
         );
         assert_eq!(preview.genres.as_deref(), Some("Fantasy, 모험"));
+        assert_eq!(preview.japanese_title.as_deref(), Some("ダンジョン飯"));
         assert_eq!(preview.covers.len(), 2);
         assert_eq!(
             preview.covers[0].cover_id,
             "11111111-1111-4111-8111-111111111111"
         );
         assert_eq!(preview.covers[1].language.as_deref(), Some("ko"));
+    }
+
+    fn titles(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+        entries
+            .iter()
+            .map(|(locale, value)| (locale.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn japanese_title_prefers_native_script_over_romanized() {
+        let main = titles(&[("en", "Delicious in Dungeon")]);
+        let alternates = vec![
+            titles(&[("ja-ro", "Dungeon Meshi")]),
+            titles(&[("ja", "ダンジョン飯")]),
+        ];
+        assert_eq!(
+            japanese_title(&main, &alternates).as_deref(),
+            Some("ダンジョン飯")
+        );
+
+        let main_ja = titles(&[("ja", "メイン題")]);
+        assert_eq!(
+            japanese_title(&main_ja, &alternates).as_deref(),
+            Some("メイン題")
+        );
+
+        let romanized_only = vec![
+            titles(&[("ja-ro", " Dungeon Meshi ")]),
+            titles(&[("ja", "  ")]),
+        ];
+        assert_eq!(
+            japanese_title(&main, &romanized_only).as_deref(),
+            Some("Dungeon Meshi")
+        );
+
+        let none = vec![titles(&[("ko", "던전밥")])];
+        assert_eq!(japanese_title(&main, &none), None);
     }
 
     #[test]

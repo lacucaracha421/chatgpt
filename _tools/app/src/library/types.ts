@@ -465,6 +465,8 @@ export type MangaDexWorkPreview = {
   mangaId: string;
   proposedTitle: string;
   alternateTitles: string[];
+  /** Native `ja` title, else romanized `ja-ro`; filled into a blank 원제 on apply/refresh. */
+  japaneseTitle?: string | null;
   author: string | null;
   year: number | null;
   status: string | null;
