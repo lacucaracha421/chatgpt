@@ -146,3 +146,27 @@ describe("reading month notes", () => {
     expect(monthNotesOf(notes, "L").map((n) => n.month)).toEqual(["2026-09"]);
   });
 });
+
+describe("income day (들어오는 날)", () => {
+  const withDay = (incomeDay: number | null, income: number | null = 2300000) => ({ income, incomeDay, recurring: [], planned: [] });
+  it("gives the income date of the viewed month, clamped to its last day", () => {
+    expect(monthSummary(withDay(25), [], "2026-09", "2026-09-10").incomeDate).toBe("2026-09-25");
+    expect(monthSummary(withDay(31), [], "2026-02", "2026-02-01").incomeDate).toBe("2026-02-28");
+    expect(monthSummary(withDay(31), [], "2028-02", "2028-02-01").incomeDate).toBe("2028-02-29");
+    expect(monthSummary(withDay(31), [], "2026-04", "2026-04-01").incomeDate).toBe("2026-04-30");
+    expect(monthSummary(withDay(null), [], "2026-09", "2026-09-10").incomeDate).toBeNull();
+    expect(monthSummary({ income: 1 }, [], "2026-09", "2026-09-10").incomeDate).toBeNull();
+  });
+  it("is upcoming after today in the current month, in future months, never in past months", () => {
+    expect(monthSummary(withDay(25), [], "2026-09", "2026-09-24").incomeUpcoming).toBe(true);
+    expect(monthSummary(withDay(25), [], "2026-09", "2026-09-25").incomeUpcoming).toBe(false);
+    expect(monthSummary(withDay(25), [], "2026-10", "2026-09-25").incomeUpcoming).toBe(true);
+    expect(monthSummary(withDay(25), [], "2026-08", "2026-09-10").incomeUpcoming).toBe(false);
+    expect(monthSummary(withDay(25, null), [], "2026-09", "2026-09-10").incomeUpcoming).toBe(false);
+  });
+  it("leaves the headline formula unchanged", () => {
+    const a = monthSummary(withDay(25), [], "2026-09", "2026-09-10"), b = monthSummary(withDay(null), [], "2026-09", "2026-09-10");
+    expect(a.available).toBe(2300000);
+    expect({ ...a, incomeDate: null, incomeUpcoming: false }).toEqual(b);
+  });
+});

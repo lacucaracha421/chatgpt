@@ -22,6 +22,7 @@ pub const MAX_MEMO_CHARS: usize = 500;
 /// Amounts are integer won, 0 <= x < 10^12.
 pub const AMOUNT_BOUND: u64 = 1_000_000_000_000;
 pub const MAX_EVERY: u64 = 120;
+pub const MAX_INCOME_DAY: u64 = 31;
 pub const MAX_FALLBACK_BYTES: usize = 24 * 1024;
 
 pub fn is_ledger_kind(kind: &str) -> bool {
@@ -258,6 +259,11 @@ pub fn validate(c: &Content) -> Result<(), &'static str> {
     if let Some(Some(income)) = c.income {
         amount_ok(income)?;
     }
+    if c.income_day
+        .is_some_and(|day| !(1..=MAX_INCOME_DAY).contains(&day))
+    {
+        return Err("수입이 들어오는 날은 1~31일 중에서 골라 주세요.");
+    }
     if let Some(list) = &c.recurring {
         check_list(
             list,
@@ -374,6 +380,7 @@ pub fn normalize(c: &mut Content) {
             c.body = ledger_fallback(
                 &c.title,
                 c.income.flatten(),
+                c.income_day,
                 c.recurring.as_deref().unwrap_or(&[]),
                 c.planned.as_deref().unwrap_or(&[]),
             );
@@ -466,6 +473,7 @@ fn fit_lines(lines: Vec<String>) -> String {
 pub fn ledger_fallback(
     title: &str,
     income: Option<u64>,
+    income_day: Option<u64>,
     recurring: &[Recurring],
     planned: &[Planned],
 ) -> String {
@@ -479,7 +487,8 @@ pub fn ledger_fallback(
         }
     )];
     if let Some(income) = income {
-        lines.push(format!("월 수입 {}", won(income)));
+        let day = income_day.map_or(String::new(), |d| format!(" · 매달 {d}일"));
+        lines.push(format!("월 수입 {}{day}", won(income)));
     }
     if !recurring.is_empty() {
         let mut sorted: Vec<&Recurring> = recurring.iter().collect();
@@ -787,6 +796,12 @@ pub fn merge(base: &Content, local: &Content, remote: &Content) -> Option<Conten
         ledger: remote.ledger.clone(),
         month: remote.month.clone(),
         income: model::three_or(&base.income, &local.income, &remote.income, remote.income),
+        income_day: model::three_or(
+            &base.income_day,
+            &local.income_day,
+            &remote.income_day,
+            remote.income_day,
+        ),
         recurring: merge_opt_list(&base.recurring, &local.recurring, &remote.recurring, stamp)?,
         planned: merge_opt_list(&base.planned, &local.planned, &remote.planned, stamp)?,
         entries: merge_opt_list(&base.entries, &local.entries, &remote.entries, stamp)?,
@@ -920,7 +935,7 @@ mod tests {
                 extra: Map::new(),
             })
             .collect();
-        let body = ledger_fallback("가계부", Some(2_300_000), &recurring, &planned);
+        let body = ledger_fallback("가계부", Some(2_300_000), None, &recurring, &planned);
         assert_eq!(summary(&body), file["truncation"]["ledger"]);
     }
 
@@ -1013,6 +1028,19 @@ mod tests {
         assert!(c.validate().is_err());
         c.income = Some(Some(AMOUNT_BOUND - 1));
         assert!(c.validate().is_ok());
+        for (day, ok) in [(0, false), (1, true), (31, true), (32, false)] {
+            c.income_day = Some(day);
+            assert_eq!(c.validate().is_ok(), ok, "income day {day}");
+        }
+        c.income_day = None;
+        assert!(c.validate().is_ok());
+        let fractional: Result<Content, _> = serde_json::from_value(
+            serde_json::json!({"type":"ledger","title":"","body":"","incomeDay":1.5,"pinned":false,"deleted":false,"createdAt":"a","updatedAt":"b"}),
+        );
+        assert!(
+            fractional.is_err(),
+            "a fractional income day is not decoded"
+        );
         c.recurring = Some(
             (0..=MAX_RECURRING)
                 .map(|i| Recurring {

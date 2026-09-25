@@ -44,6 +44,7 @@
 .ledger-line__name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ledger-line__amount { font-size: var(--text-lg); }
 .ledger-line.is-closed .ledger-line__name, .ledger-line.is-closed .ledger-line__amount { color: var(--color-muted); }
+.ledger-line.is-in .ledger-line__amount { color: var(--color-muted); }
 
 /* Right pane: segmented tabs */
 .ledger-tabs { display: flex; align-items: center; gap: 12px; height: 60px; }
@@ -82,6 +83,8 @@ select.ledger-input { color-scheme: dark; }
 .ledger-field > .ledger-input, .ledger-field > .ledger-amount-input { color: var(--color-text); font-size: var(--text-md); }
 .ledger-field--check { flex-direction: row; align-items: center; gap: 8px; min-height: 38px; font-size: var(--text-sm); color: var(--color-text); }
 .ledger-field--wide { grid-column: 1 / -1; }
+.ledger-income-day { display: flex; align-items: center; gap: 6px; color: var(--color-text); font-size: var(--text-md); }
+.ledger-income-day .ledger-input { width: 56px; text-align: center; }
 .ledger-cycle { display: grid; grid-template-columns: 56px 1fr; gap: 6px; }
 .ledger-form__actions { display: flex; flex-wrap: wrap; gap: 6px; grid-column: 1 / -1; }
 .ledger-form .ledger-problem { grid-column: 1 / -1; flex-basis: 100%; }

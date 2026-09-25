@@ -36,6 +36,7 @@ export const LEDGER_LIMITS = {
   /** Per month note: 300 worst-case entries (UUID ids, refs, 100-char Korean names) fit 256 KiB. */ entries: 300, nameChars: 100, memoChars: 500,
   /** Amounts are integer won, 0 <= x < 10^12. */ amountBound: 1_000_000_000_000,
   everyMax: 120, bodyBytes: 24 * 1024,
+  /** 들어오는 날: day of the month 1–31; past the month's end it means the last day. */ incomeDayMax: 31,
 } as const;
 
 const codePoints = (text: string) => Array.from(text).length;
@@ -73,6 +74,13 @@ export function won(amount: number): string {
 }
 export const validAmount = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0 && value < LEDGER_LIMITS.amountBound;
+export const validIncomeDay = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= LEDGER_LIMITS.incomeDayMax;
+/** The date income arrives in `month`: day `incomeDay`, or the month's last day when shorter. */
+export function incomeDateIn(month: string, incomeDay: number | null | undefined): string | null {
+  if (!isMonth(month) || !validIncomeDay(incomeDay)) return null;
+  return `${month}-${String(Math.min(incomeDay, daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7))))).padStart(2, "0")}`;
+}
 
 // ---------------------------------------------------------------------------------------
 // Limits (the backend checks the same; the UI checks before queueing a draft)
@@ -93,11 +101,12 @@ function collectionProblem<T extends { id: string; forkOf?: string }>(list: T[],
 const NAME_PROBLEM = "이름은 100자, 메모는 500자까지 쓸 수 있습니다.";
 const AMOUNT_PROBLEM = "금액은 0원 이상 1조 원 미만의 정수로 입력해 주세요.";
 
-export type LedgerContent = { type?: string; income?: number | null; recurring?: Recurring[]; planned?: Planned[]; ledger?: string; month?: string; entries?: LedgerEntry[] };
+export type LedgerContent = { type?: string; income?: number | null; incomeDay?: number | null; recurring?: Recurring[]; planned?: Planned[]; ledger?: string; month?: string; entries?: LedgerEntry[] };
 
 /** Every ledger limit; returns a Korean message or null. */
 export function ledgerLimitProblem(note: LedgerContent): string | null {
   if (note.income != null && !validAmount(note.income)) return AMOUNT_PROBLEM;
+  if (note.incomeDay != null && !validIncomeDay(note.incomeDay)) return "수입이 들어오는 날은 1~31일 중에서 골라 주세요.";
   const recurring = collectionProblem(note.recurring ?? [], LEDGER_LIMITS.recurring, "고정·구독", (r) => {
     if (codePoints(r.name) > LEDGER_LIMITS.nameChars || codePoints(r.memo) > LEDGER_LIMITS.memoChars) return NAME_PROBLEM;
     if (!validAmount(r.amount)) return AMOUNT_PROBLEM;
@@ -132,7 +141,7 @@ const PLAINTEXT_BYTES = 256 * 1024;
 export function ledgerSizeProblem(note: LedgerContent & { title: string }): string | null {
   const body = note.type === LEDGER_MONTH
     ? monthFallback({ month: note.month ?? "", income: note.income ?? null, entries: note.entries ?? [] })
-    : ledgerFallback({ title: note.title, income: note.income ?? null, recurring: note.recurring ?? [], planned: note.planned ?? [] });
+    : ledgerFallback({ title: note.title, income: note.income ?? null, incomeDay: note.incomeDay ?? null, recurring: note.recurring ?? [], planned: note.planned ?? [] });
   if (utf8Bytes(JSON.stringify({ ...note, body })) <= PLAINTEXT_BYTES) return null;
   return note.type === LEDGER_MONTH ? "이번 달 기록이 너무 많습니다. 오래된 기록을 줄여 주세요." : "가계부 항목이 너무 많습니다. 끝난 항목을 지워 주세요.";
 }
@@ -174,9 +183,9 @@ function fitLines(lines: string[]): string {
   return [...lines.slice(0, best), `… ${after[best]}건 더`].join("\n");
 }
 
-export function ledgerFallback(note: { title: string; income: number | null; recurring: Recurring[]; planned: Planned[] }): string {
+export function ledgerFallback(note: { title: string; income: number | null; incomeDay?: number | null; recurring: Recurring[]; planned: Planned[] }): string {
   const lines = [`# ${oneLine(note.title) || "가계부"}`];
-  if (note.income !== null) lines.push(`월 수입 ${won(note.income)}`);
+  if (note.income !== null) lines.push(`월 수입 ${won(note.income)}${note.incomeDay != null ? ` · 매달 ${note.incomeDay}일` : ""}`);
   if (note.recurring.length) {
     lines.push("", "## 고정·구독");
     for (const r of sortRecurring(note.recurring))

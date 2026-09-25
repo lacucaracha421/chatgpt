@@ -268,3 +268,36 @@ it("lists each subscription once in 다가오는 결제", async () => {
   const upcoming = within(screen.getByRole("region", { name: "다가오는 결제" })).getAllByRole("listitem").map((li) => li.textContent);
   expect(upcoming).toEqual(["9.28Claude₩29,000"]);
 });
+
+it("sets the payday (들어오는 날) and shows the upcoming income among the charges", async () => {
+  const { fake, store } = await openLedger([ledgerNote({ recurring: [rec("claude", "Claude", 29000, "2026-01-28")] }), monthNote("2026-09", [])]);
+  await userEvent.click(screen.getByRole("button", { name: "수입 2,300,000" }));
+  const day = screen.getByRole("textbox", { name: "들어오는 날" });
+  await userEvent.type(day, "32{Enter}");
+  expect(screen.getByRole("alert")).toHaveTextContent("1~31");
+  await userEvent.clear(day);
+  await userEvent.type(day, "27{Enter}");
+  await settle(store);
+  expect(last(fake.saves())).toMatchObject({ id: "L", income: 2300000, incomeDay: 27 });
+  expect(screen.getByRole("button", { name: "수입 2,300,000 · 27일" })).toBeInTheDocument();
+  const upcoming = within(screen.getByRole("region", { name: "다가오는 결제" })).getAllByRole("listitem").map((li) => li.textContent);
+  expect(upcoming).toEqual(["9.27수입+₩2,300,000", "9.28Claude₩29,000"]);
+  // 31 in a 30-day month means the last day; clearing the day removes the line.
+  await userEvent.click(screen.getByRole("button", { name: "수입 2,300,000 · 27일" }));
+  await userEvent.clear(screen.getByRole("textbox", { name: "들어오는 날" }));
+  await userEvent.type(screen.getByRole("textbox", { name: "들어오는 날" }), "31{Enter}");
+  await settle(store);
+  expect(screen.getByRole("button", { name: "수입 2,300,000 · 30일" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "수입 2,300,000 · 30일" }));
+  await userEvent.click(screen.getByRole("button", { name: "지우기" }));
+  await userEvent.click(screen.getByRole("button", { name: "저장" }));
+  await settle(store);
+  expect(last(fake.saves())).toMatchObject({ id: "L", incomeDay: null });
+  expect(within(screen.getByRole("region", { name: "다가오는 결제" })).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["9.28Claude₩29,000"]);
+});
+
+it("does not list a payday that already passed this month", async () => {
+  await openLedger([ledgerNote({ incomeDay: 25, recurring: [rec("claude", "Claude", 29000, "2026-01-28")] }), monthNote("2026-09", [])]);
+  expect(screen.getByRole("button", { name: "수입 2,300,000 · 25일" })).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "다가오는 결제" })).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["9.28Claude₩29,000"]);
+});

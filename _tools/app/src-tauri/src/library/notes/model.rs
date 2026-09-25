@@ -98,6 +98,10 @@ pub struct Content {
         skip_serializing_if = "Option::is_none"
     )]
     pub income: Option<Option<u64>>,
+    /// Ledger: day of the month income arrives (1–31; past the month's end = its last day).
+    /// Absent when not set, so payloads without it keep their exact shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub income_day: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recurring: Option<Vec<Recurring>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,6 +133,7 @@ impl Content {
             ledger: None,
             month: None,
             income: None,
+            income_day: None,
             recurring: None,
             planned: None,
             entries: None,
@@ -528,6 +533,12 @@ pub fn merge(base: &Content, local: &Content, remote: &Content) -> Option<Conten
             remote.month.clone(),
         ),
         income: three_or(&base.income, &local.income, &remote.income, remote.income),
+        income_day: three_or(
+            &base.income_day,
+            &local.income_day,
+            &remote.income_day,
+            remote.income_day,
+        ),
         recurring: three_or(
             &base.recurring,
             &local.recurring,

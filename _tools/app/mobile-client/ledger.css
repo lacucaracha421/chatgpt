@@ -115,6 +115,9 @@
 .ledger-field.is-check input{width:22px;height:22px;margin:0 0 0 76px;accent-color:var(--color-accent)}
 .ledger-field.is-check>span:first-child{width:auto}
 .ledger-field.is-row>div{flex:1;min-width:0}
+.ledger-income-day{min-height:52px}
+.ledger-income-day>div{display:flex;align-items:center;gap:10px;color:var(--color-text);font-size:16px}
+.ledger-income-day .ledger-stepper b{min-width:44px}
 .ledger-chips{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-left:76px}
 .ledger-field .ledger-chips{padding-left:0}
 .ledger-chips>small{font-size:12px;color:var(--color-muted)}

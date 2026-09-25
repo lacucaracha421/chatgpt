@@ -176,7 +176,7 @@ public final class NotesModelTest {
   for(int i=0;i<200;i++)recurring.add(NotesModel.recurringItem(Json.parse(String.format("{\"id\":\"r%03d\",\"name\":\"%s\",\"amount\":%d,\"every\":1,\"unit\":\"month\",\"start\":\"2026-01-15\",\"order\":\"a%03d\"}",i,name,10000+i,i))));
   for(int i=0;i<300;i++)planned.add(NotesModel.plannedItem(Json.parse(String.format("{\"id\":\"p%03d\",\"name\":\"%s\",\"amount\":%d,\"order\":\"a%03d\"}",i,name,20000+i,i))));
   check(summary(NotesModel.monthFallback("2026-09",null,entries)).equals(cut.get("month")),"month fallback truncation");
-  check(summary(NotesModel.ledgerFallback("가계부",2300000L,recurring,planned)).equals(cut.get("ledger")),"ledger fallback truncation");
+  check(summary(NotesModel.ledgerFallback("가계부",2300000L,null,recurring,planned)).equals(cut.get("ledger")),"ledger fallback truncation");
   // Drafts: create a month, keep unknown entry keys, refuse immutable or type changes.
   String now="2026-09-25T00:00:00Z";NotesModel.SecretOpen open=()->true;
   String month="{\"id\":\"x\",\"expectedRevision\":0,\"type\":\"ledger-month\",\"title\":\"가계부 2026년 9월\",\"ledger\":\"L\",\"month\":\"2026-09\",\"income\":null,\"entries\":[{\"id\":\"e\",\"date\":\"2026-09-25\",\"amount\":9500,\"name\":\"점심\",\"createdAt\":\"c\",\"place\":\"회사\"}]}";
@@ -192,6 +192,14 @@ public final class NotesModelTest {
   try{draft("{\"id\":\"x\",\"expectedRevision\":1,\"entries\":[{\"id\":\"e\",\"date\":\"2026-09-01\",\"amount\":1.5,\"name\":\"\",\"createdAt\":\"c\"}]}");check(false,"fractional amount");}catch(NotesModel.Shape expected){checks++;}
   NotesModel.Content ledger=NotesModel.applyDraft(null,draft("{\"id\":\"y\",\"expectedRevision\":0,\"type\":\"ledger\",\"title\":\"가계부\",\"pinned\":true,\"income\":null,\"recurring\":[],\"planned\":[]}"),now,open);
   check(ledger.pinned&&ledger.body.equals("# 가계부")&&ledger.toJson().contains("\"income\":null"),"new ledger note");
+  check(!ledger.toJson().contains("incomeDay"),"no income day key until one is set");
+  NotesModel.Content payday=NotesModel.applyDraft(ledger,draft("{\"id\":\"y\",\"expectedRevision\":1,\"income\":2300000,\"incomeDay\":25}"),now,open);
+  check(Long.valueOf(25).equals(payday.incomeDay)&&payday.body.equals("# 가계부\n월 수입 ₩2,300,000 · 매달 25일")&&payday.toJson().contains("\"incomeDay\":25"),"income day set");
+  check(Long.valueOf(25).equals(NotesModel.applyDraft(payday,draft("{\"id\":\"y\",\"expectedRevision\":2,\"title\":\"생활비\"}"),now,open).incomeDay),"absent keeps the income day");
+  for(String bad:new String[]{"0","32"}){try{NotesModel.applyDraft(payday,draft("{\"id\":\"y\",\"expectedRevision\":2,\"incomeDay\":"+bad+"}"),now,open);check(false,"income day "+bad);}catch(NotesModel.Invalid expected){checks++;}}
+  try{draft("{\"id\":\"y\",\"expectedRevision\":2,\"incomeDay\":1.5}");check(false,"fractional income day");}catch(NotesModel.Shape expected){checks++;}
+  NotesModel.Content cleared=NotesModel.applyDraft(payday,draft("{\"id\":\"y\",\"expectedRevision\":2,\"incomeDay\":null}"),now,open);
+  check(cleared.incomeDay==null&&!cleared.toJson().contains("incomeDay")&&cleared.body.equals("# 가계부\n월 수입 ₩2,300,000"),"income day cleared");
   check(NotesModel.validDate("2024-02-29")&&!NotesModel.validDate("2100-02-29")&&NotesModel.validMonth("2026-12")&&!NotesModel.validMonth("2026-13"),"calendar strings");
   check(NotesModel.won(0).equals("₩0")&&NotesModel.won(999_999_999_999L).equals("₩999,999,999,999"),"won");
  }

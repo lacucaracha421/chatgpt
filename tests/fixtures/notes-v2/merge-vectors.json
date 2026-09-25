@@ -10,8 +10,8 @@
   "Labels per case-insensitive key: in base -> kept only if still on both sides; not in base -> kept if on either side. Order: remote labels, then local additions; the remote spelling wins.",
   "Unknown keys (top level and per item/field) merge with the one-side rule; a collision takes remote.",
   "Any side with schema > 2 or an unknown type -> conflict.",
-  "Ledger canonical serialization: ... fields, ledger, month, income, recurring, planned, entries, pinned ... (ledger: income, recurring, planned always present; ledger-month: ledger, month, income, entries always present and archived always true). Recurring keys id, name, amount, every, unit, start, trial, until, memo, order, forkOf?; planned id, name, amount, month, memo, dropped, order, forkOf?; entries id, date, amount, name, in (only when true), createdAt, recurring?, planned?, forkOf?; then unknown keys.",
-  "Ledger merges (type ledger or ledger-month) never keep a whole-note copy unless type, ledger or month differ on any side (conflict) or the result breaks a limit. title and income collisions take remote; body is regenerated; other scalars as above.",
+  "Ledger canonical serialization: ... fields, ledger, month, income, incomeDay, recurring, planned, entries, pinned ... (ledger: income, recurring, planned always present, incomeDay only when set (1-31); ledger-month: ledger, month, income, entries always present and archived always true). Recurring keys id, name, amount, every, unit, start, trial, until, memo, order, forkOf?; planned id, name, amount, month, memo, dropped, order, forkOf?; entries id, date, amount, name, in (only when true), createdAt, recurring?, planned?, forkOf?; then unknown keys.",
+  "Ledger merges (type ledger or ledger-month) never keep a whole-note copy unless type, ledger or month differ on any side (conflict) or the result breaks a limit. title, income and incomeDay collisions take remote; body is regenerated; other scalars as above.",
   "Ledger collections (recurring, planned, entries) merge per id. A field changed on one side wins; an order collision takes remote; an unknown-key collision takes remote; any other field collision forks the item: the remote version keeps the id, the local version is added with id = UUID v4 layout of the first 16 bytes of SHA-256('lakomics-ledger-fork:1:' + local note updatedAt + ':' + remote note updatedAt + ':' + id) and forkOf = id. Deleted on one side is removed unless the other side changed a field other than order. The same id added on both sides is kept once when equal apart from order (remote order), else forked."
  ],
  "vectors": [
@@ -2237,6 +2237,599 @@
     "title": "생활비",
     "body": "# 생활비\n월 수입 ₩2,500,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
     "income": 2500000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: incomeDay changed on both sides, the server wins; income changed on one side",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 25일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "incomeDay": 25,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,400,000 · 매달 10일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2400000,
+    "incomeDay": 10,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 20일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "incomeDay": 20,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,400,000 · 매달 20일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2400000,
+    "incomeDay": 20,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: incomeDay set on one side, title on the other",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 31일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "incomeDay": 31,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "생활비",
+    "body": "# 생활비\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "생활비",
+    "body": "# 생활비\n월 수입 ₩2,300,000 · 매달 31일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "incomeDay": 31,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: incomeDay cleared on one side",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 25일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "incomeDay": 25,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 25일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "incomeDay": 25,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
     "recurring": [
      {
       "id": "r-netflix",

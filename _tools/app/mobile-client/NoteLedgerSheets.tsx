@@ -91,8 +91,9 @@ export function EntrySheet({initial,names,error,onSave,onDelete,onClose}:{initia
 }
 
 /** 수입: this month only (the month note) or the default for every month (the ledger). */
-export function IncomeSheet({month,monthIncome,defaultIncome,error,onSave,onClose}:{month:string;monthIncome:number|null;defaultIncome:number|null;error?:string|null;onSave(scope:'default'|'month',amount:number|null):Saved;onClose():void}) {
-  const commit=async(scope:'default'|'month',amount:number|null)=>{if(await onSave(scope,amount))onClose();};
+export function IncomeSheet({month,monthIncome,defaultIncome,incomeDay,error,onSave,onClose}:{month:string;monthIncome:number|null;defaultIncome:number|null;incomeDay:number|null;error?:string|null;onSave(scope:'default'|'month',amount:number|null,incomeDay:number|null):Saved;onClose():void}) {
+  const [day,setDay]=useState<number|null>(incomeDay);
+  const commit=async(scope:'default'|'month',amount:number|null)=>{if(await onSave(scope,amount,day))onClose();};
   const [scope,setScope]=useState<'default'|'month'>(monthIncome!==null?'month':'default');
   const [digits,setDigits]=useState(digitsOf(scope==='month'?monthIncome:defaultIncome));
   const choose=(value:'default'|'month')=>{setScope(value);setDigits(digitsOf(value==='month'?monthIncome??defaultIncome:defaultIncome));};
@@ -102,6 +103,11 @@ export function IncomeSheet({month,monthIncome,defaultIncome,error,onSave,onClos
       <AmountDisplay digits={digits} label="수입"/>
     </div>
     <p className="hint">{scope==='default'?'따로 정하지 않은 달은 이 금액을 씁니다. 환불이나 한 번 들어온 돈은 기록에서 들어온 돈으로 적어요.':`${monthLabel(month)}에만 쓰는 수입입니다.`}</p>
+    <div className="ledger-field is-row ledger-income-day"><span>들어오는 날</span><div>
+      {day===null?<Button variant="ghost" onClick={()=>setDay(25)}>날짜 정하기</Button>
+        :<><span>매달</span><Stepper label="들어오는 날" value={day} max={LEDGER_LIMITS.incomeDayMax} onChange={setDay}/><span>일</span><Button variant="ghost" onClick={()=>setDay(null)}>안 정함</Button></>}
+    </div></div>
+    {day!==null&&day>28&&<p className="hint">{day}일이 없는 달은 그 달 마지막 날로 계산해요.</p>}
     <Keypad onKey={key=>setDigits(value=>pressKey(value,key))}/>
     <div className="ledger-sheet__actions">
       {scope==='month'&&monthIncome!==null?<Button variant="ghost" onClick={()=>void commit('month',null)}>기본 수입으로 되돌리기</Button>:<span/>}
@@ -112,11 +118,11 @@ export function IncomeSheet({month,monthIncome,defaultIncome,error,onSave,onClos
 
 const UNITS:[LedgerUnit,string][]=[['week','주'],['month','개월'],['year','년']];
 const numberText=(value:string)=>value.replace(/\D/g,'').replace(/^0+(?=\d)/,'').slice(0,MAX_DIGITS);
-function Stepper({value,onChange,label}:{value:number;onChange(value:number):void;label:string}) {
+function Stepper({value,onChange,label,max=LEDGER_LIMITS.everyMax}:{value:number;onChange(value:number):void;label:string;max?:number}) {
   return <span className="ledger-stepper" role="group" aria-label={label}>
     <button type="button" aria-label={`${label} 줄이기`} disabled={value<=1} onClick={()=>onChange(value-1)}>−</button>
     <b className="numeric" aria-live="polite">{value}</b>
-    <button type="button" aria-label={`${label} 늘리기`} disabled={value>=LEDGER_LIMITS.everyMax} onClick={()=>onChange(value+1)}>+</button>
+    <button type="button" aria-label={`${label} 늘리기`} disabled={value>=max} onClick={()=>onChange(value+1)}>+</button>
   </span>;
 }
 

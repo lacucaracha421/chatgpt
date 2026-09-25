@@ -4,11 +4,11 @@
  * 쓸 수 있는 돈 = 수입 − 쓴 돈 − 예정.
  */
 import { chargesInMonth, dayNumber, monthEnd, monthStart, addDays } from "./cycle";
-import { byEntryOrder, LEDGER_MONTH, type LedgerEntry, type Planned, type Recurring } from "./model";
+import { byEntryOrder, incomeDateIn, LEDGER_MONTH, type LedgerEntry, type Planned, type Recurring } from "./model";
 
 /** What a reader needs from a month note (a decrypted `ledger-month` Note fits). */
 export type MonthNoteLike = { id: string; type?: string; ledger?: string; month?: string; income?: number | null; entries?: LedgerEntry[]; deleted: boolean; updatedAt: string };
-export type LedgerLike = { income?: number | null; recurring?: Recurring[]; planned?: Planned[] };
+export type LedgerLike = { income?: number | null; incomeDay?: number | null; recurring?: Recurring[]; planned?: Planned[] };
 
 /** The month notes of one ledger, newest first; keep-both copies of one month are all kept. */
 export function monthNotesOf<T extends MonthNoteLike>(notes: T[], ledgerId: string): T[] {
@@ -74,6 +74,8 @@ export type MonthSummary = {
   phase: "past" | "current" | "future";
   /** Base income (month override ?? ledger) plus 들어온 돈 entries. */ income: number;
   /** False when neither the month nor the ledger sets an income: show 쓴 돈 as the headline. */ incomeSet: boolean;
+  /** The day income arrives this month (the ledger's 들어오는 날, clamped to the month's end); null when not set. */ incomeDate: string | null;
+  /** An income is set and its date is after the cut-off day (still to come; shown in 다가오는 결제). */ incomeUpcoming: boolean;
   /** Non-`in` entries plus unconfirmed charges dated on or before the cut-off day. */ spent: number;
   /** Unconfirmed charges after the cut-off day plus this month's open plans. */ scheduled: number;
   scheduledCharges: number;
@@ -114,9 +116,10 @@ export function monthSummary(ledger: LedgerLike, monthNotes: MonthNoteLike[], mo
   const scheduledPlans = phase === "past" ? 0 : sum(plans.filter((p) => !p.doneBy).map((p) => p.plan.amount));
   const scheduled = scheduledCharges + scheduledPlans;
   const available = base === null ? null : income - spent - scheduled;
+  const incomeDate = incomeDateIn(month, ledger.incomeDay);
   const remainingDays = phase === "current" ? dayNumber(monthEnd(month)) - dayNumber(today) + 1 : null;
   return {
-    month, phase, income, incomeSet: base !== null, spent, scheduled, scheduledCharges, scheduledPlans, available,
+    month, phase, income, incomeSet: base !== null, incomeDate, incomeUpcoming: base !== null && incomeDate !== null && incomeDate > cutoff, spent, scheduled, scheduledCharges, scheduledPlans, available,
     remainingDays, perDay: available !== null && remainingDays ? Math.floor(available / remainingDays) : null,
     recurringThisMonth: sum(charges.map((c) => c.amount)), entries, pastCharges, upcomingCharges, plans,
     reviewCount: entries.filter((e) => e.forkOf).length,

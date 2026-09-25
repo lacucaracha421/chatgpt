@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import payloads from "../../../../../tests/fixtures/notes-v2/payload-examples.json";
 import vectors from "../../../../../tests/fixtures/notes-v2/ledger-vectors.json";
-import { ledgerSizeProblem, forkedIds, isDate, isMonth, keepOnly, LEDGER, LEDGER_MONTH, ledgerFallback, ledgerLimitProblem, monthFallback, won, type LedgerEntry, type Planned, type Recurring } from "./model";
+import { incomeDateIn, ledgerSizeProblem, forkedIds, isDate, isMonth, keepOnly, LEDGER, LEDGER_MONTH, ledgerFallback, ledgerLimitProblem, monthFallback, won, type LedgerEntry, type Planned, type Recurring } from "./model";
 
 type Any = Record<string, any>;
 const bigName = "가".repeat(100);
@@ -63,6 +63,25 @@ describe("limits", () => {
     expect(isDate("2028-02-29") && !isDate("2026-02-29") && !isDate("2026-9-01") && isMonth("2026-12") && !isMonth("2026-00")).toBe(true);
     expect(won(0)).toBe("₩0");
     expect(won(999_999_999_999)).toBe("₩999,999,999,999");
+  });
+});
+
+describe("income day", () => {
+  it("accepts 1–31 or null and refuses anything else", () => {
+    for (const day of [1, 25, 31, null, undefined]) expect(ledgerLimitProblem({ type: LEDGER, income: 2300000, incomeDay: day }), String(day)).toBeNull();
+    for (const day of [0, 32, 1.5, -1, "25" as unknown as number]) expect(ledgerLimitProblem({ type: LEDGER, incomeDay: day }), String(day)).toMatch("1~31일");
+  });
+  it("clamps a day past the month's end to its last day", () => {
+    expect(incomeDateIn("2026-02", 31)).toBe("2026-02-28");
+    expect(incomeDateIn("2028-02", 30)).toBe("2028-02-29");
+    expect(incomeDateIn("2026-09", 25)).toBe("2026-09-25");
+    expect(incomeDateIn("2026-09", 5)).toBe("2026-09-05");
+    expect(incomeDateIn("2026-09", null)).toBeNull();
+    expect(incomeDateIn("2026-09", 0)).toBeNull();
+  });
+  it("shows the day in the fallback next to the income", () => {
+    expect(ledgerFallback({ title: "가계부", income: 2300000, incomeDay: 25, recurring: [], planned: [] })).toBe("# 가계부\n월 수입 ₩2,300,000 · 매달 25일");
+    expect(ledgerFallback({ title: "가계부", income: null, incomeDay: 25, recurring: [], planned: [] })).toBe("# 가계부");
   });
 });
 

@@ -44,7 +44,7 @@ final class NotesModel {
     /** Ledger (가계부) notes: see the "Ledger" section below and `library/notes/ledger.rs`. */
     static final String LEDGER = "ledger", LEDGER_MONTH = "ledger-month";
     static final int MAX_RECURRING = 200, MAX_PLANNED = 300, MAX_ENTRIES = 300, MAX_LEDGER_NAME_CHARS = 100, MAX_LEDGER_MEMO_CHARS = 500, MAX_LEDGER_BODY_BYTES = 24 * 1024;
-    static final long AMOUNT_BOUND = 1_000_000_000_000L, MAX_EVERY = 120;
+    static final long AMOUNT_BOUND = 1_000_000_000_000L, MAX_EVERY = 120, MAX_INCOME_DAY = 31;
     static boolean ledgerKind(String kind) { return LEDGER.equals(kind) || LEDGER_MONTH.equals(kind); }
     static boolean knownKind(Object kind) { return TEXT.equals(kind) || CHECKLIST.equals(kind) || SECRET.equals(kind) || LEDGER.equals(kind) || LEDGER_MONTH.equals(kind); }
     static final List<String> COLORS = Collections.unmodifiableList(Arrays.asList("red", "orange", "amber", "green", "teal", "blue", "indigo", "pink"));
@@ -117,6 +117,8 @@ final class NotesModel {
         /** `income` key present (null or integer won); absent when false. */
         boolean hasIncome;
         Long income;
+        /** Ledger: day of the month income arrives (1–31); null = not set (the key is left out). */
+        Long incomeDay;
         /** Ledger collections as canonical JSON maps (known keys in order, then unknown keys). */
         List<Map<String, Object>> recurring, planned, entries;
         boolean pinned, deleted, archived;
@@ -138,7 +140,7 @@ final class NotesModel {
             c.labels = new ArrayList<>(labels);
             c.items = items == null ? null : copyItems(items);
             c.fields = fields == null ? null : copyFields(fields);
-            c.ledger = ledger; c.month = month; c.hasIncome = hasIncome; c.income = income;
+            c.ledger = ledger; c.month = month; c.hasIncome = hasIncome; c.income = income; c.incomeDay = incomeDay;
             c.recurring = copyMaps(recurring); c.planned = copyMaps(planned); c.entries = copyMaps(entries);
             c.pinned = pinned; c.deleted = deleted; c.archived = archived; c.createdAt = createdAt; c.updatedAt = updatedAt;
             c.extra = new LinkedHashMap<>(extra);
@@ -160,6 +162,7 @@ final class NotesModel {
             if (ledger != null) out.put("ledger", ledger);
             if (month != null) out.put("month", month);
             if (hasIncome) out.put("income", income);
+            if (incomeDay != null) out.put("incomeDay", incomeDay);
             if (recurring != null) out.put("recurring", new ArrayList<Object>(recurring));
             if (planned != null) out.put("planned", new ArrayList<Object>(planned));
             if (entries != null) out.put("entries", new ArrayList<Object>(entries));
@@ -194,7 +197,7 @@ final class NotesModel {
                 if (planned == null) planned = new ArrayList<>();
                 sortByOrder(recurring);
                 sortByOrder(planned);
-                body = ledgerFallback(title, income, recurring, planned);
+                body = ledgerFallback(title, income, incomeDay, recurring, planned);
             } else if (LEDGER_MONTH.equals(k)) {
                 hasIncome = true;
                 if (entries == null) entries = new ArrayList<>();
@@ -250,7 +253,7 @@ final class NotesModel {
     // ----------------------------------------------------------------------------------
     // Strict parsing (serde semantics of the PC `Content`)
 
-    private static final Set<String> KNOWN = new HashSet<>(Arrays.asList("schema", "type", "title", "body", "memo", "color", "labels", "items", "fields", "ledger", "month", "income", "recurring", "planned", "entries", "pinned", "deleted", "archived", "createdAt", "updatedAt"));
+    private static final Set<String> KNOWN = new HashSet<>(Arrays.asList("schema", "type", "title", "body", "memo", "color", "labels", "items", "fields", "ledger", "month", "income", "incomeDay", "recurring", "planned", "entries", "pinned", "deleted", "archived", "createdAt", "updatedAt"));
 
     @SuppressWarnings("unchecked")
     static Map<String, Object> object(Object value, String key) throws Shape {
@@ -334,6 +337,7 @@ final class NotesModel {
         c.ledger = optString(map, "ledger");
         c.month = optString(map, "month");
         if (map.containsKey("income")) { c.hasIncome = true; c.income = income(map.get("income")); }
+        c.incomeDay = unsigned(map.get("incomeDay"), "incomeDay");
         c.recurring = ledgerList(map.get("recurring"), "recurring", NotesModel::recurringItem);
         c.planned = ledgerList(map.get("planned"), "planned", NotesModel::plannedItem);
         c.entries = ledgerList(map.get("entries"), "entries", NotesModel::ledgerEntry);
@@ -455,6 +459,9 @@ final class NotesModel {
         String ledger, month;
         boolean hasIncome;
         Long income;
+        /** `incomeDay` key present; null clears the day. */
+        boolean hasIncomeDay;
+        Long incomeDay;
         List<Map<String, Object>> recurring, planned, entries;
     }
 
@@ -479,6 +486,7 @@ final class NotesModel {
         d.ledger = optString(map, "ledger");
         d.month = optString(map, "month");
         if (map.containsKey("income")) { d.hasIncome = true; d.income = income(map.get("income")); }
+        if (map.containsKey("incomeDay")) { d.hasIncomeDay = true; d.incomeDay = unsigned(map.get("incomeDay"), "incomeDay"); }
         d.recurring = ledgerList(map.get("recurring"), "recurring", NotesModel::recurringItem);
         d.planned = ledgerList(map.get("planned"), "planned", NotesModel::plannedItem);
         d.entries = ledgerList(map.get("entries"), "entries", NotesModel::ledgerEntry);
@@ -519,6 +527,7 @@ final class NotesModel {
         if (draft.ledger != null) content.ledger = draft.ledger;
         if (draft.month != null) content.month = draft.month;
         if (draft.hasIncome) { content.hasIncome = true; content.income = draft.income; }
+        if (draft.hasIncomeDay) content.incomeDay = draft.incomeDay;
         boolean secret = SECRET.equals(content.kind());
         if (secret && (draft.fields != null || draft.memo != null || draft.labels != null) && !secretOpen.touch()) throw new SecretLocked();
         if (draft.title != null) content.title = draft.title;
@@ -735,6 +744,7 @@ final class NotesModel {
         m.ledger = (String) threeOr(base.ledger, local.ledger, remote.ledger, remote.ledger);
         m.month = (String) threeOr(base.month, local.month, remote.month, remote.month);
         setIncome(m, threeOr(incomeSlot(base), incomeSlot(local), incomeSlot(remote), incomeSlot(remote)));
+        m.incomeDay = (Long) threeOr(base.incomeDay, local.incomeDay, remote.incomeDay, remote.incomeDay);
         m.recurring = copyMaps((List<Map<String, Object>>) threeOr(base.recurring, local.recurring, remote.recurring, remote.recurring));
         m.planned = copyMaps((List<Map<String, Object>>) threeOr(base.planned, local.planned, remote.planned, remote.planned));
         m.entries = copyMaps((List<Map<String, Object>>) threeOr(base.entries, local.entries, remote.entries, remote.entries));
@@ -915,7 +925,7 @@ final class NotesModel {
         }
         return out;
     }
-    private static void clearLedger(Content c) { c.ledger = null; c.month = null; c.hasIncome = false; c.income = null; c.recurring = null; c.planned = null; c.entries = null; }
+    private static void clearLedger(Content c) { c.ledger = null; c.month = null; c.hasIncome = false; c.income = null; c.incomeDay = null; c.recurring = null; c.planned = null; c.entries = null; }
 
     // Calendar strings and limits
 
@@ -954,6 +964,7 @@ final class NotesModel {
     /** Every ledger limit (design §4.4); null when valid. */
     static String validateLedger(Content c) {
         if (c.income != null && !amountOk(c.income)) return AMOUNT_PROBLEM;
+        if (c.incomeDay != null && (c.incomeDay < 1 || c.incomeDay > MAX_INCOME_DAY)) return "수입이 들어오는 날은 1~31일 중에서 골라 주세요.";
         String problem = checkList(c.recurring, MAX_RECURRING, "고정·구독은 200개까지 저장할 수 있습니다.", "고정·구독 형식이 올바르지 않습니다.", r -> {
             if (codePoints((String) r.get("name")) > MAX_LEDGER_NAME_CHARS || codePoints((String) r.get("memo")) > MAX_LEDGER_MEMO_CHARS) return NAME_PROBLEM;
             if (!amountOk(r.get("amount"))) return AMOUNT_PROBLEM;
@@ -1033,11 +1044,11 @@ final class NotesModel {
         kept.add("… " + after[best] + "건 더");
         return String.join("\n", kept);
     }
-    static String ledgerFallback(String title, Long income, List<Map<String, Object>> recurring, List<Map<String, Object>> planned) {
+    static String ledgerFallback(String title, Long income, Long incomeDay, List<Map<String, Object>> recurring, List<Map<String, Object>> planned) {
         List<String> lines = new ArrayList<>();
         String heading = oneLine(title);
         lines.add("# " + (heading.isEmpty() ? "가계부" : heading));
-        if (income != null) lines.add("월 수입 " + won(income));
+        if (income != null) lines.add("월 수입 " + won(income) + (incomeDay != null ? " · 매달 " + incomeDay + "일" : ""));
         if (!recurring.isEmpty()) {
             List<Map<String, Object>> sorted = new ArrayList<>(recurring);
             sortByOrder(sorted);
@@ -1205,6 +1216,7 @@ final class NotesModel {
         m.ledger = remote.ledger;
         m.month = remote.month;
         setIncome(m, threeOr(incomeSlot(base), incomeSlot(local), incomeSlot(remote), incomeSlot(remote)));
+        m.incomeDay = (Long) threeOr(base.incomeDay, local.incomeDay, remote.incomeDay, remote.incomeDay);
         try {
             m.recurring = mergeOptList(base.recurring, local.recurring, remote.recurring, RECURRING_FIELDS, NotesModel::recurringItem, stamp);
             m.planned = mergeOptList(base.planned, local.planned, remote.planned, PLANNED_FIELDS, NotesModel::plannedItem, stamp);

@@ -208,6 +208,38 @@ it('sets this month’s income separately from the default',async()=>{
   expect(saves().some(p=>p.id===LEDGER_ID)).toBe(false);
   await waitFor(()=>expect(screen.getByLabelText('이번 달 쓸 수 있는 돈').textContent).toBe('₩762,610'));
 });
+it('sets the payday (들어오는 날) and lists the upcoming income in 다가오는 결제',async()=>{
+  renderNotes();await openLedger();
+  fireEvent.click(screen.getByRole('button',{name:/수입 2,300,000/}));
+  let s=await sheet();
+  fireEvent.click(s.getByRole('button',{name:'날짜 정하기'}));
+  for(let i=0;i<2;i++)fireEvent.click(s.getByRole('button',{name:'들어오는 날 늘리기'}));
+  expect(s.getByRole('group',{name:'들어오는 날'}).textContent).toContain('27');
+  fireEvent.click(s.getByRole('button',{name:'저장'}));
+  await waitFor(()=>expect(lastSave(LEDGER_ID)).toMatchObject({income:2300000,incomeDay:27}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:/수입 2,300,000 · 27일/})).toBeTruthy());
+  // The headline is unchanged; the payday joins the charges by date as money in.
+  expect(screen.getByLabelText('이번 달 쓸 수 있는 돈').textContent).toBe('₩562,610');
+  const rows=[...screen.getByRole('heading',{name:/다가오는 결제/}).parentElement!.querySelectorAll('li')];
+  expect(rows.map(n=>n.querySelector('strong')!.textContent).slice(0,3)).toEqual(['수입','쿠팡 와우','ChatGPT Plus']);
+  expect(rows[0]!.className).toContain('is-in');expect(rows[0]!.textContent).toContain('+₩2,300,000');
+  // 안 정함 clears the day; the line disappears.
+  fireEvent.click(screen.getByRole('button',{name:/수입 2,300,000 · 27일/}));
+  s=await sheet();
+  fireEvent.click(s.getByRole('button',{name:'안 정함'}));
+  fireEvent.click(s.getByRole('button',{name:'저장'}));
+  await waitFor(()=>expect(lastSave(LEDGER_ID).incomeDay).toBeNull());
+  await waitFor(()=>expect([...screen.getByRole('heading',{name:/다가오는 결제/}).parentElement!.querySelectorAll('li strong')].map(n=>n.textContent)).not.toContain('수입'));
+});
+it('a payday of 31 falls on the last day of a shorter month and is not listed once it passed',async()=>{
+  serve([text,{...ledger,incomeDay:31},monthNote('2026-09',september)]);
+  renderNotes();await openLedger();
+  expect(screen.getByRole('button',{name:/수입 2,300,000 · 30일/})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'이전 달'}));
+  expect(await screen.findByText('2026년 8월')).toBeTruthy();
+  expect(screen.getByRole('button',{name:/수입 2,300,000 · 31일/})).toBeTruthy();
+  expect(document.querySelector('.ledger-row.is-in')).toBeNull();
+});
 it('refuses an entry over the monthly limit, keeping the sheet and the typed amount (also for 저장하고 하나 더)',async()=>{
   const full=Array.from({length:300},(_,i)=>entry(`f${i}`,'2026-09-02',1000,'마트'));
   serve([ledger,monthNote('2026-09',full)]);

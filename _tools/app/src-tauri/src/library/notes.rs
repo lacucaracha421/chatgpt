@@ -139,6 +139,9 @@ pub struct Draft {
     /// `Some(None)` clears the income; absent keeps it.
     #[serde(default, deserialize_with = "present")]
     pub income: Option<Option<u64>>,
+    /// Ledger: `Some(None)` clears the income day; absent keeps it.
+    #[serde(default, deserialize_with = "present")]
+    pub income_day: Option<Option<u64>>,
     #[serde(default)]
     pub recurring: Option<Vec<Recurring>>,
     #[serde(default)]
@@ -404,6 +407,9 @@ fn apply_draft(
     if let Some(income) = draft.income {
         content.income = Some(income);
     }
+    if let Some(day) = draft.income_day {
+        content.income_day = day;
+    }
     let secret = content.kind() == SECRET;
     if secret
         && (draft.fields.is_some() || draft.memo.is_some() || draft.labels.is_some())
@@ -499,6 +505,7 @@ fn clear_ledger(content: &mut Content) {
     content.ledger = None;
     content.month = None;
     content.income = None;
+    content.income_day = None;
     content.recurring = None;
     content.planned = None;
     content.entries = None;
@@ -1791,8 +1798,22 @@ mod ledger_tests {
         assert_eq!(value["recurring"][0]["color"], json!("red"));
         assert_eq!(value["recurring"][0]["amount"], json!(13500));
         assert_eq!(value["income"], Value::Null);
+        assert!(value.get("incomeDay").is_none(), "no income day key until one is set");
+        // 들어오는 날: set, refused out of range, cleared (the key disappears again).
+        let day = save(&lib, &key, json!({"id":id,"expectedRevision":2,"income":2300000,"incomeDay":25})).unwrap();
+        assert_eq!(day.content.income_day, Some(25));
+        assert!(day.content.body.starts_with("# 가계부\n월 수입 ₩2,300,000 · 매달 25일"));
+        assert!(save(&lib, &key, json!({"id":id,"expectedRevision":3,"incomeDay":32})).is_err());
+        assert!(save(&lib, &key, json!({"id":id,"expectedRevision":3,"incomeDay":0})).is_err());
+        let kept = save(&lib, &key, json!({"id":id,"expectedRevision":3,"title":"생활비"})).unwrap();
+        assert_eq!(kept.content.income_day, Some(25), "absent keeps the day");
+        let cleared = save(&lib, &key, json!({"id":id,"expectedRevision":4,"income":null,"incomeDay":null})).unwrap();
+        assert_eq!(cleared.content.income_day, None);
+        let payload: String = lib.connection().unwrap().query_row("SELECT payload FROM notes WHERE id=?", [&id], |r| r.get(0)).unwrap();
+        let value = open_value(&key, &id, &serde_json::from_str(&payload).unwrap()).unwrap();
+        assert!(value.get("incomeDay").is_none());
         // A ledger cannot become another type, and a month's ledger and month are fixed.
-        assert!(save(&lib, &key, json!({"id":id,"expectedRevision":2,"type":"text","body":"x"})).is_err());
+        assert!(save(&lib, &key, json!({"id":id,"expectedRevision":5,"type":"text","body":"x"})).is_err());
         // A month note is written only under its derived id and with a canonical ledger id.
         assert!(save(&lib, &key, month_draft(&uuid::Uuid::new_v4().to_string(), 0, json!([]))).is_err());
         let month = ledger::month_id(&key, "11111111-2222-4333-8444-555555555555", "2026-09");

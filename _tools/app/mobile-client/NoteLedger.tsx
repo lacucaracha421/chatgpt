@@ -93,8 +93,11 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
   function keepEntry(entryId:string){for(const note of monthNotesNow()){const list=note.entries??[];const kept=keepOnly(list,entryId);if(kept!==list&&JSON.stringify(kept)!==JSON.stringify(list))write(note,{entries:kept});}}
   const saveRecurring=(item:Recurring)=>editLedger(l=>({recurring:[...(l.recurring??[]).filter(r=>r.id!==item.id),item]}));
   const savePlan=(item:Planned)=>editLedger(l=>({planned:[...(l.planned??[]).filter(p=>p.id!==item.id),item]}));
-  async function saveIncome(scope:'default'|'month',amount:number|null){
-    return scope==='default'?editLedger(()=>({income:amount})):!!await editMonth(month,()=>({income:amount}));
+  async function saveIncome(scope:'default'|'month',amount:number|null,incomeDay:number|null){
+    const day=incomeDay!==(ledger.incomeDay??null)?{incomeDay}:{};
+    if(scope==='default')return editLedger(()=>({income:amount,...day}));
+    if('incomeDay' in day&&!editLedger(()=>day))return false;
+    return !!await editMonth(month,()=>({income:amount}));
   }
   const openEntry=(draft:EntryDraft={})=>openSheet({kind:'entry',draft});
   const buy=(plan:Planned)=>openEntry({name:plan.name,amount:plan.amount,planned:plan.id});
@@ -106,7 +109,14 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
   const incomeBase=baseIncome(ledger,monthNotes,month);
   const headline=summary.available??summary.spent;
   const next=summary.phase==='past'?[]:upcoming(recurring,all,summary.phase==='current'?addDays(today,1):`${month}-01`,3);
+  /** The payday still to come in this month joins 다가오는 결제 by date (money in). */
+  const payday=summary.incomeUpcoming&&summary.incomeDate&&incomeBase!==null?{date:summary.incomeDate,amount:incomeBase}:null;
   const dateCell=(date:string)=><span className="ledger-date"><b className="numeric">{Number(date.slice(8,10))}</b><small>{weekday(date)}</small></span>;
+  const paydayRow=(p:{date:string;amount:number})=><li key="payday" className="ledger-row is-in" onClick={()=>openSheet({kind:'income'})}>
+    {dateCell(p.date)}
+    <span className="ledger-row__name"><strong>수입</strong><small>매달 {ledger.incomeDay}일 들어와요</small></span>
+    <b className="ledger-row__amount numeric">+{won(p.amount)}</b>
+  </li>;
   const planRow=(plan:Planned,doneBy:LedgerEntry|null)=><li key={plan.id} className={`ledger-row is-plan${doneBy?' is-done':''}${plan.dropped?' is-dropped':''}`} onClick={()=>openSheet({kind:'plan',item:plan})}>
     <span className="ledger-check" aria-label={doneBy?'샀어요':plan.dropped?'안 사기로 함':'아직'}>{doneBy&&<CheckIcon aria-hidden="true"/>}</span>
     <span className="ledger-row__name"><strong>{plan.name}</strong><small>{doneBy?`${longDate(doneBy.date)} 기록과 연결`:plan.dropped?'안 사기로 함':plan.month?`${monthLabel(plan.month)} 안에`:'언젠가'}</small>{forkedPlans.has(plan.id)&&<Fork onKeep={()=>editLedger(l=>({planned:keepOnly(l.planned??[],plan.id)}))}/>}</span>
@@ -144,7 +154,8 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
         <div><dt>고정·구독 이번 달</dt><dd className="numeric">{plain(summary.recurringThisMonth)}</dd></div>
       </dl>
       {summary.reviewCount>0&&<button type="button" className="ledger-review" onClick={()=>setTab('entries')}>확인할 기록 {summary.reviewCount}건 · 두 기기에서 다르게 고쳤어요</button>}
-      {next.length>0&&<section className="ledger-section"><Label more="고정·구독" onMore={()=>setTab('recurring')}>다가오는 결제</Label><ul>{next.map(c=>chargeRow(c))}</ul></section>}
+      {(next.length>0||payday)&&<section className="ledger-section"><Label more="고정·구독" onMore={()=>setTab('recurring')}>다가오는 결제</Label><ul>
+        {next.filter(c=>!payday||c.date<payday.date).map(c=>chargeRow(c))}{payday&&paydayRow(payday)}{next.filter(c=>payday&&c.date>=payday.date).map(c=>chargeRow(c))}</ul></section>}
       {summary.plans.length>0&&<section className="ledger-section"><Label more="계획 전체" onMore={()=>setTab('plans')}>{summary.phase==='current'?'이번 달':monthOnly(month)} 계획</Label><ul>{summary.plans.map(p=>planRow(p.plan,p.doneBy))}</ul></section>}
       <section className="ledger-section"><Label more="기록 전체" onMore={()=>setTab('entries')}>최근 기록</Label>
         {summary.entries.length?<ul>{summary.entries.slice(0,4).map(e=>entryRow(e,true))}</ul>:<p className="ledger-empty">아직 기록이 없어요. 아래 + 기록으로 적어 보세요.</p>}
@@ -215,7 +226,7 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
       <h2><button type="button" onClick={()=>setMonth(current)} disabled={month===current} aria-label={month===current?monthLabel(month):`${monthLabel(month)} · 이번 달로`}>{monthLabel(month)}</button></h2>
       <IconButton label="다음 달" icon={ChevronRightIcon} onClick={()=>setMonth(m=>addMonths(m,1))}/>
       <span className="notes-top__space"/>
-      <Button variant="ghost" className="ledger-income" onClick={()=>openSheet({kind:'income'})}><WalletIcon aria-hidden="true"/>{incomeBase===null?'수입 적기':<>수입 <span className="numeric">{plain(incomeBase)}</span></>}</Button>
+      <Button variant="ghost" className="ledger-income" onClick={()=>openSheet({kind:'income'})}><WalletIcon aria-hidden="true"/>{incomeBase===null?'수입 적기':<>수입 <span className="numeric">{plain(incomeBase)}</span>{summary.incomeDate&&<> · <span className="numeric">{Number(summary.incomeDate.slice(8))}</span>일</>}</>}</Button>
     </div>
     <div className="ledger-tabs" role="tablist" aria-label="가계부">{TABS.map(([key,text])=><button key={key} type="button" role="tab" aria-selected={tab===key} onClick={()=>setTab(key)}>{text}</button>)}</div>
     <div className="ledger-scroll" role="tabpanel">
@@ -225,7 +236,7 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
     <Button variant="primary" className="notes-fab" onClick={fab.open}><PlusIcon aria-hidden="true"/>{fab.label}</Button>
     {sheet?.kind==='entry'&&<EntrySheet error={problem} key={sheet.draft.id??'new'} initial={sheet.draft} names={names} onClose={()=>setSheet(null)} onSave={saveEntry}
       onDelete={sheet.draft.id?()=>{deleteEntry(sheet.draft.id!);setSheet(null);}:undefined}/>}
-    {sheet?.kind==='income'&&<IncomeSheet error={problem} month={month} monthIncome={monthIncome} defaultIncome={ledger.income??null} onSave={saveIncome} onClose={()=>setSheet(null)}/>}
+    {sheet?.kind==='income'&&<IncomeSheet error={problem} month={month} monthIncome={monthIncome} defaultIncome={ledger.income??null} incomeDay={ledger.incomeDay??null} onSave={saveIncome} onClose={()=>setSheet(null)}/>}
     {sheet?.kind==='recurring'&&<RecurringSheet error={problem} initial={sheet.item} order={nextOrder(recurring)} onSave={saveRecurring} onClose={()=>setSheet(null)}
       onDelete={sheet.item?()=>editLedger(l=>({recurring:(l.recurring??[]).filter(r=>r.id!==sheet.item!.id)})):undefined}/>}
     {sheet?.kind==='plan'&&<PlanSheet error={problem} initial={sheet.item} month={month} order={nextOrder(planned)} onSave={savePlan} onClose={()=>setSheet(null)}

@@ -245,6 +245,72 @@
    }
   },
   {
+   "name": "ledger with an income day",
+   "note": "incomeDay (1-31, optional) is the day of the month income arrives; past the month end it means the last day. Absent when not set (existing payloads keep their exact shape); the fallback shows it after the income. Pre-incomeDay clients keep it as an unknown key.",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 25일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터",
+    "income": 2300000,
+    "incomeDay": 25,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger income day of 32 is rejected on save",
+   "note": "incomeDay must be an integer 1-31.",
+   "supported": true,
+   "valid": false,
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 32일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터",
+    "income": 2300000,
+    "incomeDay": 32,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
    "name": "ledger month with entries",
    "note": "type ledger-month: always archived; entries sorted by date desc, createdAt desc, id; unknown entry keys survive.",
    "supported": true,
@@ -642,6 +708,40 @@
       "order": "W"
      }
     ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger income day is fractional",
+   "note": "",
+   "shows": {
+    "title": "가계부"
+   },
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000 · 매달 25일\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터",
+    "income": 2300000,
+    "incomeDay": 25.5,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [],
     "pinned": true,
     "deleted": false,
     "createdAt": "2026-09-01T00:00:00Z",
