@@ -11,6 +11,13 @@ fn dispatch(running: &'static Mutex<()>, work: impl FnOnce()+Send+'static) -> st
     })
 }
 
+/// Run both steps, then report the first error.
+fn both(first: impl FnOnce()->Result<(),LibraryError>, second: impl FnOnce()->Result<(),LibraryError>) -> Result<(),LibraryError> {
+    let first=first();
+    let second=second();
+    first.and(second)
+}
+
 /// Tracks only generations produced by receiving mobile personal edits. A local
 /// write changes the generation and immediately invalidates this deferral.
 #[derive(Debug, Default)]
@@ -64,9 +71,10 @@ impl Library {
         if !config.enabled || config.api_base_url.as_deref()!=Some(endpoint){return Ok(())}
         if kind == "characters" {
             // Receive even when no local changes have dirtied the publication. Order:
-            // exclusions → mobile review decisions → snapshot → candidate feed.
-            self.run_due_character_exclusions(endpoint)?;
-            self.run_due_character_review(endpoint)?;
+            // exclusions → mobile review decisions → snapshot → candidate feed. The two
+            // receives are independent channels, so a failing exclusion pass must not starve
+            // the review receive; the first error still ends this tick.
+            both(|| self.run_due_character_exclusions(endpoint), || self.run_due_character_review(endpoint))?;
         } else if kind == "collections" {
             // Same for mobile personal edits (at most once a minute, durably throttled).
             // An applied edit dirties the lane through the 0074 triggers; the publication
@@ -121,6 +129,17 @@ mod tests {
         let (tx,rx)=mpsc::channel();
         super::dispatch(&COLLECTION,move || {tx.send(()).unwrap();}).unwrap().join().unwrap();
         rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    #[test]
+    fn character_review_runs_after_an_exclusion_failure_and_the_first_error_is_reported() {
+        use crate::library::error::LibraryError;
+        let mut review_ran=false;
+        let result=super::both(|| Err(LibraryError::CharacterExclusionUnsupported), || {review_ran=true;Err(LibraryError::CharacterReviewUnsupported)});
+        assert!(review_ran);
+        assert!(matches!(result,Err(LibraryError::CharacterExclusionUnsupported)));
+        let result=super::both(|| Ok(()), || Err(LibraryError::CharacterReviewUnsupported));
+        assert!(matches!(result,Err(LibraryError::CharacterReviewUnsupported)));
+        assert!(super::both(|| Ok(()), || Ok(())).is_ok());
     }
     #[test]
     fn catalog_visibility_is_debounced_and_remains_dirty_after_restart() {

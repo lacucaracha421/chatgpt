@@ -3,9 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import { dismissPublication } from "../library/publicationJobs";
-import type { CatalogStatus, LibraryGateway, MetadataBackup } from "../library/types";
+import type { CatalogStatus, CreatedEncryptedVault, LibraryGateway, MetadataBackup } from "../library/types";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 import { SettingsView } from "./SettingsView";
+import { confirmLeaveVaultRecovery } from "../external-vault/vaultRecoveryGuard";
 import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "character_augmentation_settings"
@@ -320,6 +321,103 @@ it("creates an encrypted vault and requires confirming the recovery key", async 
   expect(await screen.findByText("/media/usb")).toBeVisible();
   expect(screen.getByText(/열림 · 0개 · 이 PC에서 기억함/)).toBeVisible();
   expect(onPrivateVaultChanged).toHaveBeenCalled();
+});
+
+it("keeps Settings open while a vault is created and its recovery key is shown", async () => {
+  const gateway = createGateway();
+  const absent = { state: "absent" as const, vaultId: null, root: null, itemCount: null, remembered: false };
+  const unlocked = { state: "unlocked" as const, vaultId: "vault-1", root: "/media/usb", itemCount: 0, remembered: true };
+  let created!: (value: CreatedEncryptedVault) => void;
+  gateway.getEncryptedVaultStatus = vi.fn().mockResolvedValue(absent);
+  gateway.createEncryptedVault = vi.fn(() => new Promise<CreatedEncryptedVault>((resolve) => { created = resolve; }));
+  vi.mocked(open).mockResolvedValue("/media/usb" as never);
+  const onExit = vi.fn();
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+  render(<LibraryProvider gateway={gateway}>
+    <SettingsView restoring={false} onRestore={vi.fn()} onExit={onExit} initialSection="data" />
+  </LibraryProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: "새 보관함 만들기" }));
+  await userEvent.click(screen.getByRole("button", { name: "보관할 폴더 선택" }));
+  await screen.findByText("/media/usb");
+  await userEvent.type(screen.getByLabelText("비밀번호"), "pw1");
+  await userEvent.type(screen.getByLabelText("비밀번호 확인"), "pw1");
+  await userEvent.click(screen.getByRole("button", { name: "만들기" }));
+  expect(await screen.findByRole("button", { name: "만드는 중…" })).toBeDisabled();
+
+  // While creating: Esc is ignored and leaving the section asks first.
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onExit).not.toHaveBeenCalled();
+  expect(confirmLeaveVaultRecovery()).toBe(false);
+  expect(confirmSpy).toHaveBeenCalledTimes(1);
+  confirmSpy.mockClear();
+
+  await act(async () => created({ status: unlocked, recoveryKey: "ab".repeat(32) }));
+  const recovery = await screen.findByRole("group", { name: "비밀 보관함 복구키" });
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onExit).not.toHaveBeenCalled();
+  await userEvent.click(screen.getAllByRole("button", { name: "일반" })[0]);
+  expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("복구키를 다시 볼 수 없습니다"));
+  expect(recovery).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "데이터 관리" })).toBeInTheDocument();
+
+  // After the key is confirmed nothing is at stake any more.
+  await userEvent.click(within(recovery).getByRole("checkbox", { name: "복구키를 안전한 곳에 보관했습니다" }));
+  await userEvent.click(within(recovery).getByRole("button", { name: "계속" }));
+  confirmSpy.mockClear();
+  expect(confirmLeaveVaultRecovery()).toBe(true);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onExit).toHaveBeenCalledTimes(1);
+  expect(confirmSpy).not.toHaveBeenCalled();
+  confirmSpy.mockRestore();
+});
+
+it("leaves the recovery key step only when the user agrees to lose the key", async () => {
+  const gateway = createGateway();
+  gateway.getEncryptedVaultStatus = vi.fn().mockResolvedValue({ state: "absent", vaultId: null, root: null, itemCount: null, remembered: false });
+  gateway.createEncryptedVault = vi.fn().mockResolvedValue({ status: { state: "unlocked", vaultId: "v", root: "/media/usb", itemCount: 0, remembered: true }, recoveryKey: "cd".repeat(32) });
+  vi.mocked(open).mockResolvedValue("/media/usb" as never);
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<LibraryProvider gateway={gateway}>
+    <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="data" />
+  </LibraryProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: "새 보관함 만들기" }));
+  await userEvent.click(screen.getByRole("button", { name: "보관할 폴더 선택" }));
+  await screen.findByText("/media/usb");
+  await userEvent.type(screen.getByLabelText("비밀번호"), "pw");
+  await userEvent.type(screen.getByLabelText("비밀번호 확인"), "pw");
+  await userEvent.click(screen.getByRole("button", { name: "만들기" }));
+  await screen.findByRole("group", { name: "비밀 보관함 복구키" });
+  await userEvent.click(screen.getAllByRole("button", { name: "일반" })[0]);
+  expect(confirmSpy).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("group", { name: "비밀 보관함 복구키" })).not.toBeInTheDocument();
+  expect(confirmLeaveVaultRecovery()).toBe(true);
+  expect(confirmSpy).toHaveBeenCalledTimes(1);
+  confirmSpy.mockRestore();
+});
+
+it("does not leave Settings on an Esc that a dialog, the palette or a text field handled", async () => {
+  const gateway = createGateway();
+  const onExit = vi.fn();
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={onExit} initialSection="data" /></LibraryProvider>);
+  await screen.findByRole("heading", { name: "데이터 관리" });
+
+  const handled = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  handled.preventDefault();
+  window.dispatchEvent(handled);
+  const field = document.createElement("input");
+  document.body.append(field);
+  fireEvent.keyDown(field, { key: "Escape" });
+  field.remove();
+  const dialog = document.createElement("div");
+  dialog.setAttribute("role", "dialog");
+  document.body.append(dialog);
+  fireEvent.keyDown(window, { key: "Escape" });
+  dialog.remove();
+  expect(onExit).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(onExit).toHaveBeenCalledTimes(1);
 });
 
 it("changes the password, forgets the remembered key and locks an open vault", async () => {

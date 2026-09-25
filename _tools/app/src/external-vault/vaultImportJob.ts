@@ -144,5 +144,6 @@ function importErrorMessage(code: string | null, cause: unknown) {
   if (code === "encrypted_vault_locked") return `비밀 보관함이 잠겨 가져오기를 멈췄습니다. ${RESUME_HINT}`;
   if (code === "encrypted_vault_not_found") return `비밀 보관함 USB를 찾을 수 없어 가져오기를 멈췄습니다. ${RESUME_HINT}`;
   if (code === "encrypted_vault_folder_unavailable") return "가져올 폴더를 읽을 수 없습니다.";
+  if (code === "encrypted_vault_read_only") return "보관함을 이전 백업본으로 읽기 전용으로 열어 가져올 수 없습니다.";
   return commandErrorMessage(cause, `가져오지 못했습니다. ${RESUME_HINT}`);
 }

@@ -274,6 +274,24 @@ impl Library {
         prepared: &PreparedWorkArtwork,
     ) -> Result<String, LibraryError> {
         require_collection(transaction, collection_id)?;
+        // 한 provider 이미지는 컬렉션당 한 행(한 kind)만 가진다. 스크린샷 행은 갤러리 전용
+        // 역할이라 hero 등으로 승격될 수 있고, 이미 다른 역할을 가진 이미지를 스크린샷으로
+        // 다시 넣으면 기존 역할과 선택 상태를 그대로 둔다(갤러리는 모든 kind를 보여 준다).
+        let existing: Option<(String, String)> = transaction
+            .query_row(
+                "SELECT id, kind FROM collection_work_artworks
+                 WHERE collection_id = ?1 AND provider = ?2 AND provider_image_id = ?3",
+                params![collection_id, provider, provider_image_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((existing_id, existing_kind)) = existing {
+            if kind == WorkArtworkKind::Screenshot
+                && existing_kind != WorkArtworkKind::Screenshot.as_str()
+            {
+                return Ok(existing_id);
+            }
+        }
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
             "INSERT INTO collection_work_artworks (
@@ -281,6 +299,8 @@ impl Library {
                 mime_type, width, height, language, selected, created_at, updated_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11, ?11)
              ON CONFLICT(collection_id, provider, provider_image_id) DO UPDATE SET
+                kind = CASE WHEN collection_work_artworks.kind = 'screenshot'
+                    THEN excluded.kind ELSE collection_work_artworks.kind END,
                 relative_path = excluded.relative_path,
                 mime_type = excluded.mime_type,
                 width = excluded.width,
@@ -1093,6 +1113,64 @@ mod tests {
                 (second_hero_id, "hero".into(), 1),
             ]
         );
+    }
+
+    #[test]
+    fn a_screenshot_can_become_the_hero_and_is_not_reclaimed_as_a_screenshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Example Game".into(),
+                description: None,
+                collection_type: CollectionType::Game,
+            })
+            .unwrap();
+        let rows = |library: &Library| -> Vec<(String, String, i64)> {
+            library
+                .connection()
+                .unwrap()
+                .prepare(
+                    "SELECT id, kind, selected FROM collection_work_artworks
+                     WHERE collection_id = ?1",
+                )
+                .unwrap()
+                .query_map([&collection.id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let insert = |kind: WorkArtworkKind| {
+            let prepared = library
+                .prepare_work_artwork(&collection.id, &png_bytes_at(16, 9))
+                .unwrap();
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            let id = Library::insert_work_artwork_in_transaction(
+                &transaction,
+                &collection.id,
+                "igdb",
+                "shot-1",
+                kind,
+                None,
+                &prepared,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+            prepared.commit();
+            id
+        };
+
+        let screenshot_id = insert(WorkArtworkKind::Screenshot);
+        let hero_id = insert(WorkArtworkKind::Hero);
+        assert_eq!(hero_id, screenshot_id);
+        assert_eq!(rows(&library), vec![(hero_id.clone(), "hero".into(), 1)]);
+
+        let again = insert(WorkArtworkKind::Screenshot);
+        assert_eq!(again, hero_id);
+        assert_eq!(rows(&library), vec![(hero_id, "hero".into(), 1)]);
     }
 
     #[test]

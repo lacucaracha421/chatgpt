@@ -8,6 +8,7 @@ import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
 import { vaultErrorMessage } from "./vaultErrors";
 import { useVaultImportJob } from "./vaultImportJob";
+import { setVaultRecoveryPending } from "./vaultRecoveryGuard";
 import "./externalVault.css";
 
 type Mode = "idle" | "create" | "password";
@@ -47,6 +48,14 @@ export function VaultSettings({ onChanged, onSaved }: { onChanged?: () => void |
     }
   }
 
+  // The recovery key exists only in this component: keep Settings open while it is coming
+  // or on screen (see vaultRecoveryGuard).
+  const keyAtStake = recoveryKey !== null || (mode === "create" && busy);
+  useEffect(() => {
+    setVaultRecoveryPending(keyAtStake);
+    return () => setVaultRecoveryPending(false);
+  }, [keyAtStake]);
+
   if (!gateway.getEncryptedVaultStatus) return null;
   if (recoveryKey !== null) {
     return <RecoveryKeyStep recoveryKey={recoveryKey} onDone={() => { setRecoveryKey(null); setMode("idle"); void onChanged?.(); }} />;
@@ -59,7 +68,7 @@ export function VaultSettings({ onChanged, onSaved }: { onChanged?: () => void |
     <dd className="settings-view__row-note">
       {!present
         ? "USB 폴더에 암호화된 보관함을 만듭니다. 비밀번호를 잊으면 만들 때 받은 복구키로만 열 수 있습니다."
-        : [unlocked ? `열림 · ${(status.itemCount ?? 0).toLocaleString()}개` : "잠김 · 비밀 화면에서 열 수 있습니다", status.remembered ? "이 PC에서 기억함" : null].filter(Boolean).join(" · ")}
+        : [unlocked ? `열림 · ${(status.itemCount ?? 0).toLocaleString()}개` : "잠김 · 비밀 화면에서 열 수 있습니다", unlocked && status.backupIndex ? "백업 목록으로 연 읽기 전용" : null, status.remembered ? "이 PC에서 기억함" : null].filter(Boolean).join(" · ")}
     </dd>
     {mode === "idle" && <dd className="settings-view__actions">
       {!present && <Button size="sm" disabled={busy || !gateway.createEncryptedVault} onClick={() => { setError(null); setMode("create"); }}>새 보관함 만들기</Button>}
@@ -71,13 +80,12 @@ export function VaultSettings({ onChanged, onSaved }: { onChanged?: () => void |
     </dd>}
     {mode === "create" && <CreateForm busy={busy} onCancel={() => setMode("idle")} onError={setError}
       onCreate={async (root, password, remember) => {
-        let key: string | null = null;
-        const ok = await run(async () => {
+        // The key is shown as soon as it exists, even if refreshing the rest fails.
+        await run(async () => {
           const created = await gateway.createEncryptedVault!(root, password, remember);
-          key = created.recoveryKey;
+          setRecoveryKey(created.recoveryKey);
           return created.status;
         }, "비밀 보관함을 만들지 못했습니다.");
-        if (ok && key !== null) setRecoveryKey(key);
       }} />}
     {mode === "password" && <PasswordForm busy={busy} onCancel={() => setMode("idle")} onError={setError}
       onChange={async (current, next) => {
@@ -85,7 +93,7 @@ export function VaultSettings({ onChanged, onSaved }: { onChanged?: () => void |
         if (ok) setMode("idle");
       }} />}
     {error && <dd className="settings-view__row-message" role="alert">{error}</dd>}
-    {unlocked && mode === "idle" && <SidecarCleanup gateway={gateway} vaultId={status.vaultId} onChanged={onChanged} onSaved={onSaved} />}
+    {unlocked && !status.backupIndex && mode === "idle" && <SidecarCleanup gateway={gateway} vaultId={status.vaultId} onChanged={onChanged} onSaved={onSaved} />}
   </dl>;
 }
 

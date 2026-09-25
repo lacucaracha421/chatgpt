@@ -116,6 +116,9 @@ fn local_projection(db: &Connection, id: &str) -> Result<(), LibraryError> {
             // Each PC starts its retention clock when it adopts a trash: a row that was not
             // already in the trash gets the adoption time, never a stale earlier value.
             db.execute("UPDATE assets SET status=?1,trashed_at=CASE WHEN ?1='trash' THEN CASE WHEN status='trash' THEN COALESCE(trashed_at,?2) ELSE ?2 END ELSE NULL END WHERE id=?3",params![status,chrono::Utc::now().to_rfc3339(),id])?;
+            if status != "normal" {
+                super::similarity::release_incoming_reviews_without_existing(db, None)?;
+            }
         }
         None => {}
     }
@@ -159,6 +162,8 @@ fn retire_local_row(db: &Connection, id: &str) -> Result<(), LibraryError> {
             )?;
         }
     }
+    // An open incoming similarity review would fail the delete through its CHECK.
+    super::similarity::release_incoming_reviews_without_existing(db, Some(id))?;
     db.execute("DELETE FROM assets WHERE id=?", [id])?;
     Ok(())
 }

@@ -103,7 +103,8 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   const trashView = filter === "trash";
   const kind = filter === "image" || filter === "video" ? filter : null;
   const trashedCount = status.trashedCount ?? null;
-  const deletionBlocked = Boolean(status.backupIndex);
+  /** Opened from the backup index: viewing and export only; the backend refuses every change. */
+  const readOnly = Boolean(status.backupIndex);
 
   const loadFirst = useCallback(async () => {
     setLoading(true);
@@ -234,13 +235,13 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
 
   function trash(ids: string[]) {
     const call = gateway.trashEncryptedVaultItems;
-    if (!call || ids.length === 0) return Promise.resolve(false);
+    if (!call || readOnly || ids.length === 0) return Promise.resolve(false);
     return change(ids, () => call(ids), (count) => setMessage({ text: `${count.toLocaleString()}개를 휴지통으로 옮겼습니다.`, undoIds: ids }), "휴지통으로 옮기지 못했습니다.");
   }
 
   function restore(ids: string[]) {
     const call = gateway.restoreEncryptedVaultItems;
-    if (!call || ids.length === 0) return;
+    if (!call || readOnly || ids.length === 0) return;
     void change(ids, () => call(ids), (count) => setMessage({ text: `${count.toLocaleString()}개를 복원했습니다.` }), "복원하지 못했습니다.");
   }
 
@@ -292,18 +293,18 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   const single = selectedIds.length === 1 ? items.find((item) => item.id === selectedIds[0]) ?? null : null;
   const selectWithGesture = (asset: AssetSummary, gesture: SelectionGesture) =>
     setSelection((current) => applySelectionGesture(current, itemIds, asset.id, gesture));
-  const askDelete = (ids: string[]) => { if (ids.length > 0 && !deletionBlocked) setConfirm({ kind: "delete", ids }); };
+  const askDelete = (ids: string[]) => { if (ids.length > 0 && !readOnly) setConfirm({ kind: "delete", ids }); };
   const selectedLabel = selectedIds.length > 0 ? ` ${selectedIds.length.toLocaleString()}개` : "";
 
   const contextItems: ContextMenuItem[] = trashView
     ? [
-      { id: "restore", label: "복원", disabled: busy, onSelect: () => restore(selectedIds) },
-      { id: "delete", label: "영구 삭제", destructive: true, disabled: busy || deletionBlocked, onSelect: () => askDelete(selectedIds) },
+      { id: "restore", label: "복원", disabled: busy || readOnly, onSelect: () => restore(selectedIds) },
+      { id: "delete", label: "영구 삭제", destructive: true, disabled: busy || readOnly, onSelect: () => askDelete(selectedIds) },
     ]
     : [
       { id: "export", label: "내보내기", disabled: exporting, onSelect: () => void exportItems(selectedIds) },
-      { id: "title", label: "제목 변경", disabled: !single, onSelect: () => setTitleEditorOpen(true) },
-      { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: busy, onSelect: () => void trash(selectedIds) },
+      { id: "title", label: "제목 변경", disabled: !single || readOnly, onSelect: () => setTitleEditorOpen(true) },
+      { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: busy || readOnly, onSelect: () => void trash(selectedIds) },
     ];
 
   return <section className="external-vault-browser" aria-label="비밀">
@@ -320,17 +321,17 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
       </div>
       <div className="external-vault-browser__actions">
         {trashView ? <>
-          <Button size="sm" variant="ghost" disabled={busy || selectedIds.length === 0} onClick={() => restore(selectedIds)}>복원{selectedLabel}</Button>
-          <Button size="sm" variant="ghost" disabled={busy || deletionBlocked || selectedIds.length === 0} onClick={() => askDelete(selectedIds)}>영구 삭제{selectedLabel}</Button>
-          <Button size="sm" variant="ghost" disabled={busy || deletionBlocked || (totalCount === 0 && !trashedCount)} onClick={() => setConfirm({ kind: "empty" })}>휴지통 비우기</Button>
+          <Button size="sm" variant="ghost" disabled={busy || readOnly || selectedIds.length === 0} onClick={() => restore(selectedIds)}>복원{selectedLabel}</Button>
+          <Button size="sm" variant="ghost" disabled={busy || readOnly || selectedIds.length === 0} onClick={() => askDelete(selectedIds)}>영구 삭제{selectedLabel}</Button>
+          <Button size="sm" variant="ghost" disabled={busy || readOnly || (totalCount === 0 && !trashedCount)} onClick={() => setConfirm({ kind: "empty" })}>휴지통 비우기</Button>
         </> : <>
           {selectedIds.length > 0 && <>
             <Button size="sm" variant="ghost" disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)}>{exporting ? "내보내는 중…" : `내보내기${selectedLabel}`}</Button>
-            <Button size="sm" variant="ghost" disabled={busy || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)}>휴지통으로</Button>
+            <Button size="sm" variant="ghost" disabled={busy || readOnly || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)}>휴지통으로</Button>
           </>}
-          <Button size="sm" variant="ghost" disabled={!single} onClick={() => setTitleEditorOpen(true)}>제목 변경</Button>
-          <Button size="sm" variant="ghost" disabled={importing || !gateway.importFilesIntoEncryptedVault} onClick={() => void addFiles()}>파일 추가</Button>
-          <Button size="sm" variant="ghost" disabled={importing || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()}>{importing ? "가져오는 중…" : "가져오기"}</Button>
+          <Button size="sm" variant="ghost" disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)}>제목 변경</Button>
+          <Button size="sm" variant="ghost" disabled={importing || readOnly || !gateway.importFilesIntoEncryptedVault} onClick={() => void addFiles()}>파일 추가</Button>
+          <Button size="sm" variant="ghost" disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()}>{importing ? "가져오는 중…" : "가져오기"}</Button>
         </>}
         <Button size="sm" variant="ghost" disabled={importing || locking} onClick={() => void lock()}>잠그기</Button>
       </div>
@@ -345,8 +346,8 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
         ? <progress aria-label="내보내기 진행률" max={exportJob.progress?.total || undefined} value={exportJob.progress?.total ? exportJob.progress.processed : undefined} />
         : <Button size="sm" variant="ghost" onClick={dismissVaultExport}>닫기</Button>}
     </div>}
-    {trashView && deletionBlocked && <p className="external-vault-browser__hint">보관함 목록을 백업본으로 열었습니다. 이번에는 복원만 할 수 있고, 영구 삭제는 다음에 정상적으로 열렸을 때 할 수 있습니다.</p>}
-    {trashView && !deletionBlocked && totalCount > 0 && <p className="external-vault-browser__hint">휴지통의 항목은 직접 비울 때까지 USB에 암호화된 채로 남아 있습니다.</p>}
+    {readOnly && <p className="external-vault-browser__hint" role="status">보관함 목록이 손상되어 이전 백업본으로 읽기 전용으로 열었습니다. 최근에 넣거나 바꾼 항목은 보이지 않을 수 있고, 보기와 내보내기만 할 수 있습니다.</p>}
+    {trashView && !readOnly && totalCount > 0 && <p className="external-vault-browser__hint">휴지통의 항목은 직접 비울 때까지 USB에 암호화된 채로 남아 있습니다.</p>}
     {error && <p className="external-vault-browser__error" role="alert">{error}</p>}
     {importJob?.error && <p className="external-vault-browser__error" role="alert">
       {importJob.error} <Button size="sm" variant="ghost" onClick={dismissVaultImport}>닫기</Button>
@@ -368,15 +369,15 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
           onSelectionGesture={selectWithGesture}
           onSelectAll={() => setSelection((current) => selectAllLoaded(current, itemIds))}
           onMoveFocus={(delta, extend) => setSelection((current) => moveSelectionFocus(current, itemIds, delta, extend))}
-          onDeleteSelection={() => { if (trashView) askDelete(selectedIds); else void trash(selectedIds); }}
+          onDeleteSelection={() => { if (readOnly) return; if (trashView) askDelete(selectedIds); else void trash(selectedIds); }}
           onClearSelection={() => setSelection(emptySelection())}
           hasNextPage={nextOffset !== null} onLoadNextPage={() => void loadNext()}
           onOpen={(asset) => setViewerId(asset.id)} />
       </div></ContextMenu>}
     {active && <AssetViewer items={items} activeId={active} onActiveIdChange={setViewerId} onClose={() => setViewerId(null)} privacyMode={privacyMode} mediaSource="vault"
-      onTrash={trashView || !gateway.trashEncryptedVaultItems ? undefined : trashFromViewer}
+      onTrash={trashView || readOnly || !gateway.trashEncryptedVaultItems ? undefined : trashFromViewer}
       onExport={trashView || !gateway.exportEncryptedVaultItems ? undefined : (asset) => void exportItems([asset.id])} />}
-    {titleEditorOpen && single && <TitleEditor asset={single} gateway={gateway}
+    {titleEditorOpen && single && !readOnly && <TitleEditor asset={single} gateway={gateway}
       onClose={() => setTitleEditorOpen(false)} onChanged={() => void loadFirst()} />}
     {confirm && <Dialog open title={confirm.kind === "empty" ? "휴지통 비우기" : "영구 삭제"} onClose={() => { if (!busy) setConfirm(null); }}>
       <p className="external-vault-confirm">
@@ -404,7 +405,7 @@ const MEDIA_EXTENSIONS = ["jpg", "jpeg", "jfif", "png", "webp", "gif", "mp4", "w
 function vaultChangeErrorMessage(cause: unknown, fallback: string) {
   const code = typeof cause === "object" && cause !== null && "code" in cause ? String(cause.code) : "";
   if (code === "encrypted_vault_import_running") return "가져오기가 끝난 뒤 영구 삭제할 수 있습니다.";
-  if (code === "encrypted_vault_corrupt") return "보관함 목록을 백업본으로 열어 이번에는 영구 삭제할 수 없습니다.";
+  if (code === "encrypted_vault_read_only") return "보관함을 이전 백업본으로 읽기 전용으로 열어 지금은 바꿀 수 없습니다.";
   return commandErrorMessage(cause, fallback);
 }
 

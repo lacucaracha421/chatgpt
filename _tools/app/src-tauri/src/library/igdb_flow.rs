@@ -54,11 +54,24 @@ impl<'a> GameImportFlow<'a> {
         let hero_bytes = hero
             .map(|candidate| self.client.download_original(&candidate.image_id))
             .transpose()?;
+        // 대표 이미지로 고른 스크린샷은 hero 행이 갤러리에도 나오므로 다시 받지 않는다.
+        // 스크린샷 하나가 실패해도 가져오기 전체를 중단하지 않고 그 장만 건너뛴다.
+        let hero_image_id = hero.map(|candidate| candidate.image_id.as_str());
         let screenshot_bytes = fetched
             .screenshots
             .iter()
-            .map(|shot| self.client.download_original(&shot.image_id))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|shot| {
+                if Some(shot.image_id.as_str()) == hero_image_id {
+                    return None;
+                }
+                self.client
+                    .download_original(&shot.image_id)
+                    .map_err(|error| {
+                        eprintln!("igdb screenshot {} skipped: {error}", shot.image_id)
+                    })
+                    .ok()
+            })
+            .collect::<Vec<_>>();
         self.library.apply_fetched_igdb_game(
             request,
             fetched,
@@ -174,9 +187,10 @@ impl Library {
         fetched: IgdbRemoteGame,
         cover_bytes: Option<&[u8]>,
         hero_bytes: Option<&[u8]>,
-        screenshot_bytes: &[Vec<u8>],
+        screenshot_bytes: &[Option<Vec<u8>>],
     ) -> Result<CollectionSummary, LibraryError> {
         let (cover, hero) = validated_selection(&request, &fetched)?;
+        let hero_image_id = hero.map(|candidate| candidate.image_id.as_str());
         let collection_id = uuid::Uuid::new_v4().to_string();
         let cover = match (cover, cover_bytes) {
             (Some(candidate), Some(bytes)) => {
@@ -189,8 +203,12 @@ impl Library {
             .screenshots
             .iter()
             .zip(screenshot_bytes)
-            .map(|(shot, bytes)| Ok((shot, self.prepare_work_artwork(&collection_id, bytes)?)))
-            .collect::<Result<Vec<_>, LibraryError>>()?;
+            .filter(|(shot, _)| Some(shot.image_id.as_str()) != hero_image_id)
+            .filter_map(|(shot, bytes)| {
+                let prepared = self.prepare_work_artwork(&collection_id, bytes.as_deref()?);
+                prepared.ok().map(|prepared| (shot, prepared))
+            })
+            .collect::<Vec<_>>();
         let hero = match (hero, hero_bytes) {
             (Some(candidate), Some(bytes)) => {
                 Some((candidate, self.prepare_work_artwork(&collection_id, bytes)?))
@@ -480,6 +498,7 @@ impl Library {
             &request.cover,
             WorkArtworkKind::Cover,
             cover.as_ref(),
+            &[],
         )?;
         apply_artwork_decision(
             &transaction,
@@ -488,6 +507,7 @@ impl Library {
             &request.hero,
             WorkArtworkKind::Hero,
             hero.as_ref(),
+            &fetched.screenshots,
         )?;
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
@@ -614,11 +634,13 @@ fn apply_artwork_decision(
     decision: &IgdbArtworkDecision,
     kind: WorkArtworkKind,
     prepared: Option<&(String, PreparedWorkArtwork)>,
+    screenshots: &[IgdbImageRef],
 ) -> Result<(), LibraryError> {
     match decision {
         IgdbArtworkDecision::Keep => Ok(()),
         IgdbArtworkDecision::Clear => {
             Library::clear_work_artwork_kind_in_transaction(transaction, collection_id, kind)?;
+            demote_unselected_screenshots(transaction, collection_id, provider, kind, screenshots)?;
             transaction.execute(
                 "DELETE FROM collection_work_artworks
                  WHERE collection_id = ?1 AND provider = ?2 AND kind = ?3",
@@ -637,6 +659,7 @@ fn apply_artwork_decision(
                 None,
                 prepared,
             )?;
+            demote_unselected_screenshots(transaction, collection_id, provider, kind, screenshots)?;
             transaction.execute(
                 "DELETE FROM collection_work_artworks
                  WHERE collection_id = ?1 AND provider = ?2 AND kind = ?3 AND selected = 0",
@@ -645,6 +668,28 @@ fn apply_artwork_decision(
             Ok(())
         }
     }
+}
+
+// 스크린샷이던 이미지가 대표 역할에서 물러나면 삭제하지 않고 스크린샷 행으로 되돌려
+// 갤러리에 계속 남긴다.
+fn demote_unselected_screenshots(
+    transaction: &rusqlite::Transaction<'_>,
+    collection_id: &str,
+    provider: &str,
+    kind: WorkArtworkKind,
+    screenshots: &[IgdbImageRef],
+) -> Result<(), LibraryError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    for shot in screenshots {
+        transaction.execute(
+            "UPDATE collection_work_artworks
+             SET kind = 'screenshot', updated_at = ?1
+             WHERE collection_id = ?2 AND provider = ?3 AND kind = ?4 AND selected = 0
+               AND provider_image_id = ?5",
+            params![now, collection_id, provider, kind.as_str(), shot.image_id],
+        )?;
+    }
+    Ok(())
 }
 
 fn may_fill_from_provider(current: Option<&str>, previous_provider: Option<&str>) -> bool {
@@ -959,7 +1004,7 @@ mod tests {
         let shot_b = image_bytes(640, 360);
 
         let created = library
-            .apply_fetched_igdb_game(request(None, None), remote(), None, None, &[shot_a, shot_b])
+            .apply_fetched_igdb_game(request(None, None), remote(), None, None, &[Some(shot_a), Some(shot_b)])
             .unwrap();
 
         let shots: Vec<String> = library
@@ -1424,5 +1469,188 @@ mod tests {
 
         assert_eq!(replaced.id, created.id);
         assert_eq!(replaced.selected_hero_artwork_id, None);
+    }
+
+    fn two_screenshot_remote() -> IgdbRemoteGame {
+        let mut fetched = remote();
+        fetched.screenshots.push(IgdbImageRef {
+            image_id: "screenshot-2".into(),
+            width: Some(1280),
+            height: Some(720),
+        });
+        fetched
+    }
+
+    fn artwork_rows(library: &Library, collection_id: &str) -> Vec<(String, String, i64)> {
+        library
+            .connection()
+            .unwrap()
+            .prepare(
+                "SELECT provider_image_id, kind, selected FROM collection_work_artworks
+                 WHERE collection_id = ?1 ORDER BY provider_image_id",
+            )
+            .unwrap()
+            .query_map([collection_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn import_with_a_screenshot_hero_stores_that_image_once_as_the_hero() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let hero = image_bytes(1280, 720);
+
+        let created = library
+            .apply_fetched_igdb_game(
+                request(None, Some("screenshot-1")),
+                two_screenshot_remote(),
+                None,
+                Some(&hero),
+                &[Some(image_bytes(1280, 720)), Some(image_bytes(640, 360))],
+            )
+            .unwrap();
+
+        assert!(created.selected_hero_artwork_id.is_some());
+        assert_eq!(
+            artwork_rows(&library, &created.id),
+            vec![
+                ("screenshot-1".into(), "hero".into(), 1),
+                ("screenshot-2".into(), "screenshot".into(), 1),
+            ]
+        );
+        assert_eq!(library.list_collection_work_artworks(&created.id).unwrap().len(), 2);
+        assert_eq!(artwork_file_count(&library), 2);
+    }
+
+    #[test]
+    fn a_failed_or_invalid_screenshot_is_skipped_instead_of_aborting_the_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let cover = image_bytes(264, 374);
+
+        let created = library
+            .apply_fetched_igdb_game(
+                request(Some("cover-1"), None),
+                two_screenshot_remote(),
+                Some(&cover),
+                None,
+                &[None, Some(b"not an image".to_vec())],
+            )
+            .unwrap();
+
+        assert!(created.selected_work_artwork_id.is_some());
+        assert_eq!(
+            artwork_rows(&library, &created.id),
+            vec![("cover-1".into(), "cover".into(), 1)]
+        );
+        assert_eq!(artwork_file_count(&library), 1);
+    }
+
+    #[test]
+    fn replacing_the_hero_with_a_screenshot_and_back_keeps_the_screenshot_in_the_gallery() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let hero = image_bytes(1920, 1080);
+        let created = library
+            .apply_fetched_igdb_game(
+                request(None, Some("artwork-1")),
+                two_screenshot_remote(),
+                None,
+                Some(&hero),
+                &[Some(image_bytes(1280, 720)), Some(image_bytes(640, 360))],
+            )
+            .unwrap();
+
+        let replaced = library
+            .replace_fetched_igdb_game_artwork(
+                artwork_request(
+                    &created.id,
+                    IgdbArtworkDecision::Keep,
+                    IgdbArtworkDecision::Select {
+                        image_id: "screenshot-1".into(),
+                    },
+                ),
+                two_screenshot_remote(),
+                None,
+                Some(&image_bytes(1280, 720)),
+            )
+            .unwrap();
+
+        let rows = artwork_rows(&library, &created.id);
+        assert_eq!(
+            rows.iter()
+                .map(|(image, kind, _)| (image.as_str(), kind.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("screenshot-1", "hero"), ("screenshot-2", "screenshot")]
+        );
+        assert!(replaced.selected_hero_artwork_id.is_some());
+        assert_eq!(artwork_file_count(&library), 2);
+
+        library
+            .replace_fetched_igdb_game_artwork(
+                artwork_request(
+                    &created.id,
+                    IgdbArtworkDecision::Keep,
+                    IgdbArtworkDecision::Select {
+                        image_id: "artwork-1".into(),
+                    },
+                ),
+                two_screenshot_remote(),
+                None,
+                Some(&hero),
+            )
+            .unwrap();
+
+        let rows = artwork_rows(&library, &created.id);
+        assert_eq!(
+            rows.iter()
+                .map(|(image, kind, _)| (image.as_str(), kind.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("artwork-1", "hero"),
+                ("screenshot-1", "screenshot"),
+                ("screenshot-2", "screenshot"),
+            ]
+        );
+        assert_eq!(artwork_file_count(&library), 3);
+
+        let cleared = library
+            .replace_fetched_igdb_game_artwork(
+                artwork_request(
+                    &created.id,
+                    IgdbArtworkDecision::Keep,
+                    IgdbArtworkDecision::Select {
+                        image_id: "screenshot-2".into(),
+                    },
+                ),
+                two_screenshot_remote(),
+                None,
+                Some(&image_bytes(640, 360)),
+            )
+            .and_then(|_| {
+                library.replace_fetched_igdb_game_artwork(
+                    artwork_request(
+                        &created.id,
+                        IgdbArtworkDecision::Keep,
+                        IgdbArtworkDecision::Clear,
+                    ),
+                    two_screenshot_remote(),
+                    None,
+                    None,
+                )
+            })
+            .unwrap();
+        assert_eq!(cleared.selected_hero_artwork_id, None);
+        let rows = artwork_rows(&library, &created.id);
+        assert_eq!(
+            rows.iter()
+                .map(|(image, kind, _)| (image.as_str(), kind.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("screenshot-1", "screenshot"), ("screenshot-2", "screenshot")]
+        );
     }
 }

@@ -1,11 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WindowControls } from "../layout/WindowControls";
-import type { AssetPage, AssetSort, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
+import type { AssetPage, AssetSort, AssetSummary, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "./AssetBrowser";
 
 const classifications: ClassificationEntry[] = [];
@@ -1100,6 +1100,37 @@ it("opens a requested asset that is not in the loaded page and clears it on clos
   expect(await screen.findByRole("img", { name: requested.originalName })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "감상 화면 닫기" }));
   expect(onRequestedAssetHandled).toHaveBeenCalledOnce();
+});
+
+it("clears a trashed requested asset so gallery tiles open the viewer again", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+  const onRequestedAssetHandled = vi.fn();
+  function Host() {
+    const [requested, setRequested] = useState<AssetSummary | null>(asset(99));
+    return <LibraryProvider gateway={gateway}>
+      <AssetBrowser galleryLayout="justified"
+        view={{ kind: "classification", classificationId: null }}
+        classifications={[]} sort="newest"
+        metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()}
+        refreshVersion={0}
+        requestedAsset={requested}
+        onRequestedAssetHandled={() => { onRequestedAssetHandled(); setRequested(null); }}
+        onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()}
+      />
+    </LibraryProvider>;
+  }
+  render(<Host />);
+
+  const viewer = await screen.findByRole("dialog", { name: "asset-99.png" });
+  await screen.findByRole("option", { name: "asset-0.png", hidden: true });
+  await user.click(within(viewer).getByRole("button", { name: "휴지통으로 이동" }));
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-99"]);
+  expect(onRequestedAssetHandled).toHaveBeenCalledOnce();
+  await user.dblClick(screen.getByRole("option", { name: "asset-0.png" }));
+  expect(await screen.findByRole("dialog", { name: "asset-0.png" })).toBeVisible();
 });
 
 function renderBrowser(gateway: LibraryGateway, options: BrowserOptions = {}) {

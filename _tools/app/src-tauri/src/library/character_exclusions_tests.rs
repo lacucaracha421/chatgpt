@@ -132,7 +132,7 @@ fn applies_rejection_and_advances_the_cursor_in_one_transaction() {
     adopt(&library);
     let id = library_id(&library);
     let items = vec![entry(1, "op-1", "c", "a", &hex_hash("a"))];
-    let (applied, consumed) = library
+    let (applied, consumed, _) = library
         .apply_character_exclusion_page(ENDPOINT, &id, &items)
         .unwrap();
     assert_eq!((applied, consumed), (1, 0));
@@ -170,7 +170,7 @@ fn a_moved_out_asset_is_excluded_although_it_left_the_series_folder() {
         )
         .unwrap();
     let items = vec![entry(1, "op-1", "c", "b", &hex_hash("b"))];
-    let (applied, _) = library
+    let (applied, _, _) = library
         .apply_character_exclusion_page(ENDPOINT, &id, &items)
         .unwrap();
     assert_eq!(applied, 1);
@@ -181,22 +181,8 @@ fn a_moved_out_asset_is_excluded_although_it_left_the_series_folder() {
     assert_eq!(cursor(&library), Some(1));
 }
 
-#[test]
-fn a_protected_reference_fails_closed_and_does_not_advance_the_cursor() {
-    let (_temp, library) = fixture();
-    adopt(&library);
-    let id = library_id(&library);
-    let items = vec![entry(1, "op-1", "c", "x", &hex_hash("x"))];
-    let error = library
-        .apply_character_exclusion_page(ENDPOINT, &id, &items)
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        LibraryError::CharacterExclusionProtectedReference
-    ));
-    assert_eq!(latest_decision(&library, "c", "x"), None);
-    assert_eq!(cursor(&library), Some(0), "cursor must not move on failure");
-    let receipts: i64 = library
+fn receipts(library: &Library) -> i64 {
+    library
         .connection()
         .unwrap()
         .query_row(
@@ -204,45 +190,100 @@ fn a_protected_reference_fails_closed_and_does_not_advance_the_cursor() {
             [],
             |row| row.get(0),
         )
-        .unwrap();
-    assert_eq!(receipts, 0, "a rejected entry must not be receipted");
+        .unwrap()
 }
 
 #[test]
-fn a_changed_asset_hash_fails_closed_and_does_not_advance_the_cursor() {
+fn a_protected_reference_is_consumed_as_skipped_and_advances_the_cursor() {
+    let (_temp, library) = fixture();
+    adopt(&library);
+    let id = library_id(&library);
+    let items = vec![entry(1, "op-1", "c", "x", &hex_hash("x"))];
+    assert_eq!(
+        library
+            .apply_character_exclusion_page(ENDPOINT, &id, &items)
+            .unwrap(),
+        (0, 0, 1)
+    );
+    assert_eq!(latest_decision(&library, "c", "x"), None);
+    assert_eq!(cursor(&library), Some(1));
+    assert_eq!(receipts(&library), 1, "a skipped entry is still consumed");
+}
+
+#[test]
+fn a_changed_asset_hash_is_consumed_as_skipped() {
     let (_temp, library) = fixture();
     adopt(&library);
     let id = library_id(&library);
     // The server claims the bytes it saw; this library now holds different ones, so the
     // correction is no longer the decision the user made.
     let items = vec![entry(1, "op-1", "c", "a", "different-bytes")];
-    let error = library
-        .apply_character_exclusion_page(ENDPOINT, &id, &items)
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        LibraryError::CharacterExclusionAssetChanged
-    ));
+    assert_eq!(
+        library
+            .apply_character_exclusion_page(ENDPOINT, &id, &items)
+            .unwrap(),
+        (0, 0, 1)
+    );
     assert_eq!(latest_decision(&library, "c", "a"), None);
-    assert_eq!(cursor(&library), Some(0));
+    assert_eq!(cursor(&library), Some(1));
 }
 
 #[test]
-fn a_missing_target_or_asset_fails_closed_and_does_not_advance_the_cursor() {
+fn a_missing_target_or_asset_is_consumed_as_skipped() {
     let (_temp, library) = fixture();
     adopt(&library);
     let id = library_id(&library);
-    for (target, asset) in [("missing", "a"), ("c", "missing")] {
-        let items = vec![entry(1, "op-1", target, asset, &hex_hash("a"))];
-        let error = library
+    // `b` exists but is trashed: the same "never applies again" state as a missing asset.
+    library
+        .connection()
+        .unwrap()
+        .execute("UPDATE assets SET status='trash' WHERE id='b'", [])
+        .unwrap();
+    let items = vec![
+        entry(1, "op-1", "missing", "a", &hex_hash("a")),
+        entry(2, "op-2", "c", "missing", &hex_hash("a")),
+        entry(3, "op-3", "c", "b", &hex_hash("b")),
+    ];
+    assert_eq!(
+        library
             .apply_character_exclusion_page(ENDPOINT, &id, &items)
-            .unwrap_err();
-        assert!(
-            matches!(error, LibraryError::CharacterExclusionTargetMissing),
-            "{target}/{asset}: {error}"
-        );
-        assert_eq!(cursor(&library), Some(0));
-    }
+            .unwrap(),
+        (0, 0, 3)
+    );
+    assert_eq!(latest_decision(&library, "c", "b"), None);
+    assert_eq!(cursor(&library), Some(3));
+    assert_eq!(receipts(&library), 3);
+}
+
+#[test]
+fn an_unappliable_entry_does_not_block_later_exclusions() {
+    let (_temp, library) = fixture();
+    adopt(&library);
+    let id = library_id(&library);
+    // The PC deleted the target before this exclusion arrived.
+    let first = vec![entry(1, "op-1", "gone", "a", &hex_hash("a"))];
+    assert_eq!(
+        library
+            .apply_character_exclusion_page(ENDPOINT, &id, &first)
+            .unwrap(),
+        (0, 0, 1)
+    );
+    // A replay of the skipped entry is a receipted no-op, not a second skip.
+    let replay = vec![
+        entry(1, "op-1", "gone", "a", &hex_hash("a")),
+        entry(2, "op-2", "c", "a", &hex_hash("a")),
+    ];
+    assert_eq!(
+        library
+            .apply_character_exclusion_page(ENDPOINT, &id, &replay)
+            .unwrap(),
+        (1, 1, 0)
+    );
+    assert_eq!(
+        latest_decision(&library, "c", "a").as_deref(),
+        Some("rejected")
+    );
+    assert_eq!(cursor(&library), Some(2));
 }
 
 #[test]
@@ -255,14 +296,14 @@ fn a_replayed_operation_is_idempotent_by_receipt() {
         library
             .apply_character_exclusion_page(ENDPOINT, &id, &items)
             .unwrap(),
-        (1, 0)
+        (1, 0, 0)
     );
     // The same operation id arrives again — a lost response, or a retry that raced success.
     assert_eq!(
         library
             .apply_character_exclusion_page(ENDPOINT, &id, &items)
             .unwrap(),
-        (0, 1)
+        (0, 1, 0)
     );
     let decisions: i64 = library
         .connection()
@@ -319,7 +360,7 @@ fn a_replay_does_not_undo_a_later_explicit_pc_accept() {
         library
             .apply_character_exclusion_page(ENDPOINT, &id, &items)
             .unwrap(),
-        (0, 1)
+        (0, 1, 0)
     );
     assert_eq!(
         latest_decision(&library, "c", "a").as_deref(),
@@ -338,22 +379,59 @@ fn a_replay_does_not_undo_a_later_explicit_pc_accept() {
 }
 
 #[test]
-fn a_partial_page_rolls_back_whole_and_leaves_the_cursor_alone() {
+fn a_page_mixing_valid_and_unappliable_entries_applies_the_valid_ones() {
     let (_temp, library) = fixture();
     adopt(&library);
     let id = library_id(&library);
-    // The first entry is valid and the second names a protected reference, so the whole
-    // page — including the valid first decision — must roll back together.
+    // The protected reference in the middle is skipped; the entries around it still apply.
     let items = vec![
         entry(1, "op-1", "c", "a", &hex_hash("a")),
         entry(2, "op-2", "c", "x", &hex_hash("x")),
+        entry(3, "op-3", "c", "b", &hex_hash("b")),
+    ];
+    assert_eq!(
+        library
+            .apply_character_exclusion_page(ENDPOINT, &id, &items)
+            .unwrap(),
+        (2, 0, 1)
+    );
+    assert_eq!(
+        latest_decision(&library, "c", "a").as_deref(),
+        Some("rejected")
+    );
+    assert_eq!(latest_decision(&library, "c", "x"), None);
+    assert_eq!(
+        latest_decision(&library, "c", "b").as_deref(),
+        Some("rejected")
+    );
+    assert_eq!(cursor(&library), Some(3));
+}
+
+#[test]
+fn a_transient_failure_still_rolls_back_the_whole_page() {
+    let (_temp, library) = fixture();
+    adopt(&library);
+    let id = library_id(&library);
+    // A write that fails at the database layer is not a validation state, so the valid
+    // first entry must roll back with it and the cursor must stay put.
+    library
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fail_decision BEFORE INSERT ON character_decisions
+             WHEN NEW.source_asset_id='b' BEGIN SELECT RAISE(ABORT, 'busy'); END;",
+        )
+        .unwrap();
+    let items = vec![
+        entry(1, "op-1", "c", "a", &hex_hash("a")),
+        entry(2, "op-2", "c", "b", &hex_hash("b")),
     ];
     assert!(library
         .apply_character_exclusion_page(ENDPOINT, &id, &items)
         .is_err());
     assert_eq!(latest_decision(&library, "c", "a"), None);
-    assert_eq!(latest_decision(&library, "c", "x"), None);
     assert_eq!(cursor(&library), Some(0));
+    assert_eq!(receipts(&library), 0);
 }
 
 #[test]
@@ -375,7 +453,7 @@ fn an_empty_page_never_rewinds_the_cursor() {
     assert_eq!(cursor(&library), Some(2));
     // A server reporting `hasMore: false` with no entries still yields a page in the receive
     // loop, and the apply must not treat "nothing carried" as "position zero".
-    let (applied, consumed) = library
+    let (applied, consumed, _) = library
         .apply_character_exclusion_page(ENDPOINT, &id, &[])
         .unwrap();
     assert_eq!((applied, consumed), (0, 0));
@@ -395,7 +473,7 @@ fn a_replayed_page_does_not_rewind_and_does_not_re_reject() {
         library
             .apply_character_exclusion_page(ENDPOINT, &id, &page)
             .unwrap(),
-        (2, 0)
+        (2, 0, 0)
     );
     assert_eq!(cursor(&library), Some(2));
     // The same page is delivered again after a lost response. Every entry is at or below the
@@ -404,7 +482,7 @@ fn a_replayed_page_does_not_rewind_and_does_not_re_reject() {
         library
             .apply_character_exclusion_page(ENDPOINT, &id, &page)
             .unwrap(),
-        (0, 2)
+        (0, 2, 0)
     );
     assert_eq!(cursor(&library), Some(2), "a replay must not rewind");
     let decisions: i64 = library
@@ -915,7 +993,7 @@ fn cursor_only_advance_schedules_acknowledgement() {
     let outcome = library.apply_character_exclusion_page(
         ENDPOINT, &id, &[entry(2, "op-2", "c", "a", &hex_hash("a"))],
     ).unwrap();
-    assert_eq!(outcome, (0, 0), "the decision was already rejected");
+    assert_eq!(outcome, (0, 0, 0), "the decision was already rejected");
     assert_eq!(cursor(&library), Some(2));
     let dirty: bool = library.connection().unwrap().query_row(
         "SELECT generation>published_generation FROM mobile_publication_state WHERE kind='characters'",

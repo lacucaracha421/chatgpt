@@ -3,6 +3,8 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { VaultSettings } from "../external-vault/VaultSettings";
+import { confirmLeaveVaultRecovery, vaultRecoveryPending } from "../external-vault/vaultRecoveryGuard";
+import { modalDialogOpen } from "../layout/modalDialog";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { catalogStreamStatus, latestCatalogUpdate } from "../library/catalogStreams";
@@ -232,7 +234,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
 
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !pending) onExit();
+      if (event.key !== "Escape" || pending || vaultRecoveryPending()) return;
+      // Esc that closed a dialog or the 찾기 palette, ended IME composition or was typed in a
+      // field is not a request to leave Settings.
+      const target = event.target;
+      const editing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+      if (event.defaultPrevented || event.isComposing || editing || modalDialogOpen()) return;
+      onExit();
     };
     window.addEventListener("keydown", cancel);
     return () => window.removeEventListener("keydown", cancel);
@@ -742,6 +750,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   }
 
   function openSection(next: SettingsSection) {
+    if (next !== section && !confirmLeaveVaultRecovery()) return;
     setSection(next);
     setSaved(null);
   }

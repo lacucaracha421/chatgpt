@@ -22,9 +22,21 @@
 //! * the asset must not be one of the target's base or learned references, because a
 //!   reference is what *defines* the character.
 //!
-//! Any of those failing fails the whole pass closed: no decision is written and the cursor
-//! does not move, so the entry is retried rather than skipped. Advancing past an entry that
-//! was never applied would lose the user's correction with no later read able to recover it.
+//! Each of those checks describes a state that can only move further away: a deleted target
+//! does not come back, a trashed asset is no longer a member, other bytes are a different
+//! image, and a reference defines the character. An entry failing one of them is therefore
+//! *consumed as skipped*: its receipt is written, the cursor advances past it, and the pass
+//! reports it under a closed reason (`targetMissing`, `assetMissing`, `assetChanged`,
+//! `protectedReference`, the same codes `character_review_sync` records). Holding the cursor
+//! on such an entry would retry it forever and block every later correction behind it.
+//!
+//! Only errors that may clear on retry (database or I/O failures) still fail the whole page
+//! closed: no decision is written and the cursor does not move.
+//!
+//! The server keeps no per-entry outcome. Acknowledging the cursor only ends the server's
+//! pending overlay for those entries; membership then follows this PC's published snapshot,
+//! which is the correct view for every skip reason (the pair no longer exists as a member,
+//! or the image is a reference of the character).
 //!
 //! # Idempotency
 //!
@@ -71,6 +83,8 @@ pub struct ExclusionSyncOutcome {
     pub received_cursor: i64,
     pub applied: u64,
     pub already_consumed: u64,
+    /// Entries consumed without a decision because they can never apply here.
+    pub skipped: u64,
 }
 
 impl Library {
@@ -209,6 +223,7 @@ impl Library {
         };
         let mut applied = 0;
         let mut already_consumed = 0;
+        let mut skipped = 0;
         for _ in 0..MAX_PAGES {
             // Read the page with no database lock held. An adopted binding means this PC has
             // already established that it speaks to a capable server, so an absent route is
@@ -219,6 +234,7 @@ impl Library {
             let step = self.apply_character_exclusion_page(endpoint, &library_id, &page.items)?;
             applied += step.0;
             already_consumed += step.1;
+            skipped += step.2;
             // Re-read the durable position rather than trusting the page just fetched. A
             // concurrent pass may have advanced it further, and the outcome must describe
             // what is actually stored.
@@ -238,15 +254,17 @@ impl Library {
             received_cursor: cursor,
             applied,
             already_consumed,
+            skipped,
         }))
     }
 
     /// Apply one validated page, advancing the cursor in the same transaction.
     ///
-    /// Returns `(applied, already_consumed)`. The whole page is one transaction, so an
+    /// Returns `(applied, already_consumed, skipped)`. The whole page is one transaction, so an
     /// interruption re-applies it rather than skipping past it; the receipts make that
-    /// re-application a no-op. A validation failure aborts the transaction, which leaves
-    /// both the decisions and the cursor exactly where they were.
+    /// re-application a no-op. An entry that can never apply is receipted and counted as
+    /// skipped; any other failure aborts the transaction, which leaves both the decisions and
+    /// the cursor exactly where they were.
     ///
     /// The persisted cursor is read **inside** this transaction and the page is checked
     /// against it, not against whatever position the caller believed when it issued the
@@ -258,7 +276,7 @@ impl Library {
         endpoint: &str,
         library_id: &str,
         items: &[ExclusionEntry],
-    ) -> Result<(u64, u64), LibraryError> {
+    ) -> Result<(u64, u64, u64), LibraryError> {
         if !super::is_valid_library_id(library_id) {
             return Err(LibraryError::CharacterExclusionInvalid);
         }
@@ -283,6 +301,7 @@ impl Library {
         let mut highest = durable;
         let mut applied = 0;
         let mut already_consumed = 0;
+        let mut skipped = 0;
         let now = chrono::Utc::now().to_rfc3339();
         for item in items {
             let consumed =
@@ -307,20 +326,26 @@ impl Library {
             if consumed {
                 already_consumed += 1;
             } else {
-                let changed = self
-                    .write_inbound_character_rejection(
-                        &transaction,
-                        &item.target_id,
-                        &item.asset_id,
-                        &item.asset_sha256,
-                    )
-                    .map_err(map_character_exclusion_error)?;
-                if changed {
-                    applied += 1;
+                match self.write_inbound_character_rejection(
+                    &transaction,
+                    &item.target_id,
+                    &item.asset_id,
+                    &item.asset_sha256,
+                ) {
+                    Ok(true) => applied += 1,
+                    Ok(false) => {}
+                    Err(error) => match permanent_skip_reason(&error) {
+                        // The validation runs before any write, so nothing needs undoing.
+                        Some(reason) => {
+                            skipped += 1;
+                            eprintln!("character exclusion {} skipped: {reason}", item.sequence);
+                        }
+                        None => return Err(map_character_exclusion_error(error)),
+                    },
                 }
-                // The receipt is written only for an entry this pass actually consumed. An
-                // already-receipted entry needs no second row, and its uniqueness key would
-                // reject one anyway.
+                // The receipt is written only for an entry this pass actually consumed,
+                // applied or skipped. An already-receipted entry needs no second row, and its
+                // uniqueness key would reject one anyway.
                 transaction.execute(
                     "INSERT INTO mobile_character_exclusion_receipts
                         (endpoint, library_id, operation_id, sequence, target_id, asset_id, asset_sha256, created_at)
@@ -359,7 +384,7 @@ impl Library {
             )?;
         }
         transaction.commit()?;
-        Ok((applied, already_consumed))
+        Ok((applied, already_consumed, skipped))
     }
 
     /// Whether this origin already consumed this exact entry.
@@ -394,6 +419,22 @@ impl Library {
             return Err(LibraryError::CharacterExclusionInvalid);
         }
         Ok(true)
+    }
+}
+
+/// The closed reason for a validation failure that can never clear on retry, if it is one.
+///
+/// These are the states the module docs list: none of them is transient, so the entry is
+/// consumed as skipped instead of holding the cursor. Everything else is `None` and still
+/// fails the page closed.
+fn permanent_skip_reason(error: &super::characters::Error) -> Option<&'static str> {
+    use super::characters::Error;
+    match error {
+        Error::NotFound => Some("targetMissing"),
+        Error::InboundTargetNotFound => Some("assetMissing"),
+        Error::InboundAssetChanged => Some("assetChanged"),
+        Error::InboundProtectedReference => Some("protectedReference"),
+        _ => None,
     }
 }
 

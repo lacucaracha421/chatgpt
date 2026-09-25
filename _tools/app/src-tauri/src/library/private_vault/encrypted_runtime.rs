@@ -185,8 +185,21 @@ struct Session {
     index: VaultIndex,
     generation: u64,
     /// The index came from `index.prev.bin` because `index.bin` did not decrypt. Objects
-    /// newer than that backup are unknown to it, so nothing is deleted in this session.
+    /// newer than that backup are unknown to it, so nothing is deleted or saved in this
+    /// session (`Session::writable`).
     from_backup_index: bool,
+}
+
+impl Session {
+    /// A session on the backup index is read-only: saving it would make the older index
+    /// current, and the next unlock would then delete objects only the lost newer index
+    /// referenced (and the temporary file that may be its only copy).
+    fn writable(&self) -> Result<(), LibraryError> {
+        if self.from_backup_index {
+            return Err(LibraryError::EncryptedVaultReadOnly);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -356,6 +369,7 @@ pub(crate) fn import_error_code(error: &LibraryError) -> &'static str {
         LibraryError::EncryptedVaultCorrupt => "encrypted_vault_corrupt",
         LibraryError::EncryptedVaultIo => "encrypted_vault_io_failed",
         LibraryError::EncryptedVaultCrypto => "encrypted_vault_crypto_failed",
+        LibraryError::EncryptedVaultReadOnly => "encrypted_vault_read_only",
         _ => IMPORT_FAILED_CODE,
     }
 }
@@ -833,6 +847,7 @@ impl Library {
                 .session
                 .as_mut()
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.writable()?;
             let item = session
                 .index
                 .items
@@ -990,6 +1005,7 @@ impl Library {
                 .session
                 .as_ref()
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.writable()?;
             // Trashed items do not count as present: adding a file again brings it back as
             // a new item, and emptying the trash never loses it.
             let mut existing = KnownFiles::new();
@@ -1449,17 +1465,17 @@ impl Library {
         if runtime.import_running() {
             return Err(LibraryError::EncryptedVaultImportRunning);
         }
-        let (vault, generation, mut index, from_backup_index) = {
+        let (vault, generation, mut index) = {
             let state = runtime.state();
             let session = state
                 .session
                 .as_ref()
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.writable()?;
             (
                 Arc::clone(&session.vault),
                 session.generation,
                 session.index.clone(),
-                session.from_backup_index,
             )
         };
         let matches = sidecar_image_matches(&index);
@@ -1493,38 +1509,38 @@ impl Library {
             session.index = index.clone();
         }
         // Delete exactly the objects this cleanup stopped referencing (best effort; anything
-        // left behind is removed by a later unlock). Nothing is deleted while the session
-        // runs on the backup index.
-        if !from_backup_index {
-            let referenced = index.referenced_objects();
-            let unreferenced = dropped
-                .iter()
-                .flat_map(|(_, item)| {
-                    [
-                        Some(item.object_id.as_str()),
-                        item.thumbnail_object_id.as_deref(),
-                        item.poster_object_id.as_deref(),
-                    ]
-                })
-                .flatten()
-                .filter(|object_id| !referenced.contains(object_id));
-            let _ = vault.remove_objects(unreferenced);
-        }
+        // left behind is removed by a later unlock).
+        let referenced = index.referenced_objects();
+        let unreferenced = dropped
+            .iter()
+            .flat_map(|(_, item)| {
+                [
+                    Some(item.object_id.as_str()),
+                    item.thumbnail_object_id.as_deref(),
+                    item.poster_object_id.as_deref(),
+                ]
+            })
+            .flatten()
+            .filter(|object_id| !referenced.contains(object_id));
+        let _ = vault.remove_objects(unreferenced);
         Ok(result)
     }
 
-    /// Saves the session index. The caller holds the write lock.
+    /// Saves the session index. The caller holds the write lock. Refused on a session opened
+    /// from the backup index (see `Session::writable`).
     fn persist_encrypted_index(
         &self,
         vault: &EncryptedVault,
         generation: u64,
     ) -> Result<(), LibraryError> {
-        let mut snapshot = self
-            .encrypted_vault
-            .state()
-            .session_matching(generation)
-            .map(|session| session.index.clone())
-            .ok_or(LibraryError::EncryptedVaultLocked)?;
+        let mut snapshot = {
+            let mut state = self.encrypted_vault.state();
+            let session = state
+                .session_matching(generation)
+                .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.writable()?;
+            session.index.clone()
+        };
         vault
             .save_index(&mut snapshot)
             .map_err(|error| self.vault_write_error(generation, error))?;
@@ -2406,6 +2422,7 @@ mod tests {
             LibraryError::EncryptedVaultCorrupt,
             LibraryError::EncryptedVaultIo,
             LibraryError::EncryptedVaultCrypto,
+            LibraryError::EncryptedVaultReadOnly,
         ] {
             let code = super::import_error_code(&error);
             assert_eq!(code, crate::commands::CommandError::from(error).code);

@@ -362,6 +362,9 @@ impl Library {
         let mut local_only_paths: Vec<(String, ManagedAssetPaths)> = Vec::new();
         {
             let tx = connection.transaction()?;
+            // An open incoming review would make deleting its existing Asset fail the
+            // review's CHECK through `ON DELETE SET NULL`.
+            super::similarity::release_incoming_reviews_without_existing(&tx, None)?;
             for id in asset_ids {
                 let row = tx
                     .query_row(
@@ -458,6 +461,9 @@ impl Library {
     #[cfg(any(windows, target_os = "linux"))]
     fn purge_candidates_legacy(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
         let connection = self.connection()?;
+        // Before any file is removed: an open incoming review against a purged Asset would
+        // fail the row delete below through its CHECK.
+        super::similarity::release_incoming_reviews_without_existing(&connection, None)?;
         let mut deleted_count = 0;
         let mut failed_asset_ids = Vec::new();
         for asset_id in asset_ids {
@@ -661,6 +667,10 @@ pub(crate) fn update_trash_status_in_transaction(
         if changed > 0 && to_status == "normal" && from_status == "trash" {
             requeue_relation_intents_after_restore(transaction, asset_id)?;
         }
+    }
+    if to_status != "normal" {
+        // An incoming similarity review against a trashed Asset can never be decided.
+        super::similarity::release_incoming_reviews_without_existing(transaction, None)?;
     }
     Ok(())
 }

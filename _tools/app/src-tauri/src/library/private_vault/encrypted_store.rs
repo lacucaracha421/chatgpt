@@ -401,7 +401,11 @@ impl EncryptedVault {
     }
 
     /// Increments `index.revision` and replaces `index.bin` atomically, keeping the replaced
-    /// generation as `index.prev.bin`.
+    /// generation as `index.prev.bin`. `index.bin` is never missing: the new index is
+    /// written to a temporary file, the current `index.bin` is copied (itself atomically) to
+    /// `index.prev.bin`, and only then the temporary file is renamed over `index.bin`
+    /// (`fs::rename` replaces an existing file on Unix and Windows). A copy rather than a
+    /// hard link, because the vault usually lives on exFAT/FAT32 USB drives.
     pub(crate) fn save_index(&self, index: &mut VaultIndex) -> Result<()> {
         self.verify_identity()?;
         index.revision += 1;
@@ -422,13 +426,20 @@ impl EncryptedVault {
             },
             || {
                 self.verify_identity()?;
-                match fs::rename(
-                    self.dir.join(INDEX_FILE),
-                    self.dir.join(PREVIOUS_INDEX_FILE),
-                ) {
-                    Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error.into()),
-                    _ => Ok(()),
-                }
+                let mut current = match File::open(self.dir.join(INDEX_FILE)) {
+                    Ok(current) => current,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+                    Err(error) => return Err(error.into()),
+                };
+                write_atomic(
+                    &self.dir,
+                    PREVIOUS_INDEX_FILE,
+                    |file| {
+                        io::copy(&mut current, file)?;
+                        Ok(())
+                    },
+                    || Ok(()),
+                )
             },
         );
         bytes.as_mut_slice().zeroize();
@@ -438,10 +449,19 @@ impl EncryptedVault {
     /// Deletes objects the index does not reference and stale temporary files (left by a
     /// crash). Files modified within `min_age` are kept (see `ORPHAN_SAFETY_WINDOW`), and
     /// unknown files are left alone. Returns how many files were removed.
+    ///
+    /// A leftover `index.bin.tmp-*` that decrypts to a newer revision than `index` is kept,
+    /// together with every object it references: it may be the only copy of a generation
+    /// that never made it to `index.bin`.
     pub(crate) fn remove_orphans(&self, index: &VaultIndex, min_age: Duration) -> Result<usize> {
         self.verify_identity()?;
-        let referenced = index.referenced_objects();
-        let mut removed = remove_temp_files(&self.dir, min_age)?;
+        let newer = self.newer_temp_indexes(index.revision)?;
+        let mut referenced = index.referenced_objects();
+        for (_, newer) in &newer {
+            referenced.extend(newer.referenced_objects());
+        }
+        let keep: HashSet<&str> = newer.iter().map(|(name, _)| name.as_str()).collect();
+        let mut removed = remove_temp_files(&self.dir, min_age, &keep)?;
         for entry in fs::read_dir(self.objects_dir())? {
             let entry = entry?;
             if !entry.file_type()?.is_file() {
@@ -456,6 +476,27 @@ impl EncryptedVault {
             }
         }
         Ok(removed)
+    }
+
+    /// `index.bin.tmp-*` files that decrypt to an index newer than `revision`, by file name.
+    fn newer_temp_indexes(&self, revision: u64) -> Result<Vec<(String, VaultIndex)>> {
+        let prefix = format!("{INDEX_FILE}{TEMP_MARKER}");
+        let mut newer = Vec::new();
+        for entry in fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if !name.starts_with(&prefix) || !entry.file_type()?.is_file() {
+                continue;
+            }
+            if let Ok(candidate) = self.load_index_file(&name) {
+                if candidate.revision > revision {
+                    newer.push((name, candidate));
+                }
+            }
+        }
+        Ok(newer)
     }
 
     /// Deletes the given objects (ids the caller just stopped referencing in a saved index).
@@ -521,16 +562,18 @@ fn write_header(dir: &Path, header: &VaultHeader) -> Result<()> {
     )
 }
 
-/// Removes `<name>.tmp-*` files left in the vault folder by an interrupted atomic write.
-fn remove_temp_files(dir: &Path, min_age: Duration) -> Result<usize> {
+/// Removes `<name>.tmp-*` files left in the vault folder by an interrupted atomic write,
+/// except the file names in `keep`.
+fn remove_temp_files(dir: &Path, min_age: Duration, keep: &HashSet<&str>) -> Result<usize> {
     let mut removed = 0;
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name();
         let stale = name.to_str().is_some_and(|name| {
-            [HEADER_FILE, INDEX_FILE]
-                .iter()
-                .any(|target| name.starts_with(&format!("{target}{TEMP_MARKER}")))
+            !keep.contains(name)
+                && [HEADER_FILE, INDEX_FILE, PREVIOUS_INDEX_FILE]
+                    .iter()
+                    .any(|target| name.starts_with(&format!("{target}{TEMP_MARKER}")))
         });
         if stale && entry.file_type()?.is_file() && older_than(&entry, min_age) {
             fs::remove_file(entry.path())?;
@@ -1129,6 +1172,78 @@ mod tests {
         // Both generations unreadable: corrupt, and a foreign key is still a wrong secret.
         fs::remove_file(dir.path().join(VAULT_DIR).join(PREVIOUS_INDEX_FILE)).unwrap();
         assert!(is_corrupt(vault.load_index_with_fallback()));
+    }
+
+    #[test]
+    fn save_index_keeps_index_bin_in_place_and_the_replaced_generation_as_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault, _) = create(dir.path());
+        let vault_dir = dir.path().join(VAULT_DIR);
+        let first = vault.load_index().unwrap();
+        let mut index = first.clone();
+        index
+            .items
+            .push(item("0123456789abcdef0123456789abcdef", None));
+        // The replaced index.bin is copied (not moved) aside before the new one replaces it.
+        let current = fs::read(vault_dir.join(INDEX_FILE)).unwrap();
+        vault.save_index(&mut index).unwrap();
+        assert_eq!(
+            fs::read(vault_dir.join(PREVIOUS_INDEX_FILE)).unwrap(),
+            current
+        );
+        assert_eq!(vault.load_index().unwrap(), index);
+        assert_eq!(vault.load_index_file(PREVIOUS_INDEX_FILE).unwrap(), first);
+        // No temporary files are left behind.
+        assert_eq!(
+            vault_dir_names(&vault_dir),
+            [INDEX_FILE, PREVIOUS_INDEX_FILE, OBJECTS_DIR, HEADER_FILE]
+        );
+    }
+
+    #[test]
+    fn orphan_cleanup_keeps_a_newer_temporary_index_and_its_objects() {
+        let dir = tempfile::tempdir().unwrap();
+        let (vault, _) = create(dir.path());
+        let vault_dir = dir.path().join(VAULT_DIR);
+        let old = vault.write_object(&mut Cursor::new(b"a".to_vec())).unwrap();
+        let mut index = vault.load_index().unwrap();
+        index.items.push(item(&old, None));
+        vault.save_index(&mut index).unwrap();
+        let current = index.clone();
+
+        // A newer generation that only reached its temporary file (crash before the rename).
+        let newest = vault.write_object(&mut Cursor::new(b"b".to_vec())).unwrap();
+        index.items.push(item(&newest, None));
+        vault.save_index(&mut index).unwrap();
+        fs::rename(
+            vault_dir.join(INDEX_FILE),
+            vault_dir.join("index.bin.tmp-newer"),
+        )
+        .unwrap();
+        fs::copy(
+            vault_dir.join(PREVIOUS_INDEX_FILE),
+            vault_dir.join(INDEX_FILE),
+        )
+        .unwrap();
+        // An older generation's leftover and a partial write are still removed.
+        fs::copy(
+            vault_dir.join(PREVIOUS_INDEX_FILE),
+            vault_dir.join("index.bin.tmp-older"),
+        )
+        .unwrap();
+        fs::write(vault_dir.join("index.bin.tmp-partial"), b"x").unwrap();
+        fs::write(vault_dir.join("index.prev.bin.tmp-partial"), b"x").unwrap();
+        let orphan = vault.write_object(&mut Cursor::new(b"c".to_vec())).unwrap();
+
+        assert_eq!(vault.load_index().unwrap(), current);
+        assert_eq!(vault.remove_orphans(&current, Duration::ZERO).unwrap(), 4);
+        assert!(vault_dir.join("index.bin.tmp-newer").exists());
+        assert!(!vault_dir.join("index.bin.tmp-older").exists());
+        assert!(!vault_dir.join("index.bin.tmp-partial").exists());
+        assert!(!vault_dir.join("index.prev.bin.tmp-partial").exists());
+        assert!(object_path(dir.path(), &old).exists());
+        assert_eq!(vault.read_object(&newest).unwrap(), b"b");
+        assert!(!object_path(dir.path(), &orphan).exists());
     }
 
     #[test]

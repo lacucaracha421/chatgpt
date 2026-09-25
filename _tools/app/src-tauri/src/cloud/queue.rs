@@ -1,4 +1,4 @@
-use rusqlite::{params, OptionalExtension, Row, Transaction};
+use rusqlite::{params, OptionalExtension, Row};
 
 use super::models::{CloudSyncConfig, CloudSyncQueueItem};
 use crate::library::{error::LibraryError, Library};
@@ -137,7 +137,7 @@ impl Library {
 }
 
 pub(crate) fn enqueue_asset_upsert(
-    transaction: &Transaction<'_>,
+    transaction: &rusqlite::Connection,
     asset_id: &str,
     updated_at: &str,
 ) -> Result<(), LibraryError> {

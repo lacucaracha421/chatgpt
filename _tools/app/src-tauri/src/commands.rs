@@ -424,6 +424,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::EncryptedVaultInvalidRoot => "encrypted_vault_invalid_root",
             LibraryError::EncryptedVaultFolderUnavailable => "encrypted_vault_folder_unavailable",
             LibraryError::EncryptedVaultImportRunning => "encrypted_vault_import_running",
+            LibraryError::EncryptedVaultReadOnly => "encrypted_vault_read_only",
             LibraryError::InvalidEncryptedVaultTitle => "invalid_encrypted_vault_title",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",

@@ -330,15 +330,25 @@ it("shows the trash with restore, and confirms permanent deletion inside the pag
   confirmSpy.mockRestore();
 });
 
-it("offers only restore when the vault opened from its backup index", async () => {
+it("is read-only when the vault opened from its backup index", async () => {
   const gateway = vaultGateway();
   render(<ExternalVaultBrowser gateway={gateway} status={{ ...withTrash, backupIndex: true }} onStatusChange={vi.fn()} />);
-  await userEvent.click(await screen.findByRole("button", { name: "휴지통 2" }));
+  expect(await screen.findByText(/읽기 전용으로 열었습니다/)).toBeInTheDocument();
+  await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
+  expect(screen.getByRole("button", { name: "휴지통으로" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "제목 변경" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "파일 추가" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "가져오기" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /내보내기/ })).toBeEnabled();
+  await userEvent.click(screen.getByRole("button", { name: "delete key" }));
+  expect(gateway.trashEncryptedVaultItems).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole("button", { name: "휴지통 2" }));
   await userEvent.click(await screen.findByRole("button", { name: "secret.png" }));
   expect(screen.getByRole("button", { name: "영구 삭제 1개" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "휴지통 비우기" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "복원 1개" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "복원 1개" })).toBeDisabled();
   await userEvent.click(screen.getByRole("button", { name: "delete key" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByText(/백업본으로 열었습니다/)).toBeInTheDocument();
+  expect(gateway.restoreEncryptedVaultItems).not.toHaveBeenCalled();
 });

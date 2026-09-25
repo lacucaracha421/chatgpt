@@ -308,14 +308,18 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       setBatchPending(false);
     }
   })();
+  // "기존 자산 열기"로 요청된 자산이 현재 페이지에 없으면 뷰어는 그 한 장만 보여 준다.
+  const viewerItems = requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items;
   const trashViewerAsset = (asset: AssetSummary) => void (async () => {
-    const index = items.findIndex((item) => item.id === asset.id);
-    const next = items[index + 1] ?? items[index - 1];
+    const index = viewerItems.findIndex((item) => item.id === asset.id);
+    const next = index < 0 ? undefined : viewerItems[index + 1] ?? viewerItems[index - 1];
     try {
       await gateway.trashAssets([asset.id]);
       setUndoAssetIds([asset.id]);
       setMessage("휴지통으로 이동했습니다.");
       setViewerAssetId(next?.id ?? null);
+      // 휴지통으로 간 요청 자산이 남아 있으면 이후 갤러리 열기와 시리즈 뷰어가 그 자산에 묶인다.
+      if (requestedAssetRef.current?.id === asset.id) onRequestedAssetHandled();
       refresh();
       onMembershipChanged();
     } catch (error) {
@@ -401,7 +405,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       </div>
       <AssetInspector assets={selectedAssets} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onAssetUpdated={updateAssetSummary} />
     </div>
-    <AssetViewer items={requestedAsset && !items.some((item) => item.id === requestedAsset.id) ? [requestedAsset] : items} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onAssetOpened={(asset) => gateway.recordAssetOpened(asset.id, new Date().toISOString())} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} privacyMode={privacyMode} />
+    <AssetViewer items={viewerItems} activeId={viewerAssetId} onActiveIdChange={setViewerAssetId} onClose={() => { setViewerAssetId(null); onRequestedAssetHandled(); }} onAssetOpened={(asset) => gateway.recordAssetOpened(asset.id, new Date().toISOString())} onToggleFavorite={toggleFavorite} onTrash={trashViewerAsset} privacyMode={privacyMode} />
   </section>;
 }
 

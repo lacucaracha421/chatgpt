@@ -80,6 +80,10 @@ impl Library {
         let cursor = decode_review_cursor(after)?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        // A review whose existing Asset left `normal` through any path (grid trash, a sibling
+        // review's "replace existing", cloud trash) can no longer be decided; release it
+        // before counting so it neither breaks nor pads the page.
+        release_incoming_reviews_without_existing(&transaction, None)?;
         let total_count: i64 = transaction.query_row(
             "SELECT COUNT(*) FROM similarity_reviews WHERE status = 'open'",
             [],
@@ -159,14 +163,17 @@ impl Library {
                 classifications: classifications.get(asset_id).cloned().unwrap_or_default(),
             })
         };
+        // One row whose Assets are not in the expected state (a state no release above
+        // explains) is left out rather than failing the whole page.
         let items = rows
             .into_iter()
-            .map(|row| {
-                let existing = review_asset(&row.existing_asset_id, "normal")?;
+            .filter_map(|row| {
+                let existing = review_asset(&row.existing_asset_id, "normal").ok()?;
                 let candidate = review_asset(
                     &row.candidate_asset_id,
                     if row.historical { "normal" } else { "review" },
-                )?;
+                )
+                .ok()?;
                 let recommended_asset_id = if row.historical {
                     match provenance_rank(&existing.asset).cmp(&provenance_rank(&candidate.asset)) {
                         std::cmp::Ordering::Greater => Some(existing.asset.id.clone()),
@@ -176,7 +183,7 @@ impl Library {
                 } else {
                     None
                 };
-                Ok(SimilarityReviewSummary {
+                Some(SimilarityReviewSummary {
                     id: row.id,
                     distance: row.distance,
                     historical: row.historical,
@@ -185,7 +192,7 @@ impl Library {
                     candidate,
                 })
             })
-            .collect::<Result<Vec<_>, LibraryError>>()?;
+            .collect::<Vec<_>>();
         transaction.commit()?;
         Ok(SimilarityReviewPage {
             items,
@@ -399,6 +406,8 @@ impl Library {
             &chrono::Utc::now().to_rfc3339(),
         )?;
         resolve_review(&transaction, review_id, "replace_existing")?;
+        // Other incoming reviews against the Asset just trashed are released, not stranded.
+        release_incoming_reviews_without_existing(&transaction, None)?;
         transaction.commit()?;
         Ok(())
     }
@@ -927,6 +936,48 @@ fn resolve_review(
     } else {
         Err(LibraryError::SimilarityReviewConflict)
     }
+}
+
+/// Close open incoming reviews whose existing Asset is no longer `normal` (or is `departing`,
+/// i.e. about to be deleted), keeping the candidate.
+///
+/// Such a review can never be decided: every decision verifies the existing Asset is
+/// `normal`. An incoming review has no `stale` state (0090 allows it only for historical
+/// pairs), and the only outcome that never loses the candidate image is the one "keep both"
+/// already defines: the candidate becomes `normal` with the same follow-up work, and the
+/// review is `resolved` / `keep_both`. Resolving also clears the open-row CHECK that would
+/// otherwise make deleting the existing Asset (purge) fail through `ON DELETE SET NULL`.
+pub(crate) fn release_incoming_reviews_without_existing(
+    connection: &Connection,
+    departing: Option<&str>,
+) -> Result<usize, LibraryError> {
+    let stranded = connection
+        .prepare(
+            "SELECT id, candidate_asset_id FROM similarity_reviews r
+             WHERE review_kind = 'incoming' AND status = 'open'
+               AND (existing_asset_id = ?1
+                    OR NOT EXISTS (SELECT 1 FROM assets a
+                                   WHERE a.id = r.existing_asset_id AND a.status = 'normal'))",
+        )?
+        .query_map([departing], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for (review_id, candidate_id) in &stranded {
+        let promoted = connection.execute(
+            "UPDATE assets SET status = 'normal', trashed_at = NULL WHERE id = ?1 AND status = 'review'",
+            [candidate_id],
+        )?;
+        if promoted > 0 {
+            super::character_autotag::enqueue(
+                connection,
+                candidate_id,
+                super::character_autotag::Cause::SimilarityResolution,
+            )?;
+            crate::cloud::queue::enqueue_asset_upsert(connection, candidate_id, &now)?;
+        }
+        resolve_review(connection, review_id, "keep_both")?;
+    }
+    Ok(stranded.len())
 }
 
 #[cfg(test)]
@@ -1665,6 +1716,180 @@ mod tests {
                 }),
             Err(LibraryError::SimilarityReviewNotFound)
         ));
+    }
+
+    impl ReviewFixture {
+        /// A second incoming candidate near the same existing Asset.
+        fn add_sibling_review(&self) -> (String, String) {
+            let base = striped_fixture(900, 600, StripeDirection::Vertical);
+            let path = self.input.join("sibling.jpg");
+            jpeg_variant(&base, 600, 400, 80).save(&path).unwrap();
+            let review_id = match self
+                .library
+                .ingest_media(IngestMediaRequest {
+                    source_path: path,
+                    classification_id: None,
+                    source_url: None,
+                    collected_at: None,
+                    replace_duplicate_metadata: false,
+                    source_published_at: None,
+                    creator_name: None,
+                    creator_handle: None,
+                    creator_url: None,
+                    import_source: ImportSource::Direct,
+                    import_batch_id: "00000000-0000-4000-8000-000000000002".into(),
+                })
+                .unwrap()
+            {
+                IngestOutcome::ReviewPending { review_id } => review_id,
+                other => panic!("expected a second review, got {other:?}"),
+            };
+            let (existing, candidate): (String, String) = self
+                .library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT existing_asset_id, candidate_asset_id FROM similarity_reviews WHERE id = ?1",
+                    [&review_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(existing, self.existing_id);
+            (review_id, candidate)
+        }
+
+        fn review_state(&self, review_id: &str) -> (String, Option<String>) {
+            self.library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT status, decision FROM similarity_reviews WHERE id = ?1",
+                    [review_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn replacing_the_existing_asset_releases_its_sibling_review_and_keeps_the_candidate() {
+        let fixture = review_fixture();
+        let (sibling_review, sibling_candidate) = fixture.add_sibling_review();
+        assert_eq!(
+            fixture.library.list_similarity_reviews(None, 20).unwrap().items.len(),
+            2
+        );
+        fixture
+            .library
+            .decide_similarity_review(SimilarityDecisionRequest {
+                review_id: fixture.review_id.clone(),
+                decision: SimilarityDecision::ReplaceExisting,
+            })
+            .unwrap();
+        assert_eq!(fixture.status(&fixture.existing_id), "trash");
+        assert_eq!(fixture.status(&sibling_candidate), "normal");
+        assert_eq!(
+            fixture.review_state(&sibling_review),
+            ("resolved".into(), Some("keep_both".into()))
+        );
+        let page = fixture.library.list_similarity_reviews(None, 20).unwrap();
+        assert!(page.items.is_empty());
+        assert_eq!(page.total_count, 0);
+    }
+
+    #[test]
+    fn trashing_the_existing_asset_from_the_grid_releases_the_review() {
+        let fixture = review_fixture();
+        fixture
+            .library
+            .trash_assets(&[fixture.existing_id.clone()])
+            .unwrap();
+        assert_eq!(
+            fixture.review_state(&fixture.review_id),
+            ("resolved".into(), Some("keep_both".into()))
+        );
+        assert_eq!(fixture.status(&fixture.candidate_id), "normal");
+        // Restoring the existing Asset does not resurrect the review.
+        fixture
+            .library
+            .restore_assets(&[fixture.existing_id.clone()])
+            .unwrap();
+        assert_eq!(fixture.normal_ids().len(), 2);
+        assert_eq!(
+            fixture.library.list_similarity_reviews(None, 20).unwrap().total_count,
+            0
+        );
+    }
+
+    #[test]
+    fn a_stale_review_no_longer_breaks_the_list_and_releases_its_candidate() {
+        let fixture = review_fixture();
+        fixture.add_horizontal_review();
+        // Any path that does not release at trash time (cloud trash, rows written before
+        // this release existed) leaves the review open against a trashed existing Asset.
+        fixture
+            .library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET status = 'trash', trashed_at = '2026-09-25' WHERE id = ?1",
+                [&fixture.existing_id],
+            )
+            .unwrap();
+        let page = fixture.library.list_similarity_reviews(None, 20).unwrap();
+        assert_eq!(page.items.len(), 1, "the unrelated review is still listed");
+        assert_eq!(page.total_count, 1);
+        assert_ne!(page.items[0].id, fixture.review_id);
+        assert_eq!(
+            fixture.review_state(&fixture.review_id),
+            ("resolved".into(), Some("keep_both".into()))
+        );
+        assert_eq!(fixture.status(&fixture.candidate_id), "normal");
+        // The candidate is a real library Asset again, queued for replication like keep-both.
+        let queued: bool = fixture
+            .library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM cloud_sync_queue WHERE entity_type='asset' AND entity_id=?1)",
+                [&fixture.candidate_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(queued);
+    }
+
+    #[test]
+    fn deleting_an_existing_asset_under_an_open_review_fails_its_check_but_purge_releases_it() {
+        let fixture = review_fixture();
+        // Confirms the review note: ON DELETE SET NULL on an open incoming review violates
+        // the open-row CHECK, so a raw delete of the existing Asset is refused.
+        let error = fixture
+            .library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM assets WHERE id = ?1", [&fixture.existing_id])
+            .unwrap_err();
+        assert!(error.to_string().contains("CHECK constraint failed"), "{error}");
+        // A stranded row (trashed without release) is released by the purge itself.
+        fixture
+            .library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET status = 'trash', trashed_at = '2026-09-25' WHERE id = ?1",
+                [&fixture.existing_id],
+            )
+            .unwrap();
+        let summary = fixture.library.empty_trash().unwrap();
+        assert_eq!(summary.deleted_count, 1);
+        assert!(summary.failed_asset_ids.is_empty());
+        assert!(!fixture.asset_exists(&fixture.existing_id));
+        assert_eq!(fixture.status(&fixture.candidate_id), "normal");
+        assert_eq!(
+            fixture.review_state(&fixture.review_id),
+            ("resolved".into(), Some("keep_both".into()))
+        );
     }
 
     #[test]

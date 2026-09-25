@@ -85,6 +85,7 @@ impl Library {
                 .session
                 .as_mut()
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
+            session.writable()?;
             let mut previous = HashMap::new();
             for item in session.index.items.iter_mut().filter(|item| {
                 wanted.contains(item.id.as_str())
@@ -144,9 +145,7 @@ impl Library {
                 .as_ref()
                 .ok_or(LibraryError::EncryptedVaultLocked)?;
             // A backup index does not know the newest objects, so it never drives deletion.
-            if session.from_backup_index {
-                return Err(LibraryError::EncryptedVaultCorrupt);
-            }
+            session.writable()?;
             (
                 Arc::clone(&session.vault),
                 session.generation,
@@ -713,16 +712,11 @@ mod tests {
     }
 
     #[test]
-    fn deletion_is_refused_in_a_backup_index_session_and_while_an_import_runs() {
-        let (temp, library, vault) = setup();
+    fn deletion_is_refused_while_an_import_runs() {
+        let (temp, library, _vault) = setup();
         three_images(temp.path(), &library);
         let a = id_of(&library, "a.png");
         library.trash_encrypted_vault_items(&[a.clone()]).unwrap();
-        // Another save so index.prev.bin also has `a` in the trash.
-        library
-            .set_encrypted_vault_title(&id_of(&library, "b.png"), Some("x"))
-            .unwrap();
-
         library.encrypted_vault.import_job().replace(
             crate::library::models::EncryptedVaultImportJob {
                 id: 9,
@@ -735,27 +729,106 @@ mod tests {
             Err(LibraryError::EncryptedVaultImportRunning)
         ));
         library.encrypted_vault.import_job().take();
+        assert_eq!(library.empty_encrypted_vault_trash().unwrap(), 1);
+    }
+
+    /// Sets every file under `root` to a modification time outside the orphan safety window.
+    fn age_all_files(root: &Path) {
+        let long_ago = std::time::SystemTime::now()
+            - super::super::ORPHAN_SAFETY_WINDOW
+            - std::time::Duration::from_secs(60);
+        for (path, _) in snapshot(root) {
+            fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(long_ago)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_backup_index_session_is_read_only_and_the_next_unlock_deletes_nothing() {
+        let (temp, library, vault) = setup();
+        three_images(temp.path(), &library);
+        let [a, b] = ["a.png", "b.png"].map(|name| id_of(&library, name));
+        library.trash_encrypted_vault_items(&[a.clone()]).unwrap();
+        // The newest generation references `d.png`; index.prev.bin does not know it.
+        let newer = temp.path().join("newer");
+        fs::create_dir(&newer).unwrap();
+        write_png(&newer.join("d.png"), 20);
+        library
+            .import_into_encrypted_vault(&newer, &mut |_| {})
+            .unwrap();
+        let d = id_of(&library, "d.png");
 
         library.lock_encrypted_vault();
         let index = vault.join(".lakomics-vault/index.bin");
-        let mut bytes = fs::read(&index).unwrap();
+        let good = fs::read(&index).unwrap();
+        let mut bytes = good.clone();
         bytes[60] ^= 1;
         fs::write(&index, bytes).unwrap();
-        library
-            .unlock_encrypted_vault(&EncryptedVaultSecretInput::Password(PASSWORD.into()), false)
-            .unwrap();
+        age_all_files(&vault);
+        unlock(&library);
         assert!(library.encrypted_vault_status().unwrap().backup_index);
-        let before = objects(&vault);
-        assert!(matches!(
-            library.empty_encrypted_vault_trash(),
-            Err(LibraryError::EncryptedVaultCorrupt)
+        assert_eq!(counts(&library), (Some(2), Some(1)));
+        let before = snapshot(&vault);
+
+        let read_only = |result: Result<_, LibraryError>| {
+            matches!(result, Err(LibraryError::EncryptedVaultReadOnly))
+        };
+        assert!(read_only(library.empty_encrypted_vault_trash()));
+        assert!(read_only(
+            library.delete_encrypted_vault_items(&[a.clone()])
         ));
-        assert!(matches!(
-            library.delete_encrypted_vault_items(&[a]),
-            Err(LibraryError::EncryptedVaultCorrupt)
+        assert!(read_only(library.trash_encrypted_vault_items(&[b.clone()])));
+        assert!(read_only(
+            library.restore_encrypted_vault_items(&[a.clone()])
         ));
-        assert_eq!(objects(&vault), before);
-        assert_eq!(counts(&library).1, Some(1));
+        assert!(read_only(
+            library
+                .set_encrypted_vault_title(&b, Some("new title"))
+                .map(|_| 0)
+        ));
+        assert!(read_only(
+            library
+                .import_into_encrypted_vault(&newer, &mut |_| {})
+                .map(|_| 0)
+        ));
+        assert_eq!(
+            library
+                .encrypted_vault_import_job()
+                .unwrap()
+                .error
+                .as_deref(),
+            Some("encrypted_vault_read_only")
+        );
+        assert!(read_only(
+            library.apply_encrypted_vault_sidecar_cleanup().map(|_| 0)
+        ));
+        // Nothing changed on disk or in the session.
+        assert_eq!(snapshot(&vault), before);
+        assert_eq!(counts(&library), (Some(2), Some(1)));
+        assert_eq!(list(&library, true), [("a.png".to_owned(), a)]);
+
+        // The next unlock still runs on the backup and deletes nothing.
+        unlock(&library);
+        assert!(library.encrypted_vault_status().unwrap().backup_index);
+        assert_eq!(snapshot(&vault), before);
+
+        // Once index.bin is readable again the newest generation is back, complete.
+        fs::write(&index, good).unwrap();
+        unlock(&library);
+        assert!(!library.encrypted_vault_status().unwrap().backup_index);
+        assert_eq!(counts(&library), (Some(3), Some(1)));
+        let mut asset = library
+            .encrypted_vault_media(&d, super::super::EncryptedVaultMediaVariant::Asset)
+            .unwrap();
+        let len = asset.len();
+        assert_eq!(
+            asset.read_range(0, len).unwrap(),
+            fs::read(newer.join("d.png")).unwrap()
+        );
     }
 
     #[test]

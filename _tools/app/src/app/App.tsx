@@ -66,6 +66,7 @@ import { useAuthoritySyncHealth, useCloudSyncStatus } from "./useCloudProblems";
 import { useCollectionOpen } from "../statistics/useCollectionOpen";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
+import { confirmLeaveVaultRecovery } from "../external-vault/vaultRecoveryGuard";
 import { reattachVaultImport } from "../external-vault/vaultImportJob";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
 import { FaultGameProvider } from "../games/FaultGame";
@@ -539,6 +540,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   function navigateView(next: AssetView) {
+    // A vault recovery key shown once in Settings is lost if Settings closes (asks first).
+    if (view.kind === "settings" && !confirmLeaveVaultRecovery()) return;
     // Re-opening a settings section must switch to it even when the view object is unchanged.
     if (next.kind === "settings") setSettingsSectionRequest((current) => current + 1);
     if (next.kind === "collection" && view.kind === "collections") collectionReturnViewRef.current = view;
@@ -831,7 +834,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}
-                    onExit={() => { setView(settingsReturnViewRef.current); }}
+                    onExit={() => { if (confirmLeaveVaultRecovery()) setView(settingsReturnViewRef.current); }}
                     onImportFolder={beginMetadataImport}
                     metadataImportRunning={metadataImportWorks.some((work) => work.status === "running")}
                     onCollectionsChanged={refreshCollections}

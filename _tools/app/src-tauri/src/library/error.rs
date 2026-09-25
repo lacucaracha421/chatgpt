@@ -583,6 +583,8 @@ pub enum LibraryError {
     EncryptedVaultFolderUnavailable,
     #[error("이미 비밀 보관함으로 가져오는 중입니다")]
     EncryptedVaultImportRunning,
+    #[error("보관함 목록이 손상되어 이전 백업본으로 읽기 전용으로 열었습니다. 지금은 변경할 수 없습니다")]
+    EncryptedVaultReadOnly,
     #[error("제목은 200자 이하여야 합니다")]
     InvalidEncryptedVaultTitle,
     #[error("라이브러리 파일을 쓸 수 없습니다: {path}")]
