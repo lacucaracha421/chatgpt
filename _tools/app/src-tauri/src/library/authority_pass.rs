@@ -19,6 +19,7 @@ use super::classification_authority::{CredentialSource, OsCredentials};
 use super::error::LibraryError;
 use super::Library;
 use crate::cloud::client::{CloudClient, SyncStatus};
+use crate::cloud::failure::CloudFailureReason;
 
 static LOCAL_WORK: AtomicBool = AtomicBool::new(false);
 
@@ -127,6 +128,27 @@ pub(crate) struct AuthorityPassOutcome {
     pub sent: bool,
     /// Some lane was refused for credentials, so the cached token must be dropped.
     pub unauthorized: bool,
+    /// Why the first failing lane failed, as a closed [`CloudFailureReason`] code. Lanes
+    /// still fail independently; this only keeps the failure observable.
+    pub failure: Option<&'static str>,
+}
+
+impl AuthorityPassOutcome {
+    fn failed(&mut self, error: &LibraryError) {
+        self.unauthorized |= matches!(error, LibraryError::CloudUnauthorized);
+        self.failure
+            .get_or_insert(CloudFailureReason::from_error(error).code());
+    }
+}
+
+/// What one Asset lane run did.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AssetLaneOutcome {
+    /// Local Asset state changed.
+    pub changed: bool,
+    /// The lifecycle queue stopped at a head intent the server neither accepted nor
+    /// definitively refused; it is retried on the next pass.
+    pub stopped: bool,
 }
 
 impl AuthorityPassOutcome {
@@ -155,15 +177,14 @@ impl Library {
     /// The Asset lane against the status a metadata pass just read.
     ///
     /// It runs on its own single-flight thread because materialization may download
-    /// media for minutes; the metadata lanes must keep converging meanwhile. Returns
-    /// whether local Asset state changed.
+    /// media for minutes; the metadata lanes must keep converging meanwhile.
     pub(crate) fn run_asset_lane(
         &self,
         status: &SyncStatus,
         restricted: bool,
-    ) -> Result<bool, LibraryError> {
+    ) -> Result<AssetLaneOutcome, LibraryError> {
         let Some((client, token)) = self.authority_client()? else {
-            return Ok(false);
+            return Ok(AssetLaneOutcome::default());
         };
         let result = self.asset_lane_with(&client, token.expose(), None, restricted, status);
         if matches!(result, Err(LibraryError::CloudUnauthorized)) {
@@ -199,7 +220,7 @@ impl Library {
         publisher: Option<&str>,
         restricted: bool,
         status: &SyncStatus,
-    ) -> Result<bool, LibraryError> {
+    ) -> Result<AssetLaneOutcome, LibraryError> {
         let result = self.sync_assets_with_status(
             client,
             token,
@@ -208,7 +229,10 @@ impl Library {
             &|| Ok(status.clone()),
             true,
         )?;
-        Ok(result.applied_changes > 0 || result.materialized > 0 || result.flushed > 0)
+        Ok(AssetLaneOutcome {
+            changed: result.applied_changes > 0 || result.materialized > 0 || result.flushed > 0,
+            stopped: result.stopped,
+        })
     }
 
     /// The pass against explicit transport and credentials. Every lane is independent:
@@ -235,7 +259,6 @@ impl Library {
                 Err(false) => Err(LibraryError::CloudRequestUnavailable),
             }
         };
-        let refused = |error: &LibraryError| matches!(error, LibraryError::CloudUnauthorized);
 
         // Albums: flush first; receive only over a clean queue. A domain this pass
         // just wrote to is not skipped, because the shared status predates the write.
@@ -255,11 +278,11 @@ impl Library {
                                 || received.adopted_baseline
                                 || received.rematerialized_memberships > 0;
                         }
-                        Err(error) => outcome.unauthorized |= refused(&error),
+                        Err(error) => outcome.failed(&error),
                     }
                 }
             }
-            Err(error) => outcome.unauthorized |= refused(&error),
+            Err(error) => outcome.failed(&error),
         }
 
         match self.flush_classification_outbox_with_source(client, credentials) {
@@ -278,11 +301,11 @@ impl Library {
                                 || received.adopted_baseline
                                 || received.rematerialized_assignments > 0;
                         }
-                        Err(error) => outcome.unauthorized |= refused(&error),
+                        Err(error) => outcome.failed(&error),
                     }
                 }
             }
-            Err(error) => outcome.unauthorized |= refused(&error),
+            Err(error) => outcome.failed(&error),
         }
 
         // Bookmarks: receive, then deliver queued intents, then receive again after a
@@ -308,7 +331,7 @@ impl Library {
                 outcome.bookmarks = changed;
                 outcome.sent |= sent;
             }
-            Err(error) => outcome.unauthorized |= refused(&error),
+            Err(error) => outcome.failed(&error),
         }
 
         // Always read once, even when every lane above deferred, so the Asset lane
@@ -316,11 +339,122 @@ impl Library {
         let status = match read_status() {
             Ok(status) => Some(status),
             Err(error) => {
-                outcome.unauthorized |= refused(&error);
+                outcome.failed(&error);
                 None
             }
         };
         (outcome, status)
+    }
+}
+
+/// One Album or Classification domain's delivery health, read from the local database.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DomainSyncHealth {
+    /// Intents the authority refused on structural grounds; they need a user decision.
+    pub blocked_count: u32,
+    /// Asset-subject intents held until their Asset's upload commits.
+    pub waiting_count: u32,
+    /// Intents retired without delivery since this library began recording them.
+    pub dropped_count: u32,
+    /// Closed code of the most recent drop.
+    pub last_drop_reason: Option<String>,
+    pub last_dropped_at: Option<String>,
+}
+
+/// The Asset lifecycle lane's health.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AssetSyncHealth {
+    /// Lifecycle intents the server state overrode (`lifecycleRejected:*`).
+    pub rejected_count: u32,
+    /// The most common rejection code among them.
+    pub rejected_reason: Option<String>,
+    /// The last lane run stopped at an unresolved head intent (runtime state).
+    pub stopped: bool,
+}
+
+/// The latest failure of a background lane, as a closed code (runtime state).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LaneFailure {
+    pub code: &'static str,
+    pub at: String,
+}
+
+/// Local-only view of silent authority-sync trouble for the status panel.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AuthoritySyncHealth {
+    pub albums: DomainSyncHealth,
+    pub classifications: DomainSyncHealth,
+    pub assets: AssetSyncHealth,
+    pub authority_pass_failure: Option<LaneFailure>,
+    pub asset_lane_failure: Option<LaneFailure>,
+}
+
+impl Library {
+    /// The database half of [`AuthoritySyncHealth`]: a few local counts, no network.
+    /// The runtime fields (lane failures, `assets.stopped`) are left for the caller.
+    pub(crate) fn authority_sync_health(&self) -> Result<AuthoritySyncHealth, LibraryError> {
+        let albums = self.album_sync_status()?;
+        let classifications = self.classification_sync_status()?;
+        let mut health = AuthoritySyncHealth {
+            albums: DomainSyncHealth {
+                blocked_count: albums.blocked_count,
+                waiting_count: albums.waiting_count,
+                ..Default::default()
+            },
+            classifications: DomainSyncHealth {
+                blocked_count: classifications.blocked_count,
+                waiting_count: classifications.waiting_count,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let connection = self.connection()?;
+        let mut drops = connection.prepare(
+            "SELECT domain, dropped_count, last_reason, last_dropped_at FROM authority_intent_drops",
+        )?;
+        let rows = drops.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (domain, count, reason, at) = row?;
+            let target = match domain.as_str() {
+                "albums" => &mut health.albums,
+                "classifications" => &mut health.classifications,
+                _ => continue,
+            };
+            target.dropped_count = u32::try_from(count).unwrap_or(u32::MAX);
+            target.last_drop_reason = reason;
+            target.last_dropped_at = at;
+        }
+        let mut rejected = connection.prepare(
+            "SELECT last_error, COUNT(*) FROM asset_authority_state
+             WHERE last_error LIKE 'lifecycleRejected:%' GROUP BY last_error",
+        )?;
+        let rows = rejected.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut most = 0;
+        for row in rows {
+            let (error, count) = row?;
+            let count = u32::try_from(count).unwrap_or(u32::MAX);
+            health.assets.rejected_count = health.assets.rejected_count.saturating_add(count);
+            if count > most {
+                most = count;
+                health.assets.rejected_reason = error
+                    .strip_prefix(super::asset_authority::LIFECYCLE_REJECTED)
+                    .map(str::to_owned);
+            }
+        }
+        Ok(health)
     }
 }
 
@@ -511,7 +645,7 @@ mod tests {
                 &status.unwrap(),
             )
             .unwrap();
-        outcome.sent |= assets;
+        outcome.sent |= assets.changed;
         outcome
     }
 
@@ -656,6 +790,73 @@ mod tests {
         client.sync_status_conditional(TOKEN).unwrap();
         let seen: Vec<bool> = fake.take().into_iter().map(|s| s.if_none_match).collect();
         assert_eq!(seen, vec![false, true, false, false]);
+    }
+
+    #[test]
+    fn sync_health_counts_blocked_waiting_dropped_and_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        assert_eq!(
+            library.authority_sync_health().unwrap(),
+            AuthoritySyncHealth::default()
+        );
+        let db = library.connection().unwrap();
+        for (seq, state) in [(1, "blocked"), (2, "blocked"), (3, "pending")] {
+            db.execute(
+                "INSERT INTO album_authority_outbox(operation_id,command_type,album_id,epoch,payload,state,created_at)
+                 VALUES(?1,'renameAlbum','album-1',1,'{}',?2,'2026-09-25T00:00:00Z')",
+                rusqlite::params![format!("op-{seq}"), state],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO authority_intent_drops VALUES('classifications',3,'assetDeleted','op-9','2026-09-25T01:00:00Z')",
+            [],
+        )
+        .unwrap();
+        for (id, error) in [
+            ("a1", Some("lifecycleRejected:assetTombstoned")),
+            ("a2", Some("lifecycleRejected:assetTombstoned")),
+            ("a3", Some("lifecycleRejected:operationConflict")),
+            ("a4", None),
+        ] {
+            db.execute(
+                "INSERT INTO asset_authority_state(asset_id,lifecycle,entity_revision,projection,last_error)
+                 VALUES(?1,'normal',1,'{}',?2)",
+                rusqlite::params![id, error],
+            )
+            .unwrap();
+        }
+        drop(db);
+        let health = library.authority_sync_health().unwrap();
+        assert_eq!(health.albums.blocked_count, 2);
+        assert_eq!(health.albums.dropped_count, 0);
+        assert_eq!(health.classifications.blocked_count, 0);
+        assert_eq!(health.classifications.dropped_count, 3);
+        assert_eq!(
+            health.classifications.last_drop_reason.as_deref(),
+            Some("assetDeleted")
+        );
+        assert_eq!(
+            health.classifications.last_dropped_at.as_deref(),
+            Some("2026-09-25T01:00:00Z")
+        );
+        assert_eq!(health.assets.rejected_count, 3);
+        assert_eq!(
+            health.assets.rejected_reason.as_deref(),
+            Some("assetTombstoned")
+        );
+        assert!(!health.assets.stopped);
+        assert!(health.authority_pass_failure.is_none());
+    }
+
+    #[test]
+    fn a_failing_lane_keeps_its_first_failure_code() {
+        let mut outcome = AuthorityPassOutcome::default();
+        outcome.failed(&LibraryError::CredentialStoreLocked);
+        outcome.failed(&LibraryError::CloudUnauthorized);
+        assert_eq!(outcome.failure, Some("credential_store_locked"));
+        assert!(outcome.unauthorized);
     }
 
     #[test]

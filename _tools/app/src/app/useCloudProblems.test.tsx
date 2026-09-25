@@ -1,8 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { CloudBackfillProgress, LibraryGateway } from "../library/types";
+import type { AuthoritySyncHealth, CloudBackfillProgress, LibraryGateway } from "../library/types";
+import { ASSET_LIFECYCLE_CHANGED_EVENT } from "./useAssetAuthoritySync";
 import { CLOUD_PROGRESS_EVENT } from "./useCloudBackfillSupervisor";
-import { cloudProblemCount, useCloudProblems } from "./useCloudProblems";
+import { cloudProblemCount, useAuthoritySyncHealth, useCloudProblems } from "./useCloudProblems";
 
 const progress = { failed: 2, activity: [
   { direction: "replication", lastError: "전송 실패", metadataLastError: "기록 실패" },
@@ -36,4 +37,20 @@ it("does not replace a fresh supervisor result with a late initial snapshot", as
   await act(async () => resolve(progress));
   expect(result.current).toBe(0);
   unmount();
+});
+
+it("reads server sync health on mount, on refresh and after authority changes", async () => {
+  const health = { albums: { blockedCount: 1 } } as unknown as AuthoritySyncHealth;
+  const authoritySyncHealth = vi.fn().mockResolvedValue(health);
+  const gateway = { authoritySyncHealth } as unknown as LibraryGateway;
+  const { result, unmount } = renderHook(() => useAuthoritySyncHealth(gateway, "test"));
+  await waitFor(() => expect(result.current.health).toBe(health));
+  expect(authoritySyncHealth).toHaveBeenCalledTimes(1);
+  act(() => { result.current.refresh(); });
+  await waitFor(() => expect(authoritySyncHealth).toHaveBeenCalledTimes(2));
+  act(() => { window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT)); });
+  await waitFor(() => expect(authoritySyncHealth).toHaveBeenCalledTimes(3));
+  unmount();
+  window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT));
+  expect(authoritySyncHealth).toHaveBeenCalledTimes(3);
 });

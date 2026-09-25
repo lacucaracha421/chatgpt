@@ -164,6 +164,7 @@ export type ClassificationOutboxFlushResult = {
 export type ClassificationSyncStatus = {
   adopted: boolean; libraryId: string | null; epoch: number | null; contractVersion: number | null;
   cursor: number | null; pendingCount: number; blockedCount: number;
+  waitingCount: number; droppedCount: number; lastDropReason: string | null;
   oldestPendingOperationId: string | null;
 };
 export type AlbumOutboxFlushResult = {
@@ -172,7 +173,23 @@ export type AlbumOutboxFlushResult = {
 export type AlbumSyncStatus = {
   adopted: boolean; libraryId: string | null; epoch: number | null; contractVersion: number | null;
   cursor: number | null; pendingCount: number; blockedCount: number;
+  waitingCount: number; droppedCount: number; lastDropReason: string | null;
   oldestPendingOperationId: string | null;
+};
+/** One Album or Classification domain's delivery health (local counts only). */
+export type AuthorityDomainHealth = {
+  blockedCount: number; waitingCount: number; droppedCount: number;
+  lastDropReason: string | null; lastDroppedAt: string | null;
+};
+/** A background lane's latest failure, as a closed cloud failure code (`network`, `credential_store_locked`, …). */
+export type AuthorityLaneFailure = { code: string; at: string };
+/** Local-only view of silent server-sync trouble; reading it never contacts the server. */
+export type AuthoritySyncHealth = {
+  albums: AuthorityDomainHealth;
+  classifications: AuthorityDomainHealth;
+  assets: { rejectedCount: number; rejectedReason: string | null; stopped: boolean };
+  authorityPassFailure: AuthorityLaneFailure | null;
+  assetLaneFailure: AuthorityLaneFailure | null;
 };
 export type CloudLibraryRestoreReport = {
   metadataByteSize: number;
@@ -1180,6 +1197,7 @@ export interface LibraryGateway {
   classificationSyncStatus?(): Promise<ClassificationSyncStatus>;
   flushAlbumOutbox?(): Promise<AlbumOutboxFlushResult>;
   albumSyncStatus?(): Promise<AlbumSyncStatus>;
+  authoritySyncHealth?(): Promise<AuthoritySyncHealth>;
   updateOnlineCatalog(language?: CatalogLanguage, maxPages?: number): Promise<CatalogUpdateResult>;
   resetJapaneseCatalogCheckpoint(): Promise<CatalogStatus>;
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;

@@ -62,7 +62,7 @@ import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
 import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
-import { useCloudSyncStatus } from "./useCloudProblems";
+import { useAuthoritySyncHealth, useCloudSyncStatus } from "./useCloudProblems";
 import { useCollectionOpen } from "../statistics/useCollectionOpen";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
@@ -947,8 +947,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 }
 
 // Owns the cloud snapshot so each progress event re-renders only the status indicator, not the workspace.
-function CloudStatusCenter({ gateway, libraryRoot, ...props }: Omit<StatusCenterProps, "cloud"> & { gateway: LibraryGateway; libraryRoot: string }) {
-  return <StatusCenter {...props} cloud={useCloudSyncStatus(gateway, libraryRoot)} />;
+function CloudStatusCenter({ gateway, libraryRoot, onOpenChange, ...props }: Omit<StatusCenterProps, "cloud" | "authorityHealth"> & { gateway: LibraryGateway; libraryRoot: string }) {
+  const authority = useAuthoritySyncHealth(gateway, libraryRoot);
+  return <StatusCenter {...props} cloud={useCloudSyncStatus(gateway, libraryRoot)} authorityHealth={authority.health}
+    onOpenChange={(open) => { if (open) authority.refresh(); onOpenChange?.(open); }} />;
 }
 
 function DeferredViewFallback() {

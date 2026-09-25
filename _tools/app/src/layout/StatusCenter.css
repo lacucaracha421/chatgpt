@@ -53,6 +53,8 @@
 .status-center__sync[data-tone="active"] .status-center__dot { background: var(--color-accent); }
 .status-center__sync[data-tone="problem"] { color: var(--color-danger); }
 .status-center__sync[data-tone="problem"] .status-center__dot { background: var(--color-danger); }
+.status-center__sync[data-tone="note"] { color: var(--color-muted); }
+.status-center__sync-list { display: grid; }
 
 .status-center__list { display: grid; gap: 0; }
 .status-center__empty { margin: 0; color: var(--color-muted); font-size: var(--text-sm); }

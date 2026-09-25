@@ -100,6 +100,7 @@ import type {
   ClassificationSyncStatus,
   AlbumOutboxFlushResult,
   AlbumSyncStatus,
+  AuthoritySyncHealth,
   CloudCollectionsPublishResult,
   CloudLibraryRestoreReport,
   CatalogWorkDetail,
@@ -245,6 +246,7 @@ export const libraryGateway: LibraryGateway = {
     invoke<ClassificationSyncStatus>("classification_sync_status"),
   flushAlbumOutbox: () => invoke<AlbumOutboxFlushResult>("flush_album_outbox"),
   albumSyncStatus: () => invoke<AlbumSyncStatus>("album_sync_status"),
+  authoritySyncHealth: () => invoke<AuthoritySyncHealth>("authority_sync_health"),
   updateOnlineCatalog: (language, maxPages) =>
     language === undefined && maxPages === undefined
       ? invoke<CatalogUpdateResult>("update_online_catalog")

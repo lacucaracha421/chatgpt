@@ -397,6 +397,7 @@ pub fn run() {
             commands::classification_sync_status,
             commands::flush_album_outbox,
             commands::album_sync_status,
+            commands::authority_sync_health,
             commands::push_cloud_characters,
             commands::run_due_mobile_publications,
             commands::restore_cloud_metadata_backup,

@@ -14,7 +14,7 @@ import type { MetadataImportWork } from "../ingestion/metadataImport";
 import type { DropProgress, IngestionWork } from "../ingestion/useFileDrop";
 import { WorkTray } from "../ingestion/WorkTray";
 import { usePublicationJobs } from "../library/publicationJobs";
-import type { AssetView } from "../library/types";
+import type { AssetView, AuthoritySyncHealth } from "../library/types";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { ActivityIcon, InboxIcon, PhotoIcon } from "../shared/ui/ArchiveIcons";
 import type { SimilarityIndexState } from "../similarity/useSimilarityIndex";
@@ -35,6 +35,8 @@ export type StatusCenterProps = {
   dismissWork?: (workId: string) => void;
   openExisting?: (assetId: string) => void;
   cloud?: CloudSyncStatus;
+  /** Local server-sync health; null until read or when the gateway has none. */
+  authorityHealth?: AuthoritySyncHealth | null;
   reviewCount?: number;
   /** Null until the count has been read; it is refreshed whenever the panel opens. */
   unsortedCount?: number | null;
@@ -59,6 +61,7 @@ export function StatusCenter({
   dismissWork = noop,
   openExisting = noop,
   cloud,
+  authorityHealth = null,
   reviewCount = 0,
   unsortedCount = null,
   onOpenChange,
@@ -83,6 +86,7 @@ export function StatusCenter({
   const libraryProgress = runningIngestion ? null : progress;
   const libraryVisible = Boolean(libraryProgress || similarityIndex?.running || similarityIndex?.failed || similarityIndex?.message);
   const cloudProblems = cloud?.problemCount ?? 0;
+  const authority = authoritySyncSummary(authorityHealth);
 
   const activeCount = publicationJobs.filter((job) => job.running).length
     + Number(Boolean(vaultImport?.running))
@@ -99,7 +103,8 @@ export function StatusCenter({
     + characterFailures
     + Number(Boolean(similarityIndex?.failed || similarityIndex?.message))
     + visibleWorks.filter((work) => work.status === "failed" || (work.status === "completed" && work.failures.length > 0)).length
-    + cloudProblems;
+    + cloudProblems
+    + authority.problemCount;
   const workCount = publicationJobs.length + Number(Boolean(vaultImport)) + Number(Boolean(vaultExport))
     + Number(characterVisible) + Number(libraryVisible) + visibleWorks.length;
 
@@ -139,6 +144,7 @@ export function StatusCenter({
         </div>
         <div className="ui-anchored-panel__body status-center__body">
           {cloud && <SyncBlock cloud={cloud} onOpenSettings={() => go({ kind: "settings", section: "cloud" })} />}
+          <AuthoritySyncBlock summary={authority} />
           <StatusBlock title="작업">
             <div className="status-center__list">
               {workCount === 0
@@ -197,6 +203,90 @@ function SyncBlock({ cloud, onOpenSettings }: { cloud: CloudSyncStatus; onOpenSe
     <div className="status-center__sync" data-tone={tone} role="status">
       <span className="status-center__dot" aria-hidden="true" />
       <span>{text}</span>
+    </div>
+  </StatusBlock>;
+}
+
+const LANE_FAILURE_TEXT: Record<string, string> = {
+  credential_store_locked: "비밀번호 보관함이 잠겨 있음",
+  credential_store_unavailable: "비밀번호 보관함을 쓸 수 없음",
+  credential_store_failed: "비밀번호 보관함 오류",
+  credential_not_configured: "연결 정보가 설정되지 않음",
+  unauthorized: "서버가 인증을 거부함",
+  network: "연결 실패",
+  timeout: "응답 시간 초과",
+  server: "서버 오류",
+};
+
+const DROP_REASON_TEXT: Record<string, string> = {
+  assetTrashedBeforeUpload: "업로드 전에 휴지통으로 옮긴 파일",
+  assetDeleted: "이 PC에서 삭제된 파일",
+  assetPurged: "영구 삭제된 파일",
+  assetTombstoned: "서버에서 삭제된 파일",
+  assetNotFound: "서버에 없는 파일",
+  albumDeleted: "삭제된 앨범",
+  invalidAlbumMembership: "서버에 없는 파일의 앨범 변경",
+  invalidClassificationAssignment: "서버에 없는 파일의 분류 변경",
+  lifecycleTransitionRefused: "서버가 상태 변경을 거절함",
+  operationConflict: "다른 기기의 변경과 충돌",
+  epochChanged: "서버 라이브러리가 다시 설정됨",
+};
+
+export type AuthoritySyncSummary = {
+  problemCount: number;
+  problems: string[];
+  notes: string[];
+};
+
+/**
+ * Blocked intents and failing lanes are problems; waiting and dropped intents are
+ * informational (they resolve or were settled by the server state).
+ */
+export function authoritySyncSummary(health: AuthoritySyncHealth | null): AuthoritySyncSummary {
+  if (!health) return { problemCount: 0, problems: [], notes: [] };
+  const problems: string[] = [];
+  let problemCount = 0;
+  const blocked = health.albums.blockedCount + health.classifications.blockedCount;
+  if (blocked > 0) {
+    problemCount += blocked;
+    problems.push(`서버에서 막힌 변경 ${blocked.toLocaleString()}개`);
+  }
+  if (health.assets.stopped) {
+    problemCount += 1;
+    problems.push("삭제·복원 변경 전송이 멈춤");
+  }
+  // Both lanes share one credential and connection, so one cause is reported once.
+  const failures = new Set([health.authorityPassFailure?.code, health.assetLaneFailure?.code].filter((code): code is string => Boolean(code)));
+  failures.forEach((code) => problems.push(`서버 동기화 실패 · ${LANE_FAILURE_TEXT[code] ?? "알 수 없는 오류"}`));
+  problemCount += failures.size;
+
+  const notes: string[] = [];
+  const waiting = health.albums.waitingCount + health.classifications.waitingCount;
+  if (waiting > 0) notes.push(`업로드를 기다리는 변경 ${waiting.toLocaleString()}개`);
+  const dropped = health.albums.droppedCount + health.classifications.droppedCount + health.assets.rejectedCount;
+  if (dropped > 0) {
+    const latest = [health.albums, health.classifications]
+      .filter((domain) => domain.droppedCount > 0 && domain.lastDropReason)
+      .sort((a, b) => (b.lastDroppedAt ?? "").localeCompare(a.lastDroppedAt ?? ""))[0]?.lastDropReason
+      ?? health.assets.rejectedReason;
+    const reason = latest ? DROP_REASON_TEXT[latest] ?? "서버 상태가 우선함" : null;
+    notes.push(`서버가 받지 않은 변경 ${dropped.toLocaleString()}개${reason ? ` · 최근: ${reason}` : ""}`);
+  }
+  return { problemCount, problems, notes };
+}
+
+function AuthoritySyncBlock({ summary }: { summary: AuthoritySyncSummary }) {
+  if (summary.problems.length === 0 && summary.notes.length === 0) return null;
+  return <StatusBlock title="서버 동기화">
+    <div className="status-center__sync-list" role="status">
+      {summary.problems.map((text) => <div key={text} className="status-center__sync" data-tone="problem">
+        <span className="status-center__dot" aria-hidden="true" />
+        <span>{text}</span>
+      </div>)}
+      {summary.notes.map((text) => <div key={text} className="status-center__sync" data-tone="note">
+        <span className="status-center__dot" aria-hidden="true" />
+        <span>{text}</span>
+      </div>)}
     </div>
   </StatusBlock>;
 }

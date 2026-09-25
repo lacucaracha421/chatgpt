@@ -2619,6 +2619,26 @@ pub fn album_sync_status(
         .map_err(CommandError::from)
 }
 
+/// Local-only view of silent sync trouble (blocked, waiting, dropped and rejected intents,
+/// and the background lanes' latest failure). Reads the database and memory only.
+#[tauri::command]
+pub async fn authority_sync_health(
+    state: State<'_, AppState>,
+) -> Result<crate::library::authority_pass::AuthoritySyncHealth, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut health = library.authority_sync_health()?;
+        let (authority, assets, stopped) = crate::workload::lane_health(library.root());
+        health.authority_pass_failure = authority;
+        health.asset_lane_failure = assets;
+        health.assets.stopped = stopped;
+        Ok::<_, crate::library::error::LibraryError>(health)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
 #[tauri::command]
 pub async fn push_cloud_metadata_backup(
     state: State<'_, AppState>,

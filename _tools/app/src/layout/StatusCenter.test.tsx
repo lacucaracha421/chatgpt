@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import type { CloudBackfillProgress } from "../library/types";
+import type { AuthoritySyncHealth, CloudBackfillProgress } from "../library/types";
 
 const workload = vi.hoisted(() => ({
   native: false,
@@ -17,7 +17,7 @@ vi.mock("../app/workloadProfile", () => ({
 import { dismissPublication, startPublication } from "../library/publicationJobs";
 import { resetVaultExportJob, startVaultExport } from "../external-vault/vaultExportJob";
 import { resetVaultImportJob, startVaultImport } from "../external-vault/vaultImportJob";
-import { StatusCenter, type StatusWork } from "./StatusCenter";
+import { StatusCenter, authoritySyncSummary, type StatusWork } from "./StatusCenter";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
 
 afterEach(() => {
@@ -229,4 +229,65 @@ it("shows a running Private Vault export in the status panel", async () => {
   expect(screen.getByRole("status", { name: "비밀 보관함 내보내기" })).toHaveTextContent("내보내는 중 1 / 2");
   await act(async () => finish({ processed: 2, total: 2, exported: 1, failed: 1 }));
   expect(screen.getByRole("status", { name: "비밀 보관함 내보내기" })).toHaveTextContent("완료 · 내보냄 1개 · 실패 1개");
+});
+
+const domain = { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null };
+const healthy: AuthoritySyncHealth = {
+  albums: domain, classifications: domain,
+  assets: { rejectedCount: 0, rejectedReason: null, stopped: false },
+  authorityPassFailure: null, assetLaneFailure: null,
+};
+
+it("hides server sync when every authority count is zero", async () => {
+  const user = userEvent.setup();
+  render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} authorityHealth={healthy} onNavigate={vi.fn()} />);
+  await user.click(screen.getByRole("button", { name: "상태" }));
+  expect(screen.queryByRole("region", { name: "서버 동기화" })).not.toBeInTheDocument();
+});
+
+it("shows waiting and dropped changes as information without a problem count", async () => {
+  const user = userEvent.setup();
+  render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} onNavigate={vi.fn()} authorityHealth={{
+    ...healthy,
+    albums: { ...domain, waitingCount: 2, droppedCount: 1, lastDropReason: "assetDeleted", lastDroppedAt: "2026-09-24T00:00:00Z" },
+    classifications: { ...domain, waitingCount: 1, droppedCount: 2, lastDropReason: "albumDeleted", lastDroppedAt: "2026-09-25T00:00:00Z" },
+    assets: { rejectedCount: 1, rejectedReason: "operationConflict", stopped: false },
+  }} />);
+  const trigger = screen.getByRole("button", { name: "상태" });
+  expect(trigger).toHaveAttribute("data-state-tone", "idle");
+  await user.click(trigger);
+  const block = screen.getByRole("region", { name: "서버 동기화" });
+  expect(block).toHaveTextContent("업로드를 기다리는 변경 3개");
+  expect(block).toHaveTextContent("서버가 받지 않은 변경 4개 · 최근: 삭제된 앨범");
+  expect(within(block).queryByText(/막힌|실패|멈춤/)).not.toBeInTheDocument();
+});
+
+it("counts blocked changes, a stopped Asset queue and a failing lane as problems", async () => {
+  const user = userEvent.setup();
+  render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} onNavigate={vi.fn()} authorityHealth={{
+    ...healthy,
+    albums: { ...domain, blockedCount: 2 },
+    classifications: { ...domain, blockedCount: 1 },
+    assets: { rejectedCount: 0, rejectedReason: null, stopped: true },
+    authorityPassFailure: { code: "credential_store_locked", at: "2026-09-25T00:00:00Z" },
+    assetLaneFailure: { code: "credential_store_locked", at: "2026-09-25T00:00:00Z" },
+  }} />);
+  const trigger = screen.getByRole("button", { name: "상태 · 문제 5개" });
+  expect(trigger).toHaveAttribute("data-state-tone", "attention");
+  await user.click(trigger);
+  const block = screen.getByRole("region", { name: "서버 동기화" });
+  expect(block).toHaveTextContent("서버에서 막힌 변경 3개");
+  expect(block).toHaveTextContent("삭제·복원 변경 전송이 멈춤");
+  expect(within(block).getAllByText("서버 동기화 실패 · 비밀번호 보관함이 잠겨 있음")).toHaveLength(1);
+});
+
+it("names a network failure and an unknown drop reason plainly", () => {
+  const summary = authoritySyncSummary({
+    ...healthy,
+    classifications: { ...domain, droppedCount: 1, lastDropReason: "somethingNew", lastDroppedAt: "2026-09-25T00:00:00Z" },
+    assetLaneFailure: { code: "network", at: "2026-09-25T00:00:00Z" },
+  });
+  expect(summary.problemCount).toBe(1);
+  expect(summary.problems).toEqual(["서버 동기화 실패 · 연결 실패"]);
+  expect(summary.notes).toEqual(["서버가 받지 않은 변경 1개 · 최근: 서버 상태가 우선함"]);
 });

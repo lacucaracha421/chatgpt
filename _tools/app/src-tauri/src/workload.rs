@@ -1,8 +1,11 @@
 //! Machine-local workload policy and native owners of mobile-critical timers.
-use crate::library::authority_pass::{take_local_work, AuthoritySchedule};
+use crate::cloud::failure::CloudFailureReason;
+use crate::library::authority_pass::{
+    take_local_work, AuthorityPassOutcome, AuthoritySchedule, LaneFailure,
+};
 use serde::{Deserialize, Serialize};
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex, OnceLock,
@@ -21,6 +24,91 @@ pub(crate) fn video_prepared() {
     if let Some(app) = APP.get() {
         let _ = app.emit("library://asset-authority-changed", ());
     }
+}
+
+/// Latest outcome of the background authority lanes for one library, in memory only.
+/// A lane that fails every pass would otherwise be invisible; only closed codes are kept.
+#[derive(Default)]
+struct LaneHealth {
+    root: Option<PathBuf>,
+    authority: Option<LaneFailure>,
+    assets: Option<LaneFailure>,
+    asset_stopped: bool,
+}
+static LANE_HEALTH: Mutex<LaneHealth> = Mutex::new(LaneHealth {
+    root: None,
+    authority: None,
+    assets: None,
+    asset_stopped: false,
+});
+
+/// Record one lane run; a success clears that lane's failure. Emits
+/// `library://authority-health-changed` only when the visible state changes.
+fn record_lane(
+    app: &tauri::AppHandle,
+    root: &Path,
+    assets: bool,
+    failure: Option<&'static str>,
+    stopped: bool,
+) {
+    let changed = {
+        let mut guard = LANE_HEALTH
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let health = &mut *guard;
+        if health.root.as_deref() != Some(root) {
+            *health = LaneHealth {
+                root: Some(root.to_path_buf()),
+                ..LaneHealth::default()
+            };
+        }
+        let visible = |h: &LaneHealth| {
+            (
+                h.authority.as_ref().map(|f| f.code),
+                h.assets.as_ref().map(|f| f.code),
+                h.asset_stopped,
+            )
+        };
+        let before = visible(health);
+        let slot = if assets {
+            &mut health.assets
+        } else {
+            &mut health.authority
+        };
+        match failure {
+            // Keep the time the failure began while the same cause repeats.
+            Some(code) if slot.as_ref().is_some_and(|f| f.code == code) => {}
+            Some(code) => {
+                *slot = Some(LaneFailure {
+                    code,
+                    at: chrono::Utc::now().to_rfc3339(),
+                })
+            }
+            None => *slot = None,
+        }
+        if assets {
+            health.asset_stopped = stopped;
+        }
+        before != visible(health)
+    };
+    if changed {
+        let _ = app.emit("library://authority-health-changed", ());
+    }
+}
+
+/// The recorded lane failures and Asset-lane stop for `root`: `(authority, assets, stopped)`.
+pub(crate) fn lane_health(root: &Path) -> (Option<LaneFailure>, Option<LaneFailure>, bool) {
+    let health = LANE_HEALTH
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if health.root.as_deref() != Some(root) {
+        return (None, None, false);
+    }
+    (
+        health.authority.clone(),
+        health.assets.clone(),
+        health.asset_stopped,
+    )
 }
 
 const RECOVERY: Duration = Duration::from_secs(180);
@@ -416,7 +504,15 @@ fn start_timers(app: tauri::AppHandle) {
                         restricted,
                         changed: false,
                     };
-                    let (outcome, status) = lib.run_authority_pass().unwrap_or_default();
+                    let (outcome, status) = lib.run_authority_pass().unwrap_or_else(|error| {
+                        let failure = Some(CloudFailureReason::from_error(&error).code());
+                        let outcome = AuthorityPassOutcome {
+                            failure,
+                            ..AuthorityPassOutcome::default()
+                        };
+                        (outcome, None)
+                    });
+                    record_lane(&handle, lib.root(), false, outcome.failure, false);
                     finish.changed = outcome.changed();
                     for (changed, event) in [
                         (outcome.albums, "library://album-authority-changed"),
@@ -439,7 +535,17 @@ fn start_timers(app: tauri::AppHandle) {
                     }
                     std::thread::spawn(move || {
                         let _reset = Reset(&ASSETS_BUSY);
-                        if lib.run_asset_lane(&status, restricted).unwrap_or(false) {
+                        let (changed, failure, stopped) =
+                            match lib.run_asset_lane(&status, restricted) {
+                                Ok(lane) => (lane.changed, None, lane.stopped),
+                                Err(error) => (
+                                    false,
+                                    Some(CloudFailureReason::from_error(&error).code()),
+                                    false,
+                                ),
+                            };
+                        record_lane(&handle, lib.root(), true, failure, stopped);
+                        if changed {
                             let _ = handle.emit("library://asset-authority-changed", ());
                             schedule
                                 .lock()
