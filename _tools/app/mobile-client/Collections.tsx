@@ -248,22 +248,6 @@ function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:st
     {selected&&<><ol className="collection-episodes" aria-label={`${selected.name} 회차`}>{selected.episodes.slice(0,limit).map(episode=><li key={episode.id}><span className="numeric">{episode.episodeNumber}</span><strong>{episode.name}</strong><small>{[episode.airDate,episode.runtimeMinutes?`${episode.runtimeMinutes}분`:null].filter(Boolean).join(' · ')}</small></li>)}</ol>{selected.episodes.length>limit&&<Button variant="ghost" onClick={()=>setLimit(n=>n+30)}>회차 더 보기</Button>}</>}
     {!!item.series?.cast.length&&<p className="collection-cast">출연 · {item.series.cast.join(' · ')}</p>}</section>;
 }
-/** Details read only for an inbox cover, shared while the inbox is open (cleared on each open). */
-const inboxCovers=new Map<string,Promise<{revision:string;item:CollectionSummary}>>();
-/** A 신간 알림 group's cover: the listed card's artwork when loaded, otherwise the work's own detail. */
-function InboxCover({collectionId,name,known,knownRevision,active}:{collectionId:string;name:string;known?:CollectionSummary;knownRevision:string;active:boolean}) {
-  const [loaded,setLoaded]=useState<{revision:string;item:CollectionSummary}|null>(null);
-  useEffect(()=>{
-    if(known||!active)return;
-    let live=true,request=inboxCovers.get(collectionId);
-    if(!request){request=api<{revision:string;item:CollectionSummary}>(`/v1/collections/${encodeURIComponent(collectionId)}`);inboxCovers.set(collectionId,request);request.catch(()=>inboxCovers.delete(collectionId));}
-    void request.then(reply=>{if(live&&reply?.item?.id===collectionId)setLoaded(reply);},()=>{});
-    return()=>{live=false;};
-  },[collectionId,known,active]);
-  const item=known??loaded?.item;
-  if(!item)return <span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>;
-  return <Artwork item={item} id={collectionCover(item)} revision={known?knownRevision:loaded!.revision} active={active} label={name}/>;
-}
 const Stars=({score}:{score:number})=><span className="collection-score" aria-label={`내 별점 ${score.toFixed(1)}점`}><StarSolid aria-hidden="true"/><span className="numeric">{score.toFixed(1)}</span></span>;
 function WorkCard({work,revision,active,meta=true,unread=0,onOpen}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;/** Unread 신간 알림 of this manga, as on the PC card. */unread?:number;onOpen(id:string):void}) {
   const credit=collectionCardCredit(work),date=collectionCardDate(work);
@@ -350,7 +334,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const [showcaseOpen,setShowcaseOpen]=useState(false),[showcaseAll,setShowcaseAll]=useState(false);
   const [sheet,setSheet]=useState<'sort'|'rating'|null>(null);
   const [personalSheet,setPersonalSheet]=useState<PersonalSheet>(null);
-  // 신간 알림: counts for the chip and manga card badges, and the inbox level (Collections tab only).
+  // 신간: unread counts for the entry badge and manga card badges, and the 신간 screen level (Collections tab only).
   const [releases,setReleases]=useState<ReleaseCounts>(NO_RELEASES),[inboxOpen,setInboxOpen]=useState(false);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[volumeLimit,setVolumeLimit]=useState(96),[overview,setOverview]=useState(false);
@@ -413,9 +397,11 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setTab(next);};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   const openWork=(id:string)=>{if(listRef.current&&!showcaseAll&&!inboxOpen)listScroll.current=listRef.current.scrollTop;setSheet(null);setSelected(id);};
-  const openInbox=()=>{if(listRef.current&&!showcaseAll)listScroll.current=listRef.current.scrollTop;inboxCovers.clear();setSheet(null);setInboxOpen(true);};
+  const openInbox=()=>{if(listRef.current&&!showcaseAll)listScroll.current=listRef.current.scrollTop;setSheet(null);setInboxOpen(true);};
   const unreadOf=(work:CollectionSummary)=>releases.byCollection[work.id]??0;
-  const knownWork=(id:string)=>(type==='manga'?main.items:[]).find(work=>work.id===id)??showcase.items.find(work=>work.id===id&&work.type==='manga');
+  // The 신간 screen reads owned counts and 신간 알림 through the edit outbox, so a queued change shows at once.
+  const ownedOf=(work:CollectionSummary,edition:number)=>edits.visible(work.id,'ownedVolumes',{editionIndex:edition,count:work.ownedVolumes?.find(entry=>entry.editionIndex===edition)?.count??null}).value.count;
+  const watching=(work:CollectionSummary)=>work.type==='manga'&&!!work.releaseWatch&&edits.visible(work.id,'releaseWatch',work.releaseWatch.enabled).value;
 
   const item=detail?.item, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];
   const covers=item?[{id:collectionCover(item),label:item.name},...volumes.map(v=>({id:v.coverArtworkId,label:[volumeLabel(v),volumeReleaseLabel(v)].filter(Boolean).join(' · ')}))]:[];
@@ -435,9 +421,9 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
   const header=selected
-    ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간 알림':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>}/>
+    ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>}/>
     :inboxOpen
-      ?<TopBar back={{label:'뒤로',onClick:()=>setInboxOpen(false)}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title={<>신간 알림{releases.unread>0&&<span className="numeric muted"> {releases.unread.toLocaleString()}</span>}</>}/>
+      ?<TopBar back={{label:'뒤로',onClick:()=>setInboxOpen(false)}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title="신간"/>
     :showcaseAll
       ?<TopBar loading={showcase.busy&&'쇼케이스 불러오는 중'} back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</>}/>
       :searching&&tab!=='av'
@@ -445,7 +431,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
-        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{releases.unread>0&&<button className="collection-release-chip" aria-label={`신간 알림 ${releases.unread}개 보기`} onClick={openInbox}>신간 <span className="numeric">{releases.unread.toLocaleString()}</span></button>}{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}</>}/>;
+        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={<><button className="collection-release-chip" aria-label={releases.unread>0?`신간 보기, 새 알림 ${releases.unread}개`:'신간 보기'} onClick={openInbox}>신간{releases.unread>0&&<span className="collection-release-count numeric">{releases.unread.toLocaleString()}</span>}</button>{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}</>}/>;
 
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{main.legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>;
@@ -484,8 +470,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} unread={unreadOf(work)} onOpen={openWork}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
     </>}</div>
-    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} onCounts={setReleases} onOpen={openWork}
-      cover={(id,name)=><InboxCover collectionId={id} name={name} known={knownWork(id)} knownRevision={type==='manga'?revision:showcase.page?.revision??''} active={active&&!paused&&!selected}/>}/>}
+    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} onCounts={setReleases} onOpen={openWork} ownedOf={ownedOf} watching={watching}
+      cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>):<>
       {background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}
       <div className={`collection-detail-intro ${background?'has-backdrop':''}`}>

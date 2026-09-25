@@ -63,6 +63,9 @@ pub(crate) struct ReplicaCollection {
     release_watch: Option<ReleaseWatchPayload>,
     #[serde(rename = "ownedVolumes", skip_serializing_if = "Option::is_none")]
     owned_volumes: Option<Vec<OwnedVolumesPayload>>,
+    /// Read-only Kakao/MangaDex volume schedule, same gating as the tracking keys.
+    #[serde(rename = "releaseSchedule", skip_serializing_if = "Option::is_none")]
+    release_schedule: Option<ReleaseSchedulePayload>,
 }
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(crate) struct ReleaseWatchPayload {
@@ -77,6 +80,43 @@ pub(crate) struct OwnedVolumesPayload {
     edition_index: u8,
     /// Volumes owned in any format, as the PC ownership panel counts them.
     count: i64,
+}
+/// `releaseSchedule` (`mobile_collections.ReleaseSchedule`); a provider without a binding is null.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct ReleaseSchedulePayload {
+    kakao: Option<KakaoSchedulePayload>,
+    mangadex: Option<MangaDexSchedulePayload>,
+}
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KakaoSchedulePayload {
+    /// The owned-volume edition these Korean volumes belong to. Kakao sync materializes
+    /// its volumes as edition 0 and the binding carries no edition, so this is always 0.
+    edition_index: u8,
+    /// The binding's last successful Kakao sync.
+    checked_at: Option<String>,
+    volumes: Vec<KakaoScheduleVolume>,
+}
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KakaoScheduleVolume {
+    volume_number: i64,
+    date: Option<String>,
+    /// As `release_watch` computes it: relative to `checked_at`, not to the publication time.
+    status: Option<&'static str>,
+}
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MangaDexSchedulePayload {
+    checked_at: Option<String>,
+    latest_volume: Option<i64>,
+    volumes: Vec<MangaDexScheduleVolume>,
+}
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MangaDexScheduleVolume {
+    volume_number: i64,
+    edition_index: Option<u8>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -359,11 +399,11 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
             }
             let series = committed_series(&transaction, &summary.id)?;
             let film = committed_film(&transaction, &summary.id)?;
-            let (release_watch, owned_volumes) = if tracking && summary.collection_type == crate::library::models::CollectionType::Manga {
+            let (release_watch, owned_volumes, release_schedule) = if tracking && summary.collection_type == crate::library::models::CollectionType::Manga {
                 let (watch, owned) = committed_tracking(&transaction, &summary.id)?;
-                (Some(watch), Some(owned))
+                (Some(watch), Some(owned), Some(committed_release_schedule(&transaction, &summary.id)?))
             } else {
-                (None, None)
+                (None, None, None)
             };
             let collection = ReplicaCollection {
                 series,
@@ -373,6 +413,7 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
                 artworks,
                 release_watch,
                 owned_volumes,
+                release_schedule,
             };
             metadata_bytes += serde_json::to_vec(&collection)
                 .map_err(|_| LibraryError::InvalidCloudResponse)?
@@ -978,6 +1019,65 @@ mod tests {
     }
 
     #[test]
+    fn version_two_publishes_the_release_schedule_from_stored_provider_rows() {
+        let (_temp, library) = personal_edit_fixture();
+        library.connection().unwrap().execute_batch(
+            "INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('m','Bare manga','manga','2026','2026'),('g','Game','game','2026','2026');
+             INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,last_synced_at,created_at,updated_at) VALUES
+                ('c','kakao','k','{}','2026-09-20T00:00:00+00:00','t','t'),
+                ('c','mangadex','md','{}',NULL,'t','t'),
+                ('c','aladin','a','{}','2026-09-20T00:00:00+00:00','t','t');
+             INSERT INTO collection_volume_sources(collection_id,volume_number,provider,provider_item_id,title,publication_date,provider_data_json,created_at,updated_at) VALUES
+                ('c',4,'kakao','k4','4','2026-10-10','{}','t','t'),
+                ('c',3,'kakao','k3','3','2026-09-16','{}','t','t'),
+                ('c',2,'kakao','k2','2','2026-09-20','{}','t','t'),
+                ('c',5,'kakao','k5','5',NULL,'{}','t','t'),
+                ('c',6,'kakao','k6','6','soon','{}','t','t'),
+                ('c',7,'aladin','a7','7','2026-09-01','{}','t','t');
+             INSERT INTO collection_mangadex_baselines(collection_id,manga_id) VALUES('c','md');
+             INSERT INTO collection_mangadex_seen_volumes(collection_id,volume_number,edition_index) VALUES('c',9,0),('c',1,0),('c',2,1),('c',2,0),('c',1200,0);",
+        ).unwrap();
+        let endpoint = "https://sync.example.test";
+        let library_id = library.library_id().unwrap();
+        library.adopt_collection_personal_edit_library(endpoint, &library_id).unwrap();
+        let snapshot = |edit_version| {
+            let feature = PersonalEditFeature { endpoint: endpoint.into(), library_id: library_id.clone(), edit_version };
+            serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}).unwrap().replica).unwrap()
+        };
+        let find = |value: &serde_json::Value, id: &str| value["collections"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
+        let v2 = snapshot(2);
+        // Status as the release watch computes it at the last Kakao check: a date after
+        // that day (the pre-registered 4권) is upcoming, the check day itself is released.
+        assert_eq!(find(&v2, "c")["releaseSchedule"], json!({
+            "kakao": {"editionIndex": 0, "checkedAt": "2026-09-20T00:00:00+00:00", "volumes": [
+                {"volumeNumber": 2, "date": "2026-09-20", "status": "released"},
+                {"volumeNumber": 3, "date": "2026-09-16", "status": "released"},
+                {"volumeNumber": 4, "date": "2026-10-10", "status": "upcoming"},
+                {"volumeNumber": 5, "date": null, "status": null},
+                {"volumeNumber": 6, "date": null, "status": null}]},
+            "mangadex": {"checkedAt": null, "latestVolume": 9, "volumes": [
+                {"volumeNumber": 1, "editionIndex": 0}, {"volumeNumber": 2, "editionIndex": 0},
+                {"volumeNumber": 2, "editionIndex": 1}, {"volumeNumber": 9, "editionIndex": 0}]},
+        }));
+        assert_eq!(find(&v2, "m")["releaseSchedule"], json!({"kakao": null, "mangadex": null}));
+        assert!(find(&v2, "g").get("releaseSchedule").is_none());
+        // Without a check time there is no status; a binding without rows is an empty schedule.
+        library.connection().unwrap().execute_batch(
+            "UPDATE collection_external_bindings SET last_synced_at=NULL WHERE collection_id='c' AND provider='kakao';
+             DELETE FROM collection_volume_sources WHERE volume_number<>4;
+             DELETE FROM collection_mangadex_seen_volumes;",
+        ).unwrap();
+        assert_eq!(find(&snapshot(2), "c")["releaseSchedule"], json!({
+            "kakao": {"editionIndex": 0, "checkedAt": null, "volumes": [{"volumeNumber": 4, "date": "2026-10-10", "status": null}]},
+            "mangadex": {"checkedAt": null, "latestVolume": null, "volumes": []},
+        }));
+        let legacy = serde_json::to_value(&library.cloud_collections_snapshot(None, &|_| {}).unwrap().replica).unwrap();
+        for body in [snapshot(1), legacy] {
+            assert!(body["collections"].as_array().unwrap().iter().all(|c| c.get("releaseSchedule").is_none()));
+        }
+    }
+
+    #[test]
     fn publication_receives_edits_before_the_revision_and_sends_the_handshake_as_publisher() {
         use crate::library::collection_personal_edits::tests::{configure, entry, scripted};
         let (_temp, library) = personal_edit_fixture();
@@ -1134,6 +1234,78 @@ fn committed_tracking(db: &rusqlite::Connection, id: &str) -> Result<(ReleaseWat
         .query_map([id], |row| Ok(OwnedVolumesPayload { edition_index: row.get(0)?, count: row.get(1)? }))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok((watch, owned))
+}
+
+/// Server bounds of `releaseSchedule` (volume numbers 1-999, <= 999 entries per provider).
+const MAX_SCHEDULE_VOLUME: i64 = 999;
+
+/// A stored sync timestamp the server accepts (`checkedAt`: 1-100 characters).
+fn checked_at(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.is_empty() && value.len() <= 100)
+}
+
+/// One manga Collection's Kakao volume dates and MangaDex volumes, from stored sync rows.
+/// Every writer of those rows (Kakao/MangaDex sync) upserts the provider binding in the same
+/// transaction, so the 0074 `collection_external_bindings` triggers mark the publication dirty.
+fn committed_release_schedule(db: &rusqlite::Connection, id: &str) -> Result<ReleaseSchedulePayload, LibraryError> {
+    use rusqlite::OptionalExtension;
+    let binding = |provider: &str| {
+        db.query_row(
+            "SELECT last_synced_at FROM collection_external_bindings WHERE collection_id=?1 AND provider=?2",
+            rusqlite::params![id, provider],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+    };
+    let kakao = match binding("kakao")? {
+        None => None,
+        Some(synced) => {
+            let checked = checked_at(synced);
+            let volumes = db
+                .prepare(
+                    "SELECT volume_number, publication_date FROM collection_volume_sources
+                     WHERE collection_id=?1 AND provider='kakao' AND volume_number BETWEEN 1 AND ?2
+                     ORDER BY volume_number",
+                )?
+                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+                })?
+                .map(|row| {
+                    let (volume_number, stored) = row?;
+                    // Same parse as the release watch; published in canonical form only.
+                    let date = stored
+                        .as_deref()
+                        .and_then(|value| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+                        .filter(|date| (1..=9999).contains(&chrono::Datelike::year(date)))
+                        .map(|date| date.format("%Y-%m-%d").to_string());
+                    let status = match (date.is_some(), checked.as_deref()) {
+                        (true, Some(checked)) => crate::library::release_status_at(stored.as_deref(), checked),
+                        _ => None,
+                    };
+                    Ok(KakaoScheduleVolume { volume_number, date, status })
+                })
+                .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+            Some(KakaoSchedulePayload { edition_index: 0, checked_at: checked, volumes })
+        }
+    };
+    let mangadex = match binding("mangadex")? {
+        None => None,
+        Some(synced) => {
+            let volumes = db
+                .prepare(
+                    "SELECT volume_number, edition_index FROM collection_mangadex_seen_volumes
+                     WHERE collection_id=?1 AND volume_number BETWEEN 1 AND ?2 AND edition_index BETWEEN 0 AND 3
+                     ORDER BY volume_number, edition_index LIMIT ?2",
+                )?
+                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME], |row| {
+                    Ok(MangaDexScheduleVolume { volume_number: row.get(0)?, edition_index: Some(row.get(1)?) })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let latest_volume = volumes.last().map(|volume| volume.volume_number);
+            Some(MangaDexSchedulePayload { checked_at: checked_at(synced), latest_volume, volumes })
+        }
+    };
+    Ok(ReleaseSchedulePayload { kakao, mangadex })
 }
 
 fn committed_series(db: &rusqlite::Connection, id: &str) -> Result<Option<serde_json::Value>, LibraryError> {

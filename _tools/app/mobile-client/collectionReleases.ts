@@ -8,18 +8,22 @@
  * the only place they show (user decision, 2026-09-25).
  *
  * Only the two client routes are used: the unread list read and the acknowledge command.
- * The list asks for the default tablet kinds (new volumes and release-date changes), and the
- * per-Collection acknowledge form uses the same default, so a status change the tablet never
- * showed stays unread on the PC.
+ * The tablet reads all three kinds (a 발매됨 status change counts too), and the per-Collection
+ * acknowledge form names the same three kinds, so 확인 clears exactly what was shown.
+ *
+ * The 신간 screen also reads each manga's `releaseSchedule` (published by an upgraded PC) to
+ * list unowned Korean volumes and how far the Japanese edition is ahead; the pure helpers for
+ * that live here too.
  */
 import {api} from './transport';
+import {collectionPath, type CollectionPage, type CollectionSummary, type KakaoReleaseVolume} from './collectionModel';
 
 export const RELEASES_PATH = '/v1/collections/releases';
 export const RELEASES_ACKNOWLEDGE_PATH = '/v1/collections/releases/acknowledge';
-/** The count read: `counts` cover every Collection whatever the page, so one item keeps it tiny. */
-export const RELEASE_COUNTS_PATH = `${RELEASES_PATH}?limit=1`;
-
 export type ReleaseKind = 'new_volume' | 'release_date_changed' | 'release_status_changed';
+export const RELEASE_KINDS: ReleaseKind[] = ['new_volume', 'release_date_changed', 'release_status_changed'];
+/** The count read: `counts` cover every Collection whatever the page, so one item keeps it tiny. */
+export const RELEASE_COUNTS_PATH = `${RELEASES_PATH}?${new URLSearchParams({limit: '1', kinds: RELEASE_KINDS.join(',')})}`;
 export type ReleaseEvent = {
   eventId: string;
   collectionId: string;
@@ -59,17 +63,60 @@ export function releaseCounts(reply: unknown): ReleaseCounts {
 }
 
 export function releasesPage(cursor: string | null, signal?: AbortSignal): Promise<ReleaseList> {
-  const params = new URLSearchParams({limit: '50'});
+  const params = new URLSearchParams({limit: '100', kinds: RELEASE_KINDS.join(',')});
   if (cursor) params.set('cursor', cursor);
   return api<ReleaseList>(`${RELEASES_PATH}?${params}`, signal);
 }
 
+/** Every unread event (all three kinds), page after page; bounded so a runaway list cannot loop. */
+export async function allUnreadReleases(signal?: AbortSignal): Promise<{items: ReleaseEvent[]; counts: ReleaseCounts}> {
+  const items: ReleaseEvent[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null, counts = NO_RELEASES;
+  for (let page = 0; page < 20; page++) {
+    const reply: ReleaseList = await releasesPage(cursor, signal);
+    if (page === 0) counts = releaseCounts(reply);
+    for (const event of reply.items ?? []) if (!seen.has(event.eventId)) { seen.add(event.eventId); items.push(event); }
+    if (!reply.hasMore || !reply.nextCursor) break;
+    cursor = reply.nextCursor;
+  }
+  return {items, counts};
+}
+
+export type MangaShelf = {works: CollectionSummary[]; revision: string; ready: boolean};
 /**
- * Mark events read, by id or every unread (tablet-kind) event of one Collection. Retrying with
- * a fresh operation id is harmless: an event already read comes back in `alreadyRead`.
+ * Every published manga Collection (the list route has no 신간 알림 filter), page after page
+ * of one publication revision. A publication that lands mid-read restarts it once.
+ */
+export async function allMangaWorks(signal?: AbortSignal): Promise<MangaShelf> {
+  const filters = {sort: 'name', direction: 'asc', rating: 'all'} as const;
+  for (let attempt = 0; ; attempt++) {
+    const works: CollectionSummary[] = [];
+    let cursor: string | null = null, first: CollectionPage | null = null;
+    try {
+      for (let page = 0; page < 100; page++) {
+        const reply: CollectionPage = await api<CollectionPage>(collectionPath('manga', '', false, cursor, filters), signal);
+        first ??= reply;
+        if (reply.revision !== first.revision) throw Object.assign(new Error('Collection list changed'), {status: 409});
+        works.push(...(reply.items ?? []));
+        if (!reply.nextCursor) break;
+        cursor = reply.nextCursor;
+      }
+      return {works: works.filter(work => work.type === 'manga'), revision: first?.revision ?? '', ready: first?.ready !== false};
+    } catch (reason) {
+      if (attempt > 0 || (reason as {status?: number}).status !== 409 || signal?.aborted) throw reason;
+    }
+  }
+}
+
+/**
+ * Mark events read, by id or every unread event of one Collection (all three kinds, as the
+ * tablet lists them). Retrying with a fresh operation id is harmless: an event already read
+ * comes back in `alreadyRead`.
  */
 export function acknowledgeReleases(target: {eventIds: string[]} | {collectionId: string}, signal?: AbortSignal): Promise<AcknowledgeReply> {
-  return api<AcknowledgeReply>(RELEASES_ACKNOWLEDGE_PATH, signal, {version: 1, operationId: crypto.randomUUID(), ...target});
+  const body = 'collectionId' in target ? {...target, kinds: RELEASE_KINDS} : target;
+  return api<AcknowledgeReply>(RELEASES_ACKNOWLEDGE_PATH, signal, {version: 1, operationId: crypto.randomUUID(), ...body});
 }
 
 /** A provider date `2026-10-03` as `2026.10.3`; other text is shown as it came. */
@@ -102,4 +149,93 @@ export function groupReleases(events: ReleaseEvent[]): ReleaseGroup[] {
     else groups.set(event.collectionId, {collectionId: event.collectionId, name: event.collectionName, events: [event]});
   }
   return [...groups.values()];
+}
+
+/** Today in local time as `YYYY-MM-DD`, the form provider dates compare against. */
+export function localToday(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+const validDate = (value: string | null | undefined) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+
+export type KoreanVolume = {volumeNumber: number; date: string | null; upcoming: boolean; released: boolean; fresh: boolean};
+export type KoreanRow = {work: CollectionSummary; owned: number | null; volumes: KoreanVolume[]; fresh: number};
+export type JapanRow = {work: CollectionSummary; latest: number; ahead: number | null; aheadVolumes: {volumeNumber: number; fresh: boolean}[]; fresh: number};
+
+/** A Korean volume's line: "3권 · 9월 16일 발매됨", "4권 · 10월 10일 발매 예정", "5권 · 발매일 미정". */
+export function koreanVolumeLine(volume: KoreanVolume, today: string): string {
+  const head = `${volume.volumeNumber}권`;
+  if (!volume.date) return volume.released ? `${head} · 발매됨` : `${head} · 발매일 미정`;
+  const [year, month, day] = volume.date.split('-').map(Number);
+  const when = `${year === Number(today.slice(0, 4)) ? '' : `${year}년 `}${month}월 ${day}일`;
+  return `${head} · ${when} ${volume.upcoming ? '발매 예정' : '발매됨'}`;
+}
+
+const byCollection = (events: ReleaseEvent[]) => {
+  const map = new Map<string, ReleaseEvent[]>();
+  for (const event of events) map.set(event.collectionId, [...(map.get(event.collectionId) ?? []), event]);
+  return map;
+};
+const kakaoMax = (work: CollectionSummary) => Math.max(0, ...(work.releaseSchedule?.kakao?.volumes ?? []).map(volume => volume.volumeNumber));
+
+/**
+ * 한국 정발: every watched work whose Kakao edition has a volume beyond the owned count, with
+ * those volumes. `owned` is the visible (possibly still queued) count of the Kakao edition, or
+ * null when untracked (then every volume is unowned). Works are ordered by the nearest date
+ * that matters: the soonest upcoming volume first, then the most recently released, then
+ * works whose dates are unknown.
+ */
+export function koreanReleases(works: CollectionSummary[], ownedOf: (work: CollectionSummary, edition: number) => number | null, events: ReleaseEvent[], today: string): KoreanRow[] {
+  const unread = byCollection(events);
+  const rows: (KoreanRow & {group: number; key: string})[] = [];
+  for (const work of works) {
+    const kakao = work.releaseSchedule?.kakao;
+    if (!kakao) continue;
+    const owned = ownedOf(work, kakao.editionIndex);
+    const workEvents = unread.get(work.id) ?? [];
+    const freshVolumes = new Set(workEvents.filter(event => event.provider !== 'mangadex').map(event => event.volumeNumber));
+    const numbers = new Set<number>();
+    const volumes = (kakao.volumes ?? []).filter((volume: KakaoReleaseVolume) => Number.isInteger(volume.volumeNumber) && volume.volumeNumber > (owned ?? 0) && !numbers.has(volume.volumeNumber) && numbers.add(volume.volumeNumber))
+      .map((volume): KoreanVolume => {
+        const date = validDate(volume.date);
+        // `status` is as of the PC's check, so a known date decides against this device's today.
+        const upcoming = date ? date > today : volume.status === 'upcoming';
+        const released = date ? date <= today : volume.status === 'released';
+        return {volumeNumber: volume.volumeNumber, date, upcoming, released, fresh: freshVolumes.has(volume.volumeNumber)};
+      })
+      .sort((a, b) => a.volumeNumber - b.volumeNumber);
+    if (!volumes.length) continue;
+    const soonest = volumes.filter(volume => volume.upcoming && volume.date).map(volume => volume.date!).sort()[0];
+    const latest = volumes.filter(volume => volume.released && volume.date).map(volume => volume.date!).sort().reverse()[0];
+    rows.push({work, owned, volumes, fresh: workEvents.length, group: soonest ? 0 : latest ? 1 : 2, key: soonest ?? latest ?? ''});
+  }
+  rows.sort((a, b) => a.group - b.group || (a.group === 0 ? a.key.localeCompare(b.key) : b.key.localeCompare(a.key)) || a.work.name.localeCompare(b.work.name, 'ko'));
+  return rows.map(({group: _group, key: _key, ...row}) => row);
+}
+
+/**
+ * 일본: every watched work with MangaDex data, its latest Japanese volume and, when the Korean
+ * edition is behind, by how many volumes and which ones. Newly detected (unread MangaDex)
+ * volumes are marked. Works with a newly detected volume come first, then the furthest ahead.
+ */
+export function japanReleases(works: CollectionSummary[], events: ReleaseEvent[]): JapanRow[] {
+  const unread = byCollection(events);
+  const rows: JapanRow[] = [];
+  for (const work of works) {
+    const mangadex = work.releaseSchedule?.mangadex;
+    if (!mangadex) continue;
+    const listed = (mangadex.volumes ?? []).map(volume => volume.volumeNumber).filter(Number.isFinite);
+    const latest = mangadex.latestVolume ?? (listed.length ? Math.max(...listed) : null);
+    if (latest == null) continue;
+    const workEvents = unread.get(work.id) ?? [];
+    const fresh = new Set(workEvents.filter(event => event.provider === 'mangadex').map(event => event.volumeNumber));
+    const korean = work.releaseSchedule?.kakao?.volumes?.length ? kakaoMax(work) : null;
+    const ahead = korean != null && latest > korean ? latest - korean : null;
+    const numbers = new Set<number>();
+    if (ahead) for (let volume = korean! + 1; volume <= latest; volume++) numbers.add(volume);
+    for (const volume of fresh) if (volume <= latest) numbers.add(volume);
+    const aheadVolumes = [...numbers].sort((a, b) => a - b).map(volumeNumber => ({volumeNumber, fresh: fresh.has(volumeNumber)}));
+    rows.push({work, latest, ahead, aheadVolumes, fresh: workEvents.length});
+  }
+  const news = (row: JapanRow) => Number(row.aheadVolumes.some(volume => volume.fresh));
+  return rows.sort((a, b) => news(b) - news(a) || (b.ahead ?? 0) - (a.ahead ?? 0) || a.work.name.localeCompare(b.work.name, 'ko'));
 }

@@ -129,6 +129,7 @@ mod online_catalog;
 mod provider_requests;
 mod query;
 mod release_watch;
+pub(crate) use release_watch::release_status_at;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
 pub(crate) mod remote_progress;

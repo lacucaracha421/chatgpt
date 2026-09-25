@@ -62,7 +62,7 @@ pub(super) fn pending_release_changes(
     changes
 }
 
-fn release_status_at(publication_date: Option<&str>, checked_at: &str) -> Option<&'static str> {
+pub(crate) fn release_status_at(publication_date: Option<&str>, checked_at: &str) -> Option<&'static str> {
     let date = chrono::NaiveDate::parse_from_str(publication_date?, "%Y-%m-%d").ok()?;
     let checked = chrono::DateTime::parse_from_rfc3339(checked_at)
         .ok()?
@@ -763,6 +763,56 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    /// The mobile `releaseSchedule` reads Kakao source rows; a Kakao check must dirty the
+    /// Collection publication (0074 triggers on the binding and volume rows it writes).
+    #[test]
+    fn kakao_check_marks_the_collection_publication_dirty() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection_id = create_collection(&library, "던전밥", CollectionType::Manga);
+        library
+            .upsert_collection_external_binding(
+                &collection_id,
+                ExternalBindingInput {
+                    provider: "kakao".into(),
+                    external_id: "item-1".into(),
+                    provider_config_json: Some(
+                        r#"{"version":1,"query":"던전밥","groupFingerprint":"","knownItemIds":[]}"#.into(),
+                    ),
+                    provider_data_json: Some("{}".into()),
+                    last_synced_at: Some("2026-08-21T00:00:00Z".into()),
+                },
+            )
+            .unwrap();
+        subscribe_at(&library, &collection_id, Some("2026-08-21T00:00:00Z"));
+        let dirty = || -> bool {
+            library.connection().unwrap().query_row(
+                "SELECT generation<>published_generation FROM mobile_publication_state WHERE kind='collections'",
+                [], |row| row.get(0),
+            ).unwrap()
+        };
+        library.connection().unwrap()
+            .execute("UPDATE mobile_publication_state SET published_generation=generation WHERE kind='collections'", [])
+            .unwrap();
+        assert!(!dirty());
+        let mut future = item(2, Some("2026-10-10"));
+        future.item_id = "item-1".into();
+        future.base_title = "던전밥".into();
+        let result = library
+            .run_due_book_release_watch_with("kakao", "2026-09-25T00:00:00Z", |_| Ok(vec![future.clone()]))
+            .unwrap();
+        assert_eq!(result.checked, 1);
+        assert!(dirty());
+        let stored: (String, String) = library.connection().unwrap().query_row(
+            "SELECT source.publication_date, binding.last_synced_at FROM collection_volume_sources AS source
+             JOIN collection_external_bindings AS binding ON binding.collection_id=source.collection_id AND binding.provider='kakao'
+             WHERE source.collection_id=?1 AND source.provider='kakao' AND source.volume_number=2",
+            [&collection_id], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(stored, ("2026-10-10".into(), "2026-09-25T00:00:00Z".into()));
+        assert_eq!(super::release_status_at(Some(&stored.0), &stored.1), Some("upcoming"));
     }
 
     #[test]

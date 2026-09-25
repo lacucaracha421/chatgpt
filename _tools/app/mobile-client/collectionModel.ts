@@ -14,6 +14,14 @@ export type CollectionSummary = {
   releaseWatch?:{enabled:boolean;available:boolean}|null;
   /** Manga only, from an upgraded PC: owned volumes per tracked edition. */
   ownedVolumes?:{editionIndex:number;count:number}[]|null;
+  /** Manga only, from an upgraded PC: per-volume release data behind 신간 알림 (absent before). */
+  releaseSchedule?:ReleaseSchedule|null;
+};
+/** A Kakao (Korean edition) volume: `date` is `YYYY-MM-DD`; `upcoming` = pre-registered. */
+export type KakaoReleaseVolume = {volumeNumber:number;date:string|null;status:'upcoming'|'released'|null};
+export type ReleaseSchedule = {
+  kakao:null|{editionIndex:number;checkedAt:string|null;volumes:KakaoReleaseVolume[]};
+  mangadex:null|{checkedAt:string|null;latestVolume:number|null;volumes:{volumeNumber:number;editionIndex:number|null}[]};
 };
 export type CollectionSeason = {id:number;seasonNumber:number;name:string;airDate:string|null;posterArtworkId:string|null;episodes:{id:number;episodeNumber:number;name:string;airDate:string|null;runtimeMinutes:number|null}[]};
 /** TMDB film details as published by the PC: text only, without posters or local collection links. */
