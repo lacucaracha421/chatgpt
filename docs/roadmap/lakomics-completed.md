@@ -2,6 +2,65 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-26 — Catalog editions, Notes ledger, Collections releases and tablet manga tools
+
+Closed at the user's confirmation during the 2026-09-25/26 sessions ("그거빼면 다 만족", "동작은 정상이야"). Source of truth: commits `3c78843`–`a227f2c` on `main`. Production Linux library is at schema v97 (migration 0097, applied 2026-09-25); the Windows PC has not been updated (`WIN-SYNC-001`). Android 0.8.26 is installed on the tablet. This records closure; it is not a Windows or full native audit. `MOBILE-BUG-002`, `MOBILE-PARITY-001` and `PC-POLL-001`, already `DONE` in the backlog, are archived here with their last text.
+
+### Manga Catalog duplicate-edition checking
+
+Status: `DONE` — `3c78843` (Android 0.8.18, migration 0097). The PC compares the whole Manga Catalog with the `catalog_review.rs` rules, auto-merges confident pairs (identical title, equal pages, same category and languages, shared artist/group; reported to the server as `keepBoth`, one edition group, nothing hidden) and uploads the uncertain ones; a human decision always wins and a veto splits only that pair. Mobile review: 카탈로그 필터 sheet → 도구 → 중복 판본 검토 (확인 필요 / 처리됨) with two actions, "같은 작품으로 묶기" (`keepBoth` = PC `confirm`) and "다른 작품" (`notDuplicate` = `falsePositive`), through a durable decision outbox. Production first run 2026-09-25: 1,358 automatic merges, about 97 uncertain pairs; the user confirmed the review screen shows and the merges were published. Merges reach mobile grouping after a catalog publication. Known gaps are kept as one follow-up line in the backlog (Future-work notes).
+
+### Household ledger (가계부) in Notes
+
+Status: `DONE` — `1992b5e` (0.8.19), `98deae3` (each subscription once in 다가오는 결제), `e094486` (income day, 0.8.20). Replaces the requested monthly subscription calculator (USER-REQ-20260924). Design `docs/research/budget-notes-design-20260925.md`: a pinned 가계부 note with hidden per-month notes synced through the encrypted notes; monthly income, recurring charges with any cycle, plans and entries; no categories, KRW only. The user used it on 2026-09-25/26 and the follow-ups asked were fixed. Not built: in-ledger entry search; merging two ledgers created offline.
+
+### Collections release notifications and the tablet 신간 screen
+
+Status: `DONE` — server `9c2b396` (release inbox, tablet tracking edits) and `1d39f05` (per-manga `releaseSchedule`), Android `f94dcc7` (0.8.21: 신간 chip/inbox in Collections, card badges, per-manga 신간 알림 switch and owned-volume count editable on the tablet), `c537353` (0.8.22: 신간 screen with 한국 정발 / 일본 tabs), `29d3eb4` (NEW badge). Collections only, shown inside the app (no push notifications); shared read state. Home placement waits for the Revisit rebuild. The PC-side state kept in `notes_state` (release sync, personal-edit v2 receipts) moves to a proper table under `PERF-ALL-001`.
+
+### Tablet manga detail, MangaDex/Kakao connect and 원제
+
+Status: `DONE` — `b99b4ff` (0.8.23: info beside the cover, top-bar showcase and 신간 toggles, Korean genre names); server `19528c1` and Android `a53969c` (0.8.24: search and connect MangaDex/Kakao from the tablet, applied by the PC); server `36131ff` and `2539709` (0.8.25: several Kakao groups of one series, PC dialog and tablet); `a227f2c` (0.8.26: Japanese title from MangaDex as 원제, shown under the title on the tablet). The user confirmed the behaviour 2026-09-26. The PC applies a tablet pick 10–60 s later; faster pickup is `BIND-POLL-001` (backlog, folded into `PERF-ALL-001`).
+
+### USER-REQ-20260924 — delivered items
+
+Status: `DONE` for the items below; the remaining items stay in the backlog entry. The user said on 2026-09-25 that these were implemented.
+- Notes 동기화 is picked up by the PC immediately instead of the 5-minute notes poll (user-confirmed; the implementing commit was not identified in the log).
+- Notes editor lifts above the keyboard (`2af8d1e`, 0.8.2). Remaining places where the keyboard still covers the editor are tracked in USER-REQ-20260926.
+- Bottom navigation higher (`2af8d1e`, 0.8.2; 60 px in MOBILE-DESIGN-001).
+- PC asset and video viewer: chrome auto-hides and stays off the image, Left/Right seek videos by 5 s, Space plays/pauses (`0d5cf46`, `dda5aa6`).
+- Lightweight processing mode ("데이터 처리용 라이트모드") and system tray (`05b18b6`). Must be re-verified as features keep being added; that check is part of `PERF-ALL-001`.
+- Battery: idle polling and background work cut in Android 0.8.6 (`f25ddd8`); further reduction is part of `PERF-ALL-001`.
+- New-release notifications: see the section above.
+- Monthly subscription calculator: replaced by the household ledger above.
+- Notes v2 (`85aa109`, schema v96, Android 0.8.12–0.8.16), incl. secret notes; file and folder exchange between PC and tablet (`3627b70`, design `docs/research/file-exchange-design-20260924.md`, 0.8.10–0.8.11, per-device exchange tokens, status read via `/v1/sync/status`; unverified: Windows, ≥1 GiB files and resume, the R2 `exchange/` lifecycle rule); Manga reader page slider and 이어읽기 removal (`2af8d1e`, `f6ac798`); Collector items (`066e3c3`, `8f877ef`, `e626c4e`; subfolder entry kept as double-tap by choice).
+
+### MOBILE-BUG-002 — Mobile Catalog search does nothing
+
+Status: `DONE` — fixed in `7d2bfa6`; accepted on the tablet 2026-09-24.
+
+Search in the Android Catalog does not work. Reproduce first on the current APK: record the query, whether any request reaches the server (`searchMode=mobile` search-page path), the response, and whether the UI ignores it. Then fix the failing layer and verify search together with category inclusion, excluded tags and paging.
+
+### MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
+
+Status: `DONE` — slices 1–4 implemented and deployed (APK 0.8.x); accepted on the tablet 2026-09-24.
+
+The user chose these desktop features for Android, in this suggested order (smallest and safest first):
+1. **Film details** (read-only): show `WORKS-001` cast, release info and related works in mobile Collections. Publish the Film snapshot block alongside the TV `series` block (`src-tauri/src/cloud/collections.rs`, `committed_series`), then render it; local related works open the local work.
+2. **Personal Collection metadata edits** ([design](../research/mobile-collection-personal-edits-design-20260924.md), decisions recorded 2026-09-24): my rating, Showcase membership and memo, through the `MOBILE-WRITE-002` durable intent / expected-revision / receipt model proven by bookmarks. Works with the PC off and appears on PC without a manual sync.
+3. **Similarity review**: mobile shows the open review pairs and records `keep_existing` / `replace_existing` / `keep_both`; the PC applies file-level results. A decision must never delete or replace an original before the PC applies it under the existing ADR-0007 rules.
+4. **Library Trash**: move assets to the Library Trash from mobile, and browse/restore it. This activates `MOBILE-003`: it must use the tombstone, grace-period, acknowledgement and recovery protocol, never immediate deletion. Emptying the trash stays PC-only unless separately decided.
+
+Deferred but wanted on mobile later: character registration and reference-character management. Keep them PC-only until the user reopens them.
+
+### PC-POLL-001 — Cut the desktop app's idle server polling
+
+Status: `DONE` — implemented in `cf2075b`; re-measured 2026-09-25 (see below). Remaining pollers moved to `PC-POLL-002`.
+
+Server access log, 15 min with the Linux desktop app idle (client 100.122.139.56): 1,606 requests (~6,400/h), all 200 — `/v1/sync/status` 502, `/v1/mobile-catalog/status` 334, asset/album/classification/bookmark change feeds ~167 each. The desktop sends no `If-None-Match`, although the server supports ETag/304 on these endpoints (`conditional.py`). Apply what Android 0.8.6 did (`f25ddd8`): one sync-status read per pass with ETag, fetch a domain feed only when its cursor moved, idle backoff (5 → 15 → 30 → 60 s, back to fast after local writes/focus/changes), share one status read across the React sync hooks (`useAssetAuthoritySync`, `useAlbumAuthoritySync`, `useClassificationAuthoritySync`, `useCatalogBookmarkSync`, …) and the native lightweight-mode ticks. Measure the same 15-minute idle window before/after. Note: tablet traffic reaches the server through the local proxy and is logged as 100.76.119.29 (tablet 0.8.5 → 0.8.6: 476 → 184 requests per 15 min, first 15 min after install).
+
+After (`cf2075b`, Linux dev build, same 15-minute idle window, 2026-09-24 16:29–16:44 UTC): 151 requests (~600/h, −91%), 49 of them 304. `/v1/sync/status` 25 and `/v1/mobile-catalog/status` 25 (about one per minute once idle, as designed); the rest are pollers outside the coordinated pass (see `PC-POLL-002`). Three short returns to the 5 s interval (~every 3 min) coincided with the app's own uploads (character replica, saved X media, a media ticket); the source of that 3-minute cadence was not traced.
+
 ## Closure checkpoint — 2026-09-24 — Rust test runtime
 
 ### SIMILARITY-002B — PDQ mirror/rotation candidates

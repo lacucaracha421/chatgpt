@@ -8,14 +8,18 @@ Updated 2026-09-23 (evening): the Android 0.7 browse-first redesign, thumbnail l
 
 Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is implemented; `DEV-TEST-001` is archived in the [2026-09-24 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-24--rust-test-runtime).
 
+Updated 2026-09-26: Manga Catalog duplicate editions, the Notes household ledger, Collections release notifications with the tablet 신간 screen, tablet manga detail / MangaDex–Kakao connect / 원제, the delivered USER-REQ-20260924 items, and the already-done `MOBILE-BUG-002`, `MOBILE-PARITY-001` and `PC-POLL-001` are archived in the [2026-09-26 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-26--catalog-editions-notes-ledger-collections-releases-and-tablet-manga-tools). Production Linux library: schema v97 (migration 0097, 2026-09-25); Windows PC pending (`WIN-SYNC-001`). Android 0.8.26 on the tablet.
+
 ## Current priority
 
-1. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. The four series (젠레스 with 시시아 excluded, 명조, 아이돌, 리버스) are switched on the Linux PC. 2026-09-24: new target 엘렌 (젠레스) got 11 automatic S36 acceptances in 15 min (knn3 0.063–0.106); the user checked all 11 as correct. Next: choose further series to widen to; Windows PC switches separately.
-2. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
-3. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
-4. **Server review follow-ups (2026-09-24)** — review branch merged (`ae9af4b`); catalog artifact pruning (server disk 83% full, ~3.4 GB/day), then judgment calls 4, 2, 1 and 7 from `docs/research/server-review-2026-09-24.md` §3. Deployment needs approval.
-5. **VAULT-ENC-001** and **MOBILE-PARITY-001** — implemented; native/tablet acceptance remains.
-6. **PC-REVIEW-001** — fix the ten confirmed high findings of the 2026-09-25 PC app review, sync blockers first. Until item 1 is fixed, do not roll the server database back.
+1. **PERF-ALL-001** — next; run on Codex Astra. Folds in battery reduction, `PC-POLL-002`, `BIND-POLL-001`, lightweight-mode re-verification, slow covers at app start (USER-REQ-20260926), and moving PC sync state kept in `notes_state` into a proper table at the next planned migration.
+2. **USER-REQ-20260926** — Collector translation, Fault game balance, mobile video start delay, top-bar filter, Notes keyboard scrolling.
+3. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. The four series (젠레스 with 시시아 excluded, 명조, 아이돌, 리버스) are switched on the Linux PC. 2026-09-24: new target 엘렌 (젠레스) got 11 automatic S36 acceptances in 15 min (knn3 0.063–0.106); the user checked all 11 as correct. Next: choose further series to widen to; Windows PC switches separately.
+4. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
+5. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
+6. **Server review follow-ups (2026-09-24)** — review branch merged (`ae9af4b`); catalog artifact pruning (server disk 83% full, ~3.4 GB/day), then judgment calls 4, 2, 1 and 7 from `docs/research/server-review-2026-09-24.md` §3. Deployment needs approval.
+7. **VAULT-ENC-001** (Windows) and **CHAR-REVIEW-001** — implemented; native acceptance remains.
+8. **PC-REVIEW-001** — the ten high findings are fixed (2026-09-25); remaining are the recorded follow-ups and the medium/low findings.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
@@ -122,12 +126,6 @@ Keep destructive global media deletion under `MOBILE-003`; do not use this item 
 
 Acceptance: a supported edit can be made with PC off, survives offline retry/response loss, becomes authoritative exactly once, and appears later on PC without a manual publish/sync step.
 
-## MOBILE-BUG-002 — Mobile Catalog search does nothing
-
-Status: `DONE` — fixed in `7d2bfa6`; accepted on the tablet 2026-09-24 (archive with the next reconciliation).
-
-Search in the Android Catalog does not work. Reproduce first on the current APK: record the query, whether any request reaches the server (`searchMode=mobile` search-page path), the response, and whether the UI ignores it. Then fix the failing layer and verify search together with category inclusion, excluded tags and paging.
-
 ## MOBILE-008 — Catalog update requests and status
 
 Status: `IN_PROGRESS` — server refresh worker and Android request/status UI already exist.
@@ -164,42 +162,16 @@ Once the Linux PC publishes Collections with the personal-edit handshake, the ol
 - Private Vault on Windows: Credential Manager remember/auto-unlock, USB detection by drive letter, removal lock, in-app video playback.
 - FAULT game in WebView2 (`http://tauri.localhost` → `http://lakomics.localhost` original-image reads).
 - Collections authority (docs/research/collection-authority-design-20260924.md) may be activated before this update; the old Windows build is then fenced for Collections and its local-only edits are not carried over (the upgrade produces a salvage report).
+- Library schema: the production Linux library is at v97 (migrations 0096 notes base payload and 0097 catalog duplicate sync, 2026-09-25); the Windows build must be at least as new before it opens that library.
 
 ## USER-REQ-20260924 — User requests, 2026-09-24 evening
 
-Status: `TODO` — recorded as given; scope and priority to be confirmed per item.
+Status: `PARTIAL` — delivered items (notes sync pickup, keyboard lift, bottom navigation, PC viewer, lightweight mode, release notifications, household ledger, Notes v2, file exchange, reader slider, Collector items) are archived in the [2026-09-26 checkpoint](lakomics-completed.md#user-req-20260924--delivered-items). Remaining:
 
-Mobile:
-- Design consistency with the PC app (clarified 2026-09-24): the Home tab's top bar already has the logo — put it on every tab's top bar; use the top bar's space better; restyle buttons toward the PC app's button feel. The Home screen itself waits until Artist Revisit is rebuilt (PC and mobile).
-- Monthly subscription calculator — replaced 2026-09-25 by a light household ledger inside Notes (design `docs/research/budget-notes-design-20260925.md`; implemented on PC and Android 0.8.19 2026-09-25, `VERIFY` on device; not built: in-ledger entry search, merging two ledgers created offline): monthly income, recurring charges with any cycle, plans, entries; no categories, KRW only.
-- Notes: more note types (see Notes v2). "API documentation for notes" means storing sensitive documents such as API keys inside the encrypted notes (clarified 2026-09-24) — covered by encrypted notes; consider a 'secret' note type with masked display/copy button in Notes v2.
-- Battery usage: investigate and reduce (polling, thumbnail warm-up, background work).
-- New-release notifications (clarified 2026-09-24): extend the PC app's existing Collections release-watch to the app — Collections only; shown inside the app (no push notifications). Implemented 2026-09-25 (`VERIFY`): server `/v1/collections/releases` deployed (9c2b396), PC release lane + personal-edit v2, Android 0.8.21 (신간 chip/inbox in Collections, card badges; per manga Collection 신간 알림 switch and owned-volume count editable on the tablet). Shared read state; tablet shows new volume + release date change. Home placement waits for the Revisit rebuild. Follow-up: PC keeps release-sync state and v2 personal-edit receipts in `notes_state` to avoid a migration — move to a proper table (migration 0098) at the next planned migration.
-- Notes: tapping 동기화 syncs with the PC immediately (confirmed 2026-09-24: sometimes needed right away) — the PC must pick up the change within seconds, not its 5-minute notes poll.
-- Bottom navigation bar slightly higher.
-
-PC:
-- Start Collections authority slice 1 (docs/research/collection-authority-design-20260924.md).
-- Asset viewer and video viewer improvements (!!), clarified 2026-09-24: the title at top-left and the buttons at top-right cover the image — keep them off the image or hide them; in videos, Left/Right should seek about 5 s (currently does nothing); the left/right `<` `>` arrows should auto-hide.
-
-Second batch (same evening; details will be given at implementation time):
-
-Mobile:
-- Notes: when the keyboard opens, lift the editor by the keyboard height so the text being typed stays visible.
-- ~~Manga Catalog reader: remove 이어읽기 (continue reading); add a page slider to jump directly to any page (e.g. page 25 of 40).~~ Done in 0.8.2–0.8.3 (`2af8d1e`, `f6ac798`); accepted on the tablet 2026-09-24.
-- ~~File exchange between the PC and mobile through the Lakomics server~~ Done 2026-09-25 (design `docs/research/file-exchange-design-20260924.md`): server module deployed and enabled (`LAKOMICS_EXCHANGE_ENABLED=1` via a systemd drop-in), PC 보내기/받기 (더보기 / Ctrl+K, tray count) and Android 0.8.10 (47) (Home top bar, share target). Per-device client tokens provisioned (`laku-pc-exchange`, `galaxy-tab-s11-exchange`); the Library keeps the shared token. The user confirmed PC → tablet and tablet → PC on Linux + Galaxy Tab S11. Folder sending (폴더 보내기, one `<folder>.zip` per folder; PC writes a STORED zip itself, Android uses `java.util.zip`; tablet 0.8.11 (48)) added the same day; the user confirmed a tablet → PC folder send (172 entries, CRC and Korean names checked); PC → tablet folder send not yet tried. Deviations: no inbox long-poll (the server has none) — clients read `/v1/sync/status` with the device token (PC every 5 s visible / 15 s hidden; Android on the existing schedule, 5 s while the screen is open). Unverified: Windows (Downloads path, Zone.Identifier, tray), large files (≥1 GiB) and resume, the R2 `exchange/` 2-day lifecycle rule (operator step, not set; the server sweeper covers expiry).
-
-PC:
-- Lightweight processing mode ("데이터 처리용 라이트모드"): while the user is on the mobile app, keep only the PC work that mobile features depend on running and pause nearly everything else.
-
-PC and mobile:
-- ~~Notes like a notes app, on both PC and mobile. Scope chosen 2026-09-24: checklist notes (items can be checked and reordered), note colours, and Markdown rendering. Design must fit the existing encrypted notes sync.~~ Implemented 2026-09-25 as Notes v2 (design `docs/research/notes-v2-design-20260924.md` incl. 2026-09-25 scope additions: labels, search, archive, secret notes with per-device PIN/fingerprint, Linux keyring unlock prompt). PC on library schema 96 (production migrated 2026-09-25 with a pre-migration backup); Android 0.8.16 installed. Device/native checks (fingerprint, IME lift, real PC↔tablet merge) pending the user's use.
-
-Collector (`extension-list/`):
-- ~~A better way into subfolders than double-tap~~ Kept as double-tap (2026-09-25): the user reviewed the options (one tap on a folder with subfolders enters it, tap-again without a time limit, long-press, a second ring) and chose to keep the current behaviour for now.
-- ~~Store the semicircle menu's folder order and hidden folders on the server~~ Done in `066e3c3`.
-- ~~Twitter/X only: a left-navigation control that scrolls to the top and loads new posts~~ Done in `8f877ef`, `e626c4e`.
-- ~~Disable the right-side recommended-images button~~ Done in `8f877ef` (code kept).
+- Mobile design consistency with the PC app (logo on every tab's top bar, better use of the top bar, PC-like buttons): tracked in `MOBILE-DESIGN-001`; the Home screen waits for the Artist Revisit rebuild (PC and mobile).
+- PC: start Collections authority slice 1 (docs/research/collection-authority-design-20260924.md). Only slice 0 exists (`c38a2bc`, server module, inactive); slice 1 is not started.
+- `VERIFY`: lightweight processing mode (`05b18b6`) must be re-checked as features keep being added — part of `PERF-ALL-001`.
+- Battery: reduced in 0.8.6 (`f25ddd8`); further work is part of `PERF-ALL-001`.
 
 NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
 
@@ -265,18 +237,9 @@ Goal: a calmer, premium feel ("이제 고급감을 추구할 때").
 Earlier related request (USER-REQ-20260924): logo on all tabs, better use of the top bar, PC-like buttons.
 Process: show browser-rendered mockups at 800×1280 (S11 portrait) for approval before the APK.
 
-## PC-POLL-001 — Cut the desktop app's idle server polling
-
-Status: `DONE` — implemented in `cf2075b`; re-measured 2026-09-25 (see below). Remaining pollers moved to `PC-POLL-002`.
-
-Server access log, 15 min with the Linux desktop app idle (client 100.122.139.56): 1,606 requests (~6,400/h), all 200 — `/v1/sync/status` 502, `/v1/mobile-catalog/status` 334, asset/album/classification/bookmark change feeds ~167 each. The desktop sends no `If-None-Match`, although the server supports ETag/304 on these endpoints (`conditional.py`). Apply what Android 0.8.6 did (`f25ddd8`): one sync-status read per pass with ETag, fetch a domain feed only when its cursor moved, idle backoff (5 → 15 → 30 → 60 s, back to fast after local writes/focus/changes), share one status read across the React sync hooks (`useAssetAuthoritySync`, `useAlbumAuthoritySync`, `useClassificationAuthoritySync`, `useCatalogBookmarkSync`, …) and the native lightweight-mode ticks. Measure the same 15-minute idle window before/after. Note: tablet traffic reaches the server through the local proxy and is logged as 100.76.119.29 (tablet 0.8.5 → 0.8.6: 476 → 184 requests per 15 min, first 15 min after install).
-
-
-After (`cf2075b`, Linux dev build, same 15-minute idle window, 2026-09-24 16:29–16:44 UTC): 151 requests (~600/h, −91%), 49 of them 304. `/v1/sync/status` 25 and `/v1/mobile-catalog/status` 25 (about one per minute once idle, as designed); the rest are pollers outside the coordinated pass (see `PC-POLL-002`). Three short returns to the 5 s interval (~every 3 min) coincided with the app's own uploads (character replica, saved X media, a media ticket); the source of that 3-minute cadence was not traced.
-
 ## PC-POLL-002 — Fold the remaining desktop pollers into the coordinated pass
 
-Status: `TODO` — found by the 2026-09-25 `PC-POLL-001` re-measurement.
+Status: `TODO` — found by the 2026-09-25 `PC-POLL-001` re-measurement (archived); folded into `PERF-ALL-001` (2026-09-26).
 
 With the app idle for 15 minutes, these endpoints are still read about once a minute each, outside the shared status pass: `/v1/captures/pending` 18, `/v1/library/characters/review/decisions` 16, `/v1/library/characters/exclusions` 16, `/v1/library/similarity/review/decisions` 15, `/v1/collections/status` 15, `/v1/collections/personal-edits` 15 (~95 of 151 requests). Read them only when the shared status (or an ETag/cursor) says their domain moved, following `library/authority_pass.rs`; expected idle total under 50 per 15 minutes. Also find what wakes the fast interval every ~3 minutes while idle. Measure the same 15-minute window before/after.
 
@@ -310,21 +273,17 @@ Status: `TODO` — fold into PERF-ALL-001 / PC-POLL-002 (user, 2026-09-26). Tabl
 
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
-Status: `TODO` — requested 2026-09-24 for later ("벤치마크 빡세게"). Decided 2026-09-25: start only after the planned features are built; run it on Codex Astra. Existing tools: `src-tauri/src/bin/perf_probe.rs` (backend probe on a DB snapshot, from PERF-001; extend to current features), catalog/navigation/character benchmark tests (`#[ignore]`d), `android/tools/perf_summary.py`, `server/lakomics-api/tools/poll_benchmark.py`. Missing: frontend render/commit counts and native interaction timings; Astra's sandbox likely cannot drive the native window, so native measurement stays with the controller/user.
+Status: `TODO` — next item (2026-09-26). Requested 2026-09-24 ("벤치마크 빡세게"). Decided 2026-09-25: start only after the planned features are built; run it on Codex Astra. Existing tools: `src-tauri/src/bin/perf_probe.rs` (backend probe on a DB snapshot, from PERF-001; extend to current features), catalog/navigation/character benchmark tests (`#[ignore]`d), `android/tools/perf_summary.py`, `server/lakomics-api/tools/poll_benchmark.py`. Missing: frontend render/commit counts and native interaction timings; Astra's sandbox likely cannot drive the native window, so native measurement stays with the controller/user.
 
 Apply `docs/agents/implementation.md` → "Performance work" across Lakomics, one user-visible path at a time: measure on the real platform first, gate with deterministic metrics (render/commit counts, query counts, bytes, request counts, instruction counts), confirm each metric tracks real latency, then lock wins with tighten-only thresholds. Candidate paths: PC Library open/scroll and viewer, character and similarity screens, Collections/Works; Android Library/viewer (instrumentation `LakomicsPerf` + `android/tools/perf_summary.py` exists), Catalog, cold start; Cloud API hot endpoints (`tools/poll_benchmark.py` exists) and idle request volume per client; Rust indexing/ingest. Start by listing the paths with their current numbers, then pick the worst.
 
-## MOBILE-PARITY-001 — Desktop features requested on mobile (2026-09-24)
+Folded-in scope (2026-09-26):
+- Battery: further Android reduction after 0.8.6 (`f25ddd8`) — polling, thumbnail warm-up, background work.
+- `PC-POLL-002` (remaining desktop pollers) and `BIND-POLL-001` (tablet connect-request pickup).
+- Re-verify lightweight processing mode (`05b18b6`) against everything added since.
+- Covers load slowly right after the app starts (USER-REQ-20260926); see also `MOBILE-PERF-002`.
+- Move PC sync state kept in `notes_state` (Collections release sync, personal-edit v2 receipts, binding sync) into a proper table at the next planned migration (0098).
 
-Status: `DONE` — slices 1–4 implemented and deployed (APK 0.8.x); accepted on the tablet 2026-09-24 (archive with the next reconciliation).
-
-The user chose these desktop features for Android, in this suggested order (smallest and safest first):
-1. **Film details** (read-only): show `WORKS-001` cast, release info and related works in mobile Collections. Publish the Film snapshot block alongside the TV `series` block (`src-tauri/src/cloud/collections.rs`, `committed_series`), then render it; local related works open the local work.
-2. **Personal Collection metadata edits** ([design](../research/mobile-collection-personal-edits-design-20260924.md), decisions recorded 2026-09-24): my rating, Showcase membership and memo, through the `MOBILE-WRITE-002` durable intent / expected-revision / receipt model proven by bookmarks. Works with the PC off and appears on PC without a manual sync.
-3. **Similarity review**: mobile shows the open review pairs and records `keep_existing` / `replace_existing` / `keep_both`; the PC applies file-level results. A decision must never delete or replace an original before the PC applies it under the existing ADR-0007 rules.
-4. **Library Trash**: move assets to the Library Trash from mobile, and browse/restore it. This activates `MOBILE-003`: it must use the tombstone, grace-period, acknowledgement and recovery protocol, never immediate deletion. Emptying the trash stays PC-only unless separately decided.
-
-Deferred but wanted on mobile later: character registration and reference-character management. Keep them PC-only until the user reopens them.
 
 # Future-work notes — 2026-09-21
 
@@ -333,10 +292,9 @@ User-requested notes for later work, not an implementation start or priority cha
 ## Mobile app
 
 - **(Closed 2026-09-24: current physical-cover 3D is enough) Collection 3D model viewer:** view actual 3D models in Collection, rather than merely giving covers a 3D presentation. This clarifies the earlier `MOBILE-UX-001` 3D feasibility question; renderer and supported formats remain undecided.
-- **New-release notifications:** add notifications for new releases. Follow targets and notification delivery details remain to be defined.
+- **(Done 2026-09-26, [archived](lakomics-completed.md#collections-release-notifications-and-the-tablet-신간-screen)) New-release notifications:** Collections only, in-app.
 - **(Partly covered: mobile reviews PC-discovered similarity pairs, MOBILE-PARITY-001 slice 3; on-device discovery not built) Asset duplicate checking:** make duplicate checking available in the mobile Asset Library. Build on the completed desktop `SIMILARITY-004` discovery where relevant; keep this distinct from Catalog edition duplicates.
-- **(Implemented 2026-09-25; `VERIFY`) Manga Catalog duplicate-edition checking.** User decisions 2026-09-25: actions are only "같은 작품으로 묶기" (server `keepBoth` = PC `confirm`, one edition group, nothing hidden) and "다른 작품" (`notDuplicate` = `falsePositive`); the PC auto-merges confident pairs (identical title, equal pages, same category and languages, shared artist/group) and reports them as `keepBoth`; a human decision always wins; only uncertain pairs wait for review on mobile (카탈로그 필터 sheet → 도구 → 중복 판본 검토, Android 0.8.18). Production first run 2026-09-25 (schema v97): 1,358 auto merges, ~97 uncertain. Merges reach mobile grouping after a manual catalog publication. Gaps: no server `origin` field to label automatic decisions on mobile; `includesServerWorks` unused; desktop decisions are not reported to the server; decision-log restart replays old decisions.
-  - Original decision: Manga Catalog duplicate-edition checking — decided 2026-09-24, queued after vault A1 / file exchange / notes v2 (can run in parallel with mobile work since it is mostly PC + server):** keep the full comparison on the PC — the PC computes duplicate-edition candidates with the existing `catalog_review.rs` rules (title match, artist/group overlap, page count, category, language) and publishes them with the catalog; the server does not recompute the whole catalog (VPS: 1 CPU, 1.6 GB RAM, ~131k works). The server only checks works it adds itself during hourly refresh (indexed title lookup, milliseconds each). Review decisions (hide/keep) are server-owned so PC and mobile share them; mobile gets a review screen that reads the precomputed list; the PC applies the decisions. Works with the PC off for already-published candidates and server-added works.
+- **(Done 2026-09-26, [archived](lakomics-completed.md#manga-catalog-duplicate-edition-checking)) Manga Catalog duplicate-edition checking.** Follow-up gaps: no server `origin` field to label automatic decisions on mobile; `includesServerWorks` unused; desktop decisions are not reported to the server; a decision-log restart replays old decisions.
 - **Asset Library multi-select move:** select multiple assets and move them together. Clarified 2026-09-24: both targets — add to albums and change classification (folders). Coordinate with `MOBILE-WRITE-002`; the destination and move semantics remain to be defined.
 
 ## Shared — Desktop and mobile
@@ -367,9 +325,9 @@ Mobile tab switching and `SIMILARITY-004` from the original sequence were comple
 Other follow-up candidates, without a fixed order:
 
 - **(Done, user-confirmed 2026-09-24) Twitter/X GIF downloads:** inspect the current extraction/save path and add the missing support.
-- **New-release notifications:** define followed artists/works and in-app versus Android notification delivery separately from Catalog refresh.
+- **(Done 2026-09-26) New-release notifications:** Collections release inbox and 신간 screen, in-app only.
 - **Mobile Asset duplicate review:** expose candidate inspection and decisions separately from the discovery operation above.
-- **Mobile Manga Catalog edition review:** define candidate/evidence sharing and decision authority; published edition groups alone are not pending review candidates. Keep this separate from Asset duplicate review.
+- **(Done 2026-09-26) Mobile Manga Catalog edition review:** 중복 판본 검토 in Android 0.8.18.
 - **(Closed 2026-09-24) Collection 3D model viewer:** decide supported model formats, touch interaction and device performance limits; this is not the existing physical-cover renderer.
 - **Multi-person character competition:** collect concrete mistakes and improve the affected arbitration cases without reopening the entire accepted classification pass.
 - **Film Collection polish (`WORKS-001`):** implemented on desktop and mobile 2026-09-24; remaining is in-app acceptance.
