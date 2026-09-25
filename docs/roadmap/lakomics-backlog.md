@@ -274,7 +274,7 @@ Notable medium follow-ups: restore guard lacks an Asset authority probe (two rev
 
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
-Status: `TODO` — requested 2026-09-24 for later ("벤치마크 빡세게").
+Status: `TODO` — requested 2026-09-24 for later ("벤치마크 빡세게"). Decided 2026-09-25: start only after the planned features are built; run it on Codex Astra. Existing tools: `src-tauri/src/bin/perf_probe.rs` (backend probe on a DB snapshot, from PERF-001; extend to current features), catalog/navigation/character benchmark tests (`#[ignore]`d), `android/tools/perf_summary.py`, `server/lakomics-api/tools/poll_benchmark.py`. Missing: frontend render/commit counts and native interaction timings; Astra's sandbox likely cannot drive the native window, so native measurement stays with the controller/user.
 
 Apply `docs/agents/implementation.md` → "Performance work" across Lakomics, one user-visible path at a time: measure on the real platform first, gate with deterministic metrics (render/commit counts, query counts, bytes, request counts, instruction counts), confirm each metric tracks real latency, then lock wins with tighten-only thresholds. Candidate paths: PC Library open/scroll and viewer, character and similarity screens, Collections/Works; Android Library/viewer (instrumentation `LakomicsPerf` + `android/tools/perf_summary.py` exists), Catalog, cold start; Cloud API hot endpoints (`tools/poll_benchmark.py` exists) and idle request volume per client; Rust indexing/ingest. Start by listing the paths with their current numbers, then pick the worst.
 
