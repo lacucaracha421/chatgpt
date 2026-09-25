@@ -284,6 +284,10 @@ Open from the 5–10 fix (2026-09-25): ADR-0039 still says only permanent deleti
 
 Notable medium follow-ups: restore guard lacks an Asset authority probe (two reviewers); library open, trash purge and scan cancel block the UI thread; Linux provider-credential commands can block the GTK thread up to 10 s; every window focus reloads sidebar, galleries and trash; Aladin/Kakao volume renumbering fails refreshes forever; artwork cleanup can delete an in-flight import's files; a locked leftover file (drag-out staging or artwork) can stop the library from opening on Windows; long HEVC/ProRes videos hit the 30-minute ffmpeg cap; S36 rollback stops on a trashed auto-accepted image.
 
+## BIND-POLL-001 — Faster pickup of tablet connection requests
+
+Status: `TODO` — fold into PERF-ALL-001 / PC-POLL-002 (user, 2026-09-26). Tablet MangaDex/Kakao connect requests (`/v1/collections/bindings`) work, but the PC reads the request log at most once a minute, so a pick takes 10–60 s to apply. Put a pending-request signal into the status the PC already polls so it fetches immediately, without adding idle requests.
+
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
 Status: `TODO` — requested 2026-09-24 for later ("벤치마크 빡세게"). Decided 2026-09-25: start only after the planned features are built; run it on Codex Astra. Existing tools: `src-tauri/src/bin/perf_probe.rs` (backend probe on a DB snapshot, from PERF-001; extend to current features), catalog/navigation/character benchmark tests (`#[ignore]`d), `android/tools/perf_summary.py`, `server/lakomics-api/tools/poll_benchmark.py`. Missing: frontend render/commit counts and native interaction timings; Astra's sandbox likely cannot drive the native window, so native measurement stays with the controller/user.
