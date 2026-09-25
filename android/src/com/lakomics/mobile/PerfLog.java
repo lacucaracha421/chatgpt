@@ -58,6 +58,15 @@ final class PerfLog {
   try{
    if(payload==null||payload.length()>2048)return;
    JSONObject p=new JSONObject(payload);
+   if("video".equals(p.optString("event"))){
+    // Library video element state: fixed event names and small integers only.
+    String media=p.optString("media"),name=p.optString("name");
+    if(!media.matches("loadstart|loadedmetadata|canplay|playing|waiting|stalled|suspend|abort|emptied|error")||!name.matches("[A-Z0-9_]{0,48}"))return;
+    StringBuilder line=new StringBuilder("js video=").append(media).append(" id=").append(id(p.optString("id")))
+     .append(" network=").append(p.optInt("network",-1)).append(" ready=").append(p.optInt("ready",-1));
+    if(p.has("code"))line.append(" code=").append(p.optInt("code",-1)).append(" name=").append(name.isEmpty()?"-":name);
+    write(line.toString());return;
+   }
    String event=p.optString("event"),source=p.optString("source"),status=p.optString("status"),kind=p.optString("kind");
    if(!event.matches("open|native|decoded|commit|end|prefetch_start|prefetch_finish")||
       !source.matches("unknown|prepared|memory|shared|native|pending")||

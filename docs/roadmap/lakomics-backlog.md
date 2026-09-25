@@ -190,7 +190,7 @@ Fault game (`_tools/app/mobile-client/FaultGame.tsx`):
 - Bug: using the special attack at Lv2/Lv3 does not seem to fire that level's attack; verify and fix so the current level's attack fires.
 
 Mobile app:
-- Bug (current, high): videos never start — endless loading in the viewer.
+- Bug (current, high): videos never start — endless loading in the viewer. 2026-09-26 findings: the server issues the ticket and R2 serves faststart MP4s with ranges; the same URL plays in tablet Chrome 153 (WebView 152). In a failing session the player showed Chromium's broken-media icon with no app error text. Right after reinstalling, videos played within 1 s, so the failure depends on app state. Video element events (state, MediaError code/name) now go to the `LakomicsPerf` log (`js video=`); capture a failing session to find the cause.
 - Collections: move the 게임 / 만화 / 영화 / AV type switch into the top bar so it stays reachable after scrolling (the user switches often).
 - Notes (text/checklist notes; the ledger is fine): with the keyboard open, content below the visible area cannot be scrolled into view, so the lower part of a long note stays hidden behind the keyboard while editing. Make the editor scroll so every line can be brought above the keyboard.
 - Collections covers right after app start (possibly only right after installing a new build): missing covers stay blank for a while in the Collections tab; after visiting other screens and coming back, missing covers load fairly quickly. Suspect a cold-start ticket/cache warm-up or an image-request queue stall; measure and fix during PERF-ALL-001.

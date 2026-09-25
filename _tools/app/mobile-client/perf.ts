@@ -22,3 +22,16 @@ export function viewerTiming(id:string, kind:string|undefined, prepared:boolean)
   };
   return {media,log,get done(){return done;}};
 }
+
+type VideoEvent = 'loadstart'|'loadedmetadata'|'canplay'|'playing'|'waiting'|'stalled'|'suspend'|'abort'|'emptied'|'error';
+/**
+ * One line per media-element state change of a library video: the event, the element's
+ * network/ready state and, on error, the MediaError code and Chromium's leading error name.
+ * Never the URL or any other text from the page.
+ */
+export function videoEvent(id:string, event:VideoEvent, element:HTMLVideoElement) {
+  const error = element.error;
+  const payload = {event:'video', id, media:event, network:element.networkState, ready:element.readyState,
+    ...(error ? {code:error.code, name:/^[A-Z][A-Z0-9_]+/.exec(error.message ?? '')?.[0] ?? ''} : {})};
+  try{queueMicrotask(()=>{try{window.LakomicsNative?.request('', 'perfLog', JSON.stringify(payload));}catch{/* Best effort. */}});}catch{/* Best effort. */}
+}

@@ -1,4 +1,4 @@
-import {useEffect, useLayoutEffect, useRef, useState} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
 import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
 import type {ComponentType, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
@@ -6,7 +6,7 @@ import type {Asset} from './types';
 import {dateLabel, imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText} from './transport';
-import {viewerTiming} from './perf';
+import {videoEvent, viewerTiming} from './perf';
 import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
@@ -167,6 +167,8 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   }, [chrome, info, albumOpen, classificationOpen, exclusion, addOpen, asset.id, asset.kind]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
   const waiting = () => {clearTimeout(stallTimer.current);stallTimer.current=setTimeout(() => setError('영상 연결이 지연되고 있습니다. 계속 기다리거나 다시 시도해 주세요.'),15000);};
+  // Library video element states go to the native perf log; vault playback stays unlogged.
+  const track = (event: SyntheticEvent<HTMLVideoElement>) => {if(!vault)videoEvent(asset.id, event.type as Parameters<typeof videoEvent>[1], event.currentTarget);};
   const playing = () => {clearTimeout(stallTimer.current);setError('');};
   const distance = () => { const [a, b] = [...gesture.current.points.values()]; return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0; };
   const clamp = (scale: number, x: number, y: number) => {
@@ -234,11 +236,11 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
         else if (asset.kind!=='video' && g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
       }} onPointerCancel={() => gesture.current.points.clear()}>
-        {asset.kind === 'video' ? <video ref={video} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing} loop playsInline preload="auto" onWaiting={waiting} onStalled={waiting} onPlaying={playing} onCanPlay={playing} onLoadedMetadata={event => {
-          const saved=videoResume.current;if(saved.id!==asset.id)return;
+        {asset.kind === 'video' ? <video ref={video} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing} loop playsInline preload="auto" onWaiting={event => {track(event);waiting();}} onStalled={event => {track(event);waiting();}} onPlaying={event => {track(event);playing();}} onCanPlay={event => {track(event);playing();}} onLoadStart={track} onSuspend={track} onAbort={track} onEmptied={track} onLoadedMetadata={event => {
+          track(event);const saved=videoResume.current;if(saved.id!==asset.id)return;
           event.currentTarget.currentTime=Math.min(saved.time,Number.isFinite(event.currentTarget.duration)?event.currentTarget.duration:saved.time);
           if(saved.playing)void event.currentTarget.play().catch(() => {});
-        }} onError={event => {if(original){clearTimeout(stallTimer.current);setError(`영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.${vault?mediaErrorCode(event.currentTarget.error):''}`);}}} {...(vault?{controlsList:'nodownload noremoteplayback',disablePictureInPicture:true}:{})}/>
+        }} onError={event => {track(event);if(original){clearTimeout(stallTimer.current);setError(`영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.${vault?mediaErrorCode(event.currentTarget.error):''}`);}}} {...(vault?{controlsList:'nodownload noremoteplayback',disablePictureInPicture:true}:{})}/>
           : vault ? <>
             {asset.preview && loaded !== asset.id && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
             <img key={asset.id} className="viewer-image" src={original} alt={vault.label(asset)} draggable={false} onLoad={() => setLoaded(asset.id)} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded === asset.id ? undefined : 0}}/>
