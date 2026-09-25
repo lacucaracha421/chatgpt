@@ -1643,7 +1643,8 @@ impl CloudClient {
             .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
             .build()
             .into();
-        let path = format!("/v1/collections/personal-edits?libraryId={library_id}&after={after}&limit={limit}");
+        // `editVersion=2`: this PC applies the manga tracking fields (an older server ignores it).
+        let path = format!("/v1/collections/personal-edits?libraryId={library_id}&after={after}&limit={limit}&editVersion=2");
         let mut response = agent.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call()
             .map_err(|error| match error {
                 ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
@@ -2229,6 +2230,67 @@ impl CloudClient {
                 (_, error) => Err(error),
             },
         }
+    }
+
+    /// Upload one chunk of the PC's unread release events (publisher token). `None` when the
+    /// route is absent (an older server).
+    pub(crate) fn publish_release_unread(
+        &self,
+        token: &str,
+        body: &[u8],
+    ) -> Result<Option<super::collection_releases::ReleaseUploadResult>, LibraryError> {
+        if body.len() > 4 * 1024 * 1024 {
+            return Err(LibraryError::ReleaseSyncRejected(413));
+        }
+        let request = self.coded_agent()?.put(self.endpoint("/v1/collections/releases/unread")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(body);
+        let mut response = self.coded_request(request)?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            status => return Err(release_status_error(status, &mut response)),
+        }
+        Ok(Some(read_json_bounded(&mut response, 1024 * 1024)?))
+    }
+
+    /// One page of the release read log (publisher token), `after` exclusive. `None` when the
+    /// route is absent.
+    pub(crate) fn release_reads(
+        &self,
+        token: &str,
+        after: i64,
+        limit: i64,
+    ) -> Result<Option<super::collection_releases::ReadPage>, LibraryError> {
+        if !(0..=super::collection_releases::MAX_CURSOR).contains(&after) || !(1..=200).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let path = format!("/v1/collections/releases/reads?after={after}&limit={limit}");
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            status => return Err(release_status_error(status, &mut response)),
+        }
+        let page = read_json_bounded::<super::collection_releases::ReadPage>(&mut response, 1024 * 1024)?;
+        super::collection_releases::validate_read_page(&page, after, limit)?;
+        Ok(Some(page))
+    }
+
+    /// The server's last completed release generation (read through the listing route, which
+    /// also accepts the publisher role). `None` before the first complete upload.
+    pub(crate) fn release_generation(&self, token: &str) -> Result<Option<i64>, LibraryError> {
+        #[derive(serde::Deserialize)]
+        struct Listing { generation: Option<String> }
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint("/v1/collections/releases?limit=1")?)
+            .header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            status => return Err(release_status_error(status, &mut response)),
+        }
+        read_json_bounded::<Listing>(&mut response, 1024 * 1024)?
+            .generation
+            .map(|value| value.parse::<i64>().map_err(|_| LibraryError::ReleaseSyncInvalid))
+            .transpose()
     }
 
     fn coded_agent(&self) -> Result<ureq::Agent, LibraryError> {
@@ -3386,6 +3448,34 @@ fn catalog_duplicate_status_error(
     }
 }
 
+/// Map a non-success status of the release routes, reading a coded `409`.
+fn release_status_error(status: u16, response: &mut ureq::http::Response<ureq::Body>) -> LibraryError {
+    match status {
+        401 | 403 => LibraryError::CloudUnauthorized,
+        409 => {
+            #[derive(serde::Deserialize)]
+            struct Coded { detail: serde_json::Value }
+            let detail = read_json_bounded::<Coded>(response, 16 * 1024).ok().map(|body| body.detail);
+            let code = detail.as_ref().and_then(|d| d.get("code")).and_then(|c| c.as_str());
+            match code {
+                Some("releaseReadCursorExpired") => {
+                    match detail.as_ref().and_then(|d| d.get("lastSequence")).and_then(|v| v.as_i64()) {
+                        Some(last) if (0..=super::collection_releases::MAX_CURSOR).contains(&last) => {
+                            LibraryError::ReleaseReadCursorExpired(last)
+                        }
+                        _ => LibraryError::ReleaseSyncInvalid,
+                    }
+                }
+                Some("releaseCursorRejected") => LibraryError::ReleaseCursorRejected,
+                Some("releaseGenerationStale") => LibraryError::ReleaseGenerationStale,
+                _ => LibraryError::ReleaseSyncRejected(409),
+            }
+        }
+        422 => LibraryError::ReleaseSyncInvalid,
+        status => LibraryError::ReleaseSyncRejected(status),
+    }
+}
+
 /// The parts of `/v1/collections/status` the publisher uses.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3401,6 +3491,10 @@ pub(crate) struct CollectionsStatus {
 pub(crate) struct CollectionsCapabilities {
     #[serde(default)]
     pub collection_personal_edit: bool,
+    /// Present (either value) on a server that understands personal-edit version 2 (manga
+    /// tracking fields); absent on an older one.
+    #[serde(default)]
+    pub collection_tracking_edit: Option<bool>,
 }
 
 fn bearer(token: &str) -> Result<String, LibraryError> {

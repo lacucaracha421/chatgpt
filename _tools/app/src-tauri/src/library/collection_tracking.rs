@@ -26,13 +26,10 @@ impl Library {
         {
             let mut connection = self.connection()?;
             super::collection::require_collection(&connection, collection_id)?;
-            let kind: String = connection.query_row("SELECT type FROM collections WHERE id=?1", [collection_id], |row| row.get(0))?;
-            if kind != "manga" { return Err(LibraryError::InvalidCollectionType); }
             let transaction = connection.transaction()?;
-            transaction.execute("DELETE FROM collection_volume_ownership WHERE collection_id=?1 AND edition_index=?2", params![collection_id, edition_index])?;
-            transaction.execute("INSERT OR IGNORE INTO collection_ownership_tracking(collection_id,edition_index) VALUES(?1,?2)", params![collection_id, edition_index])?;
-            for volume in 1..=count {
-                transaction.execute("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES(?1,?2,?3,1,0)", params![collection_id,volume,edition_index])?;
+            if write_owned_volume_count(&transaction, collection_id, edition_index, count)? {
+                // Ownership has no 0074 trigger; the Collection publication carries the counts.
+                super::collection_personal_edits::bump_collections_generation(&transaction)?;
             }
             transaction.commit()?;
         }
@@ -74,6 +71,7 @@ impl Library {
                 transaction.execute(&sql, params![collection_id, volume, edition_index, owned])?;
             }
             transaction.execute("DELETE FROM collection_volume_ownership WHERE collection_id=?1 AND physical=0 AND digital=0", [collection_id])?;
+            super::collection_personal_edits::bump_collections_generation(&transaction)?;
             transaction.commit()?;
         }
         self.list_volume_ownership(collection_id)
@@ -94,13 +92,42 @@ impl Library {
         let mut connection = self.connection()?;
         super::collection::require_collection(&connection, collection_id)?;
         let transaction = connection.transaction()?;
-        let now = chrono::Utc::now().to_rfc3339();
-        for id in event_ids {
-            transaction.execute("UPDATE release_watch_events SET read_at=?1 WHERE collection_id=?2 AND id=?3 AND read_at IS NULL", params![now,collection_id,id])?;
-        }
+        acknowledge_release_events_in(&transaction, collection_id, &event_ids, &chrono::Utc::now().to_rfc3339())?;
         transaction.commit()?;
         Ok(())
     }
+}
+
+/// Mark exactly these unread events of one Collection read; unknown or already read ids are
+/// no-ops. Returns how many events changed. Shared by the PC inbox and the mobile read log.
+pub(super) fn acknowledge_release_events_in(connection: &rusqlite::Connection, collection_id: &str, event_ids: &[String], now: &str) -> Result<usize, LibraryError> {
+    let mut changed = 0;
+    for id in event_ids {
+        changed += connection.execute("UPDATE release_watch_events SET read_at=?1 WHERE collection_id=?2 AND id=?3 AND read_at IS NULL", params![now,collection_id,id])?;
+    }
+    Ok(changed)
+}
+
+/// Own volumes 1..=count of one edition as physical, replacing that edition's per-volume
+/// detail and marking it tracked (the PC count control). Returns whether anything changed;
+/// an edition already in exactly that state is left alone. Non-manga is `InvalidCollectionType`.
+pub(super) fn write_owned_volume_count(connection: &rusqlite::Connection, collection_id: &str, edition_index: u8, count: i64) -> Result<bool, LibraryError> {
+    if edition_index > 3 || !(0..=2000).contains(&count) { return Err(LibraryError::InvalidCollectionMetadata); }
+    let kind: String = connection.query_row("SELECT type FROM collections WHERE id=?1", [collection_id], |row| row.get(0))?;
+    if kind != "manga" { return Err(LibraryError::InvalidCollectionType); }
+    let tracked: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1 AND edition_index=?2)", params![collection_id, edition_index], |row| row.get(0))?;
+    let rows = connection.prepare("SELECT volume_number, physical, digital FROM collection_volume_ownership WHERE collection_id=?1 AND edition_index=?2 ORDER BY volume_number")?
+        .query_map(params![collection_id, edition_index], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let same = tracked && rows.len() as i64 == count
+        && rows.iter().zip(1..).all(|(&(volume, physical, digital), expected)| volume == expected && physical && !digital);
+    if same { return Ok(false); }
+    connection.execute("DELETE FROM collection_volume_ownership WHERE collection_id=?1 AND edition_index=?2", params![collection_id, edition_index])?;
+    connection.execute("INSERT OR IGNORE INTO collection_ownership_tracking(collection_id,edition_index) VALUES(?1,?2)", params![collection_id, edition_index])?;
+    for volume in 1..=count {
+        connection.execute("INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES(?1,?2,?3,1,0)", params![collection_id,volume,edition_index])?;
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

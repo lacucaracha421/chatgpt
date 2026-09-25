@@ -47,6 +47,12 @@ final class NetworkPolicy {
   // Personal Collection edits (rating, Showcase, memo): only the client command. The edit
   // log is a publisher read and stays unreachable from here.
   post=post || p.equals("/v1/collections/personal-edits");
+  // Manga release notifications (신간 알림): the unread list read and the acknowledge (확인)
+  // command, and nothing else. The unread upload PUT and the read-log GET are publisher-only
+  // and stay unreachable: `/releases/unread` and `/releases/reads` are two segments deep, so
+  // the single-segment Collection read above does not match them either.
+  get=get || p.equals("/v1/collections/releases");
+  post=post || p.equals("/v1/collections/releases/acknowledge");
   get=get || p.equals("/v1/mobile-catalog/refresh");
   post=post || p.equals("/v1/mobile-catalog/refresh");
   // The manual character exclusion accepted for this device: one named Asset in one named

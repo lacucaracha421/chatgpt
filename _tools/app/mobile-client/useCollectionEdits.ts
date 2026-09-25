@@ -9,7 +9,7 @@ import {onVisible} from './useVisibleInterval';
 
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {usePendingRetry} from './useBookmarks';
-import {flushCollectionEdits, personalEditLibrary, type CollectionEditStatus} from './collectionEditDelivery';
+import {flushCollectionEdits, personalEditLibrary, trackingEditAllowed, type CollectionEditStatus} from './collectionEditDelivery';
 import {
   COLLECTION_EDITS_EVENT,
   type CollectionEditField,
@@ -18,6 +18,7 @@ import {
   commitCollectionEdit,
   readCollectionEdits,
   resolveCollectionEditConflict,
+  sameEditValue,
 } from './collectionEditOutbox';
 import {errorText} from './transport';
 
@@ -26,6 +27,8 @@ const NOTICE_MS = 5000;
 export function useCollectionEdits({active, onSettled}: {active: boolean; onSettled(): void}) {
   const [intents, setIntents] = useState(readCollectionEdits);
   const [supported, setSupported] = useState(false);
+  /** 신간 알림 / owned volumes: the server advertises `collectionTrackingEdit` (a version-2 PC). */
+  const [trackingSupported, setTrackingSupported] = useState(false);
   const [failure, setFailure] = useState('');
   const [notice, setNotice] = useState('');
   /**
@@ -76,6 +79,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   /** Take the capability from the Collection `/status` check the screen already runs. */
   const observeStatus = useCallback((reply: unknown) => {
     setSupported(personalEditLibrary(reply as CollectionEditStatus) !== null);
+    setTrackingSupported(trackingEditAllowed(reply as CollectionEditStatus));
   }, []);
 
   const edit = useCallback((collectionId: string, field: CollectionEditField, value: CollectionEditValue, authoritative: CollectionEditValue) => {
@@ -100,13 +104,13 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   }, [flush]);
 
   const visible = useCallback(<T extends CollectionEditValue>(collectionId: string, field: CollectionEditField, authoritative: T) => {
-    const key = collectionEditKey(collectionId, field);
+    const key = collectionEditKey(collectionId, field, authoritative);
     const intent = intents[key];
     if (intent) return {value: intent.value as T, pending: true, conflict: intent.conflict ? {current: intent.conflict.current} : null};
     // Confirmed but not yet re-read: show the confirmed value while the screen still holds the
     // exact pre-edit value. Any other value (the refresh, or a later PC change) wins.
     const settledValue = confirmed[key];
-    if (settledValue && Object.is(authoritative, settledValue.expected) && !Object.is(authoritative, settledValue.value))
+    if (settledValue && sameEditValue(authoritative, settledValue.expected) && !sameEditValue(authoritative, settledValue.value))
       return {value: settledValue.value as T, pending: false, conflict: null};
     return {value: authoritative, pending: false, conflict: null};
   }, [intents, confirmed]);
@@ -114,7 +118,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   const pending = Object.values(intents).some(intent => !intent.conflict);
   usePendingRetry(active, pending, flush);
 
-  return {supported, failure, notice, edit, resolveConflict, visible, observeStatus, flush};
+  return {supported, trackingSupported, failure, notice, edit, resolveConflict, visible, observeStatus, flush};
 }
 
 /** App-level delivery: on start and on returning to the foreground, whatever screen is open. */

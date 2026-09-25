@@ -1,6 +1,7 @@
 /**
  * Durable mobile edits of personal Collection fields: my rating, Showcase
- * membership and the memo. The rules are the bookmark outbox's
+ * membership, the memo and, for manga, 신간 알림 (`releaseWatch`) and the owned-volume
+ * count per edition (`ownedVolumes`, one intent per edition). The rules are the bookmark outbox's
  * (`bookmarkOutbox.ts`), with storage in the same `localStorage`:
  *
  * 1. **One intent per `collectionId:field`, minted once.** The operation id is
@@ -19,8 +20,15 @@
  * edit as queued.
  */
 
-export type CollectionEditField = 'myScore' | 'showcase' | 'memo';
-export type CollectionEditValue = number | boolean | string | null;
+export type CollectionEditField = 'myScore' | 'showcase' | 'memo' | 'releaseWatch' | 'ownedVolumes';
+/** One edition's owned-volume count; an `expected` count is null while the edition is not tracked. */
+export type OwnedVolumesValue = {editionIndex: number; count: number | null};
+export type CollectionEditValue = number | boolean | string | null | OwnedVolumesValue;
+/** Manga tracking fields: sent only while the server advertises `collectionTrackingEdit`. */
+export const TRACKING_FIELDS: readonly CollectionEditField[] = ['releaseWatch', 'ownedVolumes'];
+const FIELDS: readonly CollectionEditField[] = ['myScore', 'showcase', 'memo', ...TRACKING_FIELDS];
+/** The PC's limit (`set_owned_volume_count`). */
+export const MAX_OWNED_COUNT = 2000;
 
 export type CollectionEditIntent = {
   collectionId: string;
@@ -42,8 +50,18 @@ export const MEMO_LIMIT = 2000;
 /** Fired after the durable queue changes, so every screen re-reads it. */
 export const COLLECTION_EDITS_EVENT = 'lakomics-collection-edits';
 
-export function collectionEditKey(collectionId: string, field: CollectionEditField): string {
-  return `${collectionId}:${field}`;
+const isOwned = (value: CollectionEditValue | undefined): value is OwnedVolumesValue => !!value && typeof value === 'object';
+
+/** The queue key: one per Collection field, and one per edition for `ownedVolumes` (`value` names it). */
+export function collectionEditKey(collectionId: string, field: CollectionEditField, value?: CollectionEditValue): string {
+  return field === 'ownedVolumes' && isOwned(value) ? `${collectionId}:${field}:${value.editionIndex}` : `${collectionId}:${field}`;
+}
+const intentKey = (intent: CollectionEditIntent) => collectionEditKey(intent.collectionId, intent.field, intent.value);
+
+/** Value equality for every field: scalars by identity, an owned-volume entry by its content. */
+export function sameEditValue(a: CollectionEditValue | undefined, b: CollectionEditValue | undefined): boolean {
+  if (isOwned(a) || isOwned(b)) return isOwned(a) && isOwned(b) && a.editionIndex === b.editionIndex && a.count === b.count;
+  return Object.is(a, b);
 }
 
 /** Characters as the PC and server count them (code points, not UTF-16 units). */
@@ -56,9 +74,16 @@ export function normalizeCollectionEdit(field: CollectionEditField, value: Colle
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 5 || !Number.isInteger(value * 2)) throw new Error('평점은 0.0–5.0 사이 0.5 단위입니다.');
     return value;
   }
-  if (field === 'showcase') {
-    if (typeof value !== 'boolean') throw new Error('쇼케이스 값을 확인할 수 없습니다.');
+  if (field === 'showcase' || field === 'releaseWatch') {
+    if (typeof value !== 'boolean') throw new Error(field === 'showcase' ? '쇼케이스 값을 확인할 수 없습니다.' : '신간 알림 값을 확인할 수 없습니다.');
     return value;
+  }
+  if (field === 'ownedVolumes') {
+    const owned = value as OwnedVolumesValue | null;
+    const whole = (n: unknown, high: number) => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= high;
+    if (!isOwned(owned) || !whole(owned.editionIndex, 3)) throw new Error('판본을 확인할 수 없습니다.');
+    if (!whole(owned.count, MAX_OWNED_COUNT)) throw new Error(`소장 권수는 0–${MAX_OWNED_COUNT.toLocaleString()}권입니다.`);
+    return {editionIndex: owned.editionIndex, count: owned.count};
   }
   if (value === null) return null;
   if (typeof value !== 'string') throw new Error('메모를 확인할 수 없습니다.');
@@ -70,7 +95,7 @@ export function normalizeCollectionEdit(field: CollectionEditField, value: Colle
 function valid(intent: unknown): intent is CollectionEditIntent {
   const value = intent as CollectionEditIntent | null;
   return !!value && typeof value === 'object' && typeof value.collectionId === 'string' && typeof value.operationId === 'string'
-    && (value.field === 'myScore' || value.field === 'showcase' || value.field === 'memo') && Array.isArray(value.own);
+    && FIELDS.includes(value.field) && Array.isArray(value.own) && (value.field !== 'ownedVolumes' || isOwned(value.value));
 }
 
 export function readCollectionEdits(): Record<string, CollectionEditIntent> {
@@ -89,8 +114,8 @@ function write(intents: Record<string, CollectionEditIntent>): boolean {
   return true;
 }
 
-export function readCollectionEdit(collectionId: string, field: CollectionEditField): CollectionEditIntent | null {
-  return readCollectionEdits()[collectionEditKey(collectionId, field)] ?? null;
+export function readCollectionEdit(collectionId: string, field: CollectionEditField, value?: CollectionEditValue): CollectionEditIntent | null {
+  return readCollectionEdits()[collectionEditKey(collectionId, field, value)] ?? null;
 }
 
 /**
@@ -108,10 +133,10 @@ export function commitCollectionEdit(
 ): CollectionEditIntent | null {
   const next = normalizeCollectionEdit(field, value);
   const intents = readCollectionEdits();
-  const key = collectionEditKey(collectionId, field);
+  const key = collectionEditKey(collectionId, field, next);
   const previous = intents[key] ?? null;
-  if (!previous && next === authoritative) return null;
-  if (previous && previous.value === next && !previous.conflict) return previous;
+  if (!previous && sameEditValue(next, authoritative)) return null;
+  if (previous && sameEditValue(previous.value, next) && !previous.conflict) return previous;
   const intent: CollectionEditIntent = {
     collectionId,
     field,
@@ -129,7 +154,7 @@ export function commitCollectionEdit(
 /** Remove an intent the server confirmed, unless a newer action replaced it. */
 export function confirmCollectionEdit(expected: CollectionEditIntent): boolean {
   const intents = readCollectionEdits();
-  const key = collectionEditKey(expected.collectionId, expected.field);
+  const key = intentKey(expected);
   if (intents[key]?.operationId !== expected.operationId) return false;
   delete intents[key];
   write(intents);
@@ -157,7 +182,7 @@ export function reissueCollectionEdit(expected: CollectionEditIntent, operationI
 /** Change the stored intent if it is still `expected`; null when replaced or not saved. */
 function replace(expected: CollectionEditIntent, change: (stored: CollectionEditIntent) => void): CollectionEditIntent | null {
   const intents = readCollectionEdits();
-  const key = collectionEditKey(expected.collectionId, expected.field);
+  const key = intentKey(expected);
   const stored = intents[key];
   if (!stored || stored.operationId !== expected.operationId) return null;
   change(stored);
@@ -167,7 +192,7 @@ function replace(expected: CollectionEditIntent, change: (stored: CollectionEdit
 /** Park a memo intent until the user chooses; it is not sent meanwhile. */
 export function markCollectionEditConflict(expected: CollectionEditIntent, current: CollectionEditValue): boolean {
   const intents = readCollectionEdits();
-  const key = collectionEditKey(expected.collectionId, expected.field);
+  const key = intentKey(expected);
   const stored = intents[key];
   if (!stored || stored.operationId !== expected.operationId) return false;
   stored.conflict = {current};
@@ -175,9 +200,9 @@ export function markCollectionEditConflict(expected: CollectionEditIntent, curre
 }
 
 /** The user's answer to a memo conflict. */
-export function resolveCollectionEditConflict(collectionId: string, field: CollectionEditField, choice: 'overwrite' | 'discard'): CollectionEditIntent | null {
+export function resolveCollectionEditConflict(collectionId: string, field: CollectionEditField, choice: 'overwrite' | 'discard', value?: CollectionEditValue): CollectionEditIntent | null {
   const intents = readCollectionEdits();
-  const key = collectionEditKey(collectionId, field);
+  const key = collectionEditKey(collectionId, field, value);
   const stored = intents[key];
   if (!stored?.conflict) return null;
   if (choice === 'discard') {
@@ -194,7 +219,7 @@ export function visibleCollectionEdit<T extends CollectionEditValue>(
   field: CollectionEditField,
   authoritative: T,
 ): {value: T; pending: boolean; conflict: boolean} {
-  const intent = readCollectionEdit(collectionId, field);
+  const intent = readCollectionEdit(collectionId, field, authoritative);
   if (!intent) return {value: authoritative, pending: false, conflict: false};
   return {value: intent.value as T, pending: true, conflict: !!intent.conflict};
 }

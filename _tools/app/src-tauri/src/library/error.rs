@@ -181,6 +181,16 @@ pub enum LibraryError {
     CatalogDuplicateInvalid,
     #[error("서버 카탈로그 중복 판본 검토 이력의 위치가 이 PC와 어긋납니다.")]
     CatalogDuplicateCursorRejected,
+    #[error("서버 신간 알림 동기화 요청이 거부됐습니다: HTTP {0}")]
+    ReleaseSyncRejected(u16),
+    #[error("서버 신간 알림 동기화 응답이 올바르지 않습니다.")]
+    ReleaseSyncInvalid,
+    #[error("서버의 오래된 신간 알림 확인 기록이 정리되었습니다.")]
+    ReleaseReadCursorExpired(i64),
+    #[error("서버 신간 알림 확인 기록의 위치가 이 PC와 어긋납니다.")]
+    ReleaseCursorRejected,
+    #[error("서버에 더 새로운 신간 알림 목록이 이미 게시되었습니다.")]
+    ReleaseGenerationStale,
     #[error("서버 캐릭터 게시가 거부됐습니다: HTTP {0}")]
     CharacterPublicationRejected(u16),
     #[error("서버의 캐릭터 게시본이 먼저 변경되었습니다. 다시 게시해 주세요.")]

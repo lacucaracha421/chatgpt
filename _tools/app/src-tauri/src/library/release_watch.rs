@@ -224,35 +224,16 @@ impl Library {
         collection_id: &str,
         enabled: bool,
     ) -> Result<ReleaseWatchStatus, LibraryError> {
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
         require_collection(&connection, collection_id)?;
-        if enabled {
-            let inserted = connection.execute(
-                "INSERT INTO release_watch_subscriptions (
-                    collection_id, provider, last_checked_at
-                 )
-                 SELECT binding.collection_id, binding.provider, binding.last_synced_at
-                 FROM collection_external_bindings AS binding
-                 JOIN collections AS collection ON collection.id = binding.collection_id
-                 WHERE binding.collection_id = ?1
-                   AND binding.provider = CASE WHEN EXISTS (
-                       SELECT 1 FROM collection_external_bindings WHERE collection_id = ?1 AND provider = 'kakao'
-                   ) THEN 'kakao' ELSE 'aladin' END
-                   AND collection.type = 'manga'
-                 ON CONFLICT(collection_id, provider) DO NOTHING",
-                [collection_id],
-            )?;
-            if inserted == 0 && !subscription_exists(&connection, collection_id)? {
-                return Err(LibraryError::ReleaseWatchRequiresAladinBinding);
-            }
-        } else {
-            connection.execute(
-                "DELETE FROM release_watch_subscriptions
-                 WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')",
-                [collection_id],
-            )?;
+        let transaction = connection.transaction()?;
+        if write_release_watch(&transaction, collection_id, enabled)? {
+            // Subscriptions have no 0074 trigger; the Collection publication carries them.
+            super::collection_personal_edits::bump_collections_generation(&transaction)?;
         }
-        release_watch_status(&connection, collection_id)
+        let status = release_watch_status(&transaction, collection_id)?;
+        transaction.commit()?;
+        Ok(status)
     }
 
     pub fn take_unread_release_changes(
@@ -313,6 +294,43 @@ fn stop_reason(error: &LibraryError) -> Option<ReleaseWatchRunStopReason> {
         LibraryError::AladinUnavailable => Some(ReleaseWatchRunStopReason::Unavailable),
         LibraryError::InvalidAladinResponse => Some(ReleaseWatchRunStopReason::InvalidResponse),
         _ => None,
+    }
+}
+
+/// Subscribe (Kakao binding preferred, else Aladin) or unsubscribe one manga Collection.
+/// Returns whether a subscription row changed. Enabling without a binding is
+/// `ReleaseWatchRequiresAladinBinding`. Shared by the PC toggle and mobile personal edits.
+pub(super) fn write_release_watch(
+    connection: &rusqlite::Connection,
+    collection_id: &str,
+    enabled: bool,
+) -> Result<bool, LibraryError> {
+    if enabled {
+        let inserted = connection.execute(
+            "INSERT INTO release_watch_subscriptions (
+                collection_id, provider, last_checked_at
+             )
+             SELECT binding.collection_id, binding.provider, binding.last_synced_at
+             FROM collection_external_bindings AS binding
+             JOIN collections AS collection ON collection.id = binding.collection_id
+             WHERE binding.collection_id = ?1
+               AND binding.provider = CASE WHEN EXISTS (
+                   SELECT 1 FROM collection_external_bindings WHERE collection_id = ?1 AND provider = 'kakao'
+               ) THEN 'kakao' ELSE 'aladin' END
+               AND collection.type = 'manga'
+             ON CONFLICT(collection_id, provider) DO NOTHING",
+            [collection_id],
+        )?;
+        if inserted == 0 && !subscription_exists(connection, collection_id)? {
+            return Err(LibraryError::ReleaseWatchRequiresAladinBinding);
+        }
+        Ok(inserted > 0)
+    } else {
+        Ok(connection.execute(
+            "DELETE FROM release_watch_subscriptions
+             WHERE collection_id = ?1 AND provider IN ('aladin', 'kakao')",
+            [collection_id],
+        )? > 0)
     }
 }
 

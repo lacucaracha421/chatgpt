@@ -87,6 +87,7 @@ mod classification_reconciliation_tests;
 pub mod cloud_preflight;
 pub(crate) mod collection;
 pub(crate) mod collection_personal_edits;
+pub(crate) mod collection_release_sync;
 pub(crate) mod collection_source;
 mod collection_volume;
 pub(crate) mod credential;

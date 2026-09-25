@@ -15,7 +15,11 @@
  * * a server refusal of one intent does not stop the others in the same pass; a
  *   transport failure ends the pass, since every other send would fail too;
  * * nothing is sent until `/v1/collections/status` advertises
- *   `collectionPersonalEdit`.
+ *   `collectionPersonalEdit`; 신간 알림 and owned-volume edits also wait for
+ *   `collectionTrackingEdit` (a PC that publishes personal-edit version 2);
+ * * 신간 알림 / owned volumes resolve a `collectionPersonalConflict` like a rating
+ *   (adopt `current`, retry once); a Collection that cannot be tracked, or 신간 알림
+ *   without an Aladin/Kakao binding, is dropped with a short message.
  *
  * It never enqueues and never schedules itself.
  */
@@ -26,6 +30,8 @@ import {
   type CollectionEditValue,
   confirmCollectionEdit,
   markCollectionEditConflict,
+  sameEditValue,
+  TRACKING_FIELDS,
   readCollectionEdits,
   rebaseCollectionEdit,
   reissueCollectionEdit,
@@ -48,17 +54,24 @@ export type CollectionEditReport = {
 const REJECTED = new Map<unknown, string>([
   ['collectionNotFound', 'PC에서 삭제되었거나 게시되지 않은 작품이라 변경을 반영하지 못했습니다.'],
   ['invalidCollectionPersonalEdit', '서버가 이 변경을 받지 않아 되돌렸습니다.'],
+  ['collectionTrackingUnavailable', '이 작품은 신간 알림과 소장 권수를 바꿀 수 없어 되돌렸습니다.'],
+  ['releaseWatchUnavailable', '알라딘이나 카카오와 연결된 만화만 신간 알림을 켤 수 있어 되돌렸습니다.'],
 ]);
 
 export type CollectionEditStatus = {
   revision?: string | null;
   libraryId?: string | null;
-  capabilities?: {collectionPersonalEdit?: boolean};
+  capabilities?: {collectionPersonalEdit?: boolean; collectionTrackingEdit?: boolean};
 };
 
 /** The library id edits may be sent under, or null when no send is legal. */
 export function personalEditLibrary(status: CollectionEditStatus | null | undefined): string | null {
   return status?.capabilities?.collectionPersonalEdit === true && typeof status.libraryId === 'string' && status.libraryId ? status.libraryId : null;
+}
+
+/** Whether 신간 알림 / owned-volume edits may be sent (a version-2 PC published). */
+export function trackingEditAllowed(status: CollectionEditStatus | null | undefined): boolean {
+  return personalEditLibrary(status) !== null && status?.capabilities?.collectionTrackingEdit === true;
 }
 
 let running: Promise<CollectionEditReport> | null = null;
@@ -77,7 +90,9 @@ async function pass(signal?: AbortSignal): Promise<CollectionEditReport> {
   const report: CollectionEditReport = {outcomes: [], unsupported: false};
   const pending = Object.entries(readCollectionEdits()).sort(([, a], [, b]) => a.createdAt - b.createdAt);
   if (!pending.length) return report;
-  const libraryId = personalEditLibrary(await api<CollectionEditStatus>('/v1/collections/status', signal));
+  const status = await api<CollectionEditStatus>('/v1/collections/status', signal);
+  const libraryId = personalEditLibrary(status);
+  const tracking = trackingEditAllowed(status);
   if (!libraryId) {
     // Queued edits wait: the server or PC may be upgraded later.
     report.unsupported = true;
@@ -90,6 +105,8 @@ async function pass(signal?: AbortSignal): Promise<CollectionEditReport> {
     const intent = readCollectionEdits()[key];
     if (!intent) continue;
     if (intent.conflict) { report.outcomes.push({key, outcome: 'conflict'}); continue; }
+    // A tracking edit waits, still queued, until the PC is upgraded again.
+    if (!tracking && TRACKING_FIELDS.includes(intent.field)) { report.outcomes.push({key, outcome: 'withheld'}); continue; }
     try {
       const outcome = await deliver(intent, libraryId, 1, signal);
       report.outcomes.push(typeof outcome === 'string' ? {key, outcome} : {key, ...outcome});
@@ -150,7 +167,7 @@ async function deliver(intent: CollectionEditIntent, libraryId: string, attempt:
 }
 
 async function conflict(intent: CollectionEditIntent, libraryId: string, current: CollectionEditValue, attempt: number, signal?: AbortSignal): Promise<Delivered> {
-  if (current === intent.value) return confirmCollectionEdit(intent) ? 'already-current' : 'superseded';
+  if (sameEditValue(current, intent.value)) return confirmCollectionEdit(intent) ? 'already-current' : 'superseded';
   // A memo is only rebased when `current` is this device's own earlier value.
   if (intent.field === 'memo' && !intent.own.includes(current)) {
     return markCollectionEditConflict(intent, current) ? 'conflict' : 'superseded';

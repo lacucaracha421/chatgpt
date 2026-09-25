@@ -72,6 +72,20 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/collections/personal-edits","GET"));
  reject(()->NetworkPolicy.api("/v1/collections/personal-edits?libraryId=0123456789abcdef0123456789abcdef&after=0&limit=100","GET"));
  for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/personal-edits",method));
+ pass(()->NetworkPolicy.api("/v1/collections/releases","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/releases?limit=1","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/releases?state=unread&limit=50&cursor=MTcwMDAwMDAwMDAwMDox","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/releases/acknowledge","POST"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/unread","PUT"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/unread","GET"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/unread","POST"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/reads","GET"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/reads?after=0&limit=100","GET"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/acknowledge","GET"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/acknowledge/","POST"));
+ reject(()->NetworkPolicy.api("/v1/collections/releases/../replica","PUT"));
+ for(String method:new String[]{"PUT","DELETE","PATCH","POST"})reject(()->NetworkPolicy.api("/v1/collections/releases",method));
+ for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/releases/acknowledge",method));
  // Album authority replication keeps its read paths. 2C-3 adds exactly the domain's
  // one typed mutation route, PUT /v1/albums/commands, and no other Album write.
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/albums/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));

@@ -131,7 +131,7 @@
 /* Personal fields: my rating, Showcase membership and memo (editable when the server allows). */
 .collection-personal{display:grid;gap:0;border-top:1px solid var(--color-border)}
 .collection-personal-row{display:flex;align-items:center;gap:12px;width:100%;min-height:var(--touch,44px);padding:10px 2px;background:transparent;border:0;border-bottom:1px solid var(--color-border);color:inherit;font:inherit;text-align:left}
-.collection-personal-label{color:var(--color-muted);min-width:64px}
+.collection-personal-label{color:var(--color-muted);min-width:5.8em}
 .collection-personal-value{flex:1;min-width:0}
 .collection-personal-row.is-pending .collection-personal-value,.collection-memo-text.is-pending{opacity:.58}
 .collection-personal-pending{font-size:12px;color:var(--color-muted);white-space:nowrap}
@@ -166,3 +166,39 @@
 .collection-personal-pending.is-slot{display:inline-block;min-width:4.5em;text-align:right}
 .collection-personal-switch{transition:background-color .15s var(--ease-standard),border-color .15s var(--ease-standard)}
 .collection-personal-switch::after{transition:transform .15s var(--ease-standard),background-color .15s var(--ease-standard)}
+/* 신간 알림: a quiet chip in the bar, a card badge like the PC's, and the inbox level. */
+.collection-release-chip{display:inline-flex;align-items:center;gap:4px;min-height:36px;margin:0 4px;padding:0 10px;background:transparent;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font:inherit;font-size:13px;white-space:nowrap}
+.collection-release-chip .numeric{color:var(--color-accent);font-weight:600}
+.collection-release-chip:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+.collection-tile{position:relative}
+.collection-release-badge{position:absolute;top:6px;right:6px;padding:2px 6px;color:var(--color-bg);background:var(--color-accent);border-radius:var(--radius-sm);font-size:11px;font-weight:600;line-height:1.4;pointer-events:none}
+.collection-releases-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;margin-top:4px}
+.collection-releases-head .hint{margin:0}
+.collection-releases-all,.collection-release-action{min-height:var(--touch,44px);color:var(--color-muted);font-size:13px;flex-shrink:0}
+.collection-release-group{border-top:1px solid var(--color-border);padding:12px 0 4px}
+.collection-release-group__head{display:flex;align-items:center;gap:8px}
+.collection-release-group__open{display:flex;align-items:center;gap:12px;flex:1;min-width:0;min-height:64px;padding:0;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.collection-release-group__cover{width:44px;flex-shrink:0}
+.collection-release-group__cover .collection-art-placeholder svg{width:16px}
+.collection-release-group__title{display:flex;flex-direction:column;gap:2px;min-width:0}
+.collection-release-group__title strong{font-weight:500;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.collection-release-group__title small{font-size:12px;color:var(--color-accent)}
+.collection-release-events{list-style:none;margin:4px 0 0;padding:0 0 0 56px}
+.collection-release-events li{display:flex;align-items:center;gap:8px;border-top:1px solid var(--color-border)}
+.collection-release-event{flex:1;min-width:0;min-height:var(--touch,44px);padding:8px 0;background:none;border:0;color:inherit;font:inherit;font-size:14px;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+.collection-release-group__open:focus-visible,.collection-release-event:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+/* Tracking rows continue the 내 기록 list; the reason under a disabled switch stays short. */
+.collection-personal-row:disabled{cursor:default}
+.collection-personal-row:disabled .collection-personal-value,.collection-personal-row:disabled .collection-personal-switch{opacity:.45}
+.collection-personal-value .muted{color:var(--color-muted)}
+.collection-tracking-reason{margin:6px 2px 4px;font-size:12px;color:var(--color-muted)}
+.collection-owned-sheet{display:flex;flex-direction:column;gap:10px}
+.collection-owned-stepper{display:flex;align-items:center;justify-content:center;gap:16px;padding:8px 0}
+.collection-owned-stepper>button{display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:transparent;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:inherit}
+.collection-owned-stepper>button:disabled{opacity:.4}
+.collection-owned-stepper>button svg{width:22px;height:22px}
+.collection-owned-stepper>button:focus-visible,.collection-owned-value input:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+.collection-owned-value{display:flex;align-items:baseline;gap:6px}
+.collection-owned-value input{width:4.2ch;min-height:56px;padding:0 6px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:inherit;font:inherit;font-size:28px;text-align:center}
+.collection-owned-value span{color:var(--color-muted);font-size:14px}
+.collection-owned-shortcuts{justify-content:center}

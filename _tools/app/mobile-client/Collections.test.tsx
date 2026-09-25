@@ -91,6 +91,7 @@ describe('tab return retention',()=>{
     let lists=0,details=0;
     mocks.api.mockImplementation((path:string)=>{
       if(path.endsWith('/status'))return Promise.resolve({revision:'r1'});
+      if(path.startsWith('/v1/collections/releases'))return Promise.resolve({revision:1,counts:{unread:0,collections:[]},items:[],nextCursor:null,hasMore:false});
       if(path.startsWith('/v1/collections?'))return ++lists===1?oldList.promise:Promise.resolve(page);
       return ++details===1?oldDetail.promise:Promise.resolve({revision:'r1',item});
     });

@@ -10,6 +10,10 @@ export type CollectionSummary = {
   platforms?:string|null; genres?:string|null; productionCompany?:string|null; externalScore?:number|null; seasonDateRange?:string[]|null;
   myScore?:number|null; releaseDate?:string|null; createdAt?:string;
   showcase:boolean; showcaseOrder?:number|null; volumes?:CollectionVolume[];
+  /** Manga only, from an upgraded PC: 신간 알림 state (`available` = an Aladin/Kakao binding). */
+  releaseWatch?:{enabled:boolean;available:boolean}|null;
+  /** Manga only, from an upgraded PC: owned volumes per tracked edition. */
+  ownedVolumes?:{editionIndex:number;count:number}[]|null;
 };
 export type CollectionSeason = {id:number;seasonNumber:number;name:string;airDate:string|null;posterArtworkId:string|null;episodes:{id:number;episodeNumber:number;name:string;airDate:string|null;runtimeMinutes:number|null}[]};
 /** TMDB film details as published by the PC: text only, without posters or local collection links. */

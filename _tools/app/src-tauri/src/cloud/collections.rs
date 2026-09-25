@@ -57,6 +57,26 @@ pub(crate) struct ReplicaCollection {
     #[serde(skip_serializing_if = "Option::is_none")]
     film: Option<serde_json::Value>,
     artworks: Vec<ReplicaArtwork>,
+    /// Manga tracking state, only on manga Collections of a version-2 handshake
+    /// (`collection_personal_edits.py`); omitted otherwise so older servers accept the body.
+    #[serde(rename = "releaseWatch", skip_serializing_if = "Option::is_none")]
+    release_watch: Option<ReleaseWatchPayload>,
+    #[serde(rename = "ownedVolumes", skip_serializing_if = "Option::is_none")]
+    owned_volumes: Option<Vec<OwnedVolumesPayload>>,
+}
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct ReleaseWatchPayload {
+    /// A subscription exists.
+    enabled: bool,
+    /// An Aladin or Kakao binding exists, so `set_release_watch_enabled` can subscribe.
+    available: bool,
+}
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OwnedVolumesPayload {
+    edition_index: u8,
+    /// Volumes owned in any format, as the PC ownership panel counts them.
+    count: i64,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -271,10 +291,11 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
                     )
                     .optional()?
                     .ok_or(LibraryError::CollectionPersonalEditCursorRejected)?;
-                Some(PersonalEditHandshake { personal_edit_version: 1, library_id: feature.library_id.clone(), personal_edit_cursor: cursor })
+                Some(PersonalEditHandshake { personal_edit_version: feature.edit_version, library_id: feature.library_id.clone(), personal_edit_cursor: cursor })
             }
             None => None,
         };
+        let tracking = feature.is_some_and(|feature| feature.edit_version >= 2);
         let source_root = collection_source_root(&transaction, root)?;
         let mut files = BTreeMap::new();
         let mut total_bytes = 0;
@@ -338,12 +359,20 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
             }
             let series = committed_series(&transaction, &summary.id)?;
             let film = committed_film(&transaction, &summary.id)?;
+            let (release_watch, owned_volumes) = if tracking && summary.collection_type == crate::library::models::CollectionType::Manga {
+                let (watch, owned) = committed_tracking(&transaction, &summary.id)?;
+                (Some(watch), Some(owned))
+            } else {
+                (None, None)
+            };
             let collection = ReplicaCollection {
                 series,
                 film,
                 summary,
                 volumes,
                 artworks,
+                release_watch,
+                owned_volumes,
             };
             metadata_bytes += serde_json::to_vec(&collection)
                 .map_err(|_| LibraryError::InvalidCloudResponse)?
@@ -893,7 +922,7 @@ mod tests {
         let endpoint = "https://sync.example.test";
         let library_id = library.library_id().unwrap();
         library.adopt_collection_personal_edit_library(endpoint, &library_id).unwrap();
-        let feature = PersonalEditFeature { endpoint: endpoint.into(), library_id: library_id.clone() };
+        let feature = PersonalEditFeature { endpoint: endpoint.into(), library_id: library_id.clone(), edit_version: 1 };
         let legacy = serde_json::to_value(&library.cloud_collections_snapshot(None, &|_| {}).unwrap().replica).unwrap();
         for field in ["personalEditVersion", "libraryId", "personalEditCursor"] {
             assert!(legacy.get(field).is_none(), "legacy snapshot must omit {field}");
@@ -906,6 +935,46 @@ mod tests {
         }
         library.connection().unwrap().execute("DELETE FROM mobile_collection_personal_edit_sync", []).unwrap();
         assert!(matches!(library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}), Err(LibraryError::CollectionPersonalEditCursorRejected)));
+    }
+
+    #[test]
+    fn version_two_adds_tracking_keys_to_manga_collections_only() {
+        let (_temp, library) = personal_edit_fixture();
+        library.connection().unwrap().execute_batch(
+            "INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('m','Bare manga','manga','2026','2026'),('g','Game','game','2026','2026'),('v','Movie','movie','2026','2026');
+             INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,last_synced_at,created_at,updated_at) VALUES('c','aladin','x','{}','t','t','t');
+             INSERT INTO release_watch_subscriptions(collection_id,provider,last_checked_at) VALUES('c','aladin',NULL);
+             INSERT INTO collection_ownership_tracking(collection_id,edition_index) VALUES('c',0),('c',2);
+             INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES('c',1,0,1,0),('c',2,0,0,1),('c',3,0,1,1),('c',1,1,1,0);",
+        ).unwrap();
+        let endpoint = "https://sync.example.test";
+        let library_id = library.library_id().unwrap();
+        library.adopt_collection_personal_edit_library(endpoint, &library_id).unwrap();
+        let snapshot = |edit_version| {
+            let feature = PersonalEditFeature { endpoint: endpoint.into(), library_id: library_id.clone(), edit_version };
+            serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}).unwrap().replica).unwrap()
+        };
+        let find = |value: &serde_json::Value, id: &str| value["collections"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
+        let v2 = snapshot(2);
+        assert_eq!(v2["personalEditVersion"], 2);
+        let manga = find(&v2, "c");
+        assert_eq!(manga["releaseWatch"], json!({"enabled":true,"available":true}));
+        // Tracked editions plus any edition with owned volumes; any format counts.
+        assert_eq!(manga["ownedVolumes"], json!([{"editionIndex":0,"count":3},{"editionIndex":1,"count":1},{"editionIndex":2,"count":0}]));
+        let bare = find(&v2, "m");
+        assert_eq!(bare["releaseWatch"], json!({"enabled":false,"available":false}));
+        assert_eq!(bare["ownedVolumes"], json!([]));
+        for id in ["g", "v"] {
+            let other = find(&v2, id);
+            assert!(other.get("releaseWatch").is_none() && other.get("ownedVolumes").is_none(), "{id}");
+        }
+        // Version 1 (an older server) and the legacy body carry no tracking keys at all.
+        let v1 = snapshot(1);
+        assert_eq!(v1["personalEditVersion"], 1);
+        let legacy = serde_json::to_value(&library.cloud_collections_snapshot(None, &|_| {}).unwrap().replica).unwrap();
+        for body in [v1, legacy] {
+            assert!(body["collections"].as_array().unwrap().iter().all(|c| c.get("releaseWatch").is_none() && c.get("ownedVolumes").is_none()));
+        }
     }
 
     #[test]
@@ -1045,6 +1114,28 @@ mod tests {
 }
 
 // Only committed presentation metadata crosses the boundary, never provider URLs or credentials.
+/// One manga Collection's 신간 알림 state and owned-volume counts per tracked edition.
+fn committed_tracking(db: &rusqlite::Connection, id: &str) -> Result<(ReleaseWatchPayload, Vec<OwnedVolumesPayload>), LibraryError> {
+    let watch = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM release_watch_subscriptions WHERE collection_id=?1 AND provider IN ('aladin','kakao')),
+                EXISTS(SELECT 1 FROM collection_external_bindings WHERE collection_id=?1 AND provider IN ('aladin','kakao'))",
+        [id],
+        |row| Ok(ReleaseWatchPayload { enabled: row.get(0)?, available: row.get(1)? }),
+    )?;
+    let owned = db
+        .prepare(
+            "SELECT edition_index, MIN(COUNT(owned), 2000) FROM (
+                 SELECT edition_index, NULL AS owned FROM collection_ownership_tracking WHERE collection_id=?1
+                 UNION ALL
+                 SELECT edition_index, volume_number FROM collection_volume_ownership
+                 WHERE collection_id=?1 AND (physical<>0 OR digital<>0)
+             ) WHERE edition_index BETWEEN 0 AND 3 GROUP BY edition_index ORDER BY edition_index",
+        )?
+        .query_map([id], |row| Ok(OwnedVolumesPayload { edition_index: row.get(0)?, count: row.get(1)? }))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((watch, owned))
+}
+
 fn committed_series(db: &rusqlite::Connection, id: &str) -> Result<Option<serde_json::Value>, LibraryError> {
     use rusqlite::OptionalExtension;
     let raw: Option<String> = db.query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='tmdb' AND external_id LIKE 'tv:%' LIMIT 1", [id], |r| r.get(0)).optional()?;

@@ -1,4 +1,5 @@
-//! Personal Collection edits (my rating, Showcase membership, memo) accepted by the mobile
+//! Personal Collection edits (my rating, Showcase membership, memo, and - personal-edit
+//! version 2 - a manga Collection's 신간 알림 and owned-volume count) accepted by the mobile
 //! server while the PC was off.
 //!
 //! The PC owns every Collection. The server accepts a mobile edit, reflects it in what
@@ -14,7 +15,12 @@
 //! * Each page is applied in one transaction that re-reads and advances the durable
 //!   cursor and writes a receipt per consumed entry, so a replay is a no-op and a stale
 //!   page can never rewind the cursor.
-//! * A malformed entry, a gap, or a receipt conflict fails the whole page closed.
+//! * A malformed entry, a gap, or a receipt conflict fails the whole page closed; so does an
+//!   unknown (future) field.
+//! * Version 2 (`releaseWatch`, `ownedVolumes`) applies through the same writes as the PC's
+//!   ownership panel (`write_release_watch`, `write_owned_volume_count`). Turning 신간 알림 on
+//!   without an Aladin/Kakao binding, or a tracking edit for a Collection that is no longer
+//!   manga, is recorded as applied without change; the next publication shows the real state.
 use std::sync::OnceLock;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -70,6 +76,9 @@ pub(crate) struct PageOutcome {
 pub(crate) struct PersonalEditFeature {
     pub endpoint: String,
     pub library_id: String,
+    /// The handshake version to publish: 2 (with the manga tracking payload keys) when the
+    /// server understands the tracking fields, else 1.
+    pub edit_version: u8,
 }
 
 /// A validated value for one field.
@@ -78,6 +87,8 @@ enum EditValue {
     Score(Option<f64>),
     Showcase(bool),
     Memo(Option<String>),
+    ReleaseWatch(bool),
+    OwnedVolumes { edition_index: u8, count: i64 },
 }
 
 type Listener = Box<dyn Fn() + Send + Sync>;
@@ -88,7 +99,7 @@ pub(crate) fn set_collections_changed_listener(listener: impl Fn() + Send + Sync
     let _ = COLLECTIONS_CHANGED.set(Box::new(listener));
 }
 
-fn notify_collections_changed() {
+pub(crate) fn notify_collections_changed() {
     if let Some(listener) = COLLECTIONS_CHANGED.get() {
         listener();
     }
@@ -143,6 +154,18 @@ fn parse_value(field: &str, value: &serde_json::Value) -> Result<EditValue, Libr
                 .map_err(|_| LibraryError::CollectionPersonalEditInvalid)
         }
         ("showcase", serde_json::Value::Bool(on)) => Ok(EditValue::Showcase(*on)),
+        ("releaseWatch", serde_json::Value::Bool(on)) => Ok(EditValue::ReleaseWatch(*on)),
+        ("ownedVolumes", serde_json::Value::Object(object)) => {
+            let edition = object.get("editionIndex").and_then(serde_json::Value::as_u64);
+            let count = object.get("count").and_then(serde_json::Value::as_i64);
+            match (object.len(), edition, count) {
+                (2, Some(edition @ 0..=3), Some(count @ 0..=2000)) => Ok(EditValue::OwnedVolumes {
+                    edition_index: edition as u8,
+                    count,
+                }),
+                _ => Err(invalid),
+            }
+        }
         ("memo", serde_json::Value::Null) => Ok(EditValue::Memo(None)),
         ("memo", serde_json::Value::String(text)) => {
             super::collection::normalized_description(Some(text.clone()))
@@ -194,11 +217,34 @@ fn write_field(
              WHERE id = ?2 AND (showcase <> 0 OR showcase_order IS NOT NULL)",
             params![now, collection_id],
         )?,
+        EditValue::ReleaseWatch(enabled) => {
+            match super::release_watch::write_release_watch(connection, collection_id, *enabled) {
+                Ok(changed) => usize::from(changed),
+                // No binding (removed after the server accepted the edit): applied without change.
+                Err(LibraryError::ReleaseWatchRequiresAladinBinding) => 0,
+                Err(error) => return Err(error),
+            }
+        }
+        EditValue::OwnedVolumes {
+            edition_index,
+            count,
+        } => match super::collection_tracking::write_owned_volume_count(
+            connection,
+            collection_id,
+            *edition_index,
+            *count,
+        ) {
+            Ok(changed) => usize::from(changed),
+            // No longer manga: applied without change.
+            Err(LibraryError::InvalidCollectionType) => 0,
+            Err(error) => return Err(error),
+        },
     };
     Ok(changed > 0)
 }
 
-fn bump_collections_generation(connection: &Connection) -> Result<(), LibraryError> {
+/// Mark the Collection publication dirty (for tables without a 0074 trigger).
+pub(super) fn bump_collections_generation(connection: &Connection) -> Result<(), LibraryError> {
     connection.execute(
         "UPDATE mobile_publication_state SET generation=generation+1,
          first_dirty=CASE WHEN generation=published_generation THEN unixepoch() ELSE first_dirty END,
@@ -286,6 +332,7 @@ impl Library {
             };
         };
         let library_id = self.library_id()?;
+        let edit_version = if capabilities.collection_tracking_edit.is_some() { 2 } else { 1 };
         if active && status.library_id.as_deref() != Some(library_id.as_str()) {
             return Err(LibraryError::CollectionPersonalEditCursorRejected);
         }
@@ -300,6 +347,7 @@ impl Library {
             Ok(_) => Ok(Some(PersonalEditFeature {
                 endpoint: endpoint.to_string(),
                 library_id,
+                edit_version,
             })),
             Err(LibraryError::CollectionPersonalEditUnsupported) if !active => Ok(None),
             Err(error) => Err(error),
@@ -470,24 +518,28 @@ impl Library {
                     outcome.skipped += 1;
                     "skipped"
                 };
-                transaction.execute(
-                    "INSERT INTO mobile_collection_personal_edit_receipts
-                        (endpoint, library_id, operation_id, sequence, collection_id, field,
-                         value, previous_value, outcome, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
-                        endpoint,
-                        library_id,
-                        item.operation_id,
-                        item.sequence,
-                        item.collection_id,
-                        item.field,
-                        value_json,
-                        item.previous.to_string(),
-                        result,
-                        now
-                    ],
-                )?;
+                if is_tracking_field(&item.field) {
+                    insert_tracking_receipt(&transaction, item, &value_json, endpoint, library_id, result, &now)?;
+                } else {
+                    transaction.execute(
+                        "INSERT INTO mobile_collection_personal_edit_receipts
+                            (endpoint, library_id, operation_id, sequence, collection_id, field,
+                             value, previous_value, outcome, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![
+                            endpoint,
+                            library_id,
+                            item.operation_id,
+                            item.sequence,
+                            item.collection_id,
+                            item.field,
+                            value_json,
+                            item.previous.to_string(),
+                            result,
+                            now
+                        ],
+                    )?;
+                }
             }
             expected += 1;
             highest = item.sequence;
@@ -513,6 +565,42 @@ impl Library {
     }
 }
 
+/// Version-2 fields. Their receipts cannot use `mobile_collection_personal_edit_receipts`,
+/// whose 0091 CHECK allows only the three version-1 fields, so (without a migration) they
+/// are kept as one JSON row each in the key/value table `notes_state` with the same
+/// content and the same divergence rules.
+fn is_tracking_field(field: &str) -> bool {
+    matches!(field, "releaseWatch" | "ownedVolumes")
+}
+
+fn tracking_receipt_key(endpoint: &str, library_id: &str, operation_id: &str) -> String {
+    format!("collectionPersonalEditReceipt:{library_id}:{operation_id}:{endpoint}")
+}
+
+fn insert_tracking_receipt(
+    transaction: &Connection,
+    item: &PersonalEditEntry,
+    value_json: &str,
+    endpoint: &str,
+    library_id: &str,
+    outcome: &str,
+    now: &str,
+) -> Result<(), LibraryError> {
+    let receipt = serde_json::json!({
+        "sequence": item.sequence, "collectionId": item.collection_id, "field": item.field,
+        "value": value_json, "previousValue": item.previous.to_string(), "outcome": outcome,
+        "createdAt": now,
+    });
+    transaction.execute(
+        "INSERT INTO notes_state(key, value) VALUES (?1, ?2)",
+        params![
+            tracking_receipt_key(endpoint, library_id, &item.operation_id),
+            receipt.to_string()
+        ],
+    )?;
+    Ok(())
+}
+
 /// Whether this origin already consumed this exact entry; a receipt with other content
 /// under the same operation id is a divergence and is refused.
 fn receipt_matches(
@@ -522,6 +610,25 @@ fn receipt_matches(
     endpoint: &str,
     library_id: &str,
 ) -> Result<bool, LibraryError> {
+    let tracking: Option<String> = transaction
+        .query_row(
+            "SELECT value FROM notes_state WHERE key = ?1",
+            [tracking_receipt_key(endpoint, library_id, &item.operation_id)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(raw) = tracking {
+        let receipt: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|_| LibraryError::CollectionPersonalEditInvalid)?;
+        if receipt["sequence"].as_i64() != Some(item.sequence)
+            || receipt["collectionId"].as_str() != Some(item.collection_id.as_str())
+            || receipt["field"].as_str() != Some(item.field.as_str())
+            || receipt["value"].as_str() != Some(value_json)
+        {
+            return Err(LibraryError::CollectionPersonalEditInvalid);
+        }
+        return Ok(true);
+    }
     let recorded: Option<(i64, String, String, String)> = transaction
         .query_row(
             "SELECT sequence, collection_id, field, value
@@ -640,7 +747,13 @@ pub(crate) mod tests {
         library
             .connection()
             .unwrap()
-            .prepare("SELECT sequence, outcome FROM mobile_collection_personal_edit_receipts ORDER BY sequence")
+            .prepare(
+                "SELECT sequence, outcome FROM mobile_collection_personal_edit_receipts
+                 UNION ALL
+                 SELECT json_extract(value,'$.sequence'), json_extract(value,'$.outcome')
+                 FROM notes_state WHERE key LIKE 'collectionPersonalEditReceipt:%'
+                 ORDER BY 1",
+            )
             .unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap()
@@ -961,6 +1074,197 @@ pub(crate) mod tests {
         assert_eq!(row(&library, "a").1, None);
     }
 
+    // --- Version 2: manga tracking fields -------------------------------------------
+
+    fn tracking(library: &Library, id: &str) -> (bool, Vec<(i64, u8, bool, bool)>, Vec<u8>) {
+        let c = library.connection().unwrap();
+        let subscribed = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM release_watch_subscriptions WHERE collection_id=?1)",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let owned = c
+            .prepare("SELECT volume_number, edition_index, physical, digital FROM collection_volume_ownership WHERE collection_id=?1 ORDER BY edition_index, volume_number")
+            .unwrap()
+            .query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let editions = c
+            .prepare("SELECT edition_index FROM collection_ownership_tracking WHERE collection_id=?1 ORDER BY 1")
+            .unwrap()
+            .query_map([id], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        (subscribed, owned, editions)
+    }
+
+    fn bind_aladin(library: &Library, id: &str) {
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,last_synced_at,created_at,updated_at)
+                 VALUES(?1,'aladin','x','{}','2026-09-01T00:00:00Z','t','t')",
+                [id],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn version_two_applies_release_watch_and_owned_volumes_like_the_pc_panel() {
+        let (_temp, library) = fixture();
+        bind_aladin(&library, "a");
+        let id = adopt(&library, ENDPOINT);
+        mark_published(&library);
+        let outcome = library
+            .apply_collection_personal_edit_page(
+                ENDPOINT,
+                &id,
+                &[
+                    entry(1, "a", "releaseWatch", serde_json::json!(true)),
+                    entry(2, "a", "ownedVolumes", serde_json::json!({"editionIndex":1,"count":3})),
+                    // No binding: recorded as applied without change.
+                    entry(3, "s", "releaseWatch", serde_json::json!(true)),
+                    // Not manga: applied without change.
+                    entry(4, "g", "ownedVolumes", serde_json::json!({"editionIndex":0,"count":2})),
+                ],
+            )
+            .unwrap();
+        assert_eq!((outcome.changed, outcome.skipped), (2, 0));
+        assert_eq!(
+            receipts(&library).iter().map(|r| r.1.as_str()).collect::<Vec<_>>(),
+            ["applied"; 4]
+        );
+        assert_eq!(
+            tracking(&library, "a"),
+            (
+                true,
+                vec![(1, 1, true, false), (2, 1, true, false), (3, 1, true, false)],
+                vec![1]
+            )
+        );
+        assert_eq!(tracking(&library, "s"), (false, vec![], vec![]));
+        assert_eq!(tracking(&library, "g"), (false, vec![], vec![]));
+        assert!(dirty(&library));
+        assert_eq!(cursor(&library, ENDPOINT), 4);
+        // Per-volume detail of that edition is replaced (a digital volume included), off works,
+        // and a count already in place is not rewritten.
+        library
+            .set_volume_ownership("a", 1, vec![7], "digital", true)
+            .unwrap();
+        let outcome = library
+            .apply_collection_personal_edit_page(
+                ENDPOINT,
+                &id,
+                &[
+                    entry(5, "a", "ownedVolumes", serde_json::json!({"editionIndex":1,"count":2})),
+                    entry(6, "a", "releaseWatch", serde_json::json!(false)),
+                    entry(7, "a", "ownedVolumes", serde_json::json!({"editionIndex":1,"count":2})),
+                ],
+            )
+            .unwrap();
+        assert_eq!(outcome.changed, 2);
+        assert_eq!(
+            tracking(&library, "a"),
+            (false, vec![(1, 1, true, false), (2, 1, true, false)], vec![1])
+        );
+    }
+
+    #[test]
+    fn tracking_receipts_make_replays_harmless_and_refuse_divergence() {
+        let (_temp, library) = fixture();
+        bind_aladin(&library, "a");
+        let id = adopt(&library, ENDPOINT);
+        let page = [
+            entry(1, "a", "releaseWatch", serde_json::json!(true)),
+            entry(2, "a", "ownedVolumes", serde_json::json!({"editionIndex":0,"count":1})),
+        ];
+        library.apply_collection_personal_edit_page(ENDPOINT, &id, &page).unwrap();
+        // The PC changes both itself; a stale replay must not undo that.
+        library.set_release_watch_enabled("a", false).unwrap();
+        library.set_owned_volume_count("a", 0, 5).unwrap();
+        let replay = library.apply_collection_personal_edit_page(ENDPOINT, &id, &page).unwrap();
+        assert_eq!((replay.already_consumed, replay.changed), (2, 0));
+        assert!(!tracking(&library, "a").0);
+        assert_eq!(tracking(&library, "a").1.len(), 5);
+        let forged = entry(2, "a", "ownedVolumes", serde_json::json!({"editionIndex":0,"count":9}));
+        assert!(matches!(
+            library.apply_collection_personal_edit_page(ENDPOINT, &id, &[forged]),
+            Err(LibraryError::CollectionPersonalEditInvalid)
+        ));
+        let mut unknown = entry(2, "a", "releaseWatch", serde_json::json!(true));
+        unknown.operation_id = "never-seen".into();
+        assert!(matches!(
+            library.apply_collection_personal_edit_page(ENDPOINT, &id, &[unknown]),
+            Err(LibraryError::CollectionPersonalEditInvalid)
+        ));
+        assert_eq!(cursor(&library, ENDPOINT), 2);
+    }
+
+    #[test]
+    fn malformed_or_unknown_tracking_entries_fail_the_page_closed() {
+        let (_temp, library) = fixture();
+        bind_aladin(&library, "a");
+        let id = adopt(&library, ENDPOINT);
+        for (field, value) in [
+            ("ownedVolumes", serde_json::json!({"editionIndex":4,"count":1})),
+            ("ownedVolumes", serde_json::json!({"editionIndex":0,"count":2001})),
+            ("ownedVolumes", serde_json::json!({"editionIndex":0,"count":-1})),
+            ("ownedVolumes", serde_json::json!({"editionIndex":0,"count":1.5})),
+            ("ownedVolumes", serde_json::json!({"editionIndex":0,"count":1,"format":"digital"})),
+            ("ownedVolumes", serde_json::json!({"editionIndex":0})),
+            ("ownedVolumes", serde_json::json!(3)),
+            ("releaseWatch", serde_json::json!("yes")),
+            ("releaseWatch", serde_json::json!(null)),
+            ("futureTrackingField", serde_json::json!(true)),
+        ] {
+            let page = [
+                entry(1, "a", "releaseWatch", serde_json::json!(true)),
+                entry(2, "a", field, value),
+            ];
+            assert!(
+                matches!(
+                    library.apply_collection_personal_edit_page(ENDPOINT, &id, &page),
+                    Err(LibraryError::CollectionPersonalEditInvalid)
+                ),
+                "{field}"
+            );
+            assert_eq!(cursor(&library, ENDPOINT), 0);
+            assert_eq!(tracking(&library, "a"), (false, vec![], vec![]));
+        }
+    }
+
+    #[test]
+    fn the_pc_panel_marks_the_collection_publication_dirty() {
+        let (_temp, library) = fixture();
+        bind_aladin(&library, "a");
+        mark_published(&library);
+        library.set_release_watch_enabled("a", true).unwrap();
+        assert!(dirty(&library));
+        mark_published(&library);
+        library.set_release_watch_enabled("a", true).unwrap();
+        assert!(!dirty(&library), "an unchanged toggle schedules nothing");
+        library.set_owned_volume_count("a", 0, 2).unwrap();
+        assert!(dirty(&library));
+        mark_published(&library);
+        library.set_owned_volume_count("a", 0, 2).unwrap();
+        assert!(!dirty(&library));
+        library.set_volume_ownership("a", 0, vec![5], "digital", true).unwrap();
+        assert!(dirty(&library));
+        assert!(matches!(
+            library.set_owned_volume_count("g", 0, 1),
+            Err(LibraryError::InvalidCollectionType)
+        ));
+        assert!(matches!(
+            library.set_release_watch_enabled("s", true),
+            Err(LibraryError::ReleaseWatchRequiresAladinBinding)
+        ));
+    }
+
     // --- Scripted server: receive, handshake decision --------------------------------
 
     fn page_body(library_id: &str, after: i64, next: i64, has_more: bool, items: &str) -> String {
@@ -1134,5 +1438,34 @@ pub(crate) mod tests {
             library.prepare_collection_personal_edits(&client, &base, &other, Some("publisher")),
             Err(LibraryError::CollectionPersonalEditCursorRejected)
         ));
+    }
+
+    #[test]
+    fn a_tracking_capable_server_gets_version_two_and_the_log_is_read_with_edit_version_two() {
+        let (_temp, library) = fixture();
+        let id = library.library_id().unwrap();
+        let empty = page_body(&id, 0, 0, false, "");
+        let (base, handle) = scripted(vec![
+            ("/v1/collections/personal-edits?libraryId=", 200, empty.clone()),
+            ("/v1/collections/personal-edits?libraryId=", 200, empty),
+        ]);
+        configure(&library, &base);
+        let client = CloudClient::new(&base).unwrap();
+        let upgraded = status(
+            r#"{"capabilities":{"collectionPersonalEdit":false,"collectionTrackingEdit":false}}"#,
+        );
+        let feature = library
+            .prepare_collection_personal_edits(&client, &base, &upgraded, Some("publisher"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(feature.edit_version, 2);
+        let older = status(r#"{"capabilities":{"collectionPersonalEdit":false}}"#);
+        let feature = library
+            .prepare_collection_personal_edits(&client, &base, &older, Some("publisher"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(feature.edit_version, 1);
+        let seen = handle.join().unwrap();
+        assert!(seen.iter().all(|(url, _, _)| url.ends_with("&editVersion=2")));
     }
 }

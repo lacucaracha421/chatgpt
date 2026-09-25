@@ -106,6 +106,19 @@ function demoMembershipState(assetId:string){
 }
 const collectionNames={game:['여름의 항로','조용한 행성','먼 바다의 기억','숲의 기록'],manga:['밤의 도서관','여름과 파도','푸른 궤도','작은 정원'],movie:['오후의 빛','도시의 창','먼 곳에서','겨울의 초상']};
 const collections:CollectionDetail[]=(['game','manga','movie'] as const).flatMap(type=>Array.from({length:12},(_,i)=>({id:`collection-${type}-${i}`,name:collectionNames[type][i%4]+(i>3?` ${Math.floor(i/4)+1}`:''),type,publisher:type==='game'?'Field Publishing':null,platforms:type==='game'?'Windows · PlayStation · Switch':null,genres:type==='manga'?'판타지 · 모험':'드라마 · 모험',seasonDateRange:type==='movie'&&i%2===0?['2024-04-01','2026-06-30']:null,productionCompany:type==='movie'?'Studio Archive':null,externalScore:type==='movie'?86:null,runtimeMinutes:type==='movie'?24:null,series:type==='movie'?{status:'방영 종료',cast:['서유진','하루'],seasons:[{id:1,seasonNumber:1,name:'시즌 1',airDate:'2024-04-01',posterArtworkId:`cover-${i}`,episodes:Array.from({length:12},(_,episode)=>({id:episode+1,episodeNumber:episode+1,name:`기억의 장면 ${episode+1}`,airDate:'2024-04-01',runtimeMinutes:24}))}]}:null,showcase:i<7,showcaseOrder:i,year:2024+i%3,myScore:i%4===0?null:i%2===0?4.5:3,createdAt:`2026-09-${String(i+1).padStart(2,'0')}T00:00:00Z`,author:type==='manga'?'서유진':null,developer:type==='game'?'Studio Field':null,director:type==='movie'?'이수현':null,selectedWorkArtworkId:`cover-${i}`,selectedHeroArtworkId:type==='game'?`hero-${i}`:null,selectedBackdropArtworkId:type==='movie'?`hero-${i}`:null,overview:'조용히 보관해 두었다가 다시 꺼내 보는 작품. 빛과 계절, 그리고 오래 남아 있는 장면들을 따라갑니다.',volumes:type==='manga'?Array.from({length:8},(_,v)=>({id:`volume-${v}`,volumeNumber:v%5+1,editionIndex:v<5?0:1,displayLabel:`${v%5+1}권`,coverArtworkId:`volume-cover-${v}`})):[],artworks:[{id:`hero-${i}`,kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true},{id:`cover-${i}`,kind:'cover',selected:true,thumbnailAvailable:true,originalAvailable:true}]})));
+// 신간 알림 and tracking in the preview: manga works carry the upgraded PC's keys, and a few
+// unread release events exercise the chip, card badges and the inbox.
+for(const [i,item] of collections.filter(item=>item.type==='manga').entries()){item.releaseWatch={enabled:i%3===0,available:i%4!==3};item.ownedVolumes=i%2===0?[{editionIndex:0,count:Math.min(5,i+1)}]:[];}
+let demoReleases=[
+  {eventId:'demo-release-1',collectionId:'collection-manga-0',kind:'new_volume',volumeNumber:6,previousValue:null,currentValue:'2026-10-03',detectedAt:'2026-09-25T09:00:00Z'},
+  {eventId:'demo-release-2',collectionId:'collection-manga-0',kind:'release_date_changed',volumeNumber:7,previousValue:'2026-11-01',currentValue:'2026-11-15',detectedAt:'2026-09-24T09:00:00Z'},
+  {eventId:'demo-release-3',collectionId:'collection-manga-2',kind:'new_volume',volumeNumber:3,previousValue:null,currentValue:null,detectedAt:'2026-09-23T09:00:00Z'},
+  {eventId:'demo-release-4',collectionId:'collection-manga-5',kind:'new_volume',volumeNumber:12,previousValue:null,currentValue:'2026-09-30',detectedAt:'2026-09-22T09:00:00Z'},
+].map(event=>({...event,collectionName:collections.find(item=>item.id===event.collectionId)!.name,provider:'aladin',read:false,readAt:null}));
+function demoReleaseList(){
+  const counts=new Map<string,number>();for(const event of demoReleases)counts.set(event.collectionId,(counts.get(event.collectionId)??0)+1);
+  return {version:1,revision:demoReleases.length,generation:'demo',publishedAt:'2026-09-25T09:00:00Z',counts:{unread:demoReleases.length,collections:[...counts].sort().map(([collectionId,unread])=>({collectionId,unread}))},items:demoReleases,nextCursor:null,hasMore:false};
+}
 export async function demoTransport(op: string, payload: Record<string, unknown>): Promise<unknown> {
   await new Promise(resolve => setTimeout(resolve, 80));
   if(op==='notesState'||op==='notesSync'||op==='notesUnlock')return {unlocked:true,notes:demoNotes,lastSyncedAt:new Date().toISOString()};
@@ -179,7 +192,25 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     const offset=Number(url.searchParams.get('cursor')??0),limit=40;
     return {revision,items:selected.slice(offset,offset+limit),totalCount:selected.length,sourceCount:selected.length,has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
   }
-  if(url.pathname==='/v1/collections/status')return {revision:'demo-1'};
+  if(url.pathname==='/v1/collections/status')return {revision:'demo-1',capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true},libraryId:demoLibraryId};
+  if(url.pathname==='/v1/collections/releases')return demoReleaseList();
+  if(url.pathname==='/v1/collections/releases/acknowledge'){
+    const body=payload.body as {operationId:string;eventIds?:string[];collectionId?:string};
+    const hit=demoReleases.filter(event=>body.eventIds?body.eventIds.includes(event.eventId):event.collectionId===body.collectionId);
+    demoReleases=demoReleases.filter(event=>!hit.includes(event));
+    return {version:1,operationId:body.operationId,acknowledged:hit.map(event=>event.eventId),alreadyRead:[],missing:[],revision:demoReleases.length,lastSequence:hit.length};
+  }
+  if(url.pathname==='/v1/collections/personal-edits'){
+    const body=payload.body as {operationId:string;collectionId:string;field:string;value:unknown};
+    const item=collections.find(work=>work.id===body.collectionId);
+    if(item){
+      if(body.field==='releaseWatch'&&item.releaseWatch)item.releaseWatch={...item.releaseWatch,enabled:body.value as boolean};
+      else if(body.field==='ownedVolumes'){const value=body.value as {editionIndex:number;count:number};item.ownedVolumes=[...(item.ownedVolumes??[]).filter(entry=>entry.editionIndex!==value.editionIndex),value].sort((a,b)=>a.editionIndex-b.editionIndex);}
+      else if(body.field==='memo')item.description=body.value as string|null;
+      else (item as Record<string,unknown>)[body.field]=body.value;
+    }
+    return {version:1,operationId:body.operationId,collectionId:body.collectionId,field:body.field,value:body.value,sequence:1,revision:'demo-1',changed:true};
+  }
   if(url.pathname==='/v1/mobile-catalog/status')return {publicationRevision:'demo-catalog',authorityLibraryId:demoLibraryId,authorityEpoch:1,authorityContractVersion:1,capabilities:{providers:['kHentai'],read:true,bookmarkWrite:true,refreshRequest:true,displayPreferencesVersion:1}};
   if(url.pathname==='/v1/mobile-catalog/refresh'){
     if(payload.method==='POST'){
