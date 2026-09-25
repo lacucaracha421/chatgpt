@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { nativeWorkload, updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/types";
-import { ActivityIcon, BookmarkIcon, CalendarIcon, Cog6ToothIcon, FolderIcon, InboxIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { useExchangeSnapshot } from "../exchange/exchangeStore";
+import { ActivityIcon, BookmarkIcon, CalendarIcon, Cog6ToothIcon, ExchangeIcon, FolderIcon, InboxIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 
 /** search: the current view's own search (palette only); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
 export type NavigationEntryGroup = "search" | "place" | "queue" | "go" | "action" | "settings";
@@ -57,12 +58,15 @@ export type NavigationEntryOptions = {
  */
 export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCount, trashCount, privateVaultAvailable, privateVaultActivity, onImportFiles }: NavigationEntryOptions): NavigationEntry[] {
   const workload = useWorkloadProfile();
+  const received = useExchangeSnapshot().unseen;
   const go = (next: AssetView) => () => onNavigate(next);
   const queued = (count: number | null) => (count ?? 0) > 0;
   const entries: NavigationEntry[] = [
     { id: "review", group: queued(reviewCount) ? "queue" : "go", label: "유사 검토", keywords: ["유사 이미지 검토", "중복"], icon: <PhotoIcon />, count: queued(reviewCount) ? reviewCount : undefined, selected: view.kind === "similarity_review", run: go({ kind: "similarity_review" }) },
     { id: "unsorted", group: queued(unsortedCount) ? "queue" : "go", label: "미분류", icon: <InboxIcon />, count: queued(unsortedCount) ? unsortedCount ?? undefined : undefined, selected: view.kind === "unsorted", run: go({ kind: "unsorted" }) },
     { id: "notes", group: "go", label: "메모", icon: <NoteIcon />, selected: view.kind === "notes", run: go({ kind: "notes" }) },
+    // Utility outside the Library: listed as a queue only while received files are unseen.
+    { id: "exchange", group: queued(received) ? "queue" : "go", label: "보내기/받기", keywords: ["파일 보내기", "파일 받기", "받은 파일", "태블릿", "전송"], icon: <ExchangeIcon />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
     ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: "비밀", keywords: ["비밀 보관함"], icon: <BookmarkIcon />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
     { id: "revisit", group: "go", label: "다시보기", icon: <CalendarIcon />, selected: REVISIT_KINDS.includes(view.kind), run: go({ kind: "revisit" }) },
     { id: "statistics", group: "go", label: "통계", icon: <ActivityIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },

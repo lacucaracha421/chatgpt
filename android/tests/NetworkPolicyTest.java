@@ -149,6 +149,24 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.api("/v1/library/assets/a-1/media-ticket?lifecycle=trash","POST"));
  for(String path:new String[]{"/v1/library/trash/","/v1/library/trashx","/v1/library/trash/empty","/v1/library/trash/../assets","/v1/library/trash%2f..","/v1/assets/authority/commands/","/v1/assets/authority/commands/extra","/v1/assets/authority/activate","/v1/assets/authority/activation-baseline","/v1/assets/authority/activation-inventory","/v1/assets/authority/commands%2f.."})for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api(path,method));
  reject(()->NetworkPolicy.api("/v1/assets/authority/activate?x=/v1/assets/authority/commands","PUT"));
+ // File exchange: exactly the device, inbox/outbox and per-transfer routes, each with one method.
+ String x="0f8fad5b-d9cb-469f-a165-70867728950e";
+ pass(()->NetworkPolicy.api("/v1/exchange/devices/"+x,"PUT"));
+ for(String path:new String[]{"/v1/exchange/devices","/v1/exchange/inbox","/v1/exchange/outbox"})pass(()->NetworkPolicy.api(path,"GET"));
+ pass(()->NetworkPolicy.api("/v1/exchange/transfers","POST"));
+ for(String step:new String[]{"complete","ticket","ack"})pass(()->NetworkPolicy.api("/v1/exchange/transfers/"+x+"/"+step,"POST"));
+ pass(()->NetworkPolicy.api("/v1/exchange/transfers/"+x,"DELETE"));
+ // Wrong methods on the allowed routes.
+ for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/exchange/devices/"+x,method));
+ for(String method:new String[]{"POST","PUT","DELETE"})for(String path:new String[]{"/v1/exchange/devices","/v1/exchange/inbox","/v1/exchange/outbox"})reject(()->NetworkPolicy.api(path,method));
+ for(String method:new String[]{"GET","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/exchange/transfers",method));
+ for(String method:new String[]{"GET","PUT","DELETE"})reject(()->NetworkPolicy.api("/v1/exchange/transfers/"+x+"/ticket",method));
+ for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api("/v1/exchange/transfers/"+x,method));
+ // Malformed ids, traversal, extra segments and unknown steps.
+ for(String path:new String[]{"/v1/exchange/transfers/"+x.toUpperCase(),"/v1/exchange/transfers/"+x+"/","/v1/exchange/transfers/"+x+"/abort","/v1/exchange/transfers/../devices","/v1/exchange/transfers/"+x+"/ticket/extra","/v1/exchange/transfers/"+x.substring(1),"/v1/exchange/transfers/%2e%2e","/v1/exchange/devices/"+x+"/extra","/v1/exchange/devices/me","/v1/exchange/status","/v1/exchange","/v1/exchange/"})for(String method:new String[]{"GET","POST","PUT","DELETE"})reject(()->NetworkPolicy.api(path,method));
+ // A query string grants no other target, and DELETE stays exchange-only.
+ reject(()->NetworkPolicy.api("/v1/exchange/inbox?x=/v1/exchange/transfers/"+x,"DELETE"));
+ reject(()->NetworkPolicy.api("/v1/notes/"+"a".repeat(64),"DELETE"));
  System.out.println("NetworkPolicy: "+checks+" checks passed");
  }
 }

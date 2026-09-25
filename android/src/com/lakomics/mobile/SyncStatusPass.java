@@ -13,6 +13,23 @@ final class SyncStatusPass implements AlbumReplica.Transport {
             if(path.startsWith("/v1/"+domain+"/"))written.add(domain);
     }
     SyncStatusPass(AlbumReplica.Transport transport) { this.transport=transport; }
+    /**
+     * The Library-relevant part of a status document, for change detection.
+     *
+     * A status read with this device's exchange token also carries `exchange.revision`,
+     * which moves on every file transfer. Transfers are not Library changes, so they must not
+     * mark the pass changed (picker refresh, metadata invalidation). An unreadable body is
+     * compared as-is.
+     */
+    static String libraryStatus(String status) {
+        try {
+            Object parsed=Json.parse(status);
+            if(!(parsed instanceof java.util.Map))return status;
+            java.util.Map<?,?> copy=new java.util.LinkedHashMap<>((java.util.Map<?,?>)parsed);
+            copy.remove("exchange");
+            return String.valueOf(copy);
+        } catch(RuntimeException unreadable) { return status; }
+    }
     public String get(String path) throws Exception {
         if(!path.equals("/v1/sync/status")) return transport.get(path);
         if(!loaded) {

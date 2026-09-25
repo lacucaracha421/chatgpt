@@ -93,9 +93,9 @@ it("reaches every former rail and 관리 destination from 더보기 with focus r
   expect(within(queues).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["유사 검토 2개"]);
   const destinations = within(panel).getByRole("navigation", { name: "이동" });
   expect(within(destinations).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
-    .toEqual(["미분류", "비밀", "다시보기", "통계", "휴지통 3개", "설정"]);
+    .toEqual(["미분류", "보내기/받기", "비밀", "다시보기", "통계", "휴지통 3개", "설정"]);
 
-  const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }], ["비밀", { kind: "private_vault" }],
+  const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }], ["보내기/받기", { kind: "exchange" }], ["비밀", { kind: "private_vault" }],
     ["다시보기", { kind: "revisit" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 검토 2개", { kind: "similarity_review" }]];
   for (const [name, view] of expected) {
     if (!screen.queryByRole("dialog", { name: "더보기" })) await user.click(trigger);

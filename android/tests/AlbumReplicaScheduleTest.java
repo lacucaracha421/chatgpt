@@ -126,9 +126,21 @@ public final class AlbumReplicaScheduleTest {
         owedPassIsDroppedWhenPollingStops();
         connectionReplacementFromTheBackgroundDoesNotStartPolling();
         disconnectThenReconnectResumesPolling();
+        exchangeRevisionIsNotALibraryChange();
 
         System.out.println("AlbumReplicaScheduleTest passed: " + checks
                 + " checks (generations, start, pause, connection replacement, pending reconcile)");
+    }
+
+    /** A device-token status carries `exchange.revision`; only Library fields decide "changed". */
+    private static void exchangeRevisionIsNotALibraryChange() {
+        String base="{\"protocolVersion\":1,\"active\":true,\"libraryId\":\"lib\",\"domains\":[{\"domain\":\"albums\",\"cursor\":4}]";
+        String a=SyncStatusPass.libraryStatus(base+",\"exchange\":{\"revision\":7}}");
+        String b=SyncStatusPass.libraryStatus(base+",\"exchange\":{\"revision\":8}}");
+        equal(a,b,"An exchange revision alone is not a Library change");
+        equal(a,SyncStatusPass.libraryStatus(base+"}"),"Library-token and device-token status compare equal");
+        check(!a.equals(SyncStatusPass.libraryStatus(base.replace("\"cursor\":4","\"cursor\":5")+",\"exchange\":{\"revision\":8}}")),"A moved domain cursor is still a change");
+        equal("not json",SyncStatusPass.libraryStatus("not json"),"An unreadable body compares as-is");
     }
 
     /** Socket-free reproduction of the existing Album continuation fixtures. */

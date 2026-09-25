@@ -17,7 +17,7 @@ export function workspaceArea(view: AssetView): "assets" | "collections" | "mang
   if (view.kind === "private_vault") return "private_vault";
   if (view.kind === "collections" || view.kind === "collection") return "collections";
   if (view.kind === "manga") return "manga";
-  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
+  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics" || view.kind === "exchange") return "manage";
   return "assets";
 }
 type RailArea = "assets" | "collections" | "manga" | "notes";

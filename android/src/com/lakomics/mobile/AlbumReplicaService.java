@@ -49,6 +49,9 @@ final class AlbumReplicaService {
     private final Context context;
     private final SecureSettings settings;
     private final CloudClient client;
+    /** The status read made with the device exchange token, with its own ETag cache. */
+    private final CloudClient exchangeStatus;
+    private volatile String refusedStatusToken="";
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "lakomics-album-replica");
         thread.setDaemon(true);
@@ -111,6 +114,7 @@ final class AlbumReplicaService {
         this.context = context.getApplicationContext();
         this.settings = new SecureSettings(this.context);
         this.client = new CloudClient(settings);
+        this.exchangeStatus = new CloudClient(settings);
     }
 
     /** The one repeating task, cancelled by {@link #schedule} so no timer outlives a pause. */
@@ -159,7 +163,7 @@ final class AlbumReplicaService {
             // account that was just replaced, and its answer must not become this one's.
             attempt++;
             lastAttempt = 0;
-            previousStatus=null;lastGenerationCheck=0;assetListGeneration="";client.clearConditional();
+            previousStatus=null;lastGenerationCheck=0;assetListGeneration="";client.clearConditional();exchangeStatus.clearConditional();refusedStatusToken="";
             code = "";
             error = "";
             last = null;
@@ -258,12 +262,16 @@ final class AlbumReplicaService {
             }
             scope = scope(connection);
             statusPass.set(new SyncStatusPass(path->{
-                String value=client.conditionalApiFor(connection,path,null).toString();
+                String value=path.equals("/v1/sync/status")?readStatus(connection):client.conditionalApiFor(connection,path,null).toString();
                 if(path.equals("/v1/sync/status")){
-                    synchronized(gate){if(startedUnder==attempt){
-                        if(!value.equals(previousStatus))passChanged=true;
-                        previousStatus=value;
+                    boolean current;
+                    synchronized(gate){current=startedUnder==attempt;if(current){
+                        String library=SyncStatusPass.libraryStatus(value);
+                        if(!library.equals(previousStatus))passChanged=true;
+                        previousStatus=library;
                     }}
+                    // File exchange arrivals ride on this read instead of a poll of their own.
+                    if(current)ExchangeService.get(context).observeStatus(value);
                 }
                 return value;
             }));
@@ -310,6 +318,32 @@ final class AlbumReplicaService {
         // and Asset row metadata that does not advance an authority cursor. Keep its
         // minute fallback independent of receive-lane failures and run after local writes.
         refreshListGeneration(startedUnder);
+    }
+
+    /**
+     * The status document, read with this device's exchange token when it has one.
+     *
+     * The server reports `exchange.revision` only to a device credential, never to the shared
+     * Library token, while the domain list is the same for every client. Reading the one
+     * status document with the device token therefore adds the exchange signal without an
+     * extra request. A refused device token falls back to the Library token, so a revoked or
+     * mistyped exchange token can never stall Library sync.
+     */
+    private String readStatus(JSONObject connection) throws Exception {
+        JSONObject device=null;
+        try{device=ExchangeService.get(context).statusConnection(connection);}catch(Exception unreadable){/* Library token below. */}
+        String key=device==null?"":ThumbnailCache.key(device.optString("endpoint")+"\n"+device.optString("token"));
+        if(device!=null&&!key.equals(refusedStatusToken)){
+            // Its own conditional cache: sharing the Library one would clear both scopes'
+            // ETags on every switch between the two tokens.
+            try{return exchangeStatus.conditionalApiFor(device,"/v1/sync/status",null).toString();}
+            catch(CloudClient.HttpFailure refused){
+                if(refused.status!=401&&refused.status!=403)throw refused;
+                // Not tried again until the stored device token changes.
+                refusedStatusToken=key;
+            }
+        }
+        return client.conditionalApiFor(connection,"/v1/sync/status",null).toString();
     }
 
     private void refreshListGeneration(int startedUnder) {

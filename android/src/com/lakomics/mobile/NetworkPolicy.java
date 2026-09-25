@@ -76,7 +76,15 @@ final class NetworkPolicy {
   get=get || p.equals("/v1/library/trash");
   boolean lifecyclePut=p.equals("/v1/assets/authority/commands");
   get=get || p.matches("/v1/notes/[a-f0-9]{64}");
-  boolean put=bookmarkPut || albumPut || classificationPut || lifecyclePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
-  if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post))throw new IllegalArgumentException("Unsupported read operation");
+  // File exchange (보내기/받기): exactly the device, inbox/outbox and per-transfer routes the
+  // client uses, each with its one method. Ids are lowercase UUIDs, so no segment can
+  // traverse or re-encode. Unregistering a device stays unreachable.
+  String exchangeId="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+  get=get || p.equals("/v1/exchange/devices") || p.equals("/v1/exchange/inbox") || p.equals("/v1/exchange/outbox");
+  post=post || p.equals("/v1/exchange/transfers") || p.matches("/v1/exchange/transfers/"+exchangeId+"/(complete|ticket|ack)");
+  boolean exchangePut=p.matches("/v1/exchange/devices/"+exchangeId);
+  boolean delete=p.matches("/v1/exchange/transfers/"+exchangeId);
+  boolean put=bookmarkPut || albumPut || classificationPut || lifecyclePut || exchangePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
+  if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post) && !(method.equals("DELETE") && delete))throw new IllegalArgumentException("Unsupported read operation");
  }
 }

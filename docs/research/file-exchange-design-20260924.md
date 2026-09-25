@@ -1,6 +1,6 @@
 # PC ↔ tablet file exchange (보내기/받기) — design
 
-Status: design proposal 2026-09-24, not accepted and not implemented. It replaces the user's LocalSend habit with a Lakomics-built transfer through the existing Cloud API and R2. Open questions for the user are at the end. Line references are to the checkout at `72c5125` plus the uncommitted worktree of that date.
+Status: implemented and accepted 2026-09-25 (server, PC, Android 0.8.10); the long-poll `?wait=25` was not built — clients poll `/v1/sync/status` instead. See `USER-REQ-20260924` in the backlog. The text below is the original proposal.
 
 ## User decisions (2026-09-24)
 

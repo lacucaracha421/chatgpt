@@ -37,6 +37,23 @@ final class SecureSettings {
   String encrypted=new JSONObject().put("iv",Base64.encodeToString(c.getIV(),2)).put("data",Base64.encodeToString(c.doFinal(value.getBytes("UTF-8")),2)).toString();
   if(!preferences.edit().putString(name,encrypted).commit())throw new java.io.IOException("Cannot store Notes key");return value;
  }
+ /**
+  * The per-device exchange credential for one endpoint, or "" when none is stored.
+  * The library keeps its own token; the exchange refuses the shared one, so this device
+  * holds a second, device-only token. Keyed by endpoint like the Notes key.
+  */
+ synchronized String exchangeToken(String endpoint)throws Exception{
+  String name="exchange-token-"+ThumbnailCache.key(endpoint);String stored=context.getSharedPreferences("exchange-tokens",0).getString(name,null);if(stored==null)return "";
+  JSONObject e=new JSONObject(stored);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(e.getString("iv"),0)));c.updateAAD(name.getBytes("UTF-8"));return new String(c.doFinal(Base64.decode(e.getString("data"),0)),"UTF-8");
+ }
+ synchronized void writeExchangeToken(String endpoint,String token)throws Exception{
+  String name="exchange-token-"+ThumbnailCache.key(endpoint);android.content.SharedPreferences preferences=context.getSharedPreferences("exchange-tokens",0);
+  if(token==null||token.isEmpty()){if(!preferences.edit().remove(name).commit())throw new java.io.IOException("Cannot clear exchange token");return;}
+  validateToken(token);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());c.updateAAD(name.getBytes("UTF-8"));
+  String encrypted=new JSONObject().put("iv",Base64.encodeToString(c.getIV(),2)).put("data",Base64.encodeToString(c.doFinal(token.getBytes("UTF-8")),2)).toString();
+  if(!preferences.edit().putString(name,encrypted).commit())throw new java.io.IOException("Cannot store exchange token");
+ }
+ synchronized void clearExchangeTokens()throws Exception{if(!context.getSharedPreferences("exchange-tokens",0).edit().clear().commit())throw new Exception("Cannot clear exchange tokens");}
  synchronized void clear() throws Exception {if(!context.getSharedPreferences("connection",0).edit().clear().commit())throw new Exception("Cannot clear connection");}
  JSONObject status() throws Exception {JSONObject s=read();return new JSONObject().put("configured",s.has("token")).put("endpoint",s.optString("endpoint",""));}
 }

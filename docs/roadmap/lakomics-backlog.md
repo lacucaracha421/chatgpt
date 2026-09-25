@@ -187,7 +187,7 @@ Second batch (same evening; details will be given at implementation time):
 Mobile:
 - Notes: when the keyboard opens, lift the editor by the keyboard height so the text being typed stays visible.
 - ~~Manga Catalog reader: remove 이어읽기 (continue reading); add a page slider to jump directly to any page (e.g. page 25 of 40).~~ Done in 0.8.2–0.8.3 (`2af8d1e`, `f6ac798`); accepted on the tablet 2026-09-24.
-- File exchange between the PC and mobile through the Lakomics server, replacing the current LocalSend workflow: send a file and it arrives on the other device right away. Decided 2026-09-24: both directions; received files go to the device's Downloads folder; transfers are one-off, so the server deletes them soon after delivery (short expiry for undelivered files).
+- ~~File exchange between the PC and mobile through the Lakomics server~~ Done 2026-09-25 (design `docs/research/file-exchange-design-20260924.md`): server module deployed and enabled (`LAKOMICS_EXCHANGE_ENABLED=1` via a systemd drop-in), PC 보내기/받기 (더보기 / Ctrl+K, tray count) and Android 0.8.10 (47) (Home top bar, share target). Per-device client tokens provisioned (`laku-pc-exchange`, `galaxy-tab-s11-exchange`); the Library keeps the shared token. The user confirmed PC → tablet and tablet → PC on Linux + Galaxy Tab S11. Folder sending (폴더 보내기, one `<folder>.zip` per folder; PC writes a STORED zip itself, Android uses `java.util.zip`; tablet 0.8.11 (48)) added the same day; the user confirmed a tablet → PC folder send (172 entries, CRC and Korean names checked); PC → tablet folder send not yet tried. Deviations: no inbox long-poll (the server has none) — clients read `/v1/sync/status` with the device token (PC every 5 s visible / 15 s hidden; Android on the existing schedule, 5 s while the screen is open). Unverified: Windows (Downloads path, Zone.Identifier, tray), large files (≥1 GiB) and resume, the R2 `exchange/` 2-day lifecycle rule (operator step, not set; the server sweeper covers expiry).
 
 PC:
 - Lightweight processing mode ("데이터 처리용 라이트모드"): while the user is on the mobile app, keep only the PC work that mobile features depend on running and pause nearly everything else.
@@ -196,10 +196,10 @@ PC and mobile:
 - Notes like a notes app, on both PC and mobile. Scope chosen 2026-09-24: checklist notes (items can be checked and reordered), note colours, and Markdown rendering. Design must fit the existing encrypted notes sync.
 
 Collector (`extension-list/`):
-- A better way into subfolders than double-tap (clarified 2026-09-24: double-tap is hard one-handed and taps are sometimes missed) — design a one-handed alternative (e.g. long-press, a chevron target, or a second ring).
-- Store the semicircle menu's folder order and hidden folders (e.g. 리버스, 명조) on the server; today a reinstall resets them.
-- Twitter/X only: add a control in X's left navigation (Profile, Home, …) that scrolls to the top and loads new posts in one step, replacing the manual scroll-up-and-refresh.
-- Disable the right-side recommended-images button for now (keep the code; re-enable later).
+- ~~A better way into subfolders than double-tap~~ Kept as double-tap (2026-09-25): the user reviewed the options (one tap on a folder with subfolders enters it, tap-again without a time limit, long-press, a second ring) and chose to keep the current behaviour for now.
+- ~~Store the semicircle menu's folder order and hidden folders on the server~~ Done in `066e3c3`.
+- ~~Twitter/X only: a left-navigation control that scrolls to the top and loads new posts~~ Done in `8f877ef`, `e626c4e`.
+- ~~Disable the right-side recommended-images button~~ Done in `8f877ef` (code kept).
 
 NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
 

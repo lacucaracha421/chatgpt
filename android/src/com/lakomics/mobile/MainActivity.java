@@ -22,6 +22,37 @@ public final class MainActivity extends Activity {
  private boolean stopped=true;
  private boolean destroyed=false;
  private volatile boolean foreground=false;
+ private static final int EXCHANGE_PICK=0x4c58,EXCHANGE_TREE=0x4c59;
+ private volatile String exchangeTarget;
+ private final ExchangeService.Listener exchangeListener=this::emit;
+ private ExchangeService exchange(){return ExchangeService.get(this);}
+ /** 보내기: the system document picker, multi-select, no storage permission. */
+ private JSONObject pickForExchange(String target)throws Exception{
+  if(!ExchangeTransfer.uuid(target))throw new ExchangeService.UserError("받는 기기를 선택해 주세요.");
+  exchangeTarget=target;
+  Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true)
+   .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+  runOnUiThread(()->{try{startActivityForResult(pick,EXCHANGE_PICK);}catch(ActivityNotFoundException missing){emitExchangeNotice("파일 선택기를 열 수 없습니다.");}});
+  return new JSONObject().put("launched",true);
+ }
+ /** 폴더 보내기: the system folder picker; its transient grant covers the zipping step. */
+ private JSONObject pickFolderForExchange(String target)throws Exception{
+  if(!ExchangeTransfer.uuid(target))throw new ExchangeService.UserError("받는 기기를 선택해 주세요.");
+  exchangeTarget=target;
+  Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+  runOnUiThread(()->{try{startActivityForResult(pick,EXCHANGE_TREE);}catch(ActivityNotFoundException missing){emitExchangeNotice("폴더 선택기를 열 수 없습니다.");}});
+  return new JSONObject().put("launched",true);
+ }
+ private void emitExchangeNotice(String message){try{emit("lakomics-exchange-notice",new JSONObject().put("message",message));}catch(JSONException ignored){}}
+ /** 열기: hand the saved Downloads entry to a viewer app with a read grant. */
+ private void openExchange(String id)throws Exception{
+  Uri uri=exchange().savedUri(id);String type=getContentResolver().getType(uri);
+  Intent view=new Intent(Intent.ACTION_VIEW).setDataAndType(uri,type==null?"application/octet-stream":type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+  FutureTask<Void> start=new FutureTask<>(()->{startActivity(view);return null;});
+  runOnUiThread(start);
+  try{start.get(5,TimeUnit.SECONDS);}
+  catch(java.util.concurrent.ExecutionException e){if(e.getCause() instanceof ActivityNotFoundException)throw new ExchangeService.UserError("이 파일을 열 수 있는 앱이 없습니다.");throw new IOException("Cannot open");}
+ }
  // Metering follows the WebView warm-up policy; native also fences queued work on pause.
  private boolean ticketWarmAllowed(){return foreground&&batteryAllowsWarm();}
  private JSONObject batteryState()throws JSONException{
@@ -50,7 +81,7 @@ public final class MainActivity extends Activity {
   web.setOnApplyWindowInsetsListener((v,insets)->{if(Build.VERSION.SDK_INT>=30){android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.ime());v.setPadding(i.left,i.top,i.right,i.bottom);}else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
   WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);s.setJavaScriptCanOpenWindowsAutomatically(false);s.setSupportMultipleWindows(false);s.setSaveFormData(false);s.setSafeBrowsingEnabled(true);
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(false);
-  web.addJavascriptInterface(new Bridge(),"LakomicsNative");
+  web.addJavascriptInterface(new Bridge(),"LakomicsNative");ExchangeService.get(this).addListener(exchangeListener);
   web.setWebViewClient(new WebViewClient(){
    @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest r){return !bundled(r.getUrl());}
    @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u)){if(u.getPath()!=null && u.getPath().startsWith("/vault/"))return vault.serve(r);return asset(u);}if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
@@ -71,7 +102,7 @@ public final class MainActivity extends Activity {
  private void reply(String id,boolean ok,Object data,String error,Integer status,Object details){try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",ok).put("status",status==null?JSONObject.NULL:status).put("data",data==null?JSONObject.NULL:data).put("error",error==null?JSONObject.NULL:error).put("details",details==null?JSONObject.NULL:details));}catch(JSONException ignored){}}
  private void cancelOtherRequests(CancellationSignal current){for(CancellationSignal s:active.values())if(s!=current)s.cancel();}
  private static String errorMessage(Exception e){
-  if(e instanceof VaultCrypto.Invalid)return e.getMessage();
+  if(e instanceof VaultCrypto.Invalid || e instanceof ExchangeService.UserError)return e.getMessage();
   if(e instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)e).status;if(status==401 || status==403)return "인증에 실패했습니다. 토큰을 확인해 주세요.";if(status==404)return "요청한 정보를 찾을 수 없습니다.";return "서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";}
   if(e instanceof java.net.SocketTimeoutException)return "연결 시간이 초과되었습니다. 다시 시도해 주세요.";
   if(e instanceof java.net.UnknownHostException || e instanceof java.net.ConnectException)return "서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.";
@@ -167,8 +198,8 @@ public final class MainActivity extends Activity {
       // A replacement connection clears the old replica and keeps Album reconciliation
       // running. Configuring does not pause the activity, so a bare reset would stop the
       // loop until the user backgrounded and resumed the app.
-      AlbumReplicaService.get(MainActivity.this).replaceConnection();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();} data=connectionStatus();break;
-     case "disconnect":LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();cancelOtherRequests(signal);settings.clear();client.clearConditional();if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();AlbumReplicaService.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);}}finally{LibraryDocumentsProvider.endConnectionChange();}data=connectionStatus();break;
+      AlbumReplicaService.get(MainActivity.this).replaceConnection();LibraryDocumentsProvider.reset(MainActivity.this);exchange().reset();}}finally{LibraryDocumentsProvider.endConnectionChange();} data=connectionStatus();break;
+     case "disconnect":LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();cancelOtherRequests(signal);settings.clear();client.clearConditional();if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();AlbumReplicaService.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);settings.clearExchangeTokens();exchange().reset();}}finally{LibraryDocumentsProvider.endConnectionChange();}data=connectionStatus();break;
      case "api":data=p.optBoolean("conditional")&&p.optString("method","GET").equals("GET")?client.conditionalApi(p.getString("path"),signal):client.api(p.getString("path"),p.optString("method","GET"),p.optJSONObject("body"),signal);break;
      case "bookmarkCommand": String provider=p.getString("provider");String workId=p.getString("providerWorkId");if(!provider.matches("kHentai|heliotrope") || !workId.matches("[0-9A-Za-z_-]{1,64}"))throw new IllegalArgumentException("Invalid bookmark identity");BookmarkCommand.validate(p);JSONObject command=BookmarkCommand.body(p);
       try{data=client.api(BookmarkCommand.path(provider,workId),"PUT",command,signal);}
@@ -181,6 +212,16 @@ public final class MainActivity extends Activity {
       }
       break;
      case "openExternal":Uri uri=Uri.parse(p.getString("url"));if(!Arrays.asList("http","https").contains(uri.getScheme()) || uri.getHost()==null || uri.getUserInfo()!=null)throw new Exception();runOnUiThread(()->{try{startActivity(new Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE));}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
+     // File exchange (보내기/받기). Native owns every protocol field, the device id and token.
+     case "exchangeState":data=exchange().snapshot();break;
+     case "exchangeDevices":data=exchange().refreshNow();break;
+     case "exchangeVisible":exchange().setVisible(p.getBoolean("visible"));data=exchange().snapshot();break;
+     case "exchangeToken":data=exchange().setToken(p.optString("token","").trim());break;
+     case "exchangeSend":data=pickForExchange(p.getString("toDevice"));break;
+     case "exchangeSendFolder":data=pickFolderForExchange(p.getString("toDevice"));break;
+     case "exchangeRetry":exchange().retry(p.getString("transferId"));data=exchange().snapshot();break;
+     case "exchangeCancel":exchange().cancel(p.getString("transferId"));data=exchange().snapshot();break;
+     case "exchangeOpen":openExchange(p.getString("transferId"));data=new JSONObject();break;
      case "copyText":copyText(p.getString("text"),signal);data=new JSONObject();break;
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();
@@ -190,6 +231,19 @@ public final class MainActivity extends Activity {
  }
  @Override public void onTrimMemory(int level){if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}
  @Override protected void onActivityResult(int request,int result,Intent data){
+  if(request==EXCHANGE_TREE){
+   final String target=exchangeTarget;final Uri tree=result==RESULT_OK&&data!=null?data.getData():null;
+   if(tree!=null&&target==null)emitExchangeNotice("받는 기기를 다시 선택해 주세요.");
+   if(tree!=null&&target!=null)try{workers.execute(()->{try{exchange().sendFolder(tree,target);}catch(ExchangeService.UserError e){emitExchangeNotice(e.getMessage());}catch(Exception e){emitExchangeNotice("폴더를 보낼 준비를 하지 못했습니다.");}});}catch(RejectedExecutionException e){emitExchangeNotice("잠시 후 다시 시도해 주세요.");}
+   return;
+  }
+  if(request==EXCHANGE_PICK){
+   final String target=exchangeTarget;final List<Uri> picked=new ArrayList<>();
+   if(result==RESULT_OK && data!=null){if(data.getClipData()!=null)for(int i=0;i<data.getClipData().getItemCount();i++)picked.add(data.getClipData().getItemAt(i).getUri());else if(data.getData()!=null)picked.add(data.getData());}
+   if(!picked.isEmpty() && target==null)emitExchangeNotice("받는 기기를 다시 선택해 주세요.");
+   if(!picked.isEmpty() && target!=null)try{workers.execute(()->{try{exchange().send(picked,target,true);}catch(ExchangeService.UserError e){emitExchangeNotice(e.getMessage());}catch(Exception e){emitExchangeNotice("파일을 보낼 준비를 하지 못했습니다.");}});}catch(RejectedExecutionException e){emitExchangeNotice("잠시 후 다시 시도해 주세요.");}
+   return;
+  }
   if(vault!=null && vault.picked(request,result,data)){try{workers.execute(()->{try{emit("lakomics-vault",vault.inspect());}catch(Exception ignored){}});}catch(RejectedExecutionException ignored){}return;}
   super.onActivityResult(request,result,data);
  }
@@ -205,8 +259,10 @@ public final class MainActivity extends Activity {
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
   AlbumReplicaService.get(this).setListGenerationListener(generation->{try{emit("lakomics-list-generation",new JSONObject().put("generation",generation));}catch(JSONException ignored){}});
+  // File exchange works only while an activity is resumed; its arrival signal comes from the pass started next.
+  ExchangeService.get(this).setForeground(true);
   AlbumReplicaService.get(this).start();}
- @Override protected void onPause(){foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();AlbumReplicaService.get(this).stop();super.onPause();}
+ @Override protected void onPause(){foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();AlbumReplicaService.get(this).stop();ExchangeService.get(this).setForeground(false);super.onPause();}
  @Override protected void onStop(){if(vault!=null)vault.stopped();stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

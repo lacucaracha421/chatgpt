@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source and installed version: **0.7.9 (36)**, declared in [AndroidManifest.xml](AndroidManifest.xml). 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source version: **0.8.11 (48)** (built, not installed; 0.8.10 was installed and tested end to end by the user), declared in [AndroidManifest.xml](AndroidManifest.xml). The version history below starts at 0.7.9; 0.8.1–0.8.9 are recorded in the commit log. 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,60 @@ Current source and installed version: **0.7.9 (36)**, declared in [AndroidManife
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.8.11 — 폴더 보내기: a folder as one zip, built, not installed (2026-09-25)
+
+- 보내기/받기 gains **폴더 보내기** beside 파일 보내기. The system folder picker
+  (`ACTION_OPEN_DOCUMENT_TREE`, no storage permission, no persisted tree grant) hands over a
+  tree; a worker walks it with `DocumentsContract` child queries and writes
+  `<folder>.zip` into `cache/exchange-zips/` (`ExchangeZip`): entries `<folder>/<relative
+  path>` with UTF-8 names and `/`, a directory entry for every folder (empty ones survive),
+  file times from `COLUMN_LAST_MODIFIED`, duplicate names numbered, deflate level 0 for
+  already-compressed media and level 1 otherwise.
+- The 2 GiB per-file cap is checked on the listed sizes before any content is read and on
+  the zip's actual bytes while writing ("폴더가 너무 큼 (압축 파일 최대 2GB)"). Unreadable
+  files or folders are skipped and counted in the row ("읽지 못한 항목 N개 제외"). The row
+  shows "압축 중 N%" and can be cancelled.
+- The zip is then sent as an ordinary transfer; retries reuse it. It is deleted after
+  completion, cancel or a permanent failure (the row then offers no 재시도), and zips no
+  saved send refers to are swept at start.
+- Checks: `ExchangeZipTest` (segment/path sanitising, duplicates, walk with empty and
+  unreadable entries, times, progress totals, both cap checks, cancel). Not verified on a
+  device (DocumentsUI tree grants, provider timestamps, zipping speed).
+
+## 0.8.10 — PC ↔ tablet file exchange (보내기/받기), built, not installed (2026-09-25)
+
+Design: [docs/research/file-exchange-design-20260924.md](../docs/research/file-exchange-design-20260924.md)
+(stages 3 and 4); the server contract is `server/lakomics-api/file_exchange.py`.
+
+- **Entry:** a 보내기/받기 icon in the Home header with a count badge for new arrivals, and a
+  toast such as "PC에서 파일 2개" with 보기. The screen lists received and sent files with
+  per-row state (업로드 중 + %, 대기 중 (받으면 삭제됨), 전달됨, 만료됨, 실패 + 재시도,
+  다운로드 폴더에 저장됨 — tap to open).
+- **Device token:** the exchange refuses the shared Library token (403
+  `exchangeDeviceTokenRequired`) and Library routes accept only the shared token, so the
+  tablet keeps both. The screen asks for a device-only `client` token (server:
+  `python3 api_auth.py provision --role client --label tablet`), registers the device with
+  it (kind `android`, the system device name) and stores it encrypted per endpoint.
+  Disconnect removes it.
+- **Receive (Android 10+ only):** automatic while the app is open. Download into
+  `cache/exchange/<id>.part` with `Range` resume and a 30 s no-progress timeout, verify
+  length and SHA-256, publish to `Download/Lakomics/` through MediaStore (`IS_PENDING`,
+  deleted on failure, final name read back), then ack. A 7-day received ledger turns a
+  lost ack into a re-ack instead of a second copy.
+- **Send:** in-app through the system document picker (multi-select, no permission) or
+  from any app's share sheet (`ExchangeShareActivity`, `SEND`/`SEND_MULTIPLE */*`), which
+  stays open with progress until the files are on the server. SHA-256 pre-pass, then a
+  fixed-length streamed presigned PUT and `complete`; the transfer id is persisted so a
+  retry stays idempotent. Transient failures retry at 2/10/30/60 s while the app is open.
+- **Arrival signal:** the Library pass reads `/v1/sync/status` with the device token when
+  one is stored (falling back to the Library token if it is refused), because the server
+  reports `exchange.revision` only to device credentials. No extra request in steady
+  state; while the screen is open it refreshes inbox/outbox every 5 s (the server has no
+  `?wait=` long-poll). Nothing polls, retries or starts while the app is paused.
+- **Checks:** `ExchangeTransferTest` (sanitiser golden cases, Range bookkeeping, idle
+  timeout, digest verification, ledger) and exchange cases in `NetworkPolicyTest` run in
+  `build.py`. Not verified on a device or against a deployed server.
 
 ## 0.7.9 — The media cache no longer rescans itself on every write (2026-09-24)
 

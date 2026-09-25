@@ -3,6 +3,7 @@ mod catalog_transport;
 mod cloud;
 mod collectible_cors;
 mod commands;
+mod exchange;
 mod workload;
 mod extension_api;
 pub mod library;
@@ -98,6 +99,8 @@ pub fn run() {
                 app_state.clone(),
                 extension_runtime.clone(),
             );
+            // File exchange (보내기/받기): native threads, so receiving continues in the tray.
+            exchange::start(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -157,6 +160,16 @@ pub fn run() {
             workload::workload_profile,
             workload::workload_quit, workload::workload_close_window,
             workload::workload_cancel_scans,
+            exchange::exchange_snapshot,
+            exchange::exchange_send,
+            exchange::exchange_cancel,
+            exchange::exchange_retry,
+            exchange::exchange_mark_seen,
+            exchange::exchange_refresh,
+            exchange::exchange_open,
+            exchange::exchange_reveal,
+            exchange::exchange_open_folder,
+            exchange::exchange_set_token,
             commands::open_library,
             commands::get_extension_connection,
             commands::get_internal_playback_url,

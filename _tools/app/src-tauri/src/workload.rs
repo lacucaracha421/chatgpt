@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Mutex, OnceLock,
     },
     time::{Duration, Instant},
@@ -280,6 +280,49 @@ pub(crate) fn workload_close_window(app: tauri::AppHandle) {
     }
 }
 struct TrayMenu(MenuItem<tauri::Wry>);
+/// The tray's "받은 파일 N개 — 폴더 열기" entry, inserted only while N > 0. Only
+/// touched on the main thread, so `shown` needs no lock.
+struct ReceivedEntry {
+    menu: Menu<tauri::Wry>,
+    item: MenuItem<tauri::Wry>,
+    shown: AtomicBool,
+}
+/// Show unseen received files (file exchange) in the tray menu and tooltip.
+///
+/// Callable from any thread without blocking: nothing happens unless the count
+/// changed, and the menu/tooltip calls are queued to the main thread with no lock
+/// held (menu calls block until the main thread runs them).
+pub(crate) fn set_received_indicator(app: &tauri::AppHandle, count: usize) {
+    static LAST: AtomicUsize = AtomicUsize::new(usize::MAX);
+    if LAST.swap(count, Ordering::AcqRel) == count {
+        return;
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(entry) = handle.try_state::<ReceivedEntry>() {
+            if count > 0 {
+                let _ = entry
+                    .item
+                    .set_text(format!("받은 파일 {count}개 — 폴더 열기"));
+                if !entry.shown.load(Ordering::Acquire) && entry.menu.insert(&entry.item, 0).is_ok()
+                {
+                    entry.shown.store(true, Ordering::Release);
+                }
+            } else if entry.shown.load(Ordering::Acquire) && entry.menu.remove(&entry.item).is_ok()
+            {
+                entry.shown.store(false, Ordering::Release);
+            }
+        }
+        if let Some(tray) = handle.tray_by_id("main-tray") {
+            let tooltip = if count > 0 {
+                format!("Lakomics · 받은 파일 {count}개")
+            } else {
+                "Lakomics".to_owned()
+            };
+            let _ = tray.set_tooltip(Some(tooltip));
+        }
+    });
+}
 fn open(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -346,12 +389,21 @@ pub(crate) fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Er
         None::<&str>,
     )?;
     let quit_item = MenuItem::with_id(app, "workload-quit", "종료", true, None::<&str>)?;
+    let received_item =
+        MenuItem::with_id(app, "exchange-received", "받은 파일", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open_item, &light_item, &quit_item])?;
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "workload-open" => open(app),
+            // Off the main thread: it takes the exchange state lock.
+            "exchange-received" => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    let _ = crate::exchange::open_folder(&app);
+                });
+            }
             "workload-light" => {
                 let mut settings = runtime()
                     .lock()
@@ -391,6 +443,11 @@ pub(crate) fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Er
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .tray_available = true;
             app.manage(TrayMenu(light_item));
+            app.manage(ReceivedEntry {
+                menu,
+                item: received_item,
+                shown: AtomicBool::new(false),
+            });
         }
         Err(error) => eprintln!("system tray unavailable: {error}"),
     }

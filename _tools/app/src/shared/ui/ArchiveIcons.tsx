@@ -25,6 +25,7 @@ export const archivePaths = {
   activity: "M4 4h16v16H4zM7 15h2v2H7zM11 11h2v6h-2zM15 7h2v10h-2z",
   person: "M9 4h6v6H9zM5 20v-3l3-3h8l3 3v3",
   people: "M5 6h5v5H5zM2 20v-3l2-3h7l2 3v3M14 5h5v5h-5zM15 14h4l3 3v3h-6",
+  exchange: "M3 8h16M15 4l4 4-4 4M21 16H5M9 12l-4 4 4 4",
 } as const;
 type Props = SVGProps<SVGSVGElement>;
 function Glyph({ kind, ...props }: Props & { kind: keyof typeof archivePaths }) {
@@ -48,3 +49,4 @@ export const NoteIcon = (props: Props) => <Glyph kind="note" {...props} />;
 export const ActivityIcon = (props: Props) => <Glyph kind="activity" {...props} />;
 export const PersonIcon = (props: Props) => <Glyph kind="person" {...props} />;
 export const PeopleIcon = (props: Props) => <Glyph kind="people" {...props} />;
+export const ExchangeIcon = (props: Props) => <Glyph kind="exchange" {...props} />;

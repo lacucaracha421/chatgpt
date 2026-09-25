@@ -53,7 +53,8 @@ def main():
         run(javac, '-encoding', 'UTF-8', '-source', '8', '-target', '8', '-classpath', android,
             '-d', classes, *sorted((root / 'src').rglob('*.java')))
         checks = ['NetworkPolicy', 'DocumentTreePolicy', 'ThumbnailCache', 'PickerSnapshot',
-                  'MediaTransfer', 'TicketBatcher', 'TemporaryImagePolicy', 'ClipboardPolicy', 'NotesCrypto', 'VaultCrypto']
+                  'MediaTransfer', 'TicketBatcher', 'TemporaryImagePolicy', 'ClipboardPolicy', 'NotesCrypto', 'VaultCrypto',
+                  'ExchangeTransfer', 'ExchangeZip']
         sources = [p for name in checks for p in (root / f'src/com/lakomics/mobile/{name}.java', root / f'tests/{name}Test.java')]
         # The additive Album collection projection is platform-free like the checks above,
         # but it reads the Album replica types, so those are compiled with it.

@@ -24,6 +24,7 @@ const CLOUD_API_TARGET: &str = "Lakomics/CloudApi";
 /// server, while ordinary capture/sync/thumbnail APIs stay client-scoped. Holding
 /// one must not imply the other.
 const CLOUD_PUBLISHER_TARGET: &str = "Lakomics/CloudPublisher";
+const EXCHANGE_TARGET: &str = "Lakomics/FileExchange";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
 
@@ -324,6 +325,29 @@ pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
     CredentialService::new(&OsCredentialBackend, ALADIN_TARGET).read()
 }
 
+/// This device's own token for the file exchange (보내기/받기). The server refuses the
+/// shared Cloud API token there, because one shared credential cannot keep a device
+/// from reading another device's inbox; library sync keeps using the Cloud API token.
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn set_exchange_token(value: &str) -> Result<(), LibraryError> {
+    CredentialService::new(&OsCredentialBackend, EXCHANGE_TARGET).set(value)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn delete_exchange_token() -> Result<(), LibraryError> {
+    CredentialService::new(&OsCredentialBackend, EXCHANGE_TARGET).delete()
+}
+
+/// The stored exchange token, or `None` when this device has none.
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn read_exchange_token() -> Result<Option<String>, LibraryError> {
+    let service = CredentialService::new(&OsCredentialBackend, EXCHANGE_TARGET);
+    if !service.configured()? {
+        return Ok(None);
+    }
+    service.read().map(Some)
+}
+
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn cloud_api_token_status() -> Result<bool, LibraryError> {
     cloud_api_token_status_with(&OsCredentialBackend)
@@ -425,6 +449,21 @@ pub(crate) fn delete_aladin_key() -> Result<(), LibraryError> {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_aladin_key() -> Result<String, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn set_exchange_token(_value: &str) -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn delete_exchange_token() -> Result<(), LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn read_exchange_token() -> Result<Option<String>, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 

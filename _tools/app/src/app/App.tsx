@@ -74,6 +74,7 @@ import { FaultGameProvider } from "../games/FaultGame";
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
 const RevisitedBundleView = lazy(() => import("../revisit/RevisitedBundleView").then((module) => ({ default: module.RevisitedBundleView })));
+const ExchangeView = lazy(() => import("../exchange/ExchangeView").then((module) => ({ default: module.ExchangeView })));
 const NotesView = lazy(() => import("../notes/NotesView").then((module) => ({default:module.NotesView})));
 const SettingsView = lazy(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 const StatisticsPanel = lazy(() => import("../statistics/StatisticsPanel").then((module) => ({ default: module.StatisticsPanel })));
@@ -358,7 +359,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     retry: gateway.retryVideoPreparation,
     onChanged: () => setAssetRefresh((current) => current + 1),
   });
-  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes" && view.kind !== "private_vault";
+  const dropEnabled = maintenance === null && view.kind !== "trash" && view.kind !== "similarity_review" && view.kind !== "settings" && view.kind !== "statistics" && view.kind !== "manga" && view.kind !== "notes" && view.kind !== "exchange" && view.kind !== "private_vault";
   const dropClassificationId = view.kind === "classification" ? view.classificationId : null;
   function handleNativeDragEvent(event: NativeFileDropEvent, disposition: NativeFileDragDisposition) {
     const assetIds = activeNativeDragAssetIdsRef.current;
@@ -830,7 +831,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
                         onContentChanged={() => void refreshPrivateVaultStatus()} privacyMode={preferences.privacyMode} />
                     : <DeferredViewFallback />
-                ) : view.kind === "notes" ? <NotesView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
+                ) : view.kind === "notes" ? <NotesView /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}

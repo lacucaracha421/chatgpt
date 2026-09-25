@@ -28,12 +28,19 @@ final class CloudClient {
   if(reply.status==304)throw new IOException("Unexpected unconditional 304");
   return new JSONObject(reply.body);
  }
- private ConditionalRead.Reply authenticatedReply(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel,String etag)throws Exception{
+ private ConditionalRead.Reply authenticatedReply(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel,String etag)throws Exception{return authenticatedReply(s,path,method,body,cancel,etag,null);}
+ /** A file exchange call: the device header names which registered device is acting. */
+ ConditionalRead.Reply exchange(JSONObject s,String device,String path,String method,JSONObject body,CancellationSignal cancel,String etag)throws Exception{
+  if(!ExchangeTransfer.uuid(device))throw new IllegalStateException("No exchange device");
+  return authenticatedReply(s,path,method,body,cancel,etag,device);
+ }
+ private ConditionalRead.Reply authenticatedReply(JSONObject s,String path,String method,JSONObject body,CancellationSignal cancel,String etag,String device)throws Exception{
   NetworkPolicy.api(path,method);if(!s.has("token"))throw new IllegalStateException("Not configured");
   HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
   try {
    prepare(c,cancel);c.setRequestMethod(method);c.setRequestProperty("Authorization","Bearer "+s.getString("token"));c.setRequestProperty("Accept","application/json");
    if(etag!=null)c.setRequestProperty("If-None-Match",etag);
+   if(device!=null)c.setRequestProperty("X-Lakomics-Device",device);
    if(method.equals("POST") || method.equals("PUT")){byte[] b=(body==null?"{}":body.toString()).getBytes("UTF-8");if(b.length>(path.startsWith("/v1/notes/")?610000:65536))throw new IOException("Request too large");c.setDoOutput(true);c.setFixedLengthStreamingMode(b.length);c.setRequestProperty("Content-Type","application/json");try(OutputStream o=c.getOutputStream()){o.write(b);}}
    int code=c.getResponseCode();
    ConditionalRead.Reply reply=ConditionalRead.response(code,c.getHeaderField("ETag"),()->{

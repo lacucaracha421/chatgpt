@@ -340,6 +340,7 @@ export type AssetView =
   | { kind: "trash" }
   | { kind: "statistics" }
   | { kind: "notes" }
+  | { kind: "exchange" }
   | { kind: "private_vault" }
   | { kind: "settings"; section?: "general" | "library" | "cloud" | "catalog" | "external_services" | "data" | "about" | "advanced" }
   | { kind: "manga" }
