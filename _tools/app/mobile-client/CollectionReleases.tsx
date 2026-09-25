@@ -20,7 +20,7 @@ export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 
  * The 신간 screen: release information for the manga whose 신간 알림 is on, in two tabs.
  * 한국 정발 lists each work's Kakao volumes beyond the owned count (released or pre-registered);
  * 일본 shows the latest MangaDex volume and how far it is ahead of the Korean edition.
- * Unread release events only highlight what they concern ("새"); 확인 marks them read on the
+ * Unread release events only highlight what they concern ("NEW"); 확인 marks them read on the
  * server (the PC follows) and the information stays. Owned counts come from `ownedOf`, which
  * includes queued tracking edits, so a change shows here at once.
  */
@@ -120,7 +120,7 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
     <button className="collection-release-group__open" onClick={() => onOpen(work.id)}>
       <span className="collection-release-group__cover">{cover(work, revision, work.name)}</span>
       <span className="collection-release-group__title"><strong>{work.name}</strong>{lines}</span>
-      {fresh > 0 && <span className="collection-release-new numeric" aria-label={`새 알림 ${fresh}개`}>새 {fresh}</span>}
+      {fresh > 0 && <span className="collection-release-new numeric" aria-label={`새 알림 ${fresh}개`}>NEW {fresh}</span>}
     </button>
     {fresh > 0 && confirmButton(work.id, work.name)}
   </div>;
@@ -150,14 +150,14 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
       <ul className="collection-release-volumes">{row.volumes.map(volume => <li key={volume.volumeNumber} className={volume.fresh ? 'is-new' : undefined}>
         <span className={`numeric${volume.upcoming ? ' is-upcoming' : ''}`}>{koreanVolumeLine(volume, today)}</span>
         <span className="collection-release-tag">미보유</span>
-        {volume.fresh && <span className="collection-release-new">새</span>}
+        {volume.fresh && <span className="collection-release-new">NEW</span>}
       </li>)}</ul>
     </section>)}
 
     {region === 'jp' && japan.map(row => <section key={row.work.id} className={`collection-release-group${row.fresh ? ' is-new' : ''}`} aria-label={row.work.name}>
       {head(row.work, <><small className="numeric">일본 최신 {row.latest}권</small>{row.ahead ? <small className="numeric is-ahead">한국 정발보다 {row.ahead}권 앞섬</small> : null}</>, row.fresh)}
       {row.aheadVolumes.length > 0 && <ul className="collection-release-chips" aria-label={`${row.work.name} 일본 권`}>
-        {row.aheadVolumes.slice(0, AHEAD_CHIPS).map(volume => <li key={volume.volumeNumber} className={volume.fresh ? 'is-new' : undefined}><span className="numeric">{volume.volumeNumber}권</span>{volume.fresh && <span className="collection-release-new">새</span>}</li>)}
+        {row.aheadVolumes.slice(0, AHEAD_CHIPS).map(volume => <li key={volume.volumeNumber} className={volume.fresh ? 'is-new' : undefined}><span className="numeric">{volume.volumeNumber}권</span>{volume.fresh && <span className="collection-release-new">NEW</span>}</li>)}
         {row.aheadVolumes.length > AHEAD_CHIPS && <li className="is-more"><span className="numeric">외 {row.aheadVolumes.length - AHEAD_CHIPS}권</span></li>}
       </ul>}
     </section>)}
@@ -169,7 +169,7 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
           <button className="collection-release-group__open" onClick={() => onOpen(group.collectionId)}>
             <span className="collection-release-group__cover">{cover(workOf(group.collectionId), revision, group.name)}</span>
             <span className="collection-release-group__title"><strong>{group.name}</strong></span>
-            <span className="collection-release-new numeric" aria-label={`새 알림 ${group.events.length}개`}>새 {group.events.length}</span>
+            <span className="collection-release-new numeric" aria-label={`새 알림 ${group.events.length}개`}>NEW {group.events.length}</span>
           </button>
           {confirmButton(group.collectionId, group.name)}
         </div>

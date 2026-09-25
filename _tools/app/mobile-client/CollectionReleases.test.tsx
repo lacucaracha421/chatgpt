@@ -135,8 +135,8 @@ it('lists watched works with unowned Korean volumes and marks the new one',async
   expect(lines(night)).toEqual(['4권 · 9월 16일 발매됨','5권 · 10월 10일 발매 예정','6권 · 발매일 미정']);
   expect(within(night).getAllByText('미보유')).toHaveLength(3);
   const fresh=within(night).getByText('5권 · 10월 10일 발매 예정').closest('li')!;
-  expect(within(fresh).getByText('새')).toBeTruthy();
-  expect(within(night).getByText('새 1')).toBeTruthy();
+  expect(within(fresh).getByText('NEW')).toBeTruthy();
+  expect(within(night).getByText('NEW 1')).toBeTruthy();
   const sea=screen.getByRole('region',{name:'바다의 시간'});
   expect(within(sea).getByText('소장 기록 없음')).toBeTruthy();
   expect(lines(sea)).toEqual(['1권 · 8월 1일 발매됨','2권 · 9월 20일 발매됨']);
@@ -158,7 +158,7 @@ it('shows how far the Japanese edition is ahead, newly found volumes marked',asy
   expect(within(full).getByText('일본 최신 4권')).toBeTruthy();
   expect(within(full).getByText('한국 정발보다 2권 앞섬')).toBeTruthy();
   const chips=within(full).getByRole('list',{name:'가득 찬 서가 일본 권'});
-  expect(within(chips).getAllByRole('listitem').map(chip=>chip.textContent)).toEqual(['3권','4권새']);
+  expect(within(chips).getAllByRole('listitem').map(chip=>chip.textContent)).toEqual(['3권','4권NEW']);
   const night=screen.getByRole('region',{name:'밤의 도서관'});
   expect(within(night).getByText('일본 최신 9권')).toBeTruthy();
   expect(within(night).getByText('한국 정발보다 3권 앞섬')).toBeTruthy();
@@ -168,7 +168,7 @@ it('shows how far the Japanese edition is ahead, newly found volumes marked',asy
 it('confirms one work with all three kinds and keeps its release information',async()=>{
   await openReleases();
   fireEvent.click(screen.getByRole('button',{name:'바다의 시간 확인'}));
-  await waitFor(()=>expect(within(screen.getByRole('region',{name:'바다의 시간'})).queryByText(/^새/)).toBeNull());
+  await waitFor(()=>expect(within(screen.getByRole('region',{name:'바다의 시간'})).queryByText(/^NEW/)).toBeNull());
   expect(acks()).toEqual([{version:1,operationId:expect.any(String),collectionId:'sea',kinds:KINDS}]);
   expect(lines(screen.getByRole('region',{name:'바다의 시간'}))).toEqual(['1권 · 8월 1일 발매됨','2권 · 9월 20일 발매됨']);
   expect(screen.queryByRole('button',{name:'바다의 시간 확인'})).toBeNull();
@@ -184,7 +184,7 @@ it('confirms everything with the per-Collection form, the information staying',a
   await waitFor(()=>expect(screen.queryByRole('button',{name:'모두 확인'})).toBeNull());
   expect(acks().map(body=>[body.collectionId,body.kinds])).toEqual([['full',KINDS],['night',KINDS],['quiet',KINDS],['sea',KINDS]]);
   expect(lines(screen.getByRole('region',{name:'밤의 도서관'}))).toHaveLength(3);
-  expect(screen.queryByText('새')).toBeNull();
+  expect(screen.queryByText('NEW')).toBeNull();
   expect(screen.queryByRole('region',{name:'조용한 숲'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
   await waitFor(async()=>expect((await entry()).getAttribute('aria-label')).toBe('신간 보기'));
