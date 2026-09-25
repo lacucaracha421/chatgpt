@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 import authority
 import collection_authority
+import collection_bindings
 import collection_personal_edits as personal_edits
 import collection_releases
 import head_cache
@@ -312,6 +313,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             db.executescript(personal_edits.DDL)
             personal_edits.migrate(db)
             collection_releases.startup_db(db)
+            collection_bindings.startup_db(db)
             # Collections authority tables only; the domain stays inactive until an
             # explicit publisher activation.
             collection_authority.startup_db(db)
@@ -345,6 +347,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
     personal_edits.register(app, get_db, reader, publisher, lambda db: legacy_state(db)[0])
     collection_releases.register(app, get_db, reader, publisher)
+    collection_bindings.register(app, get_db, reader, publisher)
     collection_authority.register(app, get_db, reader, publisher)
 
     def head(blob: ArtworkUpload, *, ticket=False):
@@ -575,7 +578,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 advertisement = {**advertisement, "capabilities": {"collectionPersonalEdit": True,
                                                                      "collectionTrackingEdit": False},
                                  "libraryId": active["libraryId"]}
-        return {"revision": revision, "publishedAt": published, **advertisement}
+        return {"revision": revision, "publishedAt": published, **advertisement,
+                "collectionBindings": collection_bindings.capabilities()}
 
     @app.get("/v1/collections/{collection_id}")
     def get_collection(collection_id: ID, authorization: str | None = Header(default=None)):
