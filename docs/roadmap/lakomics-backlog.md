@@ -203,6 +203,26 @@ Collector (`extension-list/`):
 
 NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
 
+## USER-REQ-20260926 — User requests, 2026-09-26
+
+Status: `TODO` — recorded as given; scope and priority to be confirmed per item. NovelAI app items are in `nai_frontend/docs/BACKLOG.md` (NAI-011).
+
+Collector (`extension-list/`):
+- Translation: translate a tweet based on its fully expanded text (all "show more" / truncated parts expanded first).
+
+Fault game (`_tools/app/mobile-client/FaultGame.tsx`):
+- Too many items drop.
+- The crack effect looks poor; redo it.
+- The power ball is too strong.
+- Lv1 is too weak.
+- Check whether using a skill at Lv3 actually fires the Lv3 version.
+
+Mobile app:
+- Video playback delay (slow start).
+- Move the 게임 / 만화 / 영화 / AV filter into the top bar.
+- Notes: the editor is still covered by the keyboard in places; make it possible to scroll down so the text being typed stays visible.
+- Covers load slowly right after the app starts (check during PERF-ALL-001).
+
 ## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)
 
 Status: `IN PROGRESS` — stages C and A implemented 2026-09-24/25 (not yet native-accepted on Windows), plus user feedback rounds: 메모 back on the rail; 이동 and search merged into one 찾기 palette (Ctrl+K/Ctrl+F, also jumps to folder/album/character names); larger date headings; series view reduced to one header line + compact character tiles; group view opens on member tiles with 그룹 더보기 › 그룹 편집; character 더보기 panel rebuilt around references and crops; collections 내 별점 select; asset tree shows subtree totals ("N장 · 이 폴더만 M장"), quick views above pins, pins as chips, one expanded character series at a time, groups as single rows with members hidden; simpler person/group glyphs; scrollbars styled only via ::-webkit-scrollbar (standard scrollbar-width/color make WebKitGTK draw outlined native bars); online catalog tiles simplified like mobile, rare actions under 카탈로그 더보기, "N분 전 갱신" next to 망가. Stage B still waits for the Revisit rebuild. Concepts in `docs/prototypes/pc-declutter-20260924/` (README, index.html, PNGs); the user likes all three (2026-09-24). Staged plan combining them:
