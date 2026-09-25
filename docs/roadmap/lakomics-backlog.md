@@ -177,13 +177,13 @@ NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009
 
 ## USER-REQ-20260926 — User requests, 2026-09-26
 
-Status: `IN PROGRESS` — details clarified by the user 2026-09-26. Implemented 2026-09-26 in Android 0.8.27 (64) and the collector (collector translation accepted live by the user; the rest awaits tablet checks); the video bug stays open. NovelAI app items are in `nai_frontend/docs/BACKLOG.md` (NAI-011).
+Status: `IN PROGRESS` — details clarified by the user 2026-09-26. Implemented 2026-09-26 in Android 0.8.27 (64) and the collector and accepted by the user on the tablet and live X the same day; only the video bug stays open. NovelAI app items are in `nai_frontend/docs/BACKLOG.md` (NAI-011).
 
 Collector (`extension-list/`):
 - `DONE` (accepted live 2026-09-26): the main tweet on its own page is expanded in place (bounded 1.5 s wait, falls back to the visible text) before translating. Translation of long tweets: when the main tweet is truncated, the translation covers only the visible part; the user must press "더 보기" first to get a full translation. Expand the main tweet's full text before translating (main tweet only).
 
 Fault game (`_tools/app/mobile-client/FaultGame.tsx`):
-- `VERIFY` (0.8.27): drops halved (every 20th brick + 3.5 %, none from specials), pierce item 4 s and only through one-hit bricks, special balls pierce and bounce at paddle height per level (Lv1 cyan / Lv2 gold / Lv3 red), web-like cracks from the hit point. The Lv2/Lv3 dispatch was already correct; the gauge made a partly filled segment look lit, now fixed.
+- `DONE` (0.8.27, accepted): drops halved (every 20th brick + 3.5 %, none from specials), pierce item 4 s and only through one-hit bricks, special balls pierce and bounce at paddle height per level (Lv1 cyan / Lv2 gold / Lv3 red), web-like cracks from the hit point. The Lv2/Lv3 dispatch was already correct; the gauge made a partly filled segment look lit, now fixed.
 - Item drops are too frequent overall; reduce across the board.
 - The crack effect looks fake; make it more convincing.
 - The piercing ball item is far too strong; nerf it.
@@ -192,8 +192,8 @@ Fault game (`_tools/app/mobile-client/FaultGame.tsx`):
 
 Mobile app:
 - Bug (current, high): videos never start — endless loading in the viewer. 2026-09-26 findings: the server issues the ticket and R2 serves faststart MP4s with ranges; the same URL plays in tablet Chrome 153 (WebView 152). In a failing session the player showed Chromium's broken-media icon with no app error text. Right after reinstalling, videos played within 1 s, so the failure depends on app state. Video element events (state, MediaError code/name) now go to the `LakomicsPerf` log (`js video=`); capture a failing session to find the cause.
-- `VERIFY` (0.8.27): Collections: move the 게임 / 만화 / 영화 / AV type switch into the top bar so it stays reachable after scrolling (the user switches often).
-- `VERIFY` (0.8.27; native fix: edge-to-edge on Android 15+ never resized the WebView for the keyboard, now a frame pads the keyboard height below it; the bottom navigation may now show above the keyboard): Notes (text/checklist notes; the ledger is fine): with the keyboard open, content below the visible area cannot be scrolled into view, so the lower part of a long note stays hidden behind the keyboard while editing. Make the editor scroll so every line can be brought above the keyboard.
+- `DONE` (0.8.27, accepted): Collections: move the 게임 / 만화 / 영화 / AV type switch into the top bar so it stays reachable after scrolling (the user switches often).
+- `DONE` (0.8.27, accepted; native fix: edge-to-edge on Android 15+ never resized the WebView for the keyboard, now a frame pads the keyboard height below it; the bottom navigation may now show above the keyboard): Notes (text/checklist notes; the ledger is fine): with the keyboard open, content below the visible area cannot be scrolled into view, so the lower part of a long note stays hidden behind the keyboard while editing. Make the editor scroll so every line can be brought above the keyboard.
 - Collections covers right after app start (possibly only right after installing a new build): missing covers stay blank for a while in the Collections tab; after visiting other screens and coming back, missing covers load fairly quickly. Suspect a cold-start ticket/cache warm-up or an image-request queue stall; measure and fix during PERF-ALL-001.
 
 ## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)

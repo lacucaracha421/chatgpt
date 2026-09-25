@@ -14,7 +14,7 @@ Collections and Catalog deployment evidence is recorded in the version history a
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
 
-## 0.8.27 — installed, awaiting tablet checks (2026-09-26)
+## 0.8.27 — installed and accepted on the tablet (2026-09-26)
 
 - Collections: the 게임 / 만화 / 영화 / AV switch moved into the top bar (before 신간 and search), so it stays reachable after scrolling.
 - Keyboard: on Android 15+ edge-to-edge the WebView was never resized for the soft keyboard; the page now shrinks above it, so long text/checklist notes scroll fully into view while editing.
