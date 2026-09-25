@@ -321,10 +321,13 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     return () => window.removeEventListener(CLASSIFICATION_AUTHORITY_CHANGED_EVENT, refresh);
   }, [refreshClassifications]);
   // A trash or restore from another device changes the trash count without a local action.
+  // Assets materialized from the server (e.g. a video saved on mobile) arrive the same way
+  // and need their preview prepared, which nothing else would start.
   useEffect(() => {
     const refresh = () => {
       void refreshTrashCount().catch(() => undefined);
       setAssetRefresh((current) => current + 1);
+      setVideoPreparationTrigger((current) => current + 1);
     };
     window.addEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
