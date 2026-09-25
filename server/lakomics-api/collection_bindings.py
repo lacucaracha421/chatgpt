@@ -16,9 +16,11 @@ The candidates mirror the PC exactly so the PC can apply the tablet's pick uncha
   &page=n`` (``Authorization: KakaoAK <key>``, at most 50 pages, an unfinished search is
   refused), titles parsed by ``aladin.rs parse_volume_product``, items grouped by
   normalized (base title, author, publisher). The PC applies ``apply_kakao({"collectionId",
-  "query", "anchorItemId", "groupFingerprint"})``: it re-runs the same search with
-  ``query`` and binds the group whose anchor and fingerprint match, storing
-  ``provider_config_json = {"version": 1, "query", "groupFingerprint", "knownItemIds"}``.
+  "query", "groups": [{"anchorItemId", "groupFingerprint"}]})``: it re-runs the same search
+  with ``query`` and binds every group whose anchor and fingerprint match (volumes merged by
+  volume number), storing ``provider_config_json = {"version": 1, "query",
+  "groupFingerprint", "knownItemIds"}`` for one group or ``{"version": 2, "query", "groups":
+  [{"anchorItemId", "groupFingerprint", "knownItemIds"}]}`` for several.
   ``knownItemIds`` is computed by the PC from the group at apply time; the server returns
   it only for display/diagnostics.
 
@@ -62,7 +64,7 @@ redirects, no proxy environment, per-request timeouts, response size caps).
    "isbn13": str|null}], "ignoredCount", "volumeCount", "firstVolume": int|null,
    "lastVolume": int|null, "knownItemIds": [str], "thumbnailUrl": str|null}]}`` - the PC's
    ``AladinSeriesCandidate`` plus display fields, in the PC's group order. The tablet must
-   send back ``query`` (as returned) with the group's ``anchorItemId``/``groupFingerprint``.
+   send back ``query`` (as returned) with each picked group's ``anchorItemId``/``groupFingerprint``.
    ``thumbnailUrl`` is Kakao's (https) thumbnail of the group's lowest volume.
 
    Search errors (both providers): ``422 invalidBindSearch`` (query length),
@@ -82,14 +84,25 @@ redirects, no proxy environment, per-request timeouts, response size caps).
    "mangadex"|"kakao", "choice": {...}, "expected": {"externalId": str|null}?}`` (<= 16 KiB).
    * MangaDex choice: ``{"mangaId": <UUID>, "title": str(1-500), "coverUrl": str|null?}``.
      The PC runs ``apply_mangadex`` with ``target = existing collectionId``.
-   * Kakao choice: ``{"query": str(2-100, trimmed), "anchorItemId": str(1-128),
-     "groupFingerprint": 64 lowercase hex, "title": str(1-500), "author": str|null?,
-     "publisher": str|null?, "volumeCount": int|null?, "thumbnailUrl": str|null?}``.
-     The PC runs ``apply_kakao({collectionId, query, anchorItemId, groupFingerprint})``.
-   * ``title``/``coverUrl``/``author``/``publisher``/``volumeCount``/``thumbnailUrl`` are
-     display-only (the tablet shows what is waiting); the PC ignores them.
+   * Kakao choice: ``{"query": str(2-100, trimmed), "groups": [Group] (1-10, unique by
+     groupFingerprint), "title": str(1-500), "author": str|null?, "publisher": str|null?,
+     "volumeCount": int|null?, "thumbnailUrl": str|null?}``, Group = ``{"anchorItemId":
+     str(1-128), "groupFingerprint": 64 lowercase hex, "title": str(1-500)?, "firstVolume":
+     int?, "lastVolume": int?, "volumeCount": int?}``. Kakao splits one series into several
+     groups when the title/author/publisher fingerprint differs (imprint change, "(완결)",
+     신장판); the tablet may pick several groups of the same search and the PC binds them
+     together (volumes merged by volume number; refresh re-finds every group). The legacy
+     single form ``{"query", "anchorItemId", "groupFingerprint", "title", ...}`` is still
+     accepted and normalized to one group (its ``title``/``volumeCount`` copied into it); the
+     stored request - as returned to clients and in the publisher log - always carries
+     ``groups`` (group fields omitted when unknown, never null). The PC runs
+     ``apply_kakao({collectionId, query, groups: [{anchorItemId, groupFingerprint}]})``.
+   * ``title``/``coverUrl``/``author``/``publisher``/``volumeCount``/``thumbnailUrl`` and the
+     groups' ``title``/``firstVolume``/``lastVolume``/``volumeCount`` are display-only (the
+     tablet shows what is waiting); the PC ignores them.
    * ``expected.externalId`` (optional) is the binding the tablet saw (MangaDex ``mangaId``,
-     Kakao anchor item id, null = unbound). The PC should fail the request with reason
+     Kakao binding anchor item id - for several groups the anchor of the group with the
+     lowest volume - null = unbound). The PC should fail the request with reason
      ``bindingChanged`` when its current binding differs.
    Only manga Collections the server currently serves: ``404 collectionNotFound``,
    ``409 collectionNotManga``. One pending request per (collection, provider): a newer
@@ -698,10 +711,21 @@ class MangaDexChoice(Strict):
     coverUrl: Url | None = None
 
 
-class KakaoChoice(Strict):
-    query: Annotated[str, StringConstraints(min_length=2, max_length=100)]
+MAX_KAKAO_GROUPS = 10
+
+
+class KakaoGroup(Strict):
     anchorItemId: Annotated[str, StringConstraints(pattern=r"^\S{1,128}$")]
     groupFingerprint: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    title: Display | None = None
+    firstVolume: int | None = Field(default=None, ge=0, le=100_000)
+    lastVolume: int | None = Field(default=None, ge=0, le=100_000)
+    volumeCount: int | None = Field(default=None, ge=0, le=10_000)
+
+
+class KakaoChoice(Strict):
+    query: Annotated[str, StringConstraints(min_length=2, max_length=100)]
+    groups: Annotated[list[KakaoGroup], Field(min_length=1, max_length=MAX_KAKAO_GROUPS)]
     title: Display
     author: Display | None = None
     publisher: Display | None = None
@@ -731,6 +755,20 @@ class BindResult(Strict):
     version: Literal[1]
     state: Literal["applied", "failed"]
     reason: Reason | None = None
+
+
+def _kakao_groups_form(choice):
+    """A legacy single-group Kakao choice (``anchorItemId`` + ``groupFingerprint`` at the top
+    level, no ``groups``) as the ``groups`` form; anything else unchanged."""
+    if "groups" in choice or not ({"anchorItemId", "groupFingerprint"} & choice.keys()):
+        return choice
+    normalized = {key: value for key, value in choice.items() if key not in ("anchorItemId", "groupFingerprint")}
+    group = {key: choice[key] for key in ("anchorItemId", "groupFingerprint") if key in choice}
+    for key in ("title", "volumeCount"):
+        if choice.get(key) is not None:
+            group[key] = choice[key]
+    normalized["groups"] = [group]
+    return normalized
 
 
 def _encode(value):
@@ -877,12 +915,17 @@ def register(app, get_db, require_client, require_publisher):
                 if not _uuid_ok(choice.mangaId) or str(UUID(choice.mangaId)) != choice.mangaId:
                     raise ValueError()
             else:
-                choice = KakaoChoice.model_validate(command.choice)
+                choice = KakaoChoice.model_validate(_kakao_groups_form(command.choice))
                 if choice.query != choice.query.strip() or len(choice.query) < 2:
+                    raise ValueError()
+                if len({group.groupFingerprint for group in choice.groups}) != len(choice.groups):
                     raise ValueError()
         except (ValidationError, ValueError):
             invalid_request()
-        choice_json = _encode(choice.model_dump())
+        stored = choice.model_dump()
+        if command.provider == "kakao":
+            stored["groups"] = [group.model_dump(exclude_none=True) for group in choice.groups]
+        choice_json = _encode(stored)
         expected_json = None if command.expected is None else _encode(command.expected.model_dump())
         digest = hashlib.sha256(_encode(command.model_dump()).encode()).hexdigest()
         with get_db() as db:

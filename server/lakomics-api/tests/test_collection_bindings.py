@@ -491,6 +491,52 @@ class BindRequests(Base):
         self.assertEqual(self.mangadex(headers=self.publisher).status_code, 200)  # publisher may use client routes
         self.assertEqual(self.client.post(PREFIX + "/requests", json={}).status_code, 401)
 
+    def kakao_groups(self, groups, **choice):
+        body = {"version": 1, "operationId": str(uuid.uuid4()), "collectionId": "m1", "provider": "kakao",
+                "choice": {"query": "찍히지 않습니다", "groups": groups, "title": "찍히지 않습니다", **choice}}
+        return self.client.post(PREFIX + "/requests", json=body, headers=self.auth)
+
+    def test_kakao_legacy_single_choice_is_normalized_to_groups(self):
+        request = self.ok(self.kakao())["request"]
+        self.assertEqual(request["choice"], {
+            "query": "스틸 볼 런", "groups": [{"anchorItemId": "isbn13:9788954677530", "groupFingerprint": "a" * 64,
+                                           "title": "스틸 볼 런", "volumeCount": 24}],
+            "title": "스틸 볼 런", "author": None, "publisher": "문학동네", "volumeCount": 24, "thumbnailUrl": None})
+        logged = self.ok(self.log())["items"][0]
+        self.assertEqual(logged["choice"], request["choice"])
+        self.code(self.kakao(groups=[{"anchorItemId": "x", "groupFingerprint": "b" * 64}]), 422, "invalidBindRequest")
+
+    def test_kakao_multi_group_choice_from_the_tablet(self):
+        # The exact shape the tablet sends: unknown group fields omitted, groups ordered by
+        # volume range, explicit top-level nulls, volumeCount = sum of the groups' counts.
+        groups = [
+            {"anchorItemId": "isbn13:9791138490010", "groupFingerprint": "a" * 64, "title": "찍히지 않습니다",
+             "firstVolume": 1, "lastVolume": 6, "volumeCount": 6},
+            {"anchorItemId": "isbn13:9791138491150", "groupFingerprint": "b" * 64, "firstVolume": 7,
+             "lastVolume": 7, "volumeCount": 1},
+        ]
+        request = self.ok(self.kakao_groups(groups, author=None, publisher=None, thumbnailUrl=None,
+                                            volumeCount=7))["request"]
+        self.assertEqual(request["choice"], {"query": "찍히지 않습니다", "groups": groups, "title": "찍히지 않습니다",
+                                             "author": None, "publisher": None, "volumeCount": 7,
+                                             "thumbnailUrl": None})
+        self.assertEqual(self.ok(self.log())["items"][0]["choice"]["groups"], groups)
+
+    def test_kakao_groups_bounds_and_uniqueness(self):
+        def group(n):
+            return {"anchorItemId": f"isbn13:{n}", "groupFingerprint": f"{n:064x}"}
+        self.assertEqual(len(self.ok(self.kakao_groups([group(n) for n in range(10)]))["request"]["choice"]["groups"]), 10)
+        self.code(self.kakao_groups([group(n) for n in range(11)]), 422, "invalidBindRequest")
+        self.code(self.kakao_groups([]), 422, "invalidBindRequest")
+        self.code(self.kakao_groups([group(1), {**group(1), "anchorItemId": "isbn13:other"}]), 422,
+                  "invalidBindRequest")
+        self.code(self.kakao_groups([{**group(1), "groupFingerprint": "A" * 64}]), 422, "invalidBindRequest")
+        # A null optional group field is tolerated and not stored.
+        stored = self.ok(self.kakao_groups([{**group(1), "title": None}]))["request"]["choice"]["groups"]
+        self.assertEqual(stored, [group(1)])
+        self.code(self.kakao_groups([{**group(1), "extra": 1}]), 422, "invalidBindRequest")
+        self.code(self.kakao_groups([{"groupFingerprint": "c" * 64}]), 422, "invalidBindRequest")
+
     def test_newer_request_replaces_pending_per_provider(self):
         first = self.ok(self.kakao())["request"]
         mangadex = self.ok(self.mangadex())["request"]
