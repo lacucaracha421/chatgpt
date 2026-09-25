@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from botocore.exceptions import ClientError
 from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints, ValidationError, field_validator
 from starlette.concurrency import run_in_threadpool
 
 import authority
@@ -129,6 +129,71 @@ class OwnedVolumes(StrictModel):
     count: int = Field(ge=0, le=2000)
 
 
+VolumeNumber = Annotated[StrictInt, Field(ge=1, le=999)]
+EditionIndex = Annotated[StrictInt, Field(ge=0, le=3)]
+CheckedAt = Annotated[str, Field(min_length=1, max_length=100)]
+
+
+def strictly_ascending(volumes):
+    numbers = [volume.volumeNumber for volume in volumes]
+    if any(later <= earlier for earlier, later in zip(numbers, numbers[1:])):
+        raise ValueError("volumes must be unique and ascending by volumeNumber")
+    return volumes
+
+
+class KakaoScheduleVolume(StrictModel):
+    volumeNumber: VolumeNumber
+    date: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None
+    status: Literal["upcoming", "released"] | None
+
+    @field_validator("date")
+    @classmethod
+    def calendar_date(cls, value):
+        if value is not None:
+            datetime.strptime(value, "%Y-%m-%d")
+        return value
+
+
+class KakaoSchedule(StrictModel):
+    # The owned-volume edition these Korean (Kakao) volumes correspond to.
+    editionIndex: EditionIndex
+    checkedAt: CheckedAt | None
+    volumes: list[KakaoScheduleVolume] = Field(max_length=999)
+
+    @field_validator("volumes")
+    @classmethod
+    def ascending(cls, volumes):
+        return strictly_ascending(volumes)
+
+
+class MangaDexScheduleVolume(StrictModel):
+    volumeNumber: VolumeNumber
+    editionIndex: EditionIndex | None
+
+
+class MangaDexSchedule(StrictModel):
+    checkedAt: CheckedAt | None
+    latestVolume: VolumeNumber | None
+    # One entry per MangaDex (volume, edition) slot: a volume can repeat for another edition.
+    volumes: list[MangaDexScheduleVolume] = Field(max_length=999)
+
+    @field_validator("volumes")
+    @classmethod
+    def ascending(cls, volumes):
+        numbers = [volume.volumeNumber for volume in volumes]
+        if numbers != sorted(numbers) or len({(v.volumeNumber, v.editionIndex) for v in volumes}) != len(volumes):
+            raise ValueError("volumes must be ascending by volumeNumber with unique editions")
+        return volumes
+
+
+class ReleaseSchedule(StrictModel):
+    """Per-manga release schedule from an upgraded PC (personalEditVersion 2): the
+    Korean edition's Kakao volumes with dates/status as the PC release watch computes
+    them, and the Japanese volumes MangaDex lists. null = no binding for that provider."""
+    kakao: KakaoSchedule | None
+    mangadex: MangaDexSchedule | None
+
+
 class Collection(StrictModel):
     id: ID
     name: str = Field(min_length=1, max_length=2000)
@@ -167,6 +232,7 @@ class Collection(StrictModel):
     # legacy snapshots and never stored as null, so legacy payloads stay unchanged.
     releaseWatch: ReleaseWatch | None = None
     ownedVolumes: list[OwnedVolumes] | None = Field(default=None, max_length=4)
+    releaseSchedule: ReleaseSchedule | None = None
 
 
 class Replica(StrictModel):
@@ -194,7 +260,7 @@ def encode(value) -> str:
 def stored(item: Collection) -> dict:
     """The stored payload; optional tracking keys are omitted rather than stored as null."""
     payload = item.model_dump()
-    for key in ("releaseWatch", "ownedVolumes"):
+    for key in ("releaseWatch", "ownedVolumes", "releaseSchedule"):
         if payload[key] is None:
             del payload[key]
     if "ownedVolumes" in payload:

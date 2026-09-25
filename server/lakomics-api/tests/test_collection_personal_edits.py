@@ -455,5 +455,113 @@ class CollectionTrackingEditTests(unittest.TestCase):
         self.assertTrue(self.status()['capabilities']['collectionTrackingEdit'])
 
 
+
+SCHEDULE = {
+    'kakao': {'editionIndex': 1, 'checkedAt': '2026-09-25T10:00:00+09:00', 'volumes': [
+        {'volumeNumber': 3, 'date': '2026-09-16', 'status': 'released'},
+        {'volumeNumber': 4, 'date': '2026-10-10', 'status': 'upcoming'},
+        {'volumeNumber': 5, 'date': None, 'status': None}]},
+    'mangadex': {'checkedAt': None, 'latestVolume': 7, 'volumes': [
+        {'volumeNumber': 1, 'editionIndex': 0}, {'volumeNumber': 1, 'editionIndex': 1},
+        {'volumeNumber': 7, 'editionIndex': None}]},
+}
+
+
+class CollectionReleaseScheduleTests(unittest.TestCase):
+    """The optional per-manga ``releaseSchedule`` key of a version-2 publication."""
+    base = CollectionPersonalEditTests  # what CollectionTrackingEditTests.setUp builds on
+    tracking = CollectionTrackingEditTests
+    tearDown = tracking.tearDown
+    body, publish, status, ready2 = tracking.body, tracking.publish, tracking.status, tracking.ready2
+    command, edit, detail, watch = tracking.command, tracking.edit, tracking.detail, tracking.watch
+
+    def setUp(self):
+        self.tracking.setUp(self)
+        self.items[0]['releaseSchedule'] = copy.deepcopy(SCHEDULE)
+        self.items[1]['releaseSchedule'] = {'kakao': None, 'mangadex': None}
+
+    def stored_rows(self):
+        with api_app.get_db() as db:
+            return {row['id']: json.loads(row['payload'])
+                    for row in db.execute('SELECT id,payload FROM mobile_collections')}
+
+    def rejected(self, mutate):
+        items = copy.deepcopy(self.items)
+        mutate(items[0]['releaseSchedule'])
+        return self.publish(self.body(items, base=self.status()['revision'], edit_version=2)).status_code == 422
+
+    def test_schedule_is_served_in_detail_and_list_and_survives_edits(self):
+        self.ready2()
+        self.assertEqual(self.detail()['releaseSchedule'], SCHEDULE)
+        self.assertEqual(self.detail('s')['releaseSchedule'], {'kakao': None, 'mangadex': None})
+        listed = {item['id']: item for item in self.client.get('/v1/collections', headers=AUTH).json()['items']}
+        self.assertEqual(listed['a']['releaseSchedule'], SCHEDULE)
+        self.assertNotIn('releaseSchedule', listed['m'])
+        self.assertEqual(self.edit(self.watch()).status_code, 200)
+        self.assertEqual(self.detail()['releaseSchedule'], SCHEDULE)
+
+    def test_absent_key_is_not_stored(self):
+        for item in self.items:
+            item.pop('releaseSchedule', None)
+        self.ready2()
+        rows = self.stored_rows()
+        self.assertTrue(all('releaseSchedule' not in row for row in rows.values()))
+        self.assertNotIn('releaseSchedule', self.detail())
+
+    def test_legacy_publication_payload_is_unchanged(self):
+        legacy = copy.deepcopy(self.items)
+        for item in legacy:
+            for key in ('releaseSchedule', 'releaseWatch', 'ownedVolumes'):
+                item.pop(key, None)
+        expected = {item.id: item.model_dump() for item in
+                    mobile_collections.Replica.model_validate({'version': 1, 'baseRevision': None,
+                                                               'collections': legacy}).collections}
+        for payload in expected.values():
+            for key in ('releaseSchedule', 'releaseWatch', 'ownedVolumes'):
+                del payload[key]
+        self.assertEqual(self.publish(self.body(legacy, upgraded=False), headers=AUTH).status_code, 200)
+        rows = self.stored_rows()
+        self.assertEqual(rows, expected)
+        self.assertEqual({key: mobile_collections.encode(value) for key, value in rows.items()},
+                         {key: mobile_collections.encode(value) for key, value in expected.items()})
+
+    def test_bounds(self):
+        self.ready2()
+        kakao = lambda change: lambda schedule: change(schedule['kakao'])
+        mangadex = lambda change: lambda schedule: change(schedule['mangadex'])
+        for mutate in (
+            kakao(lambda k: k.update(editionIndex=4)),
+            kakao(lambda k: k.update(editionIndex=True)),
+            kakao(lambda k: k.update(editionIndex=None)),
+            kakao(lambda k: k.pop('checkedAt')),
+            kakao(lambda k: k['volumes'].reverse()),
+            kakao(lambda k: k['volumes'].append({'volumeNumber': 5, 'date': None, 'status': None})),
+            kakao(lambda k: k['volumes'][0].update(volumeNumber=0)),
+            kakao(lambda k: k['volumes'][2].update(volumeNumber=1000)),
+            kakao(lambda k: k['volumes'][0].update(date='2026-02-30')),
+            kakao(lambda k: k['volumes'][0].update(date='2026-9-16')),
+            kakao(lambda k: k['volumes'][0].update(date='2026-09-16T00:00:00')),
+            kakao(lambda k: k['volumes'][0].update(status='owned')),
+            kakao(lambda k: k['volumes'][0].pop('status')),
+            kakao(lambda k: k['volumes'][0].update(extra=1)),
+            kakao(lambda k: k.update(volumes=[{'volumeNumber': n, 'date': None, 'status': None}
+                                              for n in range(1, 1000)] + [{'volumeNumber': 999, 'date': None, 'status': None}])),
+            mangadex(lambda d: d.update(latestVolume=0)),
+            mangadex(lambda d: d.update(latestVolume='7')),
+            mangadex(lambda d: d['volumes'][0].update(editionIndex=-1)),
+            mangadex(lambda d: d['volumes'][0].pop('editionIndex')),
+            mangadex(lambda d: d['volumes'].reverse()),
+            mangadex(lambda d: d['volumes'].append({'volumeNumber': 7, 'editionIndex': None})),
+            mangadex(lambda d: d.update(checkedAt='')),
+            lambda schedule: schedule.pop('mangadex'),
+            lambda schedule: schedule.update(aladin=None),
+        ):
+            self.assertTrue(self.rejected(mutate), mutate)
+        full = copy.deepcopy(self.items)
+        full[0]['releaseSchedule']['kakao']['volumes'] = [
+            {'volumeNumber': n, 'date': '2026-01-01', 'status': 'released'} for n in range(1, 1000)]
+        self.assertEqual(self.publish(self.body(full, base=self.status()['revision'], edit_version=2)).status_code, 200)
+
+
 if __name__ == '__main__':
     unittest.main()

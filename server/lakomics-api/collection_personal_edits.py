@@ -35,6 +35,11 @@ other types; a legacy snapshot simply lacks them):
 * ``ownedVolumes: [{"editionIndex": 0-3, "count": 0-2000}, ...]`` - one entry per tracked
   edition (`collection_ownership_tracking`, plus any edition with owned volumes); ``count``
   = volumes owned in any format, as the PC panel shows it. Unique editions, <= 4 entries.
+* ``releaseSchedule: {"kakao": null | {...}, "mangadex": null | {...}}`` - read-only release
+  information (``mobile_collections.ReleaseSchedule``): the Kakao (Korean) volumes with the
+  date/status the PC release watch computes, the owned-volume ``editionIndex`` they belong
+  to and ``checkedAt``; MangaDex's Japanese volume numbers, ``latestVolume`` and
+  ``checkedAt``. A provider without a binding is null. Not editable from clients.
 
 Handshake: a PC that understands these fields publishes ``personalEditVersion: 2`` (same
 ``libraryId``/``personalEditCursor`` rules as 1) and reads the log with ``editVersion=2``.
