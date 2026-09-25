@@ -1,10 +1,11 @@
 import {useEffect, useState} from 'react';
-import {StarIcon} from '@heroicons/react/24/outline';
+import {SparklesIcon, StarIcon} from '@heroicons/react/24/outline';
+import {SparklesIcon as SparklesSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {MEMO_LIMIT, memoLength, type CollectionEditField, type CollectionEditValue} from './collectionEditOutbox';
 import type {CollectionDetail} from './collectionModel';
-import {OwnedSheet, trackedEditions, TrackingRows} from './CollectionTracking';
+import {OwnedSheet, ReleaseWatchAction, trackedEditions, TrackingRows} from './CollectionTracking';
 
 /** `owned-N` edits the owned-volume count of edition N. */
 export type PersonalSheet = 'rating' | 'memo' | 'conflict' | `owned-${number}` | null;
@@ -27,19 +28,60 @@ const Pending = () => <span className="collection-personal-pending" role="status
 const PendingSlot = ({shown}: {shown: boolean}) => <span className="collection-personal-pending is-slot" role="status">{shown ? '전송 대기' : ''}</span>;
 
 /**
- * My rating, Showcase membership and memo, plus 신간 알림 and owned volumes for manga
- * (`CollectionTracking.tsx`). They are editable only while the server
- * advertises `collectionPersonalEdit`; otherwise they are shown read-only without
- * an error. A queued value shows at once with the bookmark-style "전송 대기" mark.
+ * 내 기록 beside the cover: my rating plus, for manga, the owned volumes
+ * (`CollectionTracking.tsx`). They are editable only while the server advertises
+ * `collectionPersonalEdit` (tracking: `collectionTrackingEdit`); otherwise they are shown
+ * read-only without an error. A queued value shows at once with the bookmark-style "전송 대기" mark.
  */
-export function CollectionPersonal({item, edits, sheet, onSheet}: {item: CollectionDetail; edits: PersonalEdits; sheet: PersonalSheet; onSheet(sheet: PersonalSheet): void}) {
+export function PersonalRecord({item, edits, onSheet}: {item: CollectionDetail; edits: PersonalEdits; onSheet(sheet: PersonalSheet): void}) {
   const score = edits.visible(item.id, 'myScore', item.myScore ?? null);
   const showcase = edits.visible(item.id, 'showcase', item.showcase);
   const memo = edits.visible(item.id, 'memo', item.description ?? null);
-  const editable = edits.supported;
   const trackingPending = item.type === 'manga' && ((item.releaseWatch && edits.visible(item.id, 'releaseWatch', item.releaseWatch.enabled).pending)
     || trackedEditions(item).some(editionIndex => edits.visible(item.id, 'ownedVolumes', {editionIndex, count: item.ownedVolumes?.find(entry => entry.editionIndex === editionIndex)?.count ?? null}).pending));
   const anyPending = score.pending || showcase.pending || memo.pending || !!trackingPending;
+  return <section className="collection-personal" aria-label="내 기록">
+    {edits.supported
+      ? <button className={`collection-personal-row${score.pending ? ' is-pending' : ''}`} aria-label={`내 평점 ${scoreText(score.value)}${score.pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet('rating')}>
+          <span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span><PendingSlot shown={score.pending}/>
+        </button>
+      : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
+    <TrackingRows item={item} edits={edits} onOwned={edition => onSheet(`owned-${edition}`)}/>
+    {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}
+    {edits.notice && <p className="collection-personal-failure" role="alert">{edits.notice}</p>}
+  </section>;
+}
+
+/**
+ * The detail's top-bar actions: Showcase membership (sparkles) and, for manga, 신간 알림 (bell).
+ * A tap that cannot change anything explains why in a brief toast.
+ */
+export function PersonalActions({item, edits}: {item: CollectionDetail; edits: PersonalEdits}) {
+  const showcase = edits.visible(item.id, 'showcase', item.showcase);
+  const [toast, setToast] = useState<{text: string; key: number} | null>(null);
+  useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3000); return () => clearTimeout(timer); }, [toast]);
+  const ShowcaseIcon = showcase.value ? SparklesSolid : SparklesIcon;
+  return <>
+    <div className="collection-bar-actions" role="group" aria-label="작품 동작">
+      {edits.supported
+        ? <button type="button" className={`ui-button ui-button--ghost ui-button--icon collection-bar-action${showcase.pending ? ' is-pending' : ''}`} aria-pressed={showcase.value} aria-label={`쇼케이스${showcase.pending ? ', 전송 대기' : ''}`} onClick={() => edits.edit(item.id, 'showcase', !showcase.value, item.showcase)}>
+            <ShowcaseIcon aria-hidden="true"/><span className="collection-bar-pending" aria-hidden="true"/>
+          </button>
+        : (showcase.value || showcase.pending) && <span className={`collection-bar-action is-static${showcase.pending ? ' is-pending' : ''}`} role="img" aria-label={`쇼케이스에 추가됨${showcase.pending ? ', 전송 대기' : ''}`}><ShowcaseIcon aria-hidden="true"/><span className="collection-bar-pending" aria-hidden="true"/></span>}
+      <ReleaseWatchAction item={item} edits={edits} onReason={text => setToast(current => ({text, key: (current?.key ?? 0) + 1}))}/>
+    </div>
+    {toast && <p key={toast.key} className="collection-toast" role="status">{toast.text}</p>}
+  </>;
+}
+
+/**
+ * My memo section plus the personal sheets (rating, owned count, memo, memo conflict). The
+ * memo is editable only while the server advertises `collectionPersonalEdit`.
+ */
+export function CollectionPersonal({item, edits, sheet, onSheet}: {item: CollectionDetail; edits: PersonalEdits; sheet: PersonalSheet; onSheet(sheet: PersonalSheet): void}) {
+  const score = edits.visible(item.id, 'myScore', item.myScore ?? null);
+  const memo = edits.visible(item.id, 'memo', item.description ?? null);
+  const editable = edits.supported;
   const ownedEdition = sheet?.startsWith('owned-') ? Number(sheet.slice(6)) : null;
   // A memo conflict asks once when it appears; the banner keeps it reachable.
   const conflictKey = memo.conflict ? JSON.stringify([item.id, memo.conflict.current]) : '';
@@ -47,21 +89,6 @@ export function CollectionPersonal({item, edits, sheet, onSheet}: {item: Collect
   useEffect(() => { if (conflictKey && asked !== conflictKey && sheet === null) { setAsked(conflictKey); onSheet('conflict'); } }, [conflictKey, asked, sheet, onSheet]);
 
   return <>
-    <section className="collection-block collection-personal" aria-label="내 기록">
-      {editable
-        ? <button className={`collection-personal-row${score.pending ? ' is-pending' : ''}`} aria-label={`내 평점 ${scoreText(score.value)}${score.pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet('rating')}>
-            <span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span><PendingSlot shown={score.pending}/>
-          </button>
-        : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
-      {editable
-        ? <button className={`collection-personal-row${showcase.pending ? ' is-pending' : ''}`} aria-pressed={showcase.value} aria-label={`쇼케이스${showcase.pending ? ', 전송 대기' : ''}`} onClick={() => edits.edit(item.id, 'showcase', !showcase.value, item.showcase)}>
-            <span className="collection-personal-label">쇼케이스</span><span className="collection-personal-value">{showcase.value ? '추가됨' : '추가 안 함'}</span><PendingSlot shown={showcase.pending}/><span className="collection-personal-switch" aria-hidden="true"/>
-          </button>
-        : (showcase.value || showcase.pending) && <div className={`collection-personal-row${showcase.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">쇼케이스</span><span className="collection-personal-value">{showcase.value ? '추가됨' : '추가 안 함'}</span>{showcase.pending && <Pending/>}</div>}
-      <TrackingRows item={item} edits={edits} onOwned={edition => onSheet(`owned-${edition}`)}/>
-      {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}
-      {edits.notice && <p className="collection-personal-failure" role="alert">{edits.notice}</p>}
-    </section>
     {(editable || memo.value || memo.pending) && <section className="collection-block collection-memo" aria-label="내 메모">
       <div className="collection-memo-heading"><h2>내 메모</h2>{memo.pending && !memo.conflict && <Pending/>}{editable && <Button variant="ghost" className="collection-memo-edit" onClick={() => onSheet('memo')}>{memo.value ? '편집' : '메모 쓰기'}</Button>}</div>
       {memo.conflict && <div className="collection-memo-conflict" role="alert"><span>PC에서 메모가 바뀌었습니다</span><Button variant="ghost" onClick={() => onSheet('conflict')}>확인</Button></div>}

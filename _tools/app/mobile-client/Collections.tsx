@@ -1,6 +1,7 @@
 import {usePublicationCheck} from './usePublicationCheck';
 import {CollectionMetadata} from './CollectionMetadata';
-import {CollectionPersonal,type PersonalSheet} from './CollectionPersonal';
+import {CollectionPersonal,PersonalActions,PersonalRecord,type PersonalSheet} from './CollectionPersonal';
+import {koreanGenres} from '../src/collections/genreNames';
 import {useCollectionEdits} from './useCollectionEdits';
 import {CollectionReleases} from './CollectionReleases';
 import {NO_RELEASES, RELEASE_COUNTS_PATH, releaseCounts, type ReleaseCounts} from './collectionReleases';
@@ -33,6 +34,15 @@ const labels:Record<CollectionTab,string> = {game:'게임',manga:'만화',movie:
 const TABS = Object.keys(labels) as CollectionTab[];
 // The detail pane names the work's own maker role rather than a generic "제작자".
 const makerLabels:Record<CollectionKind,string> = {game:'개발사',manga:'작가',movie:'제작사'};
+/** Manga facts beside the cover: publisher, year and status, then the genres as Korean chips. */
+function MangaFacts({item}:{item:CollectionDetail}) {
+  const rows=([['출판사',item.publisher],['출간년도',item.year],['상태',item.series?.status]] as const).filter(([,value])=>value!=null&&value!=='');
+  const genres=koreanGenres(item.genres);
+  return <>
+    {rows.length>0&&<dl className="collection-detail-facts" aria-label="작품 정보">{rows.map(([label,value])=><div key={label}><dt>{label}</dt><dd className={typeof value==='number'?'numeric':undefined}>{value}</dd></div>)}</dl>}
+    {genres.length>0&&<ul className="collection-genres" aria-label="장르">{genres.map(genre=><li key={genre}>{genre}</li>)}</ul>}
+  </>;
+}
 const detailMaker = (item:CollectionDetail) => (item.type==='game'?item.developer:item.type==='manga'?item.author:item.productionCompany)?.trim() ?? '';
 
 // Only visible artwork requests enter this small queue; native owns the disk cache.
@@ -413,7 +423,6 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const sortLabel=filters.sort==='media_date'?sortDirectionLabels(filters.sort)[filters.direction]:`${SORT_LABELS[filters.sort]} · ${sortDirectionLabels(filters.sort)[filters.direction]}`;
   // The memo (`description`) has its own section; manga overviews are imported provider text.
   const description=item&&item.type!=='manga'?item.overview:null;
-  const score=item?edits.visible(item.id,'myScore',item.myScore??null).value:null;
   // A queued rating shows on the cards too, until the list re-reads the server.
   const card=(work:CollectionSummary)=>{const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
@@ -421,7 +430,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
   const header=selected
-    ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>}/>
+    ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
     :inboxOpen
       ?<TopBar back={{label:'뒤로',onClick:()=>setInboxOpen(false)}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title="신간"/>
     :showcaseAll
@@ -477,7 +486,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       <div className={`collection-detail-intro ${background?'has-backdrop':''}`}>
         <button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button>
         <div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}
-          <span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{score!=null?<Stars score={score}/>:<span>미평가</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span></div>
+          {item.type==='manga'?<MangaFacts item={item}/>:<span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span>}
+          <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/></div>
       </div>
       <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
       {volumes.length>0&&<section className="collection-block collection-volume-section" aria-label="권별 표지"><h2>{volumes.length}권</h2>
@@ -486,9 +496,10 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
         {volumes.length>volumeLimit&&<Button variant="ghost" onClick={()=>setVolumeLimit(n=>n+96)}>표지 더 보기</Button>}</section>}
       {item.type==='movie'&&item.series&&<SeriesDetails item={item} revision={detail!.revision} active={active&&!paused}/>}
       {item.type==='movie'&&item.film&&<FilmDetails key={item.id} film={item.film}/>}
-      <section className="collection-block collection-information" aria-label="작품 정보 영역"><h2>작품 정보</h2>
+      {/* Manga shows its information beside the cover; the other types keep this section. */}
+      {item.type!=='manga'&&<section className="collection-block collection-information" aria-label="작품 정보 영역"><h2>작품 정보</h2>
         {description&&<><p className={`collection-overview ${overview?'':'is-clamped'}`}>{description}</p><Button variant="ghost" className="collection-overview-toggle" aria-expanded={overview} onClick={()=>setOverview(open=>!open)}>{overview?'접기':'더 보기'}</Button></>}
-        <CollectionMetadata item={item}/></section>
+        <CollectionMetadata item={item}/></section>}
     </>}</>}</div>
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
       <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>changeFilters({...filters,sort:value})}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>

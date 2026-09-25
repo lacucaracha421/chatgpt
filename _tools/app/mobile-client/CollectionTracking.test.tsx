@@ -49,7 +49,9 @@ async function openDetail(){
   await screen.findByRole('region',{name:'내 기록'});
 }
 const section=()=>screen.getByRole('region',{name:'내 기록'});
-const watchSwitch=()=>within(section()).findByRole('button',{name:/^신간 알림/});
+/** 신간 알림 is a bell in the detail's top bar. */
+const actions=()=>screen.getByRole('group',{name:'작품 동작'});
+const watchSwitch=async()=>{await screen.findByRole('group',{name:'작품 동작'});return within(actions()).findByRole('button',{name:/^신간 알림/});};
 
 it('turns 신간 알림 on through the personal-edit outbox with the expected value',async()=>{
   await openDetail();
@@ -60,14 +62,14 @@ it('turns 신간 알림 on through the personal-edit outbox with the expected va
   expect(commands()[0]).toMatchObject({version:1,libraryId:LIBRARY,collectionId:'w',field:'releaseWatch',value:true,expected:false});
   await waitFor(()=>expect(readCollectionEdits()).toEqual({}));
   await waitFor(async()=>expect((await watchSwitch()).getAttribute('aria-pressed')).toBe('true'));
-  expect(within(section()).getByText('켜짐')).toBeTruthy();
+  expect((await watchSwitch()).classList.contains('is-pending')).toBe(false);
 });
 
 it('edits the owned count per edition with the stepper, number field and 전체 shortcut',async()=>{
   await openDetail();
   // One row per edition: tracked 기본판, and 판본 2 that has volumes but no count yet.
   const main=within(section()).getByRole('button',{name:'기본판 소장 3권까지, 바꾸기'});
-  expect(main.textContent).toContain('/ 5권');
+  expect(main.textContent).toContain('3권까지 / 전체 5권');
   expect(within(section()).getByRole('button',{name:'판본 2 소장 기록 없음, 바꾸기'})).toBeTruthy();
   fireEvent.click(main);
   const sheet=await screen.findByRole('dialog',{name:'기본판 소장 권수'});
@@ -125,18 +127,22 @@ it('disables 신간 알림 with a short reason when the Collection has no Aladin
   item={...base,releaseWatch:{enabled:false,available:false}};
   await openDetail();
   const toggle=await watchSwitch() as HTMLButtonElement;
-  expect(toggle.disabled).toBe(true);
-  expect(within(section()).getByText('알라딘이나 카카오와 연결된 작품만 켤 수 있습니다.')).toBeTruthy();
+  expect(toggle.getAttribute('aria-disabled')).toBe('true');
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  expect(screen.queryByText('알라딘이나 카카오와 연결된 작품만 켤 수 있습니다.',{selector:'.collection-toast'})).toBeNull();
+  // A tap explains why in a brief toast instead of queuing anything.
   fireEvent.click(toggle);
+  expect(screen.getByText('알라딘이나 카카오와 연결된 작품만 켤 수 있습니다.',{selector:'.collection-toast'})).toBeTruthy();
   expect(commands()).toHaveLength(0);
+  expect(readCollectionEdits()).toEqual({});
 });
 
 it('lets 신간 알림 be turned off even without a binding',async()=>{
   item={...base,releaseWatch:{enabled:true,available:false}};
   await openDetail();
   const toggle=await watchSwitch() as HTMLButtonElement;
-  expect(toggle.disabled).toBe(false);
-  expect(within(section()).queryByText('알라딘이나 카카오와 연결된 작품만 켤 수 있습니다.')).toBeNull();
+  expect(toggle.getAttribute('aria-disabled')).toBeNull();
+  expect(toggle.getAttribute('aria-pressed')).toBe('true');
   fireEvent.click(toggle);
   await waitFor(()=>expect(commands()[0]).toMatchObject({field:'releaseWatch',value:false,expected:true}));
 });
@@ -154,7 +160,12 @@ it('shows tracking read-only with a short note while the PC has not been upgrade
   tracking=false;
   await openDetail();
   await waitFor(()=>expect(within(section()).getByText('PC 앱을 업데이트하면 신간 알림과 소장 권수를 여기서 바꿀 수 있습니다.')).toBeTruthy());
-  expect(within(section()).queryByRole('button',{name:/^신간 알림/})).toBeNull();
+  // The bell shows the state read-only; a tap says the PC needs the update.
+  const bell=await watchSwitch();
+  expect(bell.getAttribute('aria-disabled')).toBe('true');
+  fireEvent.click(bell);
+  expect(screen.getByText('PC 앱을 업데이트하면 신간 알림을 여기서 바꿀 수 있습니다.',{selector:'.collection-toast'})).toBeTruthy();
+  expect(commands()).toHaveLength(0);
   expect(within(section()).queryByRole('button',{name:/소장/})).toBeNull();
   expect(within(section()).getByText('3권까지')).toBeTruthy();
   // Rating stays editable: only the tracking fields wait for the PC.
@@ -180,6 +191,7 @@ it('shows nothing extra for a legacy manga publication or other Collection types
   await openDetail();
   await waitFor(()=>expect(within(section()).getByRole('button',{name:/내 평점/})).toBeTruthy());
   expect(within(section()).queryByText(/신간 알림|소장/)).toBeNull();
+  expect(within(actions()).queryByRole('button',{name:/신간 알림/})).toBeNull();
   cleanup();
   item={...base,type:'game',volumes:[]};
   await openDetail();

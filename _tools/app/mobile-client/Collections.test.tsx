@@ -439,7 +439,9 @@ it.each([['game','개발사','아주 긴 개발사 이름'],['manga','작가','�
   render(<Collections active paused={false} backRef={{current:null}}/>);
   fireEvent.click(await screen.findByText(item.name));
   expect(await screen.findByText(`${role} · ${name}`)).toBeTruthy();
-  expect(metadataBlock().textContent).toContain(name);
+  // Manga shows its facts beside the cover and does not repeat the maker in a second section.
+  if(type==='manga')expect(screen.queryByRole('region',{name:'작품 정보 영역'})).toBeNull();
+  else expect(metadataBlock().textContent).toContain(name);
 });
 
 it('shows each volume release date beside its number when the publication has one',async()=>{

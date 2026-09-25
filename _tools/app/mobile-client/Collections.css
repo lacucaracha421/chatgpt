@@ -214,3 +214,27 @@
 .collection-owned-value input{width:4.2ch;min-height:56px;padding:0 6px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:inherit;font:inherit;font-size:28px;text-align:center}
 .collection-owned-value span{color:var(--color-muted);font-size:14px}
 .collection-owned-shortcuts{justify-content:center}
+/* Detail intro: the cover on the left, the info column on its right (identity, facts, Korean
+   genre chips, then 내 기록: my rating and owned volumes). Manga has no separate info section. */
+.collection-detail-intro:not(.has-backdrop){align-items:flex-start}
+.collection-detail-identity{flex:1}
+@media(min-width:700px){.collection-detail-cover{max-width:220px}}
+.collection-detail-facts{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:8px 0 0;font-size:13px}
+.collection-detail-facts div{display:contents}
+.collection-detail-facts dt{color:var(--color-muted)}
+.collection-detail-facts dd{margin:0;overflow-wrap:anywhere}
+.collection-genres{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:10px 0 0;padding:0}
+.collection-genres li{padding:2px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);font-size:12px;line-height:1.5}
+.collection-detail-identity .collection-personal{margin-top:14px}
+.collection-detail-identity .collection-personal-row{padding:8px 2px}
+/* Showcase and 신간 알림 as top-bar icon toggles: filled and brighter when on; a dot marks 전송 대기. */
+.collection-bar-actions{display:flex;align-items:center;gap:2px}
+.collection-bar-action{position:relative}
+.top-bar .collection-bar-action[aria-pressed=true]{color:var(--color-text)}
+.collection-bar-action.is-static{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;color:var(--color-muted)}
+.collection-bar-action.is-static svg{width:20px;height:20px}
+.collection-bar-action[aria-disabled=true] svg{opacity:.45}
+.collection-bar-action.is-pending svg{opacity:.58}
+.collection-bar-pending{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:50%;background:transparent;pointer-events:none}
+.collection-bar-action.is-pending .collection-bar-pending{background:var(--color-text)}
+.collection-toast{position:fixed;z-index:190;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));width:max-content;max-width:calc(100vw - 2*var(--mobile-gutter,16px));margin:0;padding:10px 14px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-sidebar);color:var(--color-text);box-shadow:var(--shadow-dialog);font-size:13px}
