@@ -141,6 +141,7 @@ fn s36_candidates_match_the_desktop_review_list_and_its_pages() {
                 offset,
                 limit: 3,
                 mode: None,
+                series_id: None,
             })
             .unwrap();
         assert_eq!(page.summary, all.summary);

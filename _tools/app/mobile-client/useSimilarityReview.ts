@@ -8,39 +8,43 @@ import {nextSimilarityDue, queuedSimilarity, readSimilarityIntents, SIMILARITY_R
 import {flushSimilarityReview, similarityPath, type SimilarityFeed} from './similarityReviewDelivery';
 
 /**
- * Sends due decisions on start, when the undo window of a new decision ends, on resume and
- * when the network returns.
+ * Sends due decisions of a durable outbox on start, when the undo window of a new decision
+ * ends, on resume and when the network returns. Shared by the review outboxes.
  */
-export function useSimilarityReviewBackgroundFlush(enabled: boolean) {
+export function useDueFlush(enabled: boolean, nextDue: () => number | null, flush: () => Promise<unknown>, event: string) {
   useEffect(() => {
     if (!enabled) return;
     let timer = 0;
     const send = () => {
       clearTimeout(timer);
       if (document.visibilityState === 'hidden') return;
-      const due = nextSimilarityDue();
+      const due = nextDue();
       if (due === null) return;
-      if (due <= Date.now()) void flushSimilarityReview().catch(() => {}).finally(schedule);
+      if (due <= Date.now()) void flush().catch(() => {}).finally(schedule);
       else schedule();
     };
     // Wake up when the earliest queued intent becomes due (a deferred one retries later).
     const schedule = () => {
       clearTimeout(timer);
-      const due = nextSimilarityDue();
+      const due = nextDue();
       const wait = due === null ? null : due > Date.now() ? due - Date.now() + 50 : 30_000;
       if (wait !== null) timer = window.setTimeout(send, wait);
     };
     send();
     const removeVisible=onVisible(send);
     window.addEventListener('online', send);
-    window.addEventListener(SIMILARITY_REVIEW_EVENT, send);
+    window.addEventListener(event, send);
     return () => {
       clearTimeout(timer);
       removeVisible();
       window.removeEventListener('online', send);
-      window.removeEventListener(SIMILARITY_REVIEW_EVENT, send);
+      window.removeEventListener(event, send);
     };
-  }, [enabled]);
+  }, [enabled, nextDue, flush, event]);
+}
+
+export function useSimilarityReviewBackgroundFlush(enabled: boolean) {
+  useDueFlush(enabled, nextSimilarityDue, flushSimilarityReview, SIMILARITY_REVIEW_EVENT);
 }
 
 /**

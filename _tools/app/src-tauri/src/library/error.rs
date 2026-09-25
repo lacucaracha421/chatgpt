@@ -173,6 +173,14 @@ pub enum LibraryError {
     SimilarityReviewInvalid,
     #[error("서버의 유사 이미지 검토 목록이 먼저 변경되었습니다. 다시 게시해 주세요.")]
     SimilarityReviewFeedConflict,
+    #[error("서버가 카탈로그 중복 판본 검토 기능을 제공하지 않습니다.")]
+    CatalogDuplicateUnsupported,
+    #[error("서버 카탈로그 중복 판본 동기화 요청이 거부됐습니다: HTTP {0}")]
+    CatalogDuplicateSyncRejected(u16),
+    #[error("서버 카탈로그 중복 판본 검토 항목이 올바르지 않습니다.")]
+    CatalogDuplicateInvalid,
+    #[error("서버 카탈로그 중복 판본 검토 이력의 위치가 이 PC와 어긋납니다.")]
+    CatalogDuplicateCursorRejected,
     #[error("서버 캐릭터 게시가 거부됐습니다: HTTP {0}")]
     CharacterPublicationRejected(u16),
     #[error("서버의 캐릭터 게시본이 먼저 변경되었습니다. 다시 게시해 주세요.")]

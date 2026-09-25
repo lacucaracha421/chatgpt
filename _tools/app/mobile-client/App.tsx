@@ -11,6 +11,7 @@ import {SimilarityReview} from './SimilarityReview';
 import {LibraryTrash} from './LibraryTrash';
 import {useLibraryTrash} from './useLibraryTrash';
 import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
+import {useDuplicateDecisionFlush} from './CatalogDuplicates';
 import type {ViewerCharacterContext} from './Viewer';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, ChevronRightIcon, PlayIcon, ArrowsUpDownIcon} from '@heroicons/react/24/outline';
@@ -86,6 +87,8 @@ export function App() {
   const reviewBack=useRef<(()=>boolean)|null>(null);
   // Similarity review decisions wait out their undo window, then go the same way.
   useSimilarityReviewBackgroundFlush(status.configured);
+  // Catalog duplicate-edition decisions, likewise after their undo window.
+  useDuplicateDecisionFlush(status.configured);
   const [similarity,setSimilarity]=useState(false);
   const [similarityClosed,setSimilarityClosed]=useState(0);
   const similarityBack=useRef<(()=>boolean)|null>(null);

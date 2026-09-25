@@ -24,7 +24,8 @@ export type ShadowBackfillStatus = { running: boolean; preparing: boolean; total
 export type ShadowReviewPage = { items: ShadowReviewItem[]; nextOffset: number | null; policyVersion: string | null; summary: ShadowReviewSummary };
 /** `doubtful`: existing automatic acceptances that S36 does not support. */
 export type ShadowReviewMode = "candidates" | "doubtful";
-export type ShadowReviewQuery = { offset: number; limit: number; mode?: ShadowReviewMode };
+/** `seriesId`: only that series' characters, items and counts alike; omitted = all series. */
+export type ShadowReviewQuery = { offset: number; limit: number; mode?: ShadowReviewMode; seriesId?: string };
 
 export interface ShadowReviewApi {
   page(query: ShadowReviewQuery): Promise<ShadowReviewPage>;

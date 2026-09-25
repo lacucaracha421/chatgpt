@@ -63,6 +63,10 @@ final class NetworkPolicy {
   // else. The feed PUT and the decision log GET are publisher-only and stay unreachable.
   get=get || p.equals("/v1/library/similarity/review");
   post=post || p.equals("/v1/library/similarity/review/decisions");
+  // Catalog duplicate-edition review: the candidate list read and the decision command, and
+  // nothing else. The candidate PUT and the decision log GET are publisher-only.
+  get=get || p.equals("/v1/mobile-catalog/duplicates");
+  post=post || p.equals("/v1/mobile-catalog/duplicates/decisions");
   // The catalog bookmark command: one desired-state write per work identity, and
   // nothing else. The id charset excludes `/`, `.`, `%` and `?`, so the segment
   // cannot traverse or re-encode into a different entity.

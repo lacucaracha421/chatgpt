@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Budget Notes Mockups</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository. No network. */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css, mobile-client/mobile.css and the 2026-09-25 mobile design pass. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b; --color-surface-hover:#2d2e2f;
+  --color-control:#232425; --color-control-hover:#2d2e2f; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-filter-selected:#383838; --color-filter-text:#e7e7e7; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar), 3px 3px 0 0 var(--color-selection-echo);
+  --color-section-mark:rgba(221,216,202,.6); --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --gutter:16px; --note:#f2c94c;
+  /* Notes palette keys (CLASSIFICATION_COLORS subset used by Notes v2). */
+  --red:#ef6b73; --orange:#f28c52; --amber:#dba84b; --green:#58b67a; --teal:#47b6a7; --blue:#5b8def; --indigo:#7c7ee8; --pink:#df6fa7;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+.num { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.muted { color:var(--color-muted); }
+.warn { color:var(--color-danger); }
+
+/* Document chrome (not app UI). */
+.doc { max-width:1760px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1000px; margin:8px 0 0; line-height:1.7; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; }
+.toolbar button { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; cursor:pointer; color:inherit; font:inherit; }
+.toolbar button[aria-pressed=true] { background:var(--color-filter-selected); border-color:var(--color-filter-border); color:var(--color-text); }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:21px; font-weight:600; }
+section.topic>p { color:var(--color-muted); max-width:1100px; line-height:1.7; margin-top:8px; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:13px; color:var(--color-muted); margin-bottom:8px; max-width:800px; }
+.scaled { zoom:.5; }
+body.full .scaled { zoom:1; }
+.ann { position:absolute; z-index:50; background:var(--note); color:#1b1b1b; font:600 13px/1.35 var(--font-ui); padding:5px 9px; border-radius:2px; max-width:280px; box-shadow:0 2px 8px #0008; }
+.ann::before { content:attr(data-n); display:inline-grid; place-items:center; width:18px; height:18px; margin-right:6px; background:#1b1b1b; color:var(--note); border-radius:50%; font-size:11px; }
+body.clean .ann { display:none; }
+/* Single-shot mode for PNG rendering: ?shot=<id> shows only that frame at 0,0. */
+body.shot .doc>*:not(.shot-host) { display:none; }
+body.shot .doc { padding:0; margin:0; max-width:none; }
+body.shot .scaled { zoom:1; }
+
+/* ===== Tablet frame: 800 x 1232 (1280 minus an assumed 48px Android navigation inset), as in mobile-design-20260925. ===== */
+.frame { position:relative; width:800px; height:1232px; overflow:hidden; background:var(--color-bg); display:flex; flex-direction:column; }
+.content { flex:1; min-height:0; overflow:hidden; position:relative; }
+.fade-end::after { content:''; position:absolute; left:0; right:0; bottom:0; height:40px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; }
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 16px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar.sub { padding-left:4px; }
+.bar h1 { font-size:20px; font-weight:600; letter-spacing:-.2px; white-space:nowrap; }
+.bar .space { flex:1; }
+.bar .state { font-size:12px; color:var(--color-muted); margin-right:4px; }
+.bar .brand svg.mark { width:22px; height:26px; fill:none; stroke:var(--color-accent); stroke-width:1.5; margin-right:12px; }
+.ib { width:44px; height:44px; display:inline-grid; place-items:center; color:var(--color-muted); border-radius:4px; flex-shrink:0; }
+.ib.on { color:var(--color-text); }
+.nav { height:60px; margin-bottom:8px; padding:4px 0; flex-shrink:0; display:flex; justify-content:center; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav span.t { flex:1 1 0; max-width:122px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:var(--color-muted); position:relative; font-size:11px; letter-spacing:.2px; }
+.nav span.t.active { color:var(--color-accent); }
+.nav span.t.active::after { content:''; position:absolute; top:-4px; left:calc(50% - 10px); width:20px; height:2px; background:currentColor; }
+.nav svg.i { width:23px; height:23px; }
+
+/* Controls (PC ui-button recipe carried to mobile by the design pass). */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:40px; padding:0 14px; font-size:15px; font-weight:500; border:1px solid transparent; border-radius:4px; white-space:nowrap; }
+.btn svg.i { width:18px; height:18px; }
+.btn.primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); }
+.btn.secondary { background:var(--color-control); border-color:var(--color-border); box-shadow:var(--inset-light); }
+.btn.quiet { color:var(--color-muted); }
+.fab { position:absolute; right:16px; bottom:16px; height:52px; padding:0 20px 0 16px; font-weight:600; box-shadow:0 6px 18px rgba(0,0,0,.45); z-index:6; }
+.fab svg.i { width:22px; height:22px; stroke-width:2; }
+.seg { display:flex; border:1px solid var(--color-border); border-radius:4px; overflow:hidden; box-shadow:var(--inset-light); }
+.seg span { flex:1; height:40px; display:grid; place-items:center; background:var(--color-control); color:var(--color-muted); font-size:14px; }
+.seg span+span { border-left:1px solid var(--color-border); }
+.seg span.sel { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.chip { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:4px; white-space:nowrap; font-size:14px; }
+.chip.on { background:var(--color-filter-selected); border-color:var(--color-filter-border); color:var(--color-filter-text); }
+.chip .num { color:var(--color-muted); font-size:14px; }
+.label { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--color-muted); letter-spacing:.3px; }
+.label::before { content:''; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label .rule { flex:1; height:1px; background:var(--section-label-rule); }
+.label .more { display:inline-flex; align-items:center; gap:2px; font-size:13px; color:var(--color-muted); }
+.label .more svg.i { width:14px; height:14px; }
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
+.badge { display:inline-flex; align-items:center; height:20px; padding:0 7px; border-radius:2px; font-size:12px; line-height:1; background:var(--color-surface-elevated); color:var(--color-text); white-space:nowrap; }
+.badge.soft { background:transparent; border:1px solid var(--color-border); color:var(--color-muted); }
+
+/* ----- Ledger: month header and hero ----- */
+.monthrow { display:flex; align-items:center; gap:4px; height:56px; padding:0 8px 0 4px; }
+.monthrow h2 { font-size:18px; font-weight:600; padding:0 4px; }
+.monthrow .space { flex:1; }
+.pad { padding:0 var(--gutter); }
+.hero { padding:20px var(--gutter) 0; }
+.hero .k { font-size:13px; color:var(--color-muted); }
+.hero .big { font:500 52px/1.1 var(--font-numeric); letter-spacing:.5px; margin-top:4px; display:flex; align-items:baseline; gap:6px; }
+.hero .big .won { font:500 30px var(--font-ui); color:var(--color-muted); }
+.hero .sub { margin-top:6px; font-size:14px; color:var(--color-muted); }
+.hero .sub .num { color:var(--color-text); font-size:16px; }
+.meter { display:flex; height:6px; margin-top:18px; background:var(--color-surface); border-radius:1px; overflow:hidden; }
+.meter i { display:block; height:100%; }
+.meter .spent { background:var(--color-accent); }
+.meter .coming { background:repeating-linear-gradient(135deg,rgba(221,216,202,.55) 0 3px,rgba(221,216,202,.2) 3px 6px); }
+.figs { display:grid; grid-template-columns:repeat(4,1fr); margin-top:14px; border-top:1px solid var(--color-border); border-bottom:1px solid var(--color-border); }
+.figs>div { padding:12px 0 12px 14px; }
+.figs>div:first-child { padding-left:0; }
+.figs>div+div { border-left:1px solid var(--color-border); }
+.figs small { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--color-muted); }
+.figs small i { width:8px; height:8px; flex:none; }
+.figs b { display:block; font:500 21px/1.3 var(--font-numeric); margin-top:2px; }
+.sec { margin-top:26px; }
+.sec .label { margin-bottom:6px; }
+.rowline { display:flex; align-items:center; gap:14px; min-height:54px; border-bottom:1px solid var(--color-border); }
+.rowline:last-child { border-bottom:0; }
+.date { width:52px; flex:none; line-height:1.15; }
+.date b { display:block; font:500 18px var(--font-numeric); }
+.date small { font-size:12px; color:var(--color-muted); }
+.rowline .name { flex:1; min-width:0; }
+.rowline .name strong { display:block; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rowline .name small { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--color-muted); margin-top:1px; }
+.amt { text-align:right; flex:none; }
+.amt b { display:block; font:500 18px var(--font-numeric); }
+.amt small { display:block; font-size:12px; color:var(--color-muted); }
+.cat { display:grid; grid-template-columns:120px 1fr 190px; gap:14px; align-items:center; min-height:48px; }
+.cat .n { display:flex; align-items:center; gap:8px; font-size:15px; }
+.cat .track { position:relative; height:4px; background:var(--color-surface); border-radius:1px; }
+.cat .track i { position:absolute; left:0; top:0; bottom:0; border-radius:1px; }
+.cat .track em { position:absolute; top:0; bottom:0; background:repeating-linear-gradient(135deg,rgba(221,216,202,.55) 0 3px,rgba(221,216,202,.18) 3px 6px); }
+.cat .v { text-align:right; font-size:13px; color:var(--color-muted); }
+.cat .v .num { font-size:16px; color:var(--color-text); }
+.plan { display:flex; align-items:center; gap:12px; min-height:52px; border-bottom:1px solid var(--color-border); }
+.plan:last-child { border-bottom:0; }
+.plan .box { width:22px; height:22px; border:1.5px solid var(--color-border-strong); border-radius:3px; flex:none; margin:0 4px; }
+.plan .name { flex:1; }
+.plan .name small { display:block; font-size:12px; color:var(--color-muted); }
+
+/* ----- Subscriptions ----- */
+.subsum { padding:18px var(--gutter) 0; display:flex; align-items:flex-end; gap:18px; }
+.subsum .big { font:500 40px/1.1 var(--font-numeric); }
+.subsum .big .won { font:500 24px var(--font-ui); color:var(--color-muted); margin-right:4px; }
+.subsum .rest { font-size:13px; color:var(--color-muted); line-height:1.6; padding-bottom:4px; }
+.subsum .rest .num { color:var(--color-text); font-size:15px; }
+.mono { width:40px; height:40px; flex:none; display:grid; place-items:center; border-radius:4px; font-size:16px; font-weight:600; color:var(--color-text); }
+.subrow { display:flex; align-items:center; gap:14px; min-height:72px; border-bottom:1px solid var(--color-border); }
+.subrow .name { flex:1; min-width:0; }
+.subrow .name strong { font-weight:500; display:flex; align-items:center; gap:8px; }
+.subrow .name small { display:block; font-size:13px; color:var(--color-muted); margin-top:2px; }
+.subrow .when { width:130px; flex:none; text-align:right; }
+.subrow .when b { display:block; font-weight:500; font-size:14px; }
+.subrow .when small { font-size:12px; color:var(--color-muted); }
+.subrow .amt { width:118px; }
+.subrow.ended { opacity:.55; }
+
+/* ----- Add entry sheet ----- */
+.scrim { position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:7; }
+.sheet { position:absolute; left:0; right:0; bottom:0; z-index:8; background:var(--color-surface); border-top:1px solid var(--color-border-strong); border-radius:10px 10px 0 0; box-shadow:0 -10px 30px rgba(0,0,0,.5); padding:8px var(--gutter) 16px; }
+.sheet .grab { width:40px; height:4px; border-radius:2px; background:var(--color-border-strong); margin:0 auto 6px; }
+.sheet header { display:flex; align-items:center; gap:10px; height:48px; }
+.sheet header h2 { font-size:18px; font-weight:600; }
+.sheet header .space { flex:1; }
+.amountbox { display:flex; align-items:baseline; justify-content:flex-end; gap:8px; padding:6px 4px 10px; border-bottom:1px solid var(--color-border-strong); }
+.amountbox .kind { margin-right:auto; align-self:center; }
+.amountbox .won { font:500 30px var(--font-ui); color:var(--color-muted); }
+.amountbox .v { font:500 56px/1.05 var(--font-numeric); }
+.amountbox .caret { width:2px; height:46px; background:var(--color-accent); align-self:center; }
+.fieldrow { display:flex; align-items:center; gap:8px; margin-top:14px; }
+.fieldrow .k { width:44px; font-size:13px; color:var(--color-muted); flex:none; }
+.catgrid { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-top:14px; }
+.catgrid .chip { height:48px; justify-content:flex-start; padding:0 12px; font-size:15px; }
+.memo { flex:1; height:44px; display:flex; align-items:center; padding:0 12px; background:var(--color-bg); border:1px solid var(--color-border); border-radius:4px; color:var(--color-muted); }
+.keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:16px; }
+.keypad span { height:62px; display:grid; place-items:center; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:4px; font:500 26px var(--font-numeric); }
+.keypad span.fn { font:500 17px var(--font-ui); color:var(--color-muted); }
+.keypad svg.i { width:26px; height:26px; }
+.sheet .actions { display:flex; gap:10px; margin-top:14px; }
+.sheet .actions .btn { flex:1; height:52px; font-size:16px; }
+
+/* ----- Notes list card for the ledger ----- */
+.note-card { background:var(--color-surface); border-radius:6px; padding:14px 16px; }
+.note-card strong { display:flex; align-items:center; gap:8px; font-weight:600; }
+.note-card strong svg.i { width:16px; height:16px; color:var(--color-muted); }
+
+/* ===== PC frame: 1440 x 900 ===== */
+.pc { position:relative; width:1440px; height:900px; overflow:hidden; background:var(--color-bg); display:grid; grid-template-columns:56px 272px 1fr; font-size:15px; }
+.pc .rail { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; align-items:center; gap:6px; padding:12px 0; }
+.pc .rail .brand svg.mark { width:22px; height:26px; fill:none; stroke:var(--color-accent); stroke-width:1.5; margin:4px 0 14px; }
+.pc .rail .ib { width:40px; height:40px; }
+.pc .rail .ib.cur { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.pc .index { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; min-height:0; }
+.pc .index .scopes { padding:12px 12px 14px; border-bottom:1px solid var(--color-border); display:flex; flex-direction:column; gap:2px; }
+.pc .index .scopes span { display:flex; justify-content:space-between; height:32px; align-items:center; padding:0 10px; border-radius:3px; color:var(--color-text); font-size:14px; }
+.pc .index .scopes span .num { color:var(--color-muted); }
+.pc .index .scopes span.ctx { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.pc .index .list { padding:8px; }
+.pc .index .item { padding:13px 12px; border-bottom:1px solid var(--color-border); display:flex; flex-direction:column; gap:5px; }
+.pc .index .item strong { font-size:15px; font-weight:600; display:flex; align-items:center; gap:7px; }
+.pc .index .item strong svg.i { width:14px; height:14px; }
+.pc .index .item small { font-size:12px; opacity:.7; }
+.pc .index .item.sel { position:relative; background:var(--color-accent); color:var(--color-on-accent); box-shadow:var(--selection-echo); border-bottom-color:transparent; }
+.pc .main { display:flex; flex-direction:column; min-width:0; min-height:0; }
+.pc .loc { height:40px; display:flex; align-items:center; gap:8px; padding:0 20px; border-bottom:1px solid var(--color-border); font-size:13px; color:var(--color-muted); }
+.pc .loc b { color:var(--color-text); font-weight:500; }
+.pc .loc .space { flex:1; }
+.pc .ledger { flex:1; min-height:0; display:grid; grid-template-columns:440px 1fr; gap:0; }
+.pc .ledger>.left { padding:0 28px 0 32px; border-right:1px solid var(--color-border); overflow:hidden; }
+.pc .ledger>.right { padding:0 32px 0 28px; overflow:hidden; position:relative; }
+.pc .monthrow { padding:0; height:60px; }
+.pc .hero { padding:4px 0 0; }
+.pc .hero .big { font-size:46px; }
+.pc .figs { grid-template-columns:repeat(2,1fr); }
+.pc .figs>div:nth-child(3) { border-left:0; padding-left:0; }
+.pc .figs>div:nth-child(n+3) { border-top:1px solid var(--color-border); }
+.pc .cat { grid-template-columns:96px 1fr 150px; min-height:40px; }
+.pc .tabs { display:flex; align-items:center; gap:10px; height:60px; }
+.pc .tabs .seg { width:420px; }
+.pc .tabs .space { flex:1; }
+.addrow { display:grid; grid-template-columns:96px 140px 150px 1fr 88px; gap:8px; align-items:center; padding:10px 0 14px; border-bottom:1px solid var(--color-border-strong); }
+.addrow .in { height:36px; display:flex; align-items:center; gap:6px; padding:0 10px; background:var(--color-bg); border:1px solid var(--color-border); border-radius:4px; font-size:14px; color:var(--color-muted); }
+.addrow .in.focus { border-color:var(--color-border-strong); color:var(--color-text); }
+.addrow .in .caret { width:1px; height:16px; background:var(--color-text); }
+.addrow .in svg.i { width:14px; height:14px; margin-left:auto; }
+.addrow .btn { height:36px; font-size:14px; }
+.kbd { font:500 11px var(--font-ui); border:1px solid var(--color-border-strong); border-bottom-width:2px; border-radius:3px; padding:0 4px; color:var(--color-muted); }
+.day { display:flex; align-items:baseline; gap:10px; padding:16px 0 4px; font-size:13px; color:var(--color-muted); border-bottom:1px solid var(--color-border); }
+.day b { font:500 15px var(--font-numeric); color:var(--color-text); }
+.day .space { flex:1; }
+.ent { display:grid; grid-template-columns:28px 1fr 130px 110px; gap:10px; align-items:center; height:42px; border-bottom:1px solid var(--color-border); font-size:14px; }
+.ent .cat-n { display:flex; align-items:center; gap:6px; color:var(--color-muted); font-size:13px; }
+.ent .a { text-align:right; font:500 16px var(--font-numeric); }
+.ent .rec { color:var(--color-muted); }
+.ent .rec svg.i { width:16px; height:16px; }
+.ent.auto { color:var(--color-muted); }
+.ent.auto .a { color:var(--color-muted); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>메모 속 가계부 — 목업 (2026-09-25)</h1>
+    <p class="lead">태블릿 800 × 1232 CSS px(1280에서 안드로이드 탐색 영역 48 px 가정)과 PC 1440 × 900. 모든 이름·금액은 가상의 예시이고, 노란 번호 메모는 설명이지 UI가 아닙니다. 설계 문서: <code>docs/research/budget-notes-design-20260925.md</code>.</p>
+    <div class="toolbar"><button id="zoom" aria-pressed="false">실제 크기 (1:1)</button><button id="annot" aria-pressed="true">주석 표시</button></div>
+  </header>
+
+  <section class="topic shot-host" data-host="overview"><h2>1. 이번 달 (태블릿)</h2>
+    <p>가계부 메모를 열면 보이는 첫 화면. 큰 숫자 하나(이번 달 쓸 수 있는 돈 = 수입 − 쓴 돈 − 예정)와 얇은 막대 하나, 네 개의 숫자, 그리고 다가오는 결제·이번 달 계획·최근 기록만 둡니다. 분류와 분류별 예산은 없습니다. 카드 벽이나 차트는 없습니다.</p>
+    <div class="row"><figure><div class="scaled" id="overview"></div></figure></div></section>
+
+  <section class="topic shot-host" data-host="subs"><h2>2. 고정·구독 (태블릿)</h2>
+    <p>매월·매년·N개월마다 같은 서로 다른 주기를 한 목록에서 다음 결제일 순으로 봅니다. 월 환산 합계와 1년 합계가 맨 위, 월 단위가 아닌 항목은 금액 아래에 월 환산액을 작게 적습니다. 원화만 씁니다.</p>
+    <div class="row"><figure><div class="scaled" id="subs"></div></figure></div></section>
+
+  <section class="topic shot-host" data-host="entry"><h2>3. 지출 기록 (태블릿)</h2>
+    <p>키보드를 띄우지 않는 자체 숫자 패드로 금액을 넣고 저장합니다. 이름은 선택(최근 이름 한 번 누르기), 날짜는 기본이 오늘. 기록은 날짜 · 이름 · 금액뿐입니다.</p>
+    <div class="row"><figure><div class="scaled" id="entry"></div></figure></div></section>
+
+  <section class="topic shot-host" data-host="card"><h2>4. 메모 목록 속 가계부 카드 (태블릿, 띠)</h2>
+    <p>가계부는 메모 목록의 한 장입니다. 월별 기록은 목록에 따로 나오지 않습니다.</p>
+    <div class="row"><figure><div class="scaled" id="card"></div></figure></div></section>
+
+  <section class="topic shot-host" data-host="pc"><h2>5. PC 가계부</h2>
+    <p>기존 메모 화면의 왼쪽 인덱스와 목록은 그대로 두고, 가계부 메모를 고르면 본문이 두 칸이 됩니다. 왼쪽은 이번 달 요약, 오른쪽은 기록 표와 키보드만으로 쓰는 입력 줄(날짜 · 금액 · 이름)입니다.</p>
+    <div class="row"><figure><div class="scaled" id="pc"></div></figure></div></section>
+</div>
+<script>
+const IC={"MagnifyingGlass":["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],"ArrowPath":["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],"AdjustmentsHorizontal":["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],"ArrowLeft":["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],"EllipsisHorizontal":["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],"ChevronDown":["m19.5 8.25-7.5 7.5-7.5-7.5"],"ChevronRight":["m8.25 4.5 7.5 7.5-7.5 7.5"],"ChevronLeft":["M15.75 19.5 8.25 12l7.5-7.5"],"Home":["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],"Photo":["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"RectangleStack":["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],"BookOpen":["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],"PencilSquare":["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],"XMark":["M6 18 18 6M6 6l12 12"],"Plus":["M12 4.5v15m7.5-7.5h-15"],"CalendarDays":["M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z"],"Wallet":["M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3"],"Backspace":["M12 9.75 14.25 12m0 0 2.25 2.25M14.25 12l2.25-2.25M14.25 12 12 14.25m-2.58 4.92-6.374-6.375a1.125 1.125 0 0 1 0-1.59L9.42 4.83c.21-.211.497-.33.795-.33H19.5a2.25 2.25 0 0 1 2.25 2.25v10.5a2.25 2.25 0 0 1-2.25 2.25h-9.284c-.298 0-.585-.119-.795-.33Z"],"ArrowPathRoundedSquare":["M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 0 0-3.7-3.7 48.678 48.678 0 0 0-7.324 0 4.006 4.006 0 0 0-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 0 0 3.7 3.7 48.656 48.656 0 0 0 7.324 0 4.006 4.006 0 0 0 3.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3-3 3"],"ShoppingBag":["M15.75 10.5V6a3.75 3.75 0 1 0-7.5 0v4.5m11.356-1.993 1.263 12c.07.665-.45 1.243-1.119 1.243H4.25a1.125 1.125 0 0 1-1.12-1.243l1.264-12A1.125 1.125 0 0 1 5.513 7.5h12.974c.576 0 1.059.435 1.119 1.007ZM8.625 10.5a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm7.5 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"Check":["m4.5 12.75 6 6 9-13.5"],"ListBullet":["M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"DocumentText":["M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"],"LockClosed":["M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"],"CreditCard":["M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"],"Sparkles":["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"],"Clock":["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],"Trash":["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],"ArchiveBox":["m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"],"Tag":["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],"Cog6Tooth":["M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z","M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],"Squares2X2":["M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"]};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n].map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const ib=(n,extra='')=>`<span class="ib ${extra}">${I(n)}</span>`;
+const ann=(n,text,style)=>`<div class="ann" data-n="${n}" style="${style}">${text}</div>`;
+const TABS=[['Home','Home'],['Photo','Library'],['RectangleStack','Collections'],['BookOpen','Catalog'],['PencilSquare','Notes']];
+const nav=()=>`<nav class="nav">${TABS.map(([icon,label])=>`<span class="t ${label==='Notes'?'active':''}">${I(icon)}<span>${label}</span></span>`).join('')}</nav>`;
+const won=n=>n.toLocaleString('ko-KR');
+const ledgerBar=`<header class="bar sub">${ib('ArrowLeft','on')}<h1>가계부</h1><span class="space"></span><span class="state">동기화됨</span>${ib('MagnifyingGlass')}${ib('EllipsisHorizontal')}</header>`;
+const monthRow=(sel)=>`<div class="monthrow">${ib('ChevronLeft','on')}<h2>2026년 9월</h2>${ib('ChevronRight','on')}<span class="space"></span><span class="btn quiet">${I('Wallet')}수입 2,300,000</span></div>
+  <div class="pad"><div class="seg">${['이번 달','기록','고정·구독','계획'].map(t=>`<span class="${t===sel?'sel':''}">${t}</span>`).join('')}</div></div>`;
+const inIcon=`<span style="display:inline-grid;place-items:center;width:18px;height:18px;border:1px solid var(--color-border-strong);border-radius:3px;font:600 12px var(--font-ui);color:var(--color-muted)">+</span>`;
+
+/* Numbers (all derived from the stored items; see the design doc section 4):
+   income 2,300,000; entries net 612,400; recurring already charged this month 1,000,100 (incl. rent 800,000) -> spent 1,612,500;
+   recurring still to come 35,890 + planned this month 89,000 -> 124,890; free 562,610; 6 days left incl. today. */
+function overviewHTML(){
+  return `<div class="frame">${ledgerBar}<div class="content fade-end">
+  ${monthRow('이번 달')}
+  <div class="hero"><p class="k">이번 달 쓸 수 있는 돈</p>
+    <p class="big"><span class="won">₩</span>562,610</p>
+    <p class="sub">하루 약 <span class="num">₩93,700</span> · 남은 날 <span class="num">6</span>일 · 결제 예정과 계획은 미리 뺐어요</p>
+    <div class="meter"><i class="spent" style="width:70.1%"></i><i class="coming" style="width:5.4%"></i></div>
+    <div class="figs">
+      <div><small><i style="background:var(--color-surface);outline:1px solid var(--color-border-strong)"></i>수입</small><b>2,300,000</b></div>
+      <div><small><i style="background:var(--color-accent)"></i>쓴 돈</small><b>1,612,500</b></div>
+      <div><small><i style="background:repeating-linear-gradient(135deg,rgba(221,216,202,.55) 0 3px,rgba(221,216,202,.2) 3px 6px)"></i>예정</small><b>124,890</b></div>
+      <div><small>고정·구독 이번 달</small><b>1,035,990</b></div>
+    </div>
+  </div>
+  <div class="pad">
+    <div class="sec"><div class="label">다가오는 결제<span class="rule"></span><span class="more">고정·구독 ${I('ChevronRight')}</span></div>
+      ${[['27','일','쿠팡 와우','매월 27일',7890],['29','화','ChatGPT Plus','매월 29일',28000],['3','토','넷플릭스','10월 · 매월 3일',17000]].map(([d,w,n,s,a])=>`<div class="rowline"><div class="date"><b>${d}</b><small>${w}</small></div><div class="name"><strong>${n}</strong><small>${s}</small></div><div class="amt"><b>₩${won(a)}</b></div></div>`).join('')}
+    </div>
+    <div class="sec"><div class="label">이번 달 계획<span class="rule"></span><span class="more">계획 전체 ${I('ChevronRight')}</span></div>
+      <div class="plan"><span class="box"></span><div class="name">러닝화<small>9월 안에</small></div><div class="amt"><b>₩89,000</b></div><span class="btn secondary" style="margin-left:10px">샀어요</span></div>
+      <div class="plan"><span class="box" style="background:var(--color-accent);border-color:var(--color-accent);display:grid;place-items:center;color:var(--color-on-accent)">${I('Check').replace('class="i "','class="i" style="width:16px;height:16px;stroke-width:2.4"')}</span><div class="name">접이식 우산<small>9월 19일 기록과 연결</small></div><div class="amt"><b class="muted" style="text-decoration:line-through">₩25,000</b><small>실제 ₩22,000</small></div><span style="width:78px"></span></div>
+    </div>
+    <div class="sec"><div class="label">최근 기록<span class="rule"></span><span class="more">기록 전체 ${I('ChevronRight')}</span></div>
+      ${[['25','금','점심 김치찌개','',9500,0],['25','금','편의점','',3200,0],['24','목','택배 반품 환불','들어온 돈',18000,1],['24','목','저녁 장보기','',31800,0]].map(([d,w,n,s,a,inn])=>`<div class="rowline"><div class="date"><b>${d}</b><small>${w}</small></div><div class="name"><strong>${n}</strong>${s?`<small>${inIcon}${s}</small>`:''}</div><div class="amt"><b ${inn?'style="color:var(--color-muted)"':''}>${inn?'+':''}₩${won(a)}</b></div></div>`).join('')}
+    </div>
+  </div>
+  <span class="btn primary fab">${I('Plus')}기록</span>
+  </div>${nav()}
+  ${ann(1,'큰 숫자 = 이번 달 수입 − 쓴 돈 − 남은 결제 예정 − 이번 달 계획. 저장하지 않고 매번 계산합니다.','top:166px;left:470px;max-width:310px')}
+  ${ann(2,'막대: 실선 = 쓴 돈, 빗금 = 예정, 빈 곳 = 쓸 수 있는 돈','top:226px;left:470px;max-width:310px')}
+  ${ann(3,'"샀어요" → 금액이 채워진 기록 시트. 저장하면 계획이 그 기록에 연결되어 완료로 보입니다.','top:758px;left:210px;max-width:400px')}
+  ${ann(4,'분류·분류별 예산 없음. 기록은 날짜 · 이름 · 금액뿐. 환불·추가 수입은 "들어온 돈".','top:1064px;left:190px;max-width:420px')}
+  </div>`;
+}
+
+function subsHTML(){
+  const rows=[
+    ['쿠','쿠팡 와우','매월 27일','9월 27일','2일 후',7890,'',''],
+    ['G','ChatGPT Plus','매월 29일','9월 29일','4일 후',28000,'',''],
+    ['디','디즈니+','매월 1일','10월 1일','6일 후',9900,'',`<span class="badge soft">체험 중 · 첫 결제 10월 1일</span>`],
+    ['넷','넷플릭스','매월 3일','10월 3일','8일 후',17000,'',''],
+    ['보','실손 보험','매월 10일','10월 10일','15일 후',72000,'',''],
+    ['밀','밀리의 서재','3개월마다 · 12일','10월 12일','17일 후',29700,'월 9,900',''],
+    ['인','인터넷','매월 15일','10월 15일','20일 후',33000,'',''],
+    ['유','유튜브 프리미엄','매월 18일','10월 18일','23일 후',14900,'',''],
+    ['폰','휴대폰 요금','매월 21일','10월 21일','26일 후',58300,'',''],
+    ['월','월세','매월 25일','10월 25일','30일 후',800000,'',''],
+    ['닌','닌텐도 온라인','매년 11월 2일','11월 2일','38일 후',19900,'월 1,658',`<span class="badge soft">해지함 · 11월 2일 만료</span>`],
+    ['G','Google One','매년 3월 14일','2027년 3월 14일','170일 후',24000,'월 2,000',''],
+  ];
+  return `<div class="frame">${ledgerBar}<div class="content fade-end">
+  ${monthRow('고정·구독')}
+  <div class="subsum"><div><p class="muted" style="font-size:13px">월 환산 합계</p><p class="big"><span class="won">₩</span>1,049,548</p></div>
+    <div class="rest">1년 <span class="num">₩12,594,576</span> · 이번 달 청구 <span class="num">₩1,035,990</span><br>진행 중 <span class="num">13</span>개 · 10월부터 디즈니+ <span class="num">+9,900</span></div></div>
+  <div class="pad" style="margin-top:12px;display:flex;align-items:center"><span class="muted" style="font-size:13px">매주 · 매월 · 매년 · N개월마다</span><span style="flex:1"></span><span class="btn quiet">다음 결제순 ${I('ChevronDown')}</span></div>
+  <div class="pad" style="margin-top:2px">
+    ${rows.map(([m,n,cy,d,rel,a,eq,b])=>`<div class="subrow"><span class="mono" style="background:var(--color-surface-elevated);color:var(--color-muted)">${m}</span><div class="name"><strong>${n}${b}</strong><small>${cy}</small></div><div class="when"><b>${d}</b><small>${rel}</small></div><div class="amt"><b>₩${won(a)}</b>${eq?`<small>${eq}</small>`:''}</div></div>`).join('')}
+    <div class="label" style="margin-top:18px">종료됨 <span class="num">2</span><span class="rule"></span>${I('ChevronDown')}</div>
+  </div>
+  <span class="btn primary fab">${I('Plus')}고정·구독 추가</span>
+  </div>${nav()}
+  ${ann(1,'월 환산: 매월 그대로, 매년 ÷12, N개월 ÷N, 매주 ×52÷12. 체험 중·해지한 항목은 상태에 맞게 넣고 뺍니다.','top:172px;left:470px;max-width:310px')}
+  ${ann(2,'구독과 월세·보험 같은 고정비가 한 목록. 종류·분류 구분 없음, 원화만.','top:380px;left:215px;max-width:370px')}
+  ${ann(3,'1년·3개월 주기는 금액 아래에 월 환산액을 작게.','top:668px;left:215px;max-width:370px')}
+  ${ann(4,'해지해도 만료일까지는 목록에 남고, 지나면 "종료됨"으로 내려갑니다.','top:1022px;left:300px;max-width:285px')}
+  </div>`;
+}
+
+function entryHTML(){
+  return `<div class="frame">${ledgerBar}<div class="content">
+  ${monthRow('이번 달')}
+  <div class="hero"><p class="k">이번 달 쓸 수 있는 돈</p><p class="big"><span class="won">₩</span>562,610</p></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <header><h2>기록</h2><span class="space"></span>${ib('XMark','on')}</header>
+    <div class="amountbox"><span class="kind seg" style="width:210px"><span class="sel">나간 돈</span><span>들어온 돈</span></span><span class="won">₩</span><span class="v">9,500</span><span class="caret"></span></div>
+    <div class="fieldrow" style="margin-top:16px"><span class="k">이름</span><span class="memo">점심 (선택)</span></div>
+    <div class="fieldrow"><span class="k"></span><span class="chip">점심</span><span class="chip">편의점</span><span class="chip">커피</span><span class="chip">택시</span><span class="chip">장보기</span><span class="muted" style="font-size:12px;margin-left:4px">최근</span></div>
+    <div class="fieldrow"><span class="k">날짜</span><span class="chip on">오늘 <span class="num">9.25</span></span><span class="chip">어제</span><span class="chip">${I('CalendarDays')}다른 날</span></div>
+    <div class="keypad">${['1','2','3','4','5','6','7','8','9'].map(k=>`<span>${k}</span>`).join('')}<span class="fn">000</span><span>0</span><span class="fn">${I('Backspace')}</span></div>
+    <div class="actions"><span class="btn secondary">저장하고 하나 더</span><span class="btn primary">저장</span></div>
+  </div>
+  </div>${nav()}
+  ${ann(1,'금액은 자체 숫자 패드로. 안드로이드 키보드가 올라오지 않아 화면이 흔들리지 않습니다. 이름 칸을 누를 때만 키보드.','top:250px;left:440px;max-width:330px')}
+  ${ann(2,'이름은 선택. 최근 이름을 한 번 눌러 채웁니다. 분류 고르기 없음.','top:346px;left:24px;max-width:380px')}
+  ${ann(3,'나간 돈 / 들어온 돈(환불·추가 수입). 들어온 돈은 이번 달 수입에 더해집니다.','top:280px;left:24px;max-width:380px')}
+  </div>`;
+}
+
+function cardHTML(){
+  return `<div style="position:relative;width:800px;background:var(--color-bg);padding:16px">
+    <div class="label" style="margin-bottom:10px">고정됨<span class="rule"></span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="note-card"><strong>${I('Wallet')}가계부</strong>
+        <p class="muted" style="font-size:13px;margin-top:6px">9월 쓸 수 있는 돈 <span class="num" style="color:var(--color-text);font-size:15px">₩562,610</span></p>
+        <div class="meter" style="margin-top:10px;height:4px;background:var(--color-bg)"><i class="spent" style="width:70.1%"></i><i class="coming" style="width:5.4%"></i></div>
+        <p class="muted" style="font-size:12px;margin-top:8px">다음 결제 9월 27일 쿠팡 와우 · 방금</p></div>
+      <div class="note-card"><strong>다음에 볼 작품</strong><p class="muted" style="font-size:13px;margin-top:4px">마음에 남은 장면과 감상을 적어 두세요.</p><p class="muted" style="font-size:12px;margin-top:22px">2026. 9. 13.</p></div>
+    </div>
+    ${ann(1,'"새 메모" 시트에 네 번째 항목 "가계부". 첫 가계부를 만들면 이 카드가 자동으로 고정됩니다.','top:2px;left:430px;max-width:350px')}
+  </div>`;
+}
+
+function pcHTML(){
+  const day=(d,w,total,rows)=>`<div class="day"><b>${d}</b>${w}<span class="space"></span><span class="num" style="font-size:14px">₩${won(total)}</span></div>`+rows.map(([m,a,kind])=>`<div class="ent ${kind==='auto'?'auto':''}"><span class="rec">${kind==='auto'?I('ArrowPathRoundedSquare'):kind==='in'?inIcon:''}</span><span>${m}</span><span class="cat-n">${kind==='auto'?'고정·구독 자동':kind==='in'?'들어온 돈':''}</span><span class="a" ${kind==='in'?'style="color:var(--color-muted)"':''}>${kind==='in'?'+':''}₩${won(a)}</span></div>`).join('');
+  return `<div class="pc">
+  <aside class="rail"><span class="brand">${MARK}</span>${ib('Photo')}${ib('RectangleStack')}${ib('BookOpen')}${ib('PencilSquare','cur')}<span style="flex:1"></span>${ib('Cog6Tooth')}</aside>
+  <aside class="index">
+    <div class="scopes"><span class="ctx">모든 메모 <span class="num">18</span></span><span>고정</span><span>보관함</span><span>휴지통</span></div>
+    <div class="list">
+      <div class="item sel"><strong>${I('Wallet')}가계부</strong><small>9월 쓸 수 있는 돈 ₩562,610</small><small class="num">2026. 9. 25. 오후 1:12</small></div>
+      <div class="item"><strong>다음에 볼 작품</strong><small>마음에 남은 장면과 감상을 적어 두세요.</small><small class="num">2026. 9. 13.</small></div>
+      <div class="item"><strong>장보기</strong><small>우유 · 빵 · 달걀 1/3</small><small class="num">2026. 9. 12.</small></div>
+      <div class="item"><strong>${I('LockClosed')}서버 계정</strong><small class="num">2026. 9. 2.</small></div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="loc">메모 <span>›</span> <b>가계부</b><span class="space"></span>동기화됨 ${ib('EllipsisHorizontal')}</div>
+    <div class="ledger">
+      <div class="left">
+        <div class="monthrow">${ib('ChevronLeft','on')}<h2>2026년 9월</h2>${ib('ChevronRight','on')}<span class="space"></span><span class="btn quiet" style="height:34px;font-size:14px">${I('Wallet')}수입 2,300,000</span></div>
+        <div class="hero"><p class="k">이번 달 쓸 수 있는 돈</p><p class="big"><span class="won">₩</span>562,610</p>
+          <p class="sub">하루 약 <span class="num">₩93,700</span> · 남은 날 <span class="num">6</span>일</p>
+          <div class="meter"><i class="spent" style="width:70.1%"></i><i class="coming" style="width:5.4%"></i></div>
+          <div class="figs"><div><small>수입</small><b>2,300,000</b></div><div><small>쓴 돈</small><b>1,612,500</b></div><div><small>예정</small><b>124,890</b></div><div><small>고정·구독 이번 달</small><b>1,035,990</b></div></div></div>
+        <div class="sec"><div class="label">다가오는 결제<span class="rule"></span></div>
+          ${[['9.27','쿠팡 와우',7890],['9.29','ChatGPT Plus',28000],['10.1','디즈니+ (체험 끝)',9900]].map(([d,n,a])=>`<div class="rowline" style="min-height:42px"><div class="date"><b style="font-size:16px">${d}</b></div><div class="name"><strong>${n}</strong></div><div class="amt"><b style="font-size:16px">₩${won(a)}</b></div></div>`).join('')}
+        </div>
+        <div class="sec"><div class="label">이번 달 계획<span class="rule"></span></div>
+          <div class="plan" style="min-height:44px"><span class="box"></span><div class="name">러닝화</div><div class="amt"><b style="font-size:16px">₩89,000</b></div><span class="btn secondary" style="margin-left:10px;height:32px;font-size:14px">샀어요</span></div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="tabs"><div class="seg">${['이번 달','기록','고정·구독','계획'].map(t=>`<span class="${t==='기록'?'sel':''}">${t}</span>`).join('')}</div><span class="space"></span><span class="muted" style="font-size:13px">9월 기록 <span class="num" style="color:var(--color-text)">41</span>건</span></div>
+        <div class="addrow"><span class="in">09-25 ${I('CalendarDays')}</span><span class="in focus">₩ 12,000<span class="caret"></span></span><span class="in" style="grid-column:span 2">이름 (선택)</span><span class="btn primary">추가</span></div>
+        <p class="muted" style="font-size:12px;margin:8px 0 0"><span class="kbd">Ctrl</span>+<span class="kbd">N</span> 새 기록 · <span class="kbd">Tab</span> 다음 칸 · 금액 앞에 <span class="kbd">+</span> 들어온 돈 · <span class="kbd">Enter</span> 추가 · <span class="kbd">Alt</span>+<span class="kbd">←</span><span class="kbd">→</span> 달 이동</p>
+        ${day('9.25','금요일',812700,[['점심 김치찌개',9500],['편의점',3200],['월세',800000,'auto']])}
+        ${day('9.24','목요일',20250,[['지하철',1550],['저녁 장보기',31800],['커피',4900],['택배 반품 환불',18000,'in']])}
+        ${day('9.23','수요일',61200,[['양말 · 수건',24300],['전시 입장권',18000],['점심',8900],['택시',10000]])}
+        ${day('9.21','월요일',58300,[['휴대폰 요금',58300,'auto']])}
+        ${day('9.20','일요일',27400,[['브런치',27400]])}
+      </div>
+    </div>
+  </main>
+  ${ann(1,'가계부는 목록의 한 메모. 선택은 기존 slab + echo 그대로.','top:560px;left:76px;max-width:240px')}
+  ${ann(2,'입력 줄: 날짜 · 금액 · 이름만. Tab·Enter로 연속 입력, 기본 날짜 오늘.','top:252px;left:1000px;max-width:228px')}
+  ${ann(3,'고정·구독 결제는 기록으로 저장하지 않고 날짜가 되면 자동으로 보입니다(흐린 글자). 금액이 달랐다면 눌러서 "실제 금액으로 확정".','top:690px;left:1000px;max-width:250px')}
+  </div>`;
+}
+
+const R={overview:overviewHTML,subs:subsHTML,entry:entryHTML,card:cardHTML,pc:pcHTML};
+for(const [id,f] of Object.entries(R))document.getElementById(id).innerHTML=f();
+const params=new URLSearchParams(location.search);
+if(params.has('full'))document.body.classList.add('full');
+if(params.has('clean'))document.body.classList.add('clean');
+const shot=params.get('shot');
+if(shot){document.body.classList.add('shot');document.querySelectorAll('.shot-host').forEach(s=>{if(s.dataset.host!==shot)s.style.display='none';else{s.querySelector('h2').style.display='none';s.querySelector('p').style.display='none';s.style.margin='0';s.style.padding='0';s.style.border='0';s.querySelector('.row').style.margin='0';}});}
+const zoom=document.getElementById('zoom'),annot=document.getElementById('annot');
+zoom.onclick=()=>{const on=document.body.classList.toggle('full');zoom.setAttribute('aria-pressed',on);};
+annot.onclick=()=>{const off=document.body.classList.toggle('clean');annot.setAttribute('aria-pressed',!off);};
+</script>
+</body>
+</html>

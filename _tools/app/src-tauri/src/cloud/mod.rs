@@ -12,6 +12,7 @@ pub(crate) mod client;
 pub(crate) mod failure;
 pub(crate) mod collections;
 pub(crate) mod catalog;
+pub(crate) mod catalog_duplicates;
 pub(crate) mod metadata_backup;
 #[cfg(test)]
 #[path = "metadata_backup_tests.rs"]

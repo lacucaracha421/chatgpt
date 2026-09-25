@@ -102,12 +102,14 @@ async function pass(signal: AbortSignal | undefined, now: () => number): Promise
   return report;
 }
 
-function refusedByServer(error: unknown): boolean {
+/** A 4xx the server will refuse again on retry (not auth, timeout or rate limit). Shared with other outboxes. */
+export function refusedByServer(error: unknown): boolean {
   return error instanceof ApiError && error.status !== null && error.status >= 400 && error.status < 500
     && ![401, 403, 408, 429].includes(error.status);
 }
 
-function codeOf(error: unknown): string | null {
+/** The `{detail: {code}}` error code of a refused request. */
+export function codeOf(error: unknown): string | null {
   const value = error as {details?: {detail?: {code?: unknown}; code?: unknown}} | undefined;
   const code = value?.details?.detail?.code ?? value?.details?.code;
   return typeof code === 'string' ? code : null;

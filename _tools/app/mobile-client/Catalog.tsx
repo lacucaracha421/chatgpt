@@ -7,12 +7,13 @@ import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {Button,IconButton} from './ui';
 import {api,errorText} from './transport';
-import {catalogImageTicket} from './catalogMedia';
+import {CatalogCover} from './CatalogCover';
 import {CatalogReader} from './CatalogReader';
 import {CatalogRefreshBanner,CatalogRefreshControl,useCatalogRefresh,useNow} from './CatalogRefresh';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {CatalogSettings} from './CatalogSettings';
+import {CatalogDuplicates,DuplicateReviewEntry,useDuplicateCount} from './CatalogDuplicates';
 import {useBookmarks,usePendingRetry} from './useBookmarks';
 import {BOOKMARK_CONTRACT_VERSION,type BookmarkAuthority} from './bookmarkOutbox';
 import {DEFAULT_CATALOG_QUERY,FILTER_JSON_MAX_BYTES,catalogPath,catalogPathIssue,catalogDetailPath,catalogEditionsPath,catalogReaderPath,catalogTagQuery,catalogError,supportsDisplayPreferences,supportsSuggestions,catalogSuggestionPath,suggestionQuery,utf8Bytes,SUGGESTION_LIMIT,SUGGESTION_TEXT_MAX_BYTES,type CatalogSuggestion,type CatalogQuery,type CatalogItem,type CatalogPage,type CatalogDetail,type CatalogEditions,type CatalogReaderManifest} from './catalogModel';
@@ -27,30 +28,12 @@ function lruSet<K,V>(map:Map<K,V>,key:K,value:V,limit:number){map.delete(key);ma
 type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
 function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string,filterKey:string){return `${revision}:${filterKey}:${item.provider}:${item.providerWorkId}`;}
 
-function CatalogCover({item,revision,active,onUrl}:{item:CatalogItem;revision:string;active:boolean;onUrl?(url:string|null):void}){
-  const [image,setImage]=useState<{source:string;url:string}|null>(null),[failed,setFailed]=useState<string|null>(null),[visible,setVisible]=useState(false);
-  const host=useRef<HTMLSpanElement>(null),loaded=useRef<string|null>(null);
-  const source=JSON.stringify([item.provider,item.providerWorkId,item.thumbnailUrl,revision]);
-  useEffect(()=>{if(!host.current)return;if(!window.IntersectionObserver){setVisible(true);return;}const observer=new IntersectionObserver(entries=>setVisible(entries.some(e=>e.isIntersecting)),{rootMargin:'120px'});observer.observe(host.current);return()=>observer.disconnect();},[]);
-  useEffect(()=>{
-    if(!active||!visible||!item.thumbnailUrl||loaded.current===source)return;setFailed(null);
-    const controller=new AbortController();
-    void catalogImageTicket({workId:item.providerWorkId,revision,kind:'cover',index:0,url:item.thumbnailUrl},controller.signal).then(ticket=>{
-      if(controller.signal.aborted)return;
-      if(!ticket.url.startsWith('https://app.lakomics.local/media-cache/')&&!(import.meta.env.DEV&&ticket.url.startsWith('data:image/')))throw new Error('Invalid catalog cover');
-      loaded.current=source;setImage({source,url:ticket.url});
-    }).catch(()=>{if(!controller.signal.aborted)setFailed(source);});
-    return()=>controller.abort();
-  },[source,active,visible]);
-  const shown=image?.source===source&&failed!==source?image.url:null;
-  useEffect(()=>{onUrl?.(shown);},[shown,onUrl]);
-  return <span className="catalog-cover-image" ref={host}>{image?.source===source&&failed!==source?<img src={image.url} alt="" onError={()=>{loaded.current=null;setFailed(source);}}/>:null}</span>;
-}
-
 export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string}){
   const [preferences,setPreferences]=useState<CatalogPreferences>(()=>readCatalogPreferences(endpoint));
   const [query,setQuery]=useState<CatalogQuery>(()=>({...DEFAULT_CATALOG_QUERY,...preferences})),[draft,setDraft]=useState('');
   const [settings,setSettings]=useState(false);
+  const [duplicates,setDuplicates]=useState(false);
+  const duplicateCount=useDuplicateCount(settings);
   const [preferenceCheck,setPreferenceCheck]=useState(0);
   // The list is the first page plus the pages appended while scrolling.
   const [more,setMore]=useState<{items:CatalogItem[];nextCursor:string|null}|null>(null);
@@ -186,8 +169,8 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
   useEffect(()=>{
     // Settings is a modal over the catalog, so Back closes it first and leaves the
     // list, its scroll position and the open detail exactly as they were.
-    backRef.current=()=>{if(sheet){setSheet(null);return true;}if(settings){setSettings(false);return true;}if(reader){closeReader();return true;}if(selected){setSelected(null);return true;}return false;};return()=>{backRef.current=null;};
-  },[sheet,settings,reader,selected,backRef]);
+    backRef.current=()=>{if(duplicates){setDuplicates(false);return true;}if(sheet){setSheet(null);return true;}if(settings){setSettings(false);return true;}if(reader){closeReader();return true;}if(selected){setSelected(null);return true;}return false;};return()=>{backRef.current=null;};
+  },[duplicates,sheet,settings,reader,selected,backRef]);
   // Back from a work shows the list where it was, before the first paint.
   useLayoutEffect(()=>{if(!selected&&list.current)list.current.scrollTop=scroll.current;},[selected]);
   useEffect(()=>{
@@ -437,6 +420,7 @@ export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paus
     {reader&&selected&&<CatalogReader manifest={reader} title={catalogDisplayTitle(detail?.title??selected.title)} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy}/>}
     {sheet==='language'&&<BottomSheet title="언어" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 언어">{(Object.keys(LANGUAGES) as CatalogQuery['language'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.language===value} onClick={()=>{setSheet(null);if(query.language!==value)change({language:value});}}>{LANGUAGES[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 정렬">{(Object.keys(SORTS) as CatalogQuery['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.sort===value} onClick={()=>{setSheet(null);if(query.sort!==value)change({sort:value});}}>{SORTS[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
-    <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences}/>
+    <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences} tools={<DuplicateReviewEntry count={duplicateCount} onOpen={()=>{setSettings(false);setDuplicates(true);}}/>}/>
+    {duplicates&&<CatalogDuplicates context={page?.context??null} active={active&&!paused} onClose={()=>setDuplicates(false)}/>}
   </section>;
 }

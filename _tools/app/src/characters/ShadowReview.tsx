@@ -20,6 +20,8 @@ type Props = {
   privacyMode?: boolean;
   api?: ShadowReviewApi;
   decisions?: Pick<CharacterApi, "decide">;
+  /** Limit both lists and their counts to one series' characters; omitted = all series. */
+  series?: { id: string; name: string };
 };
 
 type Judgment = { item: ShadowReviewItem; decision: Extract<DecisionKind, "accepted" | "rejected"> };
@@ -45,7 +47,8 @@ function adjust(summary: ShadowReviewSummary, item: ShadowReviewItem, decision: 
  * One shadow candidate at a time. Every judgment is an ordinary manual decision
  * through `record_character_decisions`; history scoring is explicit and cancellable.
  */
-export function ShadowReview({ onClose, onChanged, privacyMode = false, api = shadowReviewApi, decisions = characterApi }: Props) {
+export function ShadowReview({ onClose, onChanged, privacyMode = false, api = shadowReviewApi, decisions = characterApi, series }: Props) {
+  const seriesId = series?.id;
   const [queue, setQueue] = useState<ShadowReviewItem[]>([]);
   const [summary, setSummary] = useState<ShadowReviewSummary>(emptyShadowSummary);
   const [hasMore, setHasMore] = useState(false);
@@ -75,7 +78,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     setLoading(true); setError(null);
     try {
       const offset = reset ? 0 : queueRef.current.length + skipped.current.size;
-      const page = await api.page(mode === "doubtful" ? { offset, limit: PAGE_SIZE, mode } : { offset, limit: PAGE_SIZE });
+      const page = await api.page({ offset, limit: PAGE_SIZE, ...(mode === "doubtful" ? { mode } : {}), ...(seriesId ? { seriesId } : {}) });
       const known = new Set((reset ? [] : queueRef.current).map(shadowItemKey));
       const fresh = page.items.filter(item => { const key = shadowItemKey(item); return !skipped.current.has(key) && !known.has(key); });
       const open = (item: ShadowReviewItem) => !judged.current.has(shadowItemKey(item));
@@ -91,7 +94,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
       setLoading(false);
       if (reloadQueued.current) { reloadQueued.current = false; setReload(value => value + 1); }
     }
-  }, [api, mode]);
+  }, [api, mode, seriesId]);
 
   useEffect(() => { void load(true); }, [load, reload]);
   function chooseMode(next: ShadowReviewMode) {
@@ -232,6 +235,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     <section className="shadow-review" aria-label="S36 확인">
       <header className="shadow-review__header">
         <h2>S36 확인</h2>
+        {series && <small className="shadow-review__scope">{series.name}</small>}
         <div className="shadow-review__modes" role="tablist" aria-label="확인 목록">
           <button role="tab" aria-selected={mode === "candidates"} disabled={busy} onClick={() => chooseMode("candidates")}>새 후보</button>
           <button role="tab" aria-selected={mode === "doubtful"} disabled={busy} onClick={() => chooseMode("doubtful")}>기존 자동 분류 점검</button>

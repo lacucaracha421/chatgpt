@@ -74,7 +74,8 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
 export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi }: Props) {
   const { gateway } = useLibrary();
   const [folders, setFolders] = useState<SeriesFolder[]>([]);
-  const [shadowReview, setShadowReview] = useState(false);
+  // `series`: opened from this series' candidate count, so scoped to it; `all`: the overflow entry.
+  const [shadowReview, setShadowReview] = useState<false | "series" | "all">(false);
   const [s36Setup, setS36Setup] = useState(false);
   const [candidateCount, setCandidateCount] = useState(0);
   const [groupCreateRequest, setGroupCreateRequest] = useState(0);
@@ -204,7 +205,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     // on the series count line. Without the runtime the action stays hidden.
     if (targetId || currentGroup || picking) return;
     let active = true;
-    void shadowApi.page({ offset: 0, limit: 1 })
+    void shadowApi.page({ offset: 0, limit: 1, seriesId: series.classificationId })
       .then(result => { if (active) setCandidateCount(result.summary.automatic.pending + result.summary.recommended.pending); })
       .catch(() => { if (active) setCandidateCount(0); });
     return () => { active = false; };
@@ -343,7 +344,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     { id: "pick-cover", label: "시리즈 표지 선택", onSelect: () => beginPick("hero") },
     ...(series.heroAssetId ? [{ id: "clear-cover", label: "시리즈 표지 해제", onSelect: () => void action(() => hubApi.saveSeries({ ...series, heroAssetId: null })) }] : []),
     ...(s36Settings || s36Error ? [{ id: "s36-setup", label: "S36 자동 분류 설정", onSelect: () => setS36Setup(true) }] : []),
-    { id: "s36-review", label: "S36 시험 채점 확인", onSelect: () => setShadowReview(true) },
+    { id: "s36-review", label: "S36 시험 채점 확인", onSelect: () => setShadowReview("all") },
     ...faultItem,
   ];
   const s36Stalled = Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.scoringEnabled);
@@ -353,7 +354,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const focusedName = current?.displayName ?? currentGroup?.name;
   const currentStatus = current ? characterStatus(current, readiness.get(current.id), s36Driven(current.id)) : null;
   const candidateReview = !picking && !current && !currentGroup && candidateCount > 0 && s36Settings?.series.includes(series.classificationId)
-    ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="S36 자동 분류가 판단을 기다리는 후보를 하나씩 확인" onClick={() => setShadowReview(true)}>후보 {candidateCount.toLocaleString()} 확인</Button>
+    ? <Button size="sm" variant="ghost" className="series-candidate-review" disabled={busy} aria-description="S36 자동 분류가 판단을 기다리는 후보를 하나씩 확인" onClick={() => setShadowReview("series")}>후보 {candidateCount.toLocaleString()} 확인</Button>
     : null;
   return <section className="series-browser" aria-label={focusedName ?? name}>
     <ViewToolbar title={focusedName ? `${name} / ${focusedName}` : name} ariaLabel="시리즈 도구"
@@ -502,7 +503,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       onSaved={() => { setReferenceSuggestionTarget(null); refresh(); }}
     />}
     {converting && current && <CharacterConversion targetId={current.id} onClose={() => setConverting(false)} onConverted={folderId => { setConverting(false); refresh(); onNavigate({ kind: "classification", classificationId: folderId }); }} />}
-    {shadowReview && <ShadowReview onClose={() => { setShadowReview(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} api={shadowApi} decisions={api} />}
+    {shadowReview && <ShadowReview onClose={() => { setShadowReview(false); setReadinessVersion(v => v + 1); }} onChanged={refresh} privacyMode={privacyMode} api={shadowApi} decisions={api} series={shadowReview === "series" ? { id: series.classificationId, name } : undefined} />}
     {s36Setup && <Dialog open title="S36 자동 분류" onClose={() => setS36Setup(false)}>
       <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
     </Dialog>}

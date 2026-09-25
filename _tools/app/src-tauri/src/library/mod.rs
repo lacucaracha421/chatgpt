@@ -40,6 +40,7 @@ mod catalog_preparation;
 pub(crate) mod catalog_provider;
 mod catalog_query;
 pub(crate) mod catalog_review;
+pub(crate) mod catalog_duplicate_sync;
 mod catalog_revision;
 pub(crate) mod catalog_update;
 mod catalog_visibility;

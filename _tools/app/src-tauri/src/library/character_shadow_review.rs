@@ -23,6 +23,10 @@ pub struct ShadowReviewQuery {
     /// `doubtful`: existing automatic acceptances that S36 does not support.
     #[serde(default)]
     pub mode: Option<String>,
+    /// Only candidates whose target character belongs to this series; `None` is the
+    /// all-series list.
+    #[serde(default)]
+    pub series_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -244,9 +248,11 @@ impl Library {
         if query.limit == 0 || query.limit > MAX_PAGE {
             return Err(Error::Invalid("한 번에 1~200개 항목을 불러올 수 있습니다."));
         }
-        let all = self.shadow_review_items(query.mode.as_deref())?;
+        let all = self.shadow_review_items_in(query.mode.as_deref(), query.series_id.as_deref())?;
         let start = (query.offset as usize).min(all.items.len());
-        let end = start.saturating_add(query.limit as usize).min(all.items.len());
+        let end = start
+            .saturating_add(query.limit as usize)
+            .min(all.items.len());
         Ok(ShadowReviewPage {
             next_offset: (end < all.items.len()).then(|| query.offset + query.limit),
             items: all.items[start..end].to_vec(),
@@ -257,17 +263,34 @@ impl Library {
 
     /// All pending items of the `candidates` (default) or `doubtful` list.
     pub(crate) fn shadow_review_items(&self, mode: Option<&str>) -> Result<ShadowReviewItems> {
+        self.shadow_review_items_in(mode, None)
+    }
+
+    /// Like [`Self::shadow_review_items`], limited to the targets of one series when given;
+    /// items and summary counts both follow the scope.
+    fn shadow_review_items_in(
+        &self,
+        mode: Option<&str>,
+        series_id: Option<&str>,
+    ) -> Result<ShadowReviewItems> {
         let doubtful = shadow_review_mode(mode)?;
         let mut page = ShadowReviewItems {
             items: Vec::new(),
             policy_version: None,
             summary: ShadowReviewSummary::default(),
         };
-        let Some((version, rows)) = shadow_rows(&self.root, doubtful)? else {
+        let Some((version, mut rows)) = shadow_rows(&self.root, doubtful)? else {
             return Ok(page);
         };
         page.policy_version = Some(version);
         let c = self.connection()?;
+        if let Some(series_id) = series_id {
+            let in_series = c
+                .prepare("SELECT id FROM character_targets WHERE series_classification_id=?1")?
+                .query_map([series_id], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()?;
+            rows.retain(|row| in_series.contains(&row.target_id));
+        }
         // Pairs the native pass already accepted automatically come after new findings
         // and are labelled as such; each group keeps the stable pseudo-random order.
         // (Backfill rows recorded "none" as the native outcome for them.)
@@ -551,6 +574,7 @@ mod tests {
                 offset,
                 limit,
                 mode: None,
+                series_id: None,
             })
             .unwrap()
     }
@@ -572,7 +596,8 @@ mod tests {
             .character_shadow_review_page(ShadowReviewQuery {
                 offset: 0,
                 limit: 0,
-                mode: None
+                mode: None,
+                series_id: None,
             })
             .is_err());
     }
@@ -932,6 +957,111 @@ mod tests {
         assert_eq!(page.items[0].origin, "live");
         assert_eq!(page.summary.by_origin["live"].automatic.pending, 1);
         assert!(!super::super::character_shadow::cache_has_origin(&cache).unwrap());
+    }
+    #[test]
+    fn character_shadow_review_series_scope_filters_items_and_counts() {
+        let f = Fixture::new();
+        let here = f.ready("Here");
+        // `child` stands in for a second S36 series.
+        let there = f.ready_in_series("There", &f.child);
+        for id in ["asset-8", "asset-9", "asset-10"] {
+            series_asset(&f, id);
+        }
+        let at = "2026-09-23T01:00:00Z";
+        insert(
+            f.temp.path(),
+            &[
+                ("asset-8", &here.id, "automatic", 0.1, "v1", "none", at),
+                ("asset-9", &here.id, "recommended", 0.2, "v1", "none", at),
+                ("asset-10", &there.id, "automatic", 0.1, "v1", "none", at),
+                ("asset-1", &there.id, "automatic", 0.1, "v1", "none", at),
+            ],
+        );
+        // asset-1 is inside the nested series, so it can be judged there.
+        decide(&f, &there, "asset-1", DecisionKind::Rejected);
+        let scoped = |series: Option<&str>, mode: Option<&str>| {
+            f.library
+                .character_shadow_review_page(ShadowReviewQuery {
+                    offset: 0,
+                    limit: 50,
+                    mode: mode.map(Into::into),
+                    series_id: series.map(Into::into),
+                })
+                .unwrap()
+        };
+        let pairs = |page: &ShadowReviewPage| {
+            let mut pairs: Vec<_> = page
+                .items
+                .iter()
+                .map(|i| (i.asset_id.clone(), i.target_id.clone()))
+                .collect();
+            pairs.sort();
+            pairs
+        };
+
+        // No scope: the unchanged all-series list and counts.
+        let all = scoped(None, None);
+        assert_eq!(all.items.len(), 3);
+        assert_eq!(all.summary.automatic.pending, 2);
+        assert_eq!(all.summary.automatic.rejected, 1);
+        assert_eq!(all.summary.recommended.pending, 1);
+        assert_eq!(all.summary, page(&f, 0, 50).summary);
+
+        let here_page = scoped(Some(&f.series), None);
+        assert_eq!(
+            pairs(&here_page),
+            vec![
+                ("asset-8".to_string(), here.id.clone()),
+                ("asset-9".to_string(), here.id.clone()),
+            ]
+        );
+        assert_eq!(
+            here_page.summary.automatic,
+            VerdictCounts {
+                pending: 1,
+                accepted: 0,
+                rejected: 0
+            }
+        );
+        assert_eq!(here_page.summary.recommended.pending, 1);
+        assert_eq!(here_page.summary.by_origin["live"].automatic.pending, 1);
+        assert_eq!(here_page.policy_version.as_deref(), Some("v1"));
+
+        let there_page = scoped(Some(&f.child), None);
+        assert_eq!(
+            pairs(&there_page),
+            vec![("asset-10".to_string(), there.id.clone())]
+        );
+        assert_eq!(
+            there_page.summary.automatic,
+            VerdictCounts {
+                pending: 1,
+                accepted: 0,
+                rejected: 1
+            }
+        );
+        assert_eq!(there_page.summary.recommended, VerdictCounts::default());
+
+        // Paging stays inside the scope.
+        let first = f
+            .library
+            .character_shadow_review_page(ShadowReviewQuery {
+                offset: 0,
+                limit: 1,
+                mode: None,
+                series_id: Some(f.series.clone()),
+            })
+            .unwrap();
+        assert_eq!(first.next_offset, Some(1));
+        assert_eq!(first.items[0].target_id, here.id);
+
+        // A series without characters has nothing pending; the doubtful list scopes too.
+        assert!(scoped(Some(&f.outside), None).items.is_empty());
+        assert_eq!(
+            scoped(Some(&f.outside), None).summary,
+            ShadowReviewSummary::default()
+        );
+        assert!(scoped(Some(&f.series), Some("doubtful")).items.is_empty());
     }
     #[test]
     fn s36_readiness_status_thresholds() {

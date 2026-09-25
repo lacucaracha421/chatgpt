@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useState,type ReactNode} from 'react';
 import {XMarkIcon,PlusIcon,TrashIcon} from '@heroicons/react/24/outline';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {catalogCategories} from '../src/manga/catalogCategories';
@@ -8,7 +8,7 @@ import {EXCLUDED_TAG_MAX,catalogPreferencesFit,parseExcludedTagInput,validExclud
 const ALL_CATEGORY_IDS:number[]=catalogCategories.map(category=>category.id);
 
 // Keep edits local until Apply, avoiding a server search for every checkbox tap.
-export function CatalogSettings({open,preferences,revealBlocked,capability,onClose,onApply,onReset}:{
+export function CatalogSettings({open,preferences,revealBlocked,capability,onClose,onApply,onReset,tools}:{
   open:boolean;
   preferences:CatalogPreferences;
   revealBlocked:boolean;
@@ -17,6 +17,8 @@ export function CatalogSettings({open,preferences,revealBlocked,capability,onClo
   onApply(next:CatalogPreferences,revealBlocked:boolean):void;
 
   onReset():void;
+  /** Catalog tools that are not filters (the duplicate-edition review entry). */
+  tools?:ReactNode;
 }){
   const supported=capability==='supported';
   const [categories,setCategories]=useState<number[]|null>(preferences.categories);
@@ -81,6 +83,7 @@ export function CatalogSettings({open,preferences,revealBlocked,capability,onClo
       <div className="catalog-settings-head"><h3>차단 항목</h3></div>
       <button className="catalog-settings-switch" role="switch" aria-checked={blocked} onClick={()=>setBlocked(value=>!value)}><span>PC 공통 정책의 차단 항목 보기<small>평소에는 숨겨 둡니다.</small></span><span className="catalog-switch" aria-hidden="true"/></button>
     </section>
+    {tools&&<section className="catalog-settings-section" aria-label="카탈로그 도구"><div className="catalog-settings-head"><h3>도구</h3></div>{tools}</section>}
     {message&&<p className="catalog-settings-message" role="alert">{message}</p>}
     <div className="dialog-actions catalog-settings-footer">
       <Button variant="ghost" onClick={onClose}>취소</Button>

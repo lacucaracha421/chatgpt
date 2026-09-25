@@ -5,11 +5,25 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-const ALGORITHM: &str = "translated-title-multisignal-canary-v2";
+pub(super) const ALGORITHM: &str = "translated-title-multisignal-canary-v2";
 const WINDOW: usize = 500;
-const BUCKET: usize = 8;
+pub(super) const BUCKET: usize = 8;
 const CANDIDATES: usize = 50;
 const TAGS: usize = 64;
+/// The bounded canary ledger of human decisions. Automatic merges
+/// (`catalog_duplicate_sync`) have their own bound and do not use this one up.
+pub(super) const HUMAN_DECISIONS: i64 = 500;
+
+/// Decision rows not owned by an automatic merge.
+pub(super) fn human_decisions(c: &Connection) -> Result<i64, LibraryError> {
+    Ok(c.query_row(
+        "SELECT COUNT(*) FROM online_catalog_review_decisions d WHERE NOT EXISTS(
+            SELECT 1 FROM catalog_duplicate_pairs p WHERE p.left_work_id=d.left_anchor
+            AND p.right_work_id=d.right_anchor AND p.origin='auto')",
+        [],
+        |r| r.get(0),
+    )?)
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,7 +146,7 @@ fn normalize(s: &str) -> String {
 
 // Only remove a clearly delimited Korean alternate title. Keep all bracketed
 // event, creator, franchise and edition qualifiers as identity evidence.
-fn review_title(s: &str) -> String {
+pub(super) fn review_title(s: &str) -> String {
     let normalized = normalize(s);
     let Some((original, alternate)) = normalized.split_once(" | ") else {
         return normalized;
@@ -148,7 +162,7 @@ fn review_title(s: &str) -> String {
     normalize(&format!("{original} {}", &alternate[suffix..]))
 }
 
-fn exact_title_match(a: &ReviewWork, b: &ReviewWork) -> bool {
+pub(super) fn exact_title_match(a: &ReviewWork, b: &ReviewWork) -> bool {
     [&a.title, a.title_jpn.as_deref().unwrap_or("")]
         .iter()
         .any(|left| {
@@ -159,7 +173,7 @@ fn exact_title_match(a: &ReviewWork, b: &ReviewWork) -> bool {
                     .any(|right| left == normalize(right))
         })
 }
-fn work(c: &Connection, id: &str) -> Result<ReviewWork, LibraryError> {
+pub(super) fn work(c: &Connection, id: &str) -> Result<ReviewWork, LibraryError> {
     let mut w = c.query_row("SELECT w.Id,m.group_id,w.Title,w.TitleJpn,w.FileCount,COALESCE(w.Category,0)
         FROM catalog.Works w JOIN online_catalog_group_members m ON m.provider='kHentai' AND m.catalog_work_id=w.Id WHERE w.Id=?1",
         [id], |r| Ok(ReviewWork { work_id:r.get::<_,i64>(0)?.to_string(),group_id:r.get(1)?, title:r.get(2)?,title_jpn:r.get(3)?,pages:r.get(4)?,category:r.get(5)?,creators:vec![],languages:vec![] }))?;
@@ -187,7 +201,54 @@ fn work(c: &Connection, id: &str) -> Result<ReviewWork, LibraryError> {
 fn anchor(c: &Connection, group: &str) -> Result<String, LibraryError> {
     Ok(c.query_row("SELECT anchor_work_id FROM online_catalog_group_handles WHERE provider='kHentai' AND group_id=?1",[group],|r|r.get(0))?)
 }
-fn generate(c: &Connection) -> Result<ReviewPage, LibraryError> {
+/// The candidate rule shared by the windowed desktop canary (`generate`) and the whole-
+/// catalog comparison of `catalog_duplicate_sync`: `(exact title, page gap)` when two works
+/// of different edition groups are a duplicate-edition candidate.
+pub(super) fn pair_match(a: &ReviewWork, b: &ReviewWork) -> Option<(bool, u64)> {
+    let exact_title = exact_title_match(a, b);
+    let page_gap = a.pages.abs_diff(b.pages);
+    let pages_match = a.pages == b.pages
+        || (!exact_title && page_gap <= 2 && page_gap <= a.pages.min(b.pages).max(0) as u64 / 10);
+    if a.group_id == b.group_id
+        || a.pages <= 0
+        || b.pages <= 0
+        || !pages_match
+        || !(1..=11).contains(&a.category)
+        || a.category != b.category
+        || a.languages.is_empty()
+        || a.languages != b.languages
+        || !a.creators.iter().any(|v| b.creators.contains(v))
+    {
+        return None;
+    }
+    Some((exact_title, page_gap))
+}
+
+pub(super) fn reason_text(exact_title: bool, page_gap: u64) -> String {
+    if exact_title {
+        "제목 일치 · 작가/그룹 중복 · 페이지 수, 분류, 언어 일치".into()
+    } else {
+        format!("덧붙인 한국어 제목 제외 시 제목 일치 · 작가/그룹 중복 · 분류, 언어 일치 · 페이지 수 차이 {page_gap}쪽")
+    }
+}
+
+/// Whether this exact pair has any decision, or its two edition groups have a negative one.
+pub(super) fn reviewed(
+    c: &Connection,
+    left: &str,
+    right: &str,
+    left_group: &str,
+    right_group: &str,
+) -> Result<bool, LibraryError> {
+    Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM online_catalog_review_decisions d
+        LEFT JOIN online_catalog_group_members a ON a.provider='kHentai' AND a.work_id=d.left_anchor
+        LEFT JOIN online_catalog_group_members b ON b.provider='kHentai' AND b.work_id=d.right_anchor
+        WHERE (d.left_anchor=?1 AND d.right_anchor=?2) OR (d.decision!='confirm' AND
+        ((a.group_id=?3 AND b.group_id=?4) OR (a.group_id=?4 AND b.group_id=?3))))",
+        params![left, right, left_group, right_group], |r| r.get(0))?)
+}
+
+pub(super) fn generate(c: &Connection) -> Result<ReviewPage, LibraryError> {
     catalog_groups::ensure_membership(c)?;
     let revision = candidate_context(c)?;
     let mut s = c.prepare("SELECT Id FROM catalog.Works ORDER BY Id DESC LIMIT ?1")?;
@@ -233,46 +294,22 @@ fn generate(c: &Connection) -> Result<ReviewPage, LibraryError> {
                 comparisons += 1;
                 let a = &works[i];
                 let b = &works[j];
-                let exact_title = exact_title_match(a, b);
-                let page_gap = a.pages.abs_diff(b.pages);
-                let pages_match = a.pages == b.pages
-                    || (!exact_title
-                        && page_gap <= 2
-                        && page_gap <= a.pages.min(b.pages).max(0) as u64 / 10);
-                if a.group_id == b.group_id
-                    || a.pages <= 0
-                    || b.pages <= 0
-                    || !pages_match
-                    || !(1..=11).contains(&a.category)
-                    || a.category != b.category
-                    || a.languages.is_empty()
-                    || a.languages != b.languages
-                    || !a.creators.iter().any(|v| b.creators.contains(v))
-                {
+                let Some((exact_title, page_gap)) = pair_match(a, b) else {
                     continue;
-                }
+                };
                 let mut left = anchor(c, &a.group_id)?;
                 let mut right = anchor(c, &b.group_id)?;
                 let mut evidence = ReviewEvidence {
                     left: a.clone(),
                     right: b.clone(),
-                    reason: if exact_title {
-                        "제목 일치 · 작가/그룹 중복 · 페이지 수, 분류, 언어 일치".into()
-                    } else {
-                        format!("덧붙인 한국어 제목 제외 시 제목 일치 · 작가/그룹 중복 · 분류, 언어 일치 · 페이지 수 차이 {page_gap}쪽")
-                    },
+                    reason: reason_text(exact_title, page_gap),
                     algorithm: ALGORITHM.into(),
                 };
                 if left > right {
                     std::mem::swap(&mut left, &mut right);
                     std::mem::swap(&mut evidence.left, &mut evidence.right);
                 }
-                let reviewed:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM online_catalog_review_decisions d
-                LEFT JOIN online_catalog_group_members a ON a.provider='kHentai' AND a.work_id=d.left_anchor
-                LEFT JOIN online_catalog_group_members b ON b.provider='kHentai' AND b.work_id=d.right_anchor
-                WHERE (d.left_anchor=?1 AND d.right_anchor=?2) OR (d.decision!='confirm' AND
-                ((a.group_id=?3 AND b.group_id=?4) OR (a.group_id=?4 AND b.group_id=?3))))",
-                params![left,right,a.group_id,b.group_id],|r|r.get(0))?;
+                let reviewed = reviewed(c, &left, &right, &a.group_id, &b.group_id)?;
                 if reviewed
                     || pairs.len() >= CANDIDATES
                     || !pairs.insert((left.clone(), right.clone()))
@@ -304,23 +341,41 @@ fn candidate_context(c: &Connection) -> Result<String, LibraryError> {
     Ok(c.query_row("SELECT s.source_revision || ':' || s.generation || ':' || COALESCE((SELECT Value FROM catalog.CrawlState WHERE Key='lakomics.catalog.contentRevision'),'legacy')
         FROM online_catalog_group_state s WHERE provider='kHentai'",[],|r|r.get(0)).optional()?.unwrap_or_default())
 }
-fn list(c: &Connection) -> Result<Vec<ReviewRow>, LibraryError> {
-    // Bounded canary ledger. Decisions are never deleted to make room.
-    let mut s=c.prepare("SELECT left_anchor,right_anchor,decision,evidence,NULL FROM online_catalog_review_decisions
-        UNION ALL SELECT left_anchor,right_anchor,'pending',evidence,source_revision FROM online_catalog_review_candidates c
+pub(super) fn list(c: &Connection) -> Result<Vec<ReviewRow>, LibraryError> {
+    rows(c, None)
+}
+
+/// One pair's row exactly as `list` would show it (same token), found directly so a pair
+/// beyond the list bounds stays decidable.
+fn row(c: &Connection, left: &str, right: &str) -> Result<Option<ReviewRow>, LibraryError> {
+    Ok(rows(c, Some((left, right)))?.into_iter().next())
+}
+
+/// Pending and decided rows are bounded separately (550 each), so thousands of decisions
+/// never push pending candidates out. Human decisions come before automatic merges
+/// (`catalog_duplicate_sync`), which fill the rest of the decided bound. Decisions are never
+/// deleted to make room.
+fn rows(c: &Connection, pair: Option<(&str, &str)>) -> Result<Vec<ReviewRow>, LibraryError> {
+    let (left, right) = pair.unzip();
+    let read =
+        |sql: &str| -> Result<Vec<(String, String, String, String, Option<String>)>, LibraryError> {
+            let mut s = c.prepare(sql)?;
+            let rows = s
+                .query_map(params![left, right], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        };
+    let mut raw = read("SELECT d.left_anchor,d.right_anchor,d.decision,d.evidence,NULL FROM online_catalog_review_decisions d
+        WHERE ?1 IS NULL OR (d.left_anchor=?1 AND d.right_anchor=?2)
+        ORDER BY EXISTS(SELECT 1 FROM catalog_duplicate_pairs p WHERE p.left_work_id=d.left_anchor
+            AND p.right_work_id=d.right_anchor AND p.origin='auto'),1,2 LIMIT 550")?;
+    raw.extend(read("SELECT left_anchor,right_anchor,'pending',evidence,source_revision FROM online_catalog_review_candidates c
         WHERE NOT EXISTS(SELECT 1 FROM online_catalog_review_decisions d WHERE d.left_anchor=c.left_anchor AND d.right_anchor=c.right_anchor)
-        ORDER BY 1,2 LIMIT 550")?;
-    let raw = s
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+        AND (?1 IS NULL OR (c.left_anchor=?1 AND c.right_anchor=?2))
+        ORDER BY 1,2 LIMIT 550")?);
+    raw.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
     let revision = candidate_context(c)?;
     raw.into_iter()
         .map(|(a, b, state, json, source)| {
@@ -358,18 +413,15 @@ fn list(c: &Connection) -> Result<Vec<ReviewRow>, LibraryError> {
         })
         .collect()
 }
-fn decide(c: &Connection, q: &ReviewDecision) -> Result<(), LibraryError> {
+pub(super) fn decide(c: &Connection, q: &ReviewDecision) -> Result<(), LibraryError> {
     if q.left_anchor >= q.right_anchor
         || !["confirm", "falsePositive", "split"].contains(&q.decision.as_str())
     {
         return Err(LibraryError::InvalidOnlineCatalog);
     }
     let revision = catalog_groups::ensure_membership(c)?;
-    let rows = list(c)?;
-    let row = rows
-        .into_iter()
-        .find(|r| r.left_anchor == q.left_anchor && r.right_anchor == q.right_anchor)
-        .ok_or(LibraryError::OnlineCatalogWorkNotFound)?;
+    let row =
+        row(c, &q.left_anchor, &q.right_anchor)?.ok_or(LibraryError::OnlineCatalogWorkNotFound)?;
     // Reject stale candidates and prevent an ordinary confirm from undoing a veto.
     if !row.actionable
         || row.review_token != q.review_token
@@ -378,16 +430,25 @@ fn decide(c: &Connection, q: &ReviewDecision) -> Result<(), LibraryError> {
     {
         return Err(LibraryError::InvalidOnlineCatalog);
     }
-    let count: i64 = c.query_row(
-        "SELECT COUNT(*) FROM online_catalog_review_decisions",
-        [],
-        |r| r.get(0),
-    )?;
-    if row.state == "pending" && count >= 500 {
+    if row.state == "pending" && human_decisions(c)? >= HUMAN_DECISIONS {
         return Err(LibraryError::InvalidOnlineCatalog);
+    }
+    if q.decision != "confirm" {
+        // Split only this pair out of a set that automatic merges hold together.
+        super::catalog_duplicate_sync::withdraw_auto_links(
+            c,
+            &q.left_anchor,
+            &q.right_anchor,
+            &revision,
+        )?;
     }
     c.execute("INSERT INTO online_catalog_review_decisions VALUES(?1,?2,?3,?4,?5) ON CONFLICT(left_anchor,right_anchor) DO UPDATE SET decision=excluded.decision,evidence=excluded.evidence,reviewed_at=excluded.reviewed_at",
         params![q.left_anchor,q.right_anchor,q.decision,serde_json::to_string(&row.evidence).map_err(|_|LibraryError::InvalidOnlineCatalog)?,chrono::Utc::now().to_rfc3339()])?;
+    // A person decided here: automation stops owning (and never re-confirms) this pair.
+    c.execute("UPDATE catalog_duplicate_pairs SET human=1,origin=NULL,desired=NULL,applied=1,blocked=NULL,
+        report=CASE WHEN report='pending' THEN 'dropped' ELSE report END,updated_at=?3
+        WHERE left_work_id=?1 AND right_work_id=?2",
+        params![q.left_anchor, q.right_anchor, chrono::Utc::now().to_rfc3339()])?;
     catalog_groups::rebuild(c, &revision)?;
     if q.decision == "confirm" {
         let same:bool=c.query_row("SELECT a.group_id=b.group_id FROM online_catalog_group_members a JOIN online_catalog_group_members b ON b.provider=a.provider WHERE a.provider='kHentai' AND a.work_id=?1 AND b.work_id=?2",params![q.left_anchor,q.right_anchor],|r|r.get(0))?;

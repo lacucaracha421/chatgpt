@@ -2162,6 +2162,75 @@ impl CloudClient {
         Ok(read_json_bounded::<Feed>(&mut response, 4 * 1024 * 1024)?.revision)
     }
 
+    /// Upload one chunk of the PC's duplicate-edition candidate set (publisher token).
+    /// `None` when the route is absent (an older server).
+    pub(crate) fn publish_catalog_duplicates(
+        &self,
+        token: &str,
+        body: &[u8],
+    ) -> Result<Option<super::catalog_duplicates::PublicationResult>, LibraryError> {
+        if body.len() > 8 * 1024 * 1024 {
+            return Err(LibraryError::CatalogDuplicateSyncRejected(413));
+        }
+        let request = self.coded_agent()?.put(self.endpoint("/v1/mobile-catalog/duplicates/candidates")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(body);
+        let mut response = self.coded_request(request)?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            status => return Err(catalog_duplicate_status_error(status, &mut response).1),
+        }
+        Ok(Some(read_json_bounded(&mut response, 64 * 1024)?))
+    }
+
+    /// One page of the duplicate-edition decision log (publisher token), `after` exclusive.
+    /// `None` when the route is absent.
+    pub(crate) fn catalog_duplicate_decisions(
+        &self,
+        token: &str,
+        after: i64,
+        limit: i64,
+    ) -> Result<Option<super::catalog_duplicates::DecisionPage>, LibraryError> {
+        if !(0..=super::catalog_duplicates::MAX_CURSOR).contains(&after) || !(1..=200).contains(&limit) {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let path = format!("/v1/mobile-catalog/duplicates/decisions?after={after}&limit={limit}");
+        let mut response = self.coded_request(self.coded_agent()?.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call())?;
+        match response.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            status => return Err(catalog_duplicate_status_error(status, &mut response).1),
+        }
+        let page = read_json_bounded::<super::catalog_duplicates::DecisionPage>(&mut response, 4 * 1024 * 1024)?;
+        super::catalog_duplicates::validate_page(&page, after, limit)?;
+        Ok(Some(page))
+    }
+
+    /// Record one duplicate-edition decision the way a mobile device does (client token).
+    pub(crate) fn decide_catalog_duplicate(
+        &self,
+        token: &str,
+        command: &super::catalog_duplicates::DecisionCommand,
+    ) -> Result<super::catalog_duplicates::CommandOutcome, LibraryError> {
+        use super::catalog_duplicates::CommandOutcome;
+        let body = serde_json::to_vec(command).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let request = self.coded_agent()?.post(self.endpoint("/v1/mobile-catalog/duplicates/decisions")?)
+            .header("Authorization", bearer(token)?).content_type("application/json").send(&body);
+        let mut response = self.coded_request(request)?;
+        match response.status().as_u16() {
+            200 => Ok(CommandOutcome::Recorded),
+            404 => Ok(CommandOutcome::Unsupported),
+            422 => Ok(CommandOutcome::Refused),
+            status => match catalog_duplicate_status_error(status, &mut response) {
+                (Some(code), _) if code == "duplicateCandidateMissing" => Ok(CommandOutcome::CandidateMissing),
+                (Some(code), _) if code == "duplicateDecisionConflict" || code == "operationConflict" => {
+                    Ok(CommandOutcome::Refused)
+                }
+                (_, error) => Err(error),
+            },
+        }
+    }
+
     fn coded_agent(&self) -> Result<ureq::Agent, LibraryError> {
         Ok(ureq::Agent::config_builder()
             .max_redirects(0)
@@ -3291,6 +3360,29 @@ fn similarity_review_status_error(status: u16, response: &mut ureq::http::Respon
         }
         422 => LibraryError::SimilarityReviewInvalid,
         status => LibraryError::SimilarityReviewSyncRejected(status),
+    }
+}
+
+/// The coded error of a duplicate-edition route: `(code, error)`.
+fn catalog_duplicate_status_error(
+    status: u16,
+    response: &mut ureq::http::Response<ureq::Body>,
+) -> (Option<String>, LibraryError) {
+    match status {
+        401 | 403 => (None, LibraryError::CloudUnauthorized),
+        409 => {
+            #[derive(serde::Deserialize)]
+            struct Coded { detail: serde_json::Value }
+            let code = read_json_bounded::<Coded>(response, 16 * 1024).ok()
+                .and_then(|body| body.detail.get("code").and_then(|code| code.as_str()).map(str::to_owned));
+            let error = match code.as_deref() {
+                Some("duplicateCursorRejected") => LibraryError::CatalogDuplicateCursorRejected,
+                _ => LibraryError::CatalogDuplicateSyncRejected(409),
+            };
+            (code, error)
+        }
+        422 => (None, LibraryError::CatalogDuplicateInvalid),
+        status => (None, LibraryError::CatalogDuplicateSyncRejected(status)),
     }
 }
 

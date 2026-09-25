@@ -138,6 +138,12 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/library/similarity/review/decisions?libraryId=0123456789abcdef0123456789abcdef&after=0&limit=100","GET"));
  for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/similarity/review/feed",method));
  for(String path:new String[]{"/v1/library/similarity","/v1/library/similarity/review/","/v1/library/similarity/reviewx","/v1/library/similarity/review/decisions/","/v1/library/similarity/review/decisions/extra","/v1/library/similarity/review/../review/feed","/v1/library/similarity/review%2f..","/v1/library/similarity/review/decisions%2f.."})for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api(path,method));
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/duplicates?state=undecided&limit=20","GET"));
+ pass(()->NetworkPolicy.api("/v1/mobile-catalog/duplicates/decisions","POST"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/duplicates",method));
+ for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/duplicates/decisions",method));
+ for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/duplicates/candidates",method));
+ for(String path:new String[]{"/v1/mobile-catalog/duplicates/","/v1/mobile-catalog/duplicates/changes","/v1/mobile-catalog/duplicatesx","/v1/mobile-catalog/duplicates/decisions/","/v1/mobile-catalog/duplicates%2f..","/v1/mobile-catalog/duplicates/../duplicates/candidates"})for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api(path,method));
  // Mobile Library Trash: the trash list is a GET, the lifecycle command route a PUT, and
  // trash-scoped tickets reuse the existing ticket POSTs with a query that widens nothing.
  pass(()->NetworkPolicy.api("/v1/library/trash","GET"));
