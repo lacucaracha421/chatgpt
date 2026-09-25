@@ -8,6 +8,7 @@ import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Select } from "../shared/ui/Select";
 import { Button } from "../shared/ui/Button";
+import { Slider } from "../shared/ui/Slider";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -350,8 +351,8 @@ export function CollectionBrowser({
 }
 
 const SORT_OPTIONS: Array<[CollectionLibrarySort, "asc" | "desc", string]> = [
-  ["media_date", "desc", "출시·출간·개봉일 · 최신순"],
-  ["media_date", "asc", "출시·출간·개봉일 · 오래된순"],
+  ["media_date", "desc", "최신순"],
+  ["media_date", "asc", "오래된순"],
   ["recent", "desc", "최근 추가 · 최신순"],
   ["recent", "asc", "최근 추가 · 오래된순"],
   ["name", "asc", "제목 · 가나다순"],
@@ -362,20 +363,35 @@ function sortLabel(sort: CollectionLibrarySort, direction: "asc" | "desc"): stri
   return SORT_OPTIONS.find(([value, order]) => value === sort && order === direction)?.[2] ?? "최근 추가";
 }
 
-const RATING_OPTIONS: Array<CollectionLibraryState["rating"]> = ["all", 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5, "unrated"];
+/** Slider stops: 전체, then 0.5 … 5.0. 미평가 is a separate toggle, never a stop. */
+const RATING_STEPS: Array<CollectionLibraryState["rating"]> = ["all", 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
 function ratingLabel(rating: CollectionLibraryState["rating"]): string {
   return rating === "all" ? "전체" : rating === "unrated" ? "미평가" : rating.toFixed(1);
 }
 
+/** The slider stop for a filter; a saved score between stops (for example 0.0) sits on the nearest. */
+function ratingStep(rating: CollectionLibraryState["rating"]): number {
+  if (typeof rating !== "number") return 0;
+  return Math.min(10, Math.max(1, Math.round(rating * 2)));
+}
+
 function RatingFilter({ rating, onChange }: { rating: CollectionLibraryState["rating"]; onChange: (rating: CollectionLibraryState["rating"]) => void }) {
-  // One select beside 정렬 (exact match); a saved value outside the presets keeps its own option.
-  const options = RATING_OPTIONS.includes(rating) ? RATING_OPTIONS : [...RATING_OPTIONS.slice(0, -1), rating, "unrated" as const];
-  return <Select label="내 별점" value={String(rating)} onChange={event => {
-    const value = event.target.value;
-    const next: CollectionLibraryState["rating"] = value === "all" || value === "unrated" ? value : Number(value);
-    if (next !== rating) onChange(next);
-  }}>{options.map(value => <option key={String(value)} value={String(value)}>{typeof value === "number" ? `★ ${value.toFixed(1)}` : ratingLabel(value)}</option>)}</Select>;
+  // Exact match (collectionLibrary `matchesRating`): the slider picks one score, and 미평가 is
+  // its own toggle, so the two can never be combined.
+  const shown = typeof rating === "number" ? `★ ${rating.toFixed(1)}` : ratingLabel(rating);
+  return <div className="collection-rating-filter">
+    <Slider label="내 별점" min={0} max={RATING_STEPS.length - 1} step={1} value={rating === "unrated" ? 0 : ratingStep(rating)} aria-valuetext={shown}
+      className={rating === "unrated" ? "is-idle" : undefined}
+      onChange={event => {
+        const next = RATING_STEPS[Number(event.target.value)] ?? "all";
+        if (next !== rating) onChange(next);
+      }} />
+    <div className="collection-rating-filter__row">
+      <output className="collection-rating-filter__value">{shown}</output>
+      <Button size="sm" variant="secondary" aria-pressed={rating === "unrated"} onClick={() => onChange(rating === "unrated" ? "all" : "unrated")}>미평가</Button>
+    </div>
+  </div>;
 }
 
 function TypeSegment({

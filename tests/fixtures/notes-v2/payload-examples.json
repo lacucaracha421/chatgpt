@@ -1,0 +1,368 @@
+{
+ "description": "Notes v2 plaintext payload examples (inside the encrypted envelope). supported=false means the client opens the note read-only; valid=false means a save of this content is refused. Shared by PC (Rust) and Android (Java) tests.",
+ "colors": [
+  "red",
+  "orange",
+  "amber",
+  "green",
+  "teal",
+  "blue",
+  "indigo",
+  "pink"
+ ],
+ "examples": [
+  {
+   "name": "v1 text note",
+   "note": "Pre-v2 shape; a v2 client writes exactly these keys back when it uses no v2 feature.",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "title": "메모",
+    "body": "PC와 **모바일**",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "v2 text note with colour, labels, archive and an unknown key",
+   "note": "Text notes are Markdown. Unknown keys (reminder) are preserved on save.",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "title": "여행 준비",
+    "body": "# 목록\n- [x] 여권",
+    "color": "teal",
+    "labels": [
+     "여행",
+     "개인"
+    ],
+    "pinned": true,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "reminder": "2026-10-01T09:00:00Z"
+   }
+  },
+  {
+   "name": "checklist with fallback body",
+   "note": "items sorted by (order, id); body lists open items, then checked items.",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 빵\n- [x] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": true,
+      "order": "h"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000c",
+      "text": "빵",
+      "checked": false,
+      "order": "m"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "secret note with fields and memo",
+   "note": "The free text of a secret note lives in memo; body is the derived 'label: value' fallback for pre-v2 clients.",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "secret",
+    "title": "서버 계정",
+    "body": "아이디: laku\n비밀번호: hunter2\n\n2단계 인증은 휴대폰",
+    "memo": "2단계 인증은 휴대폰",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku",
+      "order": "V"
+     },
+     {
+      "id": "44444444-0000-4000-8000-000000000002",
+      "label": "비밀번호",
+      "value": "hunter2",
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "newer schema opens read-only",
+   "note": "schema > 2: show title and body only; pin, trash, archive and restore still save and keep every other key.",
+   "supported": false,
+   "valid": true,
+   "payload": {
+    "schema": 3,
+    "type": "checklist",
+    "title": "미래 메모",
+    "body": "- [ ] 대체 본문",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "items2": []
+   }
+  },
+  {
+   "name": "unknown type opens read-only",
+   "note": "Unknown type: read-only like a newer schema.",
+   "supported": false,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "drawing",
+    "title": "그림",
+    "body": "(그림 메모)",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "strokes": [
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "checklist with a duplicate item id is rejected on save",
+   "note": "Limits: title <= 200 chars, body <= 128 KiB, <= 500 items of <= 1000 code points, <= 20 labels of <= 40 chars (case-insensitive unique, NFC), <= 200 fields (label <= 100, value <= 4000 code points), unique ids, order keys 1-64 printable ASCII, serialized plaintext <= 256 KiB.",
+   "supported": true,
+   "valid": false,
+   "payload": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "잘못된 목록",
+    "body": "- [ ] a\n- [ ] b",
+    "items": [
+     {
+      "id": "x",
+      "text": "a",
+      "checked": false,
+      "order": "a"
+     },
+     {
+      "id": "x",
+      "text": "b",
+      "checked": false,
+      "order": "b"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  }
+ ],
+ "undecodableDescription": "Payloads that authenticate but that a v2 client must not decode as v2: newer schema, unknown type, or any key with an unexpected JSON type or a missing required key. The note is listed read-only with the readable title/body; pin, trash, archive and restore patch only those keys (plus updatedAt) and keep every other byte of the payload. Never fail the whole vault or sync because of one note.",
+ "undecodable": [
+  {
+   "name": "colour is an object",
+   "note": "A key with an unexpected JSON type makes the note undecodable.",
+   "shows": {
+    "title": "색 객체"
+   },
+   "payload": {
+    "title": "색 객체",
+    "body": "b",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "schema": 2,
+    "color": {
+     "r": 255
+    }
+   }
+  },
+  {
+   "name": "item order is a number",
+   "note": "",
+   "shows": {
+    "title": "숫자 순서"
+   },
+   "payload": {
+    "title": "숫자 순서",
+    "body": "- [ ] a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "schema": 2,
+    "type": "checklist",
+    "items": [
+     {
+      "id": "a",
+      "text": "a",
+      "checked": false,
+      "order": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "labels are objects",
+   "note": "",
+   "shows": {
+    "title": "라벨 객체"
+   },
+   "payload": {
+    "title": "라벨 객체",
+    "body": "b",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "schema": 2,
+    "labels": [
+     {
+      "name": "업무"
+     }
+    ]
+   }
+  },
+  {
+   "name": "item without order",
+   "note": "",
+   "shows": {
+    "title": "순서 없음"
+   },
+   "payload": {
+    "title": "순서 없음",
+    "body": "- [ ] a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "schema": 2,
+    "type": "checklist",
+    "items": [
+     {
+      "id": "a",
+      "text": "a",
+      "checked": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "newer schema",
+   "note": "schema > 2 is never decoded as v2, even if it happens to parse.",
+   "shows": {
+    "title": "미래"
+   },
+   "payload": {
+    "title": "미래",
+    "body": "- [ ] 대체",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "schema": 3,
+    "type": "checklist",
+    "items": [
+     {
+      "id": "a",
+      "text": "a",
+      "done": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "unknown type",
+   "note": "",
+   "shows": {
+    "title": "그림"
+   },
+   "payload": {
+    "title": "그림",
+    "body": "b",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "schema": 2,
+    "type": "drawing",
+    "strokes": [
+     [
+      0,
+      0
+     ],
+     [
+      1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pinned is not a boolean",
+   "note": "Unreadable flags display as false; saving pin/trash/archive writes booleans.",
+   "shows": {
+    "title": "고정 문자열"
+   },
+   "payload": {
+    "title": "고정 문자열",
+    "body": "b",
+    "pinned": "yes",
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "title missing",
+   "note": "",
+   "shows": {
+    "title": ""
+   },
+   "payload": {
+    "body": "제목 없음",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  }
+ ],
+ "envelope": {
+  "note": "AES-256-GCM, AAD 'lakomics-notes:1:<sha256(key) hex>:<id>'; opens to the 'checklist with fallback body' payload.",
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "payloadExample": "checklist with fallback body",
+  "envelope": {
+   "version": 1,
+   "nonce": "000102030405060708090a0b",
+   "ciphertext": "3c20a578ad80af7aaf7ba5a7939d011de6f4bd1693133a1f530b8cf6694b2c907579da90cae328ba983ada063b33c2805e7b4caf38b9c7a31dad083438b8d5b3d0d05cca3f4d863d72798a35cfd22e03813f950c5b430810a0dd7547d41a080de9d47b8fd024a569bc2665c96a1c455d8045539ad2f414ab7cce7afdb2d65e238f6230f699effb6338cc78910dea7cf206c4d3050570b166ae2b8d0f8ef0d3cc7f0d2ef9755fee528500b59fbcebe3dfbff4ac43e7d8169047b0b2a314b795c9311aa88721a6f4a05374e9c48b70e8b5d04fc94710308ac141bcaef77178a2c27313e482d61033156277883885214c338abf9b01f848fd872d498cf82776f30136fdd0f3f5bf2b5512bb503dc35f4f6ff696a5bfe4eef38d4b0d057377d8c1696867fc7298f4ff26a30d0b6b3bb890e3a8fa766a79a4ff3aa0012d26ba0d75d9f9a54f1abb5048d9c0c2570229b66516b120f56f25a1a7246bc01003eeda2d9b7b159fb8e92717e702c0d647f2c74012a6903d04b3dd22b1f68b5ab9b8756354c4efb3bcab25b7b9cd158a1a5a6228e183671fdeb30231a65871aa2329a7cf742358655bf1e77c429995ec63abc8809f6d5b7e222cd902c9c5cc9389e7df7a1c3b0e8ce78c658f4fdd37d06edca4e40559ba5162f3a02e0c19e7c7e9047c3a802310bdabb34700a7698c6e"
+  }
+ }
+}

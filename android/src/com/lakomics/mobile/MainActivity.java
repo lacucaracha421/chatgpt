@@ -102,7 +102,7 @@ public final class MainActivity extends Activity {
  private void reply(String id,boolean ok,Object data,String error,Integer status,Object details){try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",ok).put("status",status==null?JSONObject.NULL:status).put("data",data==null?JSONObject.NULL:data).put("error",error==null?JSONObject.NULL:error).put("details",details==null?JSONObject.NULL:details));}catch(JSONException ignored){}}
  private void cancelOtherRequests(CancellationSignal current){for(CancellationSignal s:active.values())if(s!=current)s.cancel();}
  private static String errorMessage(Exception e){
-  if(e instanceof VaultCrypto.Invalid || e instanceof ExchangeService.UserError)return e.getMessage();
+  if(e instanceof VaultCrypto.Invalid || e instanceof ExchangeService.UserError || e instanceof NotesRepository.UserError)return e.getMessage();
   if(e instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)e).status;if(status==401 || status==403)return "인증에 실패했습니다. 토큰을 확인해 주세요.";if(status==404)return "요청한 정보를 찾을 수 없습니다.";return "서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";}
   if(e instanceof java.net.SocketTimeoutException)return "연결 시간이 초과되었습니다. 다시 시도해 주세요.";
   if(e instanceof java.net.UnknownHostException || e instanceof java.net.ConnectException)return "서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.";
@@ -137,11 +137,73 @@ public final class MainActivity extends Activity {
   finally{write.cancel(false);}
  }
  private JSONObject thumbnail(String id,CancellationSignal signal)throws Exception{return media==null?client.api("/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","thumbnail"),signal):media.browser(id,"thumbnail","image/webp",signal);}
+ /** Fingerprint (BiometricPrompt, API 28+) can open secret notes; the PIN is always the fallback. */
+ private boolean biometricAvailable(){
+  if(Build.VERSION.SDK_INT<28)return false;
+  if(Build.VERSION.SDK_INT>=30){android.hardware.biometrics.BiometricManager m=getSystemService(android.hardware.biometrics.BiometricManager.class);return m!=null&&m.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG)==android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;}
+  if(Build.VERSION.SDK_INT>=29){android.hardware.biometrics.BiometricManager m=getSystemService(android.hardware.biometrics.BiometricManager.class);return m!=null&&m.canAuthenticate()==android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;}
+  return getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_FINGERPRINT);
+ }
+ /** Shows the system fingerprint prompt and waits for its result on this worker thread. */
+ private void authenticateBiometric(CancellationSignal signal)throws Exception{
+  if(Build.VERSION.SDK_INT<28||!biometricAvailable())throw new NotesRepository.UserError("이 기기에서는 지문으로 열 수 없습니다. PIN을 입력해 주세요.");
+  final CountDownLatch done=new CountDownLatch(1);final String[] failure={null};final CancellationSignal prompt=new CancellationSignal();
+  signal.setOnCancelListener(prompt::cancel);
+  runOnUiThread(()->{
+   try{
+    Executor main=getMainExecutor();
+    android.hardware.biometrics.BiometricPrompt.Builder builder=new android.hardware.biometrics.BiometricPrompt.Builder(this).setTitle("암호 메모 열기").setSubtitle("지문으로 이 기기의 암호 메모를 엽니다")
+     .setNegativeButton("PIN 입력",main,(dialog,which)->{failure[0]="";done.countDown();});
+    if(Build.VERSION.SDK_INT>=29)builder.setConfirmationRequired(false);
+    if(Build.VERSION.SDK_INT>=30)builder.setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG);
+    builder.build().authenticate(prompt,main,new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback(){
+     @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult result){done.countDown();}
+     @Override public void onAuthenticationError(int code,CharSequence message){
+      failure[0]=code==android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED||code==android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_CANCELED?"":"지문으로 열지 못했습니다. PIN을 입력해 주세요.";done.countDown();}
+    });
+   }catch(RuntimeException e){failure[0]="지문 인증을 시작하지 못했습니다. PIN을 입력해 주세요.";done.countDown();}
+  });
+  // The WebView request times out at 45 s; close the prompt before that.
+  if(!done.await(40,TimeUnit.SECONDS)){prompt.cancel();throw new NotesRepository.UserError("지문 인증 시간이 지났습니다. 다시 시도하거나 PIN을 입력해 주세요.");}
+  signal.throwIfCanceled();
+  if(failure[0]!=null)throw new NotesRepository.UserError(failure[0].isEmpty()?"PIN을 입력해 주세요.":failure[0]);
+ }
+ private final Handler clipboardHandler=new Handler(Looper.getMainLooper());
+ /** The clip this app placed for a secret value (its timestamp), until it is cleared or replaced. */
+ private long secretClip=-1,secretClipDue=0;
+ /**
+  * Copies a secret-note value, marked sensitive so the system hides its preview, and clears
+  * it after 30 s if the clipboard still holds it. The value is never logged.
+  */
+ private void copySecret(final String text,final CancellationSignal signal)throws Exception{
+  final String value=ClipboardPolicy.text(text);
+  final FutureTask<Void> write=new FutureTask<>(()->{signal.throwIfCanceled();ClipboardManager manager=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(manager==null)throw new IOException("Clipboard unavailable");
+   ClipData clip=ClipData.newPlainText(ClipboardPolicy.label(),value);PersistableBundle extras=new PersistableBundle();
+   extras.putBoolean(Build.VERSION.SDK_INT>=33?ClipDescription.EXTRA_IS_SENSITIVE:"android.content.extra.IS_SENSITIVE",true);clip.getDescription().setExtras(extras);
+   manager.setPrimaryClip(clip);ClipDescription placed=manager.getPrimaryClipDescription();
+   secretClip=placed==null?-1:placed.getTimestamp();secretClipDue=SystemClock.uptimeMillis()+30_000;
+   clipboardHandler.removeCallbacks(clearSecretClip);clipboardHandler.postDelayed(clearSecretClip,30_000);return null;});
+  runOnUiThread(write);
+  try{write.get(5,TimeUnit.SECONDS);}
+  catch(java.util.concurrent.ExecutionException e){Throwable cause=e.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IOException("Clipboard write failed");}
+  finally{write.cancel(false);}
+ }
+ /** Runs on the main thread; while the app is in the background the clip cannot be checked, so resume retries. */
+ private final Runnable clearSecretClip=()->{
+  if(secretClip<0||SystemClock.uptimeMillis()<secretClipDue)return;
+  ClipboardManager manager=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);if(manager==null){secretClip=-1;return;}
+  ClipDescription now;try{now=manager.getPrimaryClipDescription();}catch(RuntimeException e){now=null;}
+  // Unreadable without window focus (Android 10+): keep it and check again on focus.
+  if(now==null)return;
+  if(now.getTimestamp()==secretClip){if(Build.VERSION.SDK_INT>=28)manager.clearPrimaryClip();else manager.setPrimaryClip(ClipData.newPlainText("",""));}
+  secretClip=-1;
+ };
  final class Bridge {
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
   @JavascriptInterface public void request(String id,String operation,String payload){
    if("perfLog".equals(operation)){PerfLog.javascript(payload);return;}
-   if(id==null || id.length()>128 || payload==null || payload.length()>65536){return;}CancellationSignal signal=new CancellationSignal();if(active.putIfAbsent(id,signal)!=null)return;
+   // A note save carries up to 128 KiB of text (256 KiB plaintext); every other request stays small.
+   if(id==null || id.length()>128 || payload==null || payload.length()>(operation!=null&&operation.startsWith("notes")?1_048_576:65536)){return;}CancellationSignal signal=new CancellationSignal();if(active.putIfAbsent(id,signal)!=null)return;
    if("vaultShow".equals(operation)){
     try{final boolean visible=new JSONObject(payload).getBoolean("visible");runOnUiThread(()->{
      if(destroyed){active.remove(id);return;}
@@ -163,8 +225,18 @@ public final class MainActivity extends Activity {
      case "vaultUnlock":data=vault.unlock(p.getString("secret"),p.optBoolean("recovery"),signal,vaultEpoch);break;
      case "notesState":data=notes.state();break;
      case "notesUnlock":data=notes.unlock(p.getString("key"));break;
-     case "notesSave":data=notes.save(p);break;
+     case "notesSave":data=notes.save(payload);break;
      case "notesSync":data=notes.sync(signal);break;
+     case "notesDismissConflictCopy":data=notes.dismissConflictCopy(p.getString("id"));break;
+     // Secret notes (암호 메모): a per-device PIN or the fingerprint opens an in-process session.
+     case "notesSecretStatus":data=notes.secretStatus().put("biometric",biometricAvailable());break;
+     case "notesSecretSetPin":data=notes.secretSetPin(p.optString("pin"));break;
+     case "notesSecretUnlock":if(p.optBoolean("biometric")){authenticateBiometric(signal);data=notes.secretUnlockBiometric();}else data=notes.secretUnlock(p.optString("pin"));break;
+     case "notesSecretResetPin":data=notes.secretResetPin(p.optString("recoveryKey"),p.optString("pin"));break;
+     case "notesSecretLock":notes.lockSecrets();data=new JSONObject();break;
+     case "notesSecretTouch":data=notes.touchSecrets();break;
+     case "notesRecoveryKey":data=notes.recoveryKey();break;
+     case "notesCopySecret":copySecret(p.getString("text"),signal);data=new JSONObject();break;
      case "status":data=connectionStatus();break;
      case "cacheStatus":data=cacheStatus();break;
      case "clearCache":if(media==null)throw new IOException();media.clear();data=cacheStatus();break;
@@ -254,7 +326,7 @@ public final class MainActivity extends Activity {
    if(controller!=null){controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);controller.hide(WindowInsets.Type.statusBars());}
   }else getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
- @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused)hideStatusBar();}
+ @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused){hideStatusBar();clipboardHandler.post(clearSecretClip);}}
  @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).resume();}
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
@@ -263,6 +335,8 @@ public final class MainActivity extends Activity {
   ExchangeService.get(this).setForeground(true);
   AlbumReplicaService.get(this).start();}
  @Override protected void onPause(){foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();AlbumReplicaService.get(this).stop();ExchangeService.get(this).setForeground(false);super.onPause();}
- @Override protected void onStop(){if(vault!=null)vault.stopped();stopNonEssential();super.onStop();}
+ @Override protected void onStop(){if(vault!=null)vault.stopped();
+  // Secret notes lock when the app goes to the background; the WebView drops their content.
+  if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
  @Override protected void onDestroy(){destroyed=true;if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

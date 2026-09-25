@@ -3,6 +3,8 @@ import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/reac
 import userEvent from '@testing-library/user-event';
 import {Catalog} from './Catalog';
 import {suggestionQuery,type CatalogItem,type CatalogPage} from './catalogModel';
+/** Search lives behind the top bar's magnifier; open it once, then use the field. */
+function catalogSearch(role:'textbox'|'combobox'){if(!screen.queryByRole(role,{name:'카탈로그 검색'}))fireEvent.click(screen.getByRole('button',{name:'검색'}));return screen.getByRole(role,{name:'카탈로그 검색'});}
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn(),decode:vi.fn()}));
 vi.mock('./media',()=>({decodeImage:mocks.decode}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(e:Error)=>e.message}));
@@ -408,7 +410,7 @@ describe('mobile catalog reads',()=>{
     // form's first submit button. The clear (X) button must not be that button.
     const user=userEvent.setup();
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
+    const search=catalogSearch('textbox') as HTMLInputElement;
     await user.type(search,'john doe{Enter}');
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('john doe'));
     expect(search.value).toBe('john doe');
@@ -423,7 +425,7 @@ describe('mobile catalog reads',()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     const sortChip=()=>screen.getByRole('button',{name:/^카탈로그 정렬/});
     expect(sortChip().textContent).toBe(CHOICES['hotDay']);
-    await user.type(screen.getByRole('textbox',{name:'카탈로그 검색'}),'artist:peachbitch{Enter}');
+    await user.type(catalogSearch('textbox'),'artist:peachbitch{Enter}');
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:peachbitch'));
     expect(searchParams(lastSearch()).get('sort')).toBe('latest');
     expect(sortChip().textContent).toBe(CHOICES['latest']);
@@ -435,19 +437,19 @@ describe('mobile catalog reads',()=>{
     fireEvent.click(screen.getByRole('button',{name:'검색어 지우기'}));
     // The unfiltered hotDay page is already cached, so the restored sort is read from the chip.
     await waitFor(()=>expect(sortChip().textContent).toBe(CHOICES['hotDay']));
-    expect((screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('');
+    expect((catalogSearch('textbox') as HTMLInputElement).value).toBe('');
     expect(screen.queryByText('검색 중에는 최신순으로 표시합니다')).toBeNull();
   });
   it('preserves the unsent draft when the settings panel is applied',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    const search=screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement;
+    const search=catalogSearch('textbox') as HTMLInputElement;
     fireEvent.change(search,{target:{value:'artist:"작가" AND tag:"밤"'}});
     fireEvent.click(screen.getByRole('button',{name:/^필터/}));await screen.findByRole('dialog',{name:'필터'});
     for(const label of ['동인지','아티스트 CG','게임 CG','서양','이미지 세트','비성인','코스프레','아시아 포르노','기타','비공개'])fireEvent.click(screen.getByLabelText(label));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('categories')).toBe('[2]'));
     // The draft is neither discarded nor quietly committed by the filter apply.
-    expect((screen.getByRole('textbox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('artist:"작가" AND tag:"밤"');
+    expect((catalogSearch('textbox') as HTMLInputElement).value).toBe('artist:"작가" AND tag:"밤"');
     expect(searchParams(lastSearch()).get('text')).toBe('');
     fireEvent.submit(screen.getByRole('search'));
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:"작가" AND tag:"밤"'));
@@ -576,7 +578,8 @@ describe('mobile catalog layout',()=>{
     fireEvent.click(blocked);fireEvent.change(screen.getByLabelText('회피 태그'),{target:{value:'female:scat'}});fireEvent.click(screen.getByRole('button',{name:'추가'}));
     fireEvent.click(screen.getByRole('button',{name:'적용'}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('revealBlocked')).toBe('true'));
-    expect(screen.getByRole('button',{name:'필터 2개 적용'})).toBeTruthy();
+    // The saved 회피 태그 are the default; only the blocked switch differs from it.
+    expect(screen.getByRole('button',{name:'필터 1개 적용'})).toBeTruthy();
     expect(screen.queryByText('PC 공통 정책의 차단 항목 보기')).toBeNull();
   });
   it('shows how long ago the catalog was published and offers the server refresh in the title bar',async()=>{
@@ -613,7 +616,7 @@ describe('mobile catalog tag autocomplete',()=>{
     mocks.api.mockImplementation(async(path:string,signal?:AbortSignal)=>path.includes('/status')?status:path.includes('/suggestions?')?suggest(path):fallback(path,signal));
   }
   async function open(){render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');}
-  const type=(role:'textbox'|'combobox',text:string)=>fireEvent.change(screen.getByRole(role,{name:'카탈로그 검색'}),{target:{value:text}});
+  const type=(role:'textbox'|'combobox',text:string)=>fireEvent.change(catalogSearch(role),{target:{value:text}});
 
   it('turns a suggestion into namespace:value, quoting only a value the parser would misread',()=>{
     expect(suggestionQuery('female:big breasts')).toBe('female:big breasts');
@@ -654,12 +657,12 @@ describe('mobile catalog tag autocomplete',()=>{
     type('combobox','big');fireEvent.click(await screen.findByRole('option',{name:/female:big breasts/}));
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('female:big breasts'));
     expect(searchParams(lastSearch()).get('sort')).toBe('latest');
-    expect((screen.getByRole('combobox',{name:'카탈로그 검색'}) as HTMLInputElement).value).toBe('female:big breasts');
+    expect((catalogSearch('combobox') as HTMLInputElement).value).toBe('female:big breasts');
     expect(screen.queryByRole('listbox')).toBeNull();
   });
   it('chooses with the arrow keys and Enter, and Escape or blur closes the list',async()=>{
     serve(suggestStatus);await open();
-    const input=screen.getByRole('combobox',{name:'카탈로그 검색'});
+    const input=catalogSearch('combobox');
     type('combobox','a');await screen.findByRole('listbox');
     fireEvent.keyDown(input,{key:'Escape'});expect(screen.queryByRole('listbox')).toBeNull();
     type('combobox','as');await screen.findByRole('listbox');

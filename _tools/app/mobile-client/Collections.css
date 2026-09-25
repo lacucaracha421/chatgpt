@@ -2,12 +2,6 @@
    continuously scrolled grid. The same layout serves portrait and landscape; wider
    screens only add grid columns. */
 .mobile-collections{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;background:var(--color-bg)}
-.collection-top{display:flex;align-items:center;gap:6px;min-height:var(--mobile-header);padding:0 calc(var(--mobile-gutter) - 10px);flex-shrink:0;background:var(--color-bg);position:relative;z-index:2}
-.collection-top.is-root{padding-inline:var(--mobile-gutter)}
-.collection-top h1{font-size:22px;font-weight:600;line-height:1.2;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.collection-top__titles{display:flex;flex-direction:column;min-width:0}
-.collection-top__titles h1{font-size:18px}
-.collection-top__crumbs{font-size:12px;color:var(--color-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .collection-list,.collection-detail{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 var(--mobile-gutter) 28px}
 .collection-segments{margin-top:4px}
 .collection-search{margin-bottom:8px}
@@ -160,3 +154,10 @@
 .collection-memo-sheet,.collection-memo-choice{display:flex;flex-direction:column;gap:6px}
 /* The Showcase shelf keeps a card's height while it loads, so opening it does not settle twice. */
 .collection-shelf>p[role=status]{display:flex;align-items:center;min-height:252px}
+/* 정렬 and 내 별점 sit on the 전체 line instead of their own sticky row. */
+.collection-all{min-height:52px}
+.collection-all .collection-chips{position:static;margin:0;padding:0;background:none;overflow:visible}
+/* 내 별점 filter sheet: the slider, then the separate 미평가 toggle. */
+.collection-rating-filter{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.collection-rating-filter .step-slider{align-self:stretch}
+.collection-rating-filter .step-slider.is-idle input{opacity:.45}

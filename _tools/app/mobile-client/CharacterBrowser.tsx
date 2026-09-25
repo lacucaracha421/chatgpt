@@ -1,5 +1,7 @@
 import {LibraryHeader,type LibraryCrumb} from './LibraryHeader';
-import {FilterChips,type FilterGroup} from './FilterChips';
+import {FilterChips,activeFilterCount,type FilterGroup} from './FilterChips';
+import {characterFolderKind} from './FolderCards';
+import {createPortal} from 'react-dom';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject} from 'react';
 import {ChevronLeftIcon,ChevronRightIcon,ChevronUpIcon,FolderIcon,PhotoIcon,UserGroupIcon} from '@heroicons/react/24/outline';
@@ -7,7 +9,7 @@ import {Button,IconButton} from './ui';
 import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
 import {Gallery} from './Gallery';
-import {RequestGate} from './model';
+import {DEFAULT_DENSITY,RequestGate} from './model';
 import type {Asset,AssetFiltersValue} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
 import {filterSummary} from './AssetFilters';
@@ -27,7 +29,17 @@ import './characters.css';
 type Location={node:string|null;filter:CharacterFilter;filters:AssetFiltersValue};
 type Cached={page:CharacterPage;scroll:number};
 const ROOT:Location={node:null,filter:'all',filters:{...EMPTY_FILTERS}};
-const labels:Record<CharacterFilter,string>={all:'전체',unclassified:'미분류',needs_review:'추가 확인'};
+/** The series filters the mobile app offers; 추가 확인 (needs_review) stays a server scope only. */
+const labels:Partial<Record<CharacterFilter,string>>={unclassified:'미분류',all:'전체 이미지'};
+const SERIES_FILTERS:CharacterFilter[]=['unclassified','all'];
+/**
+ * A series opens on 미분류 (the images still waiting for a character); every other scope has
+ * only 전체. Node ids carry their kind (`series:<id>`), so this works before the index loads.
+ */
+export function defaultCharacterFilter(node:string|null,index?:CharacterIndex):CharacterFilter {
+  const kind=index?.nodes.find(item=>item.id===node)?.kind??(node?.startsWith('series:')?'series':undefined);
+  return kind==='series'?'unclassified':'all';
+}
 
 /** The character context a character gallery hands to its viewer, or null for any other scope. */
 export function viewerCharacterContext(node:CharacterNode|undefined|null,index:CharacterIndex|undefined) {
@@ -67,7 +79,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:Characte
   </button>;
 }
 
-export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,review}:{review?:{enabled:boolean;refreshKey:unknown;onOpen(target:{id:string;name:string}):void};entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({optionsHost,onCloseOptions,entryKey=0,crumbs=[],onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit,review}:{/** The open 보기 옵션 sheet's filter slot (null while closed); absent when used standalone, which keeps the chips inline. */optionsHost?:HTMLElement|null;onCloseOptions?():void;review?:{enabled:boolean;refreshKey:unknown;onOpen(target:{id:string;name:string}):void};entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -128,7 +140,7 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
   // entry effect updates its ref eagerly while `where` commits later, so comparing the two
   // reported a drill-down for a folder that had just been opened and wrongly consumed Back.
   const drilled=useRef(false);
-  useEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:'all',filters:{...EMPTY_FILTERS}});}},[initialNode,entryKey,active,navigate]);
+  useEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:defaultCharacterFilter(initialNode,latest.current.index),filters:{...EMPTY_FILTERS}});}},[initialNode,entryKey,active,navigate]);
   // Changing a filter in the entry folder does not create a parent navigation step, and
   // entering a different child or moving between Series filters is a different scope, so
   // the filters start empty rather than carrying the previous scope's narrowing into it.
@@ -143,6 +155,9 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
       if(s.filtersOpen){setFiltersOpen(null);return true;}
       if(hasActiveFilters(s.where.filters)){applyFilters({...EMPTY_FILTERS});return true;}
       if(!s.where.node)return false;
+      // Resetting also returns a series from 전체 이미지 to its default 미분류 before leaving.
+      const home=defaultCharacterFilter(s.where.node,s.index);
+      if(s.where.filter!==home){navigate({node:s.where.node,filter:home,filters:{...EMPTY_FILTERS}});return true;}
       // A folder opened directly from the index is a top-level entry, not an in-browser
       // drill-down. Consuming Back there would strand the user on the bare series
       // overview, so decline it and let the host restore the actual prior context.
@@ -155,7 +170,7 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
       if(!parent||parent===appliedInitialNode.current)drilled.current=false;
       // Stepping up keeps the scope filters: the parent folder is the same kind of scope as
       // the child, so carrying the filter set lets the user keep narrowing while walking up.
-      navigate({node:parent,filter:'all',filters:s.where.filters});return true;
+      navigate({node:parent,filter:defaultCharacterFilter(parent,s.index),filters:s.where.filters});return true;
     };
     return()=>{backRef.current=null;};
   },[backRef,navigate,applyFilters]);
@@ -266,7 +281,7 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
   const stale=!page&&busy&&!error&&!!where.node&&!!lastPage.current;
   const galleryItems=page?.items??(stale?lastPage.current!.items:[]);
   const foldable=folderStrip&&children.length>0;
-  const filterControls=(node?.kind==='series'||foldable)&&<div className="character-filters">{node?.kind==='series'&&(Object.keys(labels) as CharacterFilter[]).map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}{foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>}</div>;
+  const filterControls=(node?.kind==='series'||foldable)&&<div className="character-filters">{node?.kind==='series'&&SERIES_FILTERS.map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}{foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>}</div>;
   const overview=<>
     {review&&node?.kind==='character'&&<CharacterReviewChip key={node.id} enabled={review.enabled&&active&&!paused} targetId={node.sourceId} refreshKey={review.refreshKey} onOpen={()=>review.onOpen({id:node.sourceId,name:node.name})}/>}
     {!landscape&&filterControls}
@@ -276,7 +291,7 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
     {index&&!index.ready&&<div className="empty-state"><h3>캐릭터 보기가 아직 공유되지 않았습니다</h3><p>PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다.</p></div>}
     {landscape&&node?.kind==='series'&&node.heroAssetId&&<div className="character-hero"><Preview id={node.heroAssetId} paused={!active||paused} label={`${node.name} 대표 이미지`}/></div>}
     {!!children.length&&landscape&&node&&<h4 className="character-section-title">{node.kind==='group'?'그룹 캐릭터':'캐릭터 · 폴더'}</h4>}
-    {!!children.length&&<div key={where.node??'root'} id={folderStrip?folderStripId:undefined} className={`character-cards${folderStrip?' character-folder-strip':pages>1?' character-cards-paged':''}`} hidden={folderStrip&&foldersCollapsed} role={folderStrip?'region':undefined} aria-label={folderStrip?'캐릭터 폴더':undefined} tabIndex={folderStrip?0:undefined} style={folderStrip?undefined:{gridTemplateColumns:`repeat(${columns},minmax(0,${landscape?'180px':'1fr'}))`}}>{(folderStrip?children:children.slice(cardPage*capacity,(cardPage+1)*capacity)).map(child=><Card key={`${index?.revision}:${child.id}`} node={child} count={index?.scopes.find(s=>s.nodeId===child.id&&s.filter==='all')?.totalCount??0} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={landscape&&child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>enterInside({node:child.id,filter:'all'})}/>)}</div>}
+    {!!children.length&&<div key={where.node??'root'} id={folderStrip?folderStripId:undefined} className={`character-cards${folderStrip?' character-folder-strip':pages>1?' character-cards-paged':''}`} hidden={folderStrip&&foldersCollapsed} role={folderStrip?'region':undefined} aria-label={folderStrip?'캐릭터 폴더':undefined} tabIndex={folderStrip?0:undefined} style={folderStrip?undefined:{gridTemplateColumns:`repeat(${columns},minmax(0,${landscape?'180px':'1fr'}))`}}>{(folderStrip?children:children.slice(cardPage*capacity,(cardPage+1)*capacity)).map(child=><Card key={`${index?.revision}:${child.id}`} node={child} count={index?.scopes.find(s=>s.nodeId===child.id&&s.filter==='all')?.totalCount??0} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={landscape&&child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>)}</div>}
     {!folderStrip&&pages>1&&<div className="character-card-pages"><IconButton label="이전 폴더" icon={ChevronLeftIcon} disabled={!cardPage} onClick={()=>setCardsPage(cardPage-1)}/><span>{cardPage+1} / {pages}</span><IconButton label="다음 폴더" icon={ChevronRightIcon} disabled={cardPage+1>=pages} onClick={()=>setCardsPage(cardPage+1)}/></div>}
     {node?.description&&<p className="character-description">{node.description}</p>}
     {landscape&&filterControls}
@@ -284,8 +299,12 @@ export function CharacterBrowser({entryKey=0,crumbs=[],onOptions=()=>{},onLocati
     {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<div className="empty-state"><h3>{where.node?(filterPending?'조건에 맞는 자산이 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}</h3>{where.node&&hasActiveFilters(shown?.filters??EMPTY_FILTERS)&&<p>필터를 해제하면 이 보기의 자산을 모두 볼 수 있습니다.</p>}</div>}
   </>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
-    <LibraryHeader title={node?.name??'시리즈'} count={page?.totalCount??scope?.totalCount} crumbs={[...crumbs,...ancestors.map(ancestor=>({id:ancestor.id,name:ancestor.name,onSelect:()=>{drilled.current=ancestor.id!==appliedInitialNode.current&&!!ancestor.parentId;navigate({node:ancestor.id,filter:'all',filters:{...EMPTY_FILTERS}});}}))]} onBack={goUp} onOptions={()=>onOptions(page?.items??[])}/>
-    <Gallery items={galleryItems} stale={stale} intro={<>{overview}{where.node&&<FilterChips value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>
+    <LibraryHeader kind={characterFolderKind(node?.kind)} title={node?.name??'시리즈'} count={page?.totalCount??scope?.totalCount} crumbs={[...crumbs,...ancestors.map(ancestor=>({id:ancestor.id,name:ancestor.name,onSelect:()=>{drilled.current=ancestor.id!==appliedInitialNode.current&&!!ancestor.parentId;navigate({node:ancestor.id,filter:defaultCharacterFilter(ancestor.id,index),filters:{...EMPTY_FILTERS}});}}))]} onBack={goUp} onOptions={()=>onOptions(page?.items??[])} changed={where.node?activeFilterCount(shown?.filters??EMPTY_FILTERS)+(density!==DEFAULT_DENSITY?1:0)+(where.filter!==defaultCharacterFilter(where.node,index)?1:0):0}/>
+    <Gallery items={galleryItems} stale={stale} intro={<>{overview}{where.node&&optionsHost===undefined&&<FilterChips value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused}/>
+    {optionsHost!==undefined&&where.node&&<>
+      {optionsHost&&active&&createPortal(<><p className="view-options-label">필터</p><FilterChips sheet={false} value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={null} onOpen={group=>{onCloseOptions?.();setFiltersOpen(group);}}/></>,optionsHost)}
+      <FilterChips row={false} value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>
+    </>}
     {more&&<div className="loading-line is-bottom" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
   </section>;

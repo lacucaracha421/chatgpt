@@ -1,1 +1,9 @@
 .collection-browser__segment-button--quiet:not([aria-pressed="true"]) { color: var(--color-text-muted); }
+
+/* 내 별점 filter: a stepped slider (전체, 0.5 … 5.0) with the value and a separate 미평가 toggle. */
+.collection-rating-filter { display: grid; gap: var(--space-1); }
+.collection-rating-filter__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-left: 80px; }
+.collection-rating-filter__value { font-size: var(--text-sm); color: var(--color-text); font-variant-numeric: tabular-nums; }
+.collection-rating-filter .ui-slider input { width: 100%; }
+.collection-rating-filter .ui-slider input.is-idle { opacity: .45; }
+.collection-rating-filter .ui-button[aria-pressed="true"] { background: var(--color-filter-selected); border-color: var(--color-filter-border); color: var(--color-filter-text); }

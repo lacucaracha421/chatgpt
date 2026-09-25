@@ -14,6 +14,7 @@ it("creates, edits, pins, trashes and restores through the actual notes editor",
   }) as NotesRequest;
   const store=new NotesStore(request);surface(store);
   await userEvent.click(await screen.findByRole("button",{name:"새 메모"}));
+  await userEvent.click(await screen.findByRole("menuitem",{name:"메모"}));
   fireEvent.change(screen.getByRole("textbox",{name:"메모 제목"}),{target:{value:"읽을 책"}});
   fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"내일 2장 읽기"}});
   await waitFor(()=>expect(store.snapshot().saving).toBe(false));
@@ -41,12 +42,14 @@ it("keeps typing status stable without delaying local writes",async()=>{
   const request=vi.fn(async(op:string,input:any)=>op==="save"?{...note,...input,localRevision:1,pending:true}:{unlocked:true,notes:[note],lastSyncedAt:null});
   const store=new NotesStore(request as NotesRequest);surface(store);
   await userEvent.click(await screen.findByRole("button",{name:/Draft/}));
+  // Existing text notes open in the rendered view; clicking the text switches to the source.
+  await userEvent.click(screen.getByText("여기에 적어보세요…"));
   vi.useFakeTimers();
   try {
     fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"typing"}});
     await act(async()=>{await Promise.resolve();});
     expect(request).toHaveBeenCalledWith("save",expect.objectContaining({body:"typing"}));
-    expect(screen.getByText("편집 중 · 자동 저장")).toBeInTheDocument();
+    expect(screen.getByText("편집 중")).toBeInTheDocument();
     await act(async()=>{vi.advanceTimersByTime(1200);});
     expect(screen.getByText("PC에 저장됨 · 동기화 대기")).toBeInTheDocument();
   } finally { vi.useRealTimers(); }

@@ -1,0 +1,1849 @@
+{
+ "description": "Notes v2 three-way merge vectors (ADR-0035 amendment, docs/research/notes-v2-design-20260924.md section 4). Each vector gives the decrypted plaintext payloads base (last server-acknowledged), local (pending edit) and remote (pulled server row). expected is the merged payload exactly as the merging client serializes it, or {\"conflict\": true} when the merge must fall back to keeping both copies. Shared by the PC (Rust) and Android (Java) tests.",
+ "rules": [
+  "Canonical serialization: keys schema, type, title, body, memo, color, labels, items, fields, pinned, deleted, archived, createdAt, updatedAt, then unknown keys. Absent: schema (v1), type when text, memo when none, color when none, labels when empty, items/fields when not that type, archived when false.",
+  "items and fields are sorted by (order, id) with plain code-unit comparison.",
+  "A checklist body is the GFM task list of open items then checked items, each group by (order, id); a secret body is 'label: value' lines by (order, id), then a blank line and memo when memo is non-empty. Newlines inside an item or field collapse to one space.",
+  "Scalars: the side that changed wins; both changed differently: title/type/text body/memo -> conflict; color/pinned -> remote; deleted/archived -> false; createdAt -> remote. updatedAt = max(local, remote). schema = max(local, remote), raised to 2 when v2 fields are present.",
+  "A type change on one side plus a body/memo/items/fields change on the other side is a conflict.",
+  "Items/fields per id: text/label/value collide -> conflict; checked/order collide -> remote. Deleted on one side: removed unless the other side changed text or checked (item) or label or value (field); a pure move does not keep it.",
+  "Labels per case-insensitive key: in base -> kept only if still on both sides; not in base -> kept if on either side. Order: remote labels, then local additions; the remote spelling wins.",
+  "Unknown keys (top level and per item/field) merge with the one-side rule; a collision takes remote.",
+  "Any side with schema > 2 or an unknown type -> conflict."
+ ],
+ "vectors": [
+  {
+   "name": "text: title on one side, body on the other",
+   "base": {
+    "title": "장보기",
+    "body": "a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "title": "장보기 목록",
+    "body": "a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "b",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "title": "장보기 목록",
+    "body": "b",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "text: both sides change the body differently",
+   "base": {
+    "title": "장보기",
+    "body": "a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "title": "장보기",
+    "body": "local",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "remote",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "name": "text: both sides change the title differently",
+   "base": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "title": "L",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "R",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "name": "text: both sides make the same change",
+   "base": {
+    "title": "장보기",
+    "body": "a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "title": "장보기",
+    "body": "same",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "same",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "expected": {
+    "title": "장보기",
+    "body": "same",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "colour: both change, the server value wins",
+   "base": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "color": "red",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "color": "blue",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "color": "blue",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "colour: cleared on one side",
+   "base": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "color": "amber",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "color": "amber",
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "trash on one side, body edit on the other",
+   "base": {
+    "title": "장보기",
+    "body": "a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "title": "장보기",
+    "body": "a",
+    "pinned": false,
+    "deleted": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "b",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "expected": {
+    "title": "장보기",
+    "body": "b",
+    "pinned": false,
+    "deleted": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "restore on one side, title edit on the other",
+   "base": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "새 제목",
+    "body": "",
+    "pinned": false,
+    "deleted": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "title": "새 제목",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "archive on one side, pin on the other",
+   "base": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "",
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "pinned": true,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: check one item locally, edit another remotely",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀\n- [x] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": true,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀 10개",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀 10개",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀 10개\n- [x] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": true,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀 10개",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: items added on both sides",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 빵",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "22222222-0000-4000-8000-00000000000c",
+      "text": "빵",
+      "checked": false,
+      "order": "m"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 사과",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "22222222-0000-4000-8000-00000000000d",
+      "text": "사과",
+      "checked": false,
+      "order": "x"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 빵\n- [ ] 사과",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "22222222-0000-4000-8000-00000000000c",
+      "text": "빵",
+      "checked": false,
+      "order": "m"
+     },
+     {
+      "id": "22222222-0000-4000-8000-00000000000d",
+      "text": "사과",
+      "checked": false,
+      "order": "x"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: deleted locally, unchanged remotely",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: deleted locally, text edited remotely keeps the edited item",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 저지방 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "저지방 우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 저지방 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "저지방 우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: deleted remotely, checked locally keeps the checked item",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀\n- [x] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": true,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀\n- [x] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": true,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: deleted locally, only moved remotely stays deleted",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀\n- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "z"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: both edit the same item's text differently",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 두유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "두유",
+      "checked": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 귀리 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "귀리 우유",
+      "checked": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "name": "checklist: both move the same item, the server order wins",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "c"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀\n- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "t"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 달걀\n- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "t"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: move on one side, text edit on the other of the same item",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "c"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유 2개\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유 2개",
+      "checked": false,
+      "order": "V"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유 2개\n- [ ] 달걀",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유 2개",
+      "checked": false,
+      "order": "c"
+     },
+     {
+      "id": "11111111-0000-4000-8000-00000000000b",
+      "text": "달걀",
+      "checked": false,
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "checklist: equal order keys tie-break by id",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "",
+    "items": [],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 치즈",
+    "items": [
+     {
+      "id": "33333333-0000-4000-8000-00000000000f",
+      "text": "치즈",
+      "checked": false,
+      "order": "m"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 버터",
+    "items": [
+     {
+      "id": "33333333-0000-4000-8000-00000000000e",
+      "text": "버터",
+      "checked": false,
+      "order": "m"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 버터\n- [ ] 치즈",
+    "items": [
+     {
+      "id": "33333333-0000-4000-8000-00000000000e",
+      "text": "버터",
+      "checked": false,
+      "order": "m"
+     },
+     {
+      "id": "33333333-0000-4000-8000-00000000000f",
+      "text": "치즈",
+      "checked": false,
+      "order": "m"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "labels: removed on one side, added on both",
+   "base": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "labels": [
+     "업무",
+     "개인"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "labels": [
+     "업무",
+     "여행"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "labels": [
+     "업무",
+     "개인",
+     "긴급"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "labels": [
+     "업무",
+     "긴급",
+     "여행"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "labels: the same label added on both sides differs only in case",
+   "base": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "labels": [
+     "Work"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "labels": [
+     "work"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "",
+    "labels": [
+     "work"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "type: converted to a checklist locally while the body changed remotely",
+   "base": {
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "- [ ] 우유\n- [ ] 달걀",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "name": "type: converted to a checklist locally, pinned remotely",
+   "base": {
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "secret: value edited locally, field added remotely",
+   "base": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku",
+    "memo": "",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku",
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku2",
+    "memo": "",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku2",
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku\n비밀번호: hunter2",
+    "memo": "",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku",
+      "order": "V"
+     },
+     {
+      "id": "44444444-0000-4000-8000-000000000002",
+      "label": "비밀번호",
+      "value": "hunter2",
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku2\n비밀번호: hunter2",
+    "memo": "",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku2",
+      "order": "V"
+     },
+     {
+      "id": "44444444-0000-4000-8000-000000000002",
+      "label": "비밀번호",
+      "value": "hunter2",
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "secret: both edit the same value differently",
+   "base": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "비밀번호: hunter2",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000002",
+      "label": "비밀번호",
+      "value": "hunter2",
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "비밀번호: a",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000002",
+      "label": "비밀번호",
+      "value": "a",
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "비밀번호: b",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000002",
+      "label": "비밀번호",
+      "value": "b",
+      "order": "h"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "name": "secret: memo edited on one side",
+   "base": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku\n\n처음",
+    "memo": "처음",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku",
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku\n\n수정",
+    "memo": "수정",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku",
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku\n\n처음",
+    "memo": "처음",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku",
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "secret",
+    "title": "장보기",
+    "body": "아이디: laku\n\n수정",
+    "memo": "수정",
+    "fields": [
+     {
+      "id": "44444444-0000-4000-8000-000000000001",
+      "label": "아이디",
+      "value": "laku",
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "unknown fields survive and merge",
+   "base": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z",
+    "reminder": "09:00"
+   },
+   "local": {
+    "title": "새 제목",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z",
+    "reminder": "09:00"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z",
+    "reminder": "10:00"
+   },
+   "expected": {
+    "title": "새 제목",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z",
+    "reminder": "10:00"
+   }
+  },
+  {
+   "name": "unknown item fields survive",
+   "base": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V",
+      "due": "2026-10-01"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [x] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": true,
+      "order": "V",
+      "due": "2026-10-01"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [ ] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": false,
+      "order": "V",
+      "due": "2026-10-01"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "장보기",
+    "body": "- [x] 우유",
+    "items": [
+     {
+      "id": "11111111-0000-4000-8000-00000000000a",
+      "text": "우유",
+      "checked": true,
+      "order": "V",
+      "due": "2026-10-01"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "a newer schema on either side is never merged",
+   "base": {
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "title": "L",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 3,
+    "type": "drawing",
+    "title": "장보기",
+    "body": "",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "name": "v1 base, v2 change on one side upgrades the schema",
+   "base": {
+    "title": "장보기",
+    "body": "a",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "a",
+    "labels": [
+     "업무"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "title": "장보기",
+    "body": "b",
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "title": "장보기",
+    "body": "b",
+    "labels": [
+     "업무"
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  }
+ ]
+}

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message } from "@tauri-apps/plugin-dialog";
-import { flushNotes, hasUnsavedNotes } from "./store";
+import { flushNotes, hasUnsavedNotes, lockAllSecrets } from "./store";
 
 /** Remains mounted when the user leaves Notes with a local write pending. */
 export function useNotesCloseGuard(){
@@ -27,6 +27,8 @@ export function useNotesCloseGuard(){
           await message("PC에 아직 저장하지 못한 메모가 있습니다. 메모 화면에서 내용을 복사하거나 저장을 다시 시도해 주세요.",{title:"메모 저장 확인",kind:"warning"});
           return;
         }
+        // Hiding the window (to the tray) re-locks secret notes.
+        await lockAllSecrets();
         await invoke("workload_close_window");
       }finally{closing=false;}
     }).then(stop=>{if(disposed)stop();else unlisten=stop;});

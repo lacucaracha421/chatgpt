@@ -193,7 +193,7 @@ PC:
 - Lightweight processing mode ("데이터 처리용 라이트모드"): while the user is on the mobile app, keep only the PC work that mobile features depend on running and pause nearly everything else.
 
 PC and mobile:
-- Notes like a notes app, on both PC and mobile. Scope chosen 2026-09-24: checklist notes (items can be checked and reordered), note colours, and Markdown rendering. Design must fit the existing encrypted notes sync.
+- ~~Notes like a notes app, on both PC and mobile. Scope chosen 2026-09-24: checklist notes (items can be checked and reordered), note colours, and Markdown rendering. Design must fit the existing encrypted notes sync.~~ Implemented 2026-09-25 as Notes v2 (design `docs/research/notes-v2-design-20260924.md` incl. 2026-09-25 scope additions: labels, search, archive, secret notes with per-device PIN/fingerprint, Linux keyring unlock prompt). PC on library schema 96 (production migrated 2026-09-25 with a pre-migration backup); Android 0.8.16 installed. Device/native checks (fingerprint, IME lift, real PC↔tablet merge) pending the user's use.
 
 Collector (`extension-list/`):
 - ~~A better way into subfolders than double-tap~~ Kept as double-tap (2026-09-25): the user reviewed the options (one tap on a folder with subfolders enters it, tap-again without a time limit, long-press, a second ring) and chose to keep the current behaviour for now.
@@ -222,7 +222,17 @@ The S36 candidate queue (자동 후보 + 추천 awaiting a judgment) is one list
 
 ## MOBILE-DESIGN-001 — Premium mobile layout pass (Galaxy Tab S11 portrait)
 
-Status: `TODO` — brief given by the user 2026-09-24; start after the mobile Private Vault UI work lands (same files). Home screen is out of scope (waits for the Revisit rebuild).
+Status: `IN PROGRESS` — implemented in Android 0.8.12 (49) on 2026-09-25, not yet accepted on the tablet. Brief given by the user 2026-09-24. Home screen content is out of scope (waits for the Revisit rebuild).
+
+Decisions (user, 2026-09-25, from the mockups in [`docs/prototypes/mobile-design-20260925/`](../prototypes/mobile-design-20260925/README.md)):
+1. Top bar brand B: the logo mark plus a larger tab name.
+2. Library root A: three columns whose covers flex so exactly three whole rows fill the first screen (computed from the real viewport at runtime), an end line "아래에 분류 N개 더", and row snapping.
+3. Viewer actions A: icon plus short label; 분류 = folder icon, 앨범 = stacked squares; 휴지통 set apart.
+4. Catalog 필터 chip: saved 회피 태그 alone count as the default (neutral chip); PC grey plus a count only when something differs.
+5. 설정 stays on Home only.
+6. Bottom navigation 60 px.
+7. `확인 N` on the Library bar only; endless grids end in a fade above the navigation.
+Not yet verified on the device: the layout on the real Tab S11 (including the Library root fit), touch feel, and the smoothness of the new-tile entrance.
 
 Goal: a calmer, premium feel ("이제 고급감을 추구할 때").
 - **One screen, one conclusion:** on the S11 in portrait each screen's content must resolve within the viewport — no section header or row that peeks just below the fold (e.g. Library root's '기타' / '오리지널' needing a small scroll to appear). Compose sections so the first screen ends cleanly.

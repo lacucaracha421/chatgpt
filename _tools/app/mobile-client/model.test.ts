@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {imageNeighbours, justifiedRows, mapBounded, normalizePage, pagePath, RequestGate, fitTransform} from './model';
+import {imageNeighbours, justifiedRows, mapBounded, normalizePage, pagePath, RequestGate, fitTransform, rowHeight, validDensity} from './model';
 import type {Asset} from './types';
 const assets: Asset[] = [0.4,1.5,1,3,0.6,2,1.4].map((ratio,index) => ({id:String(index),kind:'image',ratio}));
 describe('gallery geometry', () => {
@@ -46,4 +46,9 @@ describe('request ordering and bounded media', () => {
     const output=await mapBounded([1,2,3,4,5,6],2,async value=>{active++; peak=Math.max(peak,active); await new Promise(resolve=>setTimeout(resolve,1)); active--; return value*2;});
     expect(peak).toBe(2); expect(output).toEqual([2,4,6,8,10,12]);
   });
+});
+it('keeps the stored thumbnail sizes and interpolates the half steps of the slider',()=>{
+  expect([0,1,2].map(value=>rowHeight(value,1000))).toEqual([290,220,150]);
+  expect(rowHeight(1.5,1000)).toBe(185);
+  expect([validDensity(0.5),validDensity(3),validDensity('2'),validDensity(1.25)]).toEqual([0.5,1,1,1]);
 });

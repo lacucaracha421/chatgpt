@@ -5,10 +5,12 @@ import {useCollectionEdits} from './useCollectionEdits';
 import {FilmDetails} from './FilmDetails';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
 import {useLevelMotion} from './motion';
-import {ArrowLeftIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, StarIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
 import {BottomSheet} from './BottomSheet';
+import {SearchButton,TopBar,TopBarSearch} from './TopBar';
+import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
 import {PhysicalCover} from '../src/collections/physical/PhysicalCover';
 import {PaperbackEngine, type BookTexture} from '../src/collections/physical/PaperbackEngine';
@@ -297,8 +299,32 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
 }
 const nearEnd=(element:HTMLElement)=>element.clientHeight>0&&element.scrollHeight-element.scrollTop-element.clientHeight<element.clientHeight;
 
+/** 내 별점 filter stops: 전체, then 0.5 … 5.0 (exact match, as the server applies it). */
+const RATING_STEPS:Filters['rating'][]=['all',.5,1,1.5,2,2.5,3,3.5,4,4.5,5];
+/**
+ * The 내 별점 filter: a stepped slider plus a separate 미평가 toggle (never both). Dragging
+ * settles for a moment before the list reloads, so one gesture is one request.
+ */
+function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(value:Filters['rating']):void}) {
+  const step=typeof value==='number'?Math.min(10,Math.max(1,Math.round(value*2))):0;
+  const [draft,setDraft]=useState(step);
+  const commit=useRef(onChange);commit.current=onChange;
+  useEffect(()=>{setDraft(step);},[step,value]);
+  useEffect(()=>{
+    if(draft===step)return;
+    const timer=window.setTimeout(()=>commit.current(RATING_STEPS[draft]),250);
+    return()=>clearTimeout(timer);
+  },[draft,step]);
+  const text=(index:number)=>index===step?ratingLabel(value):ratingLabel(RATING_STEPS[index]);
+  return <div className="collection-rating-filter">
+    <StepSlider label="내 별점" count={RATING_STEPS.length} index={draft} defaultIndex={0} valueText={text} className={value==='unrated'?'is-idle':undefined} onChange={setDraft}/>
+    <button className={`filter-chip${value==='unrated'?' selected':''}`} aria-pressed={value==='unrated'} onClick={()=>onChange(value==='unrated'?'all':'unrated')}>미평가만</button>
+    <p className="hint">고른 별점과 같은 작품만 보여 줍니다.</p>
+  </div>;
+}
 export function Collections({active,paused,backRef}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>}) {
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
+  const [searchOpen,setSearchOpen]=useState(false);
   const type:CollectionKind=tab==='av'?'game':tab;
   const [filtersByType,setFiltersByType]=useState<Record<CollectionKind,Filters>>(()=>({game:defaultCollectionFilters(),manga:defaultCollectionFilters(),movie:defaultCollectionFilters()}));
   const filters=filtersByType[type];
@@ -370,18 +396,27 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const background=item?(item.type==='game'?item.selectedHeroArtworkId:item.selectedBackdropArtworkId):null;
   const maker=item?detailMaker(item):'';
   const revision=main.page?.revision??'';
-  const sortLabel=`${SORT_LABELS[filters.sort]} · ${sortDirectionLabels(filters.sort)[filters.direction]}`;
+  // The release-date sort reads as just 최신순/오래된순 (user request, 2026-09-25).
+  const sortLabel=filters.sort==='media_date'?sortDirectionLabels(filters.sort)[filters.direction]:`${SORT_LABELS[filters.sort]} · ${sortDirectionLabels(filters.sort)[filters.direction]}`;
   // The memo (`description`) has its own section; manga overviews are imported provider text.
   const description=item&&item.type!=='manga'?item.overview:null;
   const score=item?edits.visible(item.id,'myScore',item.myScore??null).value:null;
   // A queued rating shows on the cards too, until the list re-reads the server.
   const card=(work:CollectionSummary)=>{const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
+  // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
+  const searching=searchOpen||!!query||!!search;
+  const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
   const header=selected
-    ?<header className="collection-top"><IconButton label="뒤로" icon={ArrowLeftIcon} onClick={()=>setSelected(null)}/><div className="collection-top__titles"><span className="collection-top__crumbs">컬렉션 › {labels[type]}{showcaseAll?' › 쇼케이스':''}</span></div></header>
+    ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {labels[type]}{showcaseAll?' › 쇼케이스':''}</span>}/>
     :showcaseAll
-      ?<header className="collection-top"><IconButton label="뒤로" icon={ArrowLeftIcon} onClick={()=>setShowcaseAll(false)}/><div className="collection-top__titles"><span className="collection-top__crumbs">컬렉션 › {labels[type]}</span><h1>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</h1></div></header>
-      :<header className="collection-top is-root"><h1>컬렉션</h1></header>;
+      ?<TopBar back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</>}/>
+      :searching&&tab!=='av'
+        ?<TopBarSearch title="컬렉션" onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
+          <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
+          {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
+        </form></TopBarSearch>
+        :<TopBar title="컬렉션" actions={tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}/>;
 
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{main.legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>;
@@ -394,22 +429,18 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {listPull}
       <div className="library-segments collection-segments" role="tablist" aria-label="컬렉션 유형">{TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>chooseTab(value)}>{labels[value]}</button>)}</div>
       {tab==='av'?<div className="empty-state"><RectangleStackIcon/><h2>AV 컬렉션은 준비 중입니다</h2><p>PC 앱에서 AV 컬렉션이 준비되면 여기에 표시됩니다.</p></div>:<>
-      <form className="library-search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
-        <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
-        {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
-      </form>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:<>
         {!filtered&&<section className="collection-showcase-fold" aria-label="쇼케이스">
           <div className="collection-section"><button className="collection-fold" aria-expanded={showcaseOpen} onClick={()=>setShowcaseOpen(open=>!open)}><h2>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</h2><ChevronDownIcon aria-hidden="true"/></button>{showcaseOpen&&<Button variant="ghost" className="collection-more" onClick={()=>setShowcaseAll(true)}>전체 보기<ChevronRightIcon/></Button>}</div>
           {showcaseOpen&&<div className="collection-shelf">{showcase.busy&&!showcase.items.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{!showcase.busy&&showcase.committed&&!showcase.items.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcase.items.map(work=><WorkCard key={work.id} work={card(work)} revision={showcase.page?.revision??''} active={live&&!selected} meta={false} onOpen={openWork}/>)}</div>}
         </section>}
-        <div className="collection-section"><h2>{filtered?'검색 결과':'전체'}{main.page?.totalCount!=null&&<span className="numeric muted collection-total" aria-label="필터 결과 개수"> {main.page.totalCount.toLocaleString()}</span>}</h2></div>
+        <div className="collection-section collection-all"><h2>{filtered?'검색 결과':'전체'}{main.page?.totalCount!=null&&<span className="numeric muted collection-total" aria-label="필터 결과 개수"> {main.page.totalCount.toLocaleString()}</span>}</h2>
         <div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
           <button className="filter-chip" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/>{sortLabel}<ChevronDownIcon aria-hidden="true"/></button>
           <button className={`filter-chip ${filters.rating!=='all'?'selected':''}`} onClick={()=>setSheet('rating')}>{filters.rating==='all'?'내 별점':ratingLabel(filters.rating)}<ChevronDownIcon aria-hidden="true"/></button>
           {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
-        </div>
+        </div></div>
         {main.busy&&!main.items.length&&<p role="status" className="hint">컬렉션을 불러오는 중…</p>}
         {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
         <div className={`collection-grid collection-grid-${type}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected} onOpen={openWork}/>)}</div>
@@ -447,11 +478,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>changeFilters({...filters,sort:value})}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
       <p className="collection-sheet-label">순서</p><div role="radiogroup" aria-label="정렬 순서">{(['desc','asc'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.direction===value} onClick={()=>changeFilters({...filters,direction:value})}>{sortDirectionLabels(filters.sort)[value]}<span className="radio-dot"/></button>)}</div>
     </BottomSheet>}
-    {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}>
-      <div role="radiogroup" aria-label="내 별점">{(['all','unrated'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.rating===value} onClick={()=>{changeFilters({...filters,rating:value});setSheet(null);}}>{value==='all'?'전체':'미평가'}<span className="radio-dot"/></button>)}
-        <p className="collection-sheet-label">이 별점인 작품만</p>
-        <div className="collection-star-grid">{Array.from({length:11},(_,i)=>(10-i)/2).map(score=><button key={score} role="radio" aria-checked={filters.rating===score} aria-label={`${score.toFixed(1)}점`} onClick={()=>{changeFilters({...filters,rating:score});setSheet(null);}}><StarIcon aria-hidden="true"/><span className="numeric">{score.toFixed(1)}</span></button>)}</div></div>
-    </BottomSheet>}
+    {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/></BottomSheet>}
     {active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>
       <div className="collection-cover-stage"><CoverStage key={`${edition}:${coverIndex}:${coverMode}`} item={item} id={covers[coverIndex].id} revision={detail!.revision} label={covers[coverIndex].label} mode={physical?coverMode:'flat'} onFlat={()=>setCoverMode('flat')}/></div>

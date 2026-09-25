@@ -48,3 +48,81 @@
 
 .notes-body:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--space-1); border-radius: var(--radius-sm); }
 .notes-recovery-qr { align-self: flex-start; background: #fff; border-radius: var(--radius-sm, 4px); }
+
+/* Notes v2: colour tint, rendered text, checklists, labels, secret notes. */
+.notes-list-item.has-tint:not(.is-selected) { background: color-mix(in srgb, var(--note-tint) 13%, transparent); }
+.notes-list-item.has-tint:not(.is-selected):hover { background: color-mix(in srgb, var(--note-tint) 20%, transparent); }
+.notes-list-item.is-selected.has-tint { box-shadow: inset 3px 0 0 var(--note-tint), var(--selection-echo); }
+.notes-editor.has-tint { background: color-mix(in srgb, var(--note-tint) 7%, transparent); }
+.notes-copy-mark { margin-left: auto; font-size: var(--text-xs); font-weight: 400; opacity: .75; }
+.notes-editor-actions .ui-menu__trigger.notes-menu-trigger, .notes-menu-trigger { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; cursor: pointer; }
+.notes-menu-trigger:hover { background: var(--color-surface-hover); }
+.notes-menu-trigger svg { width: 18px; height: 18px; }
+.notes-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
+.notes-readonly { margin: 0 0 16px; color: var(--color-muted); font-size: var(--text-sm); }
+
+.notes-rendered { flex: 1; min-height: 64px; overflow-y: auto; padding: 0 12px 18px 0; cursor: text; }
+.notes-rendered__empty { color: var(--color-muted); margin: 0; }
+
+.notes-labels { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: -8px 0 18px; }
+.notes-label-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; border: 1px solid var(--color-border); border-radius: 999px; font-size: var(--text-xs); }
+.notes-label-chip button { border: 0; background: transparent; color: var(--color-muted); cursor: pointer; padding: 0 6px; font-size: var(--text-sm); line-height: 1; }
+.notes-label-chip button:hover { color: var(--color-text); }
+.notes-label-add { border: 0; background: transparent; color: var(--color-muted); font-size: var(--text-xs); cursor: pointer; padding: 3px 6px; border-radius: var(--radius-sm); }
+.notes-label-add:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.notes-label-input { font: var(--text-xs) var(--font-ui); color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 999px; padding: 3px 10px; width: 12ch; outline: none; }
+.notes-label-input:focus-visible { outline: var(--focus-width) solid var(--color-focus); }
+.notes-label-index { display: flex; flex-direction: column; margin-top: 12px; }
+.notes-label-index__title { padding: 6px 12px 4px; color: var(--color-muted); font-size: var(--text-xs); }
+.notes-label-index button { width: 100%; display: flex; justify-content: space-between; }
+
+.notes-checklist { flex: 1; min-height: 64px; overflow-y: auto; padding-bottom: 12px; }
+.notes-checklist ul { list-style: none; margin: 0; padding: 0; }
+.notes-check { display: flex; align-items: center; gap: 6px; min-height: 36px; border-radius: var(--radius-sm); }
+.notes-check.is-dragging { opacity: .45; }
+.notes-check.is-drop-target, .notes-check__drop-end { box-shadow: inset 0 2px 0 var(--color-accent); }
+.notes-check__drop-end { height: 4px; }
+.notes-check__handle { display: inline-grid; place-items: center; width: 22px; height: 28px; flex-shrink: 0; border: 0; background: transparent; color: var(--color-muted); cursor: grab; touch-action: none; opacity: 0; padding: 0; }
+.notes-check:hover .notes-check__handle, .notes-check:focus-within .notes-check__handle { opacity: 1; }
+.notes-check__handle svg, .notes-check__remove svg, .notes-checklist__add svg, .notes-checklist__done-toggle svg { width: 16px; height: 16px; }
+.notes-check input[type=checkbox] { width: 17px; height: 17px; margin: 0; flex-shrink: 0; accent-color: var(--color-accent); }
+.notes-check__text { flex: 1; min-width: 0; font: var(--text-md)/1.6 var(--font-ui); color: inherit; background: transparent; border: 0; outline: none; padding: 4px 2px; user-select: text; }
+.notes-check__text:focus-visible { box-shadow: inset 0 -1px 0 var(--color-border-strong); }
+.notes-check.is-checked .notes-check__text { color: var(--color-muted); text-decoration: line-through; }
+.notes-check__remove { border: 0; background: transparent; color: var(--color-muted); cursor: pointer; padding: 4px; border-radius: var(--radius-sm); opacity: 0; }
+.notes-check:hover .notes-check__remove, .notes-check:focus-within .notes-check__remove { opacity: 1; }
+.notes-checklist__add { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 0 28px; border: 0; background: transparent; color: var(--color-muted); font-size: var(--text-sm); cursor: pointer; padding: 6px 4px; }
+.notes-checklist__add:hover:not(:disabled) { color: var(--color-text); }
+.notes-checklist__done { margin-top: 18px; border-top: 1px solid var(--color-border); padding-top: 10px; }
+.notes-checklist__done-toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--color-muted); font-size: var(--text-sm); cursor: pointer; padding: 4px 2px; margin-bottom: 4px; }
+
+.notes-secret { flex: 1; min-height: 64px; display: flex; flex-direction: column; overflow-y: auto; }
+.notes-secret__fields { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.notes-secret__field { display: grid; grid-template-columns: minmax(8ch, 14ch) minmax(0, 1fr) auto auto auto; align-items: center; gap: 6px; }
+.notes-secret__label, .notes-secret__value { min-width: 0; font: var(--text-md)/1.5 var(--font-ui); color: inherit; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 6px 10px; outline: none; user-select: text; }
+.notes-secret__label { color: var(--color-muted); }
+.notes-secret__value { font-family: var(--font-mono); }
+.notes-secret__label:focus-visible, .notes-secret__value:focus-visible { outline: var(--focus-width) solid var(--color-focus); }
+.notes-secret__field svg { width: 17px; height: 17px; }
+.notes-secret__copied { min-height: 1.2em; color: var(--color-muted); font-size: var(--text-xs); }
+.notes-secret__memo { margin-top: 14px; min-height: 96px; }
+.notes-secret-gate { width: min(420px, calc(100% - 64px)); margin: auto; display: flex; flex-direction: column; gap: 12px; padding: 24px 0; }
+.notes-editor .notes-secret-gate { margin: 24px 0; }
+.notes-secret-gate h2 { font-size: var(--text-title); font-weight: 500; margin: 0; }
+.notes-secret-gate p { color: var(--color-muted); font-size: var(--text-sm); line-height: 1.7; margin: 0; }
+.notes-secret-gate label { font-size: var(--text-xs); }
+.notes-secret-gate__icon { width: 26px; height: 26px; color: var(--color-muted); }
+.notes-secret-gate__pin { width: 16ch; font: var(--text-lg) var(--font-mono); letter-spacing: .3em; background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border); border-radius: var(--radius-tile); padding: 8px 12px; }
+.notes-secret-gate .notes-secret-gate__error { color: var(--color-danger); }
+.notes-limit { margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
+.notes-recovery-pin { display: flex; flex-direction: column; gap: 8px; }
+.notes-editor-actions>div { align-items: center; }
+.notes-editor-actions__gap { width: 14px; }
+.notes-color-dot { display: block; width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 25%, transparent); }
+.notes-color-dot.is-empty { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-muted); }
+.notes-editor-footer { align-items: center; padding-top: 8px; }
+.notes-sync svg { width: 16px; height: 16px; }
+.notes-sync.is-syncing svg { animation: notes-sync-spin 1s linear infinite; }
+.notes-sync.is-error { color: var(--color-danger); }
+@keyframes notes-sync-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .notes-sync.is-syncing svg { animation-duration: 3s; } }

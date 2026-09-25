@@ -5,7 +5,7 @@ vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -118,18 +118,19 @@ describe("CollectionBrowser", () => {
     expect(screen.getByTestId("search-label")).toHaveTextContent("제목 검색");
     expect(screen.getByRole("combobox", { name: "정렬" })).toHaveValue("media_date:desc");
     expect(screen.queryByRole("combobox", { name: "방향" })).not.toBeInTheDocument();
-    const rating = screen.getByRole("combobox", { name: "내 별점" });
-    expect(rating).toHaveValue("all");
-    expect(within(rating).getAllByRole("option").map(option => option.textContent)).toEqual(["전체", "★ 5.0", "★ 4.5", "★ 4.0", "★ 3.5", "★ 3.0", "★ 2.5", "★ 2.0", "★ 1.5", "★ 1.0", "★ 0.5", "미평가"]);
-    expect(screen.queryByRole("group", { name: "내 별점" })).not.toBeInTheDocument();
+    const rating = screen.getByRole("slider", { name: "내 별점" });
+    expect(rating).toHaveValue("0");expect(rating).toHaveAttribute("aria-valuetext", "전체");
+    expect(rating).toHaveAttribute("min", "0");expect(rating).toHaveAttribute("max", "10");
+    expect(screen.getByRole("button", { name: "미평가" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("combobox", { name: "내 별점" })).not.toBeInTheDocument();
   });
 
   it("shows a saved rating outside the presets as the selected option", () => {
     const defaults = createDefaultCollectionLibraryState();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: { ...defaults.game, rating: 0 } });
-    const rating = screen.getByRole("combobox", { name: "내 별점" });
-    expect(rating).toHaveValue("0");
-    expect(within(rating).getByRole("option", { name: "★ 0.0" })).toBeInTheDocument();
+    const rating = screen.getByRole("slider", { name: "내 별점" });
+    expect(rating).toHaveAttribute("aria-valuetext", "★ 0.0");
+    expect(rating).toHaveValue("1");
   });
 
   it("updates only the active media browse state", async () => {
@@ -141,21 +142,25 @@ describe("CollectionBrowser", () => {
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, query: "nier" });
   });
 
-  it("sets sort and direction from one select and filters rating from one select", async () => {
+  it("sets sort and direction from one select and filters rating with a slider and a 미평가 toggle", async () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
     const user = userEvent.setup();
     await user.selectOptions(screen.getByRole("combobox", { name: "정렬" }), "name:asc");
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, sort: "name", direction: "asc" });
-    const rating = screen.getByRole("combobox", { name: "내 별점" });
-    expect(rating).toHaveValue("all");
-    expect(within(rating).getAllByRole("option").map(option => option.textContent)).toEqual(["전체", "★ 5.0", "★ 4.5", "★ 4.0", "★ 3.5", "★ 3.0", "★ 2.5", "★ 2.0", "★ 1.5", "★ 1.0", "★ 0.5", "미평가"]);
-    await user.selectOptions(rating, "★ 4.5");
+    const rating = screen.getByRole("slider", { name: "내 별점" });
+    expect(rating).toHaveValue("0");
+    fireEvent.change(rating, { target: { value: "9" } });
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "name", direction: "asc", rating: 4.5 }));
-    expect(rating).toHaveValue("4.5");
-    await user.selectOptions(rating, "미평가");
+    expect(rating).toHaveValue("9");expect(rating).toHaveAttribute("aria-valuetext", "★ 4.5");
+    // The keyboard steps one half-star at a time, like any range input.
+    fireEvent.change(rating, { target: { value: "10" } });
+    expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ rating: 5 }));
+    await user.click(screen.getByRole("button", { name: "미평가" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"unrated"}));
-    await user.selectOptions(rating, "전체");
+    expect(screen.getByRole("button", { name: "미평가" })).toHaveAttribute("aria-pressed", "true");
+    expect(rating).toHaveAttribute("aria-valuetext", "미평가");
+    await user.click(screen.getByRole("button", { name: "미평가" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"all"}));
   });
 

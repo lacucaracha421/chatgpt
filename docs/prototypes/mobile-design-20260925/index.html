@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile Design Mockups</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository. */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css and mobile-client/mobile.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b; --color-surface-hover:#2d2e2f;
+  --color-control:#232425; --color-control-hover:#2d2e2f; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-filter-selected:#383838; --color-filter-text:#e7e7e7; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --color-section-mark:rgba(221,216,202,.6); --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --radius-tile:2px; --radius-sm:4px; --ease-standard:cubic-bezier(.2,0,0,1);
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --gutter:16px;
+  --note:#f2c94c;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.muted { color:var(--color-muted); }
+
+/* Document chrome (not app UI). */
+.doc { max-width:1760px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:980px; margin:8px 0 0; line-height:1.7; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; }
+.toolbar button { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; cursor:pointer; }
+.toolbar button[aria-pressed=true] { background:var(--color-filter-selected); border-color:var(--color-filter-border); }
+section.topic { margin-top:56px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:21px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; width:28px; height:28px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-numeric); }
+section.topic>p, section.topic>ul { color:var(--color-muted); max-width:1100px; line-height:1.7; margin-top:8px; }
+section.topic>ul { padding-left:20px; }
+section.topic b { color:var(--color-text); font-weight:600; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:13px; color:var(--color-muted); margin-bottom:8px; max-width:800px; }
+figcaption b { color:var(--color-text); }
+.tag { display:inline-block; font:600 11px var(--font-ui); letter-spacing:1px; padding:1px 6px; margin-right:6px; border-radius:2px; background:var(--color-surface-elevated); color:var(--color-text); }
+.tag.now { background:#3a2c2c; }
+.tag.a { background:var(--color-accent); color:var(--color-on-accent); }
+.tag.b { background:#2c3a3a; }
+.scaled { zoom:.5; }
+body.full .scaled { zoom:1; }
+.shot-img { display:block; width:800px; height:auto; border:1px solid var(--color-border); }
+/* Annotations are prototype notes, not UI. */
+.ann { position:absolute; z-index:50; background:var(--note); color:#1b1b1b; font:600 13px/1.35 var(--font-ui); padding:5px 9px; border-radius:2px; max-width:300px; box-shadow:0 2px 8px #0008; }
+.ann::before { content:attr(data-n); display:inline-grid; place-items:center; width:18px; height:18px; margin-right:6px; background:#1b1b1b; color:var(--note); border-radius:50%; font-size:11px; }
+body.clean .ann { display:none; }
+
+/* ===== App frame: Galaxy Tab S11 portrait, 800 CSS px wide. 1232 = 1280 minus an assumed 48px Android navigation inset. ===== */
+.frame { position:relative; width:800px; height:1232px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); display:flex; flex-direction:column; }
+.strip { position:relative; width:800px; background:var(--color-bg); border:1px solid var(--color-border); }
+.content { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+.pad { padding:0 var(--gutter); }
+.fold-line { position:absolute; left:0; right:0; height:0; border-top:2px dashed #e26767; z-index:40; }
+.fold-line span { position:absolute; right:8px; top:-22px; font:600 12px var(--font-ui); color:#e26767; background:#161718; padding:0 6px; }
+/* Infinite grids: the cut above the navigation reads as a deliberate fade, not a clipped row. */
+.fade-end::after { content:''; position:absolute; left:0; right:0; bottom:0; height:40px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:3; }
+
+/* ----- Proposed shared top bar ----- */
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 16px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar .brand { display:flex; align-items:center; gap:10px; color:var(--color-accent); flex-shrink:0; }
+.bar .brand svg.mark { width:19px; height:22px; fill:none; stroke:currentColor; stroke-width:1.5; }
+.bar .word { font-size:11px; letter-spacing:2.6px; }
+.bar .sep { width:1px; height:18px; background:var(--color-border); margin:0 6px 0 4px; }
+.bar .title { display:flex; align-items:baseline; gap:8px; min-width:0; }
+.bar h1 { font-size:17px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bar .count { font-size:14px; color:var(--color-muted); }
+.bar .space { flex:1; }
+.bar .state { font-size:12px; color:var(--color-muted); margin-right:4px; white-space:nowrap; }
+.bar.b .brand { margin-right:12px; }
+.bar.b .brand svg.mark { width:22px; height:26px; }
+.bar.b h1 { font-size:20px; letter-spacing:-.2px; }
+.bar.sub { padding-left:4px; }
+.bar .stack { display:flex; flex-direction:column; min-width:0; line-height:1.2; }
+.bar .crumb { font-size:11px; color:var(--color-muted); }
+.ib { width:44px; height:44px; display:inline-grid; place-items:center; border:0; background:transparent; color:var(--color-muted); border-radius:4px; position:relative; flex-shrink:0; }
+.ib.on { color:var(--color-text); }
+.ib.pressed { background:var(--color-control-pressed); color:var(--color-text); }
+.ib .dot { position:absolute; top:9px; right:9px; width:6px; height:6px; background:var(--color-accent); border-radius:50%; }
+.queue { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px; margin-right:6px; border:1px solid var(--color-border); background:var(--color-control); box-shadow:var(--inset-light); border-radius:4px; font-size:12px; color:var(--color-text); white-space:nowrap; }
+.queue .numeric { font-size:13px; color:var(--color-accent); }
+.searchbar { flex:1; display:flex; align-items:center; gap:8px; height:40px; padding:0 4px 0 12px; background:var(--color-bg); border:1px solid var(--color-border-strong); border-radius:4px; margin-right:6px; }
+.searchbar span { flex:1; color:var(--color-muted); }
+.searchbar .caret { width:1px; height:18px; background:var(--color-text); margin-left:-2px; flex:none; }
+
+/* ----- Current bars (for the strips) ----- */
+.cur-top { height:56px; display:flex; align-items:center; gap:6px; padding:0 6px 0 16px; background:var(--color-bg); }
+.cur-top h1 { font-size:22px; font-weight:600; }
+.cur-home { height:56px; display:flex; align-items:center; gap:10px; padding:0 8px 0 10px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); }
+.cur-home .brand { display:flex; align-items:center; gap:10px; color:var(--color-accent); font-size:12px; letter-spacing:2px; }
+.cur-home .brand svg.mark { width:29px; height:34px; fill:none; stroke:currentColor; stroke-width:1.3; }
+
+/* ----- Bottom navigation ----- */
+.nav { flex-shrink:0; display:flex; justify-content:center; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav button { flex:1 1 0; max-width:122px; display:flex; flex-direction:column; align-items:center; justify-content:center; border:0; background:transparent; color:var(--color-muted); position:relative; line-height:1.2; }
+.nav button.active { color:var(--color-accent); }
+.nav button.active::after { content:''; position:absolute; top:0; left:calc(50% - 8px); width:16px; height:2px; background:currentColor; }
+.nav.now { height:56px; margin-bottom:8px; padding:3px 0; }
+.nav.now button { min-height:48px; gap:2px; font-size:10px; }
+.nav.now svg.i { width:21px; height:21px; }
+.nav.new { height:64px; margin-bottom:8px; padding:4px 0; }
+.nav.new button { min-height:56px; gap:4px; font-size:11px; letter-spacing:.2px; }
+.nav.new button.active::after { width:20px; left:calc(50% - 10px); }
+.nav.new svg.i { width:23px; height:23px; }
+
+/* ----- Buttons ----- */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; font-weight:500; }
+/* current mobile */
+.btn.now { min-height:44px; padding:8px 15px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:4px; }
+.btn.now.ghost { background:transparent; border-color:transparent; }
+.btn.now.primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); }
+.chip.now { display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 14px; background:transparent; border:1px solid var(--color-border); border-radius:3px; white-space:nowrap; }
+.chip.now.sel { background:var(--color-text); color:var(--color-bg); border-color:var(--color-text); }
+.chip svg.i { width:15px; height:15px; }
+/* proposed, from the PC ui-button (global.css): control face + 1px border + inset light */
+.btn.pc { height:40px; padding:0 14px; font-size:15px; border:1px solid transparent; border-radius:4px; }
+.btn.pc svg.i { width:18px; height:18px; }
+.btn.pc.primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); }
+.btn.pc.primary.pressed { background:#cbc6b9; border-color:#cbc6b9; }
+.btn.pc.secondary { background:var(--color-control); border-color:var(--color-border); box-shadow:var(--inset-light); }
+.btn.pc.secondary.pressed { background:var(--color-control-pressed); }
+.btn.pc.quiet { background:transparent; color:var(--color-muted); }
+.btn.pc.quiet.pressed { background:var(--color-control-pressed); color:var(--color-text); }
+.btn.pc.danger { background:transparent; color:var(--color-danger); border-color:color-mix(in srgb,var(--color-danger) 40%,transparent); }
+.chip.pc { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:4px; white-space:nowrap; font-size:14px; color:var(--color-text); }
+.chip.pc .chev { width:14px; height:14px; color:var(--color-muted); }
+.chip.pc.on { background:var(--color-filter-selected); border-color:var(--color-filter-border); color:var(--color-filter-text); }
+.chip.pc .badge { font:500 13px var(--font-numeric); min-width:18px; height:18px; padding:0 5px; display:inline-grid; place-items:center; border-radius:2px; background:var(--color-accent); color:var(--color-on-accent); }
+.chip.pc .soft { font:500 13px var(--font-numeric); color:var(--color-muted); }
+.chips { display:flex; gap:8px; align-items:center; }
+.specimen { display:grid; grid-template-columns:150px 1fr 1fr; gap:14px 24px; align-items:center; padding:20px 24px; }
+.specimen>.h { font-size:12px; color:var(--color-muted); letter-spacing:1px; }
+.specimen>.l { font-size:13px; color:var(--color-muted); }
+.specimen .cell { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+/* ----- Library ----- */
+.segments { display:flex; gap:4px; background:var(--color-surface); padding:3px; border-radius:3px; }
+.segments button { flex:1; height:44px; border:0; border-radius:2px; background:transparent; color:var(--color-muted); }
+.segments button.sel { background:var(--color-bg); color:var(--color-text); }
+.seg-pc { display:flex; border:1px solid var(--color-border); border-radius:4px; overflow:hidden; box-shadow:var(--inset-light); }
+.seg-pc button { flex:1; height:40px; border:0; background:var(--color-control); color:var(--color-muted); }
+.seg-pc button+button { border-left:1px solid var(--color-border); }
+.seg-pc button.sel { background:rgba(221,216,202,.16); color:#f1eee6; }
+.search-now { display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--color-border); height:49px; color:var(--color-muted); }
+.search-now svg.i { width:20px; }
+.h2 { font-size:15px; font-weight:500; }
+.label { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--color-muted); letter-spacing:.3px; }
+.label::before { content:''; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label::after { content:''; flex:1; height:1px; background:var(--section-label-rule); }
+.label .numeric { font-size:14px; }
+.recents { display:flex; gap:6px; }
+.recents span { height:44px; padding:0 12px; display:flex; align-items:center; background:var(--color-surface); border:1px solid var(--color-border); border-radius:3px; }
+.all-row { display:flex; align-items:center; gap:12px; height:76px; border-bottom:1px solid var(--color-border); }
+.all-row .covers { display:flex; gap:2px; width:112px; height:52px; overflow:hidden; border-radius:2px; }
+.all-row .covers img { flex:1; min-width:0; object-fit:cover; height:100%; }
+.all-row .name { flex:1; }
+.all-row strong { display:block; font-weight:500; }
+.all-row small { display:block; color:var(--color-muted); font-size:12px; margin-top:4px; }
+.all-row>svg.i { width:18px; color:var(--color-muted); }
+.fgrid { display:grid; gap:20px 14px; }
+.folder { display:flex; flex-direction:column; min-width:0; min-height:0; }
+.cover-group { display:flex; gap:2px; border-radius:3px; overflow:hidden; background:var(--color-surface); }
+.cover-group .big { flex:2; min-width:0; }
+.cover-group .side { flex:1; display:flex; flex-direction:column; gap:2px; min-width:0; }
+.cover-group img { width:100%; height:100%; object-fit:cover; display:block; min-height:0; }
+.cover-group .side img { flex:1; }
+.caption { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:34px; }
+.caption strong { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.caption .numeric { color:var(--color-muted); font-size:14px; }
+.folder small { color:var(--color-muted); font-size:12px; margin-top:-6px; }
+.end-line { display:flex; align-items:center; justify-content:center; gap:8px; height:32px; font-size:12px; color:var(--color-muted); }
+.end-line svg.i { width:14px; height:14px; }
+
+/* ----- Gallery / grids ----- */
+.grow { display:flex; gap:10px; margin-bottom:10px; }
+.grow img { display:block; height:100%; object-fit:cover; border-radius:2px; min-width:0; }
+.chips-row { display:flex; gap:8px; padding:14px 0; }
+.strip-folders { display:flex; gap:12px; }
+.strip-folders .f { flex:0 0 190px; }
+.strip-folders img { width:100%; height:142px; object-fit:cover; border-radius:3px; display:block; }
+.cgrid { display:grid; gap:22px 12px; }
+.card img { width:100%; object-fit:cover; display:block; border-radius:2px; }
+.card strong { display:block; font-size:14px; font-weight:500; margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.card span { display:block; font-size:12px; color:var(--color-muted); }
+.card .pic { position:relative; }
+.card .pages { position:absolute; right:6px; bottom:6px; font:500 12px var(--font-numeric); background:#171819dc; padding:1px 6px; border-radius:2px; }
+.heading-line { display:flex; align-items:center; justify-content:space-between; gap:12px; height:52px; }
+.fold-row { display:flex; align-items:center; gap:6px; height:44px; font-weight:600; font-size:15px; }
+.fold-row svg.i { width:18px; color:var(--color-muted); }
+
+/* ----- Viewer ----- */
+.viewer { position:relative; width:800px; height:1232px; background:#111213; overflow:hidden; border:1px solid var(--color-border); }
+.viewer>img { position:absolute; left:0; right:0; top:83px; width:800px; height:1066px; object-fit:cover; }
+.vbar { position:absolute; left:0; right:0; height:48px; display:flex; align-items:center; padding:0 8px; background:#111213d9; color:var(--color-muted); font-size:13px; z-index:2; }
+.vbar.top { top:0; }
+.vbar.bottom { bottom:0; justify-content:space-between; }
+.vbar .count { margin-left:8px; color:var(--color-text); font:500 14px var(--font-numeric); }
+.vbar .space { flex:1; }
+.vact { display:inline-flex; align-items:center; gap:6px; height:36px; padding:0 10px; border-radius:4px; color:var(--color-text); font-size:13px; white-space:nowrap; }
+.vact svg.i { width:19px; height:19px; color:var(--color-muted); }
+.vact.danger svg.i { color:#d88; }
+.vact.text { border:1px solid #3a3b3d; }
+.vsep { width:1px; height:20px; background:#3a3b3d; margin:0 4px; }
+.hint-card { position:absolute; top:52px; right:10px; width:300px; background:var(--color-surface-elevated); border:1px solid var(--color-border-strong); border-radius:4px; padding:14px 14px 12px; z-index:4; box-shadow:0 3px 10px rgba(0,0,0,.26),0 18px 48px rgba(0,0,0,.38); }
+.hint-card::before { content:''; position:absolute; top:-6px; right:96px; width:10px; height:10px; background:var(--color-surface-elevated); border-left:1px solid var(--color-border-strong); border-top:1px solid var(--color-border-strong); transform:rotate(45deg); }
+.hint-card h3 { font-size:14px; font-weight:600; margin-bottom:8px; }
+.hint-card dl { display:grid; grid-template-columns:24px auto 1fr; gap:8px 8px; margin:0; font-size:13px; align-items:center; }
+.hint-card dt { display:contents; }
+.hint-card dd { margin:0; color:var(--color-muted); }
+.hint-card svg.i { width:18px; height:18px; color:var(--color-text); }
+.hint-card .foot { display:flex; justify-content:flex-end; margin-top:12px; }
+
+/* ----- Tile entrance ----- */
+.tiles-demo { padding:18px 20px 22px; }
+.frames { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+.fr { background:var(--color-bg); border:1px solid var(--color-border); padding:10px; }
+.fr .t { font:500 13px var(--font-numeric); color:var(--color-muted); margin-bottom:6px; }
+.fr .rowx { display:flex; gap:6px; height:58px; margin-bottom:6px; }
+.fr .rowx>div { border-radius:2px; background:var(--color-surface); overflow:hidden; }
+.fr .rowx img { width:100%; height:100%; object-fit:cover; display:block; }
+.live { margin-top:18px; display:flex; gap:20px; align-items:flex-start; }
+.live-box { width:520px; height:300px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); padding:10px; display:flex; flex-direction:column-reverse; }
+.live-inner { display:flex; flex-direction:column; }
+.live-row { display:flex; gap:8px; height:84px; margin-top:8px; }
+.live-row .slot { background:var(--color-surface); border-radius:2px; overflow:hidden; }
+.live-row .slot img { width:100%; height:100%; object-fit:cover; display:block; opacity:0; transition:opacity 260ms var(--ease-standard); }
+.live-row .slot img.ready { opacity:1; }
+@keyframes tile-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+.live-row.is-new .slot { animation:tile-in 320ms var(--ease-standard) both; animation-delay:calc(var(--i) * 45ms); }
+@media (prefers-reduced-motion:reduce) { .live-row.is-new .slot { animation:none; } .live-row .slot img { transition:none; } }
+.spec-list { font-size:13px; color:var(--color-muted); line-height:1.8; margin:0; padding-left:18px; }
+.spec-list b { color:var(--color-text); }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>모바일 고급감 정리 시안 · MOBILE-DESIGN-001 · 2026-09-25</h1>
+  <p class="lead">Galaxy Tab S11 portrait. Each app frame is 800 × 1232 CSS px: the fixture size 800 × 1280 minus an <b>assumed</b> 48 px Android navigation inset (the status bar is hidden by the app). The real height still needs one measurement on the tablet. "현재" frames are screenshots of the app's own demo mode (<code>?demo</code>), except the Library root, which is a replica with more folders so the peeking row shows. Art is the demo's placeholder art, and all names and counts are fictional. Yellow numbered notes are annotations, not UI.</p>
+  <div class="toolbar"><span>보기</span><button id="zoom" aria-pressed="false">실제 크기 (1:1)</button><button id="notes" aria-pressed="true">주석 표시</button></div>
+</header>
+
+<!-- 1. Top bar -->
+<section class="topic" id="bars">
+  <h2><span class="k">1</span>모든 탭에 같은 상단 막대</h2>
+  <p>Home's bar (logo + title + actions on the left-to-right line) becomes the bar of every tab. Actions move up from the content (Library's 휴지통, Catalog's refresh, Notes' sync), search shrinks to a magnifier icon on tabs that can search, and 설정 sits at the same far-right spot on every tab. The bar is 56 px, like today's titles, so switching tabs moves nothing.</p>
+  <div class="row">
+    <figure><figcaption><span class="tag now">현재</span>탭마다 다른 제목 줄 (홈만 로고)</figcaption><div class="strip scaled" data-shot="bars-current" id="bars-current"></div></figure>
+  </div>
+  <div class="row">
+    <figure><figcaption><span class="tag a">A</span><b>로고 + LAKOMICS + 탭 이름</b> — 홈의 현재 모양 그대로 확장</figcaption><div class="strip scaled" data-shot="bars-a" id="bars-a"></div></figure>
+    <figure><figcaption><span class="tag b">B</span><b>로고 표식만 + 큰 탭 이름</b> — 글자 수를 줄여 제목이 주인공</figcaption><div class="strip scaled" data-shot="bars-b" id="bars-b"></div></figure>
+  </div>
+</section>
+
+<!-- 2. Library root -->
+<section class="topic" id="library">
+  <h2><span class="k">2</span>라이브러리: 최근 연 폴더 제거, 첫 화면이 깔끔하게 끝남</h2>
+  <p>Removed: 최근 연 폴더 and the always-open search field (now the bar's magnifier). The review entries (캐릭터 후보, 유사 이미지) leave the list and become one small <b>확인 N</b> button in the bar, shown only when something waits. The segment control and the 분류 label take the PC look. Two ways to make the first view end on a whole row:</p>
+  <ul><li><b>A · 줄 맞춤</b>: 3 columns. Cover height flexes slightly (between 4:3 and square) so exactly three whole rows fill the screen; the end line says how many more are below, and scrolling snaps by row, so every stop ends cleanly.</li>
+  <li><b>B · 한 화면에 모두</b>: 4 smaller columns, so up to 12 top-level folders fit on one screen without scrolling; with more, the last tile becomes "+N 더 보기".</li></ul>
+  <div class="row">
+    <figure><figcaption><span class="tag now">현재</span>세 번째 줄(기타·오리지널)이 아래에 걸림</figcaption><div class="scaled" data-shot="library-current" id="library-current"></div></figure>
+    <figure><figcaption><span class="tag a">A</span>줄 맞춤 (3열, 3줄)</figcaption><div class="scaled" data-shot="library-a" id="library-a"></div></figure>
+    <figure><figcaption><span class="tag b">B</span>한 화면에 모두 (4열)</figcaption><div class="scaled" data-shot="library-b" id="library-b"></div></figure>
+  </div>
+  <p style="margin-top:28px">Inside a folder, the separate header row (뒤로 · 경로 · 제목 · ⋮) merges into the shared bar, which gives the gallery about 90 px more. The filter chips take the PC look and stay neutral until one is set.</p>
+  <div class="row">
+    <figure><figcaption><span class="tag now">현재</span>폴더 화면 (데모 캡처)</figcaption><img class="shot-img scaled" src="current-folder.png" alt="현재 폴더 화면"></figure>
+    <figure><figcaption><span class="tag a">제안</span>폴더 화면: 제목이 상단 막대로</figcaption><div class="scaled" data-shot="folder-proposed" id="folder-proposed"></div></figure>
+  </div>
+</section>
+
+<!-- 3. Filters -->
+<section class="topic" id="filters">
+  <h2><span class="k">3</span>필터 버튼은 평소엔 조용하게</h2>
+  <p>Today the 카탈로그 <b>필터</b> chip turns white whenever any filter is stored, and saved 회피 태그 count as filters, so it is white all the time. Proposal: the user's saved 회피 태그 and categories are the <b>default</b>, and the chip stays neutral with them. It turns to the PC's grey "filter on" face with a count only when something differs from that default (another category set, 차단 작품 보기, a temporary tag). The same rule covers Collections' 내 별점. <b>Assumption to confirm:</b> the brief says "Showcase"; the always-white filter button found in the code is the Catalog one (Collections' 쇼케이스 has no filter button).</p>
+  <div class="row"><figure><figcaption>카탈로그 필터 줄: 현재 / 제안(기본 상태) / 제안(기본과 다를 때)</figcaption><div class="strip scaled" data-shot="filters" id="filters-strip"></div></figure></div>
+  <div class="row">
+    <figure><figcaption><span class="tag now">현재</span>카탈로그 (데모 캡처, 데모에는 저장된 필터가 없어 흰색이 아님)</figcaption><img class="shot-img scaled" src="current-catalog.png" alt="현재 카탈로그"></figure>
+    <figure><figcaption><span class="tag a">제안</span>카탈로그: 검색·갱신은 막대로, 필터는 중립</figcaption><div class="scaled" data-shot="catalog-proposed" id="catalog-proposed"></div></figure>
+  </div>
+  <div class="row">
+    <figure><figcaption><span class="tag now">현재</span>컬렉션 (데모 캡처)</figcaption><img class="shot-img scaled" src="current-collections.png" alt="현재 컬렉션"></figure>
+    <figure><figcaption><span class="tag a">제안</span>컬렉션: 정렬·별점을 '전체' 줄 오른쪽으로</figcaption><div class="scaled" data-shot="collections-proposed" id="collections-proposed"></div></figure>
+  </div>
+  <div class="row">
+    <figure><figcaption><span class="tag now">현재</span>메모 (데모 캡처)</figcaption><img class="shot-img scaled" src="current-notes.png" alt="현재 메모"></figure>
+    <figure><figcaption><span class="tag a">제안</span>메모: 상단 막대만 교체 (본문은 Notes v2에서)</figcaption><div class="scaled" data-shot="notes-proposed" id="notes-proposed"></div></figure>
+  </div>
+</section>
+
+<!-- 4. Viewer -->
+<section class="topic" id="viewer">
+  <h2><span class="k">4</span>자산 뷰어: 위쪽 아이콘이 무엇인지 보이게</h2>
+  <p>Today 분류 uses a tag icon and 앨범 a folder icon, while the Library shows 분류 as folders, so the icons point the wrong way. Both options switch them: <b>분류 = 폴더</b>, <b>앨범 = 겹친 사각형</b>. The destructive 휴지통 sits apart behind a divider.</p>
+  <ul><li><b>A · 아이콘 + 짧은 이름</b>: always labelled (분류 · 앨범 · 정보 · 휴지통). Clearest; uses about 330 px of the 800 px bar.</li>
+  <li><b>B · 아이콘만 + 처음 한 번 안내</b>: the bar stays minimal; the first time the viewer opens (and again from 정보), a small card names each icon and is dismissed with 확인.</li></ul>
+  <div class="row">
+    <figure><figcaption><span class="tag now">현재</span>뷰어 (데모 캡처)</figcaption><img class="shot-img scaled" src="current-viewer.png" alt="현재 뷰어"></figure>
+    <figure><figcaption><span class="tag a">A</span>아이콘 + 이름</figcaption><div class="scaled" data-shot="viewer-a" id="viewer-a"></div></figure>
+    <figure><figcaption><span class="tag b">B</span>아이콘 + 첫 사용 안내</figcaption><div class="scaled" data-shot="viewer-b" id="viewer-b"></div></figure>
+  </div>
+</section>
+
+<!-- 5. Buttons and navigation -->
+<section class="topic" id="buttons">
+  <h2><span class="k">5</span>PC 느낌의 버튼과 조금 더 높은 하단 탐색</h2>
+  <p>Buttons take the PC <code>ui-button</code> recipe: a control face with a 1 px border and a faint top light (secondary), the ivory accent only for the one main action (primary), and muted text that lights up when pressed (quiet). The visible height drops from 44 to 40 px while the touch area stays 44 px. Filter chips lose the white "selected" slab and use the PC's grey filter face with a count. The bottom navigation goes from 56 to 64 px with slightly larger icons and labels (the 8 px lift from 0.8.2 stays).</p>
+  <div class="row"><figure><figcaption>버튼 견본: 현재 / 제안</figcaption><div class="strip scaled" data-shot="buttons" id="buttons-strip"></div></figure></div>
+  <div class="row"><figure><figcaption>하단 탐색: 현재 56 px / 제안 64 px</figcaption><div class="strip scaled" data-shot="nav" id="nav-strip"></div></figure></div>
+</section>
+
+<!-- 6. Tile entrance -->
+<section class="topic" id="tiles">
+  <h2><span class="k">6</span>스크롤로 더 불러온 타일이 부드럽게 나타남</h2>
+  <p>Each new row fades in from 10 px below over 320 ms, 45 ms apart per tile, and the picture fades in once it is decoded. The tile's place is reserved at its final size first, so nothing moves. Reduced motion shows tiles at once.</p>
+  <div class="row"><figure><figcaption>정지 프레임과 실제 애니메이션 (버튼으로 다시 재생)</figcaption><div class="strip scaled" data-shot="tiles" id="tiles-strip"></div></figure></div>
+</section>
+</div>
+
+<script>
+const IC={"MagnifyingGlass":["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],"Trash":["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],"ArrowPath":["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],"ArrowsUpDown":["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],"AdjustmentsHorizontal":["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],"ArrowLeft":["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],"EllipsisVertical":["M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z"],"ChevronDown":["m19.5 8.25-7.5 7.5-7.5-7.5"],"ChevronRight":["m8.25 4.5 7.5 7.5-7.5 7.5"],"Funnel":["M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"],"Bookmark":["M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"],"Home":["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],"Photo":["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"RectangleStack":["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],"BookOpen":["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],"PencilSquare":["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],"Tag":["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],"Folder":["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],"InformationCircle":["m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"],"UserPlus":["M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"XMark":["M6 18 18 6M6 6l12 12"],"Plus":["M12 4.5v15m7.5-7.5h-15"],"CloudArrowDown":["M12 9.75v6.75m0 0-3-3m3 3 3-3m-8.25 6a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],"Cog6Tooth":["M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z","M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],"UserMinus":["M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"Squares2X2":["M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"],"Square2Stack":["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],"FolderOpen":["M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"],"Sparkles":["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"]};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n].map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const P=[['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3']];
+const art=i=>{const p=P[i%4];return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800" preserveAspectRatio="none"><rect width="600" height="800" fill="${p[0]}"/><circle cx="${180+i%3*95}" cy="190" r="85" fill="${p[3]}"/><path d="M0 480L140 280 320 580 460 370 600 490V800H0" fill="${p[2]}"/><path d="M0 610L240 420 430 630 600 530V800H0" fill="${p[1]}"/><path d="M290 800L370 600 343 482 393 607 346 800" fill="${p[3]}" opacity=".7"/></svg>`);};
+const img=(i,style='')=>`<img src="${art(i)}" alt="" style="${style}">`;
+const ib=(n,extra='')=>`<span class="ib ${extra}">${I(n)}</span>`;
+const ann=(n,text,style)=>`<div class="ann" data-n="${n}" style="${style}">${text}</div>`;
+const TABS=[['Home','Home'],['Photo','Library'],['RectangleStack','Collections'],['BookOpen','Catalog'],['PencilSquare','Notes']];
+const nav=(active,kind='new')=>`<nav class="nav ${kind}">${TABS.map(([icon,label])=>`<button class="${label===active?'active':''}">${I(icon)}<span>${label}</span></button>`).join('')}</nav>`;
+
+/* Proposed bar. v = 'a' | 'b'. */
+function bar(v,title,{count='',actions='',state='',queue=''}={}){
+  const brand=v==='a'?`<span class="brand">${MARK}<span class="word">LAKOMICS</span></span><span class="sep"></span>`:`<span class="brand">${MARK}</span>`;
+  return `<header class="bar ${v}">${brand}<span class="title"><h1>${title}</h1>${count?`<span class="count numeric">${count}</span>`:''}</span><span class="space"></span>${queue}${state?`<span class="state">${state}</span>`:''}${actions}</header>`;
+}
+const Q=`<span class="queue">확인 <span class="numeric">37</span></span>`;
+const BARS={
+  home:v=>bar(v,'최근 저장',{actions:ib('ArrowPath')+`<span class="ib">${I('ArrowsUpDown')}<span class="dot"></span></span>`+ib('AdjustmentsHorizontal')}),
+  library:v=>bar(v,'라이브러리',{queue:Q,actions:ib('MagnifyingGlass')+ib('Trash')+ib('AdjustmentsHorizontal')}),
+  collections:v=>bar(v,'컬렉션',{actions:ib('MagnifyingGlass')+ib('AdjustmentsHorizontal')}),
+  catalog:v=>bar(v,'카탈로그',{count:'24',state:'17일 전 갱신',actions:ib('CloudArrowDown')+ib('MagnifyingGlass')+ib('AdjustmentsHorizontal')}),
+  notes:v=>bar(v,'메모',{state:'동기화됨',actions:ib('ArrowPath')+ib('MagnifyingGlass')+ib('AdjustmentsHorizontal')}),
+};
+const subBar=`<header class="bar sub">${ib('ArrowLeft','on')}<span class="stack"><span class="crumb">라이브러리 ›</span><span class="title"><h1>게임</h1><span class="count numeric">120</span></span></span><span class="space"></span>${ib('EllipsisVertical')}</header>`;
+const searchBar=`<header class="bar sub">${ib('ArrowLeft','on')}<span class="searchbar"><span class="caret"></span><span>폴더·캐릭터 찾기</span></span>${ib('XMark')}</header>`;
+const lab=t=>`<div style="padding:10px 16px 6px;font-size:12px;color:var(--color-muted);letter-spacing:.5px">${t}</div>`;
+
+function strips(){
+  const set=v=>lab('홈')+BARS.home(v)+lab('라이브러리 · 확인할 것이 있을 때만 "확인 37"')+BARS.library(v)+lab('컬렉션')+BARS.collections(v)+lab('카탈로그')+BARS.catalog(v)+lab('메모')+BARS.notes(v)+lab('하위 화면 (폴더 안): 로고 자리에 뒤로')+subBar+lab('검색 아이콘을 누른 상태: 막대가 입력창이 됨')+searchBar+'<div style="height:14px"></div>';
+  document.getElementById('bars-a').innerHTML=set('a');
+  document.getElementById('bars-b').innerHTML=set('b');
+  const curHome=`<div class="cur-home"><span class="brand">${MARK.replace('class="mark"','class="mark"')}<span>LAKOMICS</span></span><b style="font-size:14px;font-weight:600">최근 저장</b><span style="flex:1"></span>${ib('ArrowPath')}${ib('ArrowsUpDown')}${ib('AdjustmentsHorizontal')}</div>`;
+  const cur=(t,right='')=>`<div class="cur-top"><h1>${t}</h1><span style="flex:1"></span>${right}</div>`;
+  document.getElementById('bars-current').innerHTML=lab('홈')+curHome+lab('라이브러리 (검색 입력칸은 본문에 항상 열려 있음)')+cur('라이브러리',ib('Trash'))+lab('컬렉션')+cur('컬렉션')+lab('카탈로그')+cur('카탈로그 <span class="numeric muted" style="font-size:15px;font-weight:500">24</span>',`<span class="state muted" style="font-size:12px">17일 전 갱신</span>`+ib('CloudArrowDown'))+lab('메모')+cur('메모',`<span class="muted" style="font-size:12px">동기화됨</span>`+ib('ArrowPath'))+lab('폴더 안 (본문 위 별도 머리줄, 94 px)')+`<div style="display:flex;align-items:center;gap:8px;padding:6px 16px 10px;border-bottom:1px solid var(--color-border)">${ib('ArrowLeft','on')}<div style="flex:1"><div style="font-size:12px;color:var(--color-muted);height:44px;display:flex;align-items:center;padding-left:6px">라이브러리</div><div style="display:flex;gap:10px;align-items:baseline"><h1 style="font-size:22px;font-weight:500">게임</h1><span class="numeric muted">120</span></div></div>${ib('EllipsisVertical')}</div><div style="height:14px"></div>`;
+}
+
+const FOLDERS=[['게임',120,'하위 폴더 3'],['아카이브 시리즈',120,'하위 폴더 13'],['일러스트',36,'하위 폴더 2'],['캐릭터',84,'하위 폴더 9'],['풍경',22,''],['사진',57,'하위 폴더 4'],['팬아트',41,''],['오리지널',18,''],['기타',9,''],['참고 자료',12,'하위 폴더 2']];
+const coverGroup=(i,h)=>`<div class="cover-group" style="height:${h}"><div class="big">${img(i)}</div><div class="side">${img(i+1)}${img(i+2)}</div></div>`;
+const folder=(f,i,h)=>`<div class="folder">${coverGroup(i,h)}<div class="caption"><strong>${f[0]}</strong><span class="numeric">${f[1]}</span></div>${f[2]?`<small>${f[2]}</small>`:'<small>&nbsp;</small>'}</div>`;
+const allRow=`<div class="all-row"><span class="covers">${img(0)}${img(1)}${img(2)}${img(3)}</span><span class="name"><strong>모든 자산</strong><small>최근 저장한 순서</small></span><span class="numeric muted">1,284</span>${I('ChevronRight')}</div>`;
+
+function libraryCurrent(){
+  // Replica of today's root at the demo's measured positions (see README).
+  const el=document.getElementById('library-current');
+  el.innerHTML=`<div class="frame"><div class="content pad" style="padding-top:0">
+    <div style="height:56px;display:flex;align-items:center"><h1 style="font-size:22px;font-weight:600">라이브러리</h1><span style="flex:1"></span>${ib('Trash')}</div>
+    <div style="margin-top:8px" class="segments"><button class="sel">분류</button><button>앨범</button></div>
+    <div class="search-now" style="margin-top:16px">${I('MagnifyingGlass')}폴더·캐릭터 찾기</div>
+    <h2 class="h2" style="margin:24px 0 12px">최근 연 폴더</h2>
+    <div class="recents"><span>게임</span><span>캐릭터</span><span>풍경</span></div>
+    <div style="margin:18px 0">${allRow}</div>
+    <h2 class="h2" style="margin:6px 0 12px">분류</h2>
+    <div style="display:flex;align-items:center;gap:10px;min-height:44px;margin-bottom:10px;padding:10px 12px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-surface)"><strong style="flex:1;font-weight:500">캐릭터 후보 확인 · 37</strong>${I('ChevronRight')}</div>
+    <div class="fgrid" style="grid-template-columns:repeat(3,1fr)">${FOLDERS.slice(0,9).map((f,i)=>folder(f,i,'185px')).join('')}</div>
+  </div>${nav('Library','now')}
+  <div class="fold-line" style="top:1168px"><span>화면 끝</span></div>
+  ${ann(1,'최근 연 폴더 — 제거 대상','top:200px;left:330px')}
+  ${ann(2,'세 번째 줄(팬아트·오리지널·기타)이 걸쳐 보임','top:1060px;left:330px')}${ann(4,'후보 확인 줄은 대기 중일 때만 (이 줄이 셋째 줄을 밀어냄)','top:470px;left:300px')}
+  ${ann(3,'검색칸이 늘 열려 있음: 아이콘으로','top:128px;left:360px')}
+  </div>`;
+}
+function libraryA(){
+  const el=document.getElementById('library-a');
+  el.innerHTML=`<div class="frame">${BARS.library('a')}<div class="content pad" style="padding-top:14px;padding-bottom:0">
+    <div class="seg-pc"><button class="sel">분류</button><button>앨범</button></div>
+    <div style="margin:8px 0 6px">${allRow}</div>
+    <div class="label" style="margin:14px 0 12px">분류 <span class="numeric">10</span></div>
+    <div class="fgrid" style="flex:1;min-height:0;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,minmax(0,1fr));gap:18px 14px">${FOLDERS.slice(0,9).map((f,i)=>`<div class="folder"><div class="cover-group" style="flex:1;min-height:0"><div class="big">${img(i)}</div><div class="side">${img(i+1)}${img(i+2)}</div></div><div class="caption"><strong>${f[0]}</strong><span class="numeric">${f[1]}</span></div></div>`).join('')}</div>
+    <div class="end-line">${I('ChevronDown')}아래에 분류 1개 더</div>
+  </div>${nav('Library')}
+  ${ann(1,'확인할 것이 있을 때만 보이는 "확인 N" — 캐릭터 후보·유사 이미지','top:196px;left:330px')}
+  ${ann(2,'세 줄이 화면을 정확히 채움 (표지 높이가 조금 늘거나 줄어듦)','top:700px;left:420px')}
+  ${ann(3,'끝줄은 결론 한 줄: 남은 개수','top:1122px;left:520px')}
+  </div>`;
+}
+function libraryB(){
+  const el=document.getElementById('library-b');
+  el.innerHTML=`<div class="frame">${BARS.library('a')}<div class="content pad" style="padding-top:14px;padding-bottom:12px">
+    <div class="seg-pc"><button class="sel">분류</button><button>앨범</button></div>
+    <div style="margin:8px 0 6px">${allRow}</div>
+    <div class="label" style="margin:14px 0 12px">분류 <span class="numeric">10</span></div>
+    <div class="fgrid" style="flex:1;min-height:0;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(3,minmax(0,1fr));gap:16px 12px">${FOLDERS.map((f,i)=>`<div class="folder"><div class="cover-group" style="flex:1;min-height:0"><div class="big">${img(i)}</div><div class="side">${img(i+1)}${img(i+2)}</div></div><div class="caption"><strong style="font-size:14px">${f[0]}</strong><span class="numeric">${f[1]}</span></div></div>`).join('')}</div>
+  </div>${nav('Library')}
+  ${ann(1,'최상위 분류 12개까지 한 화면. 더 많으면 마지막 칸이 "+N 더 보기"','top:640px;left:440px')}
+  ${ann(2,'"하위 폴더 N" 줄은 숨김 (폴더 안에서 보임)','top:1000px;left:300px')}
+  </div>`;
+}
+function galleryRows(start,rows,h=190){
+  const widths=[[143,286,119,190],[329,140,279],[111,179,314,134],[226,95,151,266]];
+  let out='',k=start;
+  for(let r=0;r<rows;r++){const w=widths[r%4];out+=`<div class="grow" style="height:${h}px">${w.map(x=>`<img src="${art(k++)}" alt="" style="flex:${x} 1 0">`).join('')}</div>`;}
+  return out;
+}
+function folderProposed(){
+  document.getElementById('folder-proposed').innerHTML=`<div class="frame">${subBar}<div class="content pad fade-end" style="padding-top:16px">
+    <div class="label" style="margin-bottom:12px">폴더 <span class="numeric">3</span></div>
+    <div class="strip-folders">${[['리버스',52],['명조',48],['젠레스',20]].map((f,i)=>`<div class="f">${img(i+4)}<div class="caption"><strong>${f[0]}</strong><span class="numeric">${f[1]}</span></div></div>`).join('')}</div>
+    <div class="chips-row"><span class="chip pc">종류${I('ChevronDown','chev')}</span><span class="chip pc">비율${I('ChevronDown','chev')}</span><span class="chip pc">길이${I('ChevronDown','chev')}</span></div>
+    ${galleryRows(0,5)}
+  </div>${nav('Library')}
+  ${ann(1,'뒤로 · 경로 · 제목 · 개수가 상단 막대 한 줄로','top:8px;left:260px')}
+  ${ann(2,'필터 칩은 PC 버튼 면, 설정 전엔 중립','top:302px;left:270px')}
+  ${ann(3,'무한 목록의 끝은 부드러운 페이드','top:1100px;left:470px')}
+  </div>`;
+}
+function filtersStrip(){
+  const lang=`<span class="chip pc">한국어${I('ChevronDown','chev')}</span><span class="chip pc">오늘 인기${I('ChevronDown','chev')}</span><span class="chip pc">${I('Bookmark')}북마크</span>`;
+  const langNow=`<span class="chip now">한국어${I('ChevronDown')}</span><span class="chip now">오늘 인기${I('ChevronDown')}</span><span class="chip now">${I('Bookmark')}북마크</span>`;
+  document.getElementById('filters-strip').innerHTML=`<div style="padding:18px 16px 20px;display:flex;flex-direction:column;gap:14px">
+    <div class="l muted" style="font-size:12px">현재 · 회피 태그 3개가 저장되어 있으면 늘 흰색</div>
+    <div class="chips">${langNow}<span class="chip now sel">${I('Funnel')}필터<span class="numeric" style="font-size:14px">3</span></span></div>
+    <div class="l muted" style="font-size:12px">제안 · 저장된 기본 필터만 적용 중: 중립 (옆에 작게 "기본")</div>
+    <div class="chips">${lang}<span class="chip pc">${I('Funnel')}필터<span class="soft">기본</span></span></div>
+    <div class="l muted" style="font-size:12px">제안 · 기본과 다를 때만: PC의 회색 "필터 켜짐" 면 + 개수</div>
+    <div class="chips">${lang}<span class="chip pc on">${I('Funnel')}필터<span class="badge">2</span></span><span class="btn pc quiet" style="height:36px">기본으로</span></div>
+  </div>`;
+}
+function catalogProposed(){
+  const cards=Array.from({length:12},(_,i)=>`<div class="card"><div class="pic"><img src="${art(i+2)}" alt="" style="aspect-ratio:2/3"><span class="pages">${24+i*4}p</span></div><strong>${['밤의 도서관','계절의 기록','먼 바다에서','밤의 도서관 2'][i%4]}</strong><span>${['서유진','하루','Studio Field'][i%3]}</span></div>`).join('');
+  document.getElementById('catalog-proposed').innerHTML=`<div class="frame">${BARS.catalog('a')}<div class="content pad fade-end" style="padding-top:14px">
+    <div class="chips" style="margin-bottom:16px"><span class="chip pc">한국어${I('ChevronDown','chev')}</span><span class="chip pc">오늘 인기${I('ChevronDown','chev')}</span><span class="chip pc">${I('Bookmark')}북마크</span><span class="chip pc">${I('Funnel')}필터<span class="soft">기본</span></span></div>
+    <div class="cgrid" style="grid-template-columns:repeat(4,1fr)">${cards}</div>
+  </div>${nav('Catalog')}
+  ${ann(1,'검색칸 대신 돋보기, 갱신 시각과 새 작품 가져오기는 막대에','top:200px;left:300px')}
+  ${ann(2,'회피 태그는 기본값이므로 필터는 중립','top:124px;left:300px')}
+  </div>`;
+}
+function collectionsProposed(){
+  const cards=Array.from({length:12},(_,i)=>`<div class="card"><img src="${art(i+3)}" alt="" style="aspect-ratio:3/4"><strong>${['먼 바다의 기억','숲의 기록 3','여름의 항로 3','조용한 행성 2'][i%4]}</strong><span>Studio Field</span><span class="numeric">${2026-Math.floor(i/4)}${['4.5','3.0','','3.0'][i%4]?' · ★ '+['4.5','3.0','','3.0'][i%4]:''}</span></div>`).join('');
+  document.getElementById('collections-proposed').innerHTML=`<div class="frame">${BARS.collections('a')}<div class="content pad fade-end" style="padding-top:14px">
+    <div class="seg-pc"><button class="sel">게임</button><button>만화</button><button>영화</button><button>AV</button></div>
+    <div class="fold-row" style="margin-top:10px">쇼케이스${I('ChevronDown')}</div>
+    <div class="heading-line"><div class="label" style="flex:1;margin-right:12px">전체 <span class="numeric">12</span></div><div class="chips"><span class="chip pc">${I('ArrowsUpDown')}출시일 · 최신순${I('ChevronDown','chev')}</span><span class="chip pc">내 별점${I('ChevronDown','chev')}</span></div></div>
+    <div class="cgrid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${cards}</div>
+  </div>${nav('Collections')}
+  ${ann(1,'검색칸 대신 막대의 돋보기','top:112px;left:470px')}
+  ${ann(2,'정렬·별점 칩을 "전체" 줄에 붙여 한 줄 절약','top:260px;left:380px')}
+  </div>`;
+}
+function notesProposed(){
+  document.getElementById('notes-proposed').innerHTML=`<div class="frame">${BARS.notes('a')}<div class="content pad" style="padding-top:18px">
+    <div class="label" style="margin-bottom:12px">고정됨</div>
+    <div style="width:380px;background:var(--color-surface);border-radius:6px;padding:16px"><strong style="font-weight:600">다음에 볼 작품</strong><p class="muted" style="font-size:14px;margin-top:4px">마음에 남은 장면과 감상을 적어 두세요.</p><p class="numeric muted" style="font-size:12px;margin-top:10px">2026. 9. 13.</p></div>
+    <span class="btn pc primary" style="position:absolute;right:16px;bottom:16px;height:48px;padding:0 18px">${I('Plus')}새 메모</span>
+  </div>${nav('Notes')}
+  ${ann(1,'상단 막대만 공통 모양으로 (본문은 Notes v2 작업에서)','top:62px;left:360px')}
+  </div>`;
+}
+function viewer(v){
+  const labelled=v==='a';
+  const act=(icon,text,cls='')=>`<span class="vact ${cls}">${I(icon)}${labelled?text:''}</span>`;
+  const actions=`${act('Folder','분류')}${act('Square2Stack','앨범')}${act('InformationCircle','정보')}<span class="vsep"></span>${act('Trash','휴지통','danger')}`;
+  const hint=labelled?'':`<div class="hint-card"><h3>이 버튼들은</h3><dl><dt>${I('Folder')}<b>분류</b></dt><dd>이 자산의 폴더 지정</dd><dt>${I('Square2Stack')}<b>앨범</b></dt><dd>앨범에 담기·빼기</dd><dt>${I('InformationCircle')}<b>정보</b></dt><dd>작가·출처·파일 정보</dd><dt>${I('Trash')}<b>휴지통</b></dt><dd>라이브러리에서 숨김 (되돌리기 가능)</dd></dl><div class="foot"><span class="btn pc secondary" style="height:36px">확인</span></div></div>`;
+  document.getElementById('viewer-'+v).innerHTML=`<div class="viewer">${img(0)}<div class="vbar top"><span class="ib on">${I('ArrowLeft')}</span><span class="count">1 / 40</span><span class="space"></span><span class="vact text">캐릭터에 추가</span>${actions}</div>${hint}<div class="vbar bottom"><span class="ib">${I('ChevronRight').replace('<svg','<svg style="transform:scaleX(-1)"')}</span><span class="numeric">2026. 09. 06.</span><span class="ib on">${I('ChevronRight')}</span></div>
+  ${labelled?ann(1,'분류=폴더, 앨범=겹친 사각형 (라이브러리와 같은 그림)','top:60px;left:380px')+ann(2,'휴지통은 구분선 뒤로 떨어뜨림','top:120px;left:520px'):ann(1,'처음 한 번만 뜨는 안내 카드, 확인으로 닫음','top:300px;left:470px')}</div>`;
+}
+function buttonsStrip(){
+  document.getElementById('buttons-strip').innerHTML=`<div class="specimen">
+    <span></span><span class="h">현재</span><span class="h">제안 (PC ui-button)</span>
+    <span class="l">주 동작</span><span class="cell"><span class="btn now primary">라이브러리 연결</span></span><span class="cell"><span class="btn pc primary">라이브러리 연결</span><span class="btn pc primary pressed">누름</span></span>
+    <span class="l">보조</span><span class="cell"><span class="btn now">다시 시도</span></span><span class="cell"><span class="btn pc secondary">다시 시도</span><span class="btn pc secondary pressed">누름</span></span>
+    <span class="l">조용한</span><span class="cell"><span class="btn now ghost">필터 해제</span></span><span class="cell"><span class="btn pc quiet">필터 해제</span><span class="btn pc quiet pressed">누름</span></span>
+    <span class="l">위험</span><span class="cell"><span class="btn now" style="color:var(--color-danger)">휴지통으로</span></span><span class="cell"><span class="btn pc danger">${I('Trash')}휴지통으로</span></span>
+    <span class="l">필터 칩</span><span class="cell"><span class="chip now">내 별점${I('ChevronDown')}</span><span class="chip now sel">4.5점</span></span><span class="cell"><span class="chip pc">내 별점${I('ChevronDown','chev')}</span><span class="chip pc on">4.5점<span class="badge">1</span></span></span>
+    <span class="l">구역 전환</span><span class="cell" style="width:280px"><div class="segments" style="width:100%"><button class="sel">분류</button><button>앨범</button></div></span><span class="cell" style="width:280px"><div class="seg-pc" style="width:100%"><button class="sel">분류</button><button>앨범</button></div></span>
+  </div>`;
+}
+function navStrip(){
+  document.getElementById('nav-strip').innerHTML=`${lab('현재 · 56 px (+8 px 띄움)')}<div style="display:flex;flex-direction:column">${nav('Library','now')}</div>${lab('제안 · 64 px (+8 px 띄움), 아이콘 23 px, 글자 11 px')}<div style="display:flex;flex-direction:column">${nav('Library','new')}</div>`;
+}
+function tilesStrip(){
+  const fr=(t,o,y,io)=>`<div class="fr"><div class="t">${t}</div><div class="rowx"><div style="flex:3">${img(1)}</div><div style="flex:2">${img(2)}</div><div style="flex:4">${img(3)}</div></div><div class="rowx">${[[2,4],[4,5],[3,6]].map(([f,k],j)=>`<div style="flex:${f};opacity:${Math.max(0,Math.min(1,o-j*.2))};transform:translateY(${Math.max(0,y-j*0)}px)"><img src="${art(k)}" alt="" style="opacity:${Math.max(0,Math.min(1,io-j*.25))}"></div>`).join('')}</div></div>`;
+  document.getElementById('tiles-strip').innerHTML=`<div class="tiles-demo">
+    <div class="frames">${fr('0 ms · 최종 크기로 자리 확보',0.3,10,0)}${fr('120 ms · 올라오며 나타남',0.85,4,0)}${fr('240 ms · 디코딩된 그림부터 페이드',1.2,1,0.7)}${fr('450 ms · 완료',1.5,0,1.6)}</div>
+    <div class="live"><div class="live-box"><div class="live-inner" id="live"></div></div>
+    <div><ul class="spec-list">
+      <li><b>opacity 0에서 1</b>, <b>translateY 10px에서 0</b>, 320 ms, <code>cubic-bezier(.2,0,0,1)</code></li>
+      <li>같은 줄 안에서 타일마다 45 ms 차이</li>
+      <li>새 페이지로 추가된 줄에만 적용 (위로 스크롤해 다시 그려지는 줄은 제외)</li>
+      <li>그림은 디코딩 후 260 ms 페이드, 그 전엔 같은 크기의 회색 면</li>
+      <li>동작 줄이기 설정이면 즉시 표시</li>
+    </ul><p style="margin-top:12px"><button id="more" class="btn pc secondary">다음 페이지 불러오기</button></p></div></div>
+  </div>`;
+  const live=document.getElementById('live');let n=0;
+  const add=()=>{const row=document.createElement('div');row.className='live-row is-new';const flex=[[3,2,4],[2,5,2],[4,3,2],[2,3,3]][n%4];row.innerHTML=flex.map((f,j)=>`<div class="slot" style="flex:${f};--i:${j}"><img src="${art(n*3+j)}" alt=""></div>`).join('');live.appendChild(row);n++;row.querySelectorAll('img').forEach((im,j)=>setTimeout(()=>im.classList.add('ready'),160+j*70));while(live.children.length>5)live.firstChild.remove();};
+  for(let k=0;k<2;k++){add();live.lastChild.classList.remove('is-new');live.lastChild.querySelectorAll('img').forEach(i=>i.classList.add('ready'));}
+  document.getElementById('more').onclick=()=>{add();add();};
+}
+strips();libraryCurrent();libraryA();libraryB();folderProposed();filtersStrip();catalogProposed();collectionsProposed();notesProposed();viewer('a');viewer('b');buttonsStrip();navStrip();tilesStrip();
+const params=new URLSearchParams(location.search);
+if(params.has('full'))document.body.classList.add('full');
+if(params.has('clean'))document.body.classList.add('clean');
+const zoom=document.getElementById('zoom'),notes=document.getElementById('notes');
+zoom.onclick=()=>{const on=document.body.classList.toggle('full');zoom.setAttribute('aria-pressed',on);};
+notes.onclick=()=>{const off=document.body.classList.toggle('clean');notes.setAttribute('aria-pressed',!off);};
+</script>
+</body>
+</html>

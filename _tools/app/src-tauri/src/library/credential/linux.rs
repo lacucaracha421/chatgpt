@@ -9,6 +9,9 @@ use super::{CredentialBackend, CredentialError};
 pub(crate) struct LinuxCredentialBackend;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 const APPLICATION: &str = "com.lakomics.desktop";
+/// A person needs time to type the keyring password.
+const INTERACTIVE_TIMEOUT: Duration = Duration::from_secs(120);
+const SESSION_COLLECTION: &str = "/org/freedesktop/secrets/collection/session";
 
 fn attributes(target: &str) -> HashMap<&str, &str> {
     HashMap::from([("application", APPLICATION), ("target", target)])
@@ -104,10 +107,39 @@ impl CredentialBackend for LinuxCredentialBackend {
     }
 }
 
+/// Asks the Secret Service to unlock the default collection, which shows the system
+/// password dialog. Only for an explicit user action (opening Notes); background
+/// readers keep using `check_collection`, which never prompts.
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) fn unlock_interactive() -> Result<(), CredentialError> {
+    bounded_with_timeout(
+        async {
+            let service = SecretService::connect(EncryptionType::Dh)
+                .await
+                .map_err(map_error)?;
+            let collection = service.get_default_collection().await.map_err(map_error)?;
+            if collection.collection_path.as_str() == SESSION_COLLECTION {
+                return Err(CredentialError::Unavailable);
+            }
+            if collection.is_locked().await.map_err(map_error)? {
+                collection.unlock().await.map_err(|error| match error {
+                    // The user dismissed the dialog: the store simply stays locked.
+                    secret_service::Error::Prompt | secret_service::Error::PromptDisconnected => {
+                        CredentialError::Locked
+                    }
+                    other => map_error(other),
+                })?;
+            }
+            Ok(())
+        },
+        INTERACTIVE_TIMEOUT,
+    )
+}
+
 async fn check_collection(
     collection: &secret_service::Collection<'_>,
 ) -> Result<(), CredentialError> {
-    if collection.collection_path.as_str() == "/org/freedesktop/secrets/collection/session" {
+    if collection.collection_path.as_str() == SESSION_COLLECTION {
         return Err(CredentialError::Unavailable);
     }
     // Background reads never unlock the keyring or trigger an unlock dialog.

@@ -95,7 +95,12 @@ const collections:CollectionDetail[]=(['game','manga','movie'] as const).flatMap
 export async function demoTransport(op: string, payload: Record<string, unknown>): Promise<unknown> {
   await new Promise(resolve => setTimeout(resolve, 80));
   if(op==='notesState'||op==='notesSync'||op==='notesUnlock')return {unlocked:true,notes:demoNotes,lastSyncedAt:new Date().toISOString()};
-  if(op==='notesSave'){const note={...payload,localRevision:Number(payload.expectedRevision)+1,pending:false,conflict:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()} as MobileNote;demoNotes=[note,...demoNotes.filter(n=>n.id!==note.id)];return note;}
+  if(op==='notesSecretStatus')return {pinSet:true,unlocked:false,biometric:false};
+  if(op==='notesSecretLock'||op==='notesCopySecret'||op==='notesDismissConflictCopy')return {};
+  if(op==='notesSecretTouch')return {unlocked:false};
+  if(op==='notesSecretUnlock'||op==='notesSecretSetPin'||op==='notesSecretResetPin')return {unlocked:true,notes:demoNotes};
+  if(op==='notesRecoveryKey')return {key:'0'.repeat(64)};
+  if(op==='notesSave'){const note={...demoNotes.find(n=>n.id===payload.id),...payload,localRevision:Number(payload.expectedRevision)+1,pending:false,conflict:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()} as MobileNote;demoNotes=[note,...demoNotes.filter(n=>n.id!==note.id)];return note;}
   if (op === 'collectionArtwork') {const index=Number(String(payload.artworkId).match(/\d+$/)?.[0]??0);return {url:art(index,String(payload.artworkId).startsWith('hero')?1200:600,String(payload.artworkId).startsWith('hero')?600:800),expires_in:240};}
   if (op === 'cacheStatus' || op === 'clearCache') return {bytes:0,count:0,limit:1024*1024*1024};
   if (op === 'thumbnail' || op === 'media') return {url:assets.find(asset => asset.id === payload.assetId)?.preview,expires_in:240};

@@ -29,4 +29,3 @@
 /* The viewer's and library's "moved to trash" snackbar. */
 .trash-snackbar { position:fixed; z-index:190; left:var(--mobile-gutter, 16px); right:var(--mobile-gutter, 16px); bottom:calc(72px + env(safe-area-inset-bottom)); display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 6px 6px 14px; border:1px solid var(--color-border); border-radius:var(--radius-sm, 8px); background:var(--color-sidebar); color:var(--color-text); box-shadow:var(--shadow-dialog); font-size:13px; }
 .trash-snackbar svg { width:16px; height:16px; }
-.library-root-header.with-tools { display:flex; align-items:center; justify-content:space-between; gap:8px; }

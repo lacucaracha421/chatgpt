@@ -1,5 +1,6 @@
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, TagIcon, TrashIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
+import type {ComponentType, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import type {Asset} from './types';
 import {dateLabel, imageNeighbours, fitTransform} from './model';
@@ -31,6 +32,13 @@ export type ViewerVaultSource = {original(asset: Asset): string; label(asset: As
 
 export type ViewerCharacterContext = {targetId:string;name:string;libraryId:string;revision:string;protectedAssetIds:string[]};
 
+/**
+ * A viewer bar action that names itself: icon plus a short label (the label hides on narrow
+ * phones). `name` keeps the established accessible name where it is longer than the label.
+ */
+function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
+  return <Button type="button" size="sm" variant="ghost" className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/><span className="viewer-action__label">{label}</span></Button>;
+}
 export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,reviewLibrary,onTrash,trashNotice,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
   /** The library character-review decisions go to; set only when a PC adopted review. */
   reviewLibrary?:string|null;
@@ -97,7 +105,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
   useEffect(() => {
     if (vault) {
-      timing.current = undefined; setLoaded(''); setError(''); setChrome(true); gesture.current.points.clear();
+      // Moving to another item never brings the bars back; only a tap on the image does. A
+      // video keeps its bars, since its own tap goes to the native controls.
+      timing.current = undefined; setLoaded(''); setError(''); if (asset.kind === 'video') setChrome(true); gesture.current.points.clear();
       return () => clearTimeout(stallTimer.current);
     }
     const controller = new AbortController();
@@ -106,7 +116,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     const observation={id:asset.id,url:fromPrepared?prepared.current.get(asset.id):undefined,span};
     timing.current=observation;
     span.log('open');
-    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); setAddOpen(false); setAdded(''); setChrome(true);
+    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); setAddOpen(false); setAdded(''); if (asset.kind === 'video') setChrome(true);
     gesture.current.points.clear();
     const load = async () => {
       try {
@@ -191,7 +201,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
     <div className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}`}>
-      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{!vault&&<>{reviewLibrary&&!asset.pending&&<Button size="sm" variant="ghost" onClick={()=>{setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAdded('');setAddOpen(true);setChrome(true);}}>캐릭터에 추가</Button>}{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<IconButton label="분류" icon={TagIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><IconButton label="앨범" icon={FolderIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><IconButton label="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/>{onTrash&&!asset.pending&&<IconButton label="휴지통으로" icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAddOpen(false);setChrome(true);onTrash(asset);}}/>}</>}</div></header>
+      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{!vault&&<>{reviewLibrary&&!asset.pending&&<Button size="sm" variant="ghost" onClick={()=>{setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAdded('');setAddOpen(true);setChrome(true);}}>캐릭터에 추가</Button>}{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/>{onTrash&&!asset.pending&&<><span className="viewer-actions__divider" aria-hidden="true"/><ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAddOpen(false);setChrome(true);onTrash(asset);}}/></>}</>}</div></header>
       <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
         if (event.button > 0 || info || albumOpen || classificationOpen || exclusion || addOpen) return;
         if(asset.kind==='video'&&video.current){const rect=video.current.getBoundingClientRect();if(event.clientY>rect.bottom-64)return;}

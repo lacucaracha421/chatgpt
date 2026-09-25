@@ -360,3 +360,22 @@ describe('video controls',()=>{
     expect(document.querySelector('.viewer')!.classList.contains('is-video')).toBe(false);
   });
 });
+describe('viewer bars',()=>{
+  it('toggles the bars only by tapping the image and keeps them hidden while swiping to other items',async()=>{
+    mocks.decode.mockResolvedValue(undefined);
+    const onIndex=vi.fn();
+    const view=render(<Viewer items={items} index={0} onIndex={onIndex} onClose={()=>{}}/>);
+    const viewer=()=>document.querySelector('.viewer')!;
+    const surface=()=>document.querySelector('.viewer-surface')!;
+    const tap=()=>{fireEvent.pointerDown(surface(),{pointerId:1,button:0,clientX:300,clientY:300});fireEvent.pointerUp(surface(),{pointerId:1,clientX:300,clientY:300});};
+    expect(viewer().classList.contains('chrome-visible')).toBe(true);
+    tap();expect(viewer().classList.contains('chrome-visible')).toBe(false);
+    // A swipe changes the item without bringing the bars back.
+    fireEvent.pointerDown(surface(),{pointerId:2,button:0,clientX:600,clientY:300});fireEvent.pointerUp(surface(),{pointerId:2,clientX:200,clientY:300});
+    expect(onIndex).toHaveBeenCalledWith(1);
+    view.rerender(<Viewer items={items} index={1} onIndex={onIndex} onClose={()=>{}}/>);
+    await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('b'));
+    expect(viewer().classList.contains('chrome-visible')).toBe(false);
+    tap();expect(viewer().classList.contains('chrome-visible')).toBe(true);
+  });
+});

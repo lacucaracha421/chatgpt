@@ -31,10 +31,10 @@
 .notes-fab.ui-button{position:absolute;right:var(--mobile-gutter);bottom:20px;min-height:56px;padding:0 20px 0 16px;border-radius:16px;gap:8px;font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.45);z-index:3}
 .notes-fab svg{width:22px;stroke-width:2}
 .notes-editor{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;padding:0 var(--mobile-gutter) 16px}
-.notes-editor__inner{display:flex;flex-direction:column;flex:1;min-height:0;width:100%;max-width:760px;margin:0 auto}
+.notes-editor__inner{display:flex;flex-direction:column;flex:1 0 auto;width:100%;max-width:760px;margin:0 auto}
 .notes-editor input,.notes-editor textarea{background:none;border:0;outline:none;color:inherit;font:inherit;resize:none;padding:0;min-width:0}
 .notes-editor input{font-size:24px;font-weight:600;padding:8px 0 4px}
-.notes-editor textarea{flex:1;min-height:0;overflow:auto;font-size:16px;line-height:1.7}
+.notes-editor textarea{flex:1 0 auto;min-height:40vh;overflow:hidden;font-size:16px;line-height:1.7}
 .notes-editor input::placeholder,.notes-editor textarea::placeholder{color:var(--color-muted)}
 .notes-editor input:focus-visible,.notes-editor textarea:focus-visible{outline:none}
 .notes-when{margin:0 0 14px;padding-bottom:14px;border-bottom:1px solid var(--color-border);font-size:12px;color:var(--color-muted)}
@@ -46,3 +46,78 @@
 .notes-unlock p{margin:0;font-size:14px;line-height:1.6;color:var(--color-muted)}
 .notes-unlock input{min-height:48px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:inherit;padding:8px 12px;font:inherit;min-width:0}
 .notes-error{position:absolute;bottom:0;left:0;right:0;z-index:4;padding:12px var(--mobile-gutter);background:var(--color-surface);border-top:1px solid var(--color-border);font-size:12px;display:flex;align-items:center;justify-content:space-between}
+
+/* Notes v2: colour tint, rendered Markdown, checklists, labels, secret notes (touch-first). */
+.note-card.has-tint{background:color-mix(in srgb,var(--note-tint) 16%,var(--color-surface))}
+.note-card.has-tint:active{background:color-mix(in srgb,var(--note-tint) 26%,var(--color-surface))}
+.note-card strong{display:flex;align-items:center;gap:6px}
+.note-card strong svg{width:15px;height:15px;flex-shrink:0;color:var(--color-muted)}
+.note-card small b{font-weight:500;color:var(--color-danger, #d98a8a)}
+.note-card__labels{display:flex;flex-wrap:wrap;gap:4px;font-style:normal}
+.note-card__labels i{font-style:normal;font-size:11px;padding:1px 8px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-muted)}
+.notes-label-filter{padding:0 0 12px;overflow-x:auto;flex-wrap:nowrap}
+.notes-label-filter .numeric{margin-left:4px;opacity:.7}
+.notes-links{display:flex;flex-wrap:wrap;gap:4px 16px}
+.notes-sync svg{width:20px;height:20px}
+.notes-sync.is-syncing svg{animation:notes-sync-spin 1s linear infinite}
+.notes-sync.is-error{color:var(--color-danger, #d98a8a)}
+@keyframes notes-sync-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.notes-sync.is-syncing svg{animation-duration:3s}}
+.notes-color-dot{display:inline-block;width:20px;height:20px;border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-text) 25%,transparent)}
+.notes-color-dot.is-empty{background:transparent;box-shadow:inset 0 0 0 1.5px var(--color-muted)}
+.sheet-option .notes-color-dot,.sheet-option>svg{margin-right:12px}
+.sheet-option>svg{width:20px;height:20px}
+.notes-editor.has-tint{background:color-mix(in srgb,var(--note-tint) 8%,var(--color-bg))}
+.notes-editor .notes-title{font-size:24px;font-weight:600;padding:8px 0 4px}
+.notes-rendered{flex:1 0 auto;min-height:40vh;font-size:16px;line-height:1.7;cursor:text;overflow-wrap:anywhere}
+.notes-rendered__empty{color:var(--color-muted);margin:0}
+.notes-rendered .markdown__task input{width:22px;height:22px}
+.notes-readonly,.notes-limit{margin:8px 0 0;padding:10px 12px;border-radius:var(--radius-sm);background:var(--color-surface);font-size:13px;color:var(--color-muted)}
+.notes-limit{color:var(--color-danger, #d98a8a)}
+.notes-conflict{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.notes-labels{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 14px}
+.notes-label-chip{display:inline-flex;align-items:center;gap:2px;min-height:32px;padding:0 2px 0 12px;border:1px solid var(--color-border);border-radius:999px;font-size:13px}
+.notes-label-chip button{display:grid;place-items:center;width:32px;height:32px;border:0;background:transparent;color:var(--color-muted)}
+.notes-label-chip button svg{width:14px;height:14px}
+.notes-label-add{display:inline-flex;align-items:center;gap:4px;min-height:32px;padding:0 12px;border:1px dashed var(--color-border);border-radius:999px;background:transparent;color:var(--color-muted);font:inherit;font-size:13px}
+.notes-label-add svg{width:14px;height:14px}
+.notes-editor .notes-label-input{font-size:14px;font-weight:400;min-height:32px;padding:0 12px;border:1px solid var(--color-accent);border-radius:999px;width:10em}
+/* Checklist: 44px targets; the handle drags after a long press and never scrolls the page. */
+.notes-checklist ul{list-style:none;margin:0;padding:0}
+.notes-check{display:flex;align-items:center;gap:2px;min-height:48px;border-radius:var(--radius-sm)}
+.notes-check.is-dragging{opacity:.45}
+.notes-check.is-drop-target,.notes-check__drop-end{box-shadow:inset 0 2px 0 var(--color-accent)}
+.notes-check__drop-end{height:4px}
+.notes-check__handle{display:grid;place-items:center;width:36px;height:44px;flex-shrink:0;border:0;background:transparent;color:var(--color-muted);touch-action:none;-webkit-user-select:none;user-select:none}
+.notes-check__handle svg{width:18px;height:18px}
+.notes-check__box{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0}
+.notes-check__box input{width:22px;height:22px;margin:0;accent-color:var(--color-accent)}
+.notes-editor .notes-check__text{flex:1;font-size:16px;font-weight:400;padding:10px 0}
+.notes-check.is-checked .notes-check__text{color:var(--color-muted);text-decoration:line-through}
+.notes-check__remove{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;border:0;background:transparent;color:var(--color-muted)}
+.notes-check__remove svg{width:18px;height:18px}
+.notes-checklist__add{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 8px 0 40px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:15px}
+.notes-checklist__add svg{width:18px;height:18px}
+.notes-checklist__done{margin-top:12px;border-top:1px solid var(--color-border);padding-top:4px}
+.notes-checklist__done-toggle{display:inline-flex;align-items:center;gap:6px;min-height:44px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:13px}
+.notes-checklist__done-toggle svg{width:16px;height:16px}
+/* Secret notes */
+.notes-secret__fields{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.notes-secret__field{display:flex;flex-direction:column;gap:2px;padding:8px 0;border-bottom:1px solid var(--color-border)}
+.notes-editor .notes-secret__label{font-size:13px;font-weight:500;color:var(--color-muted);padding:4px 0}
+.notes-secret__row{display:flex;align-items:center;gap:2px}
+.notes-editor .notes-secret__value{flex:1;font-size:16px;font-weight:400;padding:8px 0;font-family:inherit}
+.notes-secret__copied{min-height:18px;margin:6px 0;font-size:12px;color:var(--color-muted)}
+.notes-editor .notes-secret__memo{min-height:30vh;margin-top:8px}
+.notes-secret-gate{display:flex;flex-direction:column;gap:14px;max-width:420px;width:100%;margin:24px auto;padding:0 4px}
+.notes-secret-gate h2{margin:0;font-size:20px}
+.notes-secret-gate p{margin:0;font-size:14px;line-height:1.6;color:var(--color-muted)}
+.notes-secret-gate label,.notes-recovery label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--color-muted)}
+.notes-secret-gate__icon{width:32px;height:32px;color:var(--color-muted)}
+.notes-secret-gate .notes-secret-gate__pin,.notes-recovery .notes-secret-gate__pin,.notes-secret-gate__key,.notes-recovery__key{min-height:48px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:var(--color-text);padding:8px 12px;font:inherit;font-size:18px;letter-spacing:.2em}
+.notes-secret-gate__key,.notes-recovery__key{font-size:14px;letter-spacing:0;font-family:ui-monospace,monospace;min-height:72px;resize:none;width:100%;box-sizing:border-box}
+.notes-secret-gate__error{color:var(--color-danger, #d98a8a)!important}
+.notes-secret-gate__actions{display:flex;flex-wrap:wrap;gap:8px}
+.notes-secret-gate .ui-button svg{width:20px;height:20px;margin-right:6px}
+.notes-recovery{display:flex;flex-direction:column;gap:12px;padding-bottom:12px}
+.notes-recovery form{display:flex;flex-direction:column;gap:12px}

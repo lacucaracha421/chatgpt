@@ -21,7 +21,11 @@ function baseApi(path:string) {
  return {items:[],has_more:false,next_cursor:null};
 }
 async function openRootAlbum(){render(<App/>);fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByRole('heading',{name:'업로드용'});}
-async function choose(group='종류',choice='영상'){fireEvent.click(screen.getByRole('button',{name:group}));fireEvent.click(screen.getByRole('radio',{name:choice}));}
+/** Filters live in the folder bar's 보기 옵션 sheet; a chip there opens its own choice sheet. */
+async function choose(group='종류',choice='영상'){fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));fireEvent.click(await screen.findByRole('button',{name:group}));fireEvent.click(screen.getByRole('radio',{name:choice}));}
+/** Opens 보기 옵션, reads the filter chip labels, and closes the sheet again. */
+async function chipLabels(){fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));const labels=[...(await screen.findByRole('group',{name:'자산 필터'})).querySelectorAll('button')].map(b=>b.textContent);fireEvent.click(within(screen.getByRole('dialog',{name:'보기 옵션'})).getByRole('button',{name:'닫기'}));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'보기 옵션'})).toBeNull());return labels;}
+const chipShown=(label:string)=>waitFor(async()=>expect(await chipLabels()).toContain(label));
 function back(){act(()=>window.dispatchEvent(new Event('lakomics-back')));}
 beforeEach(()=>{
  localStorage.clear();vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
@@ -42,29 +46,31 @@ describe('album Library scopes',()=>{
   await openRootAlbum();expect(screen.queryByRole('dialog')).toBeNull();
   expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('라이브러리›앨범');
   expect(document.querySelector('.gallery-scroll .library-children .library-folder')?.textContent).toContain('임시');
-  expect(screen.getByRole('group',{name:'자산 필터'}).textContent).toBe('종류비율길이');
-  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(screen.getByRole('dialog',{name:'보기 옵션'})).toBeTruthy();back();
+  // The filters left the content: the gallery starts under the bar, and 보기 옵션 holds them.
+  expect(screen.queryByRole('group',{name:'자산 필터'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(screen.getByRole('dialog',{name:'보기 옵션'})).toBeTruthy();
+  expect(screen.getByRole('group',{name:'자산 필터'}).textContent).toBe('종류비율길이');back();
   await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('heading',{name:'업로드용'})).toBeTruthy();
  });
  it('walks inner sheet, filters, parent album, then root with Albums selected',async()=>{
   await openRootAlbum();fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
   expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('라이브러리›앨범›업로드용');
-  await choose();await screen.findByRole('button',{name:'영상'});fireEvent.click(screen.getByRole('button',{name:'비율'}));
-  back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('button',{name:'영상'})).toBeTruthy();
-  back();await screen.findByRole('button',{name:'종류'});expect(screen.getByRole('heading',{name:'임시'})).toBeTruthy();
+  await choose();await chipShown('영상');fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));fireEvent.click(await screen.findByRole('button',{name:'비율'}));
+  back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());await chipShown('영상');
+  back();await chipShown('종류');expect(screen.getByRole('heading',{name:'임시'})).toBeTruthy();
   back();await screen.findByRole('heading',{name:'업로드용'});back();await screen.findByRole('heading',{name:'라이브러리'});
-  expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true');expect(screen.getByRole('searchbox',{name:'앨범 찾기'})).toBeTruthy();
+  expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true');expect(screen.getByRole('button',{name:'검색'})).toBeTruthy();
  });
  it('jumps through breadcrumbs and restores the parent gallery scroll',async()=>{
   await openRootAlbum();fireEvent.scroll(document.querySelector('.gallery-scroll')!);
   fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
   fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'업로드용'}));await screen.findByRole('heading',{name:'업로드용'});
   expect(document.querySelector('.gallery-scroll')?.getAttribute('data-restore')).toBe('420');
-  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'앨범'}));await screen.findByRole('searchbox',{name:'앨범 찾기'});
+  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'앨범'}));await waitFor(()=>expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true'));await screen.findByRole('heading',{name:'라이브러리'});
  });
  it('uses the album envelope, identity, filter parameters and cursor on the normal append path',async()=>{
   mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/albums/assets')?page(path.includes('cursor=')?'a2':'a1',!path.includes('cursor=')):baseApi(path));
-  await openRootAlbum();await choose();await screen.findByRole('button',{name:'영상'});
+  await openRootAlbum();await choose();await chipShown('영상');
   fireEvent.click(screen.getByRole('button',{name:'near end'}));await screen.findByText('a2');
   const paths=albumReads().map(([path])=>String(path));expect(paths.some(path=>path.includes('cursor=c1')&&path.includes('media_kind=videos'))).toBe(true);
   expect(paths.every(path=>path.includes(`libraryId=${tree.libraryId}`)&&path.includes('epoch=1')&&path.includes('albumId=root'))).toBe(true);
@@ -76,7 +82,7 @@ describe('album Library scopes',()=>{
   await openRootAlbum();await choose();await screen.findAllByText(/narrowing failed/);
   expect(screen.getByText('a1')).toBeTruthy();expect(document.querySelector('.gallery-scroll')?.getAttribute('data-identity')).not.toContain('media_kind');
   const reads=albumReads().length;fireEvent.click(screen.getByRole('button',{name:'near end'}));await act(async()=>{});expect(albumReads()).toHaveLength(reads);
-  fail=false;fireEvent.click(screen.getAllByRole('button',{name:'다시 시도'})[0]);await screen.findByText('filtered');expect(screen.getByRole('button',{name:'영상'})).toBeTruthy();
+  fail=false;fireEvent.click(screen.getAllByRole('button',{name:'다시 시도'})[0]);await screen.findByText('filtered');await chipShown('영상');
  });
  it.each([{}, {filter_version:1}, {filterVersion:2}])('refuses incompatible filtered envelopes %j',async contract=>{
   mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/albums/assets')&&path.includes('media_kind')?{items:[asset('unchecked')],hasMore:false,nextCursor:null,...contract}:baseApi(path));
@@ -100,9 +106,9 @@ describe('album Library scopes',()=>{
   await choose();await screen.findByText('filtered');expect(signal?.aborted).toBe(true);await act(async()=>release(page('late')));expect(screen.queryByText('late')).toBeNull();
  });
  it('starts a sibling album unfiltered and separates album cache identities',async()=>{
-  await openRootAlbum();await choose();await screen.findByRole('button',{name:'영상'});
+  await openRootAlbum();await choose();await chipShown('영상');
   fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));fireEvent.click(await screen.findByRole('button',{name:'Other'}));await screen.findByText('other-asset');
-  expect(screen.getByRole('button',{name:'종류'})).toBeTruthy();expect(albumReads().at(-1)?.[0]).not.toContain('media_kind');
+  await chipShown('종류');expect(albumReads().at(-1)?.[0]).not.toContain('media_kind');
   expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView(tree,albums[2])));
   expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView({...tree,epoch:2},albums[0])));
  });

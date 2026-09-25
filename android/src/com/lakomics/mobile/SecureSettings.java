@@ -38,6 +38,20 @@ final class SecureSettings {
   if(!preferences.edit().putString(name,encrypted).commit())throw new java.io.IOException("Cannot store Notes key");return value;
  }
  /**
+  * The per-device secret-note PIN verifier (salted PBKDF2, never synced or backed up), or ""
+  * when none is set; a non-null value replaces it. Encrypted like the Notes key.
+  */
+ synchronized String notesPin(String verifier)throws Exception{
+  String name="notes-pin-verifier";android.content.SharedPreferences preferences=context.getSharedPreferences("notes-pin",0);
+  if(verifier==null){String stored=preferences.getString(name,null);if(stored==null)return "";JSONObject e=new JSONObject(stored);Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(e.getString("iv"),0)));c.updateAAD(name.getBytes("UTF-8"));return new String(c.doFinal(Base64.decode(e.getString("data"),0)),"UTF-8");}
+  Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());c.updateAAD(name.getBytes("UTF-8"));
+  String encrypted=new JSONObject().put("iv",Base64.encodeToString(c.getIV(),2)).put("data",Base64.encodeToString(c.doFinal(verifier.getBytes("UTF-8")),2)).toString();
+  if(!preferences.edit().putString(name,encrypted).remove("failures").commit())throw new java.io.IOException("Cannot store Notes PIN");return verifier;
+ }
+ /** Consecutive wrong PINs and the time of the last one (Unix seconds); survives restarts. */
+ synchronized long[] notesPinFailures(){String v=context.getSharedPreferences("notes-pin",0).getString("failures","");String[] p=v.split(":");try{return p.length==2?new long[]{Long.parseLong(p[0]),Long.parseLong(p[1])}:new long[]{0,0};}catch(NumberFormatException e){return new long[]{0,0};}}
+ synchronized void notesPinFailures(long count,long at)throws Exception{android.content.SharedPreferences.Editor e=context.getSharedPreferences("notes-pin",0).edit();if(count<=0)e.remove("failures");else e.putString("failures",count+":"+at);if(!e.commit())throw new java.io.IOException("Cannot store PIN attempts");}
+ /**
   * The per-device exchange credential for one endpoint, or "" when none is stored.
   * The library keeps its own token; the exchange refuses the shared one, so this device
   * holds a second, device-only token. Keyed by endpoint like the Notes key.

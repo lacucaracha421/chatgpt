@@ -148,13 +148,15 @@ it('rejects a late page after changing the series filter',async()=>{
   let finish!:(p:CharacterPage)=>void;
   mocks.api.mockImplementation((path:string)=>{
     if(path.endsWith('/characters'))return Promise.resolve(structuredClone(index));
-    if(path.includes('filter=all'))return new Promise(resolve=>{finish=resolve;});
+    // A series opens on its default 미분류, whose page is held back here.
+    if(path.includes('filter=unclassified'))return new Promise(resolve=>{finish=resolve;});
     return Promise.resolve(page([]));
   });
   render(<CharacterBrowser {...props}/>);
   fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));
   await waitFor(()=>expect(finish).toBeDefined());
-  fireEvent.click(screen.getByRole('button',{name:'미분류'}));
+  expect(screen.getByRole('button',{name:'미분류'}).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button',{name:'전체 이미지'}));
   await screen.findByText('이 보기에 자산이 없습니다');
   await act(async()=>finish(page(['late'])));
   expect(screen.queryByText('late')).toBeNull();
@@ -278,4 +280,27 @@ it('hands the visible scope items to the options menu so the host can offer FAUL
   fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(onOptions).toHaveBeenLastCalledWith([]);
   fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));await screen.findByText('asset-2');
   fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));expect(onOptions).toHaveBeenLastCalledWith(page().items);
+});
+
+it('offers 미분류 and 전체 이미지 only, opens a series on 미분류, and counts 전체 이미지 as a changed view',async()=>{
+  render(<CharacterBrowser {...props} initialNode="series:s" optionsHost={null}/>);
+  await screen.findByRole('heading',{name:'Series'});
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('node=series%3As')&&String(path).includes('filter=unclassified'))).toBe(true));
+  expect(mocks.api.mock.calls.some(([path])=>String(path).includes('filter=needs_review'))).toBe(false);
+  expect(screen.queryByRole('button',{name:'추가 확인'})).toBeNull();
+  expect([...document.querySelectorAll('.character-filters button[aria-pressed]')].map(b=>b.textContent)).toEqual(['미분류','전체 이미지']);
+  const options=()=>screen.getByRole('button',{name:'보기 옵션'});
+  expect(options().classList.contains('is-changed')).toBe(false);
+  fireEvent.click(screen.getByRole('button',{name:'전체 이미지'}));
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('filter=all'))).toBe(true));
+  await waitFor(()=>expect(options().classList.contains('is-changed')).toBe(true));
+  // Back resets the series to its default 미분류 before leaving.
+  let consumed=false;act(()=>{consumed=backRef.current?.()??false;});expect(consumed).toBe(true);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'미분류'}).getAttribute('aria-pressed')).toBe('true'));
+  expect(options().classList.contains('is-changed')).toBe(false);
+});
+it('marks the open series with the people glyph in the bar',async()=>{
+  render(<CharacterBrowser {...props} initialNode="series:s"/>);
+  const heading=await screen.findByRole('heading',{name:'Series'});
+  expect(heading.querySelector('svg.character-glyph')).not.toBeNull();
 });

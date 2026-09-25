@@ -54,17 +54,21 @@ def main():
             '-d', classes, *sorted((root / 'src').rglob('*.java')))
         checks = ['NetworkPolicy', 'DocumentTreePolicy', 'ThumbnailCache', 'PickerSnapshot',
                   'MediaTransfer', 'TicketBatcher', 'TemporaryImagePolicy', 'ClipboardPolicy', 'NotesCrypto', 'VaultCrypto',
-                  'ExchangeTransfer', 'ExchangeZip']
+                  'ExchangeTransfer', 'ExchangeZip', 'NotesModel']
         sources = [p for name in checks for p in (root / f'src/com/lakomics/mobile/{name}.java', root / f'tests/{name}Test.java')]
         # The additive Album collection projection is platform-free like the checks above,
         # but it reads the Album replica types, so those are compiled with it.
         sources += [root / 'src/com/lakomics/mobile/AlbumCollections.java',
                     root / 'src/com/lakomics/mobile/AlbumReplica.java',
                     root / 'src/com/lakomics/mobile/Json.java',
+                    root / 'src/com/lakomics/mobile/NotesPin.java',
                     root / 'tests/AlbumCollectionsTest.java']
         run(javac, '-encoding', 'UTF-8', '-d', tests, *sources)
         for name in checks + ['AlbumCollections']:
+            # NotesModel runs the Notes v2 fixtures shared with the PC (merge vectors,
+            # payload examples incl. undecodable ones, and the v2 AES-GCM envelope).
             run(java_cmd, f'-Dvault.fixtures={root / "tests/fixtures/private-vault"}',
+                f'-Dnotes.fixtures={root.parent / "tests/fixtures/notes-v2"}',
                 '-cp', tests, f'com.lakomics.mobile.{name}Test')
         # The Album and Classification replica checks need neither the Android runtime
         # nor an Android database: the sync engines and the store depend on the

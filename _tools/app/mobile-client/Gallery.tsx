@@ -79,6 +79,21 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   const rows = useMemo(() => justifiedRows(items, width, rowHeight(density, width)), [items, width, density]);
   const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, estimateSize: i => rows[i].height + 10, overscan: 2,scrollMargin:introHeight,observeElementRect:observeShownRect});
   const oldRows = useRef(rows);
+  // Rows added by a page append (same gallery, more items) enter with a short CSS fade. Only
+  // those rows are marked, and only briefly, so rows re-mounted while scrolling back never replay.
+  const [entering, setEntering] = useState<number | null>(null);
+  const grown = useRef({identity, items: items.length, rows: rows.length});
+  useLayoutEffect(() => {
+    const before = grown.current;
+    if (before.identity === identity && before.items > 0 && items.length > before.items) setEntering(Math.max(0, before.rows - 1));
+    else if (before.identity !== identity) setEntering(null);
+    grown.current = {identity, items: items.length, rows: rows.length};
+  }, [identity, items.length, rows.length]);
+  useEffect(() => {
+    if (entering === null) return;
+    const timer = window.setTimeout(() => setEntering(null), 900);
+    return () => clearTimeout(timer);
+  }, [entering]);
   useLayoutEffect(() => {
     const scroll = parent.current;
     if (!scroll) return;
@@ -120,7 +135,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     {pull}
     {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
-      {virtualizer.getVirtualItems().map(virtual => <div className="gallery-row" key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
+      {virtualizer.getVirtualItems().map(virtual => <div className={`gallery-row${entering !== null && virtual.index >= entering ? ' is-entering' : ''}`} key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
         {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} vault={vault}/>) }
       </div>)}
     </div>

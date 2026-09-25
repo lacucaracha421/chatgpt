@@ -5,11 +5,26 @@ import {mapBounded,normalizePage} from './model';
 import type {Asset,Page,View} from './types';
 import type {CharacterIndex} from './characterModel';
 import {entryView,type Entry} from './libraryModel';
+import {PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
+export type CharacterFolderKind='series'|'group'|'character';
+/** The character kind of a Library entry, or undefined for an ordinary asset folder. */
+export const characterKindOf=(entry:Entry):CharacterFolderKind|undefined=>entry.characterNode?characterFolderKind(entry.characterKind??'series'):undefined;
+/** A plain folder node inside a series stays an ordinary folder. */
+export const characterFolderKind=(kind:string|undefined):CharacterFolderKind|undefined=>kind==='series'||kind==='group'||kind==='character'?kind:undefined;
+/**
+ * The PC's squared person/people glyphs, marking character folders apart from asset folders:
+ * a series or group shows people, a single character a person.
+ */
+export function CharacterGlyph({kind}:{kind:CharacterFolderKind}) {
+  const Icon=kind==='character'?PersonIcon:PeopleIcon;
+  return <Icon className="character-glyph" aria-hidden="true"/>;
+}
+const KIND_NAMES:Record<CharacterFolderKind,string>={series:'캐릭터 시리즈',group:'캐릭터 그룹',character:'캐릭터'};
 export function characterCovers(entry:Entry,index?:CharacterIndex):Asset[] {
   const node=index?.nodes.find(node=>node.id===entry.characterNode);
   return node?.thumbnailAssetId?[{id:node.thumbnailAssetId,kind:'image'}]:[];
 }
-export function FolderCard({id,name,count,items,paused,childrenLabel,onSelect,onVisible}:{id:string;name:string;count?:number;items:Asset[];paused:boolean;childrenLabel?:string;onSelect():void;onVisible(id:string,visible:boolean):void}) {
+export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSelect,onVisible}:{id:string;name:string;count?:number;items:Asset[];paused:boolean;childrenLabel?:string;/** Marks a character folder (glyph and card tint); absent for an asset folder. */kind?:CharacterFolderKind;onSelect():void;onVisible(id:string,visible:boolean):void}) {
   const host=useRef<HTMLButtonElement>(null),[visible,setVisible]=useState(false);
   useEffect(()=>{
     if(!host.current)return;
@@ -17,11 +32,11 @@ export function FolderCard({id,name,count,items,paused,childrenLabel,onSelect,on
     const observer=new IntersectionObserver(records=>{const next=records.some(r=>r.isIntersecting);setVisible(next);onVisible(id,next);},{rootMargin:'120px'});
     observer.observe(host.current);return()=>observer.disconnect();
   },[id,onVisible]);
-  return <button ref={host} className="library-folder" onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`}><CoverGroup items={items} paused={paused||!visible}/><span className="folder-caption"><strong>{name}</strong>{count!==undefined&&<span className="numeric muted">{count}</span>}</span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
+  return <button ref={host} className={`library-folder${kind?' is-character':''}`} onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><CoverGroup items={items} paused={paused||!visible}/><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong>{count!==undefined&&<span className="numeric muted">{count}</span>}</span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
 }
 export function FolderCards({items,entries,characters,paused,revision,onSelect,strip=false}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;strip?:boolean}) {
   const {covers,onVisible}=useFolderCovers(items,paused,revision);
-  return <div className={strip?'library-children':'library-folder-grid'}>{items.map(entry=><FolderCard key={entry.id} id={entry.id} name={entry.name} count={entry.asset_count} items={entry.characterNode?characterCovers(entry,characters):covers[entry.id]??[]} paused={paused} childrenLabel={entries.some(item=>item.parent_id===entry.id)?`하위 폴더 ${entries.filter(item=>item.parent_id===entry.id).length}`:undefined} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)}</div>;
+  return <div className={strip?'library-children':'library-folder-grid'}>{items.map(entry=><FolderCard key={entry.id} id={entry.id} name={entry.name} kind={characterKindOf(entry)} count={entry.asset_count} items={entry.characterNode?characterCovers(entry,characters):covers[entry.id]??[]} paused={paused} childrenLabel={entries.some(item=>item.parent_id===entry.id)?`하위 폴더 ${entries.filter(item=>item.parent_id===entry.id).length}`:undefined} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)}</div>;
 }
 export function useFolderCovers(items:Entry[],paused:boolean,revision:number){
   const [visible,setVisible]=useState<Set<string>>(new Set()),[covers,setCovers]=useState<Record<string,Asset[]>>({});

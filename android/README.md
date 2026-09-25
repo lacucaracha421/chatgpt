@@ -1,6 +1,6 @@
 # Lakomics Android client
 
-Current source version: **0.8.11 (48)** (built, not installed; 0.8.10 was installed and tested end to end by the user), declared in [AndroidManifest.xml](AndroidManifest.xml). The version history below starts at 0.7.9; 0.8.1–0.8.9 are recorded in the commit log. 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
+Current source version: **0.8.16 (53)** (built, not installed; 0.8.10 was installed and tested end to end by the user), declared in [AndroidManifest.xml](AndroidManifest.xml). The version history below starts at 0.7.9; 0.8.1–0.8.9 are recorded in the commit log. 0.7.x replaces the PC-style Library drawer and Collections toolbar with mobile drill-down browsing; see the 0.7 section below.
 
 ## Current functionality and remaining gates
 
@@ -13,6 +13,20 @@ Current source version: **0.8.11 (48)** (built, not installed; 0.8.10 was instal
 Collections and Catalog deployment evidence is recorded in the version history and backlog. An APK build alone does not publish their data or establish device acceptance.
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
+
+## 0.8.16 — Notes list tidy-up, built, not installed (2026-09-25)
+
+User feedback on 0.8.15: 휴지통 and 복구키 보기 moved off the Notes list into a ⋯ button at the right end of the Notes top bar (next to 동기화), which opens a small sheet with "휴지통 N" and "복구키 보기". 보관함 stays a quiet link at the end of the list, shown only when something is archived.
+
+## 0.8.15 — Notes v2 on the tablet, built, not installed (2026-09-25)
+
+Parity with the PC Notes v2 ([design](../docs/research/notes-v2-design-20260924.md), including its Android deviations section; ADR-0035 amendments).
+
+- **Notes:** checklists (add, check, long-press drag on the handle, collapsible 완료 group), eight note colours, labels with filter chips, 보관함, search (secret notes by title only), rendered Markdown with tappable task boxes and the Markdown help, text ↔ checklist conversion. Notes from a newer app stay listed read-only; unreadable rows are counted instead of failing the list or sync.
+- **Sync:** unknown fields survive saves, a pull meeting a local edit merges three-way against the stored base, a save queued before a pull is rebased, and only a real collision keeps both copies (사본).
+- **암호 메모:** fingerprint or a per-device PIN (never synced), escalating lockout, re-lock after 5 idle minutes / leaving the note / background, masked values with 보기 (10 s) and a sensitive 복사 cleared after 30 s, PIN reset with the recovery key.
+- **Keyboard:** the editor keeps the line being typed above the keyboard.
+- **Checks:** `NotesModelTest` runs the shared PC fixtures (30 merge vectors, 7 payload examples, 8 undecodable payloads, the v2 AES-GCM envelope) plus PIN/draft checks. Not verified on a device: BiometricPrompt, the keyboard lift, clipboard clearing, PBKDF2 unlock time, and a real round trip with the PC through the server.
 
 ## 0.8.11 — 폴더 보내기: a folder as one zip, built, not installed (2026-09-25)
 

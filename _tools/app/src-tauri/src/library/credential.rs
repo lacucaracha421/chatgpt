@@ -103,6 +103,19 @@ pub(crate) fn set_notes_key(target: &str, value: &[u8]) -> Result<(), LibraryErr
         .map_err(map_backend_error)
 }
 
+/// Interactive unlock of the OS credential store (the Linux keyring password dialog).
+/// Only for an explicit user action such as opening Notes; background readers never
+/// call this. Windows has no locked state to resolve.
+#[cfg(all(target_os = "linux", not(test)))]
+pub(crate) fn unlock_store_interactive() -> Result<(), LibraryError> {
+    linux::unlock_interactive().map_err(map_backend_error)
+}
+
+#[cfg(not(all(target_os = "linux", not(test))))]
+pub(crate) fn unlock_store_interactive() -> Result<(), LibraryError> {
+    Ok(())
+}
+
 #[cfg(all(test, any(windows, target_os = "linux")))]
 pub(crate) fn delete_notes_test_key(target: &str) {
     OsCredentialBackend

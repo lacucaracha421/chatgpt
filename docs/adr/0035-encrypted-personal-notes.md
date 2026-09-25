@@ -1,6 +1,6 @@
 # 개인 메모는 별도 복구키로 암호화하여 동기화한다
 
-Status: Accepted; amended 2026-09-24 (Notes v2: checklists, colours, Markdown, item-level merge; see the amendment at the end)
+Status: Accepted; amended 2026-09-24 (Notes v2: checklists, colours, Markdown, item-level merge) and 2026-09-25 (labels, archive, secret notes, per-device PIN, keyring prompt); see the amendments at the end
 
 Clarifies: ADR-0033, Notes domain only. Asset replication authority is unchanged.
 
@@ -68,8 +68,21 @@ User decision (2026-09-24), accepting every recommendation of [`docs/research/no
 
 ### Conflicts and merge
 
-- Each client keeps the last server-acknowledged payload per note as a merge base. PC adds it with local migration 0095 (approved for implementation; it reaches the real library only through a normal app update with the usual pre-migration backup). Android adds the matching column in its notes store.
+- Each client keeps the last server-acknowledged payload per note as a merge base. PC adds it with local migration 0096 (numbered 0095 in the original design; approved for implementation; it reaches the real library only through a normal app update with the usual pre-migration backup). Android adds the matching column in its notes store.
 - When a pull meets a local pending edit, the client runs a three-way merge: scalar fields and each checklist item's text, checked state and order merge independently, taking the side that changed. Deletion against an edit keeps the edited item; restoring beats trashing; a concurrent `pinned`, `color`, `checked` or `order` change takes the server version.
 - A merge succeeds only without a true collision; the result is saved as a new local pending write on the server revision.
 - **Replaces the "선택을 제공한다" rule above:** an unresolvable collision (both sides changed the title, the type, a text body or the same item's text), a missing base or an unsupported schema keeps both copies automatically on PC and mobile: the server version wins and the local edit is kept as a separate note flagged as a conflict copy. The PC no longer asks the user to choose.
 - Rust and Java run a shared set of merge test vectors, alongside a cross-platform v2 encryption vector.
+
+
+## Amendment (2026-09-25): labels, archive, secret notes, per-device PIN, keyring prompt
+
+User decision (2026-09-25; see "Scope additions" in the Notes v2 design). Every note stays end-to-end encrypted as above; the envelope, AAD, key, server contract and `.lakonotes` format are unchanged.
+
+- **Labels and archive** live inside the encrypted payload: `labels` (≤20 per note, ≤40 chars, case-insensitive unique, NFC) and `archived`. Archived notes leave the main list and appear under 보관함. Merge: labels per label (added on either side is added; removed on one side is removed); `archived` like `deleted` (`false` wins).
+- **Search** runs in memory over decrypted titles, bodies, checklist items and labels; secret notes match by title only. Nothing is indexed on disk.
+- **Secret notes (암호 메모):** `type: "secret"` with `fields` (`id`, `label`, `value`, `order`; ≤200 fields, label ≤100 and value ≤4000 code points) and a free-text `memo`. `body` is the derived `label: value` fallback for pre-v2 clients. Fields merge per id like checklist items; the same field's label or value changed on both sides keeps both copies.
+- **Per-device PIN:** opening a secret note needs a local unlock. The PC uses a 4–8 digit PIN whose salted PBKDF2-HMAC-SHA256 verifier is kept in the OS credential store (one per device, never synced, exported or backed up); a forgotten PIN is reset with the recovery key. Until unlocked, the PC backend withholds a secret note's body, memo, fields and labels from the UI. The session closes after 5 idle minutes (enforced in the backend as well), when the note is closed, and when the window is hidden. Android uses BiometricPrompt or its own PIN in its secure settings. The PIN is a local screen lock, not an additional encryption layer. Wrong PINs lock entry out with escalating delays that survive a restart, and once a PIN exists the recovery key is shown only inside an open PIN session.
+- **Locked keyring (Linux):** when the user opens Notes and the Secret Service collection is locked, the PC asks the Secret Service to unlock it (the system password dialog). This refines the 2026-09-08 clarification above: background readers (sync, timers) still never unlock or prompt.
+- The merge-base column is local migration **0096** (`0096_notes_base_payload.sql`; `0095` was already taken), which also adds a local `conflict_copy` flag for the automatic keep-both copy and a local `notes_revisions` table so a save queued before a pull is merged rather than refused.
+- Notes this client cannot decode (newer schema, unknown type, malformed keys) stay listed read-only and are saved back unchanged apart from pin, trash and archive; one unreadable note never blocks the vault or a sync. It reaches the real library only through a normal app update with the usual pre-migration backup.

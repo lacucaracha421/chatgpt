@@ -1549,6 +1549,14 @@ pub async fn notes_request(root:String, operation:String, input:serde_json::Valu
                     serde_json::to_value(library.notes_import(serde_json::from_slice(&bytes)?)?)?
                 }else{serde_json::Value::Null}
             },
+            "unlockKeyring"=>serde_json::to_value(library.notes_unlock_keyring()?)?,
+            "secretStatus"=>serde_json::to_value(library.notes_secret_status()?)?,
+            "secretSetPin"=>serde_json::to_value(library.notes_secret_set_pin(input.get("pin").and_then(|v|v.as_str()).unwrap_or(""))?)?,
+            "secretUnlock"=>serde_json::to_value(library.notes_secret_unlock(input.get("pin").and_then(|v|v.as_str()).unwrap_or(""))?)?,
+            "secretResetPin"=>serde_json::to_value(library.notes_secret_reset_pin(input.get("recoveryKey").and_then(|v|v.as_str()).unwrap_or(""),input.get("pin").and_then(|v|v.as_str()).unwrap_or(""))?)?,
+            "secretLock"=>{library.notes_secret_lock();serde_json::Value::Null},
+            "secretTouch"=>serde_json::json!({"unlocked":library.notes_secret_touch()}),
+            "dismissConflictCopy"=>{library.notes_dismiss_conflict_copy(input.get("id").and_then(|v|v.as_str()).ok_or(Error::Message("메모를 선택해 주세요."))?)?;serde_json::Value::Null},
             "resolve"=>serde_json::to_value(library.notes_resolve(input.get("id").and_then(|v|v.as_str()).ok_or(Error::Message("메모를 선택해 주세요."))?,input.get("expectedRevision").and_then(|v|v.as_i64()).unwrap_or(-1),input.get("keepCopy").and_then(|v|v.as_bool()).unwrap_or(true))?)?,
             _=>return Err(Error::Message("지원하지 않는 메모 요청입니다."))
         })

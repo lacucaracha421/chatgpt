@@ -44,7 +44,7 @@ export function collectionCardDate(item:CollectionSummary){
   return item.year?String(item.year):item.releaseDate?.slice(0,4)??'';
 }
 
-export const SORT_LABELS:Record<CollectionFilters['sort'],string>={media_date:'출시·출간·개봉일',recent:'최근 추가',name:'제목'};
+export const SORT_LABELS:Record<CollectionFilters['sort'],string>={media_date:'최신순',recent:'최근 추가',name:'제목'};
 /** Direction words follow the sort: dates read newest/oldest, titles read alphabetical/reverse. */
 export function sortDirectionLabels(sort:CollectionFilters['sort']):Record<CollectionFilters['direction'],string> {
   return sort==='name'?{asc:'가나다순',desc:'역순'}:{desc:'최신순',asc:'오래된순'};

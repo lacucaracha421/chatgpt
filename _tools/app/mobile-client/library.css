@@ -1,13 +1,12 @@
-/* Same bar height and title size as the Collections, Catalog and Notes bars, so switching
-   bottom tabs does not move the content up or down. */
+/* The Library root sits under the shared top bar (see mobile.css `.top-bar`). */
 .library-root { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
-.library-root-header { display:flex; align-items:center; gap:6px; min-height:var(--mobile-header); padding:0 calc(var(--mobile-gutter) - 10px) 0 var(--mobile-gutter); flex-shrink:0; }
-.library-root-header h1 { font-size:22px; font-weight:600; line-height:1.2; }
 .library-root-scroll { flex:1; min-height:0; overflow:auto; overscroll-behavior-y:contain; padding:0 var(--mobile-gutter) 24px; }
 .library-root-scroll h2,.folder-intro h2 { font-size:15px; font-weight:500; margin:24px 0 12px; }
-.library-segments { display:flex; gap:4px; margin:8px 0 16px; background:var(--color-surface); padding:3px; border-radius:3px; }
-.library-segments button { flex:1; min-height:44px; border:0; border-radius:2px; background:transparent; color:var(--color-muted); }
-.library-segments button[aria-selected="true"] { background:var(--color-bg); color:var(--color-text); }
+.library-segments { display:flex; margin:14px 0 8px; border:1px solid var(--color-border); border-radius:var(--radius-sm); overflow:hidden; box-shadow:var(--inset-light); }
+.library-segments button { flex:1; min-height:42px; border:0; border-radius:0; background:var(--color-control); color:var(--color-muted); }
+.library-segments button+button { border-left:1px solid var(--color-border); }
+/* The PC's parent-context tint (DESIGN.md §6): a quiet selected segment, not a white slab. */
+.library-segments button[aria-selected="true"] { background:var(--color-selection-context); color:var(--color-selection-context-text); }
 .library-search { display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--color-border); margin-bottom:16px; }
 .library-search svg { width:20px; color:var(--color-muted); }
 .library-search input { flex:1; min-width:0; min-height:48px; border:0; background:transparent; color:inherit; font:inherit; }
@@ -17,16 +16,12 @@
 .library-folder .home-cover-group { width:100%; flex-shrink:0; height:auto; aspect-ratio:4/3; border-radius:3px; overflow:hidden; }
 .folder-caption { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:36px; }
 .folder-caption strong { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.library-folder small,.result-name small,.library-recents small { display:block; color:var(--color-muted); font-size:12px; }
+.library-folder small,.result-name small { display:block; color:var(--color-muted); font-size:12px; }
 .library-children { display:flex; gap:12px; overflow-x:auto; padding-bottom:8px; }
 .library-children .library-folder { flex:0 0 clamp(130px,24vw,190px); }
 .library-children .library-folder small { display:none; }
 .library-children .home-cover-group { display:block; }
 .library-children .home-cover-group>.home-cover:not(:first-child) { display:none; }
-.library-header { display:flex; align-items:center; gap:8px; padding:6px var(--mobile-gutter) 10px; border-bottom:1px solid var(--color-border); flex-shrink:0; }
-.library-titles { flex:1; min-width:0; }
-.library-title { display:flex; align-items:baseline; gap:10px; }
-.library-title h1 { font-size:22px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .library-breadcrumb { display:flex; align-items:center; overflow:auto; scrollbar-width:none; }
 .library-breadcrumb>span { display:flex; align-items:center; flex-shrink:0; color:var(--color-muted); }
 .library-breadcrumb button { min-height:44px; padding:0 6px; border:0; background:none; color:var(--color-muted); font-size:12px; }
@@ -39,12 +34,17 @@
 .result-name small { margin-top:5px; }
 .library-result>.home-cover { width:48px; height:56px; flex-shrink:0; }
 .library-results mark { color:var(--color-text); background:var(--color-surface); text-decoration:underline; text-underline-offset:3px; }
-.library-recents { display:flex; flex-wrap:nowrap; gap:6px; overflow-x:auto; }
-.library-recents button { display:flex; flex-shrink:0; align-items:center; white-space:nowrap; height:44px; min-height:44px; padding:0 12px; text-align:left; background:var(--color-surface); border:1px solid var(--color-border); border-radius:3px; }
 .filter-chips { display:flex; gap:8px; padding:16px 0; overflow-x:auto; }
-.filter-chip { display:flex; align-items:center; gap:8px; min-height:44px; padding:0 14px; background:transparent; border:1px solid var(--color-border); border-radius:3px; white-space:nowrap; }
-.filter-chip svg { width:14px; }
-.filter-chip.selected { background:var(--color-text); color:var(--color-bg); border-color:var(--color-text); }
+/* PC control face (global.css `ui-button--secondary`); a set filter uses the PC's neutral grey
+   filter face with its count instead of a white slab. The ::before extends the 36px face to a
+   44px touch target. */
+.filter-chip { position:relative; display:flex; align-items:center; gap:7px; height:36px; min-height:36px; margin:4px 0; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:var(--radius-sm); white-space:nowrap; color:var(--color-text); font-size:14px; }
+.filter-chip::before { content:''; position:absolute; inset:-4px 0; }
+.filter-chip svg { width:14px; color:var(--color-muted); }
+.filter-chip:active:not(:disabled) { background:var(--color-control-pressed); }
+.filter-chip.selected, .filter-chip[aria-pressed="true"] { background:var(--color-filter-selected); border-color:var(--color-filter-border); color:var(--color-filter-text); }
+.filter-chip.selected svg { color:var(--color-filter-text); }
+.filter-chip__default { font:500 12px var(--font-ui); color:var(--color-muted); }
 .filter-chip:disabled { opacity:.4; cursor:default; }
 /* A chip row that sticks under a title bar keeps a short fading gap above the content it covers. */
 .collection-chips,.catalog-chips { position:sticky; top:0; z-index:1; margin:0 0 -8px; padding:8px 0 22px; background:linear-gradient(var(--color-bg) calc(100% - 12px), transparent); }
@@ -98,3 +98,30 @@
 /* Pressed feedback, so a tap that starts a network load is acknowledged at once. */
 .library-folder:active .home-cover-group, .library-result:active, .library-all:active, .home-folder:active .home-cover-group { opacity:.8; }
 .bottom-nav button:not(.active):active { color:var(--color-text); }
+
+/* Library root: one screen, one conclusion. `.is-fit` is set when the covers were sized from the
+   real viewport so the first screen ends on a whole row; scrolling then settles on row ends. */
+.library-root .section-label { display:flex; align-items:center; gap:8px; margin:16px 0 12px; font-size:13px; font-weight:500; color:var(--color-muted); letter-spacing:.3px; }
+.library-root .section-label::before { content:''; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.library-root .section-label::after { content:''; flex:1; height:1px; background:var(--section-label-rule); }
+.library-root .section-label .numeric { font-size:14px; }
+.library-root .library-all { margin:0; }
+.library-root-folders .library-folder small { display:none; }
+.library-root.is-fit .library-root-folders .library-folder .home-cover-group { aspect-ratio:auto; height:var(--root-cover-height); }
+.library-root.is-fit .library-root-scroll { scroll-snap-type:y proximity; scroll-padding-bottom:32px; padding-bottom:0; }
+.library-root.is-fit .library-root-folders { padding-bottom:24px; }
+.library-root.is-fit .library-root-folders .library-folder { scroll-snap-align:end; }
+.library-root.is-fit .library-segments { scroll-snap-align:start; }
+/* Sticks to the bottom of the first screen and covers the gap where the next row would begin. */
+.library-end-line { position:sticky; bottom:0; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px; height:32px; margin:0; font-size:12px; color:var(--color-muted); background:var(--color-bg); }
+.library-end-line svg { width:14px; height:14px; }
+
+/* Character folders (series, groups, characters) read apart from asset folders: the PC's squared
+   people/person glyph before the name and an ivory hairline under the cover. */
+.character-glyph { width:15px; height:15px; flex:none; color:var(--color-accent); opacity:.85; }
+.folder-caption .character-glyph { margin-right:6px; }
+.folder-caption:has(.character-glyph) strong { flex:1; min-width:0; }
+.library-folder.is-character .home-cover-group { position:relative; }
+.library-folder.is-character .home-cover-group::after { content:''; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--color-accent); opacity:.55; pointer-events:none; }
+.result-name strong .character-glyph { width:14px; height:14px; margin-right:6px; vertical-align:-2px; }
+.top-bar h1 .character-glyph { width:17px; height:17px; margin-right:2px; align-self:center; }

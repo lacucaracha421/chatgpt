@@ -12,7 +12,8 @@ const section=()=>screen.getByLabelText('컬렉션',{selector:'section'});
 const list=()=>section().querySelector('.collection-list') as HTMLElement;
 const detailPane=()=>section().querySelector('.collection-detail') as HTMLElement;
 const pressTab=(name:string)=>fireEvent.click(screen.getByRole('tab',{name}));
-const searchBox=()=>screen.getByRole('searchbox',{name:'컬렉션 검색'}) as HTMLInputElement;
+/** Search lives behind the top bar's magnifier; open it once, then use the field. */
+const searchBox=()=>{if(!screen.queryByRole('searchbox',{name:'컬렉션 검색'}))fireEvent.click(screen.getByRole('button',{name:'검색'}));return screen.getByRole('searchbox',{name:'컬렉션 검색'}) as HTMLInputElement;};
 /** A downward pull from the top of a scroller is the refresh gesture. */
 function pull(element:HTMLElement){fireEvent.touchStart(element,{touches:[{clientX:0,clientY:0}]});fireEvent.touchMove(element,{touches:[{clientX:0,clientY:200}]});fireEvent.touchEnd(element);}
 /** jsdom has no layout, so the scroller's geometry is declared before the scroll event. */
@@ -210,11 +211,21 @@ describe('read-only collections',()=>{
     scrollToEnd(list());
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('cursor=page-2'));
     fireEvent.click(screen.getByRole('button',{name:/내 별점/}));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'4.5점'}));
+    // A slider (전체, 0.5 … 5.0) with 전체 marked as the default, plus a separate 미평가 toggle.
+    const slider=within(screen.getByRole('dialog')).getByRole('slider',{name:'내 별점'}) as HTMLInputElement;
+    expect(slider.getAttribute('aria-valuetext')).toBe('전체 · 기본');expect(slider.max).toBe('10');
+    fireEvent.change(slider,{target:{value:'9'}});expect(slider.getAttribute('aria-valuetext')).toBe('★ 4.5');
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=4.5'));
     expect(mocks.api.mock.calls.at(-1)?.[0]).not.toContain('cursor=');
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가만'}));
+    await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=unrated'));
+    expect(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가만'}).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.change(slider,{target:{value:'9'}});
+    await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=4.5'));
+    expect(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가만'}).getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'닫기'}));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(screen.getByRole('button',{name:/출시·출간·개봉일 · 최신순/}));
+    fireEvent.click(screen.getByRole('button',{name:'최신순'}));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'최근 추가'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('sort=recent'));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'오래된순'}));

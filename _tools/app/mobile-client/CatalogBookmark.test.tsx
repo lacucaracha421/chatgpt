@@ -51,6 +51,32 @@ describe('catalog bookmark toggle',()=>{
     expect(screen.queryByText('저장 대기')).toBeNull();
   });
 
+  it('keeps the same bookmark control, status line and detail while pending and after saving',async()=>{
+    let finish!:(value:unknown)=>void;
+    mocks.native.mockImplementation(async(operation:string,payload:Record<string,unknown>)=>{
+      if(operation==='api'&&payload.path==='/v1/mobile-catalog/status')return status();
+      if(operation==='bookmarkCommand')return new Promise(resolve=>{finish=resolve;});
+      return {url:'data:image/gif;base64,R0lGODlhAQABAAAAACw='};
+    });
+    await openDetail();
+    const button=screen.getByRole('button',{name:'북마크'});
+    const row=button.parentElement!,line=row.nextElementSibling!;
+    const detailReads=()=>mocks.api.mock.calls.filter(([path])=>String(path).includes('/works/')).length;
+    await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>String(path).includes('/reader'))).toBe(true));
+    const reads=detailReads();
+    expect(line.className).toContain('catalog-bookmark-state');expect(line.textContent).toBe('');
+    fireEvent.click(button);
+    // Pending: the same elements, only their text changes; the status line was already there.
+    await waitFor(()=>expect(line.textContent).toBe('저장 대기'));
+    expect(screen.getByRole('button',{name:'북마크 저장 중'})).toBe(button);
+    expect(row.nextElementSibling).toBe(line);expect(button.querySelector('.catalog-bookmark-label')?.textContent).toBe('북마크됨');
+    await act(async()=>finish(accepted));
+    await waitFor(()=>expect(screen.getByRole('button',{name:'북마크 해제'})).toBe(button));
+    expect(row.nextElementSibling).toBe(line);expect(line.textContent).toBe('');
+    // The toggle does not re-run the detail load under the open page.
+    expect(detailReads()).toBe(reads);
+  });
+
   it('keeps the bookmark action beside reader and marks bookmarked covers',async()=>{
     const bookmarked={...item,bookmarked:true,hasBookmarkedVersion:true};
     mocks.api.mockImplementation(async(path:string)=>{

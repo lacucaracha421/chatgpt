@@ -1,8 +1,15 @@
 import type {Asset, AssetFiltersValue, Page, PageWire, View} from './types';
 import {EMPTY_FILTERS, filterKey, filterVersionOf, withFilters} from './assetFilters';
 export const PAGE_SIZE = 40;
-export const DENSITIES = ['크게', '균형', '촘촘하게'] as const;
-export function rowHeight(density: number, width: number) { return Math.min([290, 220, 150][density] ?? 220, width * .78); }
+/** Thumbnail size: 0 (크게) … 2 (촘촘하게) in half steps; 1 (균형) is the default. */
+export const DENSITIES = ['크게', '조금 크게', '균형', '조금 촘촘하게', '촘촘하게'] as const;
+export const DEFAULT_DENSITY = 1;
+export const densityIndex = (density: number) => Math.round(density * 2);
+export const densityOf = (index: number) => index / 2;
+/** Stored before the slider as 0, 1 or 2; half steps are new. Anything else falls back to 균형. */
+export function validDensity(value: unknown) { return typeof value === 'number' && value >= 0 && value <= 2 && Number.isInteger(value * 2) ? value : DEFAULT_DENSITY; }
+/** 290px at 크게, 220px at 균형, 150px at 촘촘하게, straight in between. */
+export function rowHeight(density: number, width: number) { return Math.min(290 - 70 * validDensity(density), width * .78); }
 /**
  * The navigation identity of one view, including its filters.
  *

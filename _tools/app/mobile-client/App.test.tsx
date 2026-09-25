@@ -120,10 +120,10 @@ it('keeps visited Catalog and Notes panels separate when returning Home',async()
   mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?{unlocked:true,notes:[]}:{configured:true,endpoint:'https://example.invalid'});
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
   fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});
-  fireEvent.click(screen.getByRole('button',{name:'Notes',exact:true}));await screen.findByRole('button',{name:'메모 동기화'});
+  fireEvent.click(screen.getByRole('button',{name:'Notes',exact:true}));await screen.findByRole('button',{name:'동기화',exact:true});
   fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByText('tile-a1');
-  expect(screen.queryByRole('button',{name:'메모 동기화'})).toBeNull();expect(screen.queryByRole('region',{name:'메모',exact:true})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});expect(screen.queryByRole('button',{name:'메모 동기화'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'동기화',exact:true})).toBeNull();expect(screen.queryByRole('region',{name:'메모',exact:true})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});expect(screen.queryByRole('button',{name:'동기화',exact:true})).toBeNull();
 });
 it('keeps root Albums live so near-end pagination can append',async()=>{
   vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
@@ -343,14 +343,24 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }
 });
-it('opens density as a sheet, stores the existing preference and restores focus',async()=>{
+it('sets the thumbnail size with a slider, stores it and counts only a size other than the default',async()=>{
+  localStorage.setItem('lakomics.mobile.density','0');
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-  const opener=screen.getByRole('button',{name:'보기 옵션'});opener.focus();fireEvent.click(opener);
-  fireEvent.click(screen.getByRole('radio',{name:'촘촘하게'}));
-  expect(localStorage.getItem('lakomics.mobile.density')).toBe('2');
-  await waitFor(()=>expect(document.activeElement).toBe(opener));
-  fireEvent.click(opener);expect(screen.getByRole('radio',{name:'촘촘하게'}).getAttribute('aria-checked')).toBe('true');
+  // A pre-slider stored value (0 = 크게) is still honoured, and it differs from 균형.
+  const opener=screen.getByRole('button',{name:'보기 옵션'});
+  expect(opener.classList.contains('is-changed')).toBe(true);
+  opener.focus();fireEvent.click(opener);
+  const slider=screen.getByRole('slider',{name:'썸네일 크기'}) as HTMLInputElement;
+  expect(slider.value).toBe('0');expect(slider.getAttribute('aria-valuetext')).toBe('크게');
+  fireEvent.change(slider,{target:{value:'3'}});
+  expect(localStorage.getItem('lakomics.mobile.density')).toBe('1.5');
+  expect(slider.getAttribute('aria-valuetext')).toBe('조금 촘촘하게');
+  fireEvent.change(slider,{target:{value:'2'}});
+  expect(slider.getAttribute('aria-valuetext')).toBe('균형 · 기본');
+  expect(localStorage.getItem('lakomics.mobile.density')).toBe('1');
   act(()=>window.dispatchEvent(new Event('lakomics-back')));expect(screen.queryByRole('dialog')).toBeNull();
+  await waitFor(()=>expect(document.activeElement).toBe(opener));
+  expect(opener.classList.contains('is-changed')).toBe(false);
   expect(screen.getByRole('heading',{name:'모든 자산'})).toBeTruthy();
 });
 it('walks root, parent, child, Back, Back, root, finish and supports breadcrumb jumps',async()=>{
@@ -473,9 +483,20 @@ describe('server list generation',()=>{
     await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length).toBe(reads+1));
   });
 });
+it('closes an open search on Back before leaving the Library root',async()=>{
+  render(<App/>);
+  await screen.findByRole('button',{name:/^분류 B, /});
+  fireEvent.click(screen.getByRole('button',{name:'검색'}));
+  fireEvent.change(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}),{target:{value:'분류'}});
+  mocks.native.mockClear();
+  act(()=>window.dispatchEvent(new Event('lakomics-back')));
+  expect(screen.queryByRole('searchbox',{name:'폴더·캐릭터 찾기'})).toBeNull();
+  expect(mocks.native.mock.calls.some(([op])=>op==='finish')).toBe(false);
+});
 it('keeps the Library root mounted behind an open folder, so Back returns to the same search without rebuilding it',async()=>{
   render(<App/>);
   await screen.findByRole('button',{name:/^분류 B, /});
+  fireEvent.click(screen.getByRole('button',{name:'검색'}));
   fireEvent.change(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}),{target:{value:'분류'}});
   fireEvent.click(await screen.findByRole('button',{name:/^분류 B, /}));
   await screen.findByRole('heading',{name:'분류 B'});

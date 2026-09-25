@@ -1,6 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.lakomics.mobile" android:versionCode="48" android:versionName="0.8.11">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.lakomics.mobile" android:versionCode="53" android:versionName="0.8.16">
  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
  <uses-permission android:name="android.permission.INTERNET" />
+ <uses-permission android:name="android.permission.USE_BIOMETRIC" />
  <application android:debuggable="false" android:icon="@drawable/ic_launcher" android:label="Lakomics" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:fullBackupContent="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
   <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
   <activity android:name=".TemporaryImageActivity" android:exported="true" android:excludeFromRecents="true" android:configChanges="orientation|screenSize|keyboardHidden">

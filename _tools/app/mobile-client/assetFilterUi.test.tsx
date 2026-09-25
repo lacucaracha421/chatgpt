@@ -1,5 +1,5 @@
 import type {ReactNode} from 'react';
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import type {HomeProps} from './Home';
@@ -33,6 +33,8 @@ const legacy=async(path:string)=>{
 };
 /** Choose one filter value by its accessible group and label. */
 const openFilters=(group='종류')=>{
+  // The filter chips live in the folder bar's 보기 옵션 sheet.
+  if(!screen.queryByRole('group',{name:'자산 필터'}))fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
   const index=['종류','비율','길이'].indexOf(group==='미디어'?'종류':group);
   fireEvent.click(screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')[index]);
 };
@@ -43,6 +45,14 @@ const chooseIn=(group:string,label:string)=>{
     openFilters(name);
   }
   fireEvent.click(screen.getByRole('radio',{name:label}));
+};
+/** Opens the 보기 옵션 sheet, reads the filter chip labels, and closes the sheet again. */
+const chipLabels=async()=>{
+  fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
+  const labels=[...(await screen.findByRole('group',{name:'자산 필터'})).querySelectorAll('button')].map(b=>b.textContent);
+  fireEvent.click(within(screen.getByRole('dialog',{name:'보기 옵션'})).getByRole('button',{name:'닫기'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'보기 옵션'})).toBeNull());
+  return labels;
 };
 const openFolder=async(name:string)=>{
   fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
@@ -80,13 +90,15 @@ describe('asset filters',()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     expect(lastPagePath()).not.toContain('media_kind');
     expect(lastPagePath()).not.toContain('aspect_ratio');
-    expect(screen.getByRole('button',{name:'종류'})).toBeTruthy();
+    expect(await chipLabels()).toContain('종류');
     openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
     // The summary is both visible and part of the trigger's accessible name, so a narrowed
     // gallery announces its narrowing rather than looking like an unfiltered one.
-    await waitFor(()=>expect(screen.getByText('이미지')).toBeTruthy());
-    expect(screen.getByRole('button',{name:'이미지'})).toBeTruthy();
+    // The folder bar's 보기 옵션 button turns grey with a count, and the chip names the choice.
+    await waitFor(()=>expect(screen.getByRole('button',{name:'보기 옵션'}).classList.contains('is-changed')).toBe(true));
+    expect(screen.getByRole('button',{name:'보기 옵션'}).textContent).toBe('1');
+    expect(await chipLabels()).toContain('이미지');
   });
 
   it('refuses to present an unfiltered list as filtered when the server has no filter contract',async()=>{
@@ -182,7 +194,7 @@ describe('asset filters',()=>{
     // would be comparing against a stale set and could legitimately no-op.
     await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).toContain('duration_ms_min=300000'));
     // The reset is inside the dialog and clears every group at once.
-    fireEvent.click(screen.getByRole('button',{name:'초기화'}));
+    fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));fireEvent.click(await screen.findByRole('button',{name:'초기화'}));
     await waitFor(()=>expect(lastPagePath()).not.toContain('media_kind'));
     expect(lastPagePath()).not.toContain('duration_ms_min');
   });
@@ -332,9 +344,10 @@ describe('asset filters',()=>{
 
   it('does not offer filters on Home, where a control would imply a narrowing that is not applied',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    expect(screen.getByRole('button',{name:'종류'})).toBeTruthy();
+    expect(await chipLabels()).toContain('종류');
     fireEvent.click(screen.getByRole('button',{name:'Home'}));
     await screen.findByText('tile-a1');
+    expect(screen.queryByRole('button',{name:'보기 옵션'})).toBeNull();
     expect(screen.queryByRole('button',{name:'종류'})).toBeNull();
   });
 
