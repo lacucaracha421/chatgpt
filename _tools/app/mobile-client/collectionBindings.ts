@@ -34,7 +34,11 @@ export type BindRequest = {
 };
 export type RequestsReply = {version: 1; items: BindRequest[]; pending: Record<BindProvider, BindRequest | null> | null};
 export type MangaDexChoice = {mangaId: string; title: string; coverUrl: string | null};
-export type KakaoChoice = {query: string; anchorItemId: string; groupFingerprint: string; title: string; author: string | null; publisher: string | null; volumeCount: number | null; thumbnailUrl: string | null};
+/** One Kakao search group of a multi-group bind (a series the search split by volume range). */
+export type KakaoGroupChoice = {anchorItemId: string; groupFingerprint: string; title?: string; firstVolume?: number; lastVolume?: number; volumeCount?: number};
+export type KakaoChoice = {query: string; groups: KakaoGroupChoice[]; title: string; author: string | null; publisher: string | null; volumeCount: number | null; thumbnailUrl: string | null};
+/** A bind may join at most this many groups of one search (the server enforces the same). */
+export const MAX_KAKAO_GROUPS = 10;
 export type BindCommand = {version: 1; operationId: string; collectionId: string; provider: BindProvider; choice: MangaDexChoice | KakaoChoice; expected?: {externalId: null}};
 
 /**
@@ -61,18 +65,54 @@ export function latestRequest(reply: RequestsReply | null, provider: BindProvide
 }
 
 export const chosenTitle = (request: BindRequest) => typeof request.choice.title === 'string' ? request.choice.title : '';
+const count = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null;
+/**
+ * What a request picked, for the row beside the cover: the title, and for a Kakao bind the
+ * joined volume range (`밤의 도서관 · 1–15권 · 2개 묶음`).
+ */
+export function chosenSummary(request: BindRequest) {
+  const title = chosenTitle(request), groups = request.choice.groups;
+  if (request.provider !== 'kakao' || !Array.isArray(groups) || groups.length === 0) return title;
+  const spans = groups.filter((group): group is Record<string, unknown> => !!group && typeof group === 'object')
+    .map(group => ({firstVolume: count(group.firstVolume), lastVolume: count(group.lastVolume), volumeCount: count(group.volumeCount) ?? 0}));
+  const range = mergedVolumes(spans);
+  return [title, range, groups.length > 1 ? `${groups.length}개 묶음` : ''].filter(Boolean).join(' · ');
+}
 
 /** A MangaDex publication status in Korean; anything unknown is shown as it came. */
 export function mangaDexStatus(status: string | null) {
   if (!status) return '';
   return ({ongoing: '연재 중', completed: '완결', hiatus: '휴재', cancelled: '연재 중단'} as Record<string, string>)[status] ?? status;
 }
-/** A Kakao group's volumes as `1–12권`, with the count when volumes are missing in between. */
-export function kakaoVolumes(candidate: KakaoCandidate) {
-  const {firstVolume: first, lastVolume: last, volumeCount: count} = candidate;
+type VolumeSpan = {firstVolume: number | null; lastVolume: number | null; volumeCount: number};
+const volumesText = (first: number | null, last: number | null, count: number) => {
   if (first == null || last == null) return count > 0 ? `${count}권` : '';
   const range = first === last ? `${first}권` : `${first}–${last}권`;
   return count > 0 && count !== last - first + 1 ? `${range} · ${count}권` : range;
+};
+/** A Kakao group's volumes as `1–12권`, with the count when volumes are missing in between. */
+export const kakaoVolumes = (candidate: VolumeSpan) => volumesText(candidate.firstVolume, candidate.lastVolume, candidate.volumeCount);
+/** Several groups joined into one range: first to last volume, with the total count when it has gaps. */
+export function mergedVolumes(groups: VolumeSpan[]) {
+  const known = groups.filter(group => group.firstVolume != null && group.lastVolume != null);
+  const total = groups.reduce((sum, group) => sum + (group.volumeCount > 0 ? group.volumeCount : 0), 0);
+  if (known.length === 0) return total > 0 ? `${total}권` : '';
+  const first = Math.min(...known.map(group => group.firstVolume!)), last = Math.max(...known.map(group => group.lastVolume!));
+  // Overlapping groups count some volumes twice; the range alone says enough then.
+  return volumesText(first, last, total > last - first + 1 ? 0 : total);
+}
+/** Selected groups in volume order (unknown ranges last), which is how the bind lists them. */
+export function orderGroups<T extends VolumeSpan>(groups: T[]): T[] {
+  const key = (value: number | null) => value ?? Number.POSITIVE_INFINITY;
+  return groups.map((group, index) => ({group, index}))
+    .sort((a, b) => key(a.group.firstVolume) - key(b.group.firstVolume) || key(a.group.lastVolume) - key(b.group.lastVolume) || a.index - b.index)
+    .map(entry => entry.group);
+}
+/** The confirm summary: `1–10권 + 11–15권 → 1–15권` for several groups, the range for one. */
+export function mergeSummary(groups: VolumeSpan[]) {
+  const ordered = orderGroups(groups);
+  if (ordered.length < 2) return ordered.length ? kakaoVolumes(ordered[0]) : '';
+  return `${ordered.map(group => kakaoVolumes(group) || '권수 모름').join(' + ')} → ${mergedVolumes(ordered) || '권수 모름'}`;
 }
 /** External cover/thumbnail URLs are shown only when https (data: art only in the dev preview). */
 export const safeImageUrl = (url: string | null | undefined) => !!url && (/^https:\/\/[^\s]+$/.test(url) || (import.meta.env.DEV && url.startsWith('data:image/'))) ? url : null;
@@ -82,11 +122,23 @@ export function mangaDexCommand(collectionId: string, operationId: string, candi
     choice: {mangaId: candidate.mangaId, title: candidate.title.slice(0, 500), coverUrl: candidate.coverUrl ?? null},
     ...(connection === 'unbound' ? {expected: {externalId: null}} : {})};
 }
-/** `query` is the server's normalized query, as the PC re-runs exactly that search. */
-export function kakaoCommand(collectionId: string, operationId: string, query: string, candidate: KakaoCandidate, connection: Connection): BindCommand {
+/**
+ * `query` is the server's normalized query, as the PC re-runs exactly that search. The picked
+ * groups (one series split by volume range) go in volume order; the first names the whole bind.
+ */
+export function kakaoCommand(collectionId: string, operationId: string, query: string, candidates: KakaoCandidate[], connection: Connection): BindCommand {
+  const ordered = orderGroups(candidates), lead = ordered[0];
+  const groups = ordered.map(candidate => {
+    const group: KakaoGroupChoice = {anchorItemId: candidate.anchorItemId, groupFingerprint: candidate.groupFingerprint, title: candidate.title.slice(0, 500)};
+    if (candidate.firstVolume != null) group.firstVolume = candidate.firstVolume;
+    if (candidate.lastVolume != null) group.lastVolume = candidate.lastVolume;
+    if (candidate.volumeCount != null) group.volumeCount = candidate.volumeCount;
+    return group;
+  });
+  const volumeCount = ordered.reduce((sum, candidate) => sum + (candidate.volumeCount ?? 0), 0);
   return {version: 1, operationId, collectionId, provider: 'kakao',
-    choice: {query, anchorItemId: candidate.anchorItemId, groupFingerprint: candidate.groupFingerprint, title: candidate.title.slice(0, 500),
-      author: candidate.author ?? null, publisher: candidate.publisher ?? null, volumeCount: candidate.volumeCount ?? null, thumbnailUrl: candidate.thumbnailUrl ?? null},
+    choice: {query, groups, title: lead.title.slice(0, 500), author: lead.author ?? null, publisher: lead.publisher ?? null,
+      volumeCount: ordered.every(candidate => candidate.volumeCount == null) ? null : volumeCount, thumbnailUrl: lead.thumbnailUrl ?? null},
     ...(connection === 'unbound' ? {expected: {externalId: null}} : {})};
 }
 export const fileBindRequest = (command: BindCommand, signal?: AbortSignal) => api<{version: 1; request: BindRequest}>(BIND_REQUESTS_PATH, signal, command, 'POST');

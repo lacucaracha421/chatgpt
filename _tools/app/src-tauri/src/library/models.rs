@@ -1018,6 +1018,15 @@ pub struct AladinSeriesCandidate {
 pub struct AladinApplyRequest {
     pub collection_id: String,
     pub query: String,
+    /// One or more series groups of the same search, bound together (1-10, unique by
+    /// fingerprint). Their volumes merge by volume number.
+    pub groups: Vec<AladinGroupSelection>,
+}
+
+/// One series group picked from a search: its anchor item and fingerprint.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AladinGroupSelection {
     pub anchor_item_id: String,
     pub group_fingerprint: String,
 }

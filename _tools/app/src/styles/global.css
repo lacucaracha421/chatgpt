@@ -4395,6 +4395,29 @@ textarea:focus-visible {
   box-shadow: inset var(--focus-width) 0 var(--color-accent);
 }
 
+.book-connect__row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.book-connect__row .book-connect__result {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.book-connect__check {
+  flex: none;
+  align-self: center;
+  margin: 0 0 0 var(--space-3);
+  accent-color: var(--color-accent);
+}
+
+.book-connect__preview-group + .book-connect__preview-group {
+  margin-top: var(--space-3);
+}
+
 .book-connect__result small,
 .book-connect__preview small {
   color: var(--color-muted);

@@ -6,8 +6,10 @@
 //!
 //! * MangaDex: [`Library::apply_mangadex`] with `target = existing collectionId` (the PC
 //!   "MangaDex 연결" command). Kakao: [`Library::apply_requested_kakao`], the PC "Kakao 연결"
-//!   search-and-apply, which also accepts the one group with the picked fingerprint when the
-//!   picked anchor is no longer in a fresh search (a pick may be applied days later).
+//!   search-and-apply of every picked group (`choice.groups`, or the legacy single
+//!   `anchorItemId` + `groupFingerprint`); per group it also accepts the one group with the
+//!   picked fingerprint when the picked anchor is no longer in a fresh search (a pick may
+//!   be applied days later). The groups' volumes merge by volume number.
 //!   Volumes, covers and publication dirty marking (the 0074 triggers) come from that code;
 //!   an applied request refreshes the PC UI (`library://collections-changed`).
 //! * Before applying: the Collection must exist and be manga; a request whose binding the
@@ -31,8 +33,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::{
+    aladin_flow::{bound_group_keys, MAX_BOUND_GROUPS},
     error::LibraryError,
-    models::{AladinApplyRequest, MangaDexApplyRequest, MangaDexApplyTarget},
+    models::{
+        AladinApplyRequest, AladinGroupSelection, MangaDexApplyRequest, MangaDexApplyTarget,
+    },
     Library,
 };
 use crate::cloud::client::CloudClient;
@@ -266,29 +271,52 @@ fn target(item: &BindRequest) -> Result<Target, BindReason> {
             .map(|id| Target::MangaDex(id.to_owned()))
             .ok_or_else(invalid_choice),
         "kakao" => {
-            let query = text(&item.choice, "query", 2..=100).map(str::trim);
-            let anchor = text(&item.choice, "anchorItemId", 1..=128);
-            let fingerprint = text(&item.choice, "groupFingerprint", 64..=64).filter(|f| {
-                f.bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            });
-            match (query, anchor, fingerprint) {
-                (Some(query), Some(anchor), Some(fingerprint)) if query.chars().count() >= 2 => {
-                    Ok(Target::Kakao(AladinApplyRequest {
-                        collection_id: item.collection_id.clone(),
-                        query: query.to_owned(),
-                        anchor_item_id: anchor.to_owned(),
-                        group_fingerprint: fingerprint.to_owned(),
-                    }))
-                }
-                _ => Err(invalid_choice()),
-            }
+            let query = text(&item.choice, "query", 2..=100)
+                .map(str::trim)
+                .filter(|query| query.chars().count() >= 2)
+                .ok_or_else(invalid_choice)?;
+            let groups = kakao_groups(&item.choice).ok_or_else(invalid_choice)?;
+            Ok(Target::Kakao(AladinApplyRequest {
+                collection_id: item.collection_id.clone(),
+                query: query.to_owned(),
+                groups,
+            }))
         }
         _ => Err(reason(
             "unsupportedProvider",
             "이 PC 버전은 요청한 연결 서비스를 지원하지 않습니다.",
         )),
     }
+}
+
+/// The picked groups of a Kakao choice: `groups` (1-10, unique by fingerprint), or the
+/// legacy single `anchorItemId` + `groupFingerprint`.
+fn kakao_groups(choice: &serde_json::Value) -> Option<Vec<AladinGroupSelection>> {
+    fn group(value: &serde_json::Value) -> Option<AladinGroupSelection> {
+        let anchor = text(value, "anchorItemId", 1..=128)?;
+        let fingerprint = text(value, "groupFingerprint", 64..=64).filter(|f| {
+            f.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })?;
+        Some(AladinGroupSelection {
+            anchor_item_id: anchor.to_owned(),
+            group_fingerprint: fingerprint.to_owned(),
+        })
+    }
+    let groups = match choice.get("groups") {
+        Some(list) => list
+            .as_array()?
+            .iter()
+            .map(group)
+            .collect::<Option<Vec<_>>>()?,
+        None => vec![group(choice)?],
+    };
+    let unique = groups.iter().enumerate().all(|(index, current)| {
+        groups[..index]
+            .iter()
+            .all(|earlier| earlier.group_fingerprint != current.group_fingerprint)
+    });
+    ((1..=MAX_BOUND_GROUPS).contains(&groups.len()) && unique).then_some(groups)
 }
 
 /// `expected.externalId` when the request carries one (`Some(None)` = expected unbound).
@@ -598,16 +626,17 @@ impl Library {
             .is_some_and(|(external, config)| match target {
                 Target::MangaDex(manga_id) => external == manga_id,
                 Target::Kakao(request) => {
-                    external == &request.anchor_item_id
-                        || config
-                            .as_deref()
-                            .and_then(|c| serde_json::from_str::<serde_json::Value>(c).ok())
-                            .and_then(|c| {
-                                c.get("groupFingerprint")
-                                    .and_then(|f| f.as_str())
-                                    .map(str::to_owned)
+                    // Applied already when the binding holds exactly the picked groups
+                    // (each matched by fingerprint, or by anchor for an unchanged pick).
+                    bound_group_keys(config.as_deref(), external).is_some_and(|bound| {
+                        bound.len() == request.groups.len()
+                            && request.groups.iter().all(|picked| {
+                                bound.iter().any(|(anchor, fingerprint)| {
+                                    fingerprint == &picked.group_fingerprint
+                                        || anchor == &picked.anchor_item_id
+                                })
                             })
-                            .is_some_and(|f| f == request.group_fingerprint)
+                    })
                 }
             });
         if already {

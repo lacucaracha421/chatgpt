@@ -5,8 +5,8 @@ import {ApiError, api, errorText} from './transport';
 import {visibleInterval} from './useVisibleInterval';
 import type {CollectionDetail} from './collectionModel';
 import {
-  BINDINGS_STATUS_PATH, PROVIDER_NAMES, chosenTitle, connectionOf, fileBindRequest, kakaoCommand, kakaoVolumes, latestRequest,
-  mangaDexCommand, mangaDexStatus, requestFailure, requestsPath, safeImageUrl, searchFailure, searchPath,
+  BINDINGS_STATUS_PATH, MAX_KAKAO_GROUPS, PROVIDER_NAMES, chosenSummary, connectionOf, fileBindRequest, kakaoCommand, kakaoVolumes, latestRequest,
+  mangaDexCommand, mangaDexStatus, mergeSummary, orderGroups, requestFailure, requestsPath, safeImageUrl, searchFailure, searchPath,
   type BindFailure, type BindProvider, type BindRequest, type BindStatus, type Connection, type KakaoCandidate, type MangaDexCandidate,
   type RequestsReply, type SearchReply,
 } from './collectionBindings';
@@ -17,12 +17,13 @@ export const PUBLISHER_UPDATE_NOTE = 'PC 앱을 업데이트해야 여기서 고
 const LEGACY_NOTE = '서버를 업데이트하면 여기서 MangaDex와 카카오를 연결할 수 있어요.';
 const KAKAO_UNAVAILABLE = '서버에 카카오 키가 없어 검색할 수 없어요.';
 const PENDING_TEXT = '연결 대기 · PC가 켜지면 적용';
+export const KAKAO_GROUPS_HINT = '같은 작품이 권수별로 나뉘어 있으면 여러 개를 함께 고르세요.';
 
 type RowState = {text: string; detail: string; tone: 'ok' | 'idle' | 'pending' | 'failed'; again: boolean};
 function rowState(connection: Connection, request: BindRequest | null): RowState {
-  if (request?.state === 'pending') return {text: PENDING_TEXT, detail: chosenTitle(request), tone: 'pending', again: true};
+  if (request?.state === 'pending') return {text: PENDING_TEXT, detail: chosenSummary(request), tone: 'pending', again: true};
   if (request?.state === 'failed') return {text: '연결 실패', detail: request.reason?.message || '이유를 알 수 없어요.', tone: 'failed', again: true};
-  if (request?.state === 'applied' && connection !== 'connected') return {text: 'PC에서 적용됨', detail: chosenTitle(request), tone: 'ok', again: true};
+  if (request?.state === 'applied' && connection !== 'connected') return {text: 'PC에서 적용됨', detail: chosenSummary(request), tone: 'ok', again: true};
   switch (connection) {
     case 'connected': return {text: '연결됨', detail: '', tone: 'ok', again: true};
     case 'aladin': return {text: '알라딘 연결', detail: '카카오로 다시 연결해 주세요.', tone: 'idle', again: true};
@@ -86,11 +87,18 @@ function BindThumb({url, provider}: {url: string | null; provider: BindProvider}
 }
 
 type Found = {provider: 'mangadex'; query: string; items: MangaDexCandidate[]} | {provider: 'kakao'; query: string; items: KakaoCandidate[]};
-type Picked = {operationId: string; title: string; subtitle: string; thumbnail: string | null; build(operationId: string): ReturnType<typeof mangaDexCommand>};
+type Picked = {
+  operationId: string; title: string; subtitle: string; thumbnail: string | null;
+  // A Kakao bind of several groups: each group's title and range, and the joined range.
+  groups?: {key: string; title: string; range: string}[]; merge?: string;
+  build(operationId: string): ReturnType<typeof mangaDexCommand>;
+};
 
 /**
  * The search-and-pick sheet for one provider: the server searches (the PC may be off), a tap
  * asks to confirm, and the confirmed pick is filed as a bind request for the PC to apply.
+ * Kakao may split one series into groups by volume range, so its results are checked (one or
+ * more) and joined into one bind; MangaDex stays a single tap.
  */
 export function BindSearchSheet({item, provider, status, connection, onClose, onRequested}: {item: CollectionDetail; provider: BindProvider; status: BindStatus | null; connection: Connection; onClose(): void; onRequested(request: BindRequest): void}) {
   const name = PROVIDER_NAMES[provider];
@@ -99,6 +107,8 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
   const [busy, setBusy] = useState(false), [found, setFound] = useState<Found | null>(null), [failure, setFailure] = useState<BindFailure | null>(null);
   const [waitUntil, setWaitUntil] = useState(0), [now, setNow] = useState(() => Date.now());
   const [picked, setPicked] = useState<Picked | null>(null), [sending, setSending] = useState(false), [sendFailure, setSendFailure] = useState<BindFailure | null>(null);
+  // Checked Kakao groups of the current results, by group fingerprint.
+  const [checked, setChecked] = useState<string[]>([]);
   const lastQuery = useRef('');
   const unavailable = provider === 'kakao' && status?.kakaoSearch === false;
   const wait = Math.max(0, Math.ceil((waitUntil - now) / 1000));
@@ -114,12 +124,12 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
     void api<SearchReply<MangaDexCandidate | KakaoCandidate>>(searchPath(provider, value), controller.signal).then(reply => {
       if (controller.signal.aborted) return;
       setFound({provider, query: typeof reply.query === 'string' ? reply.query : value, items: Array.isArray(reply.items) ? reply.items : []} as Found);
-      setBusy(false);
+      setChecked([]); setBusy(false);
     }, reason => {
       if (controller.signal.aborted) return;
       const next = searchFailure(reason, provider);
       // Results of an earlier query would read as answers to this one.
-      setFailure(next); setBusy(false); setFound(null);
+      setFailure(next); setBusy(false); setFound(null); setChecked([]);
       if (next.waitSeconds) { setNow(Date.now()); setWaitUntil(Date.now() + next.waitSeconds * 1000); }
     });
   };
@@ -141,9 +151,19 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
   const pickMangaDex = (candidate: MangaDexCandidate) => setPicked({operationId: crypto.randomUUID(), title: candidate.title,
     subtitle: [candidate.author, candidate.year, mangaDexStatus(candidate.status)].filter(Boolean).join(' · '), thumbnail: candidate.coverUrl,
     build: operationId => mangaDexCommand(item.id, operationId, candidate, connection)});
-  const pickKakao = (queryUsed: string, candidate: KakaoCandidate) => setPicked({operationId: crypto.randomUUID(), title: candidate.title,
-    subtitle: [candidate.author, candidate.publisher, kakaoVolumes(candidate)].filter(Boolean).join(' · '), thumbnail: candidate.thumbnailUrl,
-    build: operationId => kakaoCommand(item.id, operationId, queryUsed, candidate, connection)});
+  const toggleKakao = (fingerprint: string) => setChecked(current => current.includes(fingerprint)
+    ? current.filter(entry => entry !== fingerprint) : current.length >= MAX_KAKAO_GROUPS ? current : [...current, fingerprint]);
+  const kakaoFound = found?.provider === 'kakao' ? found : null;
+  const pickKakao = () => {
+    if (!kakaoFound) return;
+    const chosen = orderGroups(kakaoFound.items.filter(candidate => checked.includes(candidate.groupFingerprint)));
+    if (chosen.length === 0) return;
+    const lead = chosen[0], queryUsed = kakaoFound.query, several = chosen.length > 1;
+    setPicked({operationId: crypto.randomUUID(), title: lead.title,
+      subtitle: [lead.author, lead.publisher, several ? '' : kakaoVolumes(lead)].filter(Boolean).join(' · '), thumbnail: lead.thumbnailUrl,
+      ...(several ? {groups: chosen.map(candidate => ({key: candidate.groupFingerprint, title: candidate.title, range: kakaoVolumes(candidate) || '권수 모름'})), merge: mergeSummary(chosen)} : {}),
+      build: operationId => kakaoCommand(item.id, operationId, queryUsed, chosen, connection)});
+  };
   const confirm = () => {
     if (!picked || sending) return;
     const controller = send.current = new AbortController();
@@ -181,19 +201,29 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
                 {candidate.alternateTitles?.length > 0 && <span className="bind-result-alt">{candidate.alternateTitles.slice(0, 3).join(' · ')}</span>}
                 <small>{[candidate.author, candidate.year, mangaDexStatus(candidate.status)].filter(Boolean).join(' · ')}</small></span>
             </button></li>)
-          : found.items.map(candidate => <li key={candidate.groupFingerprint}><button type="button" className="bind-result" onClick={() => pickKakao(found.query, candidate)}>
+          : found.items.map(candidate => {
+            const on = checked.includes(candidate.groupFingerprint), full = !on && checked.length >= MAX_KAKAO_GROUPS;
+            return <li key={candidate.groupFingerprint}><label className={`bind-result is-check${on ? ' is-selected' : ''}${full ? ' is-disabled' : ''}`}>
+              <input type="checkbox" checked={on} disabled={full} aria-label={[candidate.title, kakaoVolumes(candidate)].filter(Boolean).join(' ')} onChange={() => toggleKakao(candidate.groupFingerprint)}/>
               <BindThumb url={candidate.thumbnailUrl} provider="kakao"/>
               <span className="bind-result-text"><strong>{candidate.title}</strong>
                 <small>{[candidate.author, candidate.publisher].filter(Boolean).join(' · ')}</small>
                 {kakaoVolumes(candidate) && <small className="numeric">{kakaoVolumes(candidate)}</small>}</span>
-            </button></li>)}
+            </label></li>;
+          })}
       </ul>}
-      <Button variant="ghost" onClick={onClose}>닫기</Button>
+      {kakaoFound && kakaoFound.items.length > 0 && <p className="hint bind-hint">{KAKAO_GROUPS_HINT}</p>}
+      <div className="bind-actions">
+        <Button variant="ghost" onClick={onClose}>닫기</Button>
+        {provider === 'kakao' && kakaoFound && kakaoFound.items.length > 0 && <Button variant="primary" disabled={checked.length === 0} onClick={pickKakao}>{checked.length}개 묶음 연결</Button>}
+      </div>
     </div>
     {picked && <Dialog open title="이 작품으로 연결할까요?" onClose={() => { send.current?.abort(); setSending(false); setPicked(null); setSendFailure(null); }}>
       <DialogDescription className="collection-sheet-label">PC가 켜지면 {name} 정보를 가져와 적용해요. {provider === 'kakao' ? '작품명과 고른 표지는 그대로예요.' : '내가 고친 값은 덮어쓰지 않아요.'}</DialogDescription>
       <div className="library-sheet bind-confirm">
         <div className="bind-result is-static"><BindThumb url={picked.thumbnail} provider={provider}/><span className="bind-result-text"><strong>{picked.title}</strong>{picked.subtitle && <small>{picked.subtitle}</small>}</span></div>
+        {picked.groups && <ul className="bind-groups" aria-label="고른 묶음">{picked.groups.map(group => <li key={group.key}><span>{group.title}</span><span className="numeric">{group.range}</span></li>)}</ul>}
+        {picked.merge && <p className="bind-merge numeric">{picked.merge}</p>}
         {sendFailure && <p className="bind-message is-error" role="alert">{sendFailure.text}</p>}
         <Button variant="primary" disabled={sending || (!!sendFailure && !sendFailure.retry)} onClick={confirm}>{sending ? '보내는 중…' : sendFailure?.retry ? '다시 보내기' : '연결 요청'}</Button>
         <Button variant="ghost" onClick={() => { send.current?.abort(); setSending(false); setPicked(null); setSendFailure(null); }}>취소</Button>

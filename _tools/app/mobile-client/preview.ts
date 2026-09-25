@@ -135,7 +135,7 @@ const demoBindTime='2026-09-25T10:00:00Z';
 let demoBindSequence=2;
 let demoBindRequests:BindRequest[]=[
   {requestId:2,operationId:'00000000-0000-4000-8000-000000000002',collectionId:'collection-manga-4',provider:'mangadex',choice:{mangaId:'5b1c1c6a-3f7e-4bd1-9d55-2d1b8f7a4a10',title:'The Night Library',coverUrl:null},expected:{externalId:null},state:'pending',reason:null,replaces:null,createdAt:demoBindTime,updatedAt:demoBindTime,resolvedAt:null},
-  {requestId:1,operationId:'00000000-0000-4000-8000-000000000001',collectionId:'collection-manga-2',provider:'kakao',choice:{query:'푸른 궤도',anchorItemId:'demo-kakao-1',groupFingerprint:'a'.repeat(64),title:'푸른 궤도'},expected:{externalId:null},state:'failed',reason:{code:'groupNotFound',message:'카카오에서 같은 시리즈를 다시 찾지 못했어요.'},replaces:null,createdAt:demoBindTime,updatedAt:demoBindTime,resolvedAt:demoBindTime},
+  {requestId:1,operationId:'00000000-0000-4000-8000-000000000001',collectionId:'collection-manga-2',provider:'kakao',choice:{query:'푸른 궤도',groups:[{anchorItemId:'demo-kakao-1',groupFingerprint:'a'.repeat(64)}],title:'푸른 궤도'},expected:{externalId:null},state:'failed',reason:{code:'groupNotFound',message:'카카오에서 같은 시리즈를 다시 찾지 못했어요.'},replaces:null,createdAt:demoBindTime,updatedAt:demoBindTime,resolvedAt:demoBindTime},
 ];
 const demoMangaDex=(query:string):MangaDexCandidate[]=>[
   {mangaId:'5b1c1c6a-3f7e-4bd1-9d55-2d1b8f7a4a10',title:query,alternateTitles:['The Night Library','夜の図書館','Yoru no Toshokan'],author:'서유진',year:2021,status:'ongoing',primaryCoverFileName:null,coverUrl:art(1,256,384)},
@@ -143,7 +143,9 @@ const demoMangaDex=(query:string):MangaDexCandidate[]=>[
   {mangaId:'1e2d3c4b-5a69-4788-9a0b-c1d2e3f4a5b6',title:`${query}의 밤`,alternateTitles:[],author:'Haru',year:2019,status:'hiatus',primaryCoverFileName:null,coverUrl:null},
 ];
 const demoKakao=(query:string):KakaoCandidate[]=>[
-  {anchorItemId:'demo-kakao-1',groupFingerprint:'1'.repeat(64),title:query,author:'서유진',publisher:'대원씨아이',volumes:[],ignoredCount:0,volumeCount:12,firstVolume:1,lastVolume:12,knownItemIds:[],thumbnailUrl:art(3,120,174)},
+  // One series the search split by volume range: 1–10권 and 11–15권 are picked together.
+  {anchorItemId:'demo-kakao-1',groupFingerprint:'1'.repeat(64),title:query,author:'서유진',publisher:'대원씨아이',volumes:[],ignoredCount:0,volumeCount:10,firstVolume:1,lastVolume:10,knownItemIds:[],thumbnailUrl:art(3,120,174)},
+  {anchorItemId:'demo-kakao-4',groupFingerprint:'4'.repeat(64),title:query,author:'서유진',publisher:'대원씨아이',volumes:[],ignoredCount:0,volumeCount:5,firstVolume:11,lastVolume:15,knownItemIds:[],thumbnailUrl:art(1,120,174)},
   {anchorItemId:'demo-kakao-2',groupFingerprint:'2'.repeat(64),title:`${query} 애장판`,author:'서유진',publisher:'학산문화사',volumes:[],ignoredCount:1,volumeCount:5,firstVolume:1,lastVolume:6,knownItemIds:[],thumbnailUrl:art(0,120,174)},
   {anchorItemId:'demo-kakao-3',groupFingerprint:'3'.repeat(64),title:`${query} 소설`,author:'하루',publisher:null,volumes:[],ignoredCount:0,volumeCount:1,firstVolume:1,lastVolume:1,knownItemIds:[],thumbnailUrl:null},
 ];

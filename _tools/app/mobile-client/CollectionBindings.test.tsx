@@ -144,17 +144,100 @@ it('searches Kakao and sends back the normalized query with the exact group fiel
   await renderArea({...base, releaseWatch: {enabled: false, available: true}, releaseSchedule: {kakao: {editionIndex: 0, checkedAt: null, volumes: []}, mangadex: null}});
   const sheet = await openSheet('카카오', '다시 연결');
   const results = await within(sheet).findByRole('list', {name: '카카오 검색 결과'});
-  const first = within(results).getByRole('button');
+  const box = within(results).getByRole('checkbox', {name: '밤의 도서관 1–12권'}) as HTMLInputElement;
+  const first = box.closest('li')!;
   expect(first.textContent).toContain('서유진 · 대원씨아이');
   expect(first.textContent).toContain('1–12권');
   expect(first.querySelector('img')!.getAttribute('src')).toBe(kakaoItems[0].thumbnailUrl);
-  fireEvent.click(first);
-  fireEvent.click(within(await screen.findByRole('dialog', {name: '이 작품으로 연결할까요?'})).getByRole('button', {name: '연결 요청'}));
+  expect(within(sheet).getByText('같은 작품이 권수별로 나뉘어 있으면 여러 개를 함께 고르세요.')).toBeTruthy();
+  const connect = within(sheet).getByRole('button', {name: '0개 묶음 연결'}) as HTMLButtonElement;
+  expect(connect.disabled).toBe(true);
+  fireEvent.click(box);
+  fireEvent.click(within(sheet).getByRole('button', {name: '1개 묶음 연결'}));
+  const confirm = await screen.findByRole('dialog', {name: '이 작품으로 연결할까요?'});
+  expect(within(confirm).queryByRole('list', {name: '고른 묶음'})).toBeNull();
+  expect(confirm.textContent).toContain('서유진 · 대원씨아이 · 1–12권');
+  fireEvent.click(within(confirm).getByRole('button', {name: '연결 요청'}));
   await waitFor(() => expect(posts()).toHaveLength(1));
   // Already connected: the tablet does not know the current binding, so it sends no expectation.
   expect(posts()[0]).toEqual({version: 1, operationId: posts()[0].operationId, collectionId: 'w1', provider: 'kakao',
-    choice: {query: '밤의 도서관 (normalized)', anchorItemId: 'k-anchor', groupFingerprint: 'f'.repeat(64), title: '밤의 도서관', author: '서유진', publisher: '대원씨아이', volumeCount: 12, thumbnailUrl: kakaoItems[0].thumbnailUrl}});
+    choice: {query: '밤의 도서관 (normalized)', groups: [{anchorItemId: 'k-anchor', groupFingerprint: 'f'.repeat(64), title: '밤의 도서관', firstVolume: 1, lastVolume: 12, volumeCount: 12}],
+      title: '밤의 도서관', author: '서유진', publisher: '대원씨아이', volumeCount: 12, thumbnailUrl: kakaoItems[0].thumbnailUrl}});
   await waitFor(() => expect(row('카카오').textContent).toContain('연결 대기 · PC가 켜지면 적용'));
+});
+
+const splitItems = [
+  {...kakaoItems[0], anchorItemId: 'k-late', groupFingerprint: 'b'.repeat(64), title: '밤의 도서관', volumeCount: 5, firstVolume: 11, lastVolume: 15, thumbnailUrl: null},
+  {...kakaoItems[0], anchorItemId: 'k-early', groupFingerprint: 'a'.repeat(64), title: '밤의 도서관', volumeCount: 10, firstVolume: 1, lastVolume: 10},
+  {...kakaoItems[0], anchorItemId: 'k-other', groupFingerprint: 'c'.repeat(64), title: '밤의 도서관 애장판', publisher: '학산문화사', volumeCount: 6, firstVolume: 1, lastVolume: 6},
+];
+
+it('toggles several Kakao groups and joins them in volume order into one request', async () => {
+  routes.kakao = {version: 1, provider: 'kakao', query: '밤의 도서관', items: splitItems};
+  await renderArea();
+  const sheet = await openSheet('카카오');
+  const results = await within(sheet).findByRole('list', {name: '카카오 검색 결과'});
+  const late = within(results).getByRole('checkbox', {name: '밤의 도서관 11–15권'}) as HTMLInputElement;
+  const early = within(results).getByRole('checkbox', {name: '밤의 도서관 1–10권'}) as HTMLInputElement;
+  const other = within(results).getByRole('checkbox', {name: '밤의 도서관 애장판 1–6권'}) as HTMLInputElement;
+  // Tapping anywhere on the row toggles it.
+  fireEvent.click(late.closest('label')!.querySelector('strong')!);
+  expect(late.checked).toBe(true);
+  fireEvent.click(other);
+  fireEvent.click(early);
+  expect(within(sheet).getByRole('button', {name: '3개 묶음 연결'})).toBeTruthy();
+  fireEvent.click(other);
+  expect(other.checked).toBe(false);
+  expect(late.closest('label')!.classList.contains('is-selected')).toBe(true);
+  fireEvent.click(within(sheet).getByRole('button', {name: '2개 묶음 연결'}));
+  const confirm = await screen.findByRole('dialog', {name: '이 작품으로 연결할까요?'});
+  const picked = within(confirm).getByRole('list', {name: '고른 묶음'});
+  expect(within(picked).getAllByRole('listitem').map(item => item.textContent)).toEqual(['밤의 도서관1–10권', '밤의 도서관11–15권']);
+  expect(confirm.textContent).toContain('1–10권 + 11–15권 → 1–15권');
+  fireEvent.click(within(confirm).getByRole('button', {name: '연결 요청'}));
+  await waitFor(() => expect(posts()).toHaveLength(1));
+  expect(posts()[0]).toEqual({version: 1, operationId: posts()[0].operationId, collectionId: 'w1', provider: 'kakao', expected: {externalId: null},
+    choice: {query: '밤의 도서관', groups: [
+      {anchorItemId: 'k-early', groupFingerprint: 'a'.repeat(64), title: '밤의 도서관', firstVolume: 1, lastVolume: 10, volumeCount: 10},
+      {anchorItemId: 'k-late', groupFingerprint: 'b'.repeat(64), title: '밤의 도서관', firstVolume: 11, lastVolume: 15, volumeCount: 5},
+    ], title: '밤의 도서관', author: '서유진', publisher: '대원씨아이', volumeCount: 15, thumbnailUrl: kakaoItems[0].thumbnailUrl}});
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(row('카카오').textContent).toContain('연결 대기 · PC가 켜지면 적용');
+  expect(row('카카오').textContent).toContain('밤의 도서관 · 1–15권 · 2개 묶음');
+});
+
+it('clears the Kakao selection on a new search', async () => {
+  routes.kakao = {version: 1, provider: 'kakao', query: '밤의 도서관', items: splitItems};
+  await renderArea();
+  const sheet = await openSheet('카카오');
+  const results = await within(sheet).findByRole('list', {name: '카카오 검색 결과'});
+  fireEvent.click(within(results).getAllByRole('checkbox')[0]);
+  expect(within(sheet).getByRole('button', {name: '1개 묶음 연결'})).toBeTruthy();
+  fireEvent.submit(within(sheet).getByRole('searchbox', {name: '카카오 검색어'}).closest('form')!);
+  await waitFor(() => expect(calls('/search/kakao')).toHaveLength(2));
+  expect(await within(sheet).findByRole('button', {name: '0개 묶음 연결'})).toBeTruthy();
+  expect(within(sheet).getAllByRole('checkbox').every(box => !(box as HTMLInputElement).checked)).toBe(true);
+});
+
+it('shows a pending Kakao request of several groups with the joined title and range', async () => {
+  const pending = request({requestId: 5, provider: 'kakao', choice: {query: 'q', title: '밤의 도서관', groups: [
+    {anchorItemId: 'a', groupFingerprint: 'a'.repeat(64), firstVolume: 1, lastVolume: 10, volumeCount: 10},
+    {anchorItemId: 'b', groupFingerprint: 'b'.repeat(64), firstVolume: 11, lastVolume: 15, volumeCount: 5}]}});
+  routes.requests = {version: 1, items: [pending], pending: {mangadex: null, kakao: pending}};
+  await renderArea();
+  await waitFor(() => expect(row('카카오').textContent).toContain('연결 대기 · PC가 켜지면 적용'));
+  expect(row('카카오').textContent).toContain('밤의 도서관 · 1–15권 · 2개 묶음');
+});
+
+it('keeps MangaDex a single tap with no checkboxes', async () => {
+  await renderArea();
+  const sheet = await openSheet('MangaDex');
+  const results = await within(sheet).findByRole('list', {name: 'MangaDex 검색 결과'});
+  expect(within(results).queryAllByRole('checkbox')).toHaveLength(0);
+  expect(within(sheet).queryByText('같은 작품이 권수별로 나뉘어 있으면 여러 개를 함께 고르세요.')).toBeNull();
+  expect(within(sheet).queryByRole('button', {name: /묶음 연결/})).toBeNull();
+  fireEvent.click(within(results).getAllByRole('button')[0]);
+  expect(await screen.findByRole('dialog', {name: '이 작품으로 연결할까요?'})).toBeTruthy();
 });
 
 it('submits the search field value itself, not a stale draft', async () => {

@@ -112,13 +112,115 @@ struct GroupedSeries {
     items: Vec<AladinItem>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// At most this many groups of one search may be bound together.
+pub(crate) const MAX_BOUND_GROUPS: usize = 10;
+
+/// One bound group as stored: refresh re-finds it by its anchor item, or by its fingerprint
+/// together with an item it already provided.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ProviderConfig {
-    version: u8,
-    query: String,
+struct BoundGroup {
+    anchor_item_id: String,
     group_fingerprint: String,
     known_item_ids: Vec<String>,
+}
+
+/// `provider_config_json` of a Kakao/Aladin binding. Version 1 (one group; its anchor is
+/// the binding's `external_id`) is still written for a single group so older builds keep
+/// reading it; version 2 lists every group and is written only for several groups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProviderConfig {
+    query: String,
+    groups: Vec<BoundGroup>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredConfig {
+    version: u8,
+    query: String,
+    #[serde(default)]
+    group_fingerprint: Option<String>,
+    #[serde(default)]
+    known_item_ids: Vec<String>,
+    #[serde(default)]
+    groups: Vec<BoundGroup>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigV1<'a> {
+    version: u8,
+    query: &'a str,
+    group_fingerprint: &'a str,
+    known_item_ids: &'a [String],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigV2<'a> {
+    version: u8,
+    query: &'a str,
+    groups: &'a [BoundGroup],
+}
+
+impl ProviderConfig {
+    fn parse(json: &str, external_id: &str) -> Option<Self> {
+        let stored: StoredConfig = serde_json::from_str(json).ok()?;
+        let groups = match stored.version {
+            1 => vec![BoundGroup {
+                anchor_item_id: external_id.to_owned(),
+                group_fingerprint: stored.group_fingerprint?,
+                known_item_ids: stored.known_item_ids,
+            }],
+            2 if (1..=MAX_BOUND_GROUPS).contains(&stored.groups.len()) => stored.groups,
+            _ => return None,
+        };
+        Some(Self {
+            query: stored.query,
+            groups,
+        })
+    }
+
+    fn to_json(&self) -> Result<String, LibraryError> {
+        let json = match self.groups.as_slice() {
+            [group] => serde_json::to_string(&ConfigV1 {
+                version: 1,
+                query: &self.query,
+                group_fingerprint: &group.group_fingerprint,
+                known_item_ids: &group.known_item_ids,
+            }),
+            groups => serde_json::to_string(&ConfigV2 {
+                version: 2,
+                query: &self.query,
+                groups,
+            }),
+        };
+        json.map_err(|_| LibraryError::InvalidAladinResponse)
+    }
+}
+
+/// The groups of a stored binding as (anchor item id, fingerprint), for the tablet-request
+/// applier's "already applied" check. `None` when the config is unreadable.
+pub(super) fn bound_group_keys(
+    config_json: Option<&str>,
+    external_id: &str,
+) -> Option<Vec<(String, String)>> {
+    let config = ProviderConfig::parse(config_json?, external_id)?;
+    Some(
+        config
+            .groups
+            .into_iter()
+            .map(|group| (group.anchor_item_id, group.group_fingerprint))
+            .collect(),
+    )
+}
+
+/// One group of the search being bound, with the anchor and known items stored for it.
+struct PickedGroup {
+    anchor_item_id: String,
+    known_item_ids: Vec<String>,
+    series: GroupedSeries,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +239,16 @@ pub(super) struct StoredAladinSource {
 pub(super) struct AladinReconcileOutcome {
     pub(super) sync_result: AladinSyncResult,
     pub(super) release_event_count: u64,
+}
+
+fn valid_selection(request: &AladinApplyRequest) -> bool {
+    let count = request.groups.len();
+    (1..=MAX_BOUND_GROUPS).contains(&count)
+        && request.groups.iter().enumerate().all(|(index, group)| {
+            request.groups[..index]
+                .iter()
+                .all(|earlier| earlier.group_fingerprint != group.group_fingerprint)
+        })
 }
 
 impl BookFlow<'_> {
@@ -159,8 +271,11 @@ impl BookFlow<'_> {
         ttb_key: &str,
         request: AladinApplyRequest,
     ) -> Result<AladinSyncResult, LibraryError> {
+        if !valid_selection(&request) {
+            return Err(LibraryError::AmbiguousAladinBinding);
+        }
         let items = self.search_items(ttb_key, &request.query)?;
-        self.apply_aladin_items(request, items, Vec::new())
+        self.apply_aladin_items(request, items)
     }
 
     pub fn refresh_aladin(
@@ -168,27 +283,20 @@ impl BookFlow<'_> {
         ttb_key: &str,
         collection_id: &str,
     ) -> Result<AladinSyncResult, LibraryError> {
-        let (anchor_item_id, config) = self.aladin_binding_config(collection_id)?;
+        let config = self.aladin_binding_config(collection_id)?;
         let items = self.search_items(ttb_key, &config.query)?;
-        self.refresh_aladin_items(collection_id, anchor_item_id, config, items)
+        self.refresh_aladin_items(collection_id, config, items)
     }
 
     fn refresh_aladin_items(
         &self,
         collection_id: &str,
-        anchor_item_id: String,
         config: ProviderConfig,
         items: Vec<AladinItem>,
     ) -> Result<AladinSyncResult, LibraryError> {
         let checked_at = chrono::Utc::now().to_rfc3339();
         Ok(self
-            .refresh_aladin_items_with_config_at(
-                collection_id,
-                anchor_item_id,
-                config,
-                items,
-                &checked_at,
-            )?
+            .refresh_aladin_items_with_config_at(collection_id, config, items, &checked_at)?
             .sync_result)
     }
 
@@ -198,54 +306,50 @@ impl BookFlow<'_> {
         items: Vec<AladinItem>,
         checked_at: &str,
     ) -> Result<AladinReconcileOutcome, LibraryError> {
-        let (anchor_item_id, config) = self.aladin_binding_config(collection_id)?;
-        self.refresh_aladin_items_with_config_at(
-            collection_id,
-            anchor_item_id,
-            config,
-            items,
-            checked_at,
-        )
+        let config = self.aladin_binding_config(collection_id)?;
+        self.refresh_aladin_items_with_config_at(collection_id, config, items, checked_at)
     }
 
+    /// Re-finds every bound group in a fresh search: the one group holding its anchor item,
+    /// or the one with its fingerprint holding an item it provided before. Any bound group
+    /// found zero or several times refuses the refresh. Two bound groups the search now
+    /// returns as one group are kept once (the provider merged them itself).
     fn refresh_aladin_items_with_config_at(
         &self,
         collection_id: &str,
-        anchor_item_id: String,
         config: ProviderConfig,
         items: Vec<AladinItem>,
         checked_at: &str,
     ) -> Result<AladinReconcileOutcome, LibraryError> {
         let groups = grouped_items(items);
-        let mut matches = groups.iter().filter(|group| {
-            group
-                .items
-                .iter()
-                .any(|item| item.item_id == anchor_item_id)
-                || (group.candidate.group_fingerprint == config.group_fingerprint
-                    && group.items.iter().any(|item| {
-                        config
-                            .known_item_ids
+        let mut picked: Vec<PickedGroup> = Vec::new();
+        for bound in config.groups {
+            let mut matches = groups.iter().filter(|group| {
+                group
+                    .items
+                    .iter()
+                    .any(|item| item.item_id == bound.anchor_item_id)
+                    || (group.candidate.group_fingerprint == bound.group_fingerprint
+                        && group
+                            .items
                             .iter()
-                            .any(|known| known == &item.item_id)
-                    }))
-        });
-        let selected = matches.next().cloned();
-        if selected.is_none() || matches.next().is_some() {
-            return Err(LibraryError::AmbiguousAladinBinding);
+                            .any(|item| bound.known_item_ids.contains(&item.item_id)))
+            });
+            let (Some(series), None) = (matches.next(), matches.next()) else {
+                return Err(LibraryError::AmbiguousAladinBinding);
+            };
+            match picked.iter_mut().find(|pick| {
+                pick.series.candidate.group_fingerprint == series.candidate.group_fingerprint
+            }) {
+                Some(pick) => pick.known_item_ids.extend(bound.known_item_ids),
+                None => picked.push(PickedGroup {
+                    anchor_item_id: bound.anchor_item_id,
+                    known_item_ids: bound.known_item_ids,
+                    series: series.clone(),
+                }),
+            }
         }
-        let selected = selected.unwrap();
-        self.reconcile_aladin_at(
-            AladinApplyRequest {
-                collection_id: collection_id.to_owned(),
-                query: config.query,
-                anchor_item_id,
-                group_fingerprint: selected.candidate.group_fingerprint.clone(),
-            },
-            selected,
-            config.known_item_ids,
-            checked_at,
-        )
+        self.reconcile_aladin_at(collection_id, &config.query, picked, checked_at)
     }
 
     pub fn get_aladin_connection(
@@ -271,12 +375,10 @@ impl BookFlow<'_> {
             .optional()?;
         binding
             .map(|(anchor_item_id, config_json, last_synced_at)| {
-                let config: ProviderConfig = serde_json::from_str(
-                    config_json
-                        .as_deref()
-                        .ok_or(LibraryError::AmbiguousAladinBinding)?,
-                )
-                .map_err(|_| LibraryError::AmbiguousAladinBinding)?;
+                let config = config_json
+                    .as_deref()
+                    .and_then(|json| ProviderConfig::parse(json, &anchor_item_id))
+                    .ok_or(LibraryError::AmbiguousAladinBinding)?;
                 Ok(AladinConnection {
                     provider: self.provider.to_owned(),
                     anchor_item_id,
@@ -287,10 +389,7 @@ impl BookFlow<'_> {
             .transpose()
     }
 
-    fn aladin_binding_config(
-        &self,
-        collection_id: &str,
-    ) -> Result<(String, ProviderConfig), LibraryError> {
+    fn aladin_binding_config(&self, collection_id: &str) -> Result<ProviderConfig, LibraryError> {
         let connection = self.library.connection()?;
         require_collection(&connection, collection_id)?;
         let (anchor, config): (String, Option<String>) = connection
@@ -303,106 +402,146 @@ impl BookFlow<'_> {
             )
             .optional()?
             .ok_or(LibraryError::AmbiguousAladinBinding)?;
-        let config = serde_json::from_str(
-            config
-                .as_deref()
-                .ok_or(LibraryError::AmbiguousAladinBinding)?,
-        )
-        .map_err(|_| LibraryError::AmbiguousAladinBinding)?;
-        Ok((anchor, config))
+        config
+            .as_deref()
+            .and_then(|json| ProviderConfig::parse(json, &anchor))
+            .ok_or(LibraryError::AmbiguousAladinBinding)
     }
 
+    /// Binds exactly the picked groups: each must be in `items` with its anchor and
+    /// fingerprint.
     fn apply_aladin_items(
         &self,
         request: AladinApplyRequest,
         items: Vec<AladinItem>,
-        known_item_ids: Vec<String>,
     ) -> Result<AladinSyncResult, LibraryError> {
-        let groups = grouped_items(items);
-        let mut matches = groups.into_iter().filter(|group| {
-            group.candidate.anchor_item_id == request.anchor_item_id
-                && group.candidate.group_fingerprint == request.group_fingerprint
-        });
-        let selected = matches.next();
-        if selected.is_none() || matches.next().is_some() {
+        if !valid_selection(&request) {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
-        self.reconcile_aladin(request, selected.unwrap(), known_item_ids)
+        let groups = grouped_items(items);
+        let mut picked = Vec::with_capacity(request.groups.len());
+        for selection in &request.groups {
+            let mut matches = groups.iter().filter(|group| {
+                group.candidate.anchor_item_id == selection.anchor_item_id
+                    && group.candidate.group_fingerprint == selection.group_fingerprint
+            });
+            let (Some(series), None) = (matches.next(), matches.next()) else {
+                return Err(LibraryError::AmbiguousAladinBinding);
+            };
+            picked.push(PickedGroup {
+                anchor_item_id: selection.anchor_item_id.clone(),
+                known_item_ids: Vec::new(),
+                series: series.clone(),
+            });
+        }
+        let checked_at = chrono::Utc::now().to_rfc3339();
+        Ok(self
+            .reconcile_aladin_at(&request.collection_id, &request.query, picked, &checked_at)?
+            .sync_result)
     }
 
-    /// The PC apply, except that a pick whose anchor no longer matches the fresh search
-    /// (the tablet's pick may be applied days later) binds the one group with the picked
-    /// fingerprint, anchored at that group's current anchor. The PC UI keeps the strict
-    /// [`Self::apply_aladin_items`].
+    /// The PC apply, except that a picked group whose anchor no longer matches the fresh
+    /// search (the tablet's pick may be applied days later) binds the one group with the
+    /// picked fingerprint, anchored at that group's current anchor. Each group is resolved
+    /// on its own. The PC UI keeps the strict [`Self::apply_aladin_items`].
     pub(super) fn apply_requested_items(
         &self,
         mut request: AladinApplyRequest,
         items: Vec<AladinItem>,
     ) -> Result<AladinSyncResult, LibraryError> {
         let groups = grouped_items(items);
-        let exact = groups.iter().any(|group| {
-            group.candidate.anchor_item_id == request.anchor_item_id
-                && group.candidate.group_fingerprint == request.group_fingerprint
-        });
-        if !exact {
-            let mut drifted = groups
-                .iter()
-                .filter(|group| group.candidate.group_fingerprint == request.group_fingerprint);
-            match (drifted.next(), drifted.next()) {
-                (Some(group), None) => {
-                    request.anchor_item_id = group.candidate.anchor_item_id.clone()
+        for selection in &mut request.groups {
+            let exact = groups.iter().any(|group| {
+                group.candidate.anchor_item_id == selection.anchor_item_id
+                    && group.candidate.group_fingerprint == selection.group_fingerprint
+            });
+            if !exact {
+                let mut drifted = groups.iter().filter(|group| {
+                    group.candidate.group_fingerprint == selection.group_fingerprint
+                });
+                match (drifted.next(), drifted.next()) {
+                    (Some(group), None) => {
+                        selection.anchor_item_id = group.candidate.anchor_item_id.clone()
+                    }
+                    _ => return Err(LibraryError::AmbiguousAladinBinding),
                 }
-                _ => return Err(LibraryError::AmbiguousAladinBinding),
             }
         }
         let items = groups.into_iter().flat_map(|group| group.items).collect();
-        self.apply_aladin_items(request, items, Vec::new())
+        self.apply_aladin_items(request, items)
     }
 
-    fn reconcile_aladin(
-        &self,
-        request: AladinApplyRequest,
-        selected: GroupedSeries,
-        known_item_ids: Vec<String>,
-    ) -> Result<AladinSyncResult, LibraryError> {
-        let checked_at = chrono::Utc::now().to_rfc3339();
-        Ok(self
-            .reconcile_aladin_at(request, selected, known_item_ids, &checked_at)?
-            .sync_result)
-    }
-
+    /// Writes the merged volumes of the picked groups and the binding. Groups are ordered
+    /// by their lowest volume (then fingerprint); the first one's anchor is the binding's
+    /// `external_id`. A volume number provided by several groups keeps the item
+    /// [`compare_duplicate_preference`] prefers; the others count as ignored.
     fn reconcile_aladin_at(
         &self,
-        request: AladinApplyRequest,
-        selected: GroupedSeries,
-        mut known_item_ids: Vec<String>,
+        collection_id: &str,
+        query: &str,
+        mut picked: Vec<PickedGroup>,
         checked_at: &str,
     ) -> Result<AladinReconcileOutcome, LibraryError> {
-        for item in &selected.items {
-            if !known_item_ids.contains(&item.item_id) {
-                known_item_ids.push(item.item_id.clone());
-            }
+        if picked.is_empty() {
+            return Err(LibraryError::AmbiguousAladinBinding);
         }
-        known_item_ids.sort();
+        picked.sort_by(|left, right| {
+            let lowest = |pick: &PickedGroup| pick.series.items.first().map(|i| i.volume_number);
+            lowest(left).cmp(&lowest(right)).then_with(|| {
+                left.series
+                    .candidate
+                    .group_fingerprint
+                    .cmp(&right.series.candidate.group_fingerprint)
+            })
+        });
         let config = ProviderConfig {
-            version: 1,
-            query: request.query.trim().to_owned(),
-            group_fingerprint: request.group_fingerprint,
-            known_item_ids,
+            query: query.trim().to_owned(),
+            groups: picked
+                .iter()
+                .map(|pick| {
+                    let mut known_item_ids = pick.known_item_ids.clone();
+                    known_item_ids.extend(pick.series.items.iter().map(|i| i.item_id.clone()));
+                    known_item_ids.sort();
+                    known_item_ids.dedup();
+                    BoundGroup {
+                        anchor_item_id: pick.anchor_item_id.clone(),
+                        group_fingerprint: pick.series.candidate.group_fingerprint.clone(),
+                        known_item_ids,
+                    }
+                })
+                .collect(),
         };
-        let config_json =
-            serde_json::to_string(&config).map_err(|_| LibraryError::InvalidAladinResponse)?;
-        let snapshot_json = serde_json::to_string(&selected.candidate)
-            .map_err(|_| LibraryError::InvalidAladinResponse)?;
+        let config_json = config.to_json()?;
+        let snapshot_json = match picked.as_slice() {
+            [pick] => serde_json::to_string(&pick.series.candidate),
+            picks => serde_json::to_string(&serde_json::json!({
+                "groups": picks.iter().map(|pick| &pick.series.candidate).collect::<Vec<_>>()
+            })),
+        }
+        .map_err(|_| LibraryError::InvalidAladinResponse)?;
+        let mut all_items: Vec<&AladinItem> =
+            picked.iter().flat_map(|pick| &pick.series.items).collect();
+        all_items.sort_by(|left, right| compare_duplicate_preference(left, right));
+        let mut merged: BTreeMap<i64, &AladinItem> = BTreeMap::new();
+        for item in &all_items {
+            merged.entry(item.volume_number).or_insert(item);
+        }
+        let ignored = picked
+            .iter()
+            .map(|pick| pick.series.candidate.ignored_count)
+            .sum::<u64>()
+            + (all_items.len() - merged.len()) as u64;
+        let anchor_item_id = picked[0].anchor_item_id.clone();
+
         let mut connection = self.library.connection()?;
         let transaction = connection.transaction()?;
-        require_collection(&transaction, &request.collection_id)?;
+        require_collection(&transaction, collection_id)?;
         let subscription_last_checked_at = transaction
             .query_row(
                 "SELECT last_checked_at
                  FROM release_watch_subscriptions
                  WHERE collection_id = ?1 AND provider = ?2",
-                params![request.collection_id, self.provider],
+                params![collection_id, self.provider],
                 |row| row.get::<_, Option<String>>(0),
             )
             .optional()?;
@@ -410,18 +549,18 @@ impl BookFlow<'_> {
             added: 0,
             updated: 0,
             unchanged: 0,
-            ignored: selected.candidate.ignored_count,
+            ignored,
         };
         let mut release_event_count = 0;
         let tracks_ownership = self.provider != "kakao" || transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1)",
-                [&request.collection_id], |row| row.get::<_, bool>(0),
+                [collection_id], |row| row.get::<_, bool>(0),
             )?;
-        for item in &selected.items {
+        for item in merged.values() {
             let existing = reconcile_source(
                 self.provider,
                 &transaction,
-                &request.collection_id,
+                collection_id,
                 item,
                 checked_at,
                 &mut result,
@@ -440,7 +579,7 @@ impl BookFlow<'_> {
                          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
                         params![
                             uuid::Uuid::new_v4().to_string(),
-                            request.collection_id,
+                            collection_id,
                             event_kind_str(change.kind),
                             change.volume_number,
                             change.previous_value,
@@ -455,10 +594,10 @@ impl BookFlow<'_> {
         }
         super::external_binding::upsert_external_binding(
             &transaction,
-            &request.collection_id,
+            collection_id,
             ExternalBindingInput {
                 provider: self.provider.into(),
-                external_id: request.anchor_item_id,
+                external_id: anchor_item_id,
                 provider_config_json: Some(config_json),
                 provider_data_json: Some(snapshot_json),
                 last_synced_at: Some(checked_at.to_owned()),
@@ -469,7 +608,7 @@ impl BookFlow<'_> {
             transaction.execute(
                 "UPDATE release_watch_subscriptions SET last_checked_at = ?1
                  WHERE collection_id = ?2 AND provider = ?3",
-                params![checked_at, request.collection_id, self.provider],
+                params![checked_at, collection_id, self.provider],
             )?;
         }
         if self.provider == "kakao" {
@@ -478,9 +617,9 @@ impl BookFlow<'_> {
                  SELECT collection_id, 'kakao', ?2 FROM release_watch_subscriptions
                  WHERE collection_id = ?1 AND provider = 'aladin'
                  ON CONFLICT(collection_id, provider) DO NOTHING",
-                params![request.collection_id, checked_at],
+                params![collection_id, checked_at],
             )?;
-            transaction.execute("DELETE FROM release_watch_subscriptions WHERE collection_id = ?1 AND provider = 'aladin'", [&request.collection_id])?;
+            transaction.execute("DELETE FROM release_watch_subscriptions WHERE collection_id = ?1 AND provider = 'aladin'", [collection_id])?;
         }
         transaction.commit()?;
         Ok(AladinReconcileOutcome {
@@ -701,13 +840,13 @@ fn normalize(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{group_items, ProviderConfig};
+    use super::{group_items, BoundGroup, ProviderConfig};
     use crate::library::{
         aladin::AladinItem,
         error::LibraryError,
         models::{
-            AladinApplyRequest, CollectionType, CreateCollection, ExternalBindingInput,
-            ReleaseWatchEventKind,
+            AladinApplyRequest, AladinGroupSelection, CollectionType, CreateCollection,
+            ExternalBindingInput, ReleaseWatchEventKind,
         },
         Library,
     };
@@ -792,8 +931,10 @@ mod tests {
         AladinApplyRequest {
             collection_id: collection_id.into(),
             query: "던전밥".into(),
-            anchor_item_id: candidate.anchor_item_id,
-            group_fingerprint: candidate.group_fingerprint,
+            groups: vec![AladinGroupSelection {
+                anchor_item_id: candidate.anchor_item_id,
+                group_fingerprint: candidate.group_fingerprint,
+            }],
         }
     }
 
@@ -860,12 +1001,12 @@ mod tests {
 
         let first = library
             .book_flow("aladin")
-            .apply_aladin_items(request(&work_id, &items), items.clone(), Vec::new())
+            .apply_aladin_items(request(&work_id, &items), items.clone())
             .unwrap();
         assert_eq!((first.added, first.updated, first.unchanged), (2, 0, 0));
         let second = library
             .book_flow("aladin")
-            .apply_aladin_items(request(&work_id, &items), items.clone(), Vec::new())
+            .apply_aladin_items(request(&work_id, &items), items.clone())
             .unwrap();
         assert_eq!((second.added, second.updated, second.unchanged), (0, 0, 2));
 
@@ -959,7 +1100,6 @@ mod tests {
         let result = library.book_flow("aladin").apply_aladin_items(
             request(&target_id, &items),
             items,
-            Vec::new(),
         );
         assert!(matches!(
             result,
@@ -988,23 +1128,20 @@ mod tests {
         ];
         library
             .book_flow("aladin")
-            .apply_aladin_items(request(&work_id, &initial), initial.clone(), Vec::new())
+            .apply_aladin_items(request(&work_id, &initial), initial.clone())
             .unwrap();
         let candidate = group_items(initial.clone()).remove(0);
         let config = ProviderConfig {
-            version: 1,
             query: "던전밥".into(),
-            group_fingerprint: candidate.group_fingerprint.clone(),
-            known_item_ids: vec!["item-1".into(), "item-2".into()],
+            groups: vec![BoundGroup {
+                anchor_item_id: "missing-anchor".into(),
+                group_fingerprint: candidate.group_fingerprint.clone(),
+                known_item_ids: vec!["item-1".into(), "item-2".into()],
+            }],
         };
         library
             .book_flow("aladin")
-            .refresh_aladin_items(
-                &work_id,
-                "missing-anchor".into(),
-                config,
-                vec![initial[0].clone()],
-            )
+            .refresh_aladin_items(&work_id, config, vec![initial[0].clone()])
             .unwrap();
         let source_count: i64 = library
             .connection()
@@ -1020,12 +1157,13 @@ mod tests {
         let unrelated = vec![item("other", "다른책", 1, "B출판", None, None)];
         let error = library.book_flow("aladin").refresh_aladin_items(
             &work_id,
-            "missing-anchor".into(),
             ProviderConfig {
-                version: 1,
                 query: "던전밥".into(),
-                group_fingerprint: candidate.group_fingerprint,
-                known_item_ids: vec!["item-1".into()],
+                groups: vec![BoundGroup {
+                    anchor_item_id: "missing-anchor".into(),
+                    group_fingerprint: candidate.group_fingerprint,
+                    known_item_ids: vec!["item-1".into()],
+                }],
             },
             unrelated,
         );
@@ -1047,7 +1185,7 @@ mod tests {
         )];
         library
             .book_flow("aladin")
-            .apply_aladin_items(request(&work_id, &initial), initial, Vec::new())
+            .apply_aladin_items(request(&work_id, &initial), initial)
             .unwrap();
         library.set_release_watch_enabled(&work_id, true).unwrap();
         library
@@ -1125,7 +1263,7 @@ mod tests {
         let initial = vec![item("item-1", "던전밥", 1, "A출판", Some("9781"), None)];
         library
             .book_flow("aladin")
-            .apply_aladin_items(request(&work_id, &initial), initial, Vec::new())
+            .apply_aladin_items(request(&work_id, &initial), initial)
             .unwrap();
         library
             .book_flow("aladin")
@@ -1178,7 +1316,7 @@ mod tests {
         )];
         library
             .book_flow("aladin")
-            .apply_aladin_items(request(&target_id, &initial), initial, Vec::new())
+            .apply_aladin_items(request(&target_id, &initial), initial)
             .unwrap();
         library.set_release_watch_enabled(&target_id, true).unwrap();
         library
@@ -1248,7 +1386,7 @@ mod tests {
         )];
         library
             .book_flow("aladin")
-            .apply_aladin_items(request(&id, &old), old, Vec::new())
+            .apply_aladin_items(request(&id, &old), old)
             .unwrap();
         library.set_release_watch_enabled(&id, true).unwrap();
         let before: String = library
@@ -1270,7 +1408,7 @@ mod tests {
         )];
         library
             .book_flow("kakao")
-            .apply_aladin_items(request(&id, &newer), newer.clone(), Vec::new())
+            .apply_aladin_items(request(&id, &newer), newer.clone())
             .unwrap();
         assert!(library.get_aladin_connection(&id).unwrap().is_some());
         assert!(library.get_kakao_connection(&id).unwrap().is_some());
@@ -1333,7 +1471,7 @@ mod tests {
             let library = Library::open(temp.path()).unwrap();
             let id = create_work(&library, "던전밥");
             let initial = vec![item("isbn:one", "던전밥", 1, "A출판", Some("9781"), Some("2020-01-01"))];
-            library.book_flow("kakao").apply_aladin_items(request(&id, &initial), initial.clone(), Vec::new()).unwrap();
+            library.book_flow("kakao").apply_aladin_items(request(&id, &initial), initial.clone()).unwrap();
             if enabled { library.set_release_watch_enabled(&id, true).unwrap(); }
             if entered { library.set_owned_volume_count(&id, 0, 0).unwrap(); }
             let mut updated = initial;
@@ -1348,4 +1486,195 @@ mod tests {
         }
     }
 
+
+    /// A real split (user report 2026-09-26, "찍히지 않습니다"): the library's binding holds only
+    /// vol. 7 (S코믹스, two vol-7 products); vols 1-6 are a separate Kakao group. The
+    /// production library only shows the bound group, so the other group's differing field
+    /// is assumed here to be the publisher (S코믹스 is an imprint of 소미미디어).
+    fn ghost(id: &str, volume: i64, publisher: &str, isbn13: Option<&str>, date: &str) -> AladinItem {
+        AladinItem {
+            item_id: id.into(),
+            title: format!("찍히지 않습니다 {volume}"),
+            author: Some("코노시마 루카".into()),
+            publisher: Some(publisher.into()),
+            isbn13: isbn13.map(Into::into),
+            publication_date: Some(date.into()),
+            item_url: None,
+            volume_number: volume,
+            base_title: "찍히지 않습니다".into(),
+            snapshot_json: format!(r#"{{"itemId":"{id}"}}"#),
+        }
+    }
+
+    fn ghost_items() -> Vec<AladinItem> {
+        let mut items: Vec<_> = (1..=6)
+            .map(|n| ghost(&format!("isbn13:97911384900{n}0"), n, "소미미디어", Some(&format!("97911384900{n}0")), &format!("2025-0{n}-10")))
+            .collect();
+        items.push(ghost("isbn13:9791138491150", 7, "S코믹스", Some("9791138491150"), "2026-07-22"));
+        items.push(ghost("isbn13:9791138491167", 7, "S코믹스", Some("9791138491167"), "2026-07-22"));
+        items
+    }
+
+    fn select_all(collection_id: &str, items: &[AladinItem]) -> AladinApplyRequest {
+        AladinApplyRequest {
+            collection_id: collection_id.into(),
+            query: "찍히지 않습니다".into(),
+            groups: group_items(items.to_vec())
+                .into_iter()
+                .map(|group| AladinGroupSelection {
+                    anchor_item_id: group.anchor_item_id,
+                    group_fingerprint: group.group_fingerprint,
+                })
+                .collect(),
+        }
+    }
+
+    fn kakao_sources(library: &Library, id: &str) -> Vec<(i64, String)> {
+        library
+            .connection()
+            .unwrap()
+            .prepare("SELECT volume_number, provider_item_id FROM collection_volume_sources WHERE collection_id = ?1 AND provider = 'kakao' ORDER BY volume_number")
+            .unwrap()
+            .query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn kakao_binding(library: &Library, id: &str) -> (String, serde_json::Value) {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT external_id, provider_config_json FROM collection_external_bindings WHERE collection_id = ?1 AND provider = 'kakao'",
+                [id],
+                |row| Ok((row.get::<_, String>(0)?, serde_json::from_str(&row.get::<_, String>(1)?).unwrap())),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn several_groups_bind_together_and_merge_volumes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "찍히지 않습니다");
+        let items = ghost_items();
+        assert_eq!(group_items(items.clone()).len(), 2);
+        let result = library
+            .book_flow("kakao")
+            .apply_aladin_items(select_all(&id, &items), items.clone())
+            .unwrap();
+        assert_eq!((result.added, result.ignored), (7, 1));
+        let sources = kakao_sources(&library, &id);
+        assert_eq!(sources.iter().map(|s| s.0).collect::<Vec<_>>(), (1..=7).collect::<Vec<_>>());
+        assert_eq!(sources[6].1, "isbn13:9791138491150");
+        let (external, config) = kakao_binding(&library, &id);
+        // The group holding the lowest volume comes first and anchors the binding.
+        assert_eq!(external, "isbn13:9791138490010");
+        assert_eq!(config["version"], 2);
+        assert_eq!(config["groups"].as_array().unwrap().len(), 2);
+        assert_eq!(config["groups"][1]["anchorItemId"], "isbn13:9791138491150");
+        assert_eq!(config["groups"][1]["knownItemIds"], serde_json::json!(["isbn13:9791138491150"]));
+        assert_eq!(library.get_kakao_connection(&id).unwrap().unwrap().anchor_item_id, external);
+
+        // A missing group, a repeated fingerprint or an empty pick is refused.
+        let mut partial = select_all(&id, &items);
+        partial.groups[1].anchor_item_id = "gone".into();
+        assert!(matches!(library.book_flow("kakao").apply_aladin_items(partial, items.clone()), Err(LibraryError::AmbiguousAladinBinding)));
+        let mut repeated = select_all(&id, &items);
+        repeated.groups[1] = repeated.groups[0].clone();
+        assert!(matches!(library.book_flow("kakao").apply_aladin_items(repeated, items.clone()), Err(LibraryError::AmbiguousAladinBinding)));
+        let mut empty = select_all(&id, &items);
+        empty.groups.clear();
+        assert!(matches!(library.book_flow("kakao").apply_aladin_items(empty, items), Err(LibraryError::AmbiguousAladinBinding)));
+    }
+
+    #[test]
+    fn a_volume_in_several_groups_keeps_the_preferred_item() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "찍히지 않습니다");
+        let mut items = ghost_items();
+        // The old imprint also lists vol. 7, without an ISBN: the S코믹스 item with one wins.
+        items.push(ghost("url:old-7", 7, "소미미디어", None, "2026-07-30"));
+        let result = library
+            .book_flow("kakao")
+            .apply_aladin_items(select_all(&id, &items), items)
+            .unwrap();
+        assert_eq!((result.added, result.ignored), (7, 2));
+        assert_eq!(kakao_sources(&library, &id)[6].1, "isbn13:9791138491150");
+    }
+
+    #[test]
+    fn refresh_refinds_every_group_including_anchor_drift() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "찍히지 않습니다");
+        let items = ghost_items();
+        library
+            .book_flow("kakao")
+            .apply_aladin_items(select_all(&id, &items), items.clone())
+            .unwrap();
+        library.set_release_watch_enabled(&id, true).unwrap();
+        library.set_owned_volume_count(&id, 0, 7).unwrap();
+        // Vol. 1 (the first group's anchor) left the search; vol. 8 appeared in the second.
+        let mut refreshed: Vec<_> = items.into_iter().skip(1).collect();
+        refreshed.push(ghost("isbn13:9791138491174", 8, "S코믹스", Some("9791138491174"), "2026-11-20"));
+        let outcome = library
+            .book_flow("kakao")
+            .refresh_aladin_items_at(&id, refreshed.clone(), "2026-09-26T00:00:00Z")
+            .unwrap();
+        assert_eq!(outcome.sync_result.added, 1);
+        assert_eq!(kakao_sources(&library, &id).len(), 8);
+        // Release watch sees the merged volume set: only vol. 8 is new.
+        let events = library.take_unread_release_changes(&id).unwrap();
+        assert_eq!(events.iter().map(|e| (e.volume_number, e.kind)).collect::<Vec<_>>(), vec![(8, ReleaseWatchEventKind::NewVolume)]);
+        let (external, config) = kakao_binding(&library, &id);
+        assert_eq!(external, "isbn13:9791138490010");
+        assert_eq!(config["groups"][1]["knownItemIds"].as_array().unwrap().len(), 2);
+
+        // A group that vanished from the search refuses the refresh.
+        let only_first: Vec<_> = refreshed.into_iter().filter(|item| item.volume_number < 7).collect();
+        assert!(matches!(
+            library.book_flow("kakao").refresh_aladin_items_at(&id, only_first, "2026-09-27T00:00:00Z"),
+            Err(LibraryError::AmbiguousAladinBinding)
+        ));
+    }
+
+    #[test]
+    fn a_legacy_single_group_config_still_refreshes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let id = create_work(&library, "찍히지 않습니다");
+        let items = ghost_items();
+        let second = group_items(items.clone())
+            .into_iter()
+            .find(|group| group.publisher.as_deref() == Some("S코믹스"))
+            .unwrap();
+        // The exact shape stored in the production library before multi-group bindings.
+        library
+            .upsert_collection_external_binding(
+                &id,
+                ExternalBindingInput {
+                    provider: "kakao".into(),
+                    external_id: "isbn13:9791138491150".into(),
+                    provider_config_json: Some(format!(
+                        r#"{{"version":1,"query":"찍히지 않습니다","groupFingerprint":"{}","knownItemIds":["isbn13:9791138491150"]}}"#,
+                        second.group_fingerprint
+                    )),
+                    provider_data_json: Some("{}".into()),
+                    last_synced_at: None,
+                },
+            )
+            .unwrap();
+        library
+            .book_flow("kakao")
+            .refresh_aladin_items_at(&id, items, "2026-09-26T00:00:00Z")
+            .unwrap();
+        assert_eq!(kakao_sources(&library, &id), vec![(7, "isbn13:9791138491150".to_owned())]);
+        let (external, config) = kakao_binding(&library, &id);
+        assert_eq!(external, "isbn13:9791138491150");
+        assert_eq!(config["version"], 1);
+        assert_eq!(config["groupFingerprint"], serde_json::json!(second.group_fingerprint));
+    }
 }

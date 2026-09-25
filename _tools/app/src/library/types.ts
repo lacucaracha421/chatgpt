@@ -671,11 +671,16 @@ export type KakaoSeriesCandidate = {
   ignoredCount: number;
 };
 
+export type KakaoGroupSelection = {
+  anchorItemId: string;
+  groupFingerprint: string;
+};
+
+// One or more series groups of the same search (1-10, unique by fingerprint), bound together.
 export type KakaoApplyRequest = {
   collectionId: string;
   query: string;
-  anchorItemId: string;
-  groupFingerprint: string;
+  groups: KakaoGroupSelection[];
 };
 
 export type CollectionVolume = {

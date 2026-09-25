@@ -80,11 +80,62 @@ describe("KakaoConnectDialog", () => {
     expect(gateway.applyKakao).toHaveBeenCalledWith({
       collectionId: "collection-1",
       query: "던전밥",
-      anchorItemId: "item-1",
-      groupFingerprint: "fingerprint-a",
+      groups: [{ anchorItemId: "item-1", groupFingerprint: "fingerprint-a" }],
     });
     await waitFor(() => expect(onApplied).toHaveBeenCalledWith({ added: 2, updated: 0, unchanged: 0, ignored: 2 }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("checks several groups Kakao split from one series and applies them together", async () => {
+    const user = userEvent.setup();
+    const split: KakaoSeriesCandidate[] = [
+      {
+        anchorItemId: "isbn13:0010", groupFingerprint: "fingerprint-somi", title: "찍히지 않습니다",
+        author: "코노시마 루카", publisher: "소미미디어", ignoredCount: 0,
+        volumes: [1, 2, 3, 4, 5, 6].map((n) => ({ volumeNumber: n, providerItemId: `isbn13:00${n}0`, title: `찍히지 않습니다 ${n}`, publicationDate: null, isbn13: null })),
+      },
+      {
+        anchorItemId: "isbn13:1150", groupFingerprint: "fingerprint-s", title: "찍히지 않습니다",
+        author: "코노시마 루카", publisher: "S코믹스", ignoredCount: 1,
+        volumes: [{ volumeNumber: 7, providerItemId: "isbn13:1150", title: "찍히지 않습니다 7", publicationDate: "2026-07-22", isbn13: "1150" }],
+      },
+    ];
+    const { gateway } = renderDialog({ searchKakao: vi.fn().mockResolvedValue(split) });
+    await user.click(screen.getByRole("button", { name: "검색" }));
+
+    // A row click picks only that group.
+    await user.click(await screen.findByRole("button", { name: /S코믹스/ }));
+    expect(screen.getByRole("checkbox", { name: "찍히지 않습니다 7권 함께 연결" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "찍히지 않습니다 1–6권 함께 연결" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "연결" })).toBeEnabled();
+
+    // The checkbox adds the earlier volumes' group; both previews and the count show.
+    await user.click(screen.getByRole("checkbox", { name: "찍히지 않습니다 1–6권 함께 연결" }));
+    expect(screen.getByText("찍히지 않습니다 1")).toBeInTheDocument();
+    expect(screen.getByText("찍히지 않습니다 7")).toBeInTheDocument();
+    expect(screen.getByText(/시리즈 2개를 함께 연결합니다/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "2개 연결" }));
+
+    expect(gateway.applyKakao).toHaveBeenCalledWith({
+      collectionId: "collection-1",
+      query: "던전밥",
+      groups: [
+        { anchorItemId: "isbn13:0010", groupFingerprint: "fingerprint-somi" },
+        { anchorItemId: "isbn13:1150", groupFingerprint: "fingerprint-s" },
+      ],
+    });
+  });
+
+  it("unchecking every group disables connect", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    const checkbox = await screen.findByRole("checkbox", { name: "던전밥 1–3권 함께 연결" });
+    await user.click(checkbox);
+    expect(screen.getByRole("button", { name: "연결" })).toBeEnabled();
+    await user.click(checkbox);
+    expect(screen.getByRole("button", { name: "연결" })).toBeDisabled();
+    expect(screen.getByText("검색 결과에서 연결할 시리즈를 선택하세요.")).toBeInTheDocument();
   });
 
   it("keeps errors and pending requests inside the dialog", async () => {

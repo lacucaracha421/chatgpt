@@ -167,7 +167,8 @@ impl BindingApplier for Fake {
             .map(|_| ())
     }
     fn kakao(&self, library: &Library, request: AladinApplyRequest) -> Result<(), LibraryError> {
-        self.queued(format!("kakao:{}", request.anchor_item_id))?;
+        let anchors: Vec<_> = request.groups.iter().map(|g| g.anchor_item_id.as_str()).collect();
+        self.queued(format!("kakao:{}", anchors.join("+")))?;
         library
             .book_flow("kakao")
             .apply_requested_items(request, kakao_items())
@@ -446,8 +447,10 @@ fn a_kakao_request_binds_its_group_even_after_the_anchor_drifted() {
     let request = AladinApplyRequest {
         collection_id: "m".into(),
         query: "던전밥".into(),
-        anchor_item_id: group.anchor_item_id.clone(),
-        group_fingerprint: "0".repeat(64),
+        groups: vec![AladinGroupSelection {
+            anchor_item_id: group.anchor_item_id.clone(),
+            group_fingerprint: "0".repeat(64),
+        }],
     };
     assert!(matches!(
         library
@@ -830,4 +833,98 @@ fn cursor_recovery_restart_rewind_and_older_servers() {
             .retry_after
             >= now + 3600
     );
+}
+
+/// Two Kakao groups of one search: vols 1-2 under one publisher, vol 3 under another.
+fn split_kakao_items() -> Vec<AladinItem> {
+    kakao_items()
+        .into_iter()
+        .map(|mut item| {
+            if item.volume_number == 3 {
+                item.publisher = Some("S코믹스".into());
+            }
+            item
+        })
+        .collect()
+}
+
+fn split_groups_choice() -> Value {
+    let groups: Vec<Value> = group_items(split_kakao_items())
+        .into_iter()
+        .map(|g| json!({"anchorItemId":g.anchor_item_id,"groupFingerprint":g.group_fingerprint,
+            "title":g.title,"firstVolume":g.volumes[0].volume_number}))
+        .collect();
+    json!({"query":"던전밥","groups":groups,"title":"던전밥","author":null,"publisher":null,
+        "volumeCount":3,"thumbnailUrl":null})
+}
+
+fn bind_item(choice: Value) -> BindRequest {
+    serde_json::from_value(request(1, "m", "kakao", choice, Value::Null, "pending")).unwrap()
+}
+
+#[test]
+fn kakao_targets_read_groups_and_the_legacy_single_form() {
+    let Ok(Target::Kakao(multi)) = target(&bind_item(split_groups_choice())) else {
+        panic!("groups choice refused");
+    };
+    assert_eq!(multi.groups.len(), 2);
+    let Ok(Target::Kakao(legacy)) = target(&bind_item(kakao_choice("k-1"))) else {
+        panic!("legacy choice refused");
+    };
+    assert_eq!(legacy.groups.len(), 1);
+    assert_eq!(legacy.groups[0].anchor_item_id, "k-1");
+    let mut repeated = split_groups_choice();
+    let first = repeated["groups"][0].clone();
+    repeated["groups"][1] = first;
+    let mut empty = split_groups_choice();
+    empty["groups"] = json!([]);
+    let mut eleven = split_groups_choice();
+    eleven["groups"] = Value::Array(
+        (0..11)
+            .map(|n| json!({"anchorItemId":format!("a{n}"),"groupFingerprint":format!("{n:064x}")}))
+            .collect(),
+    );
+    let mut bad_fingerprint = split_groups_choice();
+    bad_fingerprint["groups"][0]["groupFingerprint"] = json!("X".repeat(64));
+    for choice in [repeated, empty, eleven, bad_fingerprint] {
+        assert!(target(&bind_item(choice)).is_err());
+    }
+}
+
+#[test]
+fn a_requested_multi_group_apply_resolves_each_group_and_merges() {
+    let (_temp, library) = fixture();
+    let Ok(Target::Kakao(mut request)) = target(&bind_item(split_groups_choice())) else {
+        panic!("groups choice refused");
+    };
+    // The second group's anchor drifted since the tablet picked it.
+    request.groups[1].anchor_item_id = "gone".into();
+    library
+        .book_flow("kakao")
+        .apply_requested_items(request, split_kakao_items())
+        .unwrap();
+    let volumes: i64 = library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM collection_volume_sources WHERE collection_id='m' AND provider='kakao'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(volumes, 3);
+    assert_eq!(binding(&library, "kakao").as_deref(), Some("k-1"));
+    // Re-reading the same request (a crash before reporting) counts as applied; a request
+    // for only one of the groups does not.
+    let item = bind_item(split_groups_choice());
+    let target_now = target(&item).unwrap();
+    assert!(matches!(
+        library.binding_precheck(&item, &target_now).unwrap(),
+        Some(Decision::Applied)
+    ));
+    let mut single = split_groups_choice();
+    single["groups"].as_array_mut().unwrap().truncate(1);
+    let item = bind_item(single);
+    let target_now = target(&item).unwrap();
+    assert!(library.binding_precheck(&item, &target_now).unwrap().is_none());
 }
