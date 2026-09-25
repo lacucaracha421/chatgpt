@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChecklistItem, NoteKind, SecretField } from "./model";
+import { LEDGER, LEDGER_MONTH, monthTitle, type LedgerEntry, type Planned, type Recurring } from "./ledger/model";
 
 /** A decrypted note as the PC backend returns it (Notes v2 fields are optional: v1 notes lack them). */
 export type Note = {id:string; title:string; body:string; pinned:boolean; deleted:boolean; createdAt:string; updatedAt:string; localRevision:number; pending:boolean; conflict:boolean;
   schema?:number; type?:string; color?:string|null; labels?:string[]; archived?:boolean; items?:ChecklistItem[]; fields?:SecretField[]; memo?:string;
+  /** Ledger (가계부) and its hidden month notes; see ./ledger. */ income?:number|null; recurring?:Recurring[]; planned?:Planned[]; ledger?:string; month?:string; entries?:LedgerEntry[];
   /** Local copy kept when an edit collision could not merge. */ conflictCopy?:boolean;
   /** Newer schema or unknown type: only pin/trash/archive/restore. */ readOnly?:boolean;
   /** Secret note while the PIN session is closed: only the title is present. */ redacted?:boolean;
@@ -13,8 +15,19 @@ export type NotesState = {unlocked:boolean; keyringLocked?:boolean; unreadable?:
 export const SECRET_LOCKED_TEXT="암호 메모 잠금을 해제해 주세요.";
 export const PIN_REQUIRED_TEXT="복구키를 보려면 암호 메모 PIN을 먼저 입력해 주세요.";
 /** Fields a draft carries; used to rebase a newer queued draft onto a merged save. */
-const DRAFT_KEYS=["title","body","pinned","deleted","archived","type","color","labels","items","fields","memo"] as const;
+const DRAFT_KEYS=["title","body","pinned","deleted","archived","type","color","labels","items","fields","memo","income","recurring","planned","entries"] as const;
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+/** Keyed lists rebase per id, so a newer draft never drops what a merged save added. */
+const LIST_KEYS=new Set<string>(["items","fields","recurring","planned","entries"]);
+type Keyed={id:string};
+/** Applies what `newer` changed relative to `draft` (added, removed or edited ids) onto `saved`. */
+export function rebaseList<T extends Keyed>(saved:T[],draft:T[],newer:T[]):T[]{
+  const before=new Map(draft.map(e=>[e.id,e])),after=new Map(newer.map(e=>[e.id,e]));
+  const changed=(id:string)=>after.has(id)&&(!before.has(id)||!same(after.get(id),before.get(id)));
+  const out=saved.filter(e=>!(before.has(e.id)&&!after.has(e.id))).map(e=>changed(e.id)?after.get(e.id)!:e);
+  for(const e of newer)if(!before.has(e.id)&&!out.some(o=>o.id===e.id))out.push(e);
+  return out;
+}
 const redact=(n:Note):Note=>({...n,body:"",memo:undefined,fields:undefined,labels:undefined,redacted:true});
 export type SecretStatus = {pinSet:boolean; unlocked:boolean};
 export const noteKind=(note:Pick<Note,"type">)=>note.type??"text";
@@ -26,7 +39,9 @@ function draftOf(note:Note,expectedRevision:number){
   if(note.readOnly)return base;
   if(note.redacted)return {...base,title:note.title,color:note.color??null};
   const kind=noteKind(note);
-  const content=kind==="checklist"?{items:note.items??[]}:kind==="secret"?{fields:note.fields??[],memo:note.memo??""}:{body:note.body};
+  const content=kind==="checklist"?{items:note.items??[]}:kind==="secret"?{fields:note.fields??[],memo:note.memo??""}
+    :kind===LEDGER?{income:note.income??null,recurring:note.recurring??[],planned:note.planned??[]}
+    :kind===LEDGER_MONTH?{ledger:note.ledger,month:note.month,income:note.income??null,entries:note.entries??[]}:{body:note.body};
   return {...base,type:kind,title:note.title,color:note.color??null,labels:note.labels??[],...content};
 }
 export type Snapshot = NotesState & {ready:boolean; saving:boolean; syncing:boolean; error:string|null;
@@ -68,11 +83,27 @@ export class NotesStore {
     const updated={...note,updatedAt:new Date().toISOString(),pending:true};this.queue.set(note.id,updated);
     this.patch({notes:[updated,...this.current.notes.filter(n=>n.id!==note.id)],saving:true,error:null});void this.drain();
   }
-  create(kind:NoteKind="text"){
+  create(kind:NoteKind|typeof LEDGER="text"){
     const now=new Date().toISOString();
     const note:Note={id:crypto.randomUUID(),title:"",body:"",pinned:false,deleted:false,createdAt:now,updatedAt:now,localRevision:0,pending:true,conflict:false,
-      ...(kind==="checklist"?{type:kind,items:[]}:kind==="secret"?{type:kind,fields:[],memo:""}:{})};
+      ...(kind==="checklist"?{type:kind,items:[]}:kind==="secret"?{type:kind,fields:[],memo:""}
+        // A ledger is created pinned (design §3); its months live in hidden month notes.
+        :kind===LEDGER?{type:kind,title:"가계부",pinned:true,income:null,recurring:[],planned:[]}:{})};
     this.edit(note);return note.id;
+  }
+  /**
+   * The month note of `ledgerId` for `month` (YYYY-MM), created locally when missing. Its id
+   * is derived natively (HMAC with the notes key), so two offline devices converge on one
+   * note and the sync merges both sides' entries. Month notes are always archived.
+   */
+  async ledgerMonth(ledgerId:string,month:string):Promise<string>{
+    const {id}=await this.request<{id:string}>("ledgerMonthId",{ledger:ledgerId,month});
+    if(!this.current.notes.some(n=>n.id===id)&&!this.queue.has(id)){
+      const now=new Date().toISOString();
+      this.edit({id,type:LEDGER_MONTH,title:monthTitle(month),body:"",ledger:ledgerId,month,income:null,entries:[],pinned:false,deleted:false,archived:true,
+        createdAt:now,updatedAt:now,localRevision:0,pending:true,conflict:false});
+    }
+    return id;
   }
   /** Only after the user opened Notes: may show the system keyring password dialog. */
   async unlockKeyring(){try{this.merge(await this.request<NotesState>("unlockKeyring"));this.patch({error:null});}catch(e){this.patch({error:message(e)});}}
@@ -124,7 +155,12 @@ export class NotesStore {
           }else if(newer){
             // Rebase the newer draft: fields it did not change since this save take the saved (possibly merged) values.
             const rebased:Note={...newer,localRevision:saved.localRevision,conflict:saved.conflict};
-            for(const key of DRAFT_KEYS)if(same(newer[key],draft[key])&&!same(saved[key],draft[key]))(rebased as Record<string,unknown>)[key]=saved[key];
+            for(const key of DRAFT_KEYS){
+              if(same(saved[key],draft[key]))continue;
+              if(same(newer[key],draft[key]))(rebased as Record<string,unknown>)[key]=saved[key];
+              else if(LIST_KEYS.has(key)&&Array.isArray(saved[key])&&Array.isArray(draft[key])&&Array.isArray(newer[key]))
+                (rebased as Record<string,unknown>)[key]=rebaseList(saved[key] as Keyed[],draft[key] as Keyed[],newer[key] as Keyed[]);
+            }
             this.queue.set(id,rebased);
             this.patch({notes:this.current.notes.map(n=>n.id===id?rebased:n)});
           }else this.patch({notes:this.current.notes.map(n=>n.id===id?saved:n)});

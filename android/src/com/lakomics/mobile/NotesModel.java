@@ -1,6 +1,8 @@
 package com.lakomics.mobile;
 
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -14,6 +16,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Notes v2 plaintext schema (inside the encrypted payload only), its limits, the fallback
@@ -37,6 +41,12 @@ final class NotesModel {
     static final int MAX_FIELD_VALUE_CHARS = 4000;
     static final int MAX_KEY_LEN = 64;
     static final String TEXT = "text", CHECKLIST = "checklist", SECRET = "secret";
+    /** Ledger (가계부) notes: see the "Ledger" section below and `library/notes/ledger.rs`. */
+    static final String LEDGER = "ledger", LEDGER_MONTH = "ledger-month";
+    static final int MAX_RECURRING = 200, MAX_PLANNED = 300, MAX_ENTRIES = 300, MAX_LEDGER_NAME_CHARS = 100, MAX_LEDGER_MEMO_CHARS = 500, MAX_LEDGER_BODY_BYTES = 24 * 1024;
+    static final long AMOUNT_BOUND = 1_000_000_000_000L, MAX_EVERY = 120;
+    static boolean ledgerKind(String kind) { return LEDGER.equals(kind) || LEDGER_MONTH.equals(kind); }
+    static boolean knownKind(Object kind) { return TEXT.equals(kind) || CHECKLIST.equals(kind) || SECRET.equals(kind) || LEDGER.equals(kind) || LEDGER_MONTH.equals(kind); }
     static final List<String> COLORS = Collections.unmodifiableList(Arrays.asList("red", "orange", "amber", "green", "teal", "blue", "indigo", "pink"));
 
     private NotesModel() {}
@@ -102,6 +112,13 @@ final class NotesModel {
         List<String> labels = new ArrayList<>();
         List<Item> items;
         List<Field> fields;
+        /** Month note: its ledger note id and `YYYY-MM` (both immutable). */
+        String ledger, month;
+        /** `income` key present (null or integer won); absent when false. */
+        boolean hasIncome;
+        Long income;
+        /** Ledger collections as canonical JSON maps (known keys in order, then unknown keys). */
+        List<Map<String, Object>> recurring, planned, entries;
         boolean pinned, deleted, archived;
         String createdAt, updatedAt;
         LinkedHashMap<String, Object> extra = new LinkedHashMap<>();
@@ -112,7 +129,7 @@ final class NotesModel {
 
         /** False for a newer schema or an unknown type: such a note is read-only here. */
         boolean supported() {
-            return (schema == null || schema <= SUPPORTED_SCHEMA) && (TEXT.equals(kind()) || CHECKLIST.equals(kind()) || SECRET.equals(kind()));
+            return (schema == null || schema <= SUPPORTED_SCHEMA) && knownKind(kind());
         }
 
         Content copy() {
@@ -121,6 +138,8 @@ final class NotesModel {
             c.labels = new ArrayList<>(labels);
             c.items = items == null ? null : copyItems(items);
             c.fields = fields == null ? null : copyFields(fields);
+            c.ledger = ledger; c.month = month; c.hasIncome = hasIncome; c.income = income;
+            c.recurring = copyMaps(recurring); c.planned = copyMaps(planned); c.entries = copyMaps(entries);
             c.pinned = pinned; c.deleted = deleted; c.archived = archived; c.createdAt = createdAt; c.updatedAt = updatedAt;
             c.extra = new LinkedHashMap<>(extra);
             return c;
@@ -138,6 +157,12 @@ final class NotesModel {
             if (!labels.isEmpty()) out.put("labels", new ArrayList<Object>(labels));
             if (items != null) { List<Object> list = new ArrayList<>(); for (Item i : items) list.add(i.toMap()); out.put("items", list); }
             if (fields != null) { List<Object> list = new ArrayList<>(); for (Field f : fields) list.add(f.toMap()); out.put("fields", list); }
+            if (ledger != null) out.put("ledger", ledger);
+            if (month != null) out.put("month", month);
+            if (hasIncome) out.put("income", income);
+            if (recurring != null) out.put("recurring", new ArrayList<Object>(recurring));
+            if (planned != null) out.put("planned", new ArrayList<Object>(planned));
+            if (entries != null) out.put("entries", new ArrayList<Object>(entries));
             out.put("pinned", pinned);
             out.put("deleted", deleted);
             if (archived) out.put("archived", true);
@@ -163,6 +188,19 @@ final class NotesModel {
                 if (fields == null) fields = new ArrayList<>();
                 sortEntries(fields);
                 body = secretFallback(fields, memo == null ? "" : memo);
+            } else if (LEDGER.equals(k)) {
+                hasIncome = true;
+                if (recurring == null) recurring = new ArrayList<>();
+                if (planned == null) planned = new ArrayList<>();
+                sortByOrder(recurring);
+                sortByOrder(planned);
+                body = ledgerFallback(title, income, recurring, planned);
+            } else if (LEDGER_MONTH.equals(k)) {
+                hasIncome = true;
+                if (entries == null) entries = new ArrayList<>();
+                sortLedgerEntries(entries);
+                archived = true;
+                body = monthFallback(month == null ? "" : month, income, entries);
             }
             if (TEXT.equals(kind)) kind = null;
             boolean v2 = kind != null || color != null || !labels.isEmpty() || archived || items != null || fields != null || memo != null;
@@ -199,6 +237,8 @@ final class NotesModel {
                     if (codePoints(field.label) > MAX_FIELD_LABEL_CHARS || codePoints(field.value) > MAX_FIELD_VALUE_CHARS) return "암호 메모 항목 이름은 100자, 값은 4000자까지 입력할 수 있습니다.";
                 }
             }
+            String ledgerProblem = validateLedger(this);
+            if (ledgerProblem != null) return ledgerProblem;
             if (utf8(toJson()) > MAX_PLAINTEXT_BYTES) return "메모가 너무 큽니다. 256 KiB 이하로 줄여 주세요.";
             return null;
         }
@@ -210,7 +250,7 @@ final class NotesModel {
     // ----------------------------------------------------------------------------------
     // Strict parsing (serde semantics of the PC `Content`)
 
-    private static final Set<String> KNOWN = new HashSet<>(Arrays.asList("schema", "type", "title", "body", "memo", "color", "labels", "items", "fields", "pinned", "deleted", "archived", "createdAt", "updatedAt"));
+    private static final Set<String> KNOWN = new HashSet<>(Arrays.asList("schema", "type", "title", "body", "memo", "color", "labels", "items", "fields", "ledger", "month", "income", "recurring", "planned", "entries", "pinned", "deleted", "archived", "createdAt", "updatedAt"));
 
     @SuppressWarnings("unchecked")
     static Map<String, Object> object(Object value, String key) throws Shape {
@@ -291,6 +331,12 @@ final class NotesModel {
         c.labels = map.containsKey("labels") ? strings(map.get("labels"), "labels") : new ArrayList<String>();
         c.items = items(map.get("items"));
         c.fields = fields(map.get("fields"));
+        c.ledger = optString(map, "ledger");
+        c.month = optString(map, "month");
+        if (map.containsKey("income")) { c.hasIncome = true; c.income = income(map.get("income")); }
+        c.recurring = ledgerList(map.get("recurring"), "recurring", NotesModel::recurringItem);
+        c.planned = ledgerList(map.get("planned"), "planned", NotesModel::plannedItem);
+        c.entries = ledgerList(map.get("entries"), "entries", NotesModel::ledgerEntry);
         c.pinned = bool(map, "pinned");
         c.deleted = bool(map, "deleted");
         c.archived = defaultBool(map, "archived");
@@ -318,7 +364,7 @@ final class NotesModel {
                 Map<?, ?> map = (Map<?, ?>) value;
                 Object schema = map.get("schema"), kind = map.get("type");
                 boolean schemaOk = schema == null || (schema instanceof Long && (Long) schema >= 0 && (Long) schema <= SUPPORTED_SCHEMA);
-                boolean typeOk = kind == null || (kind instanceof String && (TEXT.equals(kind) || CHECKLIST.equals(kind) || SECRET.equals(kind)));
+                boolean typeOk = kind == null || knownKind(kind);
                 if (schemaOk && typeOk) {
                     try {
                         Content content = parse(value);
@@ -376,6 +422,9 @@ final class NotesModel {
         c.extra.clear();
         if (c.items != null) for (Item i : c.items) i.extra.clear();
         if (c.fields != null) for (Field f : c.fields) f.extra.clear();
+        c.recurring = knownOnly(c.recurring, RECURRING_KEYS);
+        c.planned = knownOnly(c.planned, PLANNED_KEYS);
+        c.entries = knownOnly(c.entries, ENTRY_KEYS);
         if (redacted) { c.body = ""; c.memo = null; c.labels = new ArrayList<>(); c.items = null; c.fields = null; }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", id);
@@ -403,6 +452,10 @@ final class NotesModel {
         List<String> labels;
         List<Item> items;
         List<Field> fields;
+        String ledger, month;
+        boolean hasIncome;
+        Long income;
+        List<Map<String, Object>> recurring, planned, entries;
     }
 
     static Draft draft(Object value) throws Shape {
@@ -423,6 +476,12 @@ final class NotesModel {
         d.labels = map.get("labels") == null ? null : strings(map.get("labels"), "labels");
         d.items = items(map.get("items"));
         d.fields = fields(map.get("fields"));
+        d.ledger = optString(map, "ledger");
+        d.month = optString(map, "month");
+        if (map.containsKey("income")) { d.hasIncome = true; d.income = income(map.get("income")); }
+        d.recurring = ledgerList(map.get("recurring"), "recurring", NotesModel::recurringItem);
+        d.planned = ledgerList(map.get("planned"), "planned", NotesModel::plannedItem);
+        d.entries = ledgerList(map.get("entries"), "entries", NotesModel::ledgerEntry);
         return d;
     }
     private static Boolean optBool(Map<String, Object> map, String key) throws Shape {
@@ -448,11 +507,18 @@ final class NotesModel {
         content.updatedAt = now;
         if (!content.supported()) return content;
         if (draft.kind != null) {
-            if (!TEXT.equals(draft.kind) && !CHECKLIST.equals(draft.kind) && !SECRET.equals(draft.kind)) throw new Invalid("지원하지 않는 메모 형식입니다.");
+            if (!knownKind(draft.kind)) throw new Invalid("지원하지 않는 메모 형식입니다.");
             if (!draft.kind.equals(content.kind()) && old != null && (SECRET.equals(draft.kind) || SECRET.equals(content.kind())))
                 throw new Invalid("암호 메모는 다른 형식으로 바꿀 수 없습니다.");
+            if (!draft.kind.equals(content.kind()) && old != null && (ledgerKind(draft.kind) || ledgerKind(content.kind())))
+                throw new Invalid("가계부는 다른 형식으로 바꿀 수 없습니다.");
             content.kind = draft.kind;
         }
+        if ((draft.ledger != null && content.ledger != null && !content.ledger.equals(draft.ledger)) || (draft.month != null && content.month != null && !content.month.equals(draft.month)))
+            throw new Invalid("가계부 월 기록의 가계부와 달은 바꿀 수 없습니다.");
+        if (draft.ledger != null) content.ledger = draft.ledger;
+        if (draft.month != null) content.month = draft.month;
+        if (draft.hasIncome) { content.hasIncome = true; content.income = draft.income; }
         boolean secret = SECRET.equals(content.kind());
         if (secret && (draft.fields != null || draft.memo != null || draft.labels != null) && !secretOpen.touch()) throw new SecretLocked();
         if (draft.title != null) content.title = draft.title;
@@ -467,6 +533,7 @@ final class NotesModel {
             }
             content.fields = null;
             content.memo = null;
+            clearLedger(content);
         } else if (SECRET.equals(kind)) {
             if (draft.fields != null) {
                 List<Field> fields = copyFields(draft.fields);
@@ -475,11 +542,22 @@ final class NotesModel {
             }
             if (draft.memo != null) content.memo = draft.memo;
             content.items = null;
+            clearLedger(content);
+        } else if (LEDGER.equals(kind)) {
+            if (draft.recurring != null) content.recurring = restoreLedgerExtra(draft.recurring, content.recurring, RECURRING_KEYS);
+            if (draft.planned != null) content.planned = restoreLedgerExtra(draft.planned, content.planned, PLANNED_KEYS);
+            content.items = null; content.fields = null; content.memo = null;
+            content.entries = null; content.ledger = null; content.month = null;
+        } else if (LEDGER_MONTH.equals(kind)) {
+            if (draft.entries != null) content.entries = restoreLedgerExtra(draft.entries, content.entries, ENTRY_KEYS);
+            content.items = null; content.fields = null; content.memo = null;
+            content.recurring = null; content.planned = null;
         } else {
             if (draft.body != null) content.body = draft.body;
             content.items = null;
             content.fields = null;
             content.memo = null;
+            clearLedger(content);
         }
         content.normalize();
         String problem = content.validate();
@@ -614,6 +692,7 @@ final class NotesModel {
     @SuppressWarnings("unchecked")
     static Content merge(Content base, Content local, Content remote) {
         if (!(base.supported() && local.supported() && remote.supported())) return null;
+        if (ledgerKind(base.kind()) || ledgerKind(local.kind()) || ledgerKind(remote.kind())) return mergeLedger(base, local, remote);
         String bk = base.kind(), lk = local.kind(), rk = remote.kind();
         Object kindValue = three(bk, lk, rk);
         if (kindValue == COLLISION) return null;
@@ -653,6 +732,12 @@ final class NotesModel {
         m.labels = mergeLabels(base.labels, local.labels, remote.labels);
         m.items = items == null ? null : copyItems(items);
         m.fields = fields == null ? null : copyFields(fields);
+        m.ledger = (String) threeOr(base.ledger, local.ledger, remote.ledger, remote.ledger);
+        m.month = (String) threeOr(base.month, local.month, remote.month, remote.month);
+        setIncome(m, threeOr(incomeSlot(base), incomeSlot(local), incomeSlot(remote), incomeSlot(remote)));
+        m.recurring = copyMaps((List<Map<String, Object>>) threeOr(base.recurring, local.recurring, remote.recurring, remote.recurring));
+        m.planned = copyMaps((List<Map<String, Object>>) threeOr(base.planned, local.planned, remote.planned, remote.planned));
+        m.entries = copyMaps((List<Map<String, Object>>) threeOr(base.entries, local.entries, remote.entries, remote.entries));
         m.pinned = (Boolean) threeOr(base.pinned, local.pinned, remote.pinned, remote.pinned);
         m.deleted = (Boolean) threeOr(base.deleted, local.deleted, remote.deleted, false);
         m.archived = (Boolean) threeOr(base.archived, local.archived, remote.archived, false);
@@ -741,6 +826,398 @@ final class NotesModel {
     /** A canonical UUID (the PC and server accept only these as note ids). */
     static boolean uuid(String id) {
         return id != null && id.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Ledger (가계부): a `ledger` note (income, recurring, planned) plus one hidden
+    // `ledger-month` note per month (entries). A port of `library/notes/ledger.rs`:
+    // collections stay canonical JSON maps; the merge forks an item on a field collision.
+    // Charge dates and month figures are computed only by the shared TypeScript.
+
+    static final List<String> RECURRING_KEYS = Collections.unmodifiableList(Arrays.asList("id", "name", "amount", "every", "unit", "start", "trial", "until", "memo", "order", "forkOf"));
+    static final List<String> PLANNED_KEYS = Collections.unmodifiableList(Arrays.asList("id", "name", "amount", "month", "memo", "dropped", "order", "forkOf"));
+    static final List<String> ENTRY_KEYS = Collections.unmodifiableList(Arrays.asList("id", "date", "amount", "name", "in", "createdAt", "recurring", "planned", "forkOf"));
+    /** Keys the merge compares (all known keys but `id` and `order`). */
+    private static final List<String> RECURRING_FIELDS = Arrays.asList("name", "amount", "every", "unit", "start", "trial", "until", "memo", "forkOf"), PLANNED_FIELDS = Arrays.asList("name", "amount", "month", "memo", "dropped", "forkOf"), ENTRY_FIELDS = ENTRY_KEYS.subList(1, 9);
+
+    interface ItemParser { Map<String, Object> parse(Object value) throws Shape; }
+
+    /** A JSON integer 0..Long.MAX (Rust `u64`). */
+    static Long count(Map<String, Object> map, String key) throws Shape {
+        Object v = map.get(key);
+        if (!(v instanceof Long) || (Long) v < 0) throw new Shape(key);
+        return (Long) v;
+    }
+    static Long income(Object v) throws Shape { return unsigned(v, "income"); }
+    private static void putOpt(Map<String, Object> out, String key, Object value) { if (value != null) out.put(key, value); }
+    private static void extras(Map<String, Object> in, Map<String, Object> out, List<String> known) {
+        for (Map.Entry<String, Object> e : in.entrySet()) if (!known.contains(e.getKey())) out.put(e.getKey(), e.getValue());
+    }
+    static Map<String, Object> recurringItem(Object value) throws Shape {
+        Map<String, Object> m = object(value, "recurring"), out = new LinkedHashMap<>();
+        out.put("id", string(m, "id")); out.put("name", string(m, "name")); out.put("amount", count(m, "amount")); out.put("every", count(m, "every"));
+        out.put("unit", string(m, "unit")); out.put("start", string(m, "start")); out.put("trial", defaultBool(m, "trial")); out.put("until", optString(m, "until"));
+        out.put("memo", m.containsKey("memo") ? string(m, "memo") : ""); out.put("order", string(m, "order")); putOpt(out, "forkOf", optString(m, "forkOf"));
+        extras(m, out, RECURRING_KEYS);
+        return out;
+    }
+    static Map<String, Object> plannedItem(Object value) throws Shape {
+        Map<String, Object> m = object(value, "planned"), out = new LinkedHashMap<>();
+        out.put("id", string(m, "id")); out.put("name", string(m, "name")); out.put("amount", count(m, "amount")); out.put("month", optString(m, "month"));
+        out.put("memo", m.containsKey("memo") ? string(m, "memo") : ""); out.put("dropped", defaultBool(m, "dropped")); out.put("order", string(m, "order"));
+        putOpt(out, "forkOf", optString(m, "forkOf"));
+        extras(m, out, PLANNED_KEYS);
+        return out;
+    }
+    static Map<String, Object> ledgerEntry(Object value) throws Shape {
+        Map<String, Object> m = object(value, "entries"), out = new LinkedHashMap<>();
+        out.put("id", string(m, "id")); out.put("date", string(m, "date")); out.put("amount", count(m, "amount")); out.put("name", string(m, "name"));
+        if (defaultBool(m, "in")) out.put("in", true);
+        out.put("createdAt", string(m, "createdAt"));
+        if (m.get("recurring") != null) {
+            Map<String, Object> ref = object(m.get("recurring"), "recurring"), charge = new LinkedHashMap<>();
+            charge.put("id", string(ref, "id")); charge.put("date", string(ref, "date"));
+            extras(ref, charge, Arrays.asList("id", "date"));
+            out.put("recurring", charge);
+        }
+        putOpt(out, "planned", optString(m, "planned"));
+        putOpt(out, "forkOf", optString(m, "forkOf"));
+        extras(m, out, ENTRY_KEYS);
+        return out;
+    }
+    static List<Map<String, Object>> ledgerList(Object value, String key, ItemParser parser) throws Shape {
+        if (value == null) return null;
+        if (!(value instanceof List)) throw new Shape(key);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Object entry : (List<?>) value) out.add(parser.parse(entry));
+        return out;
+    }
+    static List<Map<String, Object>> copyMaps(List<Map<String, Object>> list) {
+        if (list == null) return null;
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> m : list) out.add(new LinkedHashMap<>(m));
+        return out;
+    }
+    /** The WebView never receives unknown per-item keys. */
+    static List<Map<String, Object>> knownOnly(List<Map<String, Object>> list, List<String> keys) {
+        if (list == null) return null;
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> m : list) { Map<String, Object> k = new LinkedHashMap<>(); for (Map.Entry<String, Object> e : m.entrySet()) if (keys.contains(e.getKey())) k.put(e.getKey(), e.getValue()); out.add(k); }
+        return out;
+    }
+    /** A save restores unknown per-item keys by id (for items the draft sent without any). */
+    private static List<Map<String, Object>> restoreLedgerExtra(List<Map<String, Object>> items, List<Map<String, Object>> old, List<String> keys) {
+        List<Map<String, Object>> out = copyMaps(items);
+        if (old == null) return out;
+        for (Map<String, Object> item : out) {
+            if (!keys.containsAll(item.keySet())) continue;
+            for (Map<String, Object> previous : old) if (previous.get("id").equals(item.get("id"))) { extras(previous, item, keys); break; }
+        }
+        return out;
+    }
+    private static void clearLedger(Content c) { c.ledger = null; c.month = null; c.hasIncome = false; c.income = null; c.recurring = null; c.planned = null; c.entries = null; }
+
+    // Calendar strings and limits
+
+    private static int daysInMonth(int year, int month) {
+        if (month == 2) return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 ? 29 : 28;
+        return month == 4 || month == 6 || month == 9 || month == 11 ? 30 : 31;
+    }
+    private static boolean digits(String text) { if (text.isEmpty()) return false; for (int i = 0; i < text.length(); i++) if (text.charAt(i) < '0' || text.charAt(i) > '9') return false; return true; }
+    /** `YYYY-MM`. */
+    static boolean validMonth(String value) {
+        if (value == null || value.length() != 7 || value.charAt(4) != '-' || !digits(value.substring(0, 4)) || !digits(value.substring(5))) return false;
+        int month = Integer.parseInt(value.substring(5));
+        return month >= 1 && month <= 12;
+    }
+    /** `YYYY-MM-DD`, a real calendar date. */
+    static boolean validDate(String value) {
+        if (value == null || value.length() != 10 || value.charAt(7) != '-' || !validMonth(value.substring(0, 7)) || !digits(value.substring(8))) return false;
+        int day = Integer.parseInt(value.substring(8));
+        return day >= 1 && day <= daysInMonth(Integer.parseInt(value.substring(0, 4)), Integer.parseInt(value.substring(5, 7)));
+    }
+    private interface Check { String problem(Map<String, Object> item); }
+    private static final String AMOUNT_PROBLEM = "금액은 0원 이상 1조 원 미만의 정수로 입력해 주세요.", NAME_PROBLEM = "이름은 100자, 메모는 500자까지 쓸 수 있습니다.";
+    private static boolean amountOk(Object amount) { return amount instanceof Long && (Long) amount >= 0 && (Long) amount < AMOUNT_BOUND; }
+    private static boolean key(Object value) { return value instanceof String && validKey((String) value); }
+    private static String checkList(List<Map<String, Object>> list, int max, String tooMany, String malformed, Check check) {
+        if (list == null) return null;
+        if (list.size() > max) return tooMany;
+        Set<Object> ids = new HashSet<>();
+        for (Map<String, Object> item : list) {
+            if (!key(item.get("id")) || !ids.add(item.get("id")) || (item.get("forkOf") != null && !key(item.get("forkOf")))) return malformed;
+            String problem = check.problem(item);
+            if (problem != null) return problem;
+        }
+        return null;
+    }
+    /** Every ledger limit (design §4.4); null when valid. */
+    static String validateLedger(Content c) {
+        if (c.income != null && !amountOk(c.income)) return AMOUNT_PROBLEM;
+        String problem = checkList(c.recurring, MAX_RECURRING, "고정·구독은 200개까지 저장할 수 있습니다.", "고정·구독 형식이 올바르지 않습니다.", r -> {
+            if (codePoints((String) r.get("name")) > MAX_LEDGER_NAME_CHARS || codePoints((String) r.get("memo")) > MAX_LEDGER_MEMO_CHARS) return NAME_PROBLEM;
+            if (!amountOk(r.get("amount"))) return AMOUNT_PROBLEM;
+            long every = (Long) r.get("every");
+            if (every < 1 || every > MAX_EVERY || !Arrays.asList("week", "month", "year").contains(r.get("unit"))) return "주기는 1~120 사이로 입력해 주세요.";
+            if (!validDate((String) r.get("start")) || (r.get("until") != null && !validDate((String) r.get("until"))) || !key(r.get("order"))) return "고정·구독 날짜가 올바르지 않습니다.";
+            return null;
+        });
+        if (problem != null) return problem;
+        problem = checkList(c.planned, MAX_PLANNED, "계획은 300개까지 저장할 수 있습니다.", "계획 형식이 올바르지 않습니다.", p -> {
+            if (codePoints((String) p.get("name")) > MAX_LEDGER_NAME_CHARS || codePoints((String) p.get("memo")) > MAX_LEDGER_MEMO_CHARS) return NAME_PROBLEM;
+            if (!amountOk(p.get("amount"))) return AMOUNT_PROBLEM;
+            if ((p.get("month") != null && !validMonth((String) p.get("month"))) || !key(p.get("order"))) return "계획 형식이 올바르지 않습니다.";
+            return null;
+        });
+        if (problem != null) return problem;
+        if (LEDGER_MONTH.equals(c.kind()) && !(key(c.ledger) && validMonth(c.month))) return "가계부 월 기록 형식이 올바르지 않습니다.";
+        problem = checkList(c.entries, MAX_ENTRIES, "기록은 500개까지 저장할 수 있습니다.", "기록 형식이 올바르지 않습니다.", e -> {
+            if (codePoints((String) e.get("name")) > MAX_LEDGER_NAME_CHARS) return "기록 이름은 100자까지 쓸 수 있습니다.";
+            if (!amountOk(e.get("amount"))) return AMOUNT_PROBLEM;
+            if (!validDate((String) e.get("date")) || !key(e.get("createdAt"))) return "기록 날짜가 올바르지 않습니다.";
+            Object ref = e.get("recurring");
+            if ((ref instanceof Map && (!key(((Map<?, ?>) ref).get("id")) || !validDate((String) ((Map<?, ?>) ref).get("date")))) || (e.get("planned") != null && !key(e.get("planned")))) return "기록 형식이 올바르지 않습니다.";
+            return null;
+        });
+        if (problem != null) return problem;
+        if (ledgerKind(c.kind()) && utf8(c.body) > MAX_LEDGER_BODY_BYTES) return "가계부 요약이 너무 깁니다.";
+        return null;
+    }
+
+    // Canonical order and the text fallback body
+
+    private static String str(Map<String, Object> m, String key) { Object v = m.get(key); return v instanceof String ? (String) v : ""; }
+    static void sortByOrder(List<Map<String, Object>> list) {
+        Collections.sort(list, (a, b) -> { int c = str(a, "order").compareTo(str(b, "order")); return c != 0 ? c : str(a, "id").compareTo(str(b, "id")); });
+    }
+    /** Entries: date desc, createdAt desc, then id. */
+    static void sortLedgerEntries(List<Map<String, Object>> list) {
+        Collections.sort(list, (a, b) -> {
+            int c = str(b, "date").compareTo(str(a, "date"));
+            if (c == 0) c = str(b, "createdAt").compareTo(str(a, "createdAt"));
+            return c != 0 ? c : str(a, "id").compareTo(str(b, "id"));
+        });
+    }
+    /** 2300000 → "₩2,300,000". */
+    static String won(long amount) {
+        String digits = Long.toString(amount);
+        StringBuilder out = new StringBuilder("₩");
+        for (int i = 0; i < digits.length(); i++) { if (i > 0 && (digits.length() - i) % 3 == 0) out.append(','); out.append(digits.charAt(i)); }
+        return out.toString();
+    }
+    private static long amount(Map<String, Object> m) { Object v = m.get("amount"); return v instanceof Long ? (Long) v : 0; }
+    private static String words(String... parts) {
+        StringBuilder out = new StringBuilder();
+        for (String p : parts) { if (p.isEmpty()) continue; if (out.length() > 0) out.append(' '); out.append(p); }
+        return out.toString();
+    }
+    private static String monthLabel(String month) {
+        return validMonth(month) ? Integer.parseInt(month.substring(0, 4)) + "년 " + Integer.parseInt(month.substring(5)) + "월" : month;
+    }
+    private static String cycleWord(long every, String unit) {
+        if (every == 1) return "week".equals(unit) ? "매주" : "month".equals(unit) ? "매월" : "매년";
+        return every + ("week".equals(unit) ? "주" : "month".equals(unit) ? "개월" : "년") + "마다";
+    }
+    /** Over 24 KiB, keeps the longest prefix of lines that fits with "… N건 더" (N = dropped list lines). */
+    private static String fitLines(List<String> lines) {
+        String full = String.join("\n", lines);
+        if (utf8(full) <= MAX_LEDGER_BODY_BYTES) return full;
+        int[] after = new int[lines.size() + 1];
+        for (int i = lines.size() - 1; i >= 0; i--) after[i] = after[i + 1] + (lines.get(i).startsWith("- ") ? 1 : 0);
+        int best = 0, prefix = 0;
+        for (int p = 0; p <= lines.size(); p++) {
+            if (p > 0) prefix += utf8(lines.get(p - 1)) + (p > 1 ? 1 : 0);
+            if (prefix + (p > 0 ? 1 : 0) + utf8("… " + after[p] + "건 더") <= MAX_LEDGER_BODY_BYTES) best = p;
+        }
+        List<String> kept = new ArrayList<>(lines.subList(0, best));
+        kept.add("… " + after[best] + "건 더");
+        return String.join("\n", kept);
+    }
+    static String ledgerFallback(String title, Long income, List<Map<String, Object>> recurring, List<Map<String, Object>> planned) {
+        List<String> lines = new ArrayList<>();
+        String heading = oneLine(title);
+        lines.add("# " + (heading.isEmpty() ? "가계부" : heading));
+        if (income != null) lines.add("월 수입 " + won(income));
+        if (!recurring.isEmpty()) {
+            List<Map<String, Object>> sorted = new ArrayList<>(recurring);
+            sortByOrder(sorted);
+            lines.add(""); lines.add("## 고정·구독");
+            for (Map<String, Object> r : sorted) {
+                Object every = r.get("every"), until = r.get("until");
+                StringBuilder line = new StringBuilder("- ").append(words(oneLine(str(r, "name")), won(amount(r)))).append(" · ")
+                        .append(cycleWord(every instanceof Long ? (Long) every : 0, str(r, "unit"))).append(" · ").append(str(r, "start")).append("부터");
+                if (Boolean.TRUE.equals(r.get("trial"))) line.append(" · 무료 체험");
+                if (until instanceof String && !((String) until).isEmpty()) line.append(" · ").append(until).append(" 만료");
+                lines.add(line.toString());
+            }
+        }
+        if (!planned.isEmpty()) {
+            List<Map<String, Object>> sorted = new ArrayList<>(planned);
+            sortByOrder(sorted);
+            lines.add(""); lines.add("## 사고 싶은 것");
+            for (Map<String, Object> p : sorted)
+                lines.add("- " + words(oneLine(str(p, "name")), won(amount(p))) + " · " + (p.get("month") instanceof String ? p.get("month") : "언젠가") + (Boolean.TRUE.equals(p.get("dropped")) ? " · 안 사기로 함" : ""));
+        }
+        return fitLines(lines);
+    }
+    static String monthFallback(String month, Long income, List<Map<String, Object>> entries) {
+        List<String> lines = new ArrayList<>();
+        lines.add("# " + monthLabel(month) + " 기록 (" + entries.size() + "건)");
+        if (income != null) lines.add("수입 " + won(income));
+        List<Map<String, Object>> sorted = new ArrayList<>(entries);
+        sortLedgerEntries(sorted);
+        for (Map<String, Object> e : sorted) {
+            String date = str(e, "date");
+            lines.add("- " + words((date.length() >= 5 ? date.substring(5) : "") + " " + (Boolean.TRUE.equals(e.get("in")) ? "+" : "") + won(amount(e)), oneLine(str(e, "name"))));
+        }
+        return fitLines(lines);
+    }
+
+    // Ids
+
+    /** UUID v4 layout (version 4, RFC 4122 variant) of the first 16 bytes. */
+    private static String uuidShape(byte[] digest) {
+        byte[] b = Arrays.copyOf(digest, 16);
+        b[6] = (byte) ((b[6] & 0x0f) | 0x40);
+        b[8] = (byte) ((b[8] & 0x3f) | 0x80);
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < 16; i++) hex.append(String.format("%02x", b[i] & 0xff));
+        return hex.substring(0, 8) + "-" + hex.substring(8, 12) + "-" + hex.substring(12, 16) + "-" + hex.substring(16, 20) + "-" + hex.substring(20, 32);
+    }
+    private static byte[] hmac(byte[] key, byte[] message) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(key, "HmacSHA256"));
+            return mac.doFinal(message);
+        } catch (GeneralSecurityException e) { throw new IllegalStateException(e); }
+    }
+    /**
+     * Deterministic month-note id, so offline devices converge on one note: HMAC-SHA256 under
+     * an HKDF-SHA256 subkey of the notes key (never the AES-GCM key itself).
+     */
+    static String monthId(byte[] notesKey, String ledger, String month) {
+        byte[] prk = hmac("lakomics-notes-ledger:1".getBytes(StandardCharsets.UTF_8), notesKey);
+        byte[] monthKey = hmac(prk, "ledger-month-id\u0001".getBytes(StandardCharsets.UTF_8));
+        return uuidShape(hmac(monthKey, ("lakomics-ledger-month:1:" + ledger + ":" + month).getBytes(StandardCharsets.UTF_8)));
+    }
+    /** Canonical lowercase hyphenated UUID text. */
+    static boolean canonicalUuid(String id) { return id != null && id.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"); }
+    /** Id of the local copy of an item both sides changed differently; `stamp` = "local updatedAt:remote updatedAt". */
+    static String forkId(String stamp, String id) {
+        try {
+            return uuidShape(MessageDigest.getInstance("SHA-256").digest(("lakomics-ledger-fork:1:" + stamp + ":" + id).getBytes(StandardCharsets.UTF_8)));
+        } catch (GeneralSecurityException e) { throw new IllegalStateException(e); }
+    }
+
+    // Merge
+
+    /** A pulled month note meeting a local copy with no merge base: merge against an empty month. */
+    static Content emptyMonthBase(Content local, Content remote) {
+        if (!LEDGER_MONTH.equals(local.kind()) || !LEDGER_MONTH.equals(remote.kind()) || local.ledger == null || !local.ledger.equals(remote.ledger) || !Objects.equals(local.month, remote.month)) return null;
+        Content base = Content.fresh("");
+        base.schema = SUPPORTED_SCHEMA; base.kind = LEDGER_MONTH; base.ledger = local.ledger; base.month = local.month;
+        base.hasIncome = true; base.entries = new ArrayList<>(); base.archived = true;
+        return base;
+    }
+    private static Object incomeSlot(Content c) { return c.hasIncome ? Present.of(c.income) : null; }
+    private static void setIncome(Content c, Object slot) { c.hasIncome = slot != null; c.income = slot == null ? null : (Long) ((Present) slot).value; }
+    private static Object slot(Map<String, Object> m, String key) { return m.containsKey(key) ? Present.of(m.get(key)) : null; }
+    private static boolean edited(List<String> fields, Map<String, Object> side, Map<String, Object> base) {
+        for (String k : fields) if (!Objects.equals(slot(side, k), slot(base, k))) return true;
+        return false;
+    }
+    /** Per key: one-side rule; `order` and unknown keys take remote on a collision; null when a known field collides. */
+    private static Map<String, Object> mergeObject(List<String> fields, Map<String, Object> b, Map<String, Object> l, Map<String, Object> r) {
+        LinkedHashSet<String> keys = new LinkedHashSet<>(r.keySet());
+        keys.addAll(l.keySet()); keys.addAll(b.keySet());
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (String key : keys) {
+            Object bv = slot(b, key), lv = slot(l, key), rv = slot(r, key), v;
+            if (Objects.equals(lv, rv) || Objects.equals(lv, bv)) v = rv;
+            else if (Objects.equals(rv, bv)) v = lv;
+            else if (fields.contains(key)) return null;
+            else v = rv;
+            if (v != null) out.put(key, ((Present) v).value);
+        }
+        return out;
+    }
+    private static Map<String, Object> fork(Map<String, Object> local, String id, String stamp) {
+        Map<String, Object> copy = new LinkedHashMap<>(local);
+        copy.put("id", forkId(stamp, id));
+        copy.put("forkOf", id);
+        return copy;
+    }
+    private static Map<String, Map<String, Object>> byId(List<Map<String, Object>> list) {
+        Map<String, Map<String, Object>> out = new HashMap<>();
+        for (Map<String, Object> m : list) out.put((String) m.get("id"), m);
+        return out;
+    }
+    /** Per-id merge of one collection; a field collision keeps the remote version and forks the local one. */
+    private static List<Map<String, Object>> mergeList(List<Map<String, Object>> base, List<Map<String, Object>> local, List<Map<String, Object>> remote, List<String> fields, ItemParser parser, String stamp) throws Shape {
+        Map<String, Map<String, Object>> b = byId(base), l = byId(local), r = byId(remote);
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (Map<String, Object> m : remote) ids.add((String) m.get("id"));
+        for (Map<String, Object> m : local) ids.add((String) m.get("id"));
+        for (Map<String, Object> m : base) ids.add((String) m.get("id"));
+        List<Map<String, Object>> merged = new ArrayList<>();
+        for (String id : ids) {
+            Map<String, Object> be = b.get(id), le = l.get(id), re = r.get(id);
+            if (be != null && le != null && re != null) {
+                Map<String, Object> m = mergeObject(fields, be, le, re);
+                if (m != null) merged.add(m); else { merged.add(re); merged.add(fork(le, id, stamp)); }
+            } else if (be != null && le == null && re != null) {
+                // Deleted on one side: deletion wins unless the other side edited it.
+                if (edited(fields, re, be)) merged.add(re);
+            } else if (be != null && le != null) {
+                if (edited(fields, le, be)) merged.add(le);
+            } else if (le != null && re != null) {
+                Map<String, Object> moved = new LinkedHashMap<>(le);
+                if (re.containsKey("order")) moved.put("order", re.get("order"));
+                if (moved.equals(re)) merged.add(re); else { merged.add(re); merged.add(fork(le, id, stamp)); }
+            } else if (le != null) merged.add(le);
+            else if (re != null) merged.add(re);
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> m : merged) out.add(parser.parse(m));
+        return out;
+    }
+    private static List<Map<String, Object>> mergeOptList(List<Map<String, Object>> base, List<Map<String, Object>> local, List<Map<String, Object>> remote, List<String> fields, ItemParser parser, String stamp) throws Shape {
+        if (local == null && remote == null) return null;
+        return mergeList(orEmpty(base), orEmpty(local), orEmpty(remote), fields, parser, stamp);
+    }
+    /** Three-way merge when any side is a ledger type; null (keep both) only when type, ledger or month differ or a limit breaks. */
+    @SuppressWarnings("unchecked")
+    static Content mergeLedger(Content base, Content local, Content remote) {
+        if (!base.kind().equals(local.kind()) || !local.kind().equals(remote.kind()) || !Objects.equals(base.ledger, local.ledger) || !Objects.equals(local.ledger, remote.ledger)
+                || !Objects.equals(base.month, local.month) || !Objects.equals(local.month, remote.month)) return null;
+        String stamp = local.updatedAt + ":" + remote.updatedAt;
+        Content m = new Content();
+        m.schema = local.schema == null ? remote.schema : remote.schema == null ? local.schema : Long.valueOf(Math.max(local.schema, remote.schema));
+        m.kind = remote.kind;
+        m.title = (String) threeOr(base.title, local.title, remote.title, remote.title);
+        m.memo = (String) threeOr(base.memo, local.memo, remote.memo, remote.memo);
+        m.color = (String) threeOr(base.color, local.color, remote.color, remote.color);
+        m.labels = mergeLabels(base.labels, local.labels, remote.labels);
+        List<Item> items = (List<Item>) threeOr(base.items, local.items, remote.items, remote.items);
+        List<Field> fields = (List<Field>) threeOr(base.fields, local.fields, remote.fields, remote.fields);
+        m.items = items == null ? null : copyItems(items);
+        m.fields = fields == null ? null : copyFields(fields);
+        m.ledger = remote.ledger;
+        m.month = remote.month;
+        setIncome(m, threeOr(incomeSlot(base), incomeSlot(local), incomeSlot(remote), incomeSlot(remote)));
+        try {
+            m.recurring = mergeOptList(base.recurring, local.recurring, remote.recurring, RECURRING_FIELDS, NotesModel::recurringItem, stamp);
+            m.planned = mergeOptList(base.planned, local.planned, remote.planned, PLANNED_FIELDS, NotesModel::plannedItem, stamp);
+            m.entries = mergeOptList(base.entries, local.entries, remote.entries, ENTRY_FIELDS, NotesModel::ledgerEntry, stamp);
+        } catch (Shape unexpected) { return null; }
+        m.pinned = (Boolean) threeOr(base.pinned, local.pinned, remote.pinned, remote.pinned);
+        m.deleted = (Boolean) threeOr(base.deleted, local.deleted, remote.deleted, false);
+        m.archived = (Boolean) threeOr(base.archived, local.archived, remote.archived, false);
+        m.createdAt = (String) threeOr(base.createdAt, local.createdAt, remote.createdAt, remote.createdAt);
+        m.updatedAt = local.updatedAt.compareTo(remote.updatedAt) >= 0 ? local.updatedAt : remote.updatedAt;
+        m.extra = mergeExtra(base.extra, local.extra, remote.extra);
+        m.normalize();
+        return m.validate() == null ? m : null;
     }
 
     // ----------------------------------------------------------------------------------

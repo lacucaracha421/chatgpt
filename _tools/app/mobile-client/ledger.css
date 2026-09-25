@@ -1,0 +1,141 @@
+/* 가계부 (ledger) on the tablet: month switcher, four tabs, one large figure, hairline
+   figures instead of stat cards, and sheets with an in-app number pad. Design:
+   docs/research/budget-notes-design-20260925.md §3.1, mockups in docs/prototypes/budget-notes-20260925/. */
+.ledger-view{display:flex;flex-direction:column;flex:1;min-height:0;position:relative}
+.ledger-view .notes-top h1{font-size:20px}
+.ledger-monthrow{display:flex;align-items:center;gap:2px;min-height:56px;padding:0 calc(var(--mobile-gutter) - 10px);flex-shrink:0}
+.ledger-monthrow h2{margin:0}
+.ledger-monthrow h2 button{min-height:44px;padding:0 6px;border:0;background:transparent;color:var(--color-text);font:inherit;font-size:18px;font-weight:600}
+.ledger-monthrow h2 button:disabled{cursor:default;opacity:1}
+.ledger-income.ui-button{gap:8px;color:var(--color-muted);font-size:15px}
+.ledger-income svg{width:18px;height:18px}
+.ledger-income .numeric{color:var(--color-text)}
+.ledger-tabs{display:flex;margin:0 var(--mobile-gutter);border:1px solid var(--color-border);border-radius:4px;overflow:hidden;box-shadow:var(--inset-light);flex-shrink:0}
+.ledger-tabs button{flex:1;min-height:44px;border:0;background:var(--color-control);color:var(--color-muted);font:inherit;font-size:14px}
+.ledger-tabs button+button{border-left:1px solid var(--color-border)}
+.ledger-tabs button[aria-selected="true"]{background:var(--color-selection-context);color:var(--color-selection-context-text)}
+.ledger-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 var(--mobile-gutter) 104px}
+.ledger-scroll ul{list-style:none;margin:0;padding:0}
+.ledger-won{font-family:var(--font-ui);color:var(--color-muted);font-weight:500}
+/* Hero */
+.ledger-hero{padding:20px 0 0}
+.ledger-hero__label{margin:0;font-size:13px;color:var(--color-muted)}
+.ledger-hero__big{display:flex;align-items:baseline;gap:6px;margin:4px 0 0;font:500 52px/1.1 var(--font-numeric);letter-spacing:.5px}
+.ledger-hero__big .ledger-won{font-size:30px}
+.ledger-hero__big.is-medium{font-size:40px}
+.ledger-hero__big.is-medium .ledger-won{font-size:24px}
+.ledger-hero__big.is-short{color:var(--color-danger)}
+.ledger-hero__sub{margin:6px 0 0;padding:0;border:0;background:none;font:inherit;font-size:14px;line-height:1.6;color:var(--color-muted);text-align:left}
+.ledger-hero__sub b{font-weight:500;color:var(--color-text);font-size:15px}
+.ledger-hero__sub.is-link{min-height:36px;text-decoration:underline;text-underline-offset:3px}
+.ledger-hero.is-recurring{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 20px}
+.ledger-meter{display:flex;height:6px;margin-top:18px;background:var(--color-surface);border-radius:1px;overflow:hidden}
+.ledger-meter i{display:block;height:100%}
+.ledger-meter .is-spent,.ledger-figures i.is-spent{background:var(--color-accent)}
+.ledger-meter .is-scheduled,.ledger-figures i.is-scheduled{background:repeating-linear-gradient(135deg,rgba(221,216,202,.55) 0 3px,rgba(221,216,202,.2) 3px 6px)}
+.ledger-figures{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:14px 0 0;border-top:1px solid var(--color-border);border-bottom:1px solid var(--color-border)}
+.ledger-figures>div{padding:12px 0 12px 14px;min-width:0}
+.ledger-figures>div:first-child{padding-left:0}
+.ledger-figures>div+div{border-left:1px solid var(--color-border)}
+.ledger-figures dt{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-muted);white-space:nowrap}
+.ledger-figures i{width:8px;height:8px;flex:none}
+.ledger-figures i.is-income{box-shadow:inset 0 0 0 1px var(--color-muted)}
+.ledger-figures dd{margin:2px 0 0;font:500 21px/1.3 var(--font-numeric);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:560px){.ledger-figures{grid-template-columns:repeat(2,minmax(0,1fr))}.ledger-figures>div:nth-child(3){padding-left:0;border-left:0}.ledger-figures>div:nth-child(n+3){border-top:1px solid var(--color-border)}.ledger-hero__big{font-size:42px}}
+.ledger-review{display:block;width:100%;margin:14px 0 0;padding:10px 12px;border:0;border-radius:var(--radius-sm);background:rgba(224,135,123,.12);color:var(--color-danger);font:inherit;font-size:13px;text-align:left}
+/* Sections and rows */
+.ledger-section{margin-top:26px}
+.ledger-label{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:13px;font-weight:400;color:var(--color-muted);letter-spacing:.3px}
+.ledger-label::before{content:'';width:5px;height:5px;background:var(--color-section-mark);flex:none}
+.ledger-label>i{flex:1;height:1px;background:var(--section-label-rule)}
+.ledger-label button{display:inline-flex;align-items:center;gap:2px;min-height:36px;padding:0 0 0 6px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:13px}
+.ledger-label button svg{width:14px;height:14px}
+.ledger-row{display:flex;align-items:center;gap:14px;min-height:56px;padding:6px 0;border-bottom:1px solid var(--color-border);cursor:pointer}
+.ledger-row:last-child{border-bottom:0}
+.ledger-row:active{background:var(--color-selected)}
+.ledger-date{width:44px;flex:none;line-height:1.15}
+.ledger-date b{display:block;font-size:18px;font-weight:500}
+.ledger-date small{font-size:12px;color:var(--color-muted)}
+.ledger-row__name{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ledger-row__name strong{display:flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ledger-row__name strong.is-untitled{color:var(--color-muted)}
+.ledger-row__name small{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--color-muted)}
+.ledger-row__name small svg{width:13px;height:13px}
+.ledger-row__amount{flex:none;min-width:96px;text-align:right;font-size:18px;font-weight:500}
+.ledger-row__amount b{display:block;font-weight:500}
+.ledger-row__amount small{display:block;font-size:12px;color:var(--color-muted)}
+.ledger-row__amount s{display:block;color:var(--color-muted);font-size:16px}
+.ledger-row.is-in .ledger-row__amount{color:var(--color-muted)}
+.ledger-row.is-derived{color:var(--color-muted)}
+.ledger-row.is-derived strong{color:var(--color-muted);font-weight:400}
+.ledger-row.is-dropped strong,.ledger-row.is-dropped .ledger-row__amount{color:var(--color-muted);text-decoration:line-through}
+.ledger-row__when{flex:none;text-align:right;line-height:1.3}
+.ledger-row__when b{display:block;font-size:14px;font-weight:600}
+.ledger-row__when small{font-size:12px;color:var(--color-muted)}
+.ledger-check{display:grid;place-items:center;width:24px;height:24px;flex:none;border:1.5px solid var(--color-border-strong);border-radius:3px}
+.ledger-row.is-done .ledger-check{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-on-accent)}
+.ledger-check svg{width:16px;height:16px;stroke-width:2.2}
+.ledger-buy.ui-button{flex:none;min-height:44px}
+.ledger-mono{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:3px;background:var(--color-surface-elevated);color:var(--color-muted);font-size:15px;font-weight:600}
+.ledger-row.is-recurring{min-height:72px}
+.ledger-badge{display:inline-flex;align-items:center;height:20px;padding:0 7px;border:1px solid var(--color-border);border-radius:2px;font-style:normal;font-size:12px;font-weight:400;color:var(--color-muted);white-space:nowrap}
+.ledger-fork{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:12px;color:var(--color-danger)}
+.ledger-fork .ui-button{min-height:36px;color:var(--color-text)}
+.ledger-day{margin-top:18px}
+.ledger-day__head{display:flex;justify-content:space-between;margin:0;padding-bottom:4px;border-bottom:1px solid var(--color-border);font-size:13px;font-weight:500;color:var(--color-muted)}
+.ledger-sort{margin:22px 0 4px;font-size:13px;color:var(--color-muted);text-align:right}
+.ledger-ended-toggle{display:inline-flex;align-items:center;gap:6px;min-height:44px;margin-top:10px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:13px}
+.ledger-ended-toggle svg{width:16px;height:16px}
+.ledger-ended-toggle[aria-expanded="false"] svg{transform:rotate(-90deg)}
+.is-ended .ledger-row{opacity:.6}
+.ledger-empty{margin:28px 0;font-size:14px;line-height:1.6;color:var(--color-muted)}
+/* Ledger card in the Notes list */
+.ledger-card .ledger-meter{height:4px;margin-top:8px;background:var(--color-surface-pressed)}
+.ledger-card>span b{font-weight:500;color:var(--color-text);font-size:15px}
+/* Sheets */
+.ledger-sheet{position:relative;display:flex;flex-direction:column;gap:12px}
+.ui-dialog:has(>.ledger-sheet){max-height:92dvh;overflow:auto}
+.ledger-sheet__close{position:absolute;top:-52px;right:-10px}
+.ledger-sheet .hint{margin:0;font-size:13px;line-height:1.5;color:var(--color-muted)}
+.ledger-entry-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid var(--color-border-strong)}
+.ledger-segment{display:flex;border:1px solid var(--color-border);border-radius:4px;overflow:hidden;box-shadow:var(--inset-light)}
+.ledger-segment button{min-height:44px;padding:0 18px;border:0;background:var(--color-control);color:var(--color-muted);font:inherit;font-size:14px;white-space:nowrap}
+.ledger-segment button+button{border-left:1px solid var(--color-border)}
+.ledger-segment button[aria-checked="true"]{background:var(--color-filter-selected);color:var(--color-filter-text)}
+.ledger-amount{display:flex;align-items:baseline;gap:6px;min-width:0;font:500 44px/1.1 var(--font-numeric)}
+.ledger-amount .ledger-won{font-size:28px}
+.ledger-amount i{align-self:stretch;width:2px;background:var(--color-text);animation:ledger-caret 1s steps(1) infinite}
+@keyframes ledger-caret{50%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.ledger-amount i{animation:none}}
+.ledger-field{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--color-muted)}
+.ledger-field>span:first-child{width:64px;flex:none}
+.ledger-field input:not([type="checkbox"]),.ledger-field select{flex:1;min-width:0;min-height:44px;padding:0 12px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-text);font:inherit;font-size:16px;color-scheme:dark}
+.ledger-field input:focus-visible,.ledger-field select:focus-visible{outline:none;border-color:var(--color-accent)}
+.ledger-field.is-check{min-height:44px;color:var(--color-text);font-size:14px}
+.ledger-field.is-check input{width:22px;height:22px;margin:0 0 0 76px;accent-color:var(--color-accent)}
+.ledger-field.is-check>span:first-child{width:auto}
+.ledger-field.is-row>div{flex:1;min-width:0}
+.ledger-chips{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-left:76px}
+.ledger-field .ledger-chips{padding-left:0}
+.ledger-chips>small{font-size:12px;color:var(--color-muted)}
+.ledger-chips .filter-chip{margin:0;min-height:40px}
+.ledger-chips .filter-chip small{color:var(--color-muted);font-size:13px}
+.ledger-date-chip{cursor:pointer}
+.ledger-date-chip input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.ledger-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ledger-keypad button{display:grid;place-items:center;min-height:56px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-control);box-shadow:var(--inset-light);color:var(--color-text);font-size:24px;font-weight:500}
+.ledger-keypad button:active{background:var(--color-control-pressed)}
+.ledger-keypad button.is-quiet{font-size:18px;color:var(--color-muted)}
+.ledger-keypad svg{width:26px;height:26px}
+.ledger-sheet__actions{display:flex;gap:10px;justify-content:space-between}
+.ledger-sheet__actions .ui-button{flex:1;min-height:52px;font-size:16px}
+.ledger-sheet__actions>span:empty{flex:1}
+.ledger-sheet .ui-button.is-danger{color:var(--color-danger)}
+.ledger-form{display:flex;flex-direction:column;gap:12px}
+.ledger-cycle{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.ledger-stepper{display:inline-flex;align-items:center;border:1px solid var(--color-border);border-radius:4px;overflow:hidden}
+.ledger-stepper button{width:44px;min-height:44px;border:0;background:var(--color-control);color:var(--color-text);font-size:20px}
+.ledger-stepper button:disabled{color:var(--color-border-strong)}
+.ledger-stepper b{min-width:36px;text-align:center;font-size:18px;font-weight:500;color:var(--color-text)}
+.ledger-until{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ledger-until input{flex:1}

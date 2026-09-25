@@ -1,16 +1,18 @@
 //! Encrypted local-first notes. Plaintext never crosses the cloud boundary.
+mod ledger;
 mod model;
 mod secret;
 
 use super::{credential, error::LibraryError, Library};
 pub use model::Content;
-use model::{Field, Item, CHECKLIST, SECRET, TEXT};
+use ledger::{Entry, Planned, Recurring};
+use model::{present, Field, Item, CHECKLIST, LEDGER, LEDGER_MONTH, SECRET, TEXT};
 use ring::{
     aead,
     rand::{SecureRandom, SystemRandom},
 };
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
@@ -129,11 +131,20 @@ pub struct Draft {
     pub fields: Option<Vec<Field>>,
     #[serde(default)]
     pub memo: Option<String>,
-}
-fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
-    deserializer: D,
-) -> std::result::Result<Option<T>, D::Error> {
-    T::deserialize(deserializer).map(Some)
+    /// Ledger notes (design 2026-09-25): `ledger` and `month` of a month note are immutable.
+    #[serde(default)]
+    pub ledger: Option<String>,
+    #[serde(default)]
+    pub month: Option<String>,
+    /// `Some(None)` clears the income; absent keeps it.
+    #[serde(default, deserialize_with = "present")]
+    pub income: Option<Option<u64>>,
+    #[serde(default)]
+    pub recurring: Option<Vec<Recurring>>,
+    #[serde(default)]
+    pub planned: Option<Vec<Planned>>,
+    #[serde(default)]
+    pub entries: Option<Vec<Entry>>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct Backup {
@@ -234,7 +245,9 @@ impl Stored {
         };
         let type_ok = match value.get("type") {
             None | Some(Value::Null) => true,
-            Some(Value::String(kind)) => matches!(kind.as_str(), TEXT | CHECKLIST | SECRET),
+            Some(Value::String(kind)) => {
+                matches!(kind.as_str(), TEXT | CHECKLIST | SECRET | LEDGER | LEDGER_MONTH)
+            }
             Some(_) => false,
         };
         if schema_ok && type_ok {
@@ -317,6 +330,7 @@ fn view(
     for field in content.fields.iter_mut().flatten() {
         field.extra.clear();
     }
+    ledger::clear_extra(&mut content);
     if redacted {
         content = Content {
             body: String::new(),
@@ -362,13 +376,33 @@ fn apply_draft(
         return Ok(content);
     }
     if let Some(kind) = draft.kind {
-        if !matches!(kind.as_str(), TEXT | CHECKLIST | SECRET) {
+        if !matches!(kind.as_str(), TEXT | CHECKLIST | SECRET | LEDGER | LEDGER_MONTH) {
             return Err(Error::Message("지원하지 않는 메모 형식입니다."));
         }
         if kind != content.kind() && old.is_some() && (kind == SECRET || content.kind() == SECRET) {
             return Err(Error::Message("암호 메모는 다른 형식으로 바꿀 수 없습니다."));
         }
+        if kind != content.kind()
+            && old.is_some()
+            && (ledger::is_ledger_kind(&kind) || ledger::is_ledger_kind(content.kind()))
+        {
+            return Err(Error::Message("가계부는 다른 형식으로 바꿀 수 없습니다."));
+        }
         content.kind = Some(kind);
+    }
+    for (stored, change) in [
+        (&mut content.ledger, draft.ledger),
+        (&mut content.month, draft.month),
+    ] {
+        if let Some(value) = change {
+            if stored.as_ref().is_some_and(|s| *s != value) {
+                return Err(Error::Message("가계부 월 기록의 가계부와 달은 바꿀 수 없습니다."));
+            }
+            *stored = Some(value);
+        }
+    }
+    if let Some(income) = draft.income {
+        content.income = Some(income);
     }
     let secret = content.kind() == SECRET;
     if secret
@@ -401,6 +435,7 @@ fn apply_draft(
             }
             content.fields = None;
             content.memo = None;
+            clear_ledger(&mut content);
         }
         SECRET => {
             if let Some(mut fields) = draft.fields {
@@ -417,6 +452,34 @@ fn apply_draft(
                 content.memo = Some(memo);
             }
             content.items = None;
+            clear_ledger(&mut content);
+        }
+        LEDGER => {
+            if let Some(mut recurring) = draft.recurring {
+                ledger::restore_extra(&mut recurring, content.recurring.as_ref());
+                content.recurring = Some(recurring);
+            }
+            if let Some(mut planned) = draft.planned {
+                ledger::restore_extra(&mut planned, content.planned.as_ref());
+                content.planned = Some(planned);
+            }
+            content.items = None;
+            content.fields = None;
+            content.memo = None;
+            content.entries = None;
+            content.ledger = None;
+            content.month = None;
+        }
+        LEDGER_MONTH => {
+            if let Some(mut entries) = draft.entries {
+                ledger::restore_extra(&mut entries, content.entries.as_ref());
+                content.entries = Some(entries);
+            }
+            content.items = None;
+            content.fields = None;
+            content.memo = None;
+            content.recurring = None;
+            content.planned = None;
         }
         _ => {
             if let Some(body) = draft.body {
@@ -425,11 +488,20 @@ fn apply_draft(
             content.items = None;
             content.fields = None;
             content.memo = None;
+            clear_ledger(&mut content);
         }
     }
     content.normalize();
     content.validate().map_err(Error::Message)?;
     Ok(content)
+}
+fn clear_ledger(content: &mut Content) {
+    content.ledger = None;
+    content.month = None;
+    content.income = None;
+    content.recurring = None;
+    content.planned = None;
+    content.entries = None;
 }
 fn state_value(db: &Connection, key: &str) -> Result<Option<String>> {
     Ok(db
@@ -622,6 +694,14 @@ impl Library {
     pub fn notes_secret_touch(&self) -> bool {
         secret::touch(&self.notes_target())
     }
+    /// The deterministic id of a ledger's month note (see `ledger::month_id`).
+    pub fn notes_ledger_month_id(&self, ledger_id: &str, month: &str) -> Result<String> {
+        let key = self.notes_key()?;
+        if !ledger::canonical_uuid(ledger_id) || !ledger::valid_month(month) {
+            return Err(Error::Message("가계부 월 기록을 찾을 수 없습니다."));
+        }
+        Ok(ledger::month_id(&key, ledger_id, month))
+    }
     pub fn notes_dismiss_conflict_copy(&self, id: &str) -> Result<()> {
         self.connection()?
             .execute("UPDATE notes SET conflict_copy=0 WHERE id=?", [id])?;
@@ -730,6 +810,13 @@ impl Library {
     /// it was based on; only an unresolvable collision keeps it as a separate copy.
     fn notes_save_with_key(&self, key: &[u8], draft: Draft) -> Result<Note> {
         uuid::Uuid::parse_str(&draft.id).map_err(|_| INVALID)?;
+        // A month note's content is only written under its derived id (metadata-only saves,
+        // such as trashing a keep-both copy, are exempt).
+        let month_edit = draft.kind.is_some()
+            || draft.entries.is_some()
+            || draft.ledger.is_some()
+            || draft.month.is_some()
+            || draft.income.is_some();
         let mut db = self.connection()?;
         let tx = db.transaction()?;
         let old: Option<(String, i64, bool, bool)> = tx
@@ -768,7 +855,11 @@ impl Library {
                             .and_then(|p| open_str(key, &id, &p).ok());
                         let (base, missing_base) = match base {
                             Some(Stored::Typed(base)) => (base, false),
-                            _ => (current.clone(), true),
+                            // Month notes merge against an empty month instead.
+                            _ => match ledger::empty_month_base(&current, &current) {
+                                Some(empty) => (empty, false),
+                                None => (current.clone(), true),
+                            },
                         };
                         let local = apply_draft(Some(base.clone()), draft, &now, touch)?;
                         match (!missing_base)
@@ -802,6 +893,16 @@ impl Library {
                 (next, revision + 1, conflict, conflict_copy)
             }
         };
+        if let Stored::Typed(content) = &stored {
+            if month_edit && content.kind() == LEDGER_MONTH {
+                let ledger_id = content.ledger.as_deref().unwrap_or("");
+                if !ledger::canonical_uuid(ledger_id)
+                    || id != ledger::month_id(key, ledger_id, content.month.as_deref().unwrap_or(""))
+                {
+                    return Err(Error::Message("가계부 월 기록 형식이 올바르지 않습니다."));
+                }
+            }
+        }
         let payload = serde_json::to_string(&seal(key, &id, &stored.to_value()?)?)?;
         tx.execute("INSERT INTO notes(id,payload,operation_id) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,operation_id=excluded.operation_id,local_revision=notes.local_revision+1,dirty=1",params![id,payload,uuid::Uuid::new_v4().to_string()])?;
         tx.commit()?;
@@ -893,6 +994,12 @@ impl Library {
                 let merged = match (&base, &local, &remote_stored) {
                     (Some(Stored::Typed(b)), Some(Stored::Typed(l)), Stored::Typed(r)) => {
                         model::merge(b, l, r).map(|m| (m != *r, m))
+                    }
+                    // Both devices created the same month offline: union both sides.
+                    (None, Some(Stored::Typed(l)), Stored::Typed(r)) => {
+                        ledger::empty_month_base(l, r)
+                            .and_then(|b| model::merge(&b, l, r))
+                            .map(|m| (m != *r, m))
                     }
                     _ => None,
                 };
@@ -1616,5 +1723,86 @@ mod mobile_interop {
         let key=unhex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f").unwrap();
         let content=open_value(&key,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",&Envelope {version:1,nonce:"000102030405060708090a0b".into(),ciphertext:"3c20a272b189a739b7637c222502d2c5a1faa5569f1f265e0245b5c6f1f08092eaba06171f55fe05c88653cff8ee46568b3d42b73cb7cfa95abb087d7d8f909a9558e440b5b04a127978880d9dea6f9c5dee88165459715acdcfa8ee54d2ccfdaf992d83c000bc38a43e0c827a4303023c0e7d8bb1f9d4ebd5dbca9f3a7604db".into()}).unwrap();
         assert_eq!(content["title"],"메모");assert_eq!(content["body"],"PC와 모바일");
+    }
+}
+
+#[cfg(test)]
+mod ledger_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn save(lib: &Library, key: &[u8], draft: Value) -> Result<Note> {
+        lib.notes_save_with_key(key, serde_json::from_value(draft).unwrap())
+    }
+    fn entry(id: &str, date: &str, amount: u64) -> Value {
+        json!({"id":id,"date":date,"amount":amount,"name":id,"createdAt":format!("{date}T00:00:00Z")})
+    }
+    fn month_draft(id: &str, revision: i64, entries: Value) -> Value {
+        json!({"id":id,"expectedRevision":revision,"type":"ledger-month","title":"가계부 2026년 9월","ledger":"11111111-2222-4333-8444-555555555555","month":"2026-09","income":null,"entries":entries,"archived":true})
+    }
+
+    #[test]
+    fn the_same_month_created_offline_on_two_devices_becomes_one_note() {
+        let temp = tempfile::tempdir().unwrap();
+        let lib = Library::open(temp.path()).unwrap();
+        let key = [41; 32];
+        let id = ledger::month_id(&key, "11111111-2222-4333-8444-555555555555", "2026-09");
+        // This device adds an entry to a month it has never synced (no merge base).
+        save(&lib, &key, month_draft(&id, 0, json!([entry("mine", "2026-09-25", 9500)]))).unwrap();
+        // The other device created and pushed the same month first.
+        let mut value = month_draft(&id, 0, json!([entry("theirs", "2026-09-24", 31800)]));
+        for (k, v) in [("body", json!("")), ("pinned", json!(false)), ("deleted", json!(false)), ("createdAt", json!("2026-09-24T00:00:00Z")), ("updatedAt", json!("2026-09-24T00:00:00Z"))] {
+            value[k] = v;
+        }
+        value.as_object_mut().unwrap().retain(|k, _| k != "id" && k != "expectedRevision");
+        let mut theirs: Content = serde_json::from_value(value).unwrap();
+        theirs.normalize();
+        let remote = Remote { id: id.clone(), revision: 1, operation_id: uuid::Uuid::new_v4().to_string(), sequence: 1, payload: seal(&key, &id, &theirs).unwrap() };
+        lib.notes_merge(&key, &remote).unwrap();
+        let state = lib.notes_state_with_key(&key).unwrap();
+        assert_eq!(state.notes.len(), 1, "no conflict copy");
+        let note = &state.notes[0];
+        assert!(note.pending && !note.conflict_copy && !note.read_only && note.content.archived);
+        let ids: Vec<&str> = note.content.entries.as_ref().unwrap().iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["mine", "theirs"]);
+        assert_eq!(note.content.body, "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 mine\n- 09-24 ₩31,800 theirs");
+    }
+
+    #[test]
+    fn ledger_saves_keep_unknown_keys_and_refuse_immutable_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let lib = Library::open(temp.path()).unwrap();
+        let key = [42; 32];
+        let id = uuid::Uuid::new_v4().to_string();
+        let r = json!({"id":"r","name":"넷플릭스","amount":17000,"every":1,"unit":"month","start":"2026-01-03","trial":false,"until":null,"memo":"","order":"V"});
+        let created = save(&lib, &key, json!({"id":id,"expectedRevision":0,"type":"ledger","title":"가계부","pinned":true,"income":2300000,"recurring":[r],"planned":[]})).unwrap();
+        assert_eq!(created.content.body, "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터");
+        assert_eq!(created.content.schema, Some(2));
+        // A newer client added a key to the charge; this client's edit keeps it.
+        let mut stored = created.content.clone();
+        stored.recurring.as_mut().unwrap()[0].extra.insert("color".into(), json!("red"));
+        let sealed = serde_json::to_string(&seal(&key, &id, &stored).unwrap()).unwrap();
+        lib.connection().unwrap().execute("UPDATE notes SET payload=?2 WHERE id=?1", params![id, sealed]).unwrap();
+        let edited = save(&lib, &key, json!({"id":id,"expectedRevision":1,"income":null,"recurring":[{"id":"r","name":"넷플릭스","amount":13500,"every":1,"unit":"month","start":"2026-01-03","trial":false,"until":null,"memo":"","order":"V"}]})).unwrap();
+        assert!(edited.content.recurring.as_ref().unwrap()[0].extra.is_empty(), "unknown keys stay in the backend");
+        assert_eq!(edited.content.income, Some(None));
+        let payload: String = lib.connection().unwrap().query_row("SELECT payload FROM notes WHERE id=?", [&id], |r| r.get(0)).unwrap();
+        let value = open_value(&key, &id, &serde_json::from_str(&payload).unwrap()).unwrap();
+        assert_eq!(value["recurring"][0]["color"], json!("red"));
+        assert_eq!(value["recurring"][0]["amount"], json!(13500));
+        assert_eq!(value["income"], Value::Null);
+        // A ledger cannot become another type, and a month's ledger and month are fixed.
+        assert!(save(&lib, &key, json!({"id":id,"expectedRevision":2,"type":"text","body":"x"})).is_err());
+        // A month note is written only under its derived id and with a canonical ledger id.
+        assert!(save(&lib, &key, month_draft(&uuid::Uuid::new_v4().to_string(), 0, json!([]))).is_err());
+        let month = ledger::month_id(&key, "11111111-2222-4333-8444-555555555555", "2026-09");
+        save(&lib, &key, month_draft(&month, 0, json!([]))).unwrap();
+        let mut moved = month_draft(&month, 1, json!([]));
+        moved["month"] = json!("2026-10");
+        assert!(save(&lib, &key, moved).is_err());
+        assert!(save(&lib, &key, json!({"id":month,"expectedRevision":1,"entries":[entry("big", "2026-09-01", 1_000_000_000_000)]})).is_err());
+        // Pin and trash still work on a month note; it stays archived.
+        let pinned = save(&lib, &key, json!({"id":month,"expectedRevision":1,"archived":false,"deleted":true})).unwrap();
+        assert!(pinned.content.deleted && pinned.content.archived);
     }
 }

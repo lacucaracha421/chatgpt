@@ -120,7 +120,9 @@ final class NotesRepository {
      else{
       String basePayload=null;try(Cursor c=db.rawQuery("SELECT payload FROM note_revisions WHERE scope=? AND id=? AND local_revision=?",new String[]{v.scope,id,Long.toString(draft.expectedRevision)})){if(c.moveToFirst())basePayload=c.getString(0);}
       NotesModel.Stored base=tryOpen(v,id,basePayload);boolean missing=base==null||base.isRaw();
-      NotesModel.Content baseContent=missing?current.typed:base.typed;
+      // A month note without its base merges against an empty month instead.
+      NotesModel.Content empty=missing?NotesModel.emptyMonthBase(current.typed,current.typed):null;if(empty!=null)missing=false;
+      NotesModel.Content baseContent=empty!=null?empty:missing?current.typed:base.typed;
       NotesModel.Content local=NotesModel.applyDraft(baseContent,draft,now,touch);
       NotesModel.Content merged=missing?null:NotesModel.merge(baseContent,local,current.typed);
       if(merged==null){
@@ -132,6 +134,10 @@ final class NotesRepository {
       next=NotesModel.Stored.typed(merged);
      }
     }
+    // A month note's content is only written under its derived id (metadata-only saves are exempt).
+    boolean monthEdit=draft.kind!=null||draft.entries!=null||draft.ledger!=null||draft.month!=null||draft.hasIncome;
+    if(monthEdit&&!next.isRaw()&&NotesModel.LEDGER_MONTH.equals(next.typed.kind())&&(!NotesModel.canonicalUuid(next.typed.ledger)||!id.equals(NotesModel.monthId(v.key,next.typed.ledger,next.typed.month==null?"":next.typed.month))))
+     throw new UserError("가계부 월 기록 형식이 올바르지 않습니다.");
     long revision=old==null?1:old.localRevision+1;
     put(v,id,seal(v,id,next.toJson()),revision,old==null?0:old.remoteRevision,true,UUID.randomUUID().toString(),old!=null&&old.conflictCopy,old==null?null:old.base);
     db.setTransactionSuccessful();
@@ -157,6 +163,8 @@ final class NotesRepository {
    if(local.pending&&!local.operationId.equals(operation)){
     NotesModel.Stored mine=tryOpen(v,id,local.payload),base=tryOpen(v,id,local.base);
     NotesModel.Content merged=mine!=null&&base!=null&&!mine.isRaw()&&!base.isRaw()&&!remoteStored.isRaw()?NotesModel.merge(base.typed,mine.typed,remoteStored.typed):null;
+    // Both devices created the same month offline (no base): union both sides' entries.
+    if(base==null&&mine!=null&&!mine.isRaw()&&!remoteStored.isRaw()){NotesModel.Content empty=NotesModel.emptyMonthBase(mine.typed,remoteStored.typed);if(empty!=null)merged=NotesModel.merge(empty,mine.typed,remoteStored.typed);}
     if(merged!=null&&!merged.equals(remoteStored.typed)){put(v,id,seal(v,id,merged.toJson()),local.localRevision+1,revision,true,UUID.randomUUID().toString(),local.conflictCopy,payload);return;}
     if(merged==null&&mine!=null){String copy=UUID.randomUUID().toString();put(v,copy,seal(v,copy,mine.toJson()),1,0,true,UUID.randomUUID().toString(),true,null);}
    }
@@ -188,6 +196,11 @@ final class NotesRepository {
    synchronized(this){db.execSQL("UPDATE note_state SET synced_at=? WHERE scope=?",new Object[]{Instant.now().toString(),v.scope});}
    return state();
   }finally{syncing.unlock();}
+ }
+ /** The deterministic id of a ledger's month note (HMAC with the notes key; see NotesModel.monthId). */
+ JSONObject ledgerMonthId(String ledger,String month)throws Exception{
+  Vault v=unlocked();if(!NotesModel.canonicalUuid(ledger)||!NotesModel.validMonth(month))throw new UserError("가계부 월 기록을 찾을 수 없습니다.");
+  return new JSONObject().put("id",NotesModel.monthId(v.key,ledger,month));
  }
  synchronized JSONObject dismissConflictCopy(String id)throws Exception{Vault v=unlocked();db.execSQL("UPDATE note_items SET conflict=0 WHERE scope=? AND id=?",new Object[]{v.scope,id});return new JSONObject();}
  // ------------------------------------------------------------------------------------

@@ -1,5 +1,19 @@
 import type {MobileNote} from './Notes';
-let demoNotes:MobileNote[]=[{id:'a'.repeat(32),title:'다음에 볼 작품',body:'마음에 남은 장면과 감상을 적어 두세요.',pinned:true,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false}];
+let demoNotes:MobileNote[]=[{id:'a'.repeat(32),title:'다음에 볼 작품',body:'마음에 남은 장면과 감상을 적어 두세요.',pinned:true,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false},...demoLedger()];
+/** A demo 가계부 in the current month (the mockup's numbers when today is the 25th). */
+function demoLedger():MobileNote[]{
+  const now=new Date(),month=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`,day=(d:number)=>`${month}-${String(Math.min(d,now.getDate())).padStart(2,'0')}`;
+  const ledger='0d7c2a52-6a3e-4c2b-9d61-3f1a8e0b5c11',base={deleted:false,createdAt:'2026-09-01',updatedAt:'2026-09-20',localRevision:1,pending:false,conflict:false,body:''};
+  const rec=(id:string,name:string,amount:number,start:string,more={})=>({id,name,amount,every:1,unit:'month' as const,start,trial:false,until:null,memo:'',order:id,...more});
+  const entry=(id:string,d:number,amount:number,name:string,more={})=>({id,date:day(d),amount,name,createdAt:`${day(d)}T12:00:00Z`,...more});
+  return [{...base,id:ledger,type:'ledger',title:'가계부',pinned:true,income:2300000,
+    recurring:[rec('rent','월세',800000,'2026-01-01'),rec('insurance','실손 보험',98400,'2026-01-05'),rec('phone','휴대폰 요금',55000,'2026-01-10'),rec('netflix','넷플릭스',17000,'2026-01-03'),
+      rec('millie','밀리의 서재',29700,'2026-03-12',{every:3}),rec('coupang','쿠팡 와우',7890,'2026-01-27'),rec('gpt','ChatGPT Plus',28000,'2026-01-29'),rec('google','Google One',24000,'2026-03-14',{unit:'year'}),
+      rec('nintendo','닌텐도 온라인',19900,'2025-11-02',{unit:'year',until:'2026-11-02'}),rec('disney','디즈니+',9900,'2026-10-01',{trial:true})],
+    planned:[{id:'shoes',name:'러닝화',amount:89000,month,memo:'',dropped:false,order:'1'},{id:'umbrella',name:'접이식 우산',amount:25000,month,memo:'',dropped:false,order:'2'},{id:'arm',name:'모니터암',amount:45000,month:null,memo:'',dropped:false,order:'3'}]},
+    {...base,id:'b'.repeat(32),type:'ledger-month',title:'가계부 월',archived:true,pinned:false,ledger,month,income:null,
+      entries:[entry('e1',25,9500,'점심 김치찌개'),entry('e2',25,3200,'편의점'),entry('r1',24,18000,'택배 반품 환불',{in:true}),entry('e3',24,31800,'저녁 장보기'),entry('e4',19,22000,'접이식 우산',{planned:'umbrella'}),entry('e5',12,420000,'여행 숙소'),entry('e6',6,125900,'마트')]}] as MobileNote[];
+}
 // Development-only fixtures. Vite removes this module from the production APK.
 import type {RefreshJob} from './CatalogRefresh';
 let refreshDemo:{job:RefreshJob;started:number}|null=null;
@@ -100,6 +114,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if(op==='notesSecretTouch')return {unlocked:false};
   if(op==='notesSecretUnlock'||op==='notesSecretSetPin'||op==='notesSecretResetPin')return {unlocked:true,notes:demoNotes};
   if(op==='notesRecoveryKey')return {key:'0'.repeat(64)};
+  if(op==='notesLedgerMonthId'){const found=demoNotes.find(n=>n.type==='ledger-month'&&n.ledger===payload.ledger&&n.month===payload.month);return {id:found?.id??String(payload.month).replace('-','').padEnd(32,'c')};}
   if(op==='notesSave'){const note={...demoNotes.find(n=>n.id===payload.id),...payload,localRevision:Number(payload.expectedRevision)+1,pending:false,conflict:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()} as MobileNote;demoNotes=[note,...demoNotes.filter(n=>n.id!==note.id)];return note;}
   if (op === 'collectionArtwork') {const index=Number(String(payload.artworkId).match(/\d+$/)?.[0]??0);return {url:art(index,String(payload.artworkId).startsWith('hero')?1200:600,String(payload.artworkId).startsWith('hero')?600:800),expires_in:240};}
   if (op === 'cacheStatus' || op === 'clearCache') return {bytes:0,count:0,limit:1024*1024*1024};

@@ -3,7 +3,8 @@
 //!
 //! The server never sees any of this. Android ports the same rules; both run the shared
 //! fixtures in `tests/fixtures/notes-v2/`.
-use serde::{Deserialize, Serialize};
+use super::ledger::{self, Planned, Recurring};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +24,14 @@ const MAX_KEY_LEN: usize = 64;
 pub const TEXT: &str = "text";
 pub const CHECKLIST: &str = "checklist";
 pub const SECRET: &str = "secret";
+pub use ledger::{LEDGER, LEDGER_MONTH};
+
+/// `Some(None)` for a present JSON null, so `"income": null` survives a round trip.
+pub fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -76,6 +85,25 @@ pub struct Content {
     pub items: Option<Vec<Item>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields: Option<Vec<Field>>,
+    /// Month note: the ledger note it belongs to (immutable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ledger: Option<String>,
+    /// Month note: `YYYY-MM` (immutable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub month: Option<String>,
+    /// Ledger: default monthly income; month note: this month's income. Integer won or null.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub income: Option<Option<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurring: Option<Vec<Recurring>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned: Option<Vec<Planned>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries: Option<Vec<ledger::Entry>>,
     pub pinned: bool,
     pub deleted: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -98,6 +126,12 @@ impl Content {
             labels: vec![],
             items: None,
             fields: None,
+            ledger: None,
+            month: None,
+            income: None,
+            recurring: None,
+            planned: None,
+            entries: None,
             pinned: false,
             deleted: false,
             archived: false,
@@ -115,7 +149,10 @@ impl Content {
     /// False for a newer schema or an unknown type: such a note is read-only here.
     pub fn supported(&self) -> bool {
         self.schema.unwrap_or(1) <= SUPPORTED_SCHEMA
-            && matches!(self.kind(), TEXT | CHECKLIST | SECRET)
+            && matches!(
+                self.kind(),
+                TEXT | CHECKLIST | SECRET | LEDGER | LEDGER_MONTH
+            )
     }
 
     /// Recomputes derived data: canonical item/field order, the fallback body of
@@ -132,7 +169,7 @@ impl Content {
                 sort_entries(fields);
                 self.body = secret_fallback(fields, self.memo.as_deref().unwrap_or(""));
             }
-            _ => {}
+            _ => ledger::normalize(self),
         }
         if self.kind == Some(TEXT.into()) {
             self.kind = None;
@@ -211,6 +248,7 @@ impl Content {
                 }
             }
         }
+        ledger::validate(self)?;
         let size = serde_json::to_vec(self)
             .map(|v| v.len())
             .unwrap_or(usize::MAX);
@@ -222,7 +260,7 @@ impl Content {
 }
 
 /// Ids and fractional order keys: short printable ASCII.
-fn valid_key(value: &str) -> bool {
+pub(super) fn valid_key(value: &str) -> bool {
     !value.is_empty() && value.len() <= MAX_KEY_LEN && value.bytes().all(|b| b.is_ascii_graphic())
 }
 
@@ -310,7 +348,7 @@ impl Entry for Field {
 }
 
 /// One-side rule: the side that changed wins; both changing differently is `None`.
-fn three<T: PartialEq + Clone>(base: &T, local: &T, remote: &T) -> Option<T> {
+pub(super) fn three<T: PartialEq + Clone>(base: &T, local: &T, remote: &T) -> Option<T> {
     if local == remote || local == base {
         Some(remote.clone())
     } else if remote == base {
@@ -320,12 +358,12 @@ fn three<T: PartialEq + Clone>(base: &T, local: &T, remote: &T) -> Option<T> {
     }
 }
 
-fn three_or<T: PartialEq + Clone>(base: &T, local: &T, remote: &T, collision: T) -> T {
+pub(super) fn three_or<T: PartialEq + Clone>(base: &T, local: &T, remote: &T, collision: T) -> T {
     three(base, local, remote).unwrap_or(collision)
 }
 
 /// Unknown keys merge with the one-side rule; a collision takes the server value.
-fn merge_extra(
+pub(super) fn merge_extra(
     base: &Map<String, Value>,
     local: &Map<String, Value>,
     remote: &Map<String, Value>,
@@ -383,7 +421,7 @@ fn merge_entries<T: Entry>(base: &[T], local: &[T], remote: &[T]) -> Option<Vec<
 
 /// Per label: added on either side is added; removed on either side (and present in
 /// the base) is removed. Order: the server's labels, then local additions.
-fn merge_labels(base: &[String], local: &[String], remote: &[String]) -> Vec<String> {
+pub(super) fn merge_labels(base: &[String], local: &[String], remote: &[String]) -> Vec<String> {
     let keys = |list: &[String]| -> HashSet<String> { list.iter().map(|l| label_key(l)).collect() };
     let (b, l, r) = (keys(base), keys(local), keys(remote));
     let keep = |key: &String| {
@@ -419,6 +457,9 @@ pub fn merge(base: &Content, local: &Content, remote: &Content) -> Option<Conten
         return None;
     }
     let (bk, lk, rk) = (base.kind(), local.kind(), remote.kind());
+    if [bk, lk, rk].into_iter().any(ledger::is_ledger_kind) {
+        return ledger::merge(base, local, remote);
+    }
     let kind = three(&bk, &lk, &rk)?;
     // A type conversion rewrites the content; it cannot merge with a content edit.
     if (lk != bk && content_changed(remote, base)) || (rk != bk && content_changed(local, base)) {
@@ -474,6 +515,37 @@ pub fn merge(base: &Content, local: &Content, remote: &Content) -> Option<Conten
         labels: merge_labels(&base.labels, &local.labels, &remote.labels),
         items,
         fields,
+        ledger: three_or(
+            &base.ledger,
+            &local.ledger,
+            &remote.ledger,
+            remote.ledger.clone(),
+        ),
+        month: three_or(
+            &base.month,
+            &local.month,
+            &remote.month,
+            remote.month.clone(),
+        ),
+        income: three_or(&base.income, &local.income, &remote.income, remote.income),
+        recurring: three_or(
+            &base.recurring,
+            &local.recurring,
+            &remote.recurring,
+            remote.recurring.clone(),
+        ),
+        planned: three_or(
+            &base.planned,
+            &local.planned,
+            &remote.planned,
+            remote.planned.clone(),
+        ),
+        entries: three_or(
+            &base.entries,
+            &local.entries,
+            &remote.entries,
+            remote.entries.clone(),
+        ),
         pinned: three_or(&base.pinned, &local.pinned, &remote.pinned, remote.pinned),
         deleted: three_or(&base.deleted, &local.deleted, &remote.deleted, false),
         archived: three_or(&base.archived, &local.archived, &remote.archived, false),
@@ -491,7 +563,7 @@ pub fn merge(base: &Content, local: &Content, remote: &Content) -> Option<Conten
     Some(merged)
 }
 
-fn one_line(text: &str) -> String {
+pub(super) fn one_line(text: &str) -> String {
     text.split(['\r', '\n'])
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()

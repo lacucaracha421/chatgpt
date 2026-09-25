@@ -9,7 +9,10 @@
   "Items/fields per id: text/label/value collide -> conflict; checked/order collide -> remote. Deleted on one side: removed unless the other side changed text or checked (item) or label or value (field); a pure move does not keep it.",
   "Labels per case-insensitive key: in base -> kept only if still on both sides; not in base -> kept if on either side. Order: remote labels, then local additions; the remote spelling wins.",
   "Unknown keys (top level and per item/field) merge with the one-side rule; a collision takes remote.",
-  "Any side with schema > 2 or an unknown type -> conflict."
+  "Any side with schema > 2 or an unknown type -> conflict.",
+  "Ledger canonical serialization: ... fields, ledger, month, income, recurring, planned, entries, pinned ... (ledger: income, recurring, planned always present; ledger-month: ledger, month, income, entries always present and archived always true). Recurring keys id, name, amount, every, unit, start, trial, until, memo, order, forkOf?; planned id, name, amount, month, memo, dropped, order, forkOf?; entries id, date, amount, name, in (only when true), createdAt, recurring?, planned?, forkOf?; then unknown keys.",
+  "Ledger merges (type ledger or ledger-month) never keep a whole-note copy unless type, ledger or month differ on any side (conflict) or the result breaks a limit. title and income collisions take remote; body is regenerated; other scalars as above.",
+  "Ledger collections (recurring, planned, entries) merge per id. A field changed on one side wins; an order collision takes remote; an unknown-key collision takes remote; any other field collision forks the item: the remote version keeps the id, the local version is added with id = UUID v4 layout of the first 16 bytes of SHA-256('lakomics-ledger-fork:1:' + local note updatedAt + ':' + remote note updatedAt + ':' + id) and forkOf = id. Deleted on one side is removed unless the other side changed a field other than order. The same id added on both sides is kept once when equal apart from order (remote order), else forked."
  ],
  "vectors": [
   {
@@ -1843,6 +1846,2454 @@
     "deleted": false,
     "createdAt": "2026-09-01T00:00:00Z",
     "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: items added on both sides, income changed remotely",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n- 쿠팡 와우 ₩7,890 · 매월 · 2026-01-27부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     },
+     {
+      "id": "r-coupang",
+      "name": "쿠팡 와우",
+      "amount": 7890,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-27",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "X"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,500,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09\n- 모니터암 ₩45,000 · 언젠가",
+    "income": 2500000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     },
+     {
+      "id": "p-arm",
+      "name": "모니터암",
+      "amount": 45000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "W"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,500,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n- 쿠팡 와우 ₩7,890 · 매월 · 2026-01-27부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09\n- 모니터암 ₩45,000 · 언젠가",
+    "income": 2500000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     },
+     {
+      "id": "r-coupang",
+      "name": "쿠팡 와우",
+      "amount": 7890,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-27",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "X"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     },
+     {
+      "id": "p-arm",
+      "name": "모니터암",
+      "amount": 45000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "W"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: title and income collide, the server wins",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "내 가계부",
+    "body": "# 내 가계부\n월 수입 ₩2,400,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2400000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "생활비",
+    "body": "# 생활비\n월 수입 ₩2,500,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2500000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "생활비",
+    "body": "# 생활비\n월 수입 ₩2,500,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2500000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: both change one charge's amount, the local version is forked",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩13,500 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 13500,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩19,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 19000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩13,500 · 매월 · 2026-01-03부터\n- 넷플릭스 ₩19,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "674affeb-5019-4f8b-938c-d27003a53831",
+      "name": "넷플릭스",
+      "amount": 13500,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "forkOf": "r-netflix"
+     },
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 19000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: an order collision takes the server order, a rename on one side merges",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n- 넷플릭스 프리미엄 ₩17,000 · 매월 · 2026-01-03부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     },
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스 프리미엄",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "Z"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "U"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 프리미엄 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스 프리미엄",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "U"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: deleted locally, edited remotely keeps the edited charge",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩29,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 29000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩29,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 29000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: deleted locally, only moved remotely stays deleted",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "Y"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: unknown plan keys survive a merge",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "link": "https://example.com/shoes"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩85,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 85000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩85,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 85000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "link": "https://example.com/shoes"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger: a type change never merges",
+   "base": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "checklist",
+    "title": "가계부",
+    "body": "",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z",
+    "items": []
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩1\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- ChatGPT Plus ₩28,000 · 매월 · 2026-01-29부터\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09",
+    "income": 1,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-gpt",
+      "name": "ChatGPT Plus",
+      "amount": 28000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-29",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
+   }
+  },
+  {
+   "name": "ledger-month: entries added on both sides are all kept",
+   "base": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (3건)\n- 09-25 ₩3,200 편의점\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-snack",
+      "date": "2026-09-25",
+      "amount": 3200,
+      "name": "편의점",
+      "createdAt": "2026-09-25T05:00:00Z"
+     },
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (3건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-24 ₩31,800 저녁 장보기\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-market",
+      "date": "2026-09-24",
+      "amount": 31800,
+      "name": "저녁 장보기",
+      "createdAt": "2026-09-24T11:00:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (4건)\n- 09-25 ₩3,200 편의점\n- 09-25 ₩9,500 점심 김치찌개\n- 09-24 ₩31,800 저녁 장보기\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-snack",
+      "date": "2026-09-25",
+      "amount": 3200,
+      "name": "편의점",
+      "createdAt": "2026-09-25T05:00:00Z"
+     },
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-market",
+      "date": "2026-09-24",
+      "amount": 31800,
+      "name": "저녁 장보기",
+      "createdAt": "2026-09-24T11:00:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger-month: both change one entry's amount, the local version is forked",
+   "base": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,000 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9000,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩11,000 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 11000,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (3건)\n- 09-25 ₩9,000 점심 김치찌개\n- 09-25 ₩11,000 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "c7cae666-ad43-4304-ab69-69dd54552108",
+      "date": "2026-09-25",
+      "amount": 9000,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z",
+      "forkOf": "e-lunch"
+     },
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 11000,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger-month: deleted locally, unchanged remotely is deleted",
+   "base": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (1건)\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (3건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-24 ₩31,800 저녁 장보기\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-market",
+      "date": "2026-09-24",
+      "amount": 31800,
+      "name": "저녁 장보기",
+      "createdAt": "2026-09-24T11:00:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-24 ₩31,800 저녁 장보기\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-market",
+      "date": "2026-09-24",
+      "amount": 31800,
+      "name": "저녁 장보기",
+      "createdAt": "2026-09-24T11:00:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger-month: deleted remotely, edited locally keeps the edited entry",
+   "base": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (1건)\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger-month: the same new entry id added differently on both sides is forked",
+   "base": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (3건)\n- 09-25 ₩1,000 편의점\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-snack",
+      "date": "2026-09-25",
+      "amount": 1000,
+      "name": "편의점",
+      "createdAt": "2026-09-25T05:00:00Z"
+     },
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (3건)\n- 09-25 ₩2,000 편의점\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-snack",
+      "date": "2026-09-25",
+      "amount": 2000,
+      "name": "편의점",
+      "createdAt": "2026-09-25T05:00:00Z"
+     },
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (4건)\n- 09-25 ₩1,000 편의점\n- 09-25 ₩2,000 편의점\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "7a239b97-7da0-48ae-83f1-d276f0e374ac",
+      "date": "2026-09-25",
+      "amount": 1000,
+      "name": "편의점",
+      "createdAt": "2026-09-25T05:00:00Z",
+      "forkOf": "e-snack"
+     },
+     {
+      "id": "e-snack",
+      "date": "2026-09-25",
+      "amount": 2000,
+      "name": "편의점",
+      "createdAt": "2026-09-25T05:00:00Z"
+     },
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger-month: an income collision takes the server value",
+   "base": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n수입 ₩2,400,000\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": 2400000,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n수입 ₩2,500,000\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": 2500000,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n수입 ₩2,500,000\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": 2500000,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger-month: ledger and month are immutable",
+   "base": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "local": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 10월",
+    "body": "# 2026년 10월 기록 (2건)\n- 09-25 ₩9,500 점심 김치찌개\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-10",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-02T00:00:00Z"
+   },
+   "remote": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (1건)\n- 09-25 ₩9,500 점심 김치찌개",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-03T00:00:00Z"
+   },
+   "expected": {
+    "conflict": true
    }
   }
  ]

@@ -1,7 +1,7 @@
 import {useVisibleInterval} from './useVisibleInterval';
 import {TopBar} from './TopBar';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject} from 'react';
-import {ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
 import {Button,IconButton} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -13,6 +13,8 @@ import {toggleMarkdownTask} from '../src/shared/markdown/markdown';
 import {MarkdownHelpButton} from './MarkdownHelp';
 import {byOrder,checklistMarkdown,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,stripMarkdown,textToItems,type NoteKind} from '../src/notes/model';
 import {isSecret,noteKind,NotesStore,PIN_REQUIRED_TEXT,type Note} from '../src/notes/store';
+import {genericView,isLedgerKind,LEDGER,LEDGER_MONTH} from '../src/notes/ledger/model';
+import {LedgerCard,NoteLedger} from './NoteLedger';
 import {NoteChecklist} from './NoteChecklist';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
 import {revealCaret} from './noteCaret';
@@ -29,7 +31,7 @@ const SECRET_TOUCH_MS=60_000;
  * semantics); only its transport differs. Native errors reach it as their Korean text, which
  * is what the store shows and matches (the PIN prompt texts).
  */
-const OPERATIONS:Record<string,string>={state:'notesState',unlock:'notesUnlock',save:'notesSave',sync:'notesSync',secretStatus:'notesSecretStatus',secretSetPin:'notesSecretSetPin',secretUnlock:'notesSecretUnlock',secretResetPin:'notesSecretResetPin',secretLock:'notesSecretLock',secretTouch:'notesSecretTouch',dismissConflictCopy:'notesDismissConflictCopy',recoveryKey:'notesRecoveryKey'};
+const OPERATIONS:Record<string,string>={state:'notesState',unlock:'notesUnlock',save:'notesSave',sync:'notesSync',secretStatus:'notesSecretStatus',secretSetPin:'notesSecretSetPin',secretUnlock:'notesSecretUnlock',secretResetPin:'notesSecretResetPin',secretLock:'notesSecretLock',secretTouch:'notesSecretTouch',dismissConflictCopy:'notesDismissConflictCopy',recoveryKey:'notesRecoveryKey',ledgerMonthId:'notesLedgerMonthId'};
 export function mobileNotesRequest<T>(operation:string,input:unknown={}):Promise<T> {
   const op=OPERATIONS[operation];
   if(!op)return Promise.reject('이 기기에서는 지원하지 않는 메모 작업입니다.');
@@ -42,7 +44,8 @@ const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);ret
 /** Search: title, body, checklist items and labels in memory; secret notes by title only. */
 export function noteMatches(note:Note,query:string) {
   if(!query)return true;
-  const text=isSecret(note)?note.title:[note.title,note.body,...(note.items??[]).map(item=>item.text),...(note.labels??[])].join('\n');
+  // A ledger matches by title only; its entries are searched inside the ledger.
+  const text=isSecret(note)||isLedgerKind(note)?note.title:[note.title,note.body,...(note.items??[]).map(item=>item.text),...(note.labels??[])].join('\n');
   return text.toLocaleLowerCase().includes(query.toLocaleLowerCase());
 }
 function preview(note:Note) {
@@ -100,7 +103,15 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   const bodyRef=useRef<HTMLTextAreaElement>(null),titleRef=useRef<HTMLInputElement>(null),pane=useRef<HTMLDivElement>(null);
   useEffect(()=>{void store.load();},[store]);
   const trash=scope==='trash';
-  const note=state.notes.find(n=>n.id===selected)??null;
+  const found=state.notes.find(n=>n.id===selected)??null;
+  // A live ledger opens its own screens; a trashed one and a month note whose ledger is gone
+  // stay read-only with their text fallback (pin, trash, archive and restore still work).
+  const ledgerOpen=!!found&&found.type===LEDGER&&!found.deleted&&!found.readOnly;
+  const note=ledgerOpen?found:genericView(found);
+  const ledgerBack=useRef<(()=>boolean)|null>(null);
+  // Month notes live inside their ledger: out of the list, 보관함, labels and counts.
+  const ledgerIds=useMemo(()=>new Set(state.notes.filter(n=>n.type===LEDGER).map(n=>n.id)),[state.notes]);
+  const listed=useMemo(()=>state.notes.filter(n=>!(n.type===LEDGER_MONTH&&!!n.ledger&&ledgerIds.has(n.ledger))),[state.notes,ledgerIds]);
   // ---- Sync: at once when Notes opens, every minute, and backing off while writes wait.
   const pending=state.notes.some(n=>n.pending);
   const [retryDelay,setRetryDelay]=useState(2000);
@@ -139,6 +150,7 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   const stopBodyEdit=()=>{setEditingBody(false);bodyRef.current?.blur();};
   useEffect(()=>{backRef.current=()=>{
     if(sheet){setSheet(null);return true;}
+    if(ledgerOpen&&ledgerBack.current?.())return true;
     if(editingBody&&note&&!note.deleted){stopBodyEdit();return true;}
     if(creatingSecret){setCreatingSecret(false);return true;}
     if(selected){leave();return true;}
@@ -151,6 +163,14 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
     if(kind==='secret'&&!revealed){setSelected(null);setCreatingSecret(true);return;}
     select(store.create(kind),kind==='text');
     requestAnimationFrame(()=>(kind==='text'?bodyRef.current:titleRef.current)?.focus());
+  }
+  /** One 가계부: opens the existing ledger, restores it from the trash, or creates it (pinned). */
+  function openLedger(){
+    setSheet(null);setScope('all');setLabel(null);setQuery('');
+    const ledgers=state.notes.filter(n=>n.type===LEDGER&&!n.readOnly).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+    const existing=ledgers.find(n=>!n.deleted),trashed=ledgers.find(n=>n.deleted);
+    if(!existing&&trashed)store.edit({...trashed,deleted:false});
+    select(existing?existing.id:trashed?trashed.id:store.create(LEDGER));
   }
   function edit(change:Partial<Note>){if(!note)return;const problem=noteLimitProblem({...note,...change});setLimitError(problem);if(problem)return;store.edit({...note,...change});}
   const canConvert=!!note&&editable&&!isSecret(note);
@@ -193,18 +213,19 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   const editing=!!(selected&&note)||creatingSecret;
   useLevelMotion(section,active&&state.ready&&state.unlocked?(editing?'edit':scope!=='all'?scope:'list'):null,(editing?1:0)+(scope!=='all'?1:0));
   // ---- List
-  const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of state.notes)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,'ko'));},[state.notes]);
-  const visible=state.notes.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query)).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updatedAt.localeCompare(a.updatedAt));
+  const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of listed)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,'ko'));},[listed]);
+  const visible=listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query)).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updatedAt.localeCompare(a.updatedAt));
   const pinned=scope!=='all'?[]:visible.filter(n=>n.pinned),recent=scope!=='all'?visible:visible.filter(n=>!n.pinned);
-  const trashed=state.notes.filter(n=>n.deleted).length,archived=state.notes.filter(n=>!n.deleted&&n.archived).length;
+  const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   const status=state.error?'확인 필요':state.saving?'저장 중':state.syncing?'동기화 중':pending?'동기화 대기':'동기화됨';
   const list=useRef<HTMLDivElement>(null);
   const pull=usePullToRefresh(list,()=>void store.sync(),state.syncing,!active||!state.unlocked||editing);
-  const card=(n:Note)=><button key={n.id} className={`note-card${noteColorValue(n.color)?' has-tint':''}`} style={tint(n.color)} onClick={()=>select(n.id)}>
+  const meta=(n:Note)=><>{n.conflictCopy&&<><b>사본</b> · </>}{relativeTime(n.updatedAt)}{n.pending&&<> · <i aria-hidden="true"/>동기화 대기</>}</>;
+  const card=(n:Note)=>n.type===LEDGER&&!n.readOnly&&!n.deleted?<LedgerCard key={n.id} ledger={n} notes={state.notes} onOpen={()=>select(n.id)} meta={meta(n)}/>:<button key={n.id} className={`note-card${noteColorValue(n.color)?' has-tint':''}`} style={tint(n.color)} onClick={()=>select(n.id)}>
     <strong className={n.title.trim()?undefined:'is-untitled'}>{isSecret(n)&&<LockClosedIcon aria-label="암호 메모"/>}{n.title.trim()||'제목 없음'}</strong>
     {preview(n)&&<span>{preview(n).slice(0,240)}</span>}
     {!isSecret(n)&&!!n.labels?.length&&<em className="note-card__labels">{n.labels.map(l=><i key={l}>{l}</i>)}</em>}
-    <small>{n.conflictCopy&&<><b>사본</b> · </>}{relativeTime(n.updatedAt)}{n.pending&&<> · <i aria-hidden="true"/>동기화 대기</>}</small>
+    <small>{meta(n)}</small>
   </button>;
   const syncButton=<Button type="button" size="icon" variant="ghost" className={`notes-sync${state.syncing?' is-syncing':''}${state.error?' is-error':''}`} aria-label="동기화" aria-busy={state.syncing} disabled={state.syncing} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button>;
   // ---- Editor body
@@ -227,7 +248,9 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
       <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={()=>setCreatingSecret(false)}/></header>
       <div className="notes-editor"><SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create('secret'));requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={()=>setCreatingSecret(false)}/></div>
     </>}
-    {state.ready&&state.unlocked&&note&&<>
+    {state.ready&&state.unlocked&&note&&ledgerOpen&&<NoteLedger store={store} ledger={note} notes={state.notes} backRef={ledgerBack} onLeave={leave} onMore={()=>setSheet('more')}
+      saveState={state.saving?'저장 중':state.notes.some(n=>n.pending&&(n.id===note.id||n.ledger===note.id))?'저장됨':'동기화됨'}/>}
+    {state.ready&&state.unlocked&&note&&!ledgerOpen&&<>
       <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={leave}/><span className="notes-save-state" role="status">{state.saving?'저장 중':note.pending?'저장됨':'동기화됨'}</span><span className="notes-top__space"/>
         {canConvert&&<IconButton label={kind==='checklist'?'메모로 바꾸기':'체크리스트로 바꾸기'} icon={kind==='checklist'?DocumentTextIcon:ListBulletIcon} onClick={convert}/>}
         {!note.deleted&&kind==='text'&&!note.readOnly&&<MarkdownHelpButton/>}
@@ -272,6 +295,7 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
       <button className="sheet-option" onClick={()=>newNote('text')}><DocumentTextIcon aria-hidden="true"/>메모</button>
       <button className="sheet-option" onClick={()=>newNote('checklist')}><ListBulletIcon aria-hidden="true"/>체크리스트</button>
       <button className="sheet-option" onClick={()=>newNote('secret')}><LockClosedIcon aria-hidden="true"/>암호 메모</button>
+      <button className="sheet-option" onClick={openLedger}><WalletIcon aria-hidden="true"/>가계부</button>
     </BottomSheet>}
     {sheet==='color'&&note&&<BottomSheet title="메모 색상" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="메모 색상">
       <button className="sheet-option" role="radio" aria-checked={!colorValue} onClick={()=>{edit({color:null});setSheet(null);}}><span className="notes-color-dot is-empty" aria-hidden="true"/>기본<span className="radio-dot"/></button>

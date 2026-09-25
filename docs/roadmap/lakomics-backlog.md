@@ -171,7 +171,7 @@ Status: `TODO` — recorded as given; scope and priority to be confirmed per ite
 
 Mobile:
 - Design consistency with the PC app (clarified 2026-09-24): the Home tab's top bar already has the logo — put it on every tab's top bar; use the top bar's space better; restyle buttons toward the PC app's button feel. The Home screen itself waits until Artist Revisit is rebuilt (PC and mobile).
-- Monthly subscription calculator — replaced 2026-09-25 by a light household ledger inside Notes (design `docs/research/budget-notes-design-20260925.md`, in progress): monthly income, recurring charges with any cycle, plans, entries; no categories, KRW only.
+- Monthly subscription calculator — replaced 2026-09-25 by a light household ledger inside Notes (design `docs/research/budget-notes-design-20260925.md`; implemented on PC and Android 0.8.19 2026-09-25, `VERIFY` on device; not built: in-ledger entry search, merging two ledgers created offline): monthly income, recurring charges with any cycle, plans, entries; no categories, KRW only.
 - Notes: more note types (see Notes v2). "API documentation for notes" means storing sensitive documents such as API keys inside the encrypted notes (clarified 2026-09-24) — covered by encrypted notes; consider a 'secret' note type with masked display/copy button in Notes v2.
 - Battery usage: investigate and reduce (polling, thumbnail warm-up, background work).
 - New-release notifications (clarified 2026-09-24): extend the PC app's existing Collections release-watch to the app — Collections only; shown inside the app (no push notifications).

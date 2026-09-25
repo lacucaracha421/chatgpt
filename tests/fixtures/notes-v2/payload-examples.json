@@ -180,6 +180,155 @@
     "createdAt": "2026-09-01T00:00:00Z",
     "updatedAt": "2026-09-01T00:00:00Z"
    }
+  },
+  {
+   "name": "ledger with recurring charges and plans",
+   "note": "type ledger: income (integer won or null), recurring and planned sorted by (order, id); body is the derived fallback (design 4.5).",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- 닌텐도 온라인 ₩19,900 · 매년 · 2025-11-02부터 · 2026-11-02 만료\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09\n- 모니터암 ₩45,000 · 언젠가",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-nintendo",
+      "name": "닌텐도 온라인",
+      "amount": 19900,
+      "every": 1,
+      "unit": "year",
+      "start": "2025-11-02",
+      "trial": false,
+      "until": "2026-11-02",
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     },
+     {
+      "id": "p-arm",
+      "name": "모니터암",
+      "amount": 45000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "W"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger month with entries",
+   "note": "type ledger-month: always archived; entries sorted by date desc, createdAt desc, id; unknown entry keys survive.",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (4건)\n- 09-29 ₩28,000 ChatGPT Plus\n- 09-25 ₩9,500 점심 김치찌개\n- 09-24 +₩18,000 택배 반품 환불\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-gpt",
+      "date": "2026-09-29",
+      "amount": 28000,
+      "name": "ChatGPT Plus",
+      "createdAt": "2026-09-29T00:00:00Z",
+      "recurring": {
+       "id": "r-gpt",
+       "date": "2026-09-29"
+      }
+     },
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": 9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z",
+      "place": "회사 앞"
+     },
+     {
+      "id": "e-refund",
+      "date": "2026-09-24",
+      "amount": 18000,
+      "name": "택배 반품 환불",
+      "in": true,
+      "createdAt": "2026-09-24T09:00:00Z"
+     },
+     {
+      "id": "e-umbrella",
+      "date": "2026-09-19",
+      "amount": 22000,
+      "name": "접이식 우산",
+      "createdAt": "2026-09-19T08:00:00Z",
+      "planned": "p-umbrella"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger month with an amount of 10^12 is rejected on save",
+   "note": "Ledger limits: amounts are integer won 0 <= x < 10^12; <= 200 recurring (name <= 100, memo <= 500 code points), <= 300 plans (name <= 100, memo <= 500), <= 500 entries per month (name <= 100); every 1..120; unit week|month|year; dates YYYY-MM-DD, months YYYY-MM; fallback body <= 24 KiB.",
+   "supported": true,
+   "valid": false,
+   "payload": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (1건)\n- 09-01 ₩1,000,000,000,000 너무 큼",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-big",
+      "date": "2026-09-01",
+      "amount": 1000000000000,
+      "name": "너무 큼",
+      "createdAt": "2026-09-01T00:00:00Z"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
   }
  ],
  "undecodableDescription": "Payloads that authenticate but that a v2 client must not decode as v2: newer schema, unknown type, or any key with an unexpected JSON type or a missing required key. The note is listed read-only with the readable title/body; pin, trash, archive and restore patch only those keys (plus updatedAt) and keep every other byte of the payload. Never fail the whole vault or sync because of one note.",
@@ -348,6 +497,152 @@
    "payload": {
     "body": "제목 없음",
     "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger amount is a string",
+   "note": "Ledger amounts must be JSON integers.",
+   "shows": {
+    "title": "가계부"
+   },
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- 닌텐도 온라인 ₩19,900 · 매년 · 2025-11-02부터 · 2026-11-02 만료\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09\n- 모니터암 ₩45,000 · 언젠가",
+    "income": 2300000,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": "17000",
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     },
+     {
+      "id": "p-arm",
+      "name": "모니터암",
+      "amount": 45000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "W"
+     }
+    ],
+    "pinned": true,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger entry amount is negative",
+   "note": "",
+   "shows": {
+    "title": "가계부 2026년 9월"
+   },
+   "payload": {
+    "schema": 2,
+    "type": "ledger-month",
+    "title": "가계부 2026년 9월",
+    "body": "# 2026년 9월 기록 (4건)\n- 09-29 ₩28,000 ChatGPT Plus\n- 09-25 ₩9,500 점심 김치찌개\n- 09-24 +₩18,000 택배 반품 환불\n- 09-19 ₩22,000 접이식 우산",
+    "ledger": "11111111-2222-4333-8444-555555555555",
+    "month": "2026-09",
+    "income": null,
+    "entries": [
+     {
+      "id": "e-lunch",
+      "date": "2026-09-25",
+      "amount": -9500,
+      "name": "점심 김치찌개",
+      "createdAt": "2026-09-25T03:10:00Z"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "archived": true,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger income is fractional",
+   "note": "",
+   "shows": {
+    "title": "가계부"
+   },
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "가계부",
+    "body": "# 가계부\n월 수입 ₩2,300,000\n\n## 고정·구독\n- 넷플릭스 ₩17,000 · 매월 · 2026-01-03부터\n- 닌텐도 온라인 ₩19,900 · 매년 · 2025-11-02부터 · 2026-11-02 만료\n\n## 사고 싶은 것\n- 러닝화 ₩89,000 · 2026-09\n- 모니터암 ₩45,000 · 언젠가",
+    "income": 1500.5,
+    "recurring": [
+     {
+      "id": "r-netflix",
+      "name": "넷플릭스",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-01-03",
+      "trial": false,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     },
+     {
+      "id": "r-nintendo",
+      "name": "닌텐도 온라인",
+      "amount": 19900,
+      "every": 1,
+      "unit": "year",
+      "start": "2025-11-02",
+      "trial": false,
+      "until": "2026-11-02",
+      "memo": "",
+      "order": "W"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p-shoes",
+      "name": "러닝화",
+      "amount": 89000,
+      "month": "2026-09",
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     },
+     {
+      "id": "p-arm",
+      "name": "모니터암",
+      "amount": 45000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "W"
+     }
+    ],
+    "pinned": true,
     "deleted": false,
     "createdAt": "2026-09-01T00:00:00Z",
     "updatedAt": "2026-09-01T00:00:00Z"

@@ -228,6 +228,7 @@ public final class MainActivity extends Activity {
      case "notesSave":data=notes.save(payload);break;
      case "notesSync":data=notes.sync(signal);break;
      case "notesDismissConflictCopy":data=notes.dismissConflictCopy(p.getString("id"));break;
+     case "notesLedgerMonthId":data=notes.ledgerMonthId(p.getString("ledger"),p.getString("month"));break;
      // Secret notes (암호 메모): a per-device PIN or the fingerprint opens an in-process session.
      case "notesSecretStatus":data=notes.secretStatus().put("biometric",biometricAvailable());break;
      case "notesSecretSetPin":data=notes.secretSetPin(p.optString("pin"));break;

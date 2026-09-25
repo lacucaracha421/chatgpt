@@ -1,0 +1,189 @@
+{
+ "description": "Ledger (가계부) vectors beyond merge-vectors.json and payload-examples.json (docs/research/budget-notes-design-20260925.md). Shared by the PC (Rust), Android (Java) and TypeScript tests.",
+ "monthId": {
+  "note": "Month note id = UUID v4 layout (byte 6 high nibble 4, byte 8 top bits 10) of the first 16 bytes of HMAC-SHA256(k, 'lakomics-ledger-month:1:' + ledger id + ':' + month), where k = HKDF-SHA256(salt 'lakomics-notes-ledger:1', IKM notes key, info 'ledger-month-id', 32 bytes). ledger is a canonical lowercase UUID; clients refuse to write month content under any other id.",
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "ledger": "11111111-2222-4333-8444-555555555555",
+  "month": "2026-09",
+  "id": "2dcfffc7-957f-4e88-a776-af85143b67a2"
+ },
+ "forkId": {
+  "note": "See the ledger rules in merge-vectors.json; stamp = local updatedAt + ':' + remote updatedAt.",
+  "stamp": "2026-09-02T00:00:00Z:2026-09-03T00:00:00Z",
+  "id": "e-lunch",
+  "fork": "c7cae666-ad43-4304-ab69-69dd54552108"
+ },
+ "emptyBase": {
+  "note": "A ledger-month pulled while the local copy of the same (ledger, month) has no merge base (both devices created it offline): merged against an empty month (no entries, income null, archived), so both sides' entries are kept. Any other base-less collision keeps both copies.",
+  "vectors": [
+   {
+    "name": "the same month created on two devices keeps both sides' entries",
+    "local": {
+     "schema": 2,
+     "type": "ledger-month",
+     "title": "가계부 2026년 9월",
+     "body": "# 2026년 9월 기록 (1건)\n- 09-25 ₩9,500 점심 김치찌개",
+     "ledger": "11111111-2222-4333-8444-555555555555",
+     "month": "2026-09",
+     "income": null,
+     "entries": [
+      {
+       "id": "e-lunch",
+       "date": "2026-09-25",
+       "amount": 9500,
+       "name": "점심 김치찌개",
+       "createdAt": "2026-09-25T03:10:00Z"
+      }
+     ],
+     "pinned": false,
+     "deleted": false,
+     "archived": true,
+     "createdAt": "2026-09-25T03:10:00Z",
+     "updatedAt": "2026-09-25T03:10:00Z"
+    },
+    "remote": {
+     "schema": 2,
+     "type": "ledger-month",
+     "title": "가계부 2026년 9월",
+     "body": "# 2026년 9월 기록 (1건)\n수입 ₩2,500,000\n- 09-24 ₩31,800 저녁 장보기",
+     "ledger": "11111111-2222-4333-8444-555555555555",
+     "month": "2026-09",
+     "income": 2500000,
+     "entries": [
+      {
+       "id": "e-market",
+       "date": "2026-09-24",
+       "amount": 31800,
+       "name": "저녁 장보기",
+       "createdAt": "2026-09-24T11:00:00Z"
+      }
+     ],
+     "pinned": false,
+     "deleted": false,
+     "archived": true,
+     "createdAt": "2026-09-24T11:00:00Z",
+     "updatedAt": "2026-09-24T11:00:00Z"
+    },
+    "expected": {
+     "schema": 2,
+     "type": "ledger-month",
+     "title": "가계부 2026년 9월",
+     "body": "# 2026년 9월 기록 (2건)\n수입 ₩2,500,000\n- 09-25 ₩9,500 점심 김치찌개\n- 09-24 ₩31,800 저녁 장보기",
+     "ledger": "11111111-2222-4333-8444-555555555555",
+     "month": "2026-09",
+     "income": 2500000,
+     "entries": [
+      {
+       "id": "e-lunch",
+       "date": "2026-09-25",
+       "amount": 9500,
+       "name": "점심 김치찌개",
+       "createdAt": "2026-09-25T03:10:00Z"
+      },
+      {
+       "id": "e-market",
+       "date": "2026-09-24",
+       "amount": 31800,
+       "name": "저녁 장보기",
+       "createdAt": "2026-09-24T11:00:00Z"
+      }
+     ],
+     "pinned": false,
+     "deleted": false,
+     "archived": true,
+     "createdAt": "2026-09-24T11:00:00Z",
+     "updatedAt": "2026-09-25T03:10:00Z"
+    }
+   },
+   {
+    "name": "months of different ledgers are not merged",
+    "local": {
+     "schema": 2,
+     "type": "ledger-month",
+     "title": "가계부 2026년 9월",
+     "body": "# 2026년 9월 기록 (1건)\n- 09-25 ₩9,500 점심 김치찌개",
+     "ledger": "11111111-2222-4333-8444-555555555555",
+     "month": "2026-09",
+     "income": null,
+     "entries": [
+      {
+       "id": "e-lunch",
+       "date": "2026-09-25",
+       "amount": 9500,
+       "name": "점심 김치찌개",
+       "createdAt": "2026-09-25T03:10:00Z"
+      }
+     ],
+     "pinned": false,
+     "deleted": false,
+     "archived": true,
+     "createdAt": "2026-09-25T03:10:00Z",
+     "updatedAt": "2026-09-25T03:10:00Z"
+    },
+    "remote": {
+     "schema": 2,
+     "type": "ledger-month",
+     "title": "가계부 2026년 9월",
+     "body": "# 2026년 9월 기록 (1건)\n수입 ₩2,500,000\n- 09-24 ₩31,800 저녁 장보기",
+     "ledger": "99999999-2222-4333-8444-555555555555",
+     "month": "2026-09",
+     "income": 2500000,
+     "entries": [
+      {
+       "id": "e-market",
+       "date": "2026-09-24",
+       "amount": 31800,
+       "name": "저녁 장보기",
+       "createdAt": "2026-09-24T11:00:00Z"
+      }
+     ],
+     "pinned": false,
+     "deleted": false,
+     "archived": true,
+     "createdAt": "2026-09-24T11:00:00Z",
+     "updatedAt": "2026-09-24T11:00:00Z"
+    },
+    "expected": {
+     "conflict": true
+    }
+   },
+   {
+    "name": "an ordinary note without a base is not merged",
+    "local": {
+     "title": "메모",
+     "body": "PC와 **모바일**",
+     "pinned": false,
+     "deleted": false,
+     "createdAt": "2026-09-01T00:00:00Z",
+     "updatedAt": "2026-09-01T00:00:00Z"
+    },
+    "remote": {
+     "title": "다른 제목",
+     "body": "PC와 **모바일**",
+     "pinned": false,
+     "deleted": false,
+     "createdAt": "2026-09-01T00:00:00Z",
+     "updatedAt": "2026-09-01T00:00:00Z"
+    },
+    "expected": {
+     "conflict": true
+    }
+   }
+  ]
+ },
+ "truncation": {
+  "note": "Over 24 KiB (UTF-8) the fallback keeps the longest prefix of lines that fits with a last line '… N건 더' (N = dropped '- ' lines). Generated inputs: month entries e000..e499 (above the 300-entry limit; only the fallback is tested) dated 2026-09-(1 + i % 30), amount 1000 + i, name '가' x 100, createdAt 2026-09-01T00:00:00Z; ledger income 2300000, recurring r000..r199 (amount 10000 + i, monthly from 2026-01-15, order a000..a199) and planned p000..p299 (amount 20000 + i, month null, order a000..a299), all named '가' x 100.",
+  "month": {
+   "bytes": 24531,
+   "lines": 79,
+   "first": "# 2026년 9월 기록 (500건)",
+   "last": "… 423건 더"
+  },
+  "ledger": {
+   "bytes": 24422,
+   "lines": 76,
+   "first": "# 가계부",
+   "last": "… 429건 더"
+  }
+ }
+}

@@ -18,7 +18,7 @@ public final class NotesModelTest {
  static Object roundtrip(Object value){return Json.parse(NotesModel.write(value),4*1024*1024,64);}
  public static void main(String[] args)throws Exception{
   int merges=mergeVectors(),examples=payloadExamples(),undecodable=undecodable();
-  envelope();model();drafts();pin();
+  envelope();model();drafts();pin();ledger();
   System.out.println("NotesModel: "+merges+" merge vectors, "+examples+" payload examples, "+undecodable+" undecodable payloads, "+checks+" checks passed");
  }
  static int mergeVectors()throws Exception{
@@ -152,5 +152,52 @@ public final class NotesModelTest {
   clock[0]+=NotesPin.IDLE_LOCK_MS-1;check(session.isOpen(),"refreshed by touch");
   clock[0]+=1;check(!session.isOpen()&&!session.touch(),"idle for 5 minutes locks");
   session.open();session.lock();check(!session.isOpen(),"explicit lock");
+ }
+
+ /** Ledger (가계부) vectors shared with the PC and TypeScript (tests/fixtures/notes-v2/ledger-vectors.json). */
+ static void ledger()throws Exception{
+  Map<String,Object> file=map(fixture("ledger-vectors.json")),mid=map(file.get("monthId")),fork=map(file.get("forkId"));
+  check(NotesModel.monthId(NotesCrypto.unhex((String)mid.get("key")),(String)mid.get("ledger"),(String)mid.get("month")).equals(mid.get("id")),"month id vector");
+  check(NotesModel.canonicalUuid((String)mid.get("id"))&&((String)mid.get("id")).charAt(14)=='4',"month id is a v4-shaped note id");
+  check(NotesModel.canonicalUuid("11111111-2222-4333-8444-555555555555")&&!NotesModel.canonicalUuid("11111111-2222-4333-8444-55555555555A")&&!NotesModel.canonicalUuid("111111112222433384445555555555555"),"canonical ledger ids");
+  check("x".equals(map(NotesModel.ledgerEntry(Json.parse("{\"id\":\"e\",\"date\":\"2026-09-01\",\"amount\":1,\"name\":\"\",\"createdAt\":\"c\",\"recurring\":{\"id\":\"r\",\"date\":\"2026-09-01\",\"note\":\"x\"}}")).get("recurring")).get("note")),"charge ref keeps unknown keys");
+  check(NotesModel.forkId((String)fork.get("stamp"),(String)fork.get("id")).equals(fork.get("fork")),"fork id vector");
+  for(Object entry:list(map(file.get("emptyBase")).get("vectors"))){
+   Map<String,Object> v=map(entry);String name=(String)v.get("name");
+   NotesModel.Content local=NotesModel.parse(v.get("local")),remote=NotesModel.parse(v.get("remote"));
+   NotesModel.Content base=NotesModel.emptyMonthBase(local,remote),result=base==null?null:NotesModel.merge(base,local,remote);
+   if(map(v.get("expected")).containsKey("conflict"))check(result==null,name);
+   else check(result!=null&&roundtrip(result.toMap()).equals(v.get("expected")),name+": "+(result==null?"null":result.toJson()));
+  }
+  Map<String,Object> cut=map(file.get("truncation"));
+  StringBuilder big=new StringBuilder();for(int i=0;i<100;i++)big.append('가');String name=big.toString();
+  List<Map<String,Object>> entries=new ArrayList<>(),recurring=new ArrayList<>(),planned=new ArrayList<>();
+  for(int i=0;i<500;i++)entries.add(map(Json.parse(String.format("{\"id\":\"e%03d\",\"date\":\"2026-09-%02d\",\"amount\":%d,\"name\":\"%s\",\"createdAt\":\"2026-09-01T00:00:00Z\"}",i,1+i%30,1000+i,name))));
+  for(int i=0;i<200;i++)recurring.add(NotesModel.recurringItem(Json.parse(String.format("{\"id\":\"r%03d\",\"name\":\"%s\",\"amount\":%d,\"every\":1,\"unit\":\"month\",\"start\":\"2026-01-15\",\"order\":\"a%03d\"}",i,name,10000+i,i))));
+  for(int i=0;i<300;i++)planned.add(NotesModel.plannedItem(Json.parse(String.format("{\"id\":\"p%03d\",\"name\":\"%s\",\"amount\":%d,\"order\":\"a%03d\"}",i,name,20000+i,i))));
+  check(summary(NotesModel.monthFallback("2026-09",null,entries)).equals(cut.get("month")),"month fallback truncation");
+  check(summary(NotesModel.ledgerFallback("가계부",2300000L,recurring,planned)).equals(cut.get("ledger")),"ledger fallback truncation");
+  // Drafts: create a month, keep unknown entry keys, refuse immutable or type changes.
+  String now="2026-09-25T00:00:00Z";NotesModel.SecretOpen open=()->true;
+  String month="{\"id\":\"x\",\"expectedRevision\":0,\"type\":\"ledger-month\",\"title\":\"가계부 2026년 9월\",\"ledger\":\"L\",\"month\":\"2026-09\",\"income\":null,\"entries\":[{\"id\":\"e\",\"date\":\"2026-09-25\",\"amount\":9500,\"name\":\"점심\",\"createdAt\":\"c\",\"place\":\"회사\"}]}";
+  NotesModel.Content m=NotesModel.applyDraft(null,draft(month),now,open);
+  check(m.archived&&m.hasIncome&&m.income==null&&m.body.equals("# 2026년 9월 기록 (1건)\n- 09-25 ₩9,500 점심")&&Long.valueOf(2).equals(m.schema),"new month note");
+  Map<String,Object> shown=NotesModel.view("x",NotesModel.Stored.typed(m),1,true,false,true);
+  check(!NotesModel.write(shown).contains("place")&&Boolean.FALSE.equals(shown.get("readOnly")),"view drops unknown entry keys");
+  NotesModel.Content edited=NotesModel.applyDraft(m,draft("{\"id\":\"x\",\"expectedRevision\":1,\"income\":2500000,\"entries\":[{\"id\":\"e\",\"date\":\"2026-09-25\",\"amount\":9000,\"name\":\"점심\",\"createdAt\":\"c\"}]}"),now,open);
+  check("회사".equals(edited.entries.get(0).get("place"))&&Long.valueOf(2500000).equals(edited.income)&&edited.body.startsWith("# 2026년 9월 기록 (1건)\n수입 ₩2,500,000"),"entry extras restored by id");
+  try{NotesModel.applyDraft(m,draft("{\"id\":\"x\",\"expectedRevision\":1,\"month\":\"2026-10\"}"),now,open);check(false,"month is immutable");}catch(NotesModel.Invalid expected){checks++;}
+  try{NotesModel.applyDraft(m,draft("{\"id\":\"x\",\"expectedRevision\":1,\"type\":\"text\"}"),now,open);check(false,"ledger type is fixed");}catch(NotesModel.Invalid expected){checks++;}
+  try{NotesModel.applyDraft(m,draft("{\"id\":\"x\",\"expectedRevision\":1,\"entries\":[{\"id\":\"e\",\"date\":\"2026-02-30\",\"amount\":1,\"name\":\"\",\"createdAt\":\"c\"}]}"),now,open);check(false,"bad date");}catch(NotesModel.Invalid expected){checks++;}
+  try{draft("{\"id\":\"x\",\"expectedRevision\":1,\"entries\":[{\"id\":\"e\",\"date\":\"2026-09-01\",\"amount\":1.5,\"name\":\"\",\"createdAt\":\"c\"}]}");check(false,"fractional amount");}catch(NotesModel.Shape expected){checks++;}
+  NotesModel.Content ledger=NotesModel.applyDraft(null,draft("{\"id\":\"y\",\"expectedRevision\":0,\"type\":\"ledger\",\"title\":\"가계부\",\"pinned\":true,\"income\":null,\"recurring\":[],\"planned\":[]}"),now,open);
+  check(ledger.pinned&&ledger.body.equals("# 가계부")&&ledger.toJson().contains("\"income\":null"),"new ledger note");
+  check(NotesModel.validDate("2024-02-29")&&!NotesModel.validDate("2100-02-29")&&NotesModel.validMonth("2026-12")&&!NotesModel.validMonth("2026-13"),"calendar strings");
+  check(NotesModel.won(0).equals("₩0")&&NotesModel.won(999_999_999_999L).equals("₩999,999,999,999"),"won");
+ }
+ static Map<String,Object> summary(String body){
+  String[] lines=body.split("\n",-1);Map<String,Object> out=new LinkedHashMap<>();
+  out.put("bytes",(long)body.getBytes(StandardCharsets.UTF_8).length);out.put("lines",(long)lines.length);out.put("first",lines[0]);out.put("last",lines[lines.length-1]);
+  return out;
  }
 }
