@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 import authority
 import collection_authority
 import collection_personal_edits as personal_edits
+import collection_releases
 import head_cache
 
 MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024
@@ -115,6 +116,19 @@ class Film(StrictModel):
     related: RelatedFilms | None = None
 
 
+class ReleaseWatch(StrictModel):
+    """Manga release-watch state (collection_personal_edits ``releaseWatch``)."""
+    enabled: bool
+    # False when the Collection has no Aladin/Kakao binding: the PC cannot enable it.
+    available: bool
+
+
+class OwnedVolumes(StrictModel):
+    """One tracked edition's owned-volume count (collection_personal_edits ``ownedVolumes``)."""
+    editionIndex: int = Field(ge=0, le=3)
+    count: int = Field(ge=0, le=2000)
+
+
 class Collection(StrictModel):
     id: ID
     name: str = Field(min_length=1, max_length=2000)
@@ -149,6 +163,10 @@ class Collection(StrictModel):
     film: Film | None = None
     volumes: list[Volume] = Field(default_factory=list, max_length=5000)
     artworks: list[Artwork] = Field(default_factory=list, max_length=10000)
+    # Manga tracking state from an upgraded PC (personalEditVersion 2). Absent/null in
+    # legacy snapshots and never stored as null, so legacy payloads stay unchanged.
+    releaseWatch: ReleaseWatch | None = None
+    ownedVolumes: list[OwnedVolumes] | None = Field(default=None, max_length=4)
 
 
 class Replica(StrictModel):
@@ -156,7 +174,7 @@ class Replica(StrictModel):
     baseRevision: Digest | None
     collections: list[Collection] = Field(max_length=10000)
     # Personal-edit handshake from an upgraded PC (see collection_personal_edits).
-    personalEditVersion: Literal[1] | None = None
+    personalEditVersion: Literal[1, 2] | None = None
     libraryId: personal_edits.LIBRARY | None = None
     personalEditCursor: int | None = Field(default=None, ge=0, le=personal_edits.MAX_CURSOR)
 
@@ -171,6 +189,17 @@ def artwork_key(digest: str) -> str:
 
 def encode(value) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def stored(item: Collection) -> dict:
+    """The stored payload; optional tracking keys are omitted rather than stored as null."""
+    payload = item.model_dump()
+    for key in ("releaseWatch", "ownedVolumes"):
+        if payload[key] is None:
+            del payload[key]
+    if "ownedVolumes" in payload:
+        payload["ownedVolumes"].sort(key=lambda entry: entry["editionIndex"])
+    return payload
 
 
 def public_item(item: dict, detail: bool = False) -> dict:
@@ -215,6 +244,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 );
             """)
             db.executescript(personal_edits.DDL)
+            personal_edits.migrate(db)
+            collection_releases.startup_db(db)
             # Collections authority tables only; the domain stays inactive until an
             # explicit publisher activation.
             collection_authority.startup_db(db)
@@ -247,6 +278,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
 
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
     personal_edits.register(app, get_db, reader, publisher, lambda db: legacy_state(db)[0])
+    collection_releases.register(app, get_db, reader, publisher)
     collection_authority.register(app, get_db, reader, publisher)
 
     def head(blob: ArtworkUpload, *, ticket=False):
@@ -359,6 +391,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                     if blob.sha256 in blobs and blobs[blob.sha256] != blob:
                         raise HTTPException(422, "Conflicting artwork manifests")
                     blobs[blob.sha256] = blob
+            if item.ownedVolumes is not None and len({o.editionIndex for o in item.ownedVolumes}) != len(item.ownedVolumes):
+                raise HTTPException(422, "Duplicate owned-volume editions")
             if len(encode(public_item(item.model_dump(), True)).encode()) > 3 * 1024 * 1024:
                 raise HTTPException(413, "Collection detail too large")
         # Preparation confirms each completed upload. Reuse those immutable hash
@@ -372,7 +406,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         for blob in unconfirmed:
             if not head(blob):
                 raise HTTPException(409, "Upload all artwork before publishing")
-        items = [item.model_dump() for item in sorted(snapshot.collections, key=lambda item: item.id)]
+        items = [stored(item) for item in sorted(snapshot.collections, key=lambda item: item.id)]
         published = datetime.now(timezone.utc).isoformat()
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -472,7 +506,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             if active is not None:
                 # Installed APKs keep sending personal edits; the server translates them
                 # into `updateWork`, so the capability no longer depends on the PC.
-                advertisement = {**advertisement, "capabilities": {"collectionPersonalEdit": True},
+                advertisement = {**advertisement, "capabilities": {"collectionPersonalEdit": True,
+                                                                     "collectionTrackingEdit": False},
                                  "libraryId": active["libraryId"]}
         return {"revision": revision, "publishedAt": published, **advertisement}
 

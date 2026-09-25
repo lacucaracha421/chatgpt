@@ -943,7 +943,7 @@ def build_payload(db, library_id, row):
         "series": state["details"].get("series"), "film": state["details"].get("film"),
         "volumes": volumes, "artworks": art_items,
     }
-    return mobile_collections.Collection.model_validate(payload).model_dump()
+    return mobile_collections.stored(mobile_collections.Collection.model_validate(payload))
 
 
 def refresh_projection(db, library_id, work_id):

@@ -9,6 +9,44 @@ re-applies every later log entry, so a stale snapshot cannot rewind an edit.
 Readiness follows the Character exclusion channel: nothing is accepted until an
 upgraded PC has published once (the state row exists), and from then on a legacy
 snapshot without the handshake is refused.
+
+Manga tracking fields (personal-edit version 2, decided 2026-09-25)
+-------------------------------------------------------------------
+Mobile may also manage, per manga Collection, 신간 알림 and the owned-volume count - what
+the PC's Collection ownership panel edits (`set_release_watch_enabled`,
+`set_owned_volume_count` in `_tools/app/src-tauri/src/library/`):
+
+* ``field: "releaseWatch"`` - ``value``/``expected`` are booleans. The PC applies it with
+  ``set_release_watch_enabled(collectionId, value)``. Turning it on is refused with
+  ``409 releaseWatchUnavailable`` when the published ``releaseWatch.available`` is false;
+  if the PC still cannot enable it (binding removed meanwhile) it records the entry as
+  applied without change and its next publication shows the real state.
+* ``field: "ownedVolumes"`` - ``value`` is ``{"editionIndex": 0-3, "count": 0-2000}``;
+  ``expected`` is ``{"editionIndex": <same>, "count": <int or null>}`` (null = edition not
+  tracked yet). The PC applies it with ``set_owned_volume_count(collectionId, editionIndex,
+  count)`` (volumes 1..count owned as physical, replacing that edition's per-volume
+  detail, exactly like the PC's own count control).
+
+Publication keys an upgraded PC adds to each manga Collection (both optional; never on
+other types; a legacy snapshot simply lacks them):
+
+* ``releaseWatch: {"enabled": bool, "available": bool}`` - ``enabled`` = a subscription
+  exists; ``available`` = the Collection has an Aladin or Kakao binding.
+* ``ownedVolumes: [{"editionIndex": 0-3, "count": 0-2000}, ...]`` - one entry per tracked
+  edition (`collection_ownership_tracking`, plus any edition with owned volumes); ``count``
+  = volumes owned in any format, as the PC panel shows it. Unique editions, <= 4 entries.
+
+Handshake: a PC that understands these fields publishes ``personalEditVersion: 2`` (same
+``libraryId``/``personalEditCursor`` rules as 1) and reads the log with ``editVersion=2``.
+Tracking edits are accepted only while the latest handshake publication had version 2 and
+the Collection's published payload carries the key (``409
+collectionPersonalEditUnsupported`` / ``409 collectionTrackingUnavailable`` otherwise), and
+``/v1/collections/status`` advertises ``capabilities.collectionTrackingEdit``. A log read
+without ``editVersion=2`` whose page would contain a tracking entry is refused with ``409
+collectionPersonalEditUpgradeRequired``, so a version-1 PC fails closed instead of
+skipping an entry. Do not downgrade the PC to a version-1 build once tracking edits exist:
+it stops at that error until it is upgraded again. Once Collections authority is active, tracking fields are refused
+(``409 collectionPersonalEditUnsupported``); authority clients use its own commands.
 """
 import hashlib
 import json
@@ -30,13 +68,17 @@ MAX_CURSOR = 9_007_199_254_740_991
 MAX_MEMO_CHARS = 2000
 # Room for a 2000-character Hangul memo as both `value` and `expected` (~6 KB each).
 MAX_COMMAND_BYTES = 32 * 1024
-FIELDS = ("myScore", "showcase", "memo")
+FIELDS = ("myScore", "showcase", "memo", "releaseWatch", "ownedVolumes")
+TRACKING_FIELDS = ("releaseWatch", "ownedVolumes")
+EDIT_VERSION = 2  # the handshake version that understands TRACKING_FIELDS
+MAX_OWNED_COUNT = 2000  # library/collection_tracking.rs set_owned_volume_count
 ID = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 LIBRARY = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{32}$")]
 DDL = """
 CREATE TABLE IF NOT EXISTS mobile_collection_edit_state (
  singleton INTEGER PRIMARY KEY CHECK(singleton=1), library_id TEXT NOT NULL,
- applied_cursor INTEGER NOT NULL DEFAULT 0, last_sequence INTEGER NOT NULL DEFAULT 0);
+ applied_cursor INTEGER NOT NULL DEFAULT 0, last_sequence INTEGER NOT NULL DEFAULT 0,
+ edit_version INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS mobile_collection_edits (
  sequence INTEGER PRIMARY KEY, operation_id TEXT NOT NULL UNIQUE,
  payload_digest TEXT NOT NULL, collection_id TEXT NOT NULL, field TEXT NOT NULL,
@@ -47,7 +89,15 @@ CREATE TABLE IF NOT EXISTS mobile_collection_edit_noops (
  created_at TEXT NOT NULL, result_json TEXT NOT NULL);
 """
 # Payload key per command field.
-PAYLOAD_KEYS = {"myScore": "myScore", "showcase": "showcase", "memo": "description"}
+PAYLOAD_KEYS = {"myScore": "myScore", "showcase": "showcase", "memo": "description",
+                "releaseWatch": "releaseWatch", "ownedVolumes": "ownedVolumes"}
+
+
+def migrate(db):
+    """Add ``edit_version`` to a state table created before personal-edit version 2."""
+    columns = {row[1] for row in db.execute("PRAGMA table_info(mobile_collection_edit_state)")}
+    if "edit_version" not in columns:
+        db.execute("ALTER TABLE mobile_collection_edit_state ADD COLUMN edit_version INTEGER NOT NULL DEFAULT 1")
 
 
 class Edit(BaseModel):
@@ -56,7 +106,7 @@ class Edit(BaseModel):
     libraryId: LIBRARY
     operationId: Annotated[str, StringConstraints(min_length=36, max_length=36)]
     collectionId: ID
-    field: Literal["myScore", "showcase", "memo"]
+    field: Literal["myScore", "showcase", "memo", "releaseWatch", "ownedVolumes"]
     # Both are required (null is a real value); their shape depends on `field`.
     value: Any
     expected: Any
@@ -70,8 +120,22 @@ def invalid():
     fail(422, "invalidCollectionPersonalEdit", "개인 편집 요청을 확인할 수 없습니다.")
 
 
-def normalized(field, value, *, limit=MAX_MEMO_CHARS):
-    """The PC's own validation: score null or 0–5 in 0.5 steps, bool Showcase, trimmed memo."""
+def _small_int(value, high):
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= high:
+        invalid()
+    return value
+
+
+def normalized(field, value, *, limit=MAX_MEMO_CHARS, expected=False):
+    """The PC's own validation: score null or 0–5 in 0.5 steps, bool Showcase, trimmed memo,
+    bool release watch, ``{"editionIndex": 0-3, "count": 0-2000}`` (an expected count may
+    be null: edition not tracked)."""
+    if field == "ownedVolumes":
+        if not isinstance(value, dict) or set(value) != {"editionIndex", "count"}:
+            invalid()
+        count = value["count"]
+        return {"editionIndex": _small_int(value["editionIndex"], 3),
+                "count": None if expected and count is None else _small_int(count, MAX_OWNED_COUNT)}
     if field == "myScore":
         if value is None:
             return None
@@ -84,7 +148,7 @@ def normalized(field, value, *, limit=MAX_MEMO_CHARS):
         if not math.isfinite(value) or not 0.0 <= value <= 5.0 or (value * 2) % 1 != 0:
             invalid()
         return value
-    if field == "showcase":
+    if field in ("showcase", "releaseWatch"):
         if not isinstance(value, bool):
             invalid()
         return value
@@ -98,8 +162,14 @@ def normalized(field, value, *, limit=MAX_MEMO_CHARS):
     return value or None
 
 
-def current_value(field, payload):
+def current_value(field, payload, command_value=None):
     value = payload.get(PAYLOAD_KEYS[field])
+    if field == "releaseWatch":
+        return bool(value and value.get("enabled"))
+    if field == "ownedVolumes":
+        edition = command_value["editionIndex"]
+        count = next((entry["count"] for entry in value or () if entry["editionIndex"] == edition), None)
+        return {"editionIndex": edition, "count": count}
     if field == "myScore":
         return None if value is None else float(value)
     if field == "showcase":
@@ -123,6 +193,17 @@ def check_library(db, library_id):
     if ids != {library_id} or current is not None and current["library_id"] != library_id:
         fail(409, "libraryMismatch", "다른 라이브러리의 컬렉션 편집 요청입니다.")
     return current
+
+
+def tracking_guard(current, payload, field, value):
+    """Tracking edits need a version-2 PC and a manga Collection published with the key."""
+    if current["edit_version"] < EDIT_VERSION:
+        fail(409, "collectionPersonalEditUnsupported", "PC 앱을 업데이트한 뒤 컬렉션을 게시해 주세요.")
+    state_value = payload.get(PAYLOAD_KEYS[field])
+    if payload.get("type") != "manga" or state_value is None:
+        fail(409, "collectionTrackingUnavailable", "이 작품은 신간 알림과 보유 권수를 관리할 수 없습니다.")
+    if field == "releaseWatch" and value and not state_value.get("available"):
+        fail(409, "releaseWatchUnavailable", "알라딘 또는 카카오와 연결된 만화만 신간 알림을 켤 수 있습니다.")
 
 
 def validate_handshake(snapshot):
@@ -154,7 +235,18 @@ def patch(db, collection_id, field, value):
         return False
     payload = json.loads(row["payload"])
     showcase, order = bool(row["showcase"]), row["showcase_order"]
-    if field == "showcase":
+    if field in TRACKING_FIELDS:
+        # A Collection published without the key (legacy snapshot) is left untouched.
+        current = payload.get(PAYLOAD_KEYS[field])
+        if current is None:
+            return True
+        if field == "releaseWatch":
+            # Never show watching on a Collection the PC cannot watch.
+            payload["releaseWatch"] = {**current, "enabled": value and current.get("available", False)}
+        else:
+            others = [entry for entry in current if entry["editionIndex"] != value["editionIndex"]]
+            payload["ownedVolumes"] = sorted([*others, value], key=lambda entry: entry["editionIndex"])
+    elif field == "showcase":
         if value and not showcase:
             # PC rule: append after the current maximum within the Collection type.
             order = db.execute("""SELECT COALESCE(MAX(showcase_order)+1,0) FROM mobile_collections
@@ -187,9 +279,10 @@ def acknowledge_publication(db, snapshot):
     if snapshot.personalEditVersion is None:
         return
     reapply_pending(db, snapshot.personalEditCursor)
-    db.execute("""INSERT INTO mobile_collection_edit_state(singleton,library_id,applied_cursor)
-        VALUES(1,?,?) ON CONFLICT(singleton) DO UPDATE SET applied_cursor=excluded.applied_cursor""",
-               (snapshot.libraryId, snapshot.personalEditCursor))
+    db.execute("""INSERT INTO mobile_collection_edit_state(singleton,library_id,applied_cursor,edit_version)
+        VALUES(1,?,?,?) ON CONFLICT(singleton) DO UPDATE SET applied_cursor=excluded.applied_cursor,
+        edit_version=excluded.edit_version""",
+               (snapshot.libraryId, snapshot.personalEditCursor, snapshot.personalEditVersion))
 
 
 def last_sequence(db):
@@ -200,8 +293,10 @@ def last_sequence(db):
 def advertisement(db):
     current = state(db)
     if current is None:
-        return {"capabilities": {"collectionPersonalEdit": False}}
-    return {"capabilities": {"collectionPersonalEdit": True}, "libraryId": current["library_id"],
+        return {"capabilities": {"collectionPersonalEdit": False, "collectionTrackingEdit": False}}
+    return {"capabilities": {"collectionPersonalEdit": True,
+                             "collectionTrackingEdit": current["edit_version"] >= EDIT_VERSION},
+            "libraryId": current["library_id"],
             "personalEditCursor": current["last_sequence"],
             "appliedPersonalEditCursor": current["applied_cursor"]}
 
@@ -217,7 +312,9 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
             invalid()
         value = normalized(command.field, command.value)
         # A published memo may predate the 2000-character PC limit.
-        expected = normalized(command.field, command.expected, limit=10000)
+        expected = normalized(command.field, command.expected, limit=10000, expected=True)
+        if command.field == "ownedVolumes" and expected["editionIndex"] != value["editionIndex"]:
+            invalid()
         payload_digest = hashlib.sha256(encode(command.model_dump()).encode()).hexdigest()
         with get_db() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -238,6 +335,8 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
                         fail(409, "operationConflict", "다른 내용으로 편집 요청을 재사용할 수 없습니다.")
                     return json.loads(receipt["result_json"])
             if active is not None:
+                if command.field in TRACKING_FIELDS:
+                    fail(409, "collectionPersonalEditUnsupported", "이 편집은 지금 지원되지 않습니다.")
                 result = collection_authority.personal_edit(
                     db, active, command, value, expected, collection_authority.now_iso())
                 db.commit()
@@ -247,7 +346,10 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
                 fail(404, "collectionNotFound", "PC에서 삭제되었거나 게시되지 않은 작품입니다.")
             now = datetime.now(timezone.utc).isoformat()
             revision = replica_revision(db)
-            present = current_value(command.field, json.loads(row["payload"]))
+            payload = json.loads(row["payload"])
+            if command.field in TRACKING_FIELDS:
+                tracking_guard(current, payload, command.field, value)
+            present = current_value(command.field, payload, value)
             result = {"version": 1, "operationId": command.operationId, "collectionId": command.collectionId,
                       "field": command.field, "value": value}
             if present == value:
@@ -290,6 +392,7 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
     @app.get(PREFIX)
     def changes(libraryId: LIBRARY, after: int = Query(default=0, ge=0, le=MAX_CURSOR),
                 limit: int = Query(default=100, ge=1, le=100),
+                editVersion: int = Query(default=1, ge=1, le=EDIT_VERSION),
                 authorization: str | None = Header(default=None)):
         require_publisher(authorization)
         with get_db() as db:
@@ -301,6 +404,8 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
                               (after, limit + 1)).fetchall()
             more = len(rows) > limit
             rows = rows[:limit]
+            if editVersion < EDIT_VERSION and any(r["field"] in TRACKING_FIELDS for r in rows):
+                fail(409, "collectionPersonalEditUpgradeRequired", "모바일 편집을 받으려면 PC 앱을 업데이트해 주세요.")
             return {"version": 1, "libraryId": libraryId, "after": after,
                     "nextCursor": rows[-1]["sequence"] if rows else after, "hasMore": more,
                     "items": [{"sequence": r["sequence"], "operationId": r["operation_id"],

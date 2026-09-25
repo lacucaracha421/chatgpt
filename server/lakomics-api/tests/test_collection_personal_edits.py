@@ -39,10 +39,10 @@ class CollectionPersonalEditTests(unittest.TestCase):
         self.items = [first, shown, work('m', '다', 'movie')]
 
     # --- helpers -----------------------------------------------------------------
-    def body(self, items=None, cursor=0, base=None, upgraded=True):
+    def body(self, items=None, cursor=0, base=None, upgraded=True, edit_version=1):
         body = {'version': 1, 'baseRevision': base, 'collections': copy.deepcopy(items or self.items)}
         if upgraded:
-            body.update(personalEditVersion=1, libraryId=LIBRARY, personalEditCursor=cursor)
+            body.update(personalEditVersion=edit_version, libraryId=LIBRARY, personalEditCursor=cursor)
         return body
 
     def publish(self, body, headers=None):
@@ -76,7 +76,7 @@ class CollectionPersonalEditTests(unittest.TestCase):
     def test_unsupported_until_an_upgraded_pc_publishes(self):
         legacy = self.publish(self.body(upgraded=False), headers=AUTH)
         self.assertEqual(legacy.status_code, 200, legacy.text)
-        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': False})
+        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': False, 'collectionTrackingEdit': False})
         self.assertNotIn('libraryId', self.status())
         reply = self.edit(self.command())
         self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionPersonalEditUnsupported'))
@@ -85,7 +85,7 @@ class CollectionPersonalEditTests(unittest.TestCase):
         self.assertEqual(self.feed(after=1).status_code, 409)
         self.ready()
         status = self.status()
-        self.assertEqual(status['capabilities'], {'collectionPersonalEdit': True})
+        self.assertEqual(status['capabilities'], {'collectionPersonalEdit': True, 'collectionTrackingEdit': False})
         self.assertEqual((status['libraryId'], status['personalEditCursor'], status['appliedPersonalEditCursor']),
                          (LIBRARY, 0, 0))
 
@@ -319,6 +319,140 @@ class CollectionPersonalEditTests(unittest.TestCase):
         self.assertEqual(ticket.status_code, 200, ticket.text)
         self.assertEqual(ticket.json()['sha256'], media['sha256'])
         self.assertEqual(self.detail()['artworks'][0]['thumbnailDigest'], media['sha256'])
+
+
+class CollectionTrackingEditTests(unittest.TestCase):
+    """Personal-edit version 2: release watch and owned-volume counts for manga."""
+    base = CollectionPersonalEditTests
+    tearDown = base.tearDown
+    body, publish, status, ready = base.body, base.publish, base.status, base.ready
+    command, edit, detail, feed, code = base.command, base.edit, base.detail, base.feed, base.code
+
+    def setUp(self):
+        self.base.setUp(self)
+        tracked = self.items[0]
+        tracked.update(releaseWatch={'enabled': False, 'available': True},
+                       ownedVolumes=[{'editionIndex': 2, 'count': 1}, {'editionIndex': 0, 'count': 3}])
+        self.items[1]['releaseWatch'] = {'enabled': False, 'available': False}
+
+    def ready2(self, cursor=0):
+        reply = self.publish(self.body(cursor=cursor, base=self.status()['revision'], edit_version=2))
+        self.assertEqual(reply.status_code, 200, reply.text)
+        return reply.json()['revision']
+
+    def watch(self, value=True, expected=False, collection='a'):
+        return self.command('releaseWatch', value, expected, collection)
+
+    def owned(self, edition=0, count=5, expected=3, collection='a'):
+        return self.command('ownedVolumes', {'editionIndex': edition, 'count': count},
+                            {'editionIndex': edition, 'count': expected}, collection)
+
+    def test_payload_keys_are_stored_sorted_and_absent_when_not_sent(self):
+        self.ready2()
+        self.assertEqual(self.detail()['ownedVolumes'], [{'editionIndex': 0, 'count': 3}, {'editionIndex': 2, 'count': 1}])
+        movie = self.detail('m')
+        self.assertNotIn('releaseWatch', movie)
+        self.assertNotIn('ownedVolumes', movie)
+        duplicate = copy.deepcopy(self.items)
+        duplicate[0]['ownedVolumes'] = [{'editionIndex': 0, 'count': 1}, {'editionIndex': 0, 'count': 2}]
+        self.assertEqual(self.publish(self.body(duplicate, base=self.status()['revision'], edit_version=2)).status_code, 422)
+        bad = copy.deepcopy(self.items)
+        bad[0]['ownedVolumes'] = [{'editionIndex': 4, 'count': 1}]
+        self.assertEqual(self.publish(self.body(bad, base=self.status()['revision'], edit_version=2)).status_code, 422)
+
+    def test_version_one_pc_cannot_receive_tracking_edits(self):
+        self.ready()
+        self.assertFalse(self.status()['capabilities']['collectionTrackingEdit'])
+        reply = self.edit(self.watch())
+        self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionPersonalEditUnsupported'))
+        self.ready2()
+        self.assertTrue(self.status()['capabilities']['collectionTrackingEdit'])
+        self.assertEqual(self.edit(self.watch()).status_code, 200)
+        # A version-1 PC reading the log fails closed instead of skipping the entry.
+        reply = self.feed()
+        self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionPersonalEditUpgradeRequired'))
+        self.assertEqual(self.feed(editVersion=2).status_code, 200)
+        # A version-1 publication turns the capability off again.
+        self.publish(self.body(cursor=1, base=self.status()['revision']))
+        self.assertFalse(self.status()['capabilities']['collectionTrackingEdit'])
+        self.assertEqual(self.code(self.edit(self.watch(False, True))), 'collectionPersonalEditUnsupported')
+
+    def test_release_watch_edit(self):
+        old = self.ready2()
+        reply = self.edit(self.watch())
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual((reply.json()['value'], reply.json()['changed']), (True, True))
+        self.assertEqual(self.detail()['releaseWatch'], {'enabled': True, 'available': True})
+        self.assertNotEqual(self.status()['revision'], old)
+        # Same value again is a no-op; a stale expectation conflicts with the current value.
+        self.assertFalse(self.edit(self.watch()).json()['changed'])
+        conflict = self.edit(self.watch(False, False))
+        self.assertEqual((conflict.status_code, self.code(conflict), conflict.json()['detail']['current']),
+                         (409, 'collectionPersonalConflict', True))
+        items = self.feed(editVersion=2).json()['items']
+        self.assertEqual([(i['field'], i['value'], i['previous']) for i in items], [('releaseWatch', True, False)])
+
+    def test_release_watch_unavailable_and_non_manga(self):
+        self.ready2()
+        self.assertEqual(self.code(self.edit(self.watch(collection='s'))), 'releaseWatchUnavailable')
+        self.assertEqual(self.edit(self.watch(False, False, collection='s')).json()['changed'], False)
+        self.assertEqual(self.code(self.edit(self.watch(collection='m'))), 'collectionTrackingUnavailable')
+        self.assertEqual(self.code(self.edit(self.owned(collection='s'))), 'collectionTrackingUnavailable')
+
+    def test_owned_volume_count_edit(self):
+        self.ready2()
+        self.assertEqual(self.edit(self.owned()).status_code, 200)
+        # An untracked edition is expected as null.
+        self.assertEqual(self.edit(self.owned(edition=1, count=0, expected=None)).status_code, 200)
+        self.assertEqual(self.detail()['ownedVolumes'], [
+            {'editionIndex': 0, 'count': 5}, {'editionIndex': 1, 'count': 0}, {'editionIndex': 2, 'count': 1}])
+        conflict = self.edit(self.owned(count=7, expected=3))
+        self.assertEqual((self.code(conflict), conflict.json()['detail']['current']),
+                         ('collectionPersonalConflict', {'editionIndex': 0, 'count': 5}))
+        items = self.feed(editVersion=2).json()['items']
+        self.assertEqual(items[0]['value'], {'editionIndex': 0, 'count': 5})
+        self.assertEqual(items[1]['previous'], {'editionIndex': 1, 'count': None})
+        for command in (self.owned(count=2001), self.owned(edition=4), self.owned(count=True),
+                        self.command('ownedVolumes', {'editionIndex': 0, 'count': 1}, {'editionIndex': 1, 'count': 3}),
+                        self.command('ownedVolumes', {'editionIndex': 0, 'count': None}, {'editionIndex': 0, 'count': 3}),
+                        self.command('ownedVolumes', 3, 3), self.command('releaseWatch', 1, False)):
+            self.assertEqual(self.code(self.edit(command)), 'invalidCollectionPersonalEdit', command)
+
+    def test_stale_snapshot_reapplies_tracking_edits(self):
+        self.ready2()
+        self.edit(self.watch())
+        self.edit(self.owned())
+        self.ready2(cursor=0)
+        self.assertEqual(self.detail()['releaseWatch']['enabled'], True)
+        self.assertEqual(self.detail()['ownedVolumes'][0], {'editionIndex': 0, 'count': 5})
+        # After the PC applied them, its publication is authoritative (e.g. it could not enable).
+        self.ready2(cursor=2)
+        self.assertEqual(self.detail()['releaseWatch']['enabled'], False)
+
+    def test_replay_never_shows_watching_when_unavailable(self):
+        self.ready2()
+        self.assertEqual(self.edit(self.watch()).status_code, 200)
+        # The PC lost the binding before applying the edit: a stale snapshot replays it.
+        items = copy.deepcopy(self.items)
+        items[0]['releaseWatch'] = {'enabled': False, 'available': False}
+        self.assertEqual(self.publish(self.body(items, cursor=0, base=self.status()['revision'],
+                                                edit_version=2)).status_code, 200)
+        self.assertEqual(self.detail()['releaseWatch'], {'enabled': False, 'available': False})
+
+    def test_state_table_migration(self):
+        import collection_personal_edits as personal_edits
+        with api_app.get_db() as db:
+            db.execute('DROP TABLE mobile_collection_edit_state')
+            db.execute("""CREATE TABLE mobile_collection_edit_state (singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                library_id TEXT NOT NULL, applied_cursor INTEGER NOT NULL DEFAULT 0,
+                last_sequence INTEGER NOT NULL DEFAULT 0)""")
+            db.execute("INSERT INTO mobile_collection_edit_state VALUES(1,?,0,0)", (LIBRARY,))
+            personal_edits.migrate(db)
+            personal_edits.migrate(db)
+            db.commit()
+        self.assertFalse(self.status()['capabilities']['collectionTrackingEdit'])
+        self.ready2()
+        self.assertTrue(self.status()['capabilities']['collectionTrackingEdit'])
 
 
 if __name__ == '__main__':

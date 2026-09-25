@@ -171,7 +171,7 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.assertEqual((reply.status_code, self.code(reply)), (409, 'authorityInactive'))
         # Legacy publication, personal edits and reads behave as before.
         self.assertEqual(self.publish_legacy().status_code, 200)
-        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': True})
+        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': True, 'collectionTrackingEdit': False})
         edit = self.client.post('/v1/collections/personal-edits', headers=self.auth, json={
             'version': 1, 'libraryId': LIBRARY, 'operationId': str(uuid.uuid4()),
             'collectionId': 'a', 'field': 'myScore', 'value': 4.0, 'expected': 3.0})
@@ -519,7 +519,7 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.ok(self.activate(digest))
         status = self.status()
         self.assertEqual((status['capabilities'], status['libraryId']),
-                         ({'collectionPersonalEdit': True}, LIBRARY))
+                         ({'collectionPersonalEdit': True, 'collectionTrackingEdit': False}, LIBRARY))
         self.assertEqual(self.ok(edit(before)), legacy)  # pre-activation receipt replays
         operation = str(uuid.uuid4())
         accepted = self.ok(edit(operation, value=5.0, expected=4.0))
