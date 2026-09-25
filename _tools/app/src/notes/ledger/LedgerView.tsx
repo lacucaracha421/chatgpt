@@ -342,8 +342,9 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
     if (summary.phase === "past") return [];
     const from = summary.phase === "current" ? addDays(today, 1) : monthStart(month);
     const confirmed = new Set(entries.filter((e) => e.recurring).map((e) => `${e.recurring!.id}\n${e.recurring!.date}`));
-    return recurring.flatMap((r) => nextCharges(r, from, 3).map((date) => ({ r, date })))
-      .filter((c) => !confirmed.has(`${c.r.id}\n${c.date}`)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 3);
+    // One line per item: only its next unconfirmed charge, so a subscription never repeats.
+    return recurring.flatMap((r) => nextCharges(r, from, 3).filter((date) => !confirmed.has(`${r.id}\n${date}`)).slice(0, 1).map((date) => ({ r, date })))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 3);
   }, [summary.phase, today, month, entries, recurring]);
   const totals = recurringTotals(recurring, today);
   const nextOf = (r: Recurring) => nextCharges(r, today, 1)[0] ?? null;

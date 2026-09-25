@@ -52,7 +52,8 @@ export function LedgerCard({ledger,notes,onOpen,meta}:{ledger:Note;notes:Note[];
 /** The next `count` open charges on or after `from`, across months (confirmed ones are left out). */
 function upcoming(recurring:Recurring[],entries:LedgerEntry[],from:string,count:number):Charge[] {
   const confirmed=new Set(entries.filter(e=>e.recurring).map(e=>`${e.recurring!.id}\n${e.recurring!.date}`));
-  return recurring.flatMap(r=>nextCharges(r,from,count+2).filter(date=>!confirmed.has(`${r.id}\n${date}`)).map(date=>({recurring:r,date,amount:r.amount,confirmedBy:null})))
+  // One line per item: only its next unconfirmed charge, so a subscription never repeats.
+  return recurring.flatMap(r=>nextCharges(r,from,3).filter(date=>!confirmed.has(`${r.id}\n${date}`)).slice(0,1).map(date=>({recurring:r,date,amount:r.amount,confirmedBy:null})))
     .sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0).slice(0,count);
 }
 

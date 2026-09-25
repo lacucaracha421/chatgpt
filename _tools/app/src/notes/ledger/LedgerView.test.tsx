@@ -262,3 +262,9 @@ it("restores the ledger from 휴지통 instead of creating a second one", async 
   expect(await screen.findByRole("group", { name: "새 기록" })).toBeInTheDocument();
   expect(within(screen.getByLabelText("메모 목록")).getByRole("button", { name: /가계부/ })).toBeInTheDocument();
 });
+
+it("lists each subscription once in 다가오는 결제", async () => {
+  await openLedger([ledgerNote({ recurring: [rec("claude", "Claude", 29000, "2026-01-28")] }), monthNote("2026-09", [])]);
+  const upcoming = within(screen.getByRole("region", { name: "다가오는 결제" })).getAllByRole("listitem").map((li) => li.textContent);
+  expect(upcoming).toEqual(["9.28Claude₩29,000"]);
+});
