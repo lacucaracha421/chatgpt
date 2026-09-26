@@ -774,6 +774,8 @@ Before enabling the main-character rule, measure how many existing manual accept
 
 Status: `HOLD`
 
+Idea 2026-09-26 (user): julyx10/lap (GPL-3.0 photo manager) groups faces by building a top-K nearest-neighbour graph over embeddings and running Chinese Whispers with one distance threshold (no cluster count needed; memory bounded at N×K). Its InsightFace `buffalo_s` models are real-photo only and do not fit illustrated characters, but the same graph + Chinese Whispers over our CCIP person-crop embeddings could propose "these unassigned images look like one character" as new-character candidates. Reimplement from the algorithm (do not copy GPL code); evaluate against existing labels before exposing it.
+
 Keep clustering/re-identification research deferred while explicit-reference classification remains usable. Reopen only if real-world accuracy evidence shows it solves a recurring gap better than reference/arbitration tuning.
 
 # Similarity / media identity
