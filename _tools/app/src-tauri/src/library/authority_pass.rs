@@ -18,6 +18,7 @@
 //! that changed something, then 15, 30 and 60 seconds while nothing changes (300 s while
 //! a live watcher would wake it on any change), and immediately after a local write,
 //! window focus, a watched change, or a wake that arrived mid-pass.
+use rusqlite::OptionalExtension;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -145,6 +146,8 @@ pub(crate) struct AuthorityPassOutcome {
     pub classifications: bool,
     /// Catalog bookmarks visibly changed.
     pub bookmarks: bool,
+    /// The Asset replica was re-baselined ahead of the relation lanes.
+    pub assets: bool,
     /// An outgoing intent was delivered; the authority moved because of this PC.
     pub sent: bool,
     /// Some lane was refused for credentials, so the cached token must be dropped.
@@ -176,7 +179,7 @@ pub(crate) struct AssetLaneOutcome {
 
 impl AuthorityPassOutcome {
     pub(crate) fn changed(&self) -> bool {
-        self.albums || self.classifications || self.bookmarks || self.sent
+        self.albums || self.classifications || self.bookmarks || self.assets || self.sent
     }
 }
 
@@ -295,52 +298,75 @@ impl Library {
             }
         };
 
+        // After a server authority restore the Asset replica is re-baselined first: the
+        // Album and Classification baselines replace their relation tables wholesale and
+        // can keep a lost Asset's relations only once the Asset re-baseline has released
+        // it back to local (review follow-up). Until then both lanes wait; their flushes
+        // too, since a lost Asset would otherwise still look uploaded to them.
+        let relations_ready = match read_status() {
+            Ok(status) => match self.settle_asset_identity_with_status(client, token, &status) {
+                Ok(Some(changed)) => {
+                    outcome.assets = changed;
+                    true
+                }
+                Ok(None) => false,
+                Err(error) => {
+                    outcome.failed(&error);
+                    false
+                }
+            },
+            // The lanes below meet the same status failure and record it themselves.
+            Err(_) => true,
+        };
+
         // Albums: flush first; receive only over a clean queue. A domain this pass
         // just wrote to is not skipped, because the shared status predates the write.
-        match self.flush_album_outbox_with(client, token) {
-            Ok(flush) => {
-                let wrote = flush.sent > 0 || flush.no_op > 0;
-                outcome.sent |= wrote;
-                if !flush.stopped {
-                    match self.reconcile_album_authority_with_status(
-                        client,
-                        token,
-                        &read_status,
-                        !wrote,
-                    ) {
-                        Ok(received) => {
-                            outcome.albums = received.applied_changes > 0
-                                || received.adopted_baseline
-                                || received.rematerialized_memberships > 0;
+        if relations_ready {
+            match self.flush_album_outbox_with(client, token) {
+                Ok(flush) => {
+                    let wrote = flush.sent > 0 || flush.no_op > 0;
+                    outcome.sent |= wrote;
+                    if !flush.stopped {
+                        match self.reconcile_album_authority_with_status(
+                            client,
+                            token,
+                            &read_status,
+                            !wrote,
+                        ) {
+                            Ok(received) => {
+                                outcome.albums = received.applied_changes > 0
+                                    || received.adopted_baseline
+                                    || received.rematerialized_memberships > 0;
+                            }
+                            Err(error) => outcome.failed(&error),
                         }
-                        Err(error) => outcome.failed(&error),
                     }
                 }
+                Err(error) => outcome.failed(&error),
             }
-            Err(error) => outcome.failed(&error),
-        }
 
-        match self.flush_classification_outbox_with_source(client, credentials) {
-            Ok(flush) => {
-                let wrote = flush.sent > 0 || flush.no_op > 0 || flush.rebased > 0;
-                outcome.sent |= wrote;
-                if !flush.stopped {
-                    match self.reconcile_classification_authority_with_status(
-                        client,
-                        token,
-                        &read_status,
-                        !wrote,
-                    ) {
-                        Ok(received) => {
-                            outcome.classifications = received.applied_changes > 0
-                                || received.adopted_baseline
-                                || received.rematerialized_assignments > 0;
+            match self.flush_classification_outbox_with_source(client, credentials) {
+                Ok(flush) => {
+                    let wrote = flush.sent > 0 || flush.no_op > 0 || flush.rebased > 0;
+                    outcome.sent |= wrote;
+                    if !flush.stopped {
+                        match self.reconcile_classification_authority_with_status(
+                            client,
+                            token,
+                            &read_status,
+                            !wrote,
+                        ) {
+                            Ok(received) => {
+                                outcome.classifications = received.applied_changes > 0
+                                    || received.adopted_baseline
+                                    || received.rematerialized_assignments > 0;
+                            }
+                            Err(error) => outcome.failed(&error),
                         }
-                        Err(error) => outcome.failed(&error),
                     }
                 }
+                Err(error) => outcome.failed(&error),
             }
-            Err(error) => outcome.failed(&error),
         }
 
         // Bookmarks: receive, then deliver queued intents, then receive again after a
@@ -385,7 +411,8 @@ impl Library {
                 None
             }
         };
-        outcome.live = status_watch::is_live(client.base());
+        // A deferred relation lane keeps the ordinary backoff rather than the live rest.
+        outcome.live = relations_ready && status_watch::is_live(client.base());
         (outcome, status)
     }
 }
@@ -425,6 +452,16 @@ pub(crate) struct AssetSyncHealth {
     pub stopped: bool,
 }
 
+/// Mobile character exclusions this PC consumed without applying (durable receipts).
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CharacterExclusionHealth {
+    pub skipped_count: u32,
+    /// Closed code of the most recent skip (`targetMissing`, `assetMissing`, ...).
+    pub last_skip_reason: Option<String>,
+    pub last_skipped_at: Option<String>,
+}
+
 /// The latest failure of a background lane, as a closed code (runtime state).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -440,6 +477,7 @@ pub(crate) struct AuthoritySyncHealth {
     pub albums: DomainSyncHealth,
     pub classifications: DomainSyncHealth,
     pub assets: AssetSyncHealth,
+    pub character_exclusions: CharacterExclusionHealth,
     pub authority_pass_failure: Option<LaneFailure>,
     pub asset_lane_failure: Option<LaneFailure>,
 }
@@ -505,6 +543,27 @@ impl Library {
                     .map(str::to_owned);
             }
         }
+        drop(rejected);
+        let (skipped, last): (i64, Option<(String, String)>) = (
+            connection.query_row(
+                "SELECT COUNT(*) FROM mobile_character_exclusion_receipts WHERE skip_reason IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )?,
+            connection
+                .query_row(
+                    "SELECT skip_reason, created_at FROM mobile_character_exclusion_receipts
+                     WHERE skip_reason IS NOT NULL ORDER BY created_at DESC, sequence DESC LIMIT 1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?,
+        );
+        health.character_exclusions = CharacterExclusionHealth {
+            skipped_count: u32::try_from(skipped).unwrap_or(u32::MAX),
+            last_skip_reason: last.as_ref().map(|(reason, _)| reason.clone()),
+            last_skipped_at: last.map(|(_, at)| at),
+        };
         Ok(health)
     }
 }

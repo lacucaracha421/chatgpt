@@ -11,8 +11,8 @@
 .collection-index__types { display: flex; flex-direction: column; gap: var(--space-1); }
 .collection-index__release { margin-top: var(--space-2); }
 .collection-index__count { margin-left: auto; color: var(--color-text); font-family: var(--font-numeric); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
-.collection-index__release[aria-current=page] .collection-index__count { color: inherit; }
-.collection-index__release[aria-current=page]:has(.collection-index__count)::after { margin-left: 0; }
+.collection-index__release[aria-current=page] .collection-index__count, .collection-index__calendar[aria-current=page] .collection-index__count { color: inherit; }
+.collection-index__release[aria-current=page]:has(.collection-index__count)::after, .collection-index__calendar[aria-current=page]:has(.collection-index__count)::after { margin-left: 0; }
 .collection-index__controls .collection-index__reset { align-self: flex-end; }
 
 /* Library: folding Showcase row, then the 전체 heading. */

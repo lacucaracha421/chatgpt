@@ -510,6 +510,13 @@ impl Library {
         // to COMMIT, where the transaction must be consistent — a genuinely dangling
         // parent is still refused.
         transaction.pragma_update(None, "defer_foreign_keys", "ON")?;
+        // Relations of Assets the server lost (an authority restore released them for
+        // re-upload) cannot be in this baseline; they are kept and re-sent below.
+        let unsent = if compare_local {
+            Vec::new()
+        } else {
+            unsent_memberships_of_waiting_assets(&transaction)?
+        };
         // Materialization is replaced wholesale: the baseline is the authority's
         // complete live state, so merging would leave behind rows the server removed.
         transaction.execute("DELETE FROM asset_albums", [])?;
@@ -551,6 +558,22 @@ impl Library {
             cursor: baseline.cursor,
         };
         write_authority(&transaction, &authority, &now)?;
+        // Queued after the new identity is written, so each intent carries its epoch and
+        // the membership revision the baseline just confirmed.
+        for (album_id, asset_id) in unsent {
+            // A relation the baseline describes either way is the server's decision.
+            let keep: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM albums WHERE id = ?1)
+                    AND NOT EXISTS(SELECT 1 FROM album_authority_membership_revisions
+                                   WHERE album_id = ?1 AND asset_id = ?2)",
+                [&album_id, &asset_id],
+                |row| row.get(0),
+            )?;
+            if keep {
+                materialize_membership(&transaction, &album_id, &asset_id)?;
+                Self::enqueue_album_membership_intent(&transaction, &album_id, &asset_id, true)?;
+            }
+        }
         transaction.commit()?;
         Ok(baseline.cursor)
     }
@@ -792,6 +815,30 @@ fn require_clean_baseline_receive(
         return Err(refused(&library_id, cursor));
     }
     Ok(())
+}
+
+/// Local memberships of Assets waiting for their upload that no queued intent carries.
+///
+/// A local relation normally reaches the server as an intent. A waiting Asset with a
+/// relation but no intent is one the Asset lane released after the server lost it (an
+/// authority restore): the relation was confirmed once, and the replacing baseline cannot
+/// describe it, so it would otherwise be lost.
+fn unsent_memberships_of_waiting_assets(
+    transaction: &Transaction<'_>,
+) -> Result<Vec<(String, String)>, LibraryError> {
+    let mut statement = transaction.prepare(&format!(
+        "SELECT m.album_id, m.asset_id FROM asset_albums m
+         WHERE {waiting}
+           AND NOT EXISTS(SELECT 1 FROM album_authority_outbox o
+               WHERE o.command_type = '{MEMBERSHIP}' AND o.album_id = m.album_id
+                 AND o.asset_id = m.asset_id)
+         ORDER BY m.asset_id, m.album_id",
+        waiting = asset_waiting_sql("m.asset_id"),
+    ))?;
+    let rows = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// Re-apply the optimistic effect of membership intents still waiting for their Asset.

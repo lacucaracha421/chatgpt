@@ -26,8 +26,9 @@
 //! does not come back, a trashed asset is no longer a member, other bytes are a different
 //! image, and a reference defines the character. An entry failing one of them is therefore
 //! *consumed as skipped*: its receipt is written, the cursor advances past it, and the pass
-//! reports it under a closed reason (`targetMissing`, `assetMissing`, `assetChanged`,
-//! `protectedReference`, the same codes `character_review_sync` records). Holding the cursor
+//! records it under a closed reason (`targetMissing`, `assetMissing`, `assetChanged`,
+//! `protectedReference`, the same codes `character_review_sync` records) in the receipt's
+//! `skip_reason`, which the sync-state panel reads. Holding the cursor
 //! on such an entry would retry it forever and block every later correction behind it.
 //!
 //! Only errors that may clear on retry (database or I/O failures) still fail the whole page
@@ -343,6 +344,7 @@ impl Library {
             if consumed {
                 already_consumed += 1;
             } else {
+                let mut skip_reason = None;
                 match self.write_inbound_character_rejection(
                     &transaction,
                     &item.target_id,
@@ -355,7 +357,7 @@ impl Library {
                         // The validation runs before any write, so nothing needs undoing.
                         Some(reason) => {
                             skipped += 1;
-                            eprintln!("character exclusion {} skipped: {reason}", item.sequence);
+                            skip_reason = Some(reason);
                         }
                         None => return Err(map_character_exclusion_error(error)),
                     },
@@ -365,8 +367,8 @@ impl Library {
                 // uniqueness key would reject one anyway.
                 transaction.execute(
                     "INSERT INTO mobile_character_exclusion_receipts
-                        (endpoint, library_id, operation_id, sequence, target_id, asset_id, asset_sha256, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        (endpoint, library_id, operation_id, sequence, target_id, asset_id, asset_sha256, created_at, skip_reason)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         endpoint,
                         library_id,
@@ -375,7 +377,8 @@ impl Library {
                         item.target_id,
                         item.asset_id,
                         item.asset_sha256,
-                        now
+                        now,
+                        skip_reason
                     ],
                 )?;
             }

@@ -242,7 +242,12 @@ impl Library {
             return Err(LibraryError::CollectionNotFound);
         }
         self.cleanup_collection_thumbnail_cache(id)?;
-        self.cleanup_unreferenced_work_artwork()
+        // The delete is committed; a file that cannot be removed now is retried on the
+        // next library open instead of reporting a failed delete.
+        if let Err(error) = self.cleanup_unreferenced_work_artwork() {
+            eprintln!("work artwork cleanup skipped: {error}");
+        }
+        Ok(())
     }
 
     fn cleanup_collection_thumbnail_cache(&self, collection_id: &str) -> Result<(), LibraryError> {

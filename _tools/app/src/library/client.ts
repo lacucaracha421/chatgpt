@@ -187,6 +187,16 @@ export const libraryGateway: LibraryGateway = {
   getLibraryStatistics: () => invoke("get_library_statistics"),
   measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
   recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
+  releaseCalendar: {
+    calendar: () => invoke("get_release_calendar"),
+    refresh: (force) => invoke("refresh_release_calendar", { force }),
+    wishlist: () => invoke("list_release_wishlist"),
+    add: (id) => invoke("add_release_wishlist_item", { id }),
+    remove: (id) => invoke("remove_release_wishlist_item", { id }),
+    setMuted: (id, muted) => invoke("set_release_wishlist_muted", { id, muted }),
+    acknowledge: (eventIds) => invoke("acknowledge_release_wishlist_events", { eventIds }),
+    runDue: () => invoke("run_due_release_wishlist"),
+  },
   collectionTracking: {
     runUpdates: (provider) => invoke("run_collection_updates", { provider }),
     updateStatus: (provider) => invoke("get_collection_update_status", { provider }),

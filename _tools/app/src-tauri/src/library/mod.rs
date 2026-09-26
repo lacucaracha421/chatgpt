@@ -130,6 +130,8 @@ mod online_catalog;
 mod provider_requests;
 mod query;
 mod release_watch;
+pub(crate) mod release_calendar;
+pub(crate) mod release_wishlist;
 pub(crate) use release_watch::release_status_at;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
@@ -388,7 +390,11 @@ impl Library {
         library.recover_video_similarity_scans()?;
         library.recover_character_autotag()?;
         library.requeue_interrupted_cloud_sync()?;
-        library.cleanup_unreferenced_work_artwork()?;
+        // Best effort: a locked or read-only orphan (antivirus, a sync client, a viewer)
+        // must not stop the library from opening; the next open retries (review M3).
+        if let Err(error) = library.cleanup_unreferenced_work_artwork() {
+            eprintln!("work artwork cleanup skipped: {error}");
+        }
         library.start_work_artwork_thumbnail_backfill();
         library.request_catalog_preparation();
         Ok(library)

@@ -284,6 +284,14 @@ fn an_unappliable_entry_does_not_block_later_exclusions() {
         Some("rejected")
     );
     assert_eq!(cursor(&library), Some(2));
+    // The skip is durable and reaches the sync-state panel; the applied entry is not a skip.
+    let skips = library
+        .authority_sync_health()
+        .unwrap()
+        .character_exclusions;
+    assert_eq!(skips.skipped_count, 1);
+    assert_eq!(skips.last_skip_reason.as_deref(), Some("targetMissing"));
+    assert!(skips.last_skipped_at.is_some());
 }
 
 #[test]

@@ -191,6 +191,8 @@ export type AuthoritySyncHealth = {
   albums: AuthorityDomainHealth;
   classifications: AuthorityDomainHealth;
   assets: { rejectedCount: number; rejectedReason: string | null; stopped: boolean };
+  /** Mobile character exclusions this PC could never apply (e.g. the character was deleted). */
+  characterExclusions: { skippedCount: number; lastSkipReason: string | null; lastSkippedAt: string | null };
   authorityPassFailure: AuthorityLaneFailure | null;
   assetLaneFailure: AuthorityLaneFailure | null;
 };
@@ -347,7 +349,7 @@ export type AssetView =
   | { kind: "private_vault" }
   | { kind: "settings"; section?: "general" | "library" | "cloud" | "catalog" | "external_services" | "data" | "about" | "advanced" }
   | { kind: "manga" }
-  | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider }
+  | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
   | { kind: "revisited-bundle"; bundleId: string; title: string; assetIds: string[] };
 
@@ -1193,7 +1195,56 @@ export interface CollectionTrackingGateway {
   acknowledge(collectionId: string, eventIds: string[]): Promise<void>;
 }
 
+/** 발매 캘린더: a provider date's precision. `date` is the first day of the stated period. */
+export type ReleaseDatePrecision = "exact" | "month" | "quarter" | "year" | "tbd";
+export type ReleaseTitleKind = "game" | "movie";
+export type ReleaseProviderDate = { region: string; platform: string; date: string | null; precision: ReleaseDatePrecision };
+/** An upcoming game (IGDB) or movie (TMDB); `id` is `provider:externalId`. */
+export type ReleaseTitle = {
+  id: string;
+  kind: ReleaseTitleKind;
+  provider: "igdb" | "tmdb";
+  externalId: string;
+  title: string;
+  originalTitle: string | null;
+  /** IGDB image id or TMDB poster path. */
+  cover: string | null;
+  platforms: string[];
+  date: string | null;
+  precision: ReleaseDatePrecision;
+  region: string | null;
+  popularity: number;
+  dates: ReleaseProviderDate[];
+};
+export type ReleaseCalendarSource = { provider: "igdb" | "tmdb"; fetchedAt: string | null; attemptedAt: string | null; errorCode: string | null; due: boolean };
+export type ReleaseCalendar = { rangeStart: string; rangeEnd: string; entries: Array<ReleaseTitle & { watched: boolean }>; sources: ReleaseCalendarSource[] };
+export type ReleaseWishlistEvent = { id: string; itemId: string; kind: "date_set" | "date_changed" | "released"; previousValue: string | null; currentValue: string | null; detectedAt: string; readAt: string | null };
+export type ReleaseWishlistItem = ReleaseTitle & {
+  source: "calendar" | "manual";
+  addedAt: string;
+  muted: boolean;
+  lastCheckedAt: string | null;
+  nextCheckAt: string | null;
+  released: boolean;
+  unread: ReleaseWishlistEvent[];
+};
+export type ReleaseWishlistRunResult = { checked: number; changed: number; remaining: number; stopReason: string | null };
+export interface ReleaseCalendarGateway {
+  /** The cached calendar; no network. */
+  calendar(): Promise<ReleaseCalendar>;
+  /** Refresh due providers (at most daily). */
+  refresh(force: boolean): Promise<ReleaseCalendar>;
+  wishlist(): Promise<ReleaseWishlistItem[]>;
+  add(id: string): Promise<ReleaseWishlistItem>;
+  remove(id: string): Promise<void>;
+  setMuted(id: string, muted: boolean): Promise<void>;
+  acknowledge(eventIds: string[]): Promise<void>;
+  runDue(): Promise<ReleaseWishlistRunResult>;
+}
+
 export interface LibraryGateway {
+  /** Game/movie release calendar and wishlist (desktop only). */
+  releaseCalendar?: ReleaseCalendarGateway;
   getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
   measureLibraryDerivativeStorage?(): Promise<import("../statistics/types").DerivativeStorage>;
   recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;

@@ -235,6 +235,7 @@ const domain = { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReas
 const healthy: AuthoritySyncHealth = {
   albums: domain, classifications: domain,
   assets: { rejectedCount: 0, rejectedReason: null, stopped: false },
+  characterExclusions: { skippedCount: 0, lastSkipReason: null, lastSkippedAt: null },
   authorityPassFailure: null, assetLaneFailure: null,
 };
 
@@ -290,4 +291,13 @@ it("names a network failure and an unknown drop reason plainly", () => {
   expect(summary.problemCount).toBe(1);
   expect(summary.problems).toEqual(["서버 동기화 실패 · 연결 실패"]);
   expect(summary.notes).toEqual(["서버가 받지 않은 변경 1개 · 최근: 서버 상태가 우선함"]);
+});
+
+it("reports skipped mobile character exclusions as information", () => {
+  const summary = authoritySyncSummary({
+    ...healthy,
+    characterExclusions: { skippedCount: 2, lastSkipReason: "targetMissing", lastSkippedAt: "2026-09-26T00:00:00Z" },
+  });
+  expect(summary.problemCount).toBe(0);
+  expect(summary.notes).toEqual(["적용하지 못한 모바일 캐릭터 제외 2개 · 최근: 삭제된 캐릭터"]);
 });

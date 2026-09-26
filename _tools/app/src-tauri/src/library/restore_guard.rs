@@ -14,6 +14,9 @@
 //!   `classification_authority_assignment_revisions` — the Classification domain's
 //!   adopted identity, cursor and revision caches (receive-only in 2B: this domain has
 //!   no outbox until 2B.1 adds the send half);
+//! * `asset_authority` / `asset_authority_state` / `asset_lifecycle_outbox` /
+//!   `asset_purge_pending` — the Asset lifecycle domain's adopted identity, cursor,
+//!   confirmed lifecycle and durable trash/restore/purge intents (ADR-0038);
 //! * `library_settings.library_id` — the logical library this replica belongs to.
 //!
 //! Restoring an older snapshot of that file can therefore silently roll the replica
@@ -63,6 +66,10 @@ pub(crate) const PROBES: &[Probe] = &[
     Probe {
         domain: "classifications",
         adopted: classifications_adopted,
+    },
+    Probe {
+        domain: "assets",
+        adopted: assets_adopted,
     },
 ];
 
@@ -149,6 +156,31 @@ fn classifications_adopted(connection: &Connection) -> Result<bool, LibraryError
         .is_some())
 }
 
+/// The Asset lifecycle domain's adoption marker.
+///
+/// `asset_authority` gains its singleton row only when an Asset baseline has been
+/// installed, so the row's presence *is* the marker (migration 0088). An absent or empty
+/// table means "no Asset authority adopted".
+fn assets_adopted(connection: &Connection) -> Result<bool, LibraryError> {
+    // A pre-v88 database has no table at all.
+    let exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='asset_authority')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(false);
+    }
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM asset_authority WHERE singleton = 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 /// Domains that must block a whole-database restore on this database.
 ///
 /// Returns the adopted domain names in `PROBES` order. An empty list means the
@@ -221,6 +253,20 @@ mod tests {
         assert!(names.contains(&"catalog-bookmarks"));
         assert!(names.contains(&"albums"));
         assert!(names.contains(&"classifications"));
+        assert!(names.contains(&"assets"));
+    }
+
+    #[test]
+    fn an_adopted_asset_authority_reports_the_assets_domain() {
+        let (_temp, library) = open();
+        let connection = library.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_authority VALUES (1, ?1, 1, 1, 3)",
+                ["a1b2c3d4e5f60718293a4b5c6d7e8f90"],
+            )
+            .unwrap();
+        assert_eq!(adopted_domains(&connection).unwrap(), ["assets"]);
     }
 
     #[test]

@@ -552,6 +552,9 @@ impl Library {
         // cleared before any Classification is removed: `asset_classifications
         // .classification_id` is `ON DELETE RESTRICT`, and a stale relation to a dropped
         // Classification would block that removal.
+        // Assignments of Assets the server lost (an authority restore released them for
+        // re-upload) cannot be in this baseline; they are kept and re-sent below.
+        let unsent = unsent_assignments_of_waiting_assets(&transaction)?;
         transaction.execute("DELETE FROM asset_classifications", [])?;
         let live_ids: std::collections::BTreeSet<&str> = baseline
             .classifications
@@ -604,6 +607,21 @@ impl Library {
         // the authority cannot describe those Assets yet, so the wholesale clear above must
         // not erase them.
         reapply_waiting_assignments(&transaction)?;
+        let mut kept = Vec::new();
+        for (asset_id, classification_id) in unsent {
+            // An assignment the baseline describes either way is the server's decision.
+            let inserted = transaction.execute(
+                "INSERT INTO asset_classifications (asset_id, classification_id)
+                 SELECT ?1, id FROM classification_entries WHERE id = ?2
+                   AND NOT EXISTS(SELECT 1 FROM asset_classifications WHERE asset_id = ?1)
+                   AND NOT EXISTS(SELECT 1 FROM classification_authority_assignment_revisions
+                                  WHERE asset_id = ?1)",
+                params![asset_id, classification_id],
+            )?;
+            if inserted > 0 {
+                kept.push((asset_id, classification_id));
+            }
+        }
         // Character reconsideration is owed exactly for the locally materialized Assets
         // whose effective assignment this rebase actually changed. Comparing the whole
         // state once covers every transition — including an authoritative *absence* of a
@@ -616,6 +634,15 @@ impl Library {
             cursor: baseline.cursor,
         };
         write_authority(&transaction, &authority, &now)?;
+        // Queued after the new identity is written, so each intent carries its epoch and
+        // the assignment revision the baseline just confirmed.
+        for (asset_id, classification_id) in kept {
+            Self::enqueue_classification_assignment_intent(
+                &transaction,
+                &asset_id,
+                Some(&classification_id),
+            )?;
+        }
         transaction.commit()?;
         Ok(baseline.cursor)
     }
@@ -1423,6 +1450,29 @@ fn move_unconfirmed_assignments(
         )?;
     }
     Ok(())
+}
+
+/// Local assignments of Assets waiting for their upload that no queued intent carries.
+///
+/// A local assignment normally reaches the server as an intent. A waiting Asset with an
+/// assignment but no intent is one the Asset lane released after the server lost it (an
+/// authority restore): the assignment was confirmed once, and the replacing baseline
+/// cannot describe it, so it would otherwise be lost.
+fn unsent_assignments_of_waiting_assets(
+    transaction: &Transaction<'_>,
+) -> Result<Vec<(String, String)>, LibraryError> {
+    let rows = transaction
+        .prepare(&format!(
+            "SELECT c.asset_id, c.classification_id FROM asset_classifications c
+             WHERE {waiting}
+               AND NOT EXISTS(SELECT 1 FROM classification_authority_outbox o
+                   WHERE o.command_type = '{ASSIGNMENT}' AND o.asset_id = c.asset_id)
+             ORDER BY c.asset_id",
+            waiting = crate::library::album_authority::asset_waiting_sql("c.asset_id"),
+        ))?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// Re-apply the optimistic effect of assignment intents still waiting for their Asset.

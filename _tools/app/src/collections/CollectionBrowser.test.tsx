@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
-import type { CollectionSummary, CollectionTrackingGateway, CollectionUpdateProvider, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
+import type { CollectionSummary, CollectionTrackingGateway, CollectionUpdateProvider, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem, ReleaseCalendarGateway } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
 import { coverSourceUrl } from "./physical/collectibleRuntime";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
@@ -61,12 +61,15 @@ function renderBrowser(props: {
   onLibraryStateChange?: (next: ReturnType<typeof createDefaultCollectionLibraryState>["game"]) => void;
   tracking?: CollectionTrackingGateway;
   releaseProvider?: CollectionUpdateProvider;
+  releaseCalendar?: boolean;
+  calendarApi?: ReleaseCalendarGateway;
 }) {
   const gateway = createGateway();
   if (props.tracking) gateway.collectionTracking = props.tracking;
+  if (props.calendarApi) gateway.releaseCalendar = props.calendarApi;
   function Harness() {
     const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
-    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider}
+    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar}
       collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
       onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
       libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
@@ -197,6 +200,26 @@ describe("CollectionBrowser", () => {
     expect(tracking.listInbox).not.toHaveBeenCalled();
     await userEvent.setup().click(entry);
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: false, releaseProvider: "kakao" });
+  });
+
+  it("puts the 발매 캘린더 row under 신간 with the unread wishlist count and makes it current in the calendar", async () => {
+    const onViewChange = vi.fn();
+    const calendarApi = {
+      calendar: vi.fn().mockResolvedValue({ rangeStart: "2026-09-26", rangeEnd: "2027-03-28", entries: [], sources: [] }),
+      refresh: vi.fn(), add: vi.fn(), remove: vi.fn(), setMuted: vi.fn(), acknowledge: vi.fn(), runDue: vi.fn(),
+      wishlist: vi.fn().mockResolvedValue([{ id: "igdb:1", unread: [{ id: "e1" }, { id: "e2" }] }]),
+    } as unknown as ReleaseCalendarGateway;
+    renderBrowser({ collections: [], typeFilter: "game", showcase: false, tracking: trackingWith([]), calendarApi, onViewChange });
+    const entry = await screen.findByRole("button", { name: "발매 캘린더 보기, 관심 목록 새 알림 2개" });
+    expect(entry).not.toHaveAttribute("aria-current");
+    await userEvent.setup().click(entry);
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: false, releaseCalendar: true });
+    cleanup();
+
+    renderBrowser({ collections: [], typeFilter: "game", showcase: false, tracking: trackingWith([]), calendarApi, releaseCalendar: true });
+    expect(await screen.findByRole("region", { name: "발매 캘린더" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "컬렉션 유형" })).getAllByRole("button").filter(row => row.hasAttribute("aria-current")).map(row => row.textContent)).toEqual(["발매 캘린더2"]);
+    expect(screen.queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
   });
 
   it("keeps the manual update check in the 신간 view and explains an empty list", async () => {

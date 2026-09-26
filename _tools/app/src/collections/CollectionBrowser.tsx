@@ -1,5 +1,5 @@
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "@heroicons/react/24/outline";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -23,6 +23,7 @@ import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { TmdbMovieDialog } from "./TmdbMovieDialog";
 import { CollectionReleases } from "./CollectionReleases";
+import { ReleaseCalendarView } from "./ReleaseCalendarView";
 import { groupInbox, localDay, releaseCaption } from "./releaseCaption";
 import { useReleaseData } from "./releaseData";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
@@ -40,6 +41,8 @@ export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusI
 type CollectionBrowserProps = {
   /** The 신간 view: kakao = 한국 정발, mangadex = 일본. */
   releaseProvider?: CollectionUpdateProvider;
+  /** The 발매 캘린더 (upcoming games and movies, and the 관심 목록). */
+  releaseCalendar?: boolean;
   navigationMemory?: CollectionNavigationMemory;
   collections: CollectionSummary[];
   typeFilter: CollectionType;
@@ -68,6 +71,7 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
  */
 export function CollectionBrowser({
   releaseProvider,
+  releaseCalendar = false,
   navigationMemory,
   collections,
   typeFilter,
@@ -94,13 +98,22 @@ export function CollectionBrowser({
   const today = localDay();
   const openInbox = (provider: CollectionUpdateProvider) => onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider });
   const closeInbox = () => onViewChange({ kind: "collections", typeFilter, showcase });
+  const calendarApi = gateway.releaseCalendar;
+  const openCalendar = () => onViewChange({ kind: "collections", typeFilter, showcase: false, releaseCalendar: true });
+  // Unread 관심 목록 events for the 발매 캘린더 row; re-read after the view changes the wishlist.
+  const [wishlistUnread, setWishlistUnread] = useState(0);
+  const loadWishlistUnread = useCallback(() => {
+    if (!calendarApi) return;
+    void calendarApi.wishlist().then(items => setWishlistUnread(items.reduce((sum, item) => sum + item.unread.length, 0)), () => undefined);
+  }, [calendarApi]);
+  useEffect(loadWishlistUnread, [loadWishlistUnread]);
   const libraryStateRef = useRef(libraryState);
   libraryStateRef.current = libraryState;
   useAutoDismiss(message, setMessage);
   const stageRef = useRef<HTMLDivElement>(null);
   const [pageMemory, setPageMemory] = useState<{ scope: string; page: number } | null>(null);
   // The Showcase row fold is not part of the scroll scope: unfolding it keeps the position.
-  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider]);
+  const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar]);
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -134,7 +147,7 @@ export function CollectionBrowser({
   }
 
   function setTypeFilter(next: CollectionType) {
-    if (next === typeFilter && !releaseProvider && !showcase) return;
+    if (next === typeFilter && !releaseProvider && !releaseCalendar && !showcase) return;
     onViewChange({ kind: "collections", typeFilter: next, showcase: false });
   }
 
@@ -225,16 +238,20 @@ export function CollectionBrowser({
           </>
         );
 
-  const libraryView = !releaseProvider && !showcase;
+  const inbox = Boolean(releaseProvider) || releaseCalendar;
+  const libraryView = !inbox && !showcase;
   const sortValue = `${libraryState.sort}:${libraryState.direction}`;
   // The index: type rows and the 신간 row as selected-slab links, then the library's sort / 내 별점.
   const indexNavigation = <>
     <span className="workspace-section-label">작품 유형</span>
     <div className="collection-index__types" role="group" aria-label="컬렉션 유형">
-      {TYPES.map(value => <button key={value} type="button" className="workspace-index-link" aria-current={!releaseProvider && value === typeFilter ? "page" : undefined} onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}</button>)}
+      {TYPES.map(value => <button key={value} type="button" className="workspace-index-link" aria-current={!inbox && value === typeFilter ? "page" : undefined} onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}</button>)}
       {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
         aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
         onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
+      {calendarApi && <button type="button" className="workspace-index-link collection-index__calendar" aria-current={releaseCalendar ? "page" : undefined}
+        aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"}
+        onClick={() => { if (!releaseCalendar) openCalendar(); }}>발매 캘린더{wishlistUnread > 0 && <span className="collection-index__count" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}</button>}
     </div>
     {libraryView && <div className="chrome-index-controls chrome-settings-controls collection-index__controls">
       <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
@@ -271,20 +288,20 @@ export function CollectionBrowser({
   return (
     <section className="collection-browser" aria-label="컬렉션">
       <ViewToolbar
-        title={releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
-        titleContent={releaseProvider ? "신간" : showcase ? "쇼케이스" : "컬렉션"}
+        title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
+        titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? "쇼케이스" : "컬렉션"}
         ariaLabel="컬렉션 도구"
-        leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={releaseProvider ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
+        leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
         chrome={{
           actions: indexActions,
           navigation: indexNavigation,
           summary: `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
-          search: showcase ? undefined : { scope: releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
+          search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
         }}
       />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
-        {!releaseProvider && !workspace && <div className="collection-browser__heading">
+        {!inbox && !workspace && <div className="collection-browser__heading">
           <div>
             <h3>{sectionLabel} {showcase ? "쇼케이스" : "컬렉션"}</h3>
           </div>
@@ -293,17 +310,19 @@ export function CollectionBrowser({
         <div
           className="collection-browser__content-final"
           onContextMenu={(event) => {
-            if (releaseProvider || (event.target as HTMLElement).closest(".collection-card")) return;
+            if (inbox || (event.target as HTMLElement).closest(".collection-card")) return;
             event.preventDefault();
             setEditMode({ kind: "create", type: typeFilter });
           }}
         >
-          {releaseProvider && <CollectionReleases provider={releaseProvider} collections={collections} data={releases.data} loading={releases.loading} error={releases.error}
+          {releaseProvider && !releaseCalendar && <CollectionReleases provider={releaseProvider} collections={collections} data={releases.data} loading={releases.loading} error={releases.error}
             query={libraryState.query} coverUrl={collectionCoverUrl} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} onProviderChange={openInbox} />}
-          {!releaseProvider && showcase && visible.length > 0 &&
+          {releaseCalendar && <ReleaseCalendarView query={libraryState.query} onWishlistChange={loadWishlistUnread}
+            onOpenSettings={() => onViewChange({ kind: "settings", section: "external_services" })} />}
+          {!inbox && showcase && visible.length > 0 &&
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={collection => renderCollection(collection)} scrollRef={stageRef} />}
-          {!releaseProvider && showcase && visible.length === 0 && <div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div>}
-          {!releaseProvider && !showcase &&
+          {!inbox && showcase && visible.length === 0 && <div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div>}
+          {!inbox && !showcase &&
             <VirtualCoverGrid items={visible} itemKey={collection => collection.id} render={collection => renderCollection(collection)} legacyMetrics={typeFilter !== "manga"} metadataHeight={56} label={`${sectionLabel} 작품 목록`} scrollRef={stageRef}
               leading={leading} trailing={visible.length === 0 ? <div className="collection-browser__empty">{emptyLibrary}</div> : null} />}
         </div>

@@ -169,6 +169,15 @@ impl IgdbClient {
     pub fn image_url(image_id: &str, size: IgdbImageSize) -> Result<String, LibraryError> {
         image_url(image_id, size)
     }
+    /// Run an arbitrary Apicalypse query against the games endpoint and return the raw JSON.
+    /// Used by the release calendar, which owns its own query and parsing.
+    pub(crate) fn query_games(
+        &self,
+        credentials: &IgdbCredentials,
+        body: &str,
+    ) -> Result<String, LibraryError> {
+        self.request_games(credentials, body)
+    }
     pub(crate) fn download_original(&self, image_id: &str) -> Result<Vec<u8>, LibraryError> {
         let url = Self::image_url(image_id, IgdbImageSize::Original)?;
         let mut response = self.agent.get(&url).call().map_err(map_ureq_error)?;

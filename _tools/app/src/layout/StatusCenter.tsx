@@ -232,6 +232,13 @@ const DROP_REASON_TEXT: Record<string, string> = {
   epochChanged: "서버 라이브러리가 다시 설정됨",
 };
 
+const EXCLUSION_SKIP_TEXT: Record<string, string> = {
+  targetMissing: "삭제된 캐릭터",
+  assetMissing: "휴지통에 있거나 삭제된 이미지",
+  assetChanged: "내용이 바뀐 이미지",
+  protectedReference: "캐릭터의 기준 이미지",
+};
+
 export type AuthoritySyncSummary = {
   problemCount: number;
   problems: string[];
@@ -271,6 +278,12 @@ export function authoritySyncSummary(health: AuthoritySyncHealth | null): Author
       ?? health.assets.rejectedReason;
     const reason = latest ? DROP_REASON_TEXT[latest] ?? "서버 상태가 우선함" : null;
     notes.push(`서버가 받지 않은 변경 ${dropped.toLocaleString()}개${reason ? ` · 최근: ${reason}` : ""}`);
+  }
+  const skipped = health.characterExclusions?.skippedCount ?? 0;
+  if (skipped > 0) {
+    const code = health.characterExclusions.lastSkipReason;
+    const reason = code ? EXCLUSION_SKIP_TEXT[code] ?? "적용할 수 없는 상태" : null;
+    notes.push(`적용하지 못한 모바일 캐릭터 제외 ${skipped.toLocaleString()}개${reason ? ` · 최근: ${reason}` : ""}`);
   }
   return { problemCount, problems, notes };
 }

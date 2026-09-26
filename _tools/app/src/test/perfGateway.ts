@@ -139,6 +139,7 @@ export function perfGateway(options: PerfGatewayOptions = {}): LibraryGateway {
       albums: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null },
       classifications: { blockedCount: 0, waitingCount: 0, droppedCount: 0, lastDropReason: null, lastDroppedAt: null },
       assets: { rejectedCount: 0, rejectedReason: null, stopped: false },
+      characterExclusions: { skippedCount: 0, lastSkipReason: null, lastSkippedAt: null },
       authorityPassFailure: null, assetLaneFailure: null,
     })),
     runDueMobilePublications: vi.fn().mockResolvedValue(undefined),

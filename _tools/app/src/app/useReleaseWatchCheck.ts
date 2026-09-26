@@ -55,6 +55,10 @@ export function useReleaseWatchCheck(
           const result = await gateway.runDueReleaseWatch();
           if (active) await onChanged(result);
         }
+        // Watched games and movies (발매 캘린더 관심 목록); the backend decides which are due.
+        if (active && gateway.releaseCalendar && !getWorkloadProfile().restricted) {
+          try { await gateway.releaseCalendar.runDue(); } catch { /* retried on the hourly pass */ }
+        }
       } finally {
         if (active) timer = setTimeout(() => void run().catch(() => undefined), Math.max(CONTINUATION_MS, nextWakeAt - Date.now()));
       }

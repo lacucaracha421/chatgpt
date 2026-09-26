@@ -615,50 +615,15 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let status = read_status()?;
-        let Some(remote) = status.domains.iter().find(|d| d.domain == "assets") else {
-            if authority(&*self.connection()?)?.is_some() {
-                return invalid();
-            }
+        let Some((a, applied)) = self.receive_assets(client, token, &status, skip_unchanged)?
+        else {
             return Ok(AssetSyncResult::default());
-        };
-        if remote.library_id != self.library_id()? || remote.contract_version != 1 {
-            return invalid();
-        }
-        let a = Authority {
-            library: remote.library_id.clone(),
-            epoch: remote.epoch,
-            contract: remote.contract_version,
-            cursor: remote.cursor,
         };
         let mut result = AssetSyncResult {
             adopted: true,
+            applied_changes: applied,
             ..Default::default()
         };
-        let local = authority(&*self.connection()?)?;
-        let need_baseline = local.as_ref().is_none_or(|l| {
-            l.library != a.library || l.epoch != a.epoch || l.contract != a.contract
-        });
-        if need_baseline {
-            self.install_asset_baseline(client, token, &a)?;
-            result.applied_changes += 1;
-        } else if skip_unchanged && local.as_ref().is_some_and(|l| l.cursor == a.cursor) {
-            // The shared status proves the feed has nothing after the stored cursor.
-        } else {
-            let cursor = local.unwrap().cursor;
-            match self.catch_up_assets(client, token, &a, cursor) {
-                Ok(count) => result.applied_changes += count,
-                Err(LibraryError::AssetAuthorityRejected { ref code, .. })
-                    if matches!(
-                        code.as_str(),
-                        "cursorExpired" | "cursorAhead" | "baselineChanged"
-                    ) =>
-                {
-                    self.install_asset_baseline(client, token, &a)?;
-                    result.applied_changes += 1;
-                }
-                Err(e) => return Err(e),
-            }
-        }
         // Queued lifecycle writes require the publisher role; do not touch that credential on a clean queue.
         let pending: i64 = self.connection()?.query_row(
             "SELECT count(*) FROM asset_lifecycle_outbox",
@@ -677,6 +642,105 @@ impl Library {
         self.delete_accepted_purge_files()?;
         self.materialize_candidates(client, token, &mut result, restricted)?;
         Ok(result)
+    }
+    /// Bring the confirmed replica to `status`: a baseline on a new identity or a cursor
+    /// the change feed refuses, otherwise the change feed. `None` when the server has no
+    /// Asset domain and this library never adopted one. The caller holds `asset_sync_lock`.
+    fn receive_assets(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        status: &crate::cloud::client::SyncStatus,
+        skip_unchanged: bool,
+    ) -> Result<Option<(Authority, u32)>, LibraryError> {
+        let Some(remote) = status.domains.iter().find(|d| d.domain == "assets") else {
+            if authority(&*self.connection()?)?.is_some() {
+                return invalid();
+            }
+            return Ok(None);
+        };
+        if remote.library_id != self.library_id()? || remote.contract_version != 1 {
+            return invalid();
+        }
+        let a = Authority {
+            library: remote.library_id.clone(),
+            epoch: remote.epoch,
+            contract: remote.contract_version,
+            cursor: remote.cursor,
+        };
+        let local = authority(&*self.connection()?)?;
+        let need_baseline = local.as_ref().is_none_or(|l| {
+            l.library != a.library || l.epoch != a.epoch || l.contract != a.contract
+        });
+        let mut applied = 0;
+        if need_baseline {
+            self.install_asset_baseline(client, token, &a)?;
+            applied += 1;
+        } else if skip_unchanged && local.as_ref().is_some_and(|l| l.cursor == a.cursor) {
+            // The shared status proves the feed has nothing after the stored cursor.
+        } else {
+            let cursor = local.unwrap().cursor;
+            match self.catch_up_assets(client, token, &a, cursor) {
+                Ok(count) => applied += count,
+                Err(LibraryError::AssetAuthorityRejected { ref code, .. })
+                    if matches!(
+                        code.as_str(),
+                        "cursorExpired" | "cursorAhead" | "baselineChanged"
+                    ) =>
+                {
+                    self.install_asset_baseline(client, token, &a)?;
+                    applied += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(Some((a, applied)))
+    }
+
+    /// Before Album and Classification receive: when `status` shows the adopted Asset
+    /// authority moved to another identity or behind this replica's cursor (a server
+    /// authority restore), re-baseline the Asset replica first.
+    ///
+    /// Those baselines replace their relation tables wholesale. Only after the Asset
+    /// re-baseline has released the Assets the server lost (re-queueing their upload) can
+    /// they tell such an Asset's relations apart from ones the server removed, and keep
+    /// them. `Ok(Some(changed))`: the relation lanes may receive; `changed` when the Asset
+    /// replica moved. `Ok(None)`: the Asset lane is busy on another thread, so they wait
+    /// for a later pass.
+    pub(crate) fn settle_asset_identity_with_status(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        status: &crate::cloud::client::SyncStatus,
+    ) -> Result<Option<bool>, LibraryError> {
+        let pending = |local: Option<Authority>| {
+            let remote = status.domains.iter().find(|d| d.domain == "assets");
+            match (local, remote) {
+                (Some(l), Some(r)) => {
+                    l.library != r.library_id
+                        || l.epoch != r.epoch
+                        || l.contract != r.contract_version
+                        || l.cursor > r.cursor
+                }
+                _ => false,
+            }
+        };
+        if !pending(authority(&*self.connection()?)?) {
+            return Ok(Some(false));
+        }
+        let _single = match self.asset_sync_lock.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+        };
+        // Re-read under the lock: the Asset lane may have settled it meanwhile.
+        if !pending(authority(&*self.connection()?)?) {
+            return Ok(Some(false));
+        }
+        let applied = self
+            .receive_assets(client, token, status, false)?
+            .map_or(0, |(_, applied)| applied);
+        Ok(Some(applied > 0))
     }
     fn install_asset_baseline(
         &self,
@@ -2530,6 +2594,169 @@ mod tests {
         let claimed = library.claim_next_backfill_for_test().unwrap().unwrap();
         assert_eq!(claimed.queue.entity_id, ID);
         assert!(library.claim_next_backfill_for_test().unwrap().is_none());
+    }
+
+    /// Review follow-up: after a server authority restore, the Asset re-baseline settles
+    /// before the relation baselines, so a re-uploaded Asset keeps its Album and
+    /// Classification relations and they are queued again for the server.
+    #[test]
+    fn a_server_restore_keeps_and_resends_the_relations_of_a_lost_asset() {
+        use crate::cloud::client::{
+            AlbumProjection, ClassificationProjection, ClassificationRoleProjection,
+            SyncAuthorityDomain, SyncStatus,
+        };
+        let (_temp, library, p) = setup();
+        ingest(&library, &p, &media()).unwrap();
+        let lib = library.library_id().unwrap();
+        library
+            .adopt_album_authority_for_test(&lib, 1, 1, 5)
+            .unwrap();
+        library
+            .adopt_classification_authority_for_test(&lib, 1, 1, 5)
+            .unwrap();
+        {
+            let db = library.connection().unwrap();
+            db.execute(
+                "INSERT INTO albums(id,name,created_at) VALUES('album','Album','2026')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO asset_albums(asset_id,album_id) VALUES(?,'album')",
+                [ID],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO album_authority_membership_revisions VALUES('album',?,1,1,'2026')",
+                [ID],
+            )
+            .unwrap();
+            db.execute("INSERT INTO classification_entries(id,kind,name,created_at) VALUES('class','root','Class','2026')", []).unwrap();
+            db.execute("INSERT OR IGNORE INTO asset_classifications(asset_id,classification_id) VALUES(?,'class')", [ID]).unwrap();
+            db.execute("INSERT INTO classification_authority_assignment_revisions VALUES(?,'class',2,'2026')", [ID]).unwrap();
+            db.execute("INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at) VALUES('q','asset',?,'upsert','synced',1,'2026')", [ID]).unwrap();
+        }
+        let domain = |name: &str, epoch: i64, cursor: i64| SyncAuthorityDomain {
+            domain: name.into(),
+            library_id: lib.clone(),
+            epoch,
+            contract_version: 1,
+            cursor,
+        };
+        // The restored server lost the Asset: its Asset authority moved to a new identity.
+        let status = SyncStatus {
+            protocol_version: 1,
+            active: true,
+            library_id: Some(lib.clone()),
+            domains: vec![
+                domain("assets", 2, 7),
+                domain("albums", 1, 3),
+                domain("classifications", 1, 3),
+            ],
+            publisher_logs: None,
+        };
+        let (client, worker) = baseline_server(&library, 2, vec![]);
+        assert_eq!(
+            library
+                .settle_asset_identity_with_status(&client, "token", &status)
+                .unwrap(),
+            Some(true)
+        );
+        worker.join().unwrap();
+        // Settled: a second call does nothing (no server is listening any more).
+        assert_eq!(
+            library
+                .settle_asset_identity_with_status(&client, "token", &status)
+                .unwrap(),
+            Some(false)
+        );
+        // The relation baselines of the restored server do not know the Asset.
+        let album = AlbumProjection {
+            id: "album".into(),
+            name: "Album".into(),
+            parent_id: None,
+            icon_key: None,
+            color_key: None,
+            deleted: false,
+            entity_revision: 1,
+        };
+        library
+            .install_album_baseline_for_test(&[album], &[], &lib, 1, 1, 3)
+            .unwrap();
+        let class = |id: &str| ClassificationProjection {
+            id: id.into(),
+            kind: "root".into(),
+            name: id.into(),
+            parent_id: None,
+            icon_key: None,
+            color_key: None,
+            deleted: false,
+            entity_revision: 1,
+        };
+        let originals = ClassificationRoleProjection {
+            role: "originals".into(),
+            classification_id: "lakomics-originals".into(),
+        };
+        library
+            .install_classification_baseline_for_test(
+                &[class("lakomics-originals"), class("class")],
+                &[],
+                &[originals],
+                &lib,
+                1,
+                1,
+                3,
+            )
+            .unwrap();
+        assert_eq!(
+            count(
+                &library,
+                "SELECT count(*) FROM asset_albums WHERE album_id='album'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &library,
+                "SELECT count(*) FROM asset_classifications WHERE classification_id='class'"
+            ),
+            1
+        );
+        let db = library.connection().unwrap();
+        let (album_payload, album_epoch): (String, i64) = db
+            .query_row(
+                "SELECT payload,epoch FROM album_authority_outbox WHERE state='pending'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let album_body: Value = serde_json::from_str(&album_payload).unwrap();
+        assert_eq!(
+            (
+                album_body["desiredState"].as_bool(),
+                album_body["expectedRevision"].as_i64(),
+                album_epoch
+            ),
+            (Some(true), Some(0), 1)
+        );
+        let class_payload: String = db
+            .query_row(
+                "SELECT payload FROM classification_authority_outbox WHERE state='pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let class_body: Value = serde_json::from_str(&class_payload).unwrap();
+        assert_eq!(
+            (
+                class_body["classificationId"].as_str(),
+                class_body["expectedRevision"].as_i64()
+            ),
+            (Some("class"), Some(0))
+        );
+        // Both wait for the re-upload rather than being sent and refused.
+        use crate::library::album_authority::{asset_intent_readiness, AssetIntentReadiness};
+        assert!(asset_intent_readiness(&db, ID).unwrap() == AssetIntentReadiness::Wait);
     }
 
     #[test]

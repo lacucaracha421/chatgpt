@@ -188,6 +188,35 @@ impl TmdbClient {
         image_url(file_path, size)
     }
 
+    /// GET a v3 API path (for example `/discover/movie`) with query pairs and return the raw
+    /// JSON. Used by the release calendar, which owns its own requests and parsing.
+    pub(crate) fn get_json(
+        &self,
+        credentials: &TmdbCredentials,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<String, LibraryError> {
+        let token = trimmed_token(credentials)?;
+        if !path.starts_with('/')
+            || path.contains("..")
+            || !path
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_'))
+        {
+            return Err(LibraryError::TmdbInvalidResponse);
+        }
+        let mut url = Url::parse(&format!("{API_ORIGIN}{path}"))
+            .map_err(|_| LibraryError::TmdbInvalidResponse)?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in query {
+                pairs.append_pair(key, value);
+            }
+        }
+        let mut response = self.get(&url, &token)?;
+        read_body(&mut response)
+    }
+
     fn get(
         &self,
         url: &Url,

@@ -951,7 +951,12 @@ fn api_error_response(error: ApiError) -> ApiResponse {
 fn load_or_create_token(config_dir: &Path) -> Result<String, ApiError> {
     fs::create_dir_all(config_dir).map_err(|_| ApiError::TokenLoad)?;
     let path = config_dir.join(TOKEN_FILE_NAME);
-    let token = match OpenOptions::new().create_new(true).write(true).open(&path) {
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    // Readable by this account only: the token authorizes the loopback API.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let token = match options.open(&path) {
         Ok(mut file) => {
             let token = Uuid::new_v4().simple().to_string();
             file.write_all(token.as_bytes())
@@ -960,7 +965,14 @@ fn load_or_create_token(config_dir: &Path) -> Result<String, ApiError> {
             token
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            fs::read_to_string(&path).map_err(|_| ApiError::TokenLoad)?
+            let token = fs::read_to_string(&path).map_err(|_| ApiError::TokenLoad)?;
+            if token.is_empty() {
+                // A crash between create and write left no token at all; nothing was
+                // ever paired with it, so a fresh one is created instead of failing forever.
+                fs::remove_file(&path).map_err(|_| ApiError::TokenLoad)?;
+                return load_or_create_token(config_dir);
+            }
+            token
         }
         Err(_) => return Err(ApiError::TokenLoad),
     };
@@ -1235,6 +1247,23 @@ mod tests {
         assert!(first
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn the_install_token_is_private_and_an_empty_leftover_is_replaced() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join(TOKEN_FILE_NAME), "").unwrap();
+        let token = load_or_create_token(root.path()).unwrap();
+        assert_eq!(token.len(), 32);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(root.path().join(TOKEN_FILE_NAME))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 
     #[test]

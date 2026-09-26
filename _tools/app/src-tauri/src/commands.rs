@@ -56,6 +56,7 @@ use crate::library::models::{
 pub(crate) mod characters;
 pub(crate) mod av;
 pub(crate) mod video_similarity;
+pub(crate) mod release_calendar;
 
 #[tauri::command]
 pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {
@@ -505,12 +506,15 @@ fn open_library_in_state(
     state: &AppState,
     machine_settings: Option<std::path::PathBuf>,
 ) -> Result<LibrarySummary, CommandError> {
-    let mut current = state
-        .library
-        .write()
+    // Opens are serialized among themselves only. `Library::open` (lease, migrations,
+    // recovery) runs without the AppState lock, so the `lakomics://` handler and every
+    // command reading the current library keep working meanwhile (review M1).
+    static OPENING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _opening = OPENING
+        .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(library) = current
-        .as_ref()
+    if let Some(library) = state
+        .current_library()
         .filter(|library| library.root() == std::path::Path::new(&path))
     {
         return library.summary().map_err(CommandError::from);
@@ -521,14 +525,19 @@ fn open_library_in_state(
         library.use_machine_settings(settings);
     }
     let summary = library.summary().map_err(CommandError::from)?;
-    if let Some(previous) = current.as_ref() {
+    let previous = state
+        .library
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .replace(library);
+    // Stopped after the swap: the scan stop can wait up to 2 s and must not hold the lock.
+    if let Some(previous) = previous {
         previous.stop_character_scan();
         previous.stop_video_similarity_scan();
         // The Private Vault session belongs to the library runtime: lock it so two runtimes
         // never hold the same vault unlocked (a running import stops at its next step).
         previous.lock_encrypted_vault();
     }
-    *current = Some(library);
     Ok(summary)
 }
 
@@ -912,41 +921,45 @@ pub fn update_asset_metadata(
 }
 
 #[tauri::command]
-pub fn trash_assets(
+pub async fn trash_assets(
     asset_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .trash_assets(&asset_ids)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.trash_assets(&asset_ids).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn restore_asset(asset_id: String, state: State<'_, AppState>) -> Result<(), CommandError> {
-    current_required(state)?
-        .restore_asset(&asset_id)
-        .map_err(CommandError::from)
+pub async fn restore_asset(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || library.restore_asset(&asset_id).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn restore_assets(
+pub async fn restore_assets(
     asset_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .restore_assets(&asset_ids)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || {
+        library
+            .restore_assets(&asset_ids)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_trash(
+pub async fn list_trash(
     after: Option<crate::library::models::AssetCursor>,
     limit: u32,
     state: State<'_, AppState>,
 ) -> Result<TrashPage, CommandError> {
-    current_required(state)?
-        .list_trash(after, limit)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.list_trash(after, limit).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -959,20 +972,18 @@ pub async fn empty_trash(state: State<'_, AppState>) -> Result<PurgeSummary, Com
 }
 
 #[tauri::command]
-pub fn get_trash_policy(state: State<'_, AppState>) -> Result<TrashPolicy, CommandError> {
-    current_required(state)?
-        .trash_policy()
-        .map_err(CommandError::from)
+pub async fn get_trash_policy(state: State<'_, AppState>) -> Result<TrashPolicy, CommandError> {
+    let library = current_required(state)?;
+    off_ui_thread(move || library.trash_policy().map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn set_trash_policy(
+pub async fn set_trash_policy(
     policy: TrashPolicy,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    current_required(state)?
-        .set_trash_policy(policy)
-        .map_err(CommandError::from)
+    let library = current_required(state)?;
+    off_ui_thread(move || library.set_trash_policy(policy).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -1145,21 +1156,24 @@ pub async fn refresh_mangadex(
 }
 
 #[tauri::command]
-pub fn get_igdb_credential_status() -> Result<IgdbCredentialStatus, CommandError> {
-    credential::igdb_credential_status().map_err(CommandError::from)
+pub async fn get_igdb_credential_status() -> Result<IgdbCredentialStatus, CommandError> {
+    off_ui_thread(|| credential::igdb_credential_status().map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn set_igdb_credentials(
+pub async fn set_igdb_credentials(
     client_id: String,
     client_secret: String,
 ) -> Result<IgdbCredentialStatus, CommandError> {
-    credential::set_igdb_credentials_os(&client_id, &client_secret).map_err(CommandError::from)
+    off_ui_thread(move || {
+        credential::set_igdb_credentials_os(&client_id, &client_secret).map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_igdb_credentials() -> Result<IgdbCredentialStatus, CommandError> {
-    credential::delete_igdb_credentials_os().map_err(CommandError::from)
+pub async fn delete_igdb_credentials() -> Result<IgdbCredentialStatus, CommandError> {
+    off_ui_thread(|| credential::delete_igdb_credentials_os().map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -1233,18 +1247,18 @@ pub async fn replace_igdb_game_artwork(
 }
 
 #[tauri::command]
-pub fn get_tmdb_credential_status() -> Result<TmdbCredentialStatus, CommandError> {
-    credential::tmdb_credential_status().map_err(CommandError::from)
+pub async fn get_tmdb_credential_status() -> Result<TmdbCredentialStatus, CommandError> {
+    off_ui_thread(|| credential::tmdb_credential_status().map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn set_tmdb_token(token: String) -> Result<TmdbCredentialStatus, CommandError> {
-    credential::set_tmdb_token_os(&token).map_err(CommandError::from)
+pub async fn set_tmdb_token(token: String) -> Result<TmdbCredentialStatus, CommandError> {
+    off_ui_thread(move || credential::set_tmdb_token_os(&token).map_err(CommandError::from)).await
 }
 
 #[tauri::command]
-pub fn delete_tmdb_token() -> Result<TmdbCredentialStatus, CommandError> {
-    credential::delete_tmdb_token_os().map_err(CommandError::from)
+pub async fn delete_tmdb_token() -> Result<TmdbCredentialStatus, CommandError> {
+    off_ui_thread(|| credential::delete_tmdb_token_os().map_err(CommandError::from)).await
 }
 
 #[tauri::command]
@@ -1330,22 +1344,31 @@ pub fn get_mangadex_connection(
 }
 
 #[tauri::command]
-pub fn get_aladin_credential_status() -> Result<AladinCredentialStatus, CommandError> {
-    credential::aladin_key_status()
-        .map(|configured| AladinCredentialStatus { configured })
-        .map_err(CommandError::from)
+pub async fn get_aladin_credential_status() -> Result<AladinCredentialStatus, CommandError> {
+    off_ui_thread(|| {
+        credential::aladin_key_status()
+            .map(|configured| AladinCredentialStatus { configured })
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_aladin_ttb_key(ttb_key: String) -> Result<AladinCredentialStatus, CommandError> {
-    credential::set_aladin_key(&ttb_key).map_err(CommandError::from)?;
-    Ok(AladinCredentialStatus { configured: true })
+pub async fn set_aladin_ttb_key(ttb_key: String) -> Result<AladinCredentialStatus, CommandError> {
+    off_ui_thread(move || {
+        credential::set_aladin_key(&ttb_key).map_err(CommandError::from)?;
+        Ok(AladinCredentialStatus { configured: true })
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_aladin_ttb_key() -> Result<AladinCredentialStatus, CommandError> {
-    credential::delete_aladin_key().map_err(CommandError::from)?;
-    Ok(AladinCredentialStatus { configured: false })
+pub async fn delete_aladin_ttb_key() -> Result<AladinCredentialStatus, CommandError> {
+    off_ui_thread(|| {
+        credential::delete_aladin_key().map_err(CommandError::from)?;
+        Ok(AladinCredentialStatus { configured: false })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1404,22 +1427,31 @@ pub fn get_aladin_connection(
 }
 
 #[tauri::command]
-pub fn get_kakao_credential_status() -> Result<AladinCredentialStatus, CommandError> {
-    credential::kakao_key_status()
-        .map(|configured| AladinCredentialStatus { configured })
-        .map_err(CommandError::from)
+pub async fn get_kakao_credential_status() -> Result<AladinCredentialStatus, CommandError> {
+    off_ui_thread(|| {
+        credential::kakao_key_status()
+            .map(|configured| AladinCredentialStatus { configured })
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_kakao_api_key(api_key: String) -> Result<AladinCredentialStatus, CommandError> {
-    credential::set_kakao_key(&api_key).map_err(CommandError::from)?;
-    Ok(AladinCredentialStatus { configured: true })
+pub async fn set_kakao_api_key(api_key: String) -> Result<AladinCredentialStatus, CommandError> {
+    off_ui_thread(move || {
+        credential::set_kakao_key(&api_key).map_err(CommandError::from)?;
+        Ok(AladinCredentialStatus { configured: true })
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_kakao_api_key() -> Result<AladinCredentialStatus, CommandError> {
-    credential::delete_kakao_key().map_err(CommandError::from)?;
-    Ok(AladinCredentialStatus { configured: false })
+pub async fn delete_kakao_api_key() -> Result<AladinCredentialStatus, CommandError> {
+    off_ui_thread(|| {
+        credential::delete_kakao_key().map_err(CommandError::from)?;
+        Ok(AladinCredentialStatus { configured: false })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -3329,6 +3361,15 @@ pub async fn sync_mangadex_volume_covers(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+/// Run blocking work (SQLite locks, OS credential stores) off the UI thread.
+async fn off_ui_thread<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, CommandError> + Send + 'static,
+) -> Result<T, CommandError> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|_| background_task_error())?
 }
 
 fn background_task_error() -> CommandError {

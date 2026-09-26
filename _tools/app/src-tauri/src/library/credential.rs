@@ -273,11 +273,18 @@ mod windows {
 
             let value = unsafe {
                 let credential_ref = &*credential;
-                let value = slice::from_raw_parts(
-                    credential_ref.CredentialBlob,
-                    credential_ref.CredentialBlobSize as usize,
-                )
-                .to_vec();
+                // An empty blob may come with a null pointer, which `from_raw_parts` forbids.
+                let value = if credential_ref.CredentialBlob.is_null()
+                    || credential_ref.CredentialBlobSize == 0
+                {
+                    Vec::new()
+                } else {
+                    slice::from_raw_parts(
+                        credential_ref.CredentialBlob,
+                        credential_ref.CredentialBlobSize as usize,
+                    )
+                    .to_vec()
+                };
                 CredFree(credential.cast());
                 value
             };

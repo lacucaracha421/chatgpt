@@ -86,10 +86,15 @@ impl Library {
             if child.parent() != Some(canonical_drag_root.as_path()) {
                 return Err(LibraryError::UnsafeMediaPath);
             }
-            if child.is_dir() {
-                fs::remove_dir_all(child).map_err(drag_error)?;
+            // Best effort per entry: a drop target may still hold a file open (Windows),
+            // and a leftover must never stop the library from opening (review M6).
+            let removed = if child.is_dir() {
+                fs::remove_dir_all(&child)
             } else {
-                fs::remove_file(child).map_err(drag_error)?;
+                fs::remove_file(&child)
+            };
+            if let Err(error) = removed {
+                eprintln!("stale drag-out entry kept: {}: {error}", child.display());
             }
         }
         Ok(())
@@ -257,6 +262,28 @@ fn library_open_removes_stale_drag_directories() {
         .next()
         .is_none());
     drop(library);
+}
+
+/// Review M6/M3: a leftover that cannot be removed (a drop target or another program still
+/// holds it; simulated with a read-only directory) must not stop the library from opening.
+#[cfg(unix)]
+#[test]
+fn an_unremovable_leftover_does_not_stop_the_library_from_opening() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    drop(Library::open(temp.path()).unwrap());
+    let stale = temp.path().join(".drag-out/stale");
+    let artwork = temp.path().join("work-artwork/orphan-collection");
+    for directory in [&stale, &artwork] {
+        std::fs::create_dir_all(directory).unwrap();
+        std::fs::write(directory.join("locked.png"), b"old").unwrap();
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o555)).unwrap();
+    }
+    let opened = Library::open(temp.path());
+    for directory in [&stale, &artwork] {
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    drop(opened.unwrap());
 }
 
 #[cfg(test)]

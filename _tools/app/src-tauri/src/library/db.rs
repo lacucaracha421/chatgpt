@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 97;
+pub(crate) const SCHEMA_VERSION: i64 = 99;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -563,6 +563,15 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0097_catalog_duplicate_sync.sql"
             ))?;
         }
+        if version <= 97 {
+            transaction
+                .execute_batch(include_str!("../../migrations/0098_release_calendar.sql"))?;
+        }
+        if version <= 98 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0099_character_exclusion_skip_reason.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -662,6 +671,52 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn v98_adds_the_release_calendar_and_wishlist_tables_with_their_constraints() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 97);
+        migrate_to_latest(&mut connection, 97).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        connection
+            .execute_batch(
+                "INSERT INTO release_watch_items(id,kind,provider,external_id,title,source,added_at)
+                 VALUES('igdb:7','game','igdb','7','게임','calendar','2026-09-26T00:00:00Z');
+                 INSERT INTO release_watch_dates(item_id,region,platform,date,precision,checked_at)
+                 VALUES('igdb:7','korea','PC','2026-10-01','month','2026-09-26T00:00:00Z'),
+                       ('igdb:7','worldwide','PC',NULL,'tbd','2026-09-26T00:00:00Z');
+                 INSERT INTO release_watch_item_events(id,item_id,event_kind,current_value,detected_at)
+                 VALUES('e1','igdb:7','date_set','2026-10','2026-09-26T00:00:00Z');",
+            )
+            .unwrap();
+        // The id is always provider:external_id, and a movie is never an IGDB title.
+        for bad in [
+            "INSERT INTO release_watch_items(id,kind,provider,external_id,title,source,added_at) VALUES('x','game','igdb','8','g','calendar','t')",
+            "INSERT INTO release_watch_items(id,kind,provider,external_id,title,source,added_at) VALUES('igdb:9','movie','igdb','9','g','calendar','t')",
+            "INSERT INTO release_watch_dates(item_id,region,platform,date,precision,checked_at) VALUES('igdb:7','asia','',NULL,'exact','t')",
+        ] {
+            assert!(connection.execute(bad, []).is_err(), "{bad}");
+        }
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        connection
+            .execute("DELETE FROM release_watch_items WHERE id='igdb:7'", [])
+            .unwrap();
+        for table in ["release_watch_dates", "release_watch_item_events"] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} rows follow their watched title");
+        }
     }
 
     #[test]

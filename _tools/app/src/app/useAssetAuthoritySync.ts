@@ -16,9 +16,10 @@ export function useAssetAuthoritySync(gateway:LibraryGateway,libraryRoot:string)
         window.dispatchEvent(new Event(ALBUM_AUTHORITY_CHANGED_EVENT));
         window.dispatchEvent(new Event(ASSET_LIFECYCLE_CHANGED_EVENT));
       };
+      // No focus relay: the native pass already wakes on window focus and emits this
+      // event only when local Asset state really changed.
       void listen("library://asset-authority-changed", changed).then(stop => { if (stopped) stop(); else unlisten = stop; }).catch(() => undefined);
-      window.addEventListener("focus", changed);
-      return () => { stopped = true; unlisten?.(); window.removeEventListener("focus", changed); };
+      return () => { stopped = true; unlisten?.(); };
     }
     if (!gateway.syncAssetAuthority) return;
     let active=true,running=false;

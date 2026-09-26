@@ -54,3 +54,24 @@ it("the desktop app sends no per-domain polls from React and relays the native p
   expect(relays()).toHaveLength(0);
   events.forEach(name => window.removeEventListener(name, record));
 });
+
+it("the desktop app does not turn a window focus into Asset change events", async () => {
+  const { useAssetAuthoritySync, ASSET_LIFECYCLE_CHANGED_EVENT } = await import("./useAssetAuthoritySync");
+  const { ALBUM_AUTHORITY_CHANGED_EVENT } = await import("./useAlbumAuthoritySync");
+  const { CLASSIFICATION_AUTHORITY_CHANGED_EVENT } = await import("./useClassificationAuthoritySync");
+  const gateway = { syncAssetAuthority: vi.fn() } as unknown as LibraryGateway;
+  const seen: string[] = [];
+  const events = [CLASSIFICATION_AUTHORITY_CHANGED_EVENT, ALBUM_AUTHORITY_CHANGED_EVENT, ASSET_LIFECYCLE_CHANGED_EVENT];
+  const record = (event: Event) => seen.push(event.type);
+  events.forEach(name => window.addEventListener(name, record));
+  const { unmount } = renderHook(() => useAssetAuthoritySync(gateway, "root"));
+  await waitFor(() => expect(handlers.has("library://asset-authority-changed")).toBe(true));
+  window.dispatchEvent(new Event("focus"));
+  expect(seen).toEqual([]);
+  expect(gateway.syncAssetAuthority).not.toHaveBeenCalled();
+  // A real native change still refreshes all three views.
+  handlers.get("library://asset-authority-changed")!();
+  expect(seen).toEqual(events);
+  unmount();
+  events.forEach(name => window.removeEventListener(name, record));
+});

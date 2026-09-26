@@ -882,6 +882,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 ) : view.kind === "collections" ? (
                   <CollectionBrowser
                     releaseProvider={view.kind === "collections" ? view.releaseProvider : undefined}
+                    releaseCalendar={view.kind === "collections" ? view.releaseCalendar : undefined}
                     collections={collections}
                     typeFilter={view.typeFilter}
                     showcase={view.showcase}
