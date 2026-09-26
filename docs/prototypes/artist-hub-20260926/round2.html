@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artist Hub Round 2</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css and mobile-client/mobile.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-control:#232425; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --color-filter-selected:#383838; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-dialog:0 10px 30px rgba(0,0,0,.45);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo);
+  --selection-mark-size:7px;
+  --radius-tile:2px; --radius-sm:4px;
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --gutter:16px;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+svg.i.solid { fill:currentColor; stroke:none; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.muted { color:var(--color-muted); }
+img { display:block; }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:2560px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.toolbar a { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; color:var(--color-text); text-decoration:none; font-size:13px; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; width:28px; height:28px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1250px; line-height:1.7; margin-top:8px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:14px; color:var(--color-muted); margin-bottom:10px; line-height:1.6; max-width:800px; }
+figcaption b { color:var(--color-text); }
+.scaled { zoom:.5; }
+.scaled figcaption { font-size:26px; max-width:none; }
+.pc figcaption { max-width:1680px; }
+table.data { border-collapse:collapse; margin-top:14px; font-size:13.5px; width:100%; max-width:1500px; }
+table.data th, table.data td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--color-border); line-height:1.55; }
+table.data th { color:var(--color-muted); font-weight:500; font-size:12.5px; }
+table.data td:first-child { color:var(--color-text); font-weight:500; white-space:nowrap; }
+table.data code, .notes code { font-size:12px; color:#cfd3d6; background:var(--color-surface); padding:0 4px; border-radius:2px; }
+.st { display:inline-block; min-width:44px; text-align:center; font-size:12px; font-weight:600; padding:1px 6px; border-radius:2px; }
+.st.ok { background:#2c3a33; color:#bfe0cc; }
+.st.part { background:#3a3629; color:#e6d9a8; }
+.st.new { background:#3a2c2c; color:#f0c0c0; }
+/* Screenshot mode: one topic at 1:1, no document chrome. */
+body.shot .doc>header, body.shot section.topic:not(.shown) { display:none; }
+body.shot .doc { padding:24px; max-width:none; }
+body.shot section.topic { margin:0; border:0; padding:0; }
+body.shot section.topic>.notes, body.shot section.topic>h2 { display:none; }
+body.shot .scaled { zoom:1; }
+body.shot .scaled figcaption { font-size:15px; }
+body.shot .row { flex-wrap:nowrap; margin-top:0; margin-bottom:24px; }
+
+/* ===== Shared bits ===== */
+.slabel { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--color-muted); letter-spacing:.3px; }
+.slabel::before { content:''; width:5px; height:5px; background:rgba(221,216,202,.6); flex:none; }
+.slabel::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06)); }
+.slabel .numeric { font-size:13px; }
+.chip { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:4px; white-space:nowrap; font-size:14px; color:var(--color-text); }
+.chip.on { background:var(--color-filter-selected); border-color:var(--color-filter-border); }
+.chip .numeric { color:var(--color-muted); font-size:13px; }
+.chip.sm { height:30px; padding:0 9px; font-size:13px; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:36px; padding:0 12px; font-size:14px; font-weight:500; white-space:nowrap; border-radius:4px; border:1px solid var(--color-border); background:var(--color-control); box-shadow:var(--inset-light); flex:none; color:var(--color-text); }
+.btn svg.i { width:18px; height:18px; }
+.btn.primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); box-shadow:none; }
+.btn.ghost { background:transparent; border-color:transparent; box-shadow:none; color:var(--color-muted); }
+.ib { width:44px; height:44px; display:inline-grid; place-items:center; border:0; background:transparent; color:var(--color-muted); border-radius:4px; position:relative; flex-shrink:0; }
+.ib.on { color:var(--color-accent); }
+.th { display:block; background:var(--color-surface); overflow:hidden; border-radius:var(--radius-tile); flex:none; }
+.th img { width:100%; height:100%; object-fit:cover; }
+.name { font-family:"Barlow","SUIT",sans-serif; font-weight:500; }
+.handle { color:var(--color-muted); font-size:12px; font-family:"Barlow",sans-serif; }
+.why { display:inline-flex; align-items:center; gap:7px; font-size:13px; color:var(--color-accent); font-weight:600; white-space:nowrap; }
+.why::before { content:''; width:6px; height:6px; background:var(--color-accent); flex:none; }
+.why.quiet { color:var(--color-muted); font-weight:500; }
+.why.quiet::before { background:transparent; border:1px solid var(--color-muted); }
+/* A masonry block (CSS columns stand in for the real waterfall renderer). */
+.mason { column-gap:8px; }
+.mason .th { width:100%; margin-bottom:8px; break-inside:avoid; }
+.dhead { font:500 15px var(--font-numeric); color:var(--color-text); display:flex; gap:8px; align-items:baseline; margin:14px 0 8px; }
+.dhead small { font:13px var(--font-ui); color:var(--color-muted); }
+.strip { display:flex; gap:6px; overflow:hidden; position:relative; }
+.strip.fade::after { content:''; position:absolute; top:0; right:0; bottom:0; width:60px; background:linear-gradient(90deg,transparent,var(--color-bg)); }
+
+/* ===== Tablet frame: Galaxy Tab S11 portrait 800 × 1280 ===== */
+.frame { position:relative; width:800px; height:1280px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); display:flex; flex-direction:column; }
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 16px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar.sub { padding-left:4px; }
+.bar .brand { display:flex; align-items:center; color:var(--color-accent); margin-right:12px; }
+.bar .brand svg.mark { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.bar h1 { font-size:20px; font-weight:600; line-height:1.2; white-space:nowrap; display:flex; align-items:baseline; gap:8px; }
+.bar h1 .numeric { font-size:16px; font-weight:500; color:var(--color-muted); }
+.bar .stack { display:flex; flex-direction:column; min-width:0; line-height:1.2; margin-left:2px; }
+.bar .crumb { font-size:13px; color:var(--color-muted); }
+.bar .space { flex:1; }
+.content { flex:1; min-height:0; overflow:hidden; position:relative; }
+.fade-end::after { content:''; position:absolute; left:0; right:0; bottom:0; height:40px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:3; }
+.pad { padding:0 var(--gutter); }
+.nav { flex-shrink:0; height:60px; margin-bottom:8px; padding:3px 0; display:flex; justify-content:center; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav button { flex:1 1 0; max-width:122px; min-height:53px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:0; background:transparent; color:var(--color-muted); position:relative; font:11px/1.2 var(--font-ui); }
+.nav button.active { color:var(--color-accent); }
+.nav button.active::after { content:''; position:absolute; top:-3px; left:calc(50% - 8px); width:16px; height:2px; background:currentColor; }
+.seg-tabs { display:flex; align-self:stretch; margin-left:14px; }
+.seg-tabs span { height:100%; padding:0 14px; display:flex; align-items:center; gap:6px; color:var(--color-muted); font-size:15px; position:relative; }
+.seg-tabs span.sel { color:var(--color-text); font-weight:600; }
+.seg-tabs span.sel::after { content:''; position:absolute; left:8px; right:8px; bottom:-1px; height:2px; background:var(--color-accent); }
+.seg-tabs .numeric { font-size:14px; color:var(--color-muted); font-weight:500; }
+
+/* ===== PC frame: 1680 × 1050, Chrome 03b shell ===== */
+.win { position:relative; width:1680px; height:1050px; display:flex; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); }
+.rail { width:64px; flex:none; display:flex; flex-direction:column; gap:6px; padding:6px 6px 10px; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.rail .mk { height:38px; display:grid; place-items:center; margin-bottom:4px; color:var(--color-accent); }
+.rail .mk svg { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.ri { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:56px; color:var(--color-muted); font-size:12px; line-height:14px; }
+.ri svg.i { width:20px; height:20px; }
+.ri.on { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.ri.on::after { content:''; position:absolute; right:4px; top:4px; width:4px; height:4px; background:currentColor; }
+.rail .tail { margin-top:auto; }
+.index { width:260px; flex:none; display:flex; flex-direction:column; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.index-head { height:44px; flex:none; display:flex; align-items:center; padding:0 4px 0 16px; border-bottom:1px solid var(--color-border); font-size:15px; font-weight:500; }
+.index-head .space { flex:1; }
+.index-head .ib { width:36px; height:36px; }
+.index-head .ib svg.i { width:18px; height:18px; }
+.index-body { flex:1; min-height:0; overflow:hidden; padding:14px 14px 12px 14px; display:flex; flex-direction:column; gap:4px; position:relative; }
+.index-body .slabel { margin:10px 0 4px; }
+.index-body .slabel:first-child { margin-top:0; }
+.index-foot { flex:none; border-top:1px solid var(--color-border); padding:10px 14px; display:flex; align-items:center; gap:8px; font-size:13px; color:var(--color-muted); }
+/* Selected rows: ivory slab + hard echo + small dark mark on the right; no outside cursor (2026-09-26 rule). */
+.irow { position:relative; display:flex; align-items:center; gap:10px; min-height:36px; padding:4px 10px; color:var(--color-text); font-size:14px; }
+.irow svg.i { width:18px; height:18px; color:var(--color-muted); }
+.irow .txt { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.irow .n { font:500 13px var(--font-numeric); color:var(--color-muted); }
+.irow .th { width:26px; height:26px; }
+.irow.sel { background:var(--color-accent); color:var(--color-on-accent); box-shadow:var(--selection-echo); }
+.irow.sel svg.i, .irow.sel .n { color:var(--color-on-accent); }
+.irow.sel::after { content:''; width:var(--selection-mark-size); height:var(--selection-mark-size); background:var(--color-on-accent); flex:none; }
+.main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
+.titlebar { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding-left:18px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.titlebar h2 { font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.titlebar h2::before { content:''; width:5px; height:5px; background:var(--color-accent); }
+.titlebar .st { font-size:12.5px; color:var(--color-muted); }
+.titlebar .space { flex:1; }
+.titlebar .ib { width:36px; height:36px; }
+.titlebar .ib svg.i { width:18px; height:18px; }
+.winctl { display:flex; height:100%; margin-left:8px; }
+.winctl span { width:44px; height:100%; display:grid; place-items:center; color:var(--color-muted); }
+.winctl svg.i { width:14px; height:14px; stroke-width:1.3; }
+.mbody { flex:1; min-height:0; overflow:hidden; position:relative; }
+
+/* ===== A — tablet index ===== */
+.asearch { display:flex; align-items:center; gap:8px; height:44px; margin:12px var(--gutter) 0; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; color:var(--color-muted); }
+.asearch svg.i { width:18px; height:18px; }
+.sortrow { display:flex; gap:8px; padding:12px var(--gutter) 0; }
+.pins { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-top:10px; }
+.pin .th { width:100%; aspect-ratio:1; }
+.pin .name { font-size:14px; margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pin .meta { font:500 13px var(--font-numeric); color:var(--color-muted); }
+.arow { display:flex; align-items:center; gap:14px; min-height:84px; border-bottom:1px solid var(--color-border); padding:10px 0; }
+.arow>.th { width:62px; height:62px; }
+.arow .who { flex:1; min-width:0; display:grid; line-height:1.3; }
+.arow .who .name { font-size:16px; }
+.arow .who .meta { font-size:12.5px; color:var(--color-muted); margin-top:3px; }
+.arow .who .meta .numeric { font-size:13.5px; color:var(--color-text); }
+.arow .strip .th { width:58px; height:58px; }
+.arow>svg.i { color:var(--color-faint); width:18px; }
+/* A — tablet artist page */
+.hero { display:flex; gap:4px; height:250px; }
+.hero .th { height:100%; border-radius:0; }
+.ident { display:flex; align-items:flex-start; gap:14px; padding:16px var(--gutter) 0; }
+.ident .who { flex:1; min-width:0; }
+.ident h2 { font:600 26px/1.2 "Barlow","SUIT",sans-serif; }
+.ident .src { font-size:13px; color:var(--color-muted); margin-top:4px; display:flex; gap:10px; }
+.ident .acts { display:flex; gap:8px; }
+.facts { display:flex; gap:0; margin:16px var(--gutter) 0; border-top:1px solid var(--color-border); border-bottom:1px solid var(--color-border); }
+.facts div { flex:1; padding:10px 12px; display:grid; gap:1px; }
+.facts div+div { border-left:1px solid var(--color-border); }
+.facts small { font-size:12px; color:var(--color-muted); }
+.facts .numeric { font-size:19px; line-height:1.2; }
+.facts .txtv { white-space:nowrap; font-size:14px; line-height:1.5; padding-top:2px; }
+.chiprow { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.redisc { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:10px; }
+.rcard { border:1px solid var(--color-border); border-radius:2px; padding:10px; background:var(--color-sidebar); }
+.rcard .why { font-size:13px; }
+.rcard .sub { font-size:12px; color:var(--color-muted); margin:2px 0 8px; }
+.rcard .g { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; }
+.rcard .g .th { aspect-ratio:1; }
+.rcard .flag { font-size:11px; color:var(--color-faint); margin-top:6px; }
+
+/* ===== A — PC ===== */
+.apc-head { display:flex; gap:24px; padding:18px 22px 0; align-items:flex-start; }
+.apc-head .facts { margin:0; flex:none; width:640px; }
+.apc-head .with { flex:1; min-width:0; }
+.apc-red { display:grid; grid-template-columns:1fr 1fr; gap:18px; padding:16px 22px 0; }
+.apc-red .rcard .g { grid-template-columns:repeat(6,1fr); }
+.gal { padding:4px 22px 0; }
+.gal .mason { column-count:7; }
+
+/* ===== B — rediscovery feed ===== */
+.feedtop { display:flex; align-items:center; gap:8px; padding:14px var(--gutter) 6px; font-size:13px; color:var(--color-muted); }
+.feedtop .space { flex:1; }
+.fitem { padding:14px 0 14px; border-bottom:1px solid var(--color-border); }
+.fitem .fh { display:flex; align-items:center; gap:12px; }
+.fitem .fh>.th { width:44px; height:44px; }
+.fitem .fh .who { flex:1; min-width:0; display:grid; line-height:1.25; }
+.fitem .fh .who .name { font-size:16px; }
+.fitem .fline { font-size:13px; color:var(--color-muted); margin:8px 0 10px; }
+.fitem .fline .numeric { color:var(--color-text); font-size:14px; }
+.fitem .strip .th { height:190px; }
+.fitem .ff { display:flex; gap:8px; margin-top:10px; align-items:center; }
+.fitem .ff .space { flex:1; }
+/* B — PC */
+.bpc { padding:0 22px; }
+.brow { display:flex; gap:22px; padding:18px 0; border-bottom:1px solid var(--color-border); }
+.brow .left { width:250px; flex:none; display:flex; flex-direction:column; gap:6px; }
+.brow .left .top { display:flex; gap:10px; align-items:center; }
+.brow .left .top .th { width:44px; height:44px; }
+.brow .left .top .name { font-size:17px; line-height:1.2; }
+.brow .left .l2 { font-size:12.5px; color:var(--color-muted); line-height:1.6; }
+.brow .left .l2 .numeric { color:var(--color-text); font-size:13.5px; }
+.brow .left .acts { display:flex; gap:6px; margin-top:auto; }
+.brow .strip { flex:1; min-width:0; }
+.brow .strip .th { height:196px; }
+
+/* ===== Round 2 additions ===== */
+:root { --asset-selection-tint:rgb(36 125 137 / 55%); --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3); }
+mark { background:none; color:var(--color-accent); font-weight:700; }
+.faint { color:var(--color-faint); }
+.site { display:inline-flex; align-items:center; height:18px; padding:0 6px; font:500 11px "Barlow",sans-serif; color:var(--color-muted); border:1px solid var(--color-border-strong); border-radius:2px; white-space:nowrap; }
+.site.user { color:var(--color-accent); border-color:rgba(221,216,202,.45); }
+.site.warn { color:#e6d9a8; border-color:#6b6040; }
+.cb { width:20px; height:20px; border:1px solid var(--color-border-strong); background:var(--color-bg); border-radius:3px; display:inline-grid; place-items:center; flex:none; }
+.cb.on { background:var(--color-accent); border-color:var(--color-accent); color:var(--color-on-accent); }
+.cb svg.i { width:14px; height:14px; stroke-width:2.2; }
+/* Search field */
+.sfield { display:flex; align-items:center; gap:10px; height:46px; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; color:var(--color-muted); font-size:15px; }
+.sfield svg.i { width:18px; height:18px; }
+.sfield .q { color:var(--color-text); }
+.sfield .caret { width:1px; height:20px; background:var(--color-accent); margin-left:-8px; }
+.sfield .space { flex:1; }
+.sfield.sm { height:38px; font-size:14px; }
+/* Today strip (round 1 B, compact) */
+.tday { border:1px solid var(--color-border); background:var(--color-sidebar); padding:0 12px; margin-top:8px; }
+.trow { display:flex; align-items:center; gap:12px; height:70px; border-bottom:1px solid var(--color-border); }
+.tday .strip.fade::after, .tcard .strip.fade::after { background:linear-gradient(90deg,transparent,var(--color-sidebar)); }
+.trow:last-child { border-bottom:0; }
+.trow .who { width:176px; flex:none; display:grid; gap:3px; line-height:1.25; }
+.trow .who .name { font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.trow .why { font-size:12.5px; }
+.trow .strip { flex:1; min-width:0; }
+.trow .ib { width:36px; height:36px; }
+.trow .ib svg.i { width:16px; height:16px; }
+.headrow { display:flex; align-items:center; gap:10px; }
+.headrow .slabel { flex:1; }
+.headrow .act { font-size:12.5px; color:var(--color-muted); display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.headrow .act svg.i { width:14px; height:14px; }
+/* Tier rule: shown quietly next to the heading */
+.rule { font-size:12px; color:var(--color-faint); white-space:nowrap; display:inline-flex; align-items:center; gap:5px; }
+.rule svg.i { width:13px; height:13px; }
+/* Pinned row */
+.pins6 { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-top:8px; }
+.pins6 .th { width:100%; aspect-ratio:4/3; }
+.pins6 .name { font-size:13.5px; margin-top:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pins6 .meta { font:500 12.5px var(--font-numeric); color:var(--color-muted); }
+/* Main-tier rows */
+.mrow { display:flex; align-items:center; gap:12px; min-height:72px; border-bottom:1px solid var(--color-border); padding:8px 0; }
+.mrow>.th { width:52px; height:52px; }
+.mrow .who { flex:1; min-width:0; display:grid; line-height:1.3; }
+.mrow .who .name { font-size:15.5px; }
+.mrow .who .meta { font-size:12.5px; color:var(--color-muted); margin-top:2px; }
+.mrow .who .meta .numeric { color:var(--color-text); font-size:13.5px; }
+.mrow .strip .th { width:52px; height:52px; }
+.mrow>svg.i { color:var(--color-faint); width:16px; }
+.more { display:flex; align-items:center; justify-content:center; gap:6px; height:44px; font-size:14px; color:var(--color-muted); border-bottom:1px solid var(--color-border); }
+.more svg.i { width:16px; height:16px; }
+/* Grouped entries (collapsed tail, one-image mosaic, unknown) */
+.grp { display:flex; align-items:center; gap:14px; min-height:70px; padding:10px 12px; border:1px solid var(--color-border); background:var(--color-sidebar); margin-top:8px; }
+.grp .ico { width:50px; height:50px; flex:none; display:grid; place-items:center; color:var(--color-muted); border:1px solid var(--color-border); background:var(--color-bg); }
+.grp .ico svg.i { width:22px; height:22px; }
+.grp .ico.dash { border-style:dashed; border-color:var(--color-border-strong); }
+.grp .mini { width:50px; height:50px; flex:none; display:grid; grid-template-columns:repeat(3,1fr); gap:1px; }
+.grp .mini .th { border-radius:0; width:100%; height:100%; }
+.grp .who { flex:1; min-width:0; display:grid; line-height:1.3; }
+.grp .who b { font-size:16px; font-weight:600; }
+.grp .who b .numeric { font-size:16px; font-weight:500; color:var(--color-muted); margin-left:4px; }
+.grp .who span { font-size:12.5px; color:var(--color-muted); margin-top:2px; }
+.grp>svg.i { color:var(--color-faint); width:18px; }
+.grp.open { border-color:var(--color-border-strong); border-bottom-color:var(--color-border); }
+.grpbody { border:1px solid var(--color-border-strong); border-top:0; background:var(--color-sidebar); padding:10px 12px 4px; }
+/* Compact searchable list */
+.chips { display:flex; gap:8px; flex-wrap:wrap; }
+.clist { position:relative; }
+.crow { display:flex; align-items:center; gap:10px; height:48px; border-bottom:1px solid var(--color-border); font-size:14.5px; }
+.crow .th { width:32px; height:32px; }
+.crow .name { flex:0 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.crow .handle { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.crow .numeric { color:var(--color-muted); font-size:13.5px; width:26px; text-align:right; }
+.crow .d { font:500 12.5px var(--font-numeric); color:var(--color-faint); width:74px; text-align:right; }
+.crow.pressed { background:var(--color-control-pressed); margin:0 -12px; padding:0 12px; }
+.resultline { font-size:12.5px; color:var(--color-muted); margin:10px 0 2px; display:flex; gap:8px; }
+.jumpbar { position:absolute; right:-4px; top:0; bottom:0; width:22px; display:flex; flex-direction:column; justify-content:space-between; align-items:center; font-size:11px; color:var(--color-faint); }
+.jumpbar b { color:var(--color-accent); }
+/* Floating menu (tablet long-press / PC context) */
+.menu { position:absolute; z-index:8; min-width:220px; background:var(--color-surface-elevated); border:1px solid var(--color-border-strong); border-radius:4px; box-shadow:var(--shadow-floating); padding:4px; }
+.menu .mi { display:flex; align-items:center; gap:12px; height:44px; padding:0 12px; font-size:14.5px; color:var(--color-text); }
+.menu .mi svg.i { width:18px; height:18px; color:var(--color-muted); }
+.menu .mi small { margin-left:auto; color:var(--color-faint); font-size:12px; }
+.menu .sep { height:1px; background:var(--color-border); margin:4px 0; }
+.menu .mh { font-size:12px; color:var(--color-muted); padding:6px 12px 4px; }
+/* Bottom sheet */
+.scrim { position:absolute; inset:0; background:rgba(0,0,0,.58); z-index:6; }
+.sheet { position:absolute; left:0; right:0; bottom:0; z-index:7; background:var(--color-surface); border-top:1px solid var(--color-border-strong); border-radius:6px 6px 0 0; box-shadow:var(--shadow-dialog); display:flex; flex-direction:column; }
+.sheet .grab { width:40px; height:4px; background:var(--color-border-strong); border-radius:2px; margin:10px auto 2px; }
+.sheet .shead { display:flex; align-items:center; gap:10px; padding:6px 8px 10px var(--gutter); }
+.sheet .shead h3 { font-size:19px; font-weight:600; flex:1; }
+.sheet .sbody { padding:0 var(--gutter); display:flex; flex-direction:column; gap:14px; }
+.sheet .sfoot { display:flex; gap:10px; padding:14px var(--gutter) 22px; border-top:1px solid var(--color-border); margin-top:16px; }
+.sheet .sfoot .space { flex:1; }
+.btn.lg { height:46px; padding:0 18px; font-size:15px; }
+.flabel { font-size:12.5px; color:var(--color-muted); margin-bottom:6px; display:block; }
+.field { height:50px; display:flex; align-items:center; gap:8px; padding:0 12px; background:var(--color-bg); border:1px solid var(--color-accent); border-radius:4px; font:500 18px "Barlow","SUIT",sans-serif; }
+.field .caret { width:1px; height:22px; background:var(--color-accent); }
+.field .space { flex:1; }
+.field .ib { width:32px; height:32px; }
+.help { font-size:12.5px; color:var(--color-muted); margin-top:6px; line-height:1.5; }
+.alias { display:flex; align-items:center; gap:12px; min-height:58px; border-bottom:1px solid var(--color-border); }
+.alias .th { width:40px; height:40px; }
+.alias .who { flex:1; min-width:0; display:grid; line-height:1.3; }
+.alias .who .name { font-size:15px; }
+.alias .who .handle { font-size:12.5px; }
+.alias .numeric { font-size:14px; color:var(--color-muted); }
+.alias .btn { height:32px; font-size:13px; }
+.toggles { display:flex; gap:28px; }
+.toggles label { display:flex; align-items:center; gap:10px; font-size:15px; }
+/* Artist identity with user-defined name */
+.ident .ttl { display:flex; align-items:center; gap:8px; }
+.ident .ttl .ib { width:36px; height:36px; }
+.ident .ttl .ib svg.i { width:18px; height:18px; }
+.aka { font-size:13px; color:var(--color-muted); margin-top:5px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
+.aka .name { color:var(--color-text); font-size:13.5px; }
+/* Rediscovery rows (B-style, per artist) */
+.rrow { padding:10px 0; border-bottom:1px solid var(--color-border); }
+.rrow .rh { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+.rrow .rh .sub { font-size:12.5px; color:var(--color-muted); }
+.rrow .rh .space { flex:1; }
+.rrow .rh .act { font-size:12.5px; color:var(--color-muted); }
+/* Selection grid (unknown creator) */
+.sgrid { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
+.sgrid .t { position:relative; aspect-ratio:1; }
+.sgrid .t .th { width:100%; height:100%; border-radius:0; }
+.sgrid .t .mk { position:absolute; left:6px; top:6px; width:18px; height:18px; border:1.5px solid rgba(255,255,255,.85); background:rgba(0,0,0,.25); }
+.sgrid .t.on::after { content:''; position:absolute; inset:0; background:var(--asset-selection-tint); }
+.sgrid .t.on .mk { background:var(--color-accent); border-color:var(--color-accent); z-index:2; }
+.dgh { display:flex; align-items:baseline; gap:8px; margin:14px 0 8px; font:500 15px var(--font-numeric); }
+.dgh small { font:13px var(--font-ui); color:var(--color-muted); }
+.dgh .space { flex:1; }
+.dgh .act { font:13px var(--font-ui); color:var(--color-accent); }
+.selbar { height:56px; flex:none; display:flex; align-items:center; gap:4px; padding:0 8px 0 4px; background:var(--color-surface-elevated); border-bottom:1px solid var(--color-border-strong); }
+.selbar h1 { font-size:18px; font-weight:600; }
+.selbar .space { flex:1; }
+.res { display:flex; align-items:center; gap:12px; min-height:56px; border-bottom:1px solid var(--color-border); }
+.res .th { width:40px; height:40px; }
+.res .who { flex:1; min-width:0; display:grid; line-height:1.3; }
+.res .who .name { font-size:15.5px; }
+.res .numeric { color:var(--color-muted); font-size:14px; }
+.res.pick { background:var(--color-control-pressed); margin:0 calc(-1 * var(--gutter)); padding:0 var(--gutter); }
+.res .newi { width:40px; height:40px; display:grid; place-items:center; border:1px dashed var(--color-border-strong); color:var(--color-accent); }
+.res .newi svg.i { width:18px; height:18px; }
+/* Merge suggestions */
+.mcard { border:1px solid var(--color-border); background:var(--color-sidebar); padding:14px 14px 12px; margin-top:12px; }
+.mcard .reason { display:flex; align-items:center; gap:8px; font-size:13.5px; margin-bottom:12px; }
+.mcard .reason .why { font-size:13.5px; }
+.mcard .pair { display:grid; grid-template-columns:1fr 24px 1fr; gap:10px; align-items:start; }
+.mcard .pair>svg.i { width:18px; color:var(--color-faint); margin-top:14px; }
+.mside .top { display:flex; align-items:center; gap:10px; }
+.mside .top .th { width:40px; height:40px; }
+.mside .top .who { display:grid; line-height:1.3; min-width:0; }
+.mside .top .who .name { font-size:15.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mside .top .who .handle { font-size:12.5px; display:flex; gap:6px; align-items:center; }
+.mside .g { display:grid; grid-template-columns:repeat(4,1fr); gap:3px; margin-top:8px; }
+.mside .g .th { aspect-ratio:1; border-radius:0; }
+.mcard .choose { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:12px; padding-top:10px; border-top:1px solid var(--color-border); font-size:13.5px; color:var(--color-muted); }
+.radio { display:inline-flex; align-items:center; gap:7px; color:var(--color-text); }
+.radio i { width:16px; height:16px; border-radius:50%; border:1px solid var(--color-border-strong); background:var(--color-bg); display:inline-grid; place-items:center; }
+.radio.on i::after { content:''; width:8px; height:8px; border-radius:50%; background:var(--color-accent); }
+.mcard .acts { display:flex; gap:8px; margin-top:12px; align-items:center; }
+.mcard .acts .space { flex:1; }
+.mcard .acts small { font-size:12px; color:var(--color-faint); }
+/* PC additions */
+.pctoday { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; padding:16px 22px 0; }
+.tcard { min-width:0; overflow:hidden; border:1px solid var(--color-border); background:var(--color-sidebar); padding:10px 12px; }
+.tcard .top { display:flex; align-items:center; gap:10px; }
+.tcard .top .th { width:36px; height:36px; }
+.tcard .top .who { flex:1; display:grid; line-height:1.25; min-width:0; }
+.tcard .top .name { font-size:15px; }
+.tcard .top .ib { width:30px; height:30px; }
+.tcard .top .ib svg.i { width:15px; height:15px; }
+.tcard .strip { margin-top:8px; }
+.pclist { padding:8px 22px 0; }
+.pcrow { display:flex; align-items:center; gap:14px; height:92px; border-bottom:1px solid var(--color-border); }
+.pcrow>.th { width:56px; height:56px; }
+.pcrow .who { width:260px; flex:none; display:grid; line-height:1.3; }
+.pcrow .who .name { font-size:16px; }
+.pcrow .who .meta { font-size:12.5px; color:var(--color-muted); }
+.pcrow .who .meta .numeric { color:var(--color-text); font-size:13.5px; }
+.pcrow .strip { flex:1; min-width:0; }
+.pcrow .strip .th { height:70px; }
+.popover { position:absolute; z-index:8; background:var(--color-surface-elevated); border:1px solid var(--color-border-strong); border-radius:4px; box-shadow:var(--shadow-floating); padding:14px 16px; font-size:14px; }
+.popover h4 { margin:0 0 10px; font-size:14px; font-weight:600; }
+.popover .ln { display:flex; align-items:center; gap:8px; height:40px; white-space:nowrap; }
+.num-in { width:52px; height:32px; display:inline-grid; place-items:center; border:1px solid var(--color-border-strong); background:var(--color-bg); border-radius:3px; font:500 15px var(--font-numeric); }
+.popover .help { margin-top:8px; }
+.panel { position:absolute; z-index:8; top:0; right:0; bottom:0; width:440px; background:var(--color-surface); border-left:1px solid var(--color-border-strong); box-shadow:var(--shadow-floating); display:flex; flex-direction:column; }
+.panel .shead { display:flex; align-items:center; gap:8px; height:52px; padding:0 8px 0 18px; border-bottom:1px solid var(--color-border); }
+.panel .shead h3 { font-size:16px; font-weight:600; flex:1; }
+.panel .sbody { padding:16px 18px; display:flex; flex-direction:column; gap:16px; }
+.panel .sfoot { margin-top:auto; display:flex; gap:10px; padding:12px 18px; border-top:1px solid var(--color-border); }
+.panel .sfoot .space { flex:1; }
+.panel .field { height:42px; font-size:16px; }
+.panel .alias { min-height:52px; }
+.panel .alias .th { width:34px; height:34px; }
+/* Fill-from-source table */
+.srctab { width:100%; border-collapse:collapse; font-size:14px; }
+.srctab th { text-align:left; font-size:12.5px; color:var(--color-muted); font-weight:500; padding:8px 12px; border-bottom:1px solid var(--color-border); }
+.srctab td { white-space:nowrap; padding:12px; border-bottom:1px solid var(--color-border); vertical-align:middle; }
+.srctab td .numeric { font-size:15px; }
+.srctab tr.cur td { background:var(--color-surface); }
+.srctab tr.cur td:first-child { box-shadow:inset 2px 0 0 var(--color-accent); }
+.mode { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; padding:2px 8px; border-radius:2px; }
+.mode.auto { background:#2c3a33; color:#bfe0cc; }
+.mode.look { background:#2a3340; color:#bcd0ea; }
+.mode.man { background:#3a3629; color:#e6d9a8; }
+.pv { border:1px solid var(--color-border); background:var(--color-sidebar); }
+.pv .pvh { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--color-border); }
+.pv .pvh b { font-size:15px; }
+.pv .pvh .space { flex:1; }
+.pvrow { display:flex; align-items:center; gap:12px; height:58px; padding:0 14px; border-bottom:1px solid var(--color-border); font-size:14px; }
+.pvrow .strip .th { width:40px; height:40px; }
+.pvrow .h { width:170px; font-family:"Barlow",sans-serif; }
+.pvrow .to { white-space:nowrap; flex:1; color:var(--color-muted); display:flex; align-items:center; gap:6px; }
+.pvrow .to .name { color:var(--color-text); }
+.pvrow .numeric { width:40px; text-align:right; color:var(--color-text); }
+.pvrow svg.i { width:14px; height:14px; color:var(--color-faint); }
+/* Notes table status labels reuse .st from round 1. */
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>작가 허브 목업 2차 — ARTIST-001</h1>
+  <p class="lead">1차에서 고른 <b>A(작가 색인 → 작가 페이지)</b>에 <b>B의 “오늘” 줄</b>을 얹고, 실제 라이브러리 규모(작가 <b>2,344</b>명 중 한 장뿐인 작가 1,796명, 작가·출처가 모두 없는 이미지 4,742장)에 맞춰 <b>많은 작가를 편하게 관리하는 화면</b>을 그렸습니다. 새로 들어간 것: 자동 구분(주요 작가 / 그 외 / 한 장뿐인 작가), 고정·숨기기, 초성·핸들·이름 검색, <b>직접 지은 작가 이름</b>과 원래 이름 목록, 합치기 제안, 작가 미상 이미지에 작가를 한꺼번에 붙이기, 출처 주소에서 작가 채우기. 태블릿 800 × 1280, PC 1680 × 1050. PC에서 선택된 줄은 <b>아이보리 슬랩 + 오른쪽 작은 어두운 표식</b>만 쓰고 왼쪽 바깥의 아이보리 사각형은 없습니다. 작가 이름·핸들·이미지는 모두 가상이며, 개수는 9월 26일 조사 숫자를 바탕으로 맞췄습니다(최근 30일 기준으로 더해지는 작가 수 등 일부는 예시).</p>
+  <div class="toolbar">바로가기
+    <a href="#sec1">1 작가 색인</a><a href="#sec2">2 작가 페이지 · 이름 편집</a><a href="#sec3">3 합치기 제안</a><a href="#sec4">4 작가 미상 정리</a><a href="#notes">데이터 · 구현 메모</a><a href="index.html">1차 목업</a>
+  </div>
+</header>
+
+<section class="topic" id="sec1">
+  <h2><span class="k">1</span>작가 색인 — 오늘 · 고정 · 주요 작가 · 나머지는 접기</h2>
+  <div class="notes">맨 위는 1차 B안의 <b>오늘</b> 세 줄(이유 한 줄 + 이미지 줄, 넘기기)입니다. 그 아래 <b>고정한 작가</b>, 그리고 자동으로 고른 <b>주요 작가</b>가 이어집니다. 기준은 “<b>5장 이상</b> 또는 <b>최근 30일 안에 2장 이상</b>”이며 제목 옆에 작게만 적고, 누르면 숫자를 바꿀 수 있습니다(PC 그림의 작은 창). 나머지 작가는 <b>그 외 작가 2,245명</b> 한 줄로 접혀 있다가, 열면 이름만 촘촘히 보이는 검색 목록이 됩니다. 검색은 이름·핸들·<b>초성</b>(예: <code>ㅅㄹ</code> → 서리, 새롬, 수련…)을 모두 받고, 직접 지은 이름과 원래 이름 어느 쪽으로도 찾아집니다. 한 장뿐인 작가 1,796명은 이름 목록 대신 <b>그림 모자이크</b>로 훑어보는 입구를 따로 두었고, 작가가 없는 이미지는 <b>작가 미상 4,742장</b> 입구로 모았습니다. 숨긴 작가는 목록·오늘·검색에서 빠지고 <b>숨긴 작가</b> 필터에서만 보입니다.</div>
+  <div class="row scaled" id="row1"></div>
+  <div class="row scaled" id="row1b"></div>
+</section>
+
+<section class="topic" id="sec2">
+  <h2><span class="k">2</span>작가 페이지 — 직접 지은 이름 · 원래 이름 · 합치기</h2>
+  <div class="notes">작가 이름은 <b>내가 정한 표시 이름</b>이 먼저 보이고, 수집할 때 들어온 이름과 핸들은 그 아래 <b>원래 이름</b>으로 남습니다(검색에는 모두 쓰임). 편집 시트에서 표시 이름을 바꾸고, 합쳐진 원래 이름을 하나씩 떼어내고, 다른 작가를 찾아 합치고, 고정·숨기기를 켜고 끕니다. 표시 이름을 비우면 원래 이름으로 돌아갑니다. 작가 미상에서 직접 붙인 이미지도 “직접 지정 N장”으로 같은 목록에 보여서 나중에 떼어낼 수 있습니다. PC는 같은 내용을 오른쪽 패널로 엽니다(본문 폭·스크롤은 그대로).</div>
+  <div class="row scaled" id="row2"></div>
+  <div class="row scaled" id="row2b"></div>
+</section>
+
+<section class="topic" id="sec3">
+  <h2><span class="k">3</span>같은 작가일 수 있어요 — 합치기 제안</h2>
+  <div class="notes">앱이 먼저 후보를 찾아 한 쌍씩 보여 줍니다. 이유는 한 줄로: <b>X 핸들이 같음</b>(대소문자만 다르거나 표시 이름이 바뀐 경우), <b>이름이 같음</b>(x.com과 pixiv처럼 사이트가 다름), <b>확실하지 않음</b>(비슷한 핸들, 게시판 출처). 양쪽 이미지를 나란히 보고 <b>합치기</b> 또는 <b>따로 두기</b>를 누릅니다. 합칠 때 표시 이름을 고르거나 새로 적을 수 있고, 따로 두기를 누른 쌍은 다시 제안하지 않습니다. arca.live·dcinside처럼 <b>올린 사람이 작가가 아닐 수 있는 출처</b>는 경고 표시를 붙입니다. 제안은 색인의 정리 줄과 PC 인덱스 “정리”에서 들어옵니다.</div>
+  <div class="row scaled" id="row3"></div>
+  <div class="row scaled" id="row3b"></div>
+</section>
+
+<section class="topic" id="sec4">
+  <h2><span class="k">4</span>작가 미상 정리 — 한꺼번에 작가 지정 · 출처에서 채우기</h2>
+  <div class="notes"><b>작가 미상</b>은 가져온 날짜 묶음으로 보여서 “이 묶음 모두 선택”으로 여러 장을 빠르게 고를 수 있습니다. 고른 뒤 <b>작가 지정</b>을 누르면 시트에서 기존 작가를 찾거나(직접 지은 이름 포함) 입력한 이름으로 <b>새 작가</b>를 만듭니다. 원래 파일·출처 정보는 바꾸지 않고 “이 이미지는 이 작가”라는 연결만 더합니다. <b>출처에서 작가 채우기</b>는 출처 주소는 있는데 작가가 비어 있는 699장을 사이트별로 미리 셉니다. x.com은 주소에 핸들이 있어 바로 채우고, pixiv는 작품 번호로 작가를 조회해야 해서(온라인) 따로 버튼을 두었습니다. arca.live·dcinside는 글쓴이가 작가가 아닌 경우가 많아 <b>자동으로 채우지 않고</b> 게시글별로 모아 작가 지정 시트로 넘깁니다.</div>
+  <div class="row scaled" id="row4"></div>
+  <div class="row scaled" id="row4b"></div>
+</section>
+
+<section class="topic" id="notes">
+  <h2>데이터 · 구현 메모 (2026-09-26 코드 기준)</h2>
+  <div class="notes">소스 검색으로 확인한 내용입니다. 실제 앱이나 기기에서 돌려 보지는 않았습니다. <span class="st ok">있음</span> <span class="st part">일부</span> <span class="st new">새 작업</span></div>
+  <table class="data">
+    <tr><th>항목</th><th>지금 있는 것</th><th>새로 필요한 것</th></tr>
+    <tr><td>작가 원본 정보</td><td><span class="st ok">있음</span> PC <code>assets.creator_name / creator_handle / creator_url</code>. 서버 복제본은 <code>creator_name</code>, <code>creator_handle</code>, <code>source_url</code>.</td><td>그대로 둠. 사용자가 정한 것은 모두 별도 표에 저장해 수집 정보를 덮어쓰지 않음.</td></tr>
+    <tr><td>작가 묶는 기준</td><td><span class="st part">일부</span> <code>creator_key</code> = 핸들, 없으면 URL (<code>revisit.rs</code> <code>creator_key()</code>, 통계도 같은 기준). 이름은 기준이 아니라서 같은 사람이 x.com·pixiv에 따로 나뉨. 핸들 대소문자도 구분됨.</td><td>합치기 표(아래)로 여러 <code>creator_key</code>를 한 작가로 묶음. 표시 이름은 지금 <code>MAX(creator_name)</code>이라 이름이 바뀐 작가에서 임의로 골라짐 → 사용자 이름이 있으면 그것을 우선.</td></tr>
+    <tr><td>작가 목록 · 개수 · 커버</td><td><span class="st ok">있음</span> PC <code>list_asset_creators</code> → <code>AssetCreatorSummary</code>, 화면 <code>CreatorBrowse</code>.</td><td>합친 작가 단위로 다시 집계, 구분(주요/그 외/한 장), 고정·숨김, 초성 검색 필드를 더함.</td></tr>
+    <tr><td>작가별 이미지</td><td><span class="st ok">있음</span> PC <code>AssetQuery.creator_key</code>, 서버 <code>/v1/library/revisit/creator/{key}/assets</code>.</td><td>작가 ID로 조회: 합쳐진 모든 key + 직접 지정한 이미지를 함께.</td></tr>
+    <tr><td>사용자 작가(표시 이름)</td><td><span class="st new">없음</span></td><td><code>artists</code>(id, display_name, pinned, hidden, created/updated) — 이름 없는 작가(원래 이름만)도 한 줄로 가질 수 있지만, 처음에는 사용자가 뭔가 바꾼 작가만 행을 만듦.</td></tr>
+    <tr><td>합치기 · 떼어내기</td><td><span class="st new">없음</span></td><td><code>artist_members</code>(creator_key UNIQUE → artist_id). 떼어내기 = 행 삭제. 거절한 제안은 <code>artist_merge_dismissals</code>(key 쌍)에 남겨 다시 제안하지 않음.</td></tr>
+    <tr><td>작가 미상에 직접 지정</td><td><span class="st new">없음</span></td><td><code>asset_artist_assignments</code>(asset_id → artist_id). 원본 creator 칸은 비워 둔 채 연결만 더함. 출처에서 채우기(x.com)는 주소에서 읽은 핸들을 같은 방식으로 연결하거나 creator_handle을 채울지 결정 필요.</td></tr>
+    <tr><td>합치기 제안 계산</td><td><span class="st new">없음</span></td><td>핸들 소문자 비교, 이름 정규화(공백·기호·전각) 후 사이트 간 일치, 비슷한 핸들(뒤 숫자·밑줄). 게시판 출처는 “확실하지 않음”. CLIP 유사도는 나중(선택).</td></tr>
+    <tr><td>구분 기준 설정</td><td><span class="st new">없음</span></td><td>앱 설정에 숫자 셋(저장 N장, 최근 D일, 그 안에 M장; 기본 5 · 30 · 2). 조회할 때 계산, 저장하지 않음.</td></tr>
+    <tr><td>초성 검색</td><td><span class="st new">없음</span></td><td>표시 이름·원래 이름에서 초성 문자열을 만들어 비교(작가 수천 명이라 메모리 계산으로 충분).</td></tr>
+    <tr><td>출처에서 채우기</td><td><span class="st part">일부</span> <code>source_url</code> 있음. x.com 주소 형식 <code>/{handle}/status/{id}</code>.</td><td>x.com: 주소에서 핸들 추출(오프라인). pixiv: 작품 번호 → 작가 조회가 필요(온라인, 선택, 속도 제한). arca.live·dcinside: 자동 없음, 게시글별 묶음만.</td></tr>
+    <tr><td>태블릿</td><td><span class="st new">없음</span> 작가 목록 API 없음. 오늘 줄은 <code>_revisit_creator_groups</code> 재사용 가능.</td><td><code>/v1/library/artists</code>(구분·검색·커서·커버), <code>/v1/library/artists/{id}</code>, 이름·고정·숨김·합치기·지정 쓰기 경로, 새 표의 서버 동기화. 새 경로는 Android <code>NetworkPolicy.java</code> 허용 목록에 넣어야 함. <b>PC와 서버 중 어디가 원본인지(쓰기 방향)</b>는 결정 필요.</td></tr>
+  </table>
+</section>
+</div>
+<script>
+const IC={"MagnifyingGlass":["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],"Trash":["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],"ArrowPath":["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],"ArrowsUpDown":["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],"AdjustmentsHorizontal":["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],"ArrowLeft":["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],"EllipsisVertical":["M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z"],"ChevronDown":["m19.5 8.25-7.5 7.5-7.5-7.5"],"ChevronRight":["m8.25 4.5 7.5 7.5-7.5 7.5"],"Funnel":["M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"],"Bookmark":["M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"],"Home":["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],"Photo":["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"RectangleStack":["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],"BookOpen":["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],"PencilSquare":["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],"Tag":["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],"Folder":["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],"InformationCircle":["m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"],"UserPlus":["M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"XMark":["M6 18 18 6M6 6l12 12"],"Plus":["M12 4.5v15m7.5-7.5h-15"],"CloudArrowDown":["M12 9.75v6.75m0 0-3-3m3 3 3-3m-8.25 6a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],"Cog6Tooth":["M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z","M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],"UserMinus":["M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"Squares2X2":["M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"],"Square2Stack":["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],"FolderOpen":["M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"],"Sparkles":["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"]};
+Object.assign(IC,{
+  Bell:["M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"],
+  BellSlash:["M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"],
+  LockClosed:["M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"],
+  Link:["M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"],
+  Wallet:["M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3"],
+  Check:["m4.5 12.75 6 6 9-13.5"],
+  ChevronUp:["m4.5 15.75 7.5-7.5 7.5 7.5"],
+  EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+  Pin:["M15.75 3.75 20.25 8.25M18 6l-4.5 4.5 1.5 5.25-2.25 2.25-3.375-3.375L4.5 19.5M9.375 14.625 6 11.25 8.25 9l5.25 1.5"],
+  Star:["M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"],
+});
+
+Object.assign(IC,{
+  Minus:["M5 12h14"],
+  Play:["M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"],
+  ArrowTopRightOnSquare:["M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"],
+  Clock:["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  CalendarDays:["M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"],
+  UserGroup:["M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z"],
+  ArrowRight:["M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"],
+});
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${(IC[n]||[]).map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const ib=(n,cls='')=>`<span class="ib ${cls}">${I(n)}</span>`;
+
+/* Placeholder artwork: each artist has its own palette so their works read as one hand. */
+const P=[['#c9b6b0','#5a3c3c','#93706a','#efe0cc'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#b6b7c4','#363d57','#737c93','#d4cbc3'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#a9b9a0','#34443a','#6d8466','#dfe3c8'],['#9fb0c8','#2e3a52','#5f7596','#e0d6c4'],['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#d0b8c6','#4a3448','#8c6784','#f0dde2'],['#c2c9a4','#3f452c','#7d875a','#ebe8cf'],['#a8c4cc','#26404a','#5a8894','#e6ecdf']];
+const R=[0.72,1,1.35,0.66,0.8,1.5,0.75,1.1,0.62,1.25,0.9,0.7];
+const art=(pal,j,ratio=1)=>{const p=P[pal%P.length];const k=j%4;const W=300,H=Math.round(300/ratio);
+  const cy=H*(0.25+0.1*(j%3)),r=W*(0.12+0.03*k);
+  const fig=k%2?`<ellipse cx="${W*0.5}" cy="${H*0.62}" rx="${W*0.16}" ry="${H*0.3}" fill="${p[1]}" opacity=".9"/><circle cx="${W*0.5}" cy="${H*0.3}" r="${W*0.09}" fill="${p[1]}"/>`:'';
+  return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="${p[0]}"/><circle cx="${W*(0.25+0.17*k)}" cy="${cy}" r="${r}" fill="${p[3]}"/><path d="M0 ${H*0.62}L${W*0.3} ${H*(0.42+0.04*k)} ${W*0.58} ${H*0.7} ${W*0.8} ${H*0.5} ${W} ${H*0.6}V${H}H0Z" fill="${p[2]}"/>${fig}<path d="M0 ${H*0.8}L${W*0.4} ${H*0.66} ${W*0.7} ${H*0.82} ${W} ${H*0.74}V${H}H0Z" fill="${p[1]}" opacity=".85"/></svg>`);};
+const th=(pal,j,style='',ratio=1)=>`<span class="th" style="${style}"><img src="${art(pal,j,ratio)}" alt=""></span>`;
+/* Image of intrinsic ratio at a fixed height (strips/hero). */
+const thh=(pal,j,h)=>{const r=R[(pal*3+j)%R.length];return th(pal,j,`height:${h}px;width:${Math.round(h*r)}px`,r);};
+const thm=(pal,j)=>{const r=R[(pal*5+j)%R.length];return th(pal,j,`aspect-ratio:${r}`,r);};
+
+const tabletNav=active=>`<nav class="nav">${[['Home','Home'],['Photo','Library'],['RectangleStack','Collections'],['BookOpen','Catalog'],['PencilSquare','Notes']].map(([i,l])=>`<button class="${l===active?'active':''}">${I(i)}<span>${l}</span></button>`).join('')}</nav>`;
+const fig=(cap,body,cls='')=>`<figure class="${cls}"><figcaption>${cap}</figcaption>${body}</figure>`;
+const RAIL=[['RectangleStack','에셋'],['BookOpen','컬렉션'],['Photo','망가'],['PencilSquare','메모'],['ArrowsUpDown','전송']];
+const rail=`<nav class="rail"><div class="mk">${MARK}</div>${RAIL.map(([ic,l])=>`<div class="ri ${l==='에셋'?'on':''}">${I(ic)}<span>${l}</span></div>`).join('')}<div class="tail"><div class="ri">${I('EllipsisHorizontal')}<span>더보기</span></div></div></nav>`;
+const winctl=`<span class="winctl"><span>${I('Minus')}</span><span>${I('Square2Stack')}</span><span>${I('XMark')}</span></span>`;
+const titlebar=(t,st,extra='')=>`<header class="titlebar"><h2>${t}</h2><span class="st">${st}</span><span class="space"></span>${extra}${winctl}</header>`;
+const pcwin=(index,main)=>`<div class="win">${rail}<aside class="index">${index}</aside><div class="main">${main}</div></div>`;
+
+Object.assign(IC,{
+  EyeSlash:["M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"],
+  QuestionMarkCircle:["M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z"],
+  ArrowsPointingIn:["M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"],
+});
+const CHECK=`<svg class="i" viewBox="0 0 24 24"><path d="m4.5 12.75 6 6 9-13.5"/></svg>`;
+const cb=on=>`<span class="cb ${on?'on':''}">${on?CHECK:''}</span>`;
+const n=v=>`<span class="numeric">${v}</span>`;
+
+/* Fictional artists. o.aka = original names shown as aliases. */
+const X=(name,h,c,last,first,pal,o={})=>({name,h,c,last,first,pal,...o});
+const MOON=X('달그림자','moonshade_art',486,'09.25','2021.02.03',0,{pin:1,user:1,aka:'Moonshade · 月影 외 1'});
+const PINS=[MOON,X('윤슬','yunseul_art',238,'09.25','2022.01.08',1,{pin:1}),X('Kuroneko','kuroneko_draws',187,'09.22','2020.11.30',2,{pin:1}),X('Aoi Mizuhara','mizu_aoi',154,'09.19','2023.02.02',3,{pin:1}),X('모래시계','sandglass_k',96,'09.08','2022.06.11',5,{pin:1}),X('도토리','dotori_pix',58,'08.14','2024.01.05',8,{pin:1})];
+const MAIN=[X('Rin Kagura','kagura_rin',129,'09.12','2021.07.19',4),X('하늘고래','sky_whale',86,'09.24','2022.03.02',9),X('Nori','nori_sketch',3,'09.21','2026.09.03',7,{recent:'최근 30일 3장'}),X('Tetsu','tetsu_sketch',77,'08.30','2020.04.25',6),X('레몬밤','lemonbalm_d',61,'08.21','2023.08.30',7),X('Pale Moth','palemoth',45,'07.29','2021.10.10',9),X('Kiri','kiri_draws',41,'09.23','2023.05.14',2),X('Hollow Lantern','hollowlantern',33,'06.30','2022.08.08',4)];
+const irowX=(a,sel=false)=>`<div class="irow ${sel?'sel':''}">${th(a.pal,0)}<span class="txt name">${a.name}</span><span class="n">${a.c}</span></div>`;
+const irowI=(ic,t,c,sel=false)=>`<div class="irow ${sel?'sel':''}">${I(ic)}<span class="txt">${t}</span><span class="n">${c}</span></div>`;
+const strip=(pal,js,h)=>`<div class="strip fade">${js.map(j=>thh(pal,j,h)).join('')}</div>`;
+const TODAY=[[PINS[1],'3년 전 오늘 저장',''],[MAIN[5],'214일 동안 안 봄','quiet'],[MAIN[1],'이번 주 새 작품 12장','']];
+const RULE=`<span class="rule">5장 이상 · 30일 안에 2장 이상 ${I('Cog6Tooth')}</span>`;
+const miniMosaic=`<div class="mini">${[0,3,5,7,1,9].map((p,j)=>th(p,j+3)).join('')}</div>`;
+const grpTail=(open=false)=>`<div class="grp ${open?'open':''}"><div class="ico">${I('UserGroup')}</div><div class="who"><b>그 외 작가${n('2,245')}</b><span>2–4장 ${n(449)}명 · 1장 ${n('1,796')}명 · 이름 목록으로 찾기</span></div>${I(open?'ChevronUp':'ChevronDown')}</div>`;
+const grpOne=`<div class="grp">${miniMosaic}<div class="who"><b>한 장뿐인 작가들${n('1,796')}</b><span>이름 대신 그림으로 훑어보기 · 마음에 들면 작가 페이지로</span></div>${I('ChevronRight')}</div>`;
+const grpUnknown=`<div class="grp"><div class="ico dash">${I('QuestionMarkCircle')}</div><div class="who"><b>작가 미상${n('4,742')}</b><span>작가도 출처도 없는 이미지 · 골라서 작가 지정</span></div>${I('ChevronRight')}</div>`;
+const tabletBar=(title,count,crumb='라이브러리',icons=['EllipsisVertical'])=>`<div class="bar sub">${ib('ArrowLeft')}<div class="stack"><span class="crumb">${crumb}</span><h1>${title}${count?` <span class="numeric">${count}</span>`:''}</h1></div><span class="space"></span>${icons.map(i=>Array.isArray(i)?ib(...i):ib(i)).join('')}</div>`;
+
+/* ================= 1 ================= */
+const t1a=()=>{
+  const today=TODAY.map(([a,why,q])=>`<div class="trow"><div class="who"><span class="name">${a.name}</span><span class="why ${q}">${why}</span></div>${strip(a.pal,[1,2,3,4,5,6,7],54)}${ib('XMark')}</div>`).join('');
+  const pins=PINS.map(a=>`<div>${th(a.pal,1)}<div class="name">${a.name}</div><div class="meta">${a.c}</div></div>`).join('');
+  const rows=MAIN.slice(0,3).map(a=>`<div class="mrow">${th(a.pal,0)}<div class="who"><span class="name">${a.name}</span><span class="meta">${a.recent?`<span style="color:var(--color-accent)">${a.recent}</span>`:`${n(a.c)}장`} · 최근 저장 ${n(a.last)}</span></div><div class="strip">${[2,3,4,5].map(j=>th(a.pal,j)).join('')}</div>${I('ChevronRight')}</div>`).join('');
+  return `<div class="frame">${tabletBar('작가','2,344')}
+  <div class="content fade-end"><div class="pad">
+    <div class="sfield" style="margin-top:12px">${I('MagnifyingGlass')}<span>이름 · 핸들 · 초성으로 찾기</span></div>
+    <div class="headrow" style="margin-top:16px"><div class="slabel">오늘 · 9월 26일</div><span class="act">${I('ArrowPath')}다시 고르기</span></div>
+    <div class="tday">${today}</div>
+    <div class="headrow" style="margin-top:18px"><div class="slabel">고정 ${n(6)}</div></div>
+    <div class="pins6">${pins}</div>
+    <div class="headrow" style="margin-top:18px"><div class="slabel">주요 작가 ${n(99)}</div>${RULE}</div>
+    ${rows}<div class="more">주요 작가 ${n(96)}명 더 보기 ${I('ChevronDown')}</div>
+    ${grpTail()}${grpOne}${grpUnknown}
+    <div class="headrow" style="margin-top:18px"><div class="slabel">정리</div></div>
+    <div class="grp" style="min-height:52px">${I('ArrowsPointingIn')}<div class="who"><b style="font-size:15px">같은 작가일 수 있어요${n(12)}</b></div>${I('Link')}<div class="who"><b style="font-size:15px">출처에서 작가 채우기${n(699)}</b></div>${I('ChevronRight')}</div>
+  </div></div>${tabletNav('Library')}</div>`;};
+
+const OTHERS=[['<mark>서리</mark>','seori_ink',4,'2025.11.02',1],['<mark>새롬</mark>','saerom_d',3,'2025.06.19',3],['<mark>소리</mark>꾼','sorikkun',2,'2024.12.30',5],['<mark>수련</mark>','suryeon_w',2,'2024.08.14',7],['<mark>시루</mark>','siru_bread',2,'2023.10.01',9],['<mark>솔랑</mark>','sollang',1,'2025.02.11',4],['<mark>스르</mark>륵','seureureuk',1,'2022.07.07',8]];
+const t1b=()=>{
+  const list=OTHERS.map(([nm,h,c,d,p],i)=>`<div class="crow ${i===0?'pressed':''}">${th(p,2)}<span class="name">${nm}</span><span class="handle">@${h}</span>${n(c)}<span class="d">${d}</span></div>`).join('');
+  const jump=['ㄱ','ㄴ','ㄷ','ㄹ','ㅁ','ㅂ','<b>ㅅ</b>','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ','A','F','K','P','T','#'].map(x=>`<span>${x}</span>`).join('');
+  return `<div class="frame">${tabletBar('작가','2,344')}
+  <div class="content fade-end"><div class="pad">
+    <div class="headrow" style="margin-top:14px"><div class="slabel">주요 작가 ${n(99)}</div>${RULE}</div>
+    ${MAIN.slice(5,7).map(a=>`<div class="mrow">${th(a.pal,0)}<div class="who"><span class="name">${a.name}</span><span class="meta">${n(a.c)}장 · 최근 저장 ${n(a.last)}</span></div><div class="strip">${[2,3,4,5].map(j=>th(a.pal,j)).join('')}</div>${I('ChevronRight')}</div>`).join('')}
+    ${grpTail(true)}
+    <div class="grpbody">
+      <div class="sfield sm">${I('MagnifyingGlass')}<span class="q">ㅅㄹ</span><span class="caret"></span><span class="space"></span>${I('XMark')}</div>
+      <div class="chips" style="margin-top:10px"><span class="chip sm">${I('ArrowsUpDown')}이름순</span><span class="chip sm on">2–4장 <span class="numeric">449</span></span><span class="chip sm on">1장 <span class="numeric">1,796</span></span><span class="chip sm">${I('EyeSlash')}숨긴 작가 <span class="numeric">3</span></span></div>
+      <div class="resultline">초성 <b style="color:var(--color-text)">ㅅㄹ</b> · ${n(7)}명 <span class="faint">· 이름·원래 이름·핸들에서 찾음</span></div>
+      <div class="clist" style="padding-right:26px">${list}<div class="jumpbar">${jump}</div></div>
+      <div class="menu" style="left:250px;top:470px"><div class="mh">서리 · @seori_ink</div><div class="mi">${I('Pin')}고정</div><div class="mi">${I('PencilSquare')}이름 바꾸기</div><div class="mi">${I('ArrowsPointingIn')}다른 작가와 합치기</div><div class="sep"></div><div class="mi">${I('EyeSlash')}숨기기<small>목록·오늘·검색에서 빠짐</small></div></div>
+    </div>
+    ${grpOne}${grpUnknown}
+  </div></div>${tabletNav('Library')}</div>`;};
+
+const pcIndex=(sel)=>`<div class="index-head">작가 ${'<span class="numeric" style="color:var(--color-muted);font-size:13px;margin-left:6px">2,344</span>'}<span class="space"></span>${ib('MagnifyingGlass')}</div><div class="index-body">
+    <div class="slabel">고정</div>${PINS.map(a=>irowX(a,sel===a.name)).join('')}
+    <div class="slabel">모음</div>
+    ${irowI('Star','주요 작가',99,sel==='main')}${irowI('UserGroup','그 외 작가','2,245',sel==='other')}${irowI('Squares2X2','한 장뿐인 작가들','1,796',sel==='one')}${irowI('QuestionMarkCircle','작가 미상','4,742',sel==='unknown')}
+    <div class="slabel">정리</div>
+    ${irowI('ArrowsPointingIn','같은 작가일 수 있어요',12,sel==='merge')}${irowI('Link','출처에서 작가 채우기',699,sel==='fill')}${irowI('EyeSlash','숨긴 작가',3,sel==='hidden')}
+  </div><div class="index-foot">${I('ArrowsUpDown')}정렬 · 최근 저장</div>`;
+
+const pc1=()=>{
+  const today=TODAY.map(([a,why,q])=>`<div class="tcard"><div class="top">${th(a.pal,0)}<div class="who"><span class="name">${a.name}</span><span class="why ${q}">${why}</span></div>${ib('XMark')}</div>${strip(a.pal,[1,2,3,4,5,6],120)}</div>`).join('');
+  const rows=MAIN.map(a=>`<div class="pcrow">${th(a.pal,0)}<div class="who"><span class="name">${a.name}</span><span class="handle">@${a.h}</span><span class="meta">${a.recent?`<span style="color:var(--color-accent)">${a.recent}</span>`:`${n(a.c)}장`} · 최근 저장 ${n(a.last)}</span></div>${strip(a.pal,[2,3,4,5,6,7,8,9,10,11,12,13],70)}</div>`).join('');
+  const pop=`<div class="popover" style="right:150px;top:40px;width:370px"><h4>주요 작가 기준</h4><div class="ln">저장 <span class="num-in">5</span> 장 이상</div><div class="ln">또는 최근 <span class="num-in">30</span> 일 안에 <span class="num-in">2</span> 장 이상</div><div class="help">지금 기준으로 ${n(99)}명. 고정한 작가는 기준과 상관없이 맨 위에 둡니다. 설정 → 작가에서도 바꿀 수 있어요.</div></div>`;
+  return pcwin(pcIndex('main'),titlebar('주요 작가','99명',`<span class="btn ghost" style="height:30px;font-size:12.5px;color:var(--color-faint)">5장 이상 · 30일 안에 2장 이상 ${I('Cog6Tooth')}</span>`)+`<div class="mbody fade-end">${pop}
+    <div class="pctoday" style="padding-top:14px"><div class="headrow" style="grid-column:1/-1"><div class="slabel">오늘 · 9월 26일</div><span class="act">${I('ArrowPath')}다시 고르기</span></div>${today}</div>
+    <div class="pclist"><div class="headrow" style="margin-top:14px"><div class="slabel">최근 저장 순 <span class="faint">· 고정한 작가 제외</span></div></div>${rows}</div></div>`);};
+
+/* ================= 2 ================= */
+const moonFacts=`<div class="facts"><div><small>저장</small>${n(486)}</div><div><small>처음 저장</small>${n('2021.02.03')}</div><div><small>최근 저장</small>${n('09.25')}</div><div><small>출처</small><span class="txtv">X ${n(402)} · Pixiv ${n(72)} · 지정 ${n(12)}</span></div></div>`;
+const moonAka=`<div class="aka"><span>원래 이름</span><span class="name">Moonshade</span><span class="site">x.com</span><span class="name">月影</span><span class="site">pixiv</span><span class="site user">직접 지정 12장</span></div>`;
+const rrows=(pal,cols=6,h=110)=>`<div class="rrow"><div class="rh"><span class="why">3년 전 오늘</span><span class="sub">2023.09.26에 ${n(7)}장 저장</span><span class="space"></span><span class="act">모두 보기</span></div>${strip(pal,[6,7,8,9,10,11,12,13].slice(0,cols+2),h)}</div>
+  <div class="rrow"><div class="rh"><span class="why quiet">오래 안 본 작품</span><span class="sub">1년 넘게 열지 않은 ${n(58)}장</span><span class="space"></span><span class="act">모두 보기</span></div>${strip(pal,[14,15,16,17,18,19,20,21].slice(0,cols+2),h)}</div>`;
+const t2a=()=>{const a=MOON;
+  return `<div class="frame">${tabletBar('달그림자','','작가',[['Pin','on'],'PencilSquare','EllipsisVertical'])}
+  <div class="content fade-end">
+    <div class="hero" style="height:220px">${[0,1,2].map(j=>`<span class="th" style="flex:${R[j*2]};height:220px;border-radius:0"><img src="${art(a.pal,j+20,R[j*2])}" alt=""></span>`).join('')}</div>
+    <div class="ident"><div class="who"><div class="ttl"><h2>달그림자</h2><span class="site user">직접 지은 이름</span></div>${moonAka}</div><div class="acts"><span class="btn primary">${I('Play')}연속 보기</span></div></div>
+    ${moonFacts.replace('class="facts"','class="facts" style="margin:14px var(--gutter) 0"')}
+    <div class="pad" style="margin-top:14px"><div class="slabel">다시보기</div>${rrows(a.pal,5,104)}</div>
+    <div class="pad"><div class="dhead">9월 25일 <small>3장</small></div><div class="mason" style="column-count:4">${Array.from({length:12},(_,j)=>thm(a.pal,j+30)).join('')}</div></div>
+  </div>${tabletNav('Library')}</div>`;};
+
+const aliasRows=(small=false)=>`
+  <div class="alias">${th(0,3)}<div class="who"><span class="name">Moonshade <span class="site">x.com</span></span><span class="handle">@moonshade_art</span></div>${n(402)}<span class="btn ghost">떼어내기</span></div>
+  <div class="alias">${th(0,5)}<div class="who"><span class="name">月影 <span class="site">pixiv</span></span><span class="handle">작가 번호 48213377</span></div>${n(72)}<span class="btn ghost">떼어내기</span></div>
+  <div class="alias">${th(0,7)}<div class="who"><span class="name">직접 지정 <span class="site user">작가 미상에서</span></span><span class="handle">9월 20일에 붙인 이미지</span></div>${n(12)}<span class="btn ghost">떼어내기</span></div>`;
+const mergeFind=`<div class="sfield sm">${I('MagnifyingGlass')}<span>합칠 작가를 이름 · 핸들로 찾기</span></div>
+  <div class="alias">${th(0,9)}<div class="who"><span class="name">moonshade 2nd <span class="site">x.com</span></span><span class="handle">@moonshade_sub · <span style="color:var(--color-accent)">같은 작가일 수 있어요</span></span></div>${n(9)}<span class="btn">${I('ArrowsPointingIn')}합치기</span></div>`;
+const t2b=()=>{
+  const sheet=`<div class="scrim"></div><div class="sheet"><div class="grab"></div><div class="shead"><h3>작가 편집</h3>${ib('XMark')}</div><div class="sbody">
+    <div><span class="flabel">표시 이름</span><div class="field">달그림자<span class="caret"></span><span class="space"></span>${ib('XMark')}</div><div class="help">목록 · 캡션 · 검색에 이 이름이 보입니다. 비우면 원래 이름 <b style="color:var(--color-text)">Moonshade</b>로 돌아가요. 원래 이름과 핸들로도 계속 찾아집니다.</div></div>
+    <div><div class="slabel">원래 이름 · 핸들 ${n(3)}</div>${aliasRows()}</div>
+    <div><div class="slabel">합치기</div><div style="margin-top:8px">${mergeFind}</div></div>
+    <div class="toggles"><label>${cb(true)}고정</label><label>${cb(false)}숨기기</label></div>
+  </div><div class="sfoot"><span class="space"></span><span class="btn lg ghost">취소</span><span class="btn lg primary">저장</span></div></div>`;
+  return t2a().replace(/<nav class="nav">/,sheet+'<nav class="nav">');};
+
+const pc2=()=>{const a=MOON;
+  const panel=`<aside class="panel"><div class="shead"><h3>작가 편집</h3>${ib('XMark')}</div><div class="sbody">
+    <div><span class="flabel">표시 이름</span><div class="field">달그림자<span class="caret"></span><span class="space"></span></div><div class="help">비우면 원래 이름 <b style="color:var(--color-text)">Moonshade</b>. 원래 이름·핸들로도 검색됩니다.</div></div>
+    <div><div class="slabel">원래 이름 · 핸들 ${n(3)}</div>${aliasRows()}</div>
+    <div><div class="slabel">합치기</div><div style="margin-top:8px">${mergeFind}</div></div>
+    <div class="toggles"><label>${cb(true)}고정</label><label>${cb(false)}숨기기</label></div>
+  </div><div class="sfoot"><span class="space"></span><span class="btn ghost">취소</span><span class="btn primary">저장</span></div></aside>`;
+  const main=titlebar('달그림자','Moonshade · 月影 외 1 · 486장',`${ib('Pin','on')}${ib('PencilSquare','on')}${ib('EllipsisVertical')}<span class="btn primary" style="height:30px">${I('Play')}연속 보기</span>`)+`<div class="mbody fade-end">${panel}
+    <div class="apc-head"><div style="flex:none;width:780px">${moonFacts}<div style="margin-top:10px">${moonAka}</div></div><div class="with"><div class="slabel">자주 함께</div><div class="chiprow"><span class="chip sm">오리지널 ${n(188)}</span><span class="chip sm">블루 아카이브 ${n(96)}</span><span class="chip sm">원신 ${n(40)}</span></div></div></div>
+    <div style="padding:10px 22px 0"><div class="slabel">다시보기</div>${rrows(a.pal,8,120)}</div>
+    <div class="gal"><div class="dhead">9월 25일 <small>3장</small></div><div class="mason">${Array.from({length:22},(_,j)=>thm(a.pal,j+40)).join('')}</div></div></div>`;
+  return pcwin(pcIndex('달그림자'),main);};
+
+/* ================= 3 ================= */
+const mside=(nm,handle,site,c,pal,off,cols=4)=>`<div class="mside"><div class="top">${th(pal,off)}<div class="who"><span class="name">${nm}</span><span class="handle">${handle} ${site} · ${n(c)}장</span></div></div><div class="g" style="grid-template-columns:repeat(${cols},1fr)">${Array.from({length:cols},(_,j)=>th(pal,j+off+1)).join('')}</div></div>`;
+const S=s=>`<span class="site">${s}</span>`;
+const CARDS=[
+  {why:'X 핸들이 같아요',sub:'대소문자만 다름 · 표시 이름이 바뀜',q:'',
+   l:['Kiri','@kiri_draws',S('x.com'),41,2,0],r:['키리 커미션OPEN','@Kiri_Draws',S('x.com'),14,2,10],
+   names:['Kiri','키리 커미션OPEN','직접 입력']},
+  {why:'이름이 같아요',sub:'x.com과 pixiv',q:'',
+   l:['Hollow Lantern','@hollowlantern',S('x.com'),33,4,0],r:['Hollow Lantern','pixiv 3302911',S('pixiv'),6,4,20],
+   names:['Hollow Lantern','직접 입력']},
+  {why:'이름이 같아요',sub:'게시판 출처',q:'quiet',warn:'올린 사람일 수 있음',
+   l:['유리병','@yuribyeong',S('x.com'),11,5,0],r:['유리병','dcinside 글쓴이',`<span class="site warn">dcinside</span>`,4,1,30],
+   names:['유리병','직접 입력']},
+  {why:'핸들이 비슷해요',sub:'뒤에 숫자만 다름',q:'quiet',
+   l:['시오미즈','@sio_mizu',S('x.com'),27,9,0],r:['sio','@sio_mizu2',S('x.com'),5,9,12],
+   names:['시오미즈','sio','직접 입력']},
+];
+const mcard=(c,cols=4)=>`<div class="mcard"><div class="reason"><span class="why ${c.q}">${c.why}</span><span class="muted">· ${c.sub}</span>${c.warn?`<span class="site warn">${c.warn}</span>`:''}</div>
+  <div class="pair">${mside(...c.l,cols)}${I('ArrowsPointingIn')}${mside(...c.r,cols)}</div>
+  <div class="choose">합친 이름 ${c.names.map((x,i)=>`<span class="radio ${i===0?'on':''}"><i></i>${x}</span>`).join('')}</div>
+  <div class="acts"><span class="btn primary">${I('ArrowsPointingIn')}합치기</span><span class="btn">따로 두기</span><span class="space"></span><small>합친 뒤에도 작가 편집에서 떼어낼 수 있어요</small></div></div>`;
+const t3=()=>`<div class="frame">${tabletBar('같은 작가일 수 있어요','12','작가 · 정리',[])}
+  <div class="content fade-end"><div class="pad">
+    <div class="chips" style="margin-top:12px"><span class="chip on">전체 <span class="numeric">12</span></span><span class="chip">핸들 같음 <span class="numeric">4</span></span><span class="chip">이름 같음 <span class="numeric">6</span></span><span class="chip">확실하지 않음 <span class="numeric">2</span></span></div>
+    ${CARDS.map(c=>mcard(c)).join('')}
+  </div></div>${tabletNav('Library')}</div>`;
+const pc3=()=>pcwin(pcIndex('merge'),titlebar('같은 작가일 수 있어요','12쌍 · 따로 두기 한 쌍은 다시 나오지 않음')+`<div class="mbody fade-end"><div style="padding:14px 22px 0">
+  <div class="chips"><span class="chip sm on">전체 <span class="numeric">12</span></span><span class="chip sm">핸들 같음 <span class="numeric">4</span></span><span class="chip sm">이름 같음 <span class="numeric">6</span></span><span class="chip sm">확실하지 않음 <span class="numeric">2</span></span></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">${CARDS.map(c=>mcard(c,5)).join('')}</div></div></div>`);
+
+/* ================= 4 ================= */
+const t4a=()=>{
+  const g1=Array.from({length:10},(_,j)=>`<div class="t ${j<8||j===9?'on':''}">${th([1,3,5,7,9,2][j%6],j+40)}<span class="mk"></span></div>`).join('');
+  const g2=Array.from({length:10},(_,j)=>`<div class="t ${[0,1,4,6,7,8].includes(j)?'on':''}">${th([4,6,8,0][j%4],j+60)}<span class="mk"></span></div>`).join('');
+  const sheet=`<div class="scrim"></div><div class="sheet"><div class="grab"></div><div class="shead"><h3>작가 지정 · ${n(15)}장</h3>${ib('XMark')}</div><div class="sbody">
+    <div class="sfield">${I('MagnifyingGlass')}<span class="q">하늘</span><span class="caret"></span></div>
+    <div>
+      <div class="res pick">${th(9,0)}<div class="who"><span class="name"><mark>하늘</mark>고래</span><span class="handle">@sky_whale · x.com</span></div>${n(86)}<span class="cb on">${CHECK}</span></div>
+      <div class="res">${th(3,4)}<div class="who"><span class="name"><mark>하늘</mark>빛 <span class="site user">직접 지은 이름</span></span><span class="handle">직접 지정 5장</span></div>${n(5)}</div>
+      <div class="res">${th(6,2)}<div class="who"><span class="name">Sora Nakaji</span><span class="handle">원래 이름에 ‘<mark>하늘</mark>’ 없음 · 표시 이름 ‘<mark>하늘</mark>나카지’</span></div>${n(9)}</div>
+      <div class="res"><span class="newi">${I('Plus')}</span><div class="who"><span class="name">‘하늘’ 이름으로 새 작가 만들기</span><span class="handle">직접 지은 이름 · 원래 이름 없음</span></div></div>
+    </div>
+    <div class="help">원래 파일과 출처 정보는 바꾸지 않고, 고른 이미지를 이 작가에 붙이기만 합니다. 작가 편집의 원래 이름 목록에 “직접 지정 15장”으로 보이고 언제든 떼어낼 수 있어요.</div>
+  </div><div class="sfoot"><span class="space"></span><span class="btn lg ghost">취소</span><span class="btn lg primary">하늘고래에 붙이기</span></div></div>`;
+  return `<div class="frame"><div class="selbar">${ib('XMark')}<h1>${n(15)}장 선택</h1><span class="space"></span><span class="btn primary">${I('UserPlus')}작가 지정</span></div>
+  <div class="content fade-end"><div class="pad">
+    <div class="chips" style="margin-top:12px"><span class="chip on">출처 없음 <span class="numeric">4,742</span></span><span class="chip">출처만 있음 <span class="numeric">699</span></span><span class="chip">${I('ArrowsUpDown')}가져온 날짜순</span></div>
+    <div class="dgh">2024.03.11 <small>가져오기 · 10장</small><span class="space"></span><span class="act">이 묶음 모두 선택</span></div><div class="sgrid">${g1}</div>
+    <div class="dgh">2024.03.09 <small>가져오기 · 10장</small><span class="space"></span><span class="act">이 묶음 모두 선택</span></div><div class="sgrid">${g2}</div>
+  </div></div>${sheet.replace('class="scrim"','class="scrim" style="background:rgba(0,0,0,.3)"')}${tabletNav('Library')}</div>`;};
+
+const pc4=()=>{
+  const table=`<table class="srctab"><tr><th>출처</th><th style="text-align:right">장수</th><th>채우는 방법</th><th style="text-align:right">채울 수 있음</th><th></th></tr>
+    <tr class="cur"><td><b>x.com</b></td><td style="text-align:right">${n(393)}</td><td><span class="mode auto">자동</span> <span class="muted" style="font-size:12.5px">주소에서 핸들 읽기</span></td><td style="text-align:right">${n(381)}<div class="faint" style="font-size:12px;white-space:nowrap">12장 핸들 없음</div></td><td><span class="btn" style="height:30px">미리보기</span></td></tr>
+    <tr><td><b>pixiv</b></td><td style="text-align:right">${n(33)}</td><td><span class="mode look">자동 · 조회</span> <span class="muted" style="font-size:12.5px">작품 번호로 조회 · 온라인</span></td><td style="text-align:right">${n(33)}</td><td><span class="btn" style="height:30px">조회하기</span></td></tr>
+    <tr><td><b>arca.live</b></td><td style="text-align:right">${n(176)}</td><td><span class="mode man">직접</span> <span class="muted" style="font-size:12.5px">글쓴이가 작가가 아닐 수 있음</span></td><td style="text-align:right" class="faint">—</td><td><span class="btn ghost" style="height:30px">게시글별로 보기</span></td></tr>
+    <tr><td><b>dcinside</b></td><td style="text-align:right">${n(45)}</td><td><span class="mode man">직접</span> <span class="muted" style="font-size:12.5px">글쓴이가 작가가 아닐 수 있음</span></td><td style="text-align:right" class="faint">—</td><td><span class="btn ghost" style="height:30px">게시글별로 보기</span></td></tr>
+    <tr><td class="muted">합계</td><td style="text-align:right">${n(699)}</td><td></td><td style="text-align:right">${n(414)}</td><td></td></tr></table>`;
+  const pv=[['@kiri_draws','Kiri','기존',18,2],['@moonshade_art','달그림자','기존',12,0],['@sky_whale','하늘고래','기존',9,9],['@nori_sketch','Nori','기존',7,7],['@palemoth','Pale Moth','기존',6,9],['@glass_owl','glass_owl','새 작가',5,3],['@minty_ro','minty_ro','새 작가',4,5]];
+  const prev=`<div class="pv"><div class="pvh"><b>x.com ${n(381)}장 → 작가 ${n(57)}명</b><span class="muted" style="font-size:13px">기존 작가 ${n(44)}명에 붙음 · 새 작가 ${n(13)}명</span><span class="space"></span><span class="btn primary">${I('Check')}381장 채우기</span></div>
+    ${pv.map(([h,to,k,c,p])=>`<div class="pvrow"><div class="strip">${[1,2,3].map(j=>th(p,j+c)).join('')}</div><span class="h">${h}</span>${I('ArrowRight')}<span class="to"><span class="name">${to}</span>${k==='새 작가'?'<span class="site user">새 작가</span>':`<span class="faint">${k}</span>`}</span>${n(c)}</div>`).join('')}
+    <div class="pvrow" style="border-bottom:0;color:var(--color-muted);font-size:13px">… 50명 더 · 핸들이 없는 12장은 작가 미상에 남습니다</div></div>`;
+  return pcwin(pcIndex('fill'),titlebar('출처에서 작가 채우기','출처 주소는 있고 작가가 없는 699장')+`<div class="mbody"><div style="display:grid;grid-template-columns:720px 1fr;gap:22px;padding:18px 22px">
+    <div>${table}<div class="help" style="margin-top:12px">x.com은 주소 <code>x.com/{핸들}/status/…</code>에서 바로 읽어 오프라인으로 채웁니다. pixiv는 작품 번호만 있어 조회가 필요하고, arca.live·dcinside는 게시글별로 묶어 <b style="color:var(--color-text)">작가 지정</b>으로 직접 붙입니다.</div></div>
+    <div>${prev}</div></div></div>`);};
+
+document.getElementById('row1').innerHTML=fig('<b>1a 태블릿 · 작가 첫 화면</b> — 검색, 오늘 세 줄, 고정 6명, 주요 작가(기준은 제목 옆에 작게), 그 외 작가 · 한 장뿐인 작가들 · 작가 미상 입구.',t1a())+fig('<b>1b 태블릿 · 그 외 작가를 연 모습</b> — 촘촘한 이름 목록, 초성 검색 “ㅅㄹ”, 장수·숨긴 작가 필터, 길게 눌러 고정 · 이름 바꾸기 · 합치기 · 숨기기.',t1b());
+document.getElementById('row1b').innerHTML=fig('<b>1c PC</b> — 인덱스: 고정 / 모음(주요 · 그 외 · 한 장뿐 · 미상) / 정리(합치기 제안 · 출처에서 채우기 · 숨긴 작가). 본문 위에 오늘 세 칸, 기준 버튼을 누르면 숫자를 바꾸는 작은 창.',pc1(),'pc');
+document.getElementById('row2').innerHTML=fig('<b>2a 태블릿 · 작가 페이지</b> — 직접 지은 이름 “달그림자”, 아래에 원래 이름(Moonshade · 月影 · 직접 지정 12장), 요약, 다시보기 두 줄, 전체 작품.',t2a())+fig('<b>2b 태블릿 · 작가 편집 시트</b> — 표시 이름, 원래 이름 · 핸들 목록(떼어내기), 합칠 작가 찾기와 제안, 고정 · 숨기기.',t2b());
+document.getElementById('row2b').innerHTML=fig('<b>2c PC</b> — 인덱스의 고정 목록에서 달그림자가 선택됨(슬랩 + 오른쪽 표식). 편집은 오른쪽 패널로 열려 본문 폭이 바뀌지 않음.',pc2(),'pc');
+document.getElementById('row3').innerHTML=fig('<b>3a 태블릿 · 합치기 제안</b> — 이유 한 줄, 양쪽 이미지, 합친 이름 고르기, 합치기 / 따로 두기. 게시판 출처는 경고 표시.',t3());
+document.getElementById('row3b').innerHTML=fig('<b>3b PC</b> — 같은 카드를 두 줄로. 인덱스 “정리 → 같은 작가일 수 있어요”가 선택됨.',pc3(),'pc');
+document.getElementById('row4').innerHTML=fig('<b>4a 태블릿 · 작가 미상에서 여러 장 골라 작가 지정</b> — 가져온 날짜 묶음, “이 묶음 모두 선택”, 기존 작가 검색 또는 새 이름으로 만들기.',t4a());
+document.getElementById('row4b').innerHTML=fig('<b>4b PC · 출처에서 작가 채우기</b> — 사이트별 장수와 방법. x.com은 미리보기(어느 작가에 몇 장 붙는지) 뒤 한 번에 채우고, pixiv는 조회, arca.live · dcinside는 직접.',pc4(),'pc');
+
+const params=new URLSearchParams(location.search);
+if(params.get('shot')){document.body.classList.add('shot');document.getElementById(params.get('shot')).classList.add('shown');}
+</script>
+</body>
+</html>
