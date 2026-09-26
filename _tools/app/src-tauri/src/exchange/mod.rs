@@ -7,8 +7,10 @@
 //!
 //! * the receiver polls `exchange.revision` in `/v1/sync/status` (one conditional read,
 //!   `304` while nothing changed) and, when it moves, refreshes devices, outbox and
-//!   inbox and saves every new file: part file → size + SHA-256 check → reserved final
-//!   name → rename → ack. A local ledger means a lost ack never saves a file twice;
+//!   inbox and saves every new file: part file → size + SHA-256 check → journaled final
+//!   name → reservation → rename → durable receipt → ack. A local ledger means a lost ack
+//!   never saves a file twice, and the journal means a crash between the rename and the
+//!   receipt finishes that same file instead of saving another;
 //! * the sender hashes, creates, uploads (one presigned PUT) and completes each queued
 //!   file. The transfer id is persisted first, so every step is retry-safe.
 //!
@@ -86,6 +88,10 @@ struct Received {
     acked: bool,
     #[serde(default)]
     seen: bool,
+    /// Journaled before the file is moved into Downloads: `path` is the chosen
+    /// destination, and the row is neither shown nor acknowledged until this clears.
+    #[serde(default)]
+    publishing: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -112,7 +118,7 @@ struct StoredSend {
     note: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct Stored {
     device_id: String,
@@ -174,8 +180,33 @@ impl Stored {
     }
 
     fn unseen(&self) -> usize {
-        self.received.iter().filter(|row| !row.seen).count()
+        self.received
+            .iter()
+            .filter(|row| !row.seen && !row.publishing)
+            .count()
     }
+
+    /// Receipts: files that are in Downloads (not a publication still in progress).
+    fn receipts(&self) -> impl Iterator<Item = &Received> {
+        self.received.iter().filter(|row| !row.publishing)
+    }
+}
+
+/// Apply `change` to a copy of the stored state, write that durably, then adopt it. On
+/// failure nothing changes in memory either, so a caller never acts on a record that is
+/// not on disk (a receipt is only acknowledged once it is durable).
+fn commit(
+    path: Option<&Path>,
+    stored: &mut Stored,
+    change: impl FnOnce(&mut Stored),
+) -> io::Result<()> {
+    let mut next = stored.clone();
+    change(&mut next);
+    if let Some(path) = path {
+        next.save(path)?;
+    }
+    *stored = next;
+    Ok(())
 }
 
 // --- runtime state ------------------------------------------------------------
@@ -510,8 +541,7 @@ fn snapshot(state: &State, folder: Option<String>) -> Snapshot {
             .collect(),
         received: state
             .stored
-            .received
-            .iter()
+            .receipts()
             .map(|row| ReceivedRow {
                 transfer_id: row.transfer_id.clone(),
                 file_name: row.file_name.clone(),
@@ -534,8 +564,7 @@ fn current_snapshot(app: &AppHandle) -> Snapshot {
         let state = lock();
         let paths: Vec<PathBuf> = state
             .stored
-            .received
-            .iter()
+            .receipts()
             .map(|row| row.path.clone())
             .collect();
         (snapshot(&state, folder), paths)
@@ -888,8 +917,29 @@ impl Receiver {
             state.parts.clone()
         };
         // Their part files go too. A full page may hide older offers, so it sweeps nothing.
-        if let Some(parts) = parts.filter(|_| inbox.len() < client::INBOX_PAGE) {
-            files::sweep_parts(&parts, Some(&offered), Duration::ZERO);
+        if inbox.len() < client::INBOX_PAGE {
+            if let Some(parts) = parts {
+                files::sweep_parts(&parts, Some(&offered), Duration::ZERO);
+            }
+            // So do their unfinished publications (a finished one is kept as received).
+            let publishing: Vec<Received> = lock()
+                .stored
+                .received
+                .iter()
+                .filter(|row| row.publishing && !offered.contains(&row.transfer_id))
+                .cloned()
+                .collect();
+            if !publishing.is_empty() {
+                let (finished, forgotten) = abandoned(&publishing);
+                let settled = {
+                    let mut state = lock();
+                    let State { path, stored, .. } = &mut *state;
+                    settle_abandoned(stored, path.as_deref(), &finished, &forgotten)
+                };
+                if let Err(error) = settled {
+                    eprintln!("file exchange state not saved: {error}");
+                }
+            }
         }
         emit();
         self.handled = None;
@@ -1102,15 +1152,165 @@ fn acknowledge(context: &Context, transfer_id: &str, sha256: &str) -> Result<(),
     Ok(())
 }
 
+/// What a journaled destination holds.
+#[derive(Debug, PartialEq, Eq)]
+enum Journaled {
+    /// The complete file: the publication finished before its receipt was recorded.
+    Published,
+    /// Nothing yet, or the empty reservation: the publication can continue there.
+    Open,
+    /// Something else (not ours): the publication needs another name.
+    Foreign,
+}
+
+fn journaled(row: &Received) -> Journaled {
+    match fs::symlink_metadata(&row.path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Journaled::Open,
+        Ok(meta) if meta.is_file() => {
+            if files::verify_part(&row.path, row.size_bytes, &row.sha256)
+                .is_ok_and(|verify| verify == files::Verify::Ok)
+            {
+                Journaled::Published
+            } else if meta.len() == 0 {
+                Journaled::Open
+            } else {
+                Journaled::Foreign
+            }
+        }
+        _ => Journaled::Foreign,
+    }
+}
+
+/// Journal `target` as this transfer's destination, durably, before anything is written
+/// there. A crash afterwards is finished (or cleaned) at that same path.
+fn journal_destination(
+    stored: &mut Stored,
+    path: Option<&Path>,
+    item: &InboxItem,
+    target: &Path,
+) -> io::Result<()> {
+    commit(path, stored, |stored| {
+        stored
+            .received
+            .retain(|row| row.transfer_id != item.transfer_id);
+        stored.received.insert(
+            0,
+            Received {
+                transfer_id: item.transfer_id.clone(),
+                file_name: target
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| item.file_name.clone()),
+                path: target.to_path_buf(),
+                size_bytes: item.size_bytes,
+                sha256: item.sha256.clone(),
+                from_name: item.from_name.clone(),
+                received_at: now_rfc3339(),
+                acked: false,
+                seen: false,
+                publishing: true,
+            },
+        );
+    })
+}
+
+/// Record a finished publication as received. Until this is durable the file is not
+/// acknowledged; the journal lets a later pass finish it.
+fn record_receipt(stored: &mut Stored, path: Option<&Path>, transfer_id: &str) -> io::Result<()> {
+    commit(path, stored, |stored| {
+        if let Some(row) = stored
+            .received
+            .iter_mut()
+            .find(|row| row.transfer_id == transfer_id)
+        {
+            row.publishing = false;
+            row.received_at = now_rfc3339();
+        }
+        stored.prune(chrono::Utc::now());
+    })
+}
+
+/// Put a verified part into `dir` under a journaled name. `resume_at` is the destination an
+/// interrupted earlier attempt journaled; it is reused when still free (or holding only
+/// its empty reservation). `journal` must make each chosen name durable before it is used.
+fn publish(
+    part: &Path,
+    dir: &Path,
+    leaf: &str,
+    mut resume_at: Option<PathBuf>,
+    mut journal: impl FnMut(&Path) -> io::Result<()>,
+) -> io::Result<PathBuf> {
+    // A name taken between choosing and claiming it is retried a few times.
+    for _ in 0..8 {
+        let (target, resume) = match resume_at.take() {
+            Some(path) => (path, true),
+            None => (files::free_name(dir, leaf)?, false),
+        };
+        journal(&target)?;
+        match files::place(part, &target, resume) {
+            Ok(()) => return Ok(target),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "no free file name",
+    ))
+}
+
+/// Journaled publications whose transfer the server no longer offers (withdrawn, expired,
+/// declined): which finished (kept as received, nothing left to acknowledge) and which are
+/// forgotten (their empty reservation is removed here). Reads files: call it unlocked.
+fn abandoned(publishing: &[Received]) -> (HashSet<String>, HashSet<String>) {
+    let mut finished = HashSet::new();
+    let mut forgotten = HashSet::new();
+    for row in publishing {
+        match journaled(row) {
+            Journaled::Published => {
+                finished.insert(row.transfer_id.clone());
+            }
+            outcome => {
+                if outcome == Journaled::Open
+                    && fs::symlink_metadata(&row.path)
+                        .is_ok_and(|meta| meta.is_file() && meta.len() == 0)
+                {
+                    let _ = fs::remove_file(&row.path);
+                }
+                forgotten.insert(row.transfer_id.clone());
+            }
+        }
+    }
+    (finished, forgotten)
+}
+
+fn settle_abandoned(
+    stored: &mut Stored,
+    path: Option<&Path>,
+    finished: &HashSet<String>,
+    forgotten: &HashSet<String>,
+) -> io::Result<()> {
+    commit(path, stored, |stored| {
+        stored
+            .received
+            .retain(|row| !(row.publishing && forgotten.contains(&row.transfer_id)));
+        for row in stored
+            .received
+            .iter_mut()
+            .filter(|row| row.publishing && finished.contains(&row.transfer_id))
+        {
+            row.publishing = false;
+            row.acked = true;
+        }
+    })
+}
+
 /// Save one inbox item. Transient failures return `Err` (the pass backs off); anything
 /// else is shown on the row and waits for the user.
 fn receive(app: &AppHandle, context: &Context, item: &InboxItem) -> Result<(), ApiError> {
     let (ledger, skip, parts) = {
         let state = lock();
-        let ledger = state
-            .stored
-            .ledger(&item.transfer_id)
-            .map(|row| (row.acked, row.sha256.clone()));
+        let ledger = state.stored.ledger(&item.transfer_id).cloned();
         let skip = state.declined.contains(&item.transfer_id)
             || state
                 .incoming
@@ -1118,13 +1318,34 @@ fn receive(app: &AppHandle, context: &Context, item: &InboxItem) -> Result<(), A
                 .any(|row| row.item.transfer_id == item.transfer_id && row.failed.is_some());
         (ledger, skip, state.parts.clone())
     };
-    if let Some((acked, sha256)) = ledger {
-        // Saved before: never save twice, only repeat the lost ack.
-        return if acked {
-            Ok(())
-        } else {
-            acknowledge(context, &item.transfer_id, &sha256)
-        };
+    let mut resume_at = None;
+    if let Some(row) = ledger {
+        if !row.publishing {
+            // Saved before: never save twice, only repeat the lost ack.
+            return if row.acked {
+                Ok(())
+            } else {
+                acknowledge(context, &item.transfer_id, &row.sha256)
+            };
+        }
+        // A publication an earlier attempt left unfinished: finish that same destination,
+        // or continue it there once the part is verified again.
+        match journaled(&row) {
+            Journaled::Published => {
+                // The crash may have come before the download mark.
+                files::mark_downloaded(&row.path);
+                let recorded = {
+                    let mut state = lock();
+                    let State { path, stored, .. } = &mut *state;
+                    record_receipt(stored, path.as_deref(), &item.transfer_id)
+                };
+                emit();
+                recorded.map_err(ApiError::Local)?;
+                return acknowledge(context, &item.transfer_id, &row.sha256);
+            }
+            Journaled::Open => resume_at = Some(row.path),
+            Journaled::Foreign => {}
+        }
     }
     if skip {
         return Ok(());
@@ -1179,41 +1400,32 @@ fn receive(app: &AppHandle, context: &Context, item: &InboxItem) -> Result<(), A
         if cancel.load(Ordering::Acquire) {
             return Err(ApiError::Cancelled);
         }
-        files::finalize(
+        publish(
             &part,
             &dir,
             &files::sanitize_leaf(&item.file_name, cfg!(windows)),
+            resume_at,
+            |target| {
+                let mut state = lock();
+                let State { path, stored, .. } = &mut *state;
+                journal_destination(stored, path.as_deref(), item, target)
+            },
         )
         .map_err(ApiError::Local)
     })();
     match saved {
-        Ok(path) => {
-            {
+        Ok(_) => {
+            let recorded = {
                 let mut state = lock();
                 state
                     .incoming
                     .retain(|row| row.item.transfer_id != item.transfer_id);
-                state.stored.received.insert(
-                    0,
-                    Received {
-                        transfer_id: item.transfer_id.clone(),
-                        file_name: path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| item.file_name.clone()),
-                        path,
-                        size_bytes: item.size_bytes,
-                        sha256: item.sha256.clone(),
-                        from_name: item.from_name.clone(),
-                        received_at: now_rfc3339(),
-                        acked: false,
-                        seen: false,
-                    },
-                );
-                state.stored.prune(chrono::Utc::now());
-                persist(&state);
-            }
+                let State { path, stored, .. } = &mut *state;
+                record_receipt(stored, path.as_deref(), &item.transfer_id)
+            };
             emit();
+            // Not durable: no ack. The journal finishes this file on a later pass.
+            recorded.map_err(ApiError::Local)?;
             acknowledge(context, &item.transfer_id, &item.sha256)
         }
         Err(_) if cancel.load(Ordering::Acquire) => {
@@ -1975,6 +2187,7 @@ fn received_path(transfer_id: &str) -> Result<PathBuf, String> {
     let path = lock()
         .stored
         .ledger(transfer_id)
+        .filter(|row| !row.publishing)
         .map(|row| row.path.clone());
     path.filter(|path| path.is_file())
         .ok_or_else(|| "파일이 옮겨졌거나 삭제되었습니다.".to_owned())
@@ -2113,6 +2326,7 @@ mod tests {
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             acked,
             seen: false,
+            publishing: false,
         }
     }
 
@@ -2251,5 +2465,158 @@ mod tests {
         });
         assert_eq!(delay, REJECTED_RETRY);
         assert!(ApiError::TimedOut.transient());
+    }
+
+    /// A verified part in `parts`, its inbox item, and the Downloads folder it goes to.
+    fn arrival(root: &Path, bytes: &[u8]) -> (InboxItem, PathBuf, PathBuf) {
+        let id = uuid::Uuid::new_v4();
+        let parts = root.join("parts");
+        let downloads = root.join("Downloads");
+        fs::create_dir_all(&parts).unwrap();
+        fs::create_dir_all(&downloads).unwrap();
+        let part = files::part_path(&parts, &id);
+        fs::write(&part, bytes).unwrap();
+        let item = InboxItem {
+            transfer_id: id.hyphenated().to_string(),
+            from_name: Some("Tablet".into()),
+            file_name: "photo.jpg".into(),
+            size_bytes: bytes.len() as u64,
+            sha256: files::sha256_file(&part).unwrap(),
+        };
+        (item, part, downloads)
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_crash_between_publication_and_receipt_does_not_publish_twice() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(STATE_FILE);
+        let (item, part, downloads) = arrival(root.path(), b"received");
+        let mut stored = Stored::load(&state);
+        let target = publish(&part, &downloads, "photo.jpg", None, |target| {
+            journal_destination(&mut stored, Some(&state), &item, target)
+        })
+        .unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"received");
+        // The process dies here: the file is in Downloads, its receipt was never recorded.
+
+        let mut restarted = Stored::load(&state);
+        let row = restarted.ledger(&item.transfer_id).cloned().unwrap();
+        assert!(row.publishing);
+        assert_eq!(row.path, target);
+        // An unfinished publication is neither shown nor counted, and never acknowledged.
+        assert_eq!(restarted.receipts().count(), 0);
+        assert_eq!(restarted.unseen(), 0);
+        // The journal names the complete file: finish it, do not receive it again.
+        assert_eq!(journaled(&row), Journaled::Published);
+        record_receipt(&mut restarted, Some(&state), &item.transfer_id).unwrap();
+        let reloaded = Stored::load(&state);
+        let row = reloaded.ledger(&item.transfer_id).unwrap();
+        assert!(!row.publishing && !row.acked);
+        assert_eq!(reloaded.receipts().count(), 1);
+        assert_eq!(names(&downloads), ["photo.jpg"]);
+    }
+
+    #[test]
+    fn a_crash_after_the_reservation_continues_at_the_same_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(STATE_FILE);
+        let (item, part, downloads) = arrival(root.path(), b"received");
+        let mut stored = Stored::load(&state);
+        let target = files::free_name(&downloads, "photo.jpg").unwrap();
+        journal_destination(&mut stored, Some(&state), &item, &target).unwrap();
+        // The empty reservation was created, then the process died before the rename.
+        fs::write(&target, b"").unwrap();
+
+        let mut restarted = Stored::load(&state);
+        let row = restarted.ledger(&item.transfer_id).cloned().unwrap();
+        assert_eq!(journaled(&row), Journaled::Open);
+        let saved = publish(&part, &downloads, "photo.jpg", Some(row.path), |target| {
+            journal_destination(&mut restarted, Some(&state), &item, target)
+        })
+        .unwrap();
+        assert_eq!(saved, target);
+        assert_eq!(names(&downloads), ["photo.jpg"]);
+        assert_eq!(fs::read(&saved).unwrap(), b"received");
+
+        // A journaled name that meanwhile holds someone else's file is left alone.
+        fs::write(&target, b"theirs").unwrap();
+        let foreign = restarted.ledger(&item.transfer_id).cloned().unwrap();
+        assert_eq!(journaled(&foreign), Journaled::Foreign);
+    }
+
+    #[test]
+    fn the_ack_is_withheld_while_the_receipt_cannot_be_saved() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(STATE_FILE);
+        let (item, _part, downloads) = arrival(root.path(), b"received");
+        let mut stored = Stored::load(&state);
+        journal_destination(
+            &mut stored,
+            Some(&state),
+            &item,
+            &downloads.join("photo.jpg"),
+        )
+        .unwrap();
+        // The state folder becomes unwritable: its path is now below a regular file.
+        let blocked = root.path().join("blocked");
+        fs::write(&blocked, b"").unwrap();
+        let unwritable = blocked.join(STATE_FILE);
+        assert!(record_receipt(&mut stored, Some(&unwritable), &item.transfer_id).is_err());
+        // Nothing changed in memory either: the row still reads as an unfinished
+        // publication, so `receive` returns the error before acknowledging.
+        let row = stored.ledger(&item.transfer_id).unwrap();
+        assert!(row.publishing);
+        assert_eq!(stored.receipts().count(), 0);
+        // A journal that cannot be written stops the publication before Downloads.
+        let (other, other_part, _) = arrival(root.path(), b"second");
+        let result = publish(&other_part, &downloads, "second.bin", None, |target| {
+            journal_destination(&mut stored, Some(&unwritable), &other, target)
+        });
+        assert!(result.is_err());
+        assert!(stored.ledger(&other.transfer_id).is_none());
+        assert!(!downloads.join("second.bin").exists());
+        assert!(other_part.exists());
+    }
+
+    #[test]
+    fn abandoned_publications_are_finished_or_cleaned() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(STATE_FILE);
+        let mut stored = Stored::load(&state);
+        let (done, done_part, downloads) = arrival(root.path(), b"done");
+        let (reserved, _, _) = arrival(root.path(), b"reserved");
+        let (theirs, _, _) = arrival(root.path(), b"theirs");
+        for (item, name) in [(&done, "a.bin"), (&reserved, "b.bin"), (&theirs, "c.bin")] {
+            journal_destination(&mut stored, Some(&state), item, &downloads.join(name)).unwrap();
+        }
+        files::place(&done_part, &downloads.join("a.bin"), false).unwrap();
+        fs::write(downloads.join("b.bin"), b"").unwrap();
+        fs::write(downloads.join("c.bin"), b"someone else").unwrap();
+
+        let publishing: Vec<Received> = stored.received.clone();
+        let (finished, forgotten) = abandoned(&publishing);
+        assert_eq!(finished, HashSet::from([done.transfer_id.clone()]));
+        assert_eq!(
+            forgotten,
+            HashSet::from([reserved.transfer_id.clone(), theirs.transfer_id.clone()])
+        );
+        settle_abandoned(&mut stored, Some(&state), &finished, &forgotten).unwrap();
+        let reloaded = Stored::load(&state);
+        let kept = reloaded.ledger(&done.transfer_id).unwrap();
+        assert!(!kept.publishing && kept.acked);
+        assert!(reloaded.ledger(&reserved.transfer_id).is_none());
+        assert!(reloaded.ledger(&theirs.transfer_id).is_none());
+        // The empty reservation went; someone else's file stayed.
+        assert_eq!(names(&downloads), ["a.bin", "c.bin"]);
     }
 }

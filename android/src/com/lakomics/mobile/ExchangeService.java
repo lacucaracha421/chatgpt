@@ -20,9 +20,15 @@ import java.util.concurrent.*;
  * Everything is foreground-only. Arrivals are noticed through the `exchange.revision` field
  * of the `/v1/sync/status` read the Library pass already makes ({@link #observeStatus}) and of
  * the foreground status long-poll; the open 보내기/받기 screen adds a 5 s inbox/outbox refresh
- * only while that long-poll is not live ({@link #setStatusLive}). Failed arrival reads retry
- * after 5/15/60 s (capped at 60 s) while the screen is visible. Nothing is polled, retried or
- * started while the activity is paused; a transfer already moving is allowed to finish.
+ * only while that long-poll is not live ({@link #setStatusLive}). A revision is a change hint,
+ * not evidence that outstanding work succeeded: a failed arrival read and an unsent
+ * acknowledgement each retry on their own deadline (5/15/60 s, capped at 60 s) while the app is
+ * in the foreground, whether or not the screen is open. Nothing is polled, retried or started
+ * while the activity is paused; a transfer already moving is allowed to finish.
+ *
+ * Receiving is crash-consistent: the hidden Downloads entry is journaled in the ledger before a
+ * byte is written, the receipt is durable before the acknowledgement, and a publication a crash
+ * interrupted is finished or cleaned on the next start ({@link #recoverPublications}).
  *
  * The exchange refuses the shared Library token, so this device keeps a second, device-only
  * token ({@link SecureSettings#exchangeToken}) and a client-generated device id.
@@ -78,6 +84,9 @@ final class ExchangeService {
     private JSONArray outbox = new JSONArray();
     private JSONArray devices = new JSONArray();
     private ExchangeTransfer.Ledger ledger;
+    /** Written synchronously: the ledger is what prevents a second copy after a crash. */
+    private final ExchangeTransfer.Journal journal;
+    private final ExchangeTransfer.Destination destination = new Downloads();
     private String code = "";
     private String registeredKey = "";
     private final ExchangeRefreshState refreshState = new ExchangeRefreshState();
@@ -86,7 +95,7 @@ final class ExchangeService {
     private int resumed;
     private boolean foreground, visible, refreshing, refreshAgain, refreshDevices, emitScheduled, statusLive;
     private long lastEmit;
-    private ScheduledFuture<?> poll, refreshRetry;
+    private ScheduledFuture<?> poll, refreshRetry, ackRetry;
     /** Advances on every reset so work started for a replaced connection records nothing. */
     private int epoch;
 
@@ -99,10 +108,13 @@ final class ExchangeService {
         settings = new SecureSettings(context);
         client = new CloudClient(settings);
         preferences = context.getSharedPreferences("exchange", 0);
+        journal = encoded -> preferences.edit().putString("ledger", encoded).commit();
         ledger = ExchangeTransfer.Ledger.decode(preferences.getString("ledger", null));
         if (ledger.prune(System.currentTimeMillis())) saveLedger();
         restoreSends();
         sweepZips();
+        // Before any new receive: the downloads worker runs one task at a time.
+        try { downloads.execute(this::recoverPublications); } catch (RejectedExecutionException ignored) {}
     }
 
     static boolean receiveSupported() { return Build.VERSION.SDK_INT >= 29; }
@@ -187,6 +199,7 @@ final class ExchangeService {
         synchronized (this) {
             epoch++;
             stopRefreshRetry();
+            stopAckRetry();
             for (Row row : incoming.values()) row.cancelled = true;
             for (Row row : outgoing.values()) row.cancelled = true;
             for (Row row : outgoing.values()) discard(row);
@@ -210,11 +223,14 @@ final class ExchangeService {
         synchronized (this) {
             resumed = Math.max(0, resumed + (value ? 1 : -1));
             foreground = resumed > 0;
-            if (!foreground) { stopPoll(); stopRefreshRetry(); return; }
-            if (visible) { startPoll(); scheduleRefreshRetry(); }
+            if (!foreground) { stopPoll(); stopRefreshRetry(); stopAckRetry(); return; }
+            if (visible) startPoll();
+            scheduleRefreshRetry();
             retry = new ArrayList<>(deferred);
             deferred.clear();
         }
+        // Acknowledgements owed from before a pause or a restart.
+        requestAcks();
         for (String id : retry) resume(id);
     }
 
@@ -223,7 +239,8 @@ final class ExchangeService {
         synchronized (this) {
             visible = value;
             if (value) { unseen = 0; if (foreground) startPoll(); }
-            else { stopPoll(); stopRefreshRetry(); }
+            // A pending inbox retry keeps its own deadline when the screen closes.
+            else stopPoll();
         }
         if (value) requestRefresh(true);
         changed();
@@ -238,8 +255,8 @@ final class ExchangeService {
         synchronized (this) {
             if (statusLive == value) return;
             statusLive = value;
-            if (value) { stopPoll(); scheduleRefreshRetry(); }
-            else { stopRefreshRetry(); if (foreground && visible) startPoll(); }
+            if (value) stopPoll();
+            else if (foreground && visible) startPoll();
         }
     }
 
@@ -253,14 +270,14 @@ final class ExchangeService {
 
     private void stopPoll() { if (poll != null) { poll.cancel(false); poll = null; } }
 
-    /** Called with the service monitor held; only one visible-screen retry can be queued. */
+    /** Called with the service monitor held; only one foreground inbox retry can be queued. */
     private void scheduleRefreshRetry() {
-        long delay = refreshState.retryDelay(foreground, visible, statusLive);
+        long delay = refreshState.retryDelay(foreground);
         if (delay < 0 || refreshRetry != null) return;
         refreshRetry = net.schedule(() -> {
             synchronized (this) {
                 refreshRetry = null;
-                if (refreshState.retryDelay(foreground, visible, statusLive) < 0 || refreshing) return;
+                if (refreshState.retryDelay(foreground) < 0 || refreshing) return;
                 refreshDevices = true;
             }
             refresh(false);
@@ -379,7 +396,7 @@ final class ExchangeService {
         int fresh = 0;
         String fromName = "", fromKind = "";
         List<Row> receive = new ArrayList<>();
-        List<Row> acks = new ArrayList<>();
+        boolean ackDue = false;
         synchronized (this) {
             if (started != epoch) return;
             Set<String> present = new HashSet<>();
@@ -400,10 +417,11 @@ final class ExchangeService {
                     row.peerId = item.optString("fromDevice", "");
                     row.peer = item.isNull("fromName") ? "" : item.optString("fromName", "");
                     row.created = item.optString("createdAt", "");
-                    if (ledger.contains(id)) row.state = "saved";
+                    if (ledger.saved(id)) row.state = "saved";
                     incoming.put(id, row);
                 }
-                if (ledger.contains(id)) { acks.add(row); continue; }
+                // Saved before: never save twice, only repeat the lost ack.
+                if (ledger.saved(id)) { ledger.withSha(id, row.sha); ackDue = true; continue; }
                 if (announced.add(id)) { fresh++; fromName = row.peer; fromKind = kindOf(row.peerId); }
                 if ("waiting".equals(row.state) && receiveSupported() && foreground) receive.add(row);
             }
@@ -414,8 +432,9 @@ final class ExchangeService {
                 else if ("failed".equals(row.state)) { row.state = "expired"; row.code = "transferGone"; }
             }
             if (fresh > 0 && !visible) unseen += fresh;
+            // Respects a running ack backoff; an idle queue is flushed at once.
+            if (ackDue) scheduleAckRetry();
         }
-        for (Row row : acks) ack(row);
         for (Row row : receive) enqueueReceive(row);
         if (fresh > 0) {
             try { emit(ARRIVED, new JSONObject().put("count", fresh).put("fromName", fromName).put("fromKind", fromKind)); }
@@ -459,7 +478,14 @@ final class ExchangeService {
         try {
             JSONObject connection = connection();
             if (connection == null) return;
-            if (ledger(row.id)) { ack(row); return; }
+            ExchangeTransfer.Ledger.Entry journaled = ledger.get(row.id);
+            if (journaled != null && !journaled.publishing) { requestAcks(); return; }
+            if (journaled != null) {
+                // An interrupted publication: finish that same destination, or clean it and receive again.
+                if (!receiveSupported()) throw new UserError("unsupported");
+                update(row, "saving", "");
+                if (ledger.recover(journal, destination, journaled) != null) { saved(row, part, started); return; }
+            }
             update(row, "downloading", "");
             part.getParentFile().mkdirs();
             // The part file and the Downloads copy both need room. 0 means "unknown", not "full".
@@ -486,19 +512,12 @@ final class ExchangeService {
                 row.state = "saving"; row.code = "";
             }
             changed();
-            String[] saved = publish(part, row.name, row.hint);
-            boolean current;
-            synchronized (this) {
-                // Whatever happened meanwhile, a published copy is always recorded, so a later
-                // sighting of the same transfer acks instead of saving a second copy.
-                current = started == epoch;
-                ledger.put(new ExchangeTransfer.Ledger.Entry(row.id, System.currentTimeMillis(), saved[0], saved[1], row.size, row.peer, false));
-                saveLedger();
-                incoming.remove(row.id);
-            }
-            part.delete();
-            changed();
-            if (current) ack(row);
+            if (!receiveSupported()) throw new UserError("unsupported");
+            // Whatever happens meanwhile, a published copy is always recorded (journal first,
+            // receipt before the ack), so a later sighting acks instead of saving a second copy.
+            ledger.publish(journal, destination, row.id, part, ExchangeTransfer.fileName(row.name), row.hint,
+                    row.size, row.sha, row.peer, System.currentTimeMillis());
+            saved(row, part, started);
         } catch (Exception e) {
             if (row.cancelled) { part.delete(); return; }
             String reason = failureCode(e);
@@ -513,65 +532,196 @@ final class ExchangeService {
         }
     }
 
-    private synchronized boolean ledger(String id) { return ledger.contains(id); }
+    /** The receipt is durable: the row leaves the inbox list and its acknowledgement is owed. */
+    private void saved(Row row, File part, int started) {
+        boolean current;
+        synchronized (this) { current = started == epoch; incoming.remove(row.id); }
+        part.delete();
+        changed();
+        if (current) requestAcks();
+    }
 
-    /** Tell the sender's server row we have the file; the server then deletes its object. */
-    private void ack(Row row) {
+    /**
+     * Start-up: finish or clean each publication a crash interrupted, then remove hidden
+     * Downloads entries of ours that no journal refers to (a crash between creating one and
+     * journaling it). Runs on the downloads worker, so no publication is in progress.
+     */
+    private void recoverPublications() {
+        if (!receiveSupported()) return;
+        boolean recovered = false;
+        for (ExchangeTransfer.Ledger.Entry entry : ledger.publishing()) {
+            try { recovered |= ledger.recover(journal, destination, entry) != null; }
+            catch (Exception kept) { /* The journal stays; the transfer's next sighting tries again. */ }
+        }
+        Set<Long> journaled = new HashSet<>();
+        for (ExchangeTransfer.Ledger.Entry entry : ledger.publishing()) {
+            try { journaled.add(ContentUris.parseId(Uri.parse(entry.uri))); }
+            catch (RuntimeException unknown) { return; /* Never guess which entry is ours. */ }
+        }
+        sweepPending(journaled);
+        if (recovered) { changed(); requestAcks(); }
+    }
+
+    private void sweepPending(Set<Long> keep) {
+        ContentResolver resolver = context.getContentResolver();
+        Uri collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+        String selection = MediaStore.MediaColumns.IS_PENDING + "=1 AND " + MediaStore.MediaColumns.RELATIVE_PATH + "=? AND "
+                + MediaStore.MediaColumns.OWNER_PACKAGE_NAME + "=?";
+        List<Uri> orphans = new ArrayList<>();
+        try (Cursor cursor = queryIncludingPending(collection, new String[]{MediaStore.MediaColumns._ID}, selection,
+                new String[]{DOWNLOAD_FOLDER, context.getPackageName()})) {
+            if (cursor == null) return;
+            while (cursor.moveToNext()) {
+                long id = cursor.getLong(0);
+                if (!keep.contains(id)) orphans.add(ContentUris.withAppendedId(collection, id));
+            }
+        } catch (RuntimeException unreadable) { return; }
+        for (Uri orphan : orphans) try { resolver.delete(orphan, null, null); } catch (RuntimeException ignored) {}
+    }
+
+    /** A MediaStore query that also sees this app's hidden (pending) entries. */
+    @SuppressWarnings("deprecation")
+    private Cursor queryIncludingPending(Uri uri, String[] columns, String selection, String[] args) {
+        ContentResolver resolver = context.getContentResolver();
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.os.Bundle query = new android.os.Bundle();
+            query.putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE);
+            if (selection != null) {
+                query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection);
+                query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args);
+            }
+            return resolver.query(uri, columns, query, null);
+        }
+        return resolver.query(MediaStore.setIncludePending(uri), columns, selection, args, null);
+    }
+
+    // --- acknowledgements -----------------------------------------------------------
+
+    /** Send every owed acknowledgement now (foreground only); failures retry on their own deadline. */
+    private void requestAcks() {
+        synchronized (this) {
+            if (!foreground) return;
+            stopAckRetry();
+        }
+        try { net.execute(this::flushAcks); } catch (RejectedExecutionException ignored) {}
+    }
+
+    /** Called with the service monitor held; only one acknowledgement round can be queued. */
+    private void scheduleAckRetry() {
+        long delay = refreshState.ackDelay(foreground, !ledger.unacked().isEmpty());
+        if (delay < 0 || ackRetry != null) return;
         try {
-            net.execute(() -> {
-                ExchangeTransfer.Ledger.Entry entry;
-                synchronized (this) { entry = ledger.get(row.id); }
-                if (entry == null) return;
-                try {
-                    JSONObject connection = connection();
-                    if (connection == null) return;
-                    String sha = row.sha;
-                    if (sha == null || sha.isEmpty()) return;
-                    call(connection, "/v1/exchange/transfers/" + row.id + "/ack", "POST", new JSONObject().put("sha256", sha));
-                    synchronized (this) { ledger.acked(row.id); saveLedger(); incoming.remove(row.id); }
-                } catch (Exception e) {
-                    String reason = failureCode(e);
-                    // Already delivered, expired or withdrawn: nothing is left to acknowledge.
-                    if ("transferGone".equals(reason) || "transferUnknown".equals(reason))
-                        synchronized (this) { ledger.acked(row.id); saveLedger(); incoming.remove(row.id); }
-                    // Otherwise the inbox still lists it and the next refresh acks again.
-                }
-                changed();
-            });
+            ackRetry = net.schedule(() -> { synchronized (this) { ackRetry = null; } flushAcks(); }, delay, TimeUnit.MILLISECONDS);
         } catch (RejectedExecutionException ignored) {}
     }
 
-    private String[] publish(File file, String name, String hint) throws Exception {
-        if (!receiveSupported()) throw new UserError("unsupported");
-        ContentResolver resolver = context.getContentResolver();
-        String leaf = ExchangeTransfer.fileName(name);
-        ContentValues values = new ContentValues();
-        values.put(MediaStore.MediaColumns.DISPLAY_NAME, leaf);
-        values.put(MediaStore.MediaColumns.MIME_TYPE, mime(leaf, hint));
-        values.put(MediaStore.MediaColumns.RELATIVE_PATH, DOWNLOAD_FOLDER);
-        values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-        Uri target = resolver.insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values);
-        if (target == null) throw new IOException("No download storage");
-        boolean committed = false;
-        try {
-            try (InputStream in = new FileInputStream(file); OutputStream out = resolver.openOutputStream(target, "w")) {
+    private void stopAckRetry() {
+        if (ackRetry != null) { ackRetry.cancel(false); ackRetry = null; }
+    }
+
+    /**
+     * Tell each sender's server row that its file is saved; the server then deletes its object.
+     * Only durable receipts are acknowledged, and they persist across restarts with their digest.
+     */
+    private void flushAcks() {
+        int started;
+        synchronized (this) { if (!foreground) return; started = epoch; }
+        List<ExchangeTransfer.Ledger.Entry> owed = ledger.unacked();
+        boolean failed = false;
+        if (!owed.isEmpty()) {
+            JSONObject connection;
+            try { connection = connection(); } catch (Exception unreadable) { connection = null; failed = true; }
+            // Without this device's token nothing can be acknowledged; saving one refreshes.
+            if (connection == null && !failed) return;
+            if (connection != null) for (ExchangeTransfer.Ledger.Entry entry : owed) {
+                synchronized (this) { if (!foreground || started != epoch) return; }
+                try {
+                    call(connection, "/v1/exchange/transfers/" + entry.id + "/ack", "POST", new JSONObject().put("sha256", entry.sha256));
+                    settleAck(entry.id);
+                } catch (Exception e) {
+                    String reason = failureCode(e);
+                    // Already delivered, expired or withdrawn (or refused for good): nothing is left to acknowledge.
+                    if (Arrays.asList("transferGone", "transferUnknown", "digestMismatch").contains(reason)) settleAck(entry.id);
+                    else failed = true;
+                }
+            }
+        }
+        synchronized (this) {
+            if (started != epoch) return;
+            if (failed) refreshState.ackFailed(); else refreshState.acksSettled();
+            scheduleAckRetry();
+        }
+        if (!owed.isEmpty()) changed();
+    }
+
+    private void settleAck(String id) {
+        ledger.acked(id);
+        saveLedger();
+        synchronized (this) { incoming.remove(id); }
+    }
+
+    /** MediaStore `Download/Lakomics/`: hidden (IS_PENDING=1) while written, then revealed. */
+    private final class Downloads implements ExchangeTransfer.Destination {
+        private ContentResolver resolver() { return context.getContentResolver(); }
+
+        public String create(String name, String hint) throws IOException {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mime(name, hint));
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, DOWNLOAD_FOLDER);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            Uri target;
+            try { target = resolver().insert(MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values); }
+            catch (RuntimeException e) { throw new IOException("No download storage", e); }
+            if (target == null) throw new IOException("No download storage");
+            return target.toString();
+        }
+
+        public void write(String uri, File part) throws IOException {
+            try (InputStream in = new FileInputStream(part); OutputStream out = resolver().openOutputStream(Uri.parse(uri), "w")) {
                 if (out == null) throw new IOException("No download output");
                 byte[] buffer = new byte[65536];
                 int n;
                 while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
             }
+        }
+
+        public void reveal(String uri) throws IOException {
             ContentValues ready = new ContentValues();
             ready.put(MediaStore.MediaColumns.IS_PENDING, 0);
-            if (resolver.update(target, ready, null, null) != 1) throw new IOException("Cannot publish download");
-            committed = true;
-        } finally {
-            if (!committed) try { resolver.delete(target, null, null); } catch (RuntimeException ignored) {}
+            if (resolver().update(Uri.parse(uri), ready, null, null) != 1) throw new IOException("Cannot publish download");
         }
-        String display = leaf;
-        try (Cursor cursor = resolver.query(target, new String[]{MediaStore.MediaColumns.DISPLAY_NAME}, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) display = cursor.getString(0);
-        } catch (RuntimeException ignored) {}
-        return new String[]{target.toString(), display};
+
+        public int state(String uri) throws IOException {
+            try (Cursor cursor = queryIncludingPending(Uri.parse(uri), new String[]{MediaStore.MediaColumns.IS_PENDING}, null, null)) {
+                if (cursor == null) throw new IOException("Downloads unreadable");
+                if (!cursor.moveToFirst()) return GONE;
+                return cursor.getInt(0) == 0 ? PUBLISHED : PENDING;
+            } catch (RuntimeException e) {
+                throw new IOException("Downloads unreadable", e);
+            }
+        }
+
+        public boolean holds(String uri, long size, String sha256) throws IOException {
+            try (InputStream in = resolver().openInputStream(Uri.parse(uri))) {
+                if (in == null) return false;
+                ExchangeTransfer.Digest digest = ExchangeTransfer.digest(in, null, null);
+                return digest.size == size && digest.sha256.equals(sha256);
+            } catch (FileNotFoundException | SecurityException gone) {
+                return false;
+            }
+        }
+
+        public void delete(String uri) {
+            try { resolver().delete(Uri.parse(uri), null, null); } catch (RuntimeException ignored) {}
+        }
+
+        public String name(String uri, String fallback) {
+            try (Cursor cursor = queryIncludingPending(Uri.parse(uri), new String[]{MediaStore.MediaColumns.DISPLAY_NAME}, null, null)) {
+                if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) return cursor.getString(0);
+            } catch (RuntimeException ignored) {}
+            return fallback;
+        }
     }
 
     static String mime(String name, String hint) {
@@ -587,7 +737,7 @@ final class ExchangeService {
     Uri savedUri(String id) throws UserError {
         ExchangeTransfer.Ledger.Entry entry;
         synchronized (this) { entry = ledger.get(id); }
-        if (entry == null || entry.uri.isEmpty()) throw new UserError("저장된 파일을 찾을 수 없습니다.");
+        if (entry == null || entry.publishing || entry.uri.isEmpty()) throw new UserError("저장된 파일을 찾을 수 없습니다.");
         Uri uri = Uri.parse(entry.uri);
         try (Cursor cursor = context.getContentResolver().query(uri, new String[]{MediaStore.MediaColumns._ID}, null, null, null)) {
             if (cursor == null || !cursor.moveToFirst()) throw new UserError("파일이 다운로드 폴더에 없습니다. 삭제되었거나 옮겨졌을 수 있습니다.");
@@ -726,12 +876,14 @@ final class ExchangeService {
 
     private static final List<String> AUTOMATIC = Arrays.asList("network", "server", "storageUnavailable", "transferNotReady");
 
-    /** Record a failure; transient ones retry at 2/10/30/60 s while the app stays open. */
+    /** Record a failure; transient ones retry at 2/10/30/60 s while the app stays open (sends four times). */
     private void fail(Row row, String reason, Runnable again) {
         boolean scheduled = false;
         synchronized (this) {
             row.state = "failed"; row.code = reason;
-            if (again != null && AUTOMATIC.contains(reason) && row.attempts < AUTO_RETRIES) {
+            // A receive keeps retrying (every 60 s at most) while the app is open: the inbox
+            // revision it arrived with is already handled, so nothing else would bring it back.
+            if (again != null && AUTOMATIC.contains(reason) && (row.incoming || row.attempts < AUTO_RETRIES)) {
                 long delay = ExchangeTransfer.retryDelay(row.attempts++);
                 int started = epoch;
                 scheduled = true;
@@ -795,8 +947,7 @@ final class ExchangeService {
 
     // --- persistence ---------------------------------------------------------------------
 
-    /** Written synchronously: the ledger is what prevents a second copy after a crash. */
-    private void saveLedger() { preferences.edit().putString("ledger", ledger.encode()).commit(); }
+    private boolean saveLedger() { return ledger.save(journal); }
 
     /** Unfinished sends survive a restart with their transfer id, so a retry stays idempotent. */
     private void saveSends() {
@@ -1002,7 +1153,7 @@ final class ExchangeService {
                             .put("kind", device.optString("kind")).put("lastSeenAt", device.optString("lastSeenAt")));
             }
             JSONArray in = new JSONArray();
-            for (Row row : incoming.values()) if (!ledger.contains(row.id)) in.put(rowView(row));
+            for (Row row : incoming.values()) if (!ledger.saved(row.id)) in.put(rowView(row));
             for (ExchangeTransfer.Ledger.Entry entry : ledger.newestFirst())
                 in.put(new JSONObject().put("transferId", entry.id).put("fileName", entry.name).put("sizeBytes", entry.size)
                         .put("bytes", entry.size).put("peer", entry.from).put("state", "saved").put("code", "")

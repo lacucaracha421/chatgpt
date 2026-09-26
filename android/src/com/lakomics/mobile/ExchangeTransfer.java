@@ -293,53 +293,188 @@ final class ExchangeTransfer {
     // --- received ledger ------------------------------------------------------------
 
     /**
-     * Transfers this device already saved, kept for {@link #LEDGER_MILLIS}. A lost ack
-     * response leaves the transfer in the inbox; the ledger turns the next sighting into an
-     * ack instead of a second copy in Downloads. It also backs the "saved" rows and 열기.
+     * Where a received file is published: MediaStore Downloads on the device, a fake in tests.
+     * An entry is created hidden (pending), written, then revealed.
+     */
+    interface Destination {
+        int GONE = 0, PENDING = 1, PUBLISHED = 2;
+        /** A new hidden entry for `name`; returns its URI. */
+        String create(String name, String hint) throws IOException;
+        void write(String uri, File part) throws IOException;
+        /** Make a hidden entry visible. */
+        void reveal(String uri) throws IOException;
+        /** GONE, PENDING or PUBLISHED; throws when it cannot tell. */
+        int state(String uri) throws IOException;
+        /** Whether the entry holds exactly `size` bytes with this SHA-256. */
+        boolean holds(String uri, long size, String sha256) throws IOException;
+        void delete(String uri);
+        /** The name the store settled on (it resolves collisions itself). */
+        String name(String uri, String fallback);
+    }
+
+    /** Durable storage of the encoded ledger; false when the write did not persist. */
+    interface Journal { boolean write(String encoded); }
+
+    /**
+     * Transfers this device saved, kept for {@link #LEDGER_MILLIS}, and the journal of the one
+     * being published. A lost ack response leaves the transfer in the inbox; the ledger turns
+     * the next sighting into an ack instead of a second copy in Downloads. It also backs the
+     * "saved" rows and 열기.
+     *
+     * Publication is crash-consistent: the hidden destination is journaled before any byte
+     * reaches it, and an acknowledgement is only due once the receipt itself is durable. After
+     * a crash, {@link #recover} finishes or cleans that same destination.
      */
     static final class Ledger {
         static final class Entry {
-            final String id, uri, name, from; final long savedAt, size; final boolean acked;
+            final String id, uri, name, from, sha256; final long savedAt, size; final boolean acked, publishing;
             Entry(String id, long savedAt, String uri, String name, long size, String from, boolean acked) {
+                this(id, savedAt, uri, name, size, from, acked, "", false);
+            }
+            Entry(String id, long savedAt, String uri, String name, long size, String from, boolean acked, String sha256, boolean publishing) {
                 this.id = id; this.savedAt = savedAt; this.uri = uri; this.name = name; this.size = size; this.from = from; this.acked = acked;
+                this.sha256 = sha256 == null ? "" : sha256; this.publishing = publishing;
             }
         }
         private final LinkedHashMap<String, Entry> entries = new LinkedHashMap<>();
 
         private static String clean(String value) { return value == null ? "" : value.replaceAll("[\\t\\r\\n]", " "); }
 
+        /** Reads both the current nine-field lines and the seven-field lines of earlier versions. */
         static Ledger decode(String stored) {
             Ledger ledger = new Ledger();
             if (stored == null) return ledger;
             for (String line : stored.split("\n")) {
                 String[] f = line.split("\t", -1);
-                if (f.length != 7 || !uuid(f[0])) continue;
+                if ((f.length != 7 && f.length != 9) || !uuid(f[0])) continue;
+                String sha = f.length == 9 ? f[7] : "";
+                if (!sha.isEmpty() && !sha.matches("[0-9a-f]{64}")) continue;
                 try {
-                    ledger.entries.put(f[0], new Entry(f[0], Long.parseLong(f[1]), f[2], f[3], Long.parseLong(f[4]), f[5], "1".equals(f[6])));
+                    ledger.entries.put(f[0], new Entry(f[0], Long.parseLong(f[1]), f[2], f[3], Long.parseLong(f[4]), f[5], "1".equals(f[6]),
+                            sha, f.length == 9 && "1".equals(f[8])));
                 } catch (NumberFormatException ignored) { /* A damaged line is dropped, never guessed. */ }
             }
             return ledger;
         }
 
-        String encode() {
+        synchronized String encode() {
             StringBuilder out = new StringBuilder();
             for (Entry e : entries.values()) {
                 if (out.length() > 0) out.append('\n');
                 out.append(e.id).append('\t').append(e.savedAt).append('\t').append(clean(e.uri)).append('\t').append(clean(e.name))
-                        .append('\t').append(e.size).append('\t').append(clean(e.from)).append('\t').append(e.acked ? '1' : '0');
+                        .append('\t').append(e.size).append('\t').append(clean(e.from)).append('\t').append(e.acked ? '1' : '0')
+                        .append('\t').append(clean(e.sha256)).append('\t').append(e.publishing ? '1' : '0');
             }
             return out.toString();
         }
 
-        void put(Entry entry) { entries.remove(entry.id); entries.put(entry.id, entry); }
-        Entry get(String id) { return entries.get(id); }
-        boolean contains(String id) { return entries.containsKey(id); }
-        void acked(String id) {
+        synchronized void put(Entry entry) { entries.remove(entry.id); entries.put(entry.id, entry); }
+        synchronized Entry get(String id) { return entries.get(id); }
+        synchronized boolean contains(String id) { return entries.containsKey(id); }
+        /** A receipt: the file is in Downloads (not a publication still in progress). */
+        synchronized boolean saved(String id) { Entry e = entries.get(id); return e != null && !e.publishing; }
+        synchronized void acked(String id) {
             Entry e = entries.get(id);
-            if (e != null && !e.acked) entries.put(id, new Entry(e.id, e.savedAt, e.uri, e.name, e.size, e.from, true));
+            if (e != null && !e.acked) entries.put(id, new Entry(e.id, e.savedAt, e.uri, e.name, e.size, e.from, true, e.sha256, e.publishing));
         }
-        /** Drops entries older than the window. Returns whether anything was removed. */
-        boolean prune(long now) { return entries.values().removeIf(e -> now - e.savedAt > LEDGER_MILLIS || e.savedAt > now + 86_400_000L); }
-        List<Entry> newestFirst() { List<Entry> list = new ArrayList<>(entries.values()); Collections.reverse(list); return list; }
+        /** Fill in the digest of an entry written by an earlier version, so its ack can be retried alone. */
+        synchronized void withSha(String id, String sha256) {
+            Entry e = entries.get(id);
+            if (e != null && e.sha256.isEmpty() && sha256 != null && sha256.matches("[0-9a-f]{64}"))
+                entries.put(id, new Entry(e.id, e.savedAt, e.uri, e.name, e.size, e.from, e.acked, sha256, e.publishing));
+        }
+        /** Drops receipts older than the window. Returns whether anything was removed. A journaled publication stays until recovered. */
+        synchronized boolean prune(long now) {
+            return entries.values().removeIf(e -> !e.publishing && (now - e.savedAt > LEDGER_MILLIS || e.savedAt > now + 86_400_000L));
+        }
+        /** Receipts, newest first. */
+        synchronized List<Entry> newestFirst() {
+            List<Entry> list = new ArrayList<>();
+            for (Entry e : entries.values()) if (!e.publishing) list.add(e);
+            Collections.reverse(list);
+            return list;
+        }
+        /** Publications a crash interrupted. */
+        synchronized List<Entry> publishing() {
+            List<Entry> list = new ArrayList<>();
+            for (Entry e : entries.values()) if (e.publishing) list.add(e);
+            return list;
+        }
+        /** Durable receipts whose acknowledgement is still owed. */
+        synchronized List<Entry> unacked() {
+            List<Entry> list = new ArrayList<>();
+            for (Entry e : entries.values()) if (!e.publishing && !e.acked && !e.sha256.isEmpty()) list.add(e);
+            return list;
+        }
+
+        synchronized boolean save(Journal journal) { return journal.write(encode()); }
+
+        /** Record `next` durably, or leave the ledger as it was. */
+        private synchronized boolean commit(Journal journal, Entry next) {
+            Entry previous = entries.get(next.id);
+            put(next);
+            if (journal.write(encode())) return true;
+            if (previous == null) entries.remove(next.id); else put(previous);
+            return false;
+        }
+
+        /** Drop a journaled publication durably, or keep it for a later recovery. */
+        private synchronized boolean forget(Journal journal, Entry pending) {
+            if (entries.get(pending.id) != pending) return true;
+            entries.remove(pending.id);
+            if (journal.write(encode())) return true;
+            put(pending);
+            return false;
+        }
+
+        /**
+         * Publish a verified `part`. The hidden destination is journaled before a byte reaches
+         * it and the receipt is durable before this returns; a failed journal write throws, and
+         * the caller must not acknowledge then. A crash at any point leaves either nothing, or a
+         * journaled destination that {@link #recover} finishes or cleans.
+         */
+        Entry publish(Journal journal, Destination to, String id, File part, String name, String hint,
+                      long size, String sha256, String from, long now) throws IOException {
+            String uri = to.create(name, hint);
+            Entry pending = new Entry(id, now, uri, name, size, from, false, sha256, true);
+            if (!commit(journal, pending)) {
+                to.delete(uri);
+                throw new IOException("Receipt not saved");
+            }
+            try {
+                to.write(uri, part);
+                to.reveal(uri);
+            } catch (IOException | RuntimeException e) {
+                to.delete(uri);
+                forget(journal, pending);
+                throw e;
+            }
+            return finish(journal, pending, to.name(uri, name));
+        }
+
+        private Entry finish(Journal journal, Entry pending, String name) throws IOException {
+            Entry saved = new Entry(pending.id, pending.savedAt, pending.uri, name, pending.size, pending.from, false, pending.sha256, false);
+            if (!commit(journal, saved)) throw new IOException("Receipt not saved");
+            return saved;
+        }
+
+        /**
+         * Finish a journaled publication whose destination is complete, or remove what it left so
+         * the transfer is received again (then null). Throws, keeping the journal, when the
+         * destination cannot be inspected or the journal cannot be written.
+         */
+        Entry recover(Journal journal, Destination to, Entry pending) throws IOException {
+            int state = pending.uri.isEmpty() ? Destination.GONE : to.state(pending.uri);
+            if (state == Destination.PUBLISHED) return finish(journal, pending, to.name(pending.uri, pending.name));
+            if (state == Destination.PENDING) {
+                if (to.holds(pending.uri, pending.size, pending.sha256)) {
+                    to.reveal(pending.uri);
+                    return finish(journal, pending, to.name(pending.uri, pending.name));
+                }
+                to.delete(pending.uri);
+            }
+            if (!forget(journal, pending)) throw new IOException("Receipt not saved");
+            return null;
+        }
     }
 }

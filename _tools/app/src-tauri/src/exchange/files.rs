@@ -138,15 +138,16 @@ fn child(dir: &Path, name: &str) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// Create an empty file under the first free candidate name. `create_new` makes the
-/// check and the claim one step, so an existing file (or a folder) is never reused.
-pub(crate) fn reserve(dir: &Path, leaf: &str) -> io::Result<PathBuf> {
+/// The first candidate name in `dir` that nothing occupies yet. It is not claimed: the
+/// receiver journals it first, then [`place`] claims it and reports a name taken
+/// meanwhile as `AlreadyExists`.
+pub(crate) fn free_name(dir: &Path, leaf: &str) -> io::Result<PathBuf> {
     for number in 0..=MAX_COLLISION_NUMBER {
         let path = child(dir, &candidate_name(leaf, number))?;
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(_) => return Ok(path),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(path),
             Err(error) => return Err(error),
+            Ok(_) => continue,
         }
     }
     Err(io::Error::new(
@@ -155,36 +156,48 @@ pub(crate) fn reserve(dir: &Path, leaf: &str) -> io::Result<PathBuf> {
     ))
 }
 
-/// Move a verified part file (kept in the app's own data folder) to its final name in
-/// `dir`: reserve the name, then rename the part over that empty reservation. A file
-/// that existed before is never replaced.
-pub(crate) fn finalize(part: &Path, dir: &Path, leaf: &str) -> io::Result<PathBuf> {
-    finalize_with(part, dir, leaf, |from, to| fs::rename(from, to))
+/// Move a verified part file (kept in the app's own data folder) to exactly `target`:
+/// claim the name with an empty reservation (`create_new`, so a file or folder that
+/// exists is never reused), then rename the part over it. With `resume`, an empty file
+/// already at `target` is accepted as the reservation an interrupted attempt left there.
+pub(crate) fn place(part: &Path, target: &Path, resume: bool) -> io::Result<()> {
+    place_with(part, target, resume, |from, to| fs::rename(from, to))
 }
 
-fn finalize_with(
+fn place_with(
     part: &Path,
-    dir: &Path,
-    leaf: &str,
+    target: &Path,
+    resume: bool,
     rename: impl Fn(&Path, &Path) -> io::Result<()>,
-) -> io::Result<PathBuf> {
+) -> io::Result<()> {
     if !part.is_file() {
         return Err(io::Error::from(io::ErrorKind::NotFound));
     }
-    let path = reserve(dir, leaf)?;
+    let dir = target
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no folder"))?;
+    match OpenOptions::new().write(true).create_new(true).open(target) {
+        Ok(_) => {}
+        Err(error)
+            if error.kind() == io::ErrorKind::AlreadyExists
+                && resume
+                && fs::symlink_metadata(target)
+                    .is_ok_and(|meta| meta.is_file() && meta.len() == 0) => {}
+        Err(error) => return Err(error),
+    }
     // A rename fails across filesystems (app data and Downloads may differ): copy to
     // a temporary name inside `dir`, then rename that over the reservation.
-    let moved = rename(part, &path).or_else(|_| copy_over(part, dir, &path));
+    let moved = rename(part, target).or_else(|_| copy_over(part, dir, target));
     if let Err(error) = moved {
         // Only our own empty reservation is removed.
-        if fs::metadata(&path).is_ok_and(|meta| meta.len() == 0) {
-            let _ = fs::remove_file(&path);
+        if fs::metadata(target).is_ok_and(|meta| meta.len() == 0) {
+            let _ = fs::remove_file(target);
         }
         return Err(error);
     }
     let _ = fs::remove_file(part);
-    mark_downloaded(&path);
-    Ok(path)
+    mark_downloaded(target);
+    Ok(())
 }
 
 fn copy_over(part: &Path, dir: &Path, reserved: &Path) -> io::Result<()> {
@@ -200,14 +213,14 @@ fn copy_over(part: &Path, dir: &Path, reserved: &Path) -> io::Result<()> {
 
 /// Mark-of-the-Web: SmartScreen and Office treat the file as downloaded content.
 #[cfg(windows)]
-fn mark_downloaded(path: &Path) {
+pub(crate) fn mark_downloaded(path: &Path) {
     let mut stream = path.as_os_str().to_owned();
     stream.push(":Zone.Identifier");
     let _ = fs::write(PathBuf::from(stream), b"[ZoneTransfer]\r\nZoneId=3\r\n");
 }
 
 #[cfg(not(windows))]
-fn mark_downloaded(_path: &Path) {}
+pub(crate) fn mark_downloaded(_path: &Path) {}
 
 /// The download target for one transfer inside the app's part folder (never Downloads).
 pub(crate) fn part_path(parts: &Path, transfer_id: &uuid::Uuid) -> PathBuf {
@@ -387,42 +400,65 @@ mod tests {
     }
 
     #[test]
-    fn reservation_skips_existing_files_and_folders() {
+    fn free_names_skip_existing_files_and_folders() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("a.txt"), b"mine").unwrap();
         fs::create_dir(dir.path().join("a (1).txt")).unwrap();
-        let reserved = reserve(dir.path(), "a.txt").unwrap();
-        assert_eq!(reserved, dir.path().join("a (2).txt"));
+        let free = free_name(dir.path(), "a.txt").unwrap();
+        assert_eq!(free, dir.path().join("a (2).txt"));
+        // Choosing a name claims nothing; placing does.
+        assert!(!free.exists());
         assert_eq!(fs::read(dir.path().join("a.txt")).unwrap(), b"mine");
-        assert_eq!(fs::metadata(&reserved).unwrap().len(), 0);
     }
 
     #[test]
-    fn reservation_refuses_names_that_escape_the_folder() {
+    fn free_names_refuse_names_that_escape_the_folder() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(reserve(dir.path(), "../x").is_err());
-        assert!(reserve(dir.path(), "..").is_err());
+        assert!(free_name(dir.path(), "../x").is_err());
+        assert!(free_name(dir.path(), "..").is_err());
     }
 
     #[test]
-    fn finalize_never_overwrites_an_existing_file() {
+    fn placing_never_overwrites_an_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("photo.jpg"), b"original").unwrap();
-        let id = uuid::Uuid::new_v4();
-        let part = part_path(dir.path(), &id);
+        let part = part_path(dir.path(), &uuid::Uuid::new_v4());
         fs::write(&part, b"received").unwrap();
-        let saved = finalize(&part, dir.path(), "photo.jpg").unwrap();
+        let taken = dir.path().join("photo.jpg");
+        // A name taken after it was chosen is reported, never replaced, even when resuming.
+        for resume in [false, true] {
+            let error = place(&part, &taken, resume).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        }
+        assert_eq!(fs::read(&taken).unwrap(), b"original");
+        let saved = free_name(dir.path(), "photo.jpg").unwrap();
         assert_eq!(saved, dir.path().join("photo (1).jpg"));
+        place(&part, &saved, false).unwrap();
         assert_eq!(fs::read(&saved).unwrap(), b"received");
-        assert_eq!(fs::read(dir.path().join("photo.jpg")).unwrap(), b"original");
         assert!(!part.exists());
+    }
+
+    #[test]
+    fn resuming_reuses_only_an_empty_reservation() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = part_path(dir.path(), &uuid::Uuid::new_v4());
+        fs::write(&part, b"received").unwrap();
+        let target = dir.path().join("clip.mp4");
+        fs::write(&target, b"").unwrap();
+        assert_eq!(
+            place(&part, &target, false).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        place(&part, &target, true).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"received");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
     fn a_missing_part_leaves_no_reservation_behind() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing.lakomics-part");
-        assert!(finalize(&missing, dir.path(), "x.bin").is_err());
+        assert!(place(&missing, &dir.path().join("x.bin"), false).is_err());
         assert!(!dir.path().join("x.bin").exists());
     }
 
@@ -434,7 +470,8 @@ mod tests {
         let part = part_path(parts.path(), &uuid::Uuid::new_v4());
         fs::write(&part, b"received").unwrap();
         let cross_device = |_: &Path, _: &Path| Err(io::Error::other("EXDEV"));
-        let saved = finalize_with(&part, downloads.path(), "clip.mp4", cross_device).unwrap();
+        let saved = free_name(downloads.path(), "clip.mp4").unwrap();
+        place_with(&part, &saved, false, cross_device).unwrap();
         assert_eq!(saved, downloads.path().join("clip (1).mp4"));
         assert_eq!(fs::read(&saved).unwrap(), b"received");
         assert_eq!(
