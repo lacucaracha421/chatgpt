@@ -199,9 +199,7 @@ fn check_limits(plan: &Plan) -> Result<(), ZipError> {
         ));
     }
     if archive_size(plan) > super::MAX_FILE_BYTES {
-        return Err(ZipError::Refused(
-            "폴더가 너무 큼 (압축 파일 최대 2GB)".to_owned(),
-        ));
+        return Err(too_large());
     }
     Ok(())
 }
@@ -256,11 +254,17 @@ fn local_header(
     out.write_all(&header)
 }
 
+fn too_large() -> ZipError {
+    ZipError::Refused("폴더가 너무 큼 (압축 파일 최대 2GB)".to_owned())
+}
+
 /// Copy one file after its header; returns `(crc, bytes)`, or `None` if it could not
-/// be read (the caller rewinds and skips it).
+/// be read (the caller rewinds and skips it). Refused as soon as the member would pass
+/// `budget` bytes (a file that grew while being read), before that chunk is written.
 fn copy_member(
     source: &Path,
     out: &mut File,
+    budget: u64,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64),
 ) -> Result<Option<(u32, u64)>, ZipError> {
@@ -281,6 +285,9 @@ fn copy_member(
         if read == 0 {
             break;
         }
+        if total + read as u64 > budget {
+            return Err(too_large());
+        }
         out.write_all(&buffer[..read])?;
         crc = crc32_update(crc, &buffer[..read]);
         total += read as u64;
@@ -294,6 +301,17 @@ fn copy_member(
 pub(crate) fn write(
     plan: &Plan,
     output: &Path,
+    cancel: &AtomicBool,
+    progress: impl FnMut(u64),
+) -> Result<usize, ZipError> {
+    write_limited(plan, output, super::MAX_FILE_BYTES, cancel, progress)
+}
+
+/// [`write`] with the archive size cap as a parameter, enforced while copying.
+fn write_limited(
+    plan: &Plan,
+    output: &Path,
+    limit: u64,
     cancel: &AtomicBool,
     mut progress: impl FnMut(u64),
 ) -> Result<usize, ZipError> {
@@ -317,15 +335,10 @@ pub(crate) fn write(
             continue;
         };
         local_header(&mut out, &entry.name, time, date, 0, 0)?;
-        match copy_member(source, &mut out, cancel, &mut progress)? {
+        let budget = limit.saturating_sub(out.stream_position()?);
+        match copy_member(source, &mut out, budget, cancel, &mut progress)? {
             Some((crc, size)) => {
                 let end = out.stream_position()?;
-                if end > super::MAX_FILE_BYTES {
-                    // A file grew while being read.
-                    return Err(ZipError::Refused(
-                        "폴더가 너무 큼 (압축 파일 최대 2GB)".to_owned(),
-                    ));
-                }
                 // Patch CRC and sizes into the local header (offset 14).
                 out.seek(SeekFrom::Start(offset + 14))?;
                 let mut patch = Vec::with_capacity(12);
@@ -384,10 +397,8 @@ pub(crate) fn write(
     central.extend_from_slice(&(central_offset as u32).to_le_bytes());
     central.extend_from_slice(&0u16.to_le_bytes());
     out.write_all(&central)?;
-    if out.stream_position()? > super::MAX_FILE_BYTES {
-        return Err(ZipError::Refused(
-            "폴더가 너무 큼 (압축 파일 최대 2GB)".to_owned(),
-        ));
+    if out.stream_position()? > limit {
+        return Err(too_large());
     }
     out.sync_all()?;
     Ok(skipped)
@@ -534,6 +545,28 @@ mod tests {
             |_| {},
         );
         assert!(matches!(result, Err(ZipError::Cancelled)));
+    }
+
+    #[test]
+    fn a_file_growing_past_the_cap_is_refused_while_copying() {
+        let source = tempfile::tempdir().unwrap();
+        let root = source.path().join("f");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("a"), b"small").unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let plan = plan(&root, temp.path()).unwrap();
+        let limit = archive_size(&plan) + 1024;
+        // Grows after planning by more than one copy chunk.
+        fs::write(root.join("a"), vec![7u8; 600 * 1024]).unwrap();
+        let output = temp.path().join("f.zip");
+        let mut copied = 0;
+        let result = write_limited(&plan, &output, limit, &AtomicBool::new(false), |n| {
+            copied += n
+        });
+        assert!(matches!(result, Err(ZipError::Refused(ref m)) if m.contains("2GB")));
+        // Stopped before the first chunk that would pass the cap, not after the member.
+        assert_eq!(copied, 0);
+        assert!(fs::metadata(&output).unwrap().len() <= limit);
     }
 
     #[test]

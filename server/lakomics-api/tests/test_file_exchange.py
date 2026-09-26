@@ -37,9 +37,10 @@ class FakeStorage:
         self.deleted.append(Key)
         self.objects.pop(Key, None)
 
-    def list_objects_v2(self, *, Bucket, Prefix, MaxKeys):
-        keys = sorted(key for key in self.objects if key.startswith(Prefix))[:MaxKeys]
-        return {"Contents": [{"Key": key} for key in keys]}
+    def list_objects_v2(self, *, Bucket, Prefix, MaxKeys, StartAfter=None):
+        self.listed_after = getattr(self, "listed_after", []) + [StartAfter]
+        keys = sorted(key for key in self.objects if key.startswith(Prefix) and (StartAfter is None or key > StartAfter))
+        return {"Contents": [{"Key": key} for key in keys[:MaxKeys]], "IsTruncated": len(keys) > MaxKeys}
 
     def generate_presigned_url(self, operation, Params, ExpiresIn):
         self.signed.append((operation, Params, ExpiresIn))
@@ -69,8 +70,8 @@ class ExchangeFixture(unittest.TestCase):
         self.storage = FakeStorage()
         self.puts = []
 
-        def presign_put(key, content_type, expires_in=600):
-            self.puts.append((key, content_type, expires_in))
+        def presign_put(key, content_type, expires_in=600, content_length=None):
+            self.puts.append((key, content_type, expires_in, content_length))
             return f"https://r2.example.test/{key}?put={len(self.puts)}"
 
         self.app = FastAPI()
@@ -215,7 +216,7 @@ class TransferTests(ExchangeFixture):
         self.assertEqual(transfer["state"], "uploading")
         self.assertEqual(transfer["upload"]["method"], "PUT")
         self.assertEqual(transfer["upload"]["requiredHeaders"], {"Content-Type": "application/octet-stream"})
-        self.assertEqual(self.puts[-1], (key, "application/octet-stream", 900))
+        self.assertEqual(self.puts[-1], (key, "application/octet-stream", 900, 5))
         self.assertNotIn("object_key", created.text)
         # Uploading is not visible to the receiver and does not move its revision.
         self.assertEqual(self.exchange_status(self.tab_principal)["revision"], tab_revision)
@@ -256,6 +257,35 @@ class TransferTests(ExchangeFixture):
         self.assertEqual(self.client.get("/v1/exchange/inbox", headers=self.as_tab()).json()["items"], [])
         outbox = self.client.get("/v1/exchange/outbox", headers=self.as_pc()).json()["items"]
         self.assertEqual([(o["state"], o["toName"]) for o in outbox], [("delivered", "Galaxy Tab S11")])
+
+    def test_inbox_pages_follow_next_cursor_oldest_first(self):
+        sent = []
+        for step in range(5):
+            self.now = T0 + step
+            sent.append(self.send_ready()["transferId"])
+        self.now = T0 + 10
+        with mock.patch.object(fx, "INBOX_LIMIT", 2):
+            first = self.client.get("/v1/exchange/inbox", headers=self.as_tab()).json()
+            seen, pages, cursor = [i["transferId"] for i in first["items"]], 1, first["nextCursor"]
+            while cursor:
+                page = self.client.get("/v1/exchange/inbox", params={"after": cursor}, headers=self.as_tab()).json()
+                seen += [i["transferId"] for i in page["items"]]
+                pages, cursor = pages + 1, page["nextCursor"]
+            # A row delivered between pages does not shift the continuation.
+            second = self.client.get("/v1/exchange/inbox", params={"after": first["nextCursor"]},
+                                     headers=self.as_tab()).json()
+            self.client.post(f"/v1/exchange/transfers/{sent[2]}/ack", headers=self.as_tab(), json={"sha256": "a" * 64})
+            again = self.client.get("/v1/exchange/inbox", params={"after": first["nextCursor"]},
+                                    headers=self.as_tab()).json()
+        self.assertEqual((seen, pages), (sent, 3))
+        self.assertEqual([i["transferId"] for i in second["items"]], sent[2:4])
+        self.assertEqual([i["transferId"] for i in again["items"]], sent[3:5])
+        self.assertIsNone(again["nextCursor"])
+        # Without `after` an old client still gets the first (oldest) page.
+        self.assertIsNone(self.client.get("/v1/exchange/inbox", headers=self.as_tab()).json()["nextCursor"])
+        for bad in ("x~2026", "12", "~2026-01-01", "1" * 19 + "~a"):
+            self.assert_code(self.client.get("/v1/exchange/inbox", params={"after": bad}, headers=self.as_tab()),
+                             422, "invalidCursor")
 
     def test_create_is_idempotent_on_transfer_id_and_refuses_reuse(self):
         transfer_id = new_id()
@@ -404,6 +434,26 @@ class SweepTests(ExchangeFixture):
         self.assertEqual(self.sweep()["orphansDeleted"], 1)
         self.assertEqual(set(self.storage.objects), {live_key, "library/asset/original"})
 
+    def test_orphan_scan_resumes_where_the_previous_sweep_stopped(self):
+        orphans = sorted(f"exchange/{self.tab}/{new_id()}" for _ in range(5))
+        for key in orphans:
+            self.storage.objects[key] = b"orphan"
+        cursor = {"startAfter": None}
+        # A failing delete keeps the object, so progress comes from the cursor, not from deletion.
+        self.storage.fail_delete = True
+        self.sweep(orphan_limit=2, orphan_cursor=cursor)
+        self.assertEqual(cursor["startAfter"], orphans[1])
+        self.sweep(orphan_limit=2, orphan_cursor=cursor)
+        self.assertEqual(cursor["startAfter"], orphans[3])
+        self.sweep(orphan_limit=2, orphan_cursor=cursor)
+        self.assertIsNone(cursor["startAfter"])  # last page: the next sweep starts over
+        self.assertEqual(self.storage.listed_after, [None, orphans[1], orphans[3]])
+        self.storage.fail_delete = False
+        self.assertEqual(self.sweep(orphan_limit=2, orphan_cursor=cursor)["orphansDeleted"], 2)
+        sweeper = fx.ExchangeSweeper(self.get_db, lambda: self.storage, lambda: "test-bucket")
+        sweeper.run_once()
+        self.assertIsNone(sweeper.orphan_cursor["startAfter"])
+
     def test_sweeper_switch(self):
         self.assertTrue(fx.sweep_enabled({}))
         self.assertFalse(fx.sweep_enabled({fx.SWEEP_ENV: "0"}))
@@ -413,6 +463,18 @@ class SweepTests(ExchangeFixture):
             self.assertIsNone(sweeper.thread)
         sweeper = fx.ExchangeSweeper(self.get_db, lambda: self.storage, lambda: "test-bucket")
         self.assertEqual(sweeper.run_once()["expired"], 0)
+
+
+class PresignTests(unittest.TestCase):
+    def test_upload_url_signs_the_declared_content_length(self):
+        env = {"R2_ENDPOINT": "https://r2.example.test", "R2_ACCESS_KEY_ID": "id", "R2_SECRET_ACCESS_KEY": "secret"}
+        with mock.patch.dict("os.environ", env):
+            import r2
+        with mock.patch.object(r2.head_cache.ticket_heads, "invalidate"):
+            bound = r2.presign_put("exchange/a/b", "application/octet-stream", 900, content_length=1234)
+            plain = r2.presign_put("exchange/a/b", "application/octet-stream", 900)
+        self.assertIn("X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost", bound)
+        self.assertIn("X-Amz-SignedHeaders=content-type%3Bhost", plain)
 
 
 if __name__ == "__main__":

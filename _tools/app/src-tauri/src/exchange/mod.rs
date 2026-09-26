@@ -930,7 +930,10 @@ impl Receiver {
         }
         let devices = context.client.devices()?;
         let outbox = context.client.outbox()?;
-        let inbox = context.client.inbox()?;
+        let client::Inbox {
+            items: inbox,
+            complete,
+        } = context.client.inbox()?;
         let offered: HashSet<String> = inbox.iter().map(|item| item.transfer_id.clone()).collect();
         let parts = {
             let mut state = lock();
@@ -943,8 +946,8 @@ impl Receiver {
             state.declined.retain(|id| offered.contains(id));
             state.parts.clone()
         };
-        // Their part files go too. A full page may hide older offers, so it sweeps nothing.
-        if inbox.len() < client::INBOX_PAGE {
+        // Their part files go too. An incomplete listing may hide offers, so it sweeps nothing.
+        if complete {
             if let Some(parts) = parts {
                 files::sweep_parts(&parts, Some(&offered), Duration::ZERO);
             }

@@ -267,11 +267,13 @@ Status: `IDEA` — noted 2026-09-26 at the user's request; not started. Jev (Typ
 
 ## TRANSFER-REVIEW-001 — Deferred findings of the 2026-09-26 transfer-path review
 
-Status: `TODO` (low priority; single-user setup makes them unlikely). Fixed the same day: outbox identity (`5b7c5c2`), exchange retries and crash-safe receive (`8443890`), bind recheck at commit and similarity withdrawal across pages (`f4a5672`), tablet thumbnail revision (`5b7c5c2` + server `4209a38`). Remaining:
-- Exchange storage quota enforces declared sizes, not uploaded bytes (`file_exchange.py` ~400/426, `r2.py` ~39): bind the upload to the reserved length or use a bounded gateway.
-- The exchange inbox returns only the oldest 100 ready transfers with no continuation; 100 locally failed large transfers hide later ones (`file_exchange.py` ~509): paginate.
-- Desktop ZIP creation checks the 2 GiB budget only after each member (`exchange/zip.rs` ~276/323): enforce per chunk.
-- Exchange orphan cleanup rescans the first 1,000 storage keys each sweep (`file_exchange.py` ~645): keep a continuation.
+Status: `TODO` (low priority; single-user setup makes them unlikely). Fixed the same day: outbox identity (`5b7c5c2`), exchange retries and crash-safe receive (`8443890`), bind recheck at commit and similarity withdrawal across pages (`f4a5672`), tablet thumbnail revision (`5b7c5c2` + server `4209a38`). Fixed 2026-09-26 (second pass; uncommitted, needs the server deploy of `file_exchange.py` + `r2.py`, the next PC build and the next APK):
+- Exchange upload bound to the reserved length: the presigned PUT now signs `Content-Length` (the declared size), so storage refuses any other body length; the HEAD size check at completion stays as the backstop. Not yet verified against live R2.
+- Exchange inbox pages: `GET /v1/exchange/inbox?after=<nextCursor>`; every response carries `nextCursor` (`null` on the last page), and a request without `after` still gets the oldest 100, so old clients are unchanged. The PC client and the tablet follow the cursor (up to 20 pages); the PC sweeps orphaned part files only after a complete listing.
+- Desktop ZIP creation enforces the 2 GiB cap per copied chunk, before writing the chunk that would pass it.
+- Exchange orphan cleanup resumes each sweep after the last key the previous sweep listed (`StartAfter`, kept in memory by the sweeper, wrapping to the start after the last page).
+
+Remaining:
 - Catalog duplicate decisions are scoped by server address only; a `libraryId` on `/v1/mobile-catalog/duplicates` and its decisions route would scope them per library.
 - Similarity-review withdrawal accepted after the PC read the log but before the next feed PUT still leaves the image in Library Trash (known design edge).
 

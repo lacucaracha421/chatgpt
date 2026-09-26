@@ -17,6 +17,8 @@ use std::{
 const MAX_JSON_BYTES: usize = 1024 * 1024;
 /// The server's inbox page size (`INBOX_LIMIT`).
 pub(crate) const INBOX_PAGE: usize = 100;
+/// Most inbox pages one refresh follows (the server keeps at most 1,000 outstanding transfers).
+const INBOX_MAX_PAGES: usize = 20;
 const API_TIMEOUT: Duration = Duration::from_secs(30);
 /// Presigned transfers have no total deadline, so a slow link can finish a 2 GiB file;
 /// instead each socket read or write must make progress within this time.
@@ -161,6 +163,22 @@ pub(crate) struct CreateRequest<'a> {
 struct Items<T> {
     #[serde(default = "Vec::new")]
     items: Vec<T>,
+}
+
+/// Every ready transfer the server offers, oldest first. `complete` is false when an offer
+/// may be missing (page cap reached, or a full last page from a server without `nextCursor`).
+pub(crate) struct Inbox {
+    pub items: Vec<InboxItem>,
+    pub complete: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InboxPage {
+    #[serde(default = "Vec::new")]
+    items: Vec<InboxItem>,
+    #[serde(default)]
+    next_cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -480,11 +498,33 @@ impl ExchangeClient {
         Ok((revision, advertised))
     }
 
-    pub(crate) fn inbox(&self) -> Result<Vec<InboxItem>> {
-        Ok(
-            json::<Items<InboxItem>>(self.get("/v1/exchange/inbox")?.call().map_err(network)?)?
-                .items,
-        )
+    /// Follows `nextCursor` so offers beyond the first page are seen too.
+    pub(crate) fn inbox(&self) -> Result<Inbox> {
+        let mut items = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..INBOX_MAX_PAGES {
+            let mut request = self.get("/v1/exchange/inbox")?;
+            if let Some(after) = &cursor {
+                request = request.query("after", after);
+            }
+            let page: InboxPage = json(request.call().map_err(network)?)?;
+            let full = page.items.len() >= INBOX_PAGE;
+            items.extend(page.items);
+            match page.next_cursor {
+                Some(next) if Some(&next) != cursor.as_ref() => cursor = Some(next),
+                Some(_) => return Err(ApiError::Invalid),
+                None => {
+                    return Ok(Inbox {
+                        items,
+                        complete: !full,
+                    })
+                }
+            }
+        }
+        Ok(Inbox {
+            items,
+            complete: false,
+        })
     }
 
     pub(crate) fn outbox(&self) -> Result<Vec<Transfer>> {
@@ -767,6 +807,70 @@ mod tests {
         )
         .unwrap();
         assert!(finished.upload.is_none());
+    }
+
+    #[test]
+    fn inbox_follows_next_cursor_until_the_last_page() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr().to_ip().unwrap());
+        let handle = std::thread::spawn(move || {
+            let pages = [
+                r#"{"revision":1,"items":[{"transferId":"a","fileName":"a","sizeBytes":1,"sha256":"x"}],"nextCursor":"7~2026-09-26T00:00:00Z"}"#,
+                r#"{"revision":1,"items":[{"transferId":"b","fileName":"b","sizeBytes":1,"sha256":"x"}],"nextCursor":null}"#,
+            ];
+            let mut seen = Vec::new();
+            for page in pages {
+                let request = server.recv().unwrap();
+                seen.push(request.url().to_owned());
+                request
+                    .respond(tiny_http::Response::from_string(page))
+                    .unwrap();
+            }
+            seen
+        });
+        let client = ExchangeClient::new(&base, "token", "device").unwrap();
+        let inbox = client.inbox().unwrap();
+        let ids: Vec<_> = inbox
+            .items
+            .iter()
+            .map(|item| item.transfer_id.as_str())
+            .collect();
+        assert_eq!(ids, ["a", "b"]);
+        assert!(inbox.complete);
+        assert_eq!(
+            handle.join().unwrap(),
+            [
+                "/v1/exchange/inbox".to_owned(),
+                "/v1/exchange/inbox?after=7~2026-09-26T00%3A00%3A00Z".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn an_old_server_full_inbox_page_is_not_complete() {
+        let page: InboxPage = serde_json::from_str(r#"{"revision":1,"items":[]}"#).unwrap();
+        assert!(page.next_cursor.is_none());
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr().to_ip().unwrap());
+        let handle = std::thread::spawn(move || {
+            let items: Vec<String> = (0..INBOX_PAGE)
+                .map(|i| {
+                    format!(r#"{{"transferId":"{i}","fileName":"f","sizeBytes":1,"sha256":"x"}}"#)
+                })
+                .collect();
+            let body = format!(r#"{{"revision":1,"items":[{}]}}"#, items.join(","));
+            server
+                .recv()
+                .unwrap()
+                .respond(tiny_http::Response::from_string(body))
+                .unwrap();
+        });
+        let inbox = ExchangeClient::new(&base, "token", "device")
+            .unwrap()
+            .inbox()
+            .unwrap();
+        assert_eq!((inbox.items.len(), inbox.complete), (INBOX_PAGE, false));
+        handle.join().unwrap();
     }
 
     /// A presigned GET stand-in: honours `Range` unless `ranges` is false.

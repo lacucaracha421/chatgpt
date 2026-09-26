@@ -166,6 +166,21 @@ final class ExchangeService {
         return new JSONObject(conditional.get(scope, path, etag -> client.exchange(connection, deviceId(), path, "GET", null, null, etag)));
     }
 
+    /** Every inbox page, oldest first: the server pages 100 at a time and returns {@code nextCursor} until the last one. */
+    private JSONArray readInbox(JSONObject connection) throws Exception {
+        JSONArray all = new JSONArray();
+        String path = "/v1/exchange/inbox";
+        for (int page = 0; page < 20; page++) {
+            JSONObject body = read(connection, path);
+            JSONArray items = body.getJSONArray("items");
+            for (int i = 0; i < items.length(); i++) all.put(items.get(i));
+            String next = body.isNull("nextCursor") ? "" : body.optString("nextCursor", "");
+            if (next.isEmpty()) break;
+            path = "/v1/exchange/inbox?after=" + java.net.URLEncoder.encode(next, "UTF-8");
+        }
+        return all;
+    }
+
     private void register(JSONObject connection) throws Exception {
         String key = ThumbnailCache.key(connection.getString("endpoint") + "\n" + connection.getString("token") + "\n" + deviceId());
         synchronized (this) { if (key.equals(registeredKey)) return; }
@@ -359,7 +374,7 @@ final class ExchangeService {
             boolean withDevices;
             synchronized (this) { withDevices = refreshDevices || devices.length() == 0; refreshDevices = false; }
             JSONArray nextDevices = withDevices ? read(connection, "/v1/exchange/devices").getJSONArray("devices") : null;
-            JSONArray inbox = read(connection, "/v1/exchange/inbox").getJSONArray("items");
+            JSONArray inbox = readInbox(connection);
             JSONArray nextOutbox = read(connection, "/v1/exchange/outbox").getJSONArray("items");
             synchronized (this) {
                 if (started != epoch) return;

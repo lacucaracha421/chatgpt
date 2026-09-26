@@ -31,7 +31,7 @@ import time
 import unicodedata
 from typing import Annotated, Literal
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -124,6 +124,16 @@ def _visible(text):
 
 def _truncate_utf8(text, limit):
     return text.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+
+
+def _inbox_position(cursor):
+    """``(created_at, rowid)`` of an inbox ``nextCursor``, or ``None`` for the first page."""
+    if cursor is None:
+        return None
+    rowid, _, created = cursor.partition("~")
+    if not rowid.isdigit() or not created or len(rowid) > 18:
+        fail(422, "invalidCursor", "잘못된 목록 위치입니다.")
+    return created, int(rowid)
 
 
 def sanitize_file_name(raw):
@@ -398,7 +408,12 @@ def register(app, get_db, require_client, storage, bucket, presign_put, *, clock
     # --- transfers ----------------------------------------------------------
 
     def upload_for(row):
-        return {"method": "PUT", "url": presign_put(row["object_key"], OBJECT_CONTENT_TYPE, UPLOAD_URL_SECONDS),
+        # The declared size is signed into the URL, so storage refuses any other body length and
+        # the quota (which counts declared sizes) bounds the bytes actually stored; the HEAD at
+        # completion stays as the backstop.
+        url = presign_put(row["object_key"], OBJECT_CONTENT_TYPE, UPLOAD_URL_SECONDS,
+                          content_length=row["size_bytes"])
+        return {"method": "PUT", "url": url,
                 "expiresIn": UPLOAD_URL_SECONDS, "requiredHeaders": {"Content-Type": OBJECT_CONTENT_TYPE}}
 
     def create(authorization, device_id, body):
@@ -502,18 +517,29 @@ def register(app, get_db, require_client, storage, bucket, presign_put, *, clock
     @app.get(PREFIX + "/inbox")
     def inbox(authorization: str | None = Header(default=None),
               x_lakomics_device: str | None = Header(default=None),
-              if_none_match: str | None = Header(default=None)):
+              if_none_match: str | None = Header(default=None),
+              after: str | None = Query(default=None, max_length=64)):
+        """Oldest first, ``INBOX_LIMIT`` per page; ``nextCursor`` (opaque) is passed back as
+        ``after`` for the next page and is ``null`` on the last one. No ``after`` = first page."""
         _, me = caller(authorization, x_lakomics_device)
+        position = _inbox_position(after)
         with get_db() as db:
             revision = db.execute("SELECT revision FROM exchange_devices WHERE id=?", [me["id"]]).fetchone()[0]
-            rows = db.execute("SELECT * FROM exchange_transfers WHERE to_device=? AND state='ready' "
-                              "AND expires_at>? ORDER BY created_at,rowid LIMIT ?",
-                              [me["id"], iso(clock()), INBOX_LIMIT]).fetchall()
+            where, args = "", []
+            if position is not None:
+                where, args = " AND (created_at>? OR (created_at=? AND rowid>?))", [position[0], *position]
+            rows = db.execute("SELECT rowid AS position,* FROM exchange_transfers WHERE to_device=? "
+                              "AND state='ready' AND expires_at>?" + where +
+                              " ORDER BY created_at,rowid LIMIT ?",
+                              [me["id"], iso(clock()), *args, INBOX_LIMIT + 1]).fetchall()
+            more, rows = len(rows) > INBOX_LIMIT, rows[:INBOX_LIMIT]
             names = _names(db, rows)
         items = [{key: view[key] for key in ("transferId", "batchId", "fromDevice", "fromName", "fileName",
                                              "sizeBytes", "sha256", "contentTypeHint", "createdAt", "expiresAt")}
                  for view in (transfer_view(row, names) for row in rows)]
-        return conditional.json_response({"revision": revision, "items": items}, if_none_match)
+        cursor = f"{rows[-1]['position']}~{rows[-1]['created_at']}" if more else None
+        return conditional.json_response({"revision": revision, "items": items, "nextCursor": cursor},
+                                         if_none_match)
 
     @app.get(PREFIX + "/outbox")
     def outbox(authorization: str | None = Header(default=None),
@@ -600,12 +626,15 @@ def register(app, get_db, require_client, storage, bucket, presign_put, *, clock
 
 # --- retention --------------------------------------------------------------
 
-def sweep(get_db, storage, bucket, *, now=None, orphan_limit=ORPHAN_SCAN_LIMIT):
+def sweep(get_db, storage, bucket, *, now=None, orphan_limit=ORPHAN_SCAN_LIMIT, orphan_cursor=None):
     """One retention pass; safe to run concurrently with requests and never touches another prefix.
 
     1. expire ``uploading`` rows (2 h) and ``ready`` rows (24 h) past ``expires_at``;
     2. delete the objects of every terminal row not yet deleted;
-    3. delete ``exchange/`` objects with no live row (one bounded listing page);
+    3. delete ``exchange/`` objects with no live row (one bounded listing page; with an
+       ``orphan_cursor`` dict, the page resumes after ``orphan_cursor["startAfter"]`` and the
+       dict is advanced, wrapping to the start after the last page, so successive sweeps cover
+       the whole prefix);
     4. prune terminal rows finished more than 7 days ago, and long-unregistered devices.
     """
     now = time.time() if now is None else now
@@ -642,8 +671,13 @@ def sweep(get_db, storage, bucket, *, now=None, orphan_limit=ORPHAN_SCAN_LIMIT):
         summary["objectsDeleted"] += 1
 
     try:
-        listing = client.list_objects_v2(Bucket=name, Prefix=OBJECT_PREFIX, MaxKeys=orphan_limit)
-        keys = [item["Key"] for item in listing.get("Contents", []) if item["Key"].startswith(OBJECT_PREFIX)]
+        start_after = (orphan_cursor or {}).get("startAfter")
+        listing = client.list_objects_v2(Bucket=name, Prefix=OBJECT_PREFIX, MaxKeys=orphan_limit,
+                                         **({"StartAfter": start_after} if start_after else {}))
+        listed = [item["Key"] for item in listing.get("Contents", [])]
+        if orphan_cursor is not None:
+            orphan_cursor["startAfter"] = listed[-1] if listing.get("IsTruncated") and listed else None
+        keys = [key for key in listed if key.startswith(OBJECT_PREFIX)]
         if keys:
             with get_db() as db:
                 live = {r[0] for r in db.execute(
@@ -689,6 +723,7 @@ class ExchangeSweeper:
         self.interval, self.initial_delay = interval, initial_delay
         self.stop_event = threading.Event()
         self.thread = None
+        self.orphan_cursor = {"startAfter": None}
 
     def start(self):
         if not sweep_enabled():
@@ -713,7 +748,7 @@ class ExchangeSweeper:
 
     def run_once(self):
         try:
-            summary = sweep(self.get_db, self.storage, self.bucket)
+            summary = sweep(self.get_db, self.storage, self.bucket, orphan_cursor=self.orphan_cursor)
         except Exception as exc:  # noqa: BLE001
             LOG.error("Exchange sweep failed: %s: %s", type(exc).__name__, exc)
             return None

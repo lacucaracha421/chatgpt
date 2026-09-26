@@ -36,15 +36,21 @@ def thumbnail_storage_client():
     )
 
 
-def presign_put(object_key: str, content_type: str, expires_in: int = 600) -> str:
+def presign_put(object_key: str, content_type: str, expires_in: int = 600,
+                content_length: int | None = None) -> str:
+    """``content_length`` is signed into the URL (``X-Amz-SignedHeaders``), so a PUT
+    whose ``Content-Length`` differs from it fails the signature check."""
     head_cache.ticket_heads.invalidate(_s3, R2_BUCKET, object_key)
+    params = {
+        "Bucket": R2_BUCKET,
+        "Key": object_key,
+        "ContentType": content_type,
+    }
+    if content_length is not None:
+        params["ContentLength"] = content_length
     return _s3.generate_presigned_url(
         "put_object",
-        Params={
-            "Bucket": R2_BUCKET,
-            "Key": object_key,
-            "ContentType": content_type,
-        },
+        Params=params,
         ExpiresIn=expires_in,
     )
 
