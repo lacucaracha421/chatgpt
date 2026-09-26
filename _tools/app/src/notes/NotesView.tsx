@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent } from "react";
-import { ArrowPathIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, WalletIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useLibrary } from "../library/LibraryContext";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -11,10 +11,12 @@ import { MarkdownHelpButton } from "../shared/markdown/MarkdownHelp";
 import { toggleMarkdownTask } from "../shared/markdown/markdown";
 import { ChecklistEditor } from "./ChecklistEditor";
 import { SecretEditor, SecretGate } from "./SecretNote";
-import { byOrder, checklistMarkdown, labelKey, NOTE_COLORS, NOTE_LIMITS, noteColorValue, noteLimitProblem, normalizeLabel, stripMarkdown, textToItems, type NoteKind } from "./model";
+import { checklistMarkdown, labelKey, NOTE_COLORS, NOTE_LIMITS, noteColorValue, noteLimitProblem, normalizeLabel, textToItems, type NoteKind } from "./model";
 import { isSecret, NOTES_REFRESH_INTERVAL, noteKind, notesStore, PIN_REQUIRED_TEXT, type Note, type NotesStore } from "./store";
 import { genericView, isLedgerKind, LEDGER } from "./ledger/model";
-import { hiddenLedgerMonths, LedgerView, ledgerPreview } from "./ledger/LedgerView";
+import { hiddenLedgerMonths, LedgerView } from "./ledger/LedgerView";
+import { NoteMasonry } from "./NoteBoard";
+import { useBackHandler } from "../shared/navigation/BackNavigation";
 import QRCode from "qrcode";
 import "./notes.css";
 
@@ -58,17 +60,6 @@ export function noteMatches(note: Note, query: string) {
   const text = isSecret(note) || isLedgerKind(note) ? note.title : [note.title, note.body, ...(note.items ?? []).map((item) => item.text), ...(note.labels ?? [])].join("\n");
   return text.toLocaleLowerCase().includes(query.toLocaleLowerCase());
 }
-function preview(note: Note, notes: Note[]) {
-  if (isSecret(note)) return "암호 메모";
-  if (note.type === LEDGER && !note.readOnly && !note.deleted) return ledgerPreview(note, notes);
-  if (noteKind(note) === "checklist" && !note.readOnly) {
-    const items = [...(note.items ?? [])].sort(byOrder);
-    const open = items.filter((item) => !item.checked).map((item) => item.text.trim()).filter(Boolean);
-    return items.length ? `${items.length - open.length}/${items.length} · ${open.slice(0, 4).join(", ") || "모두 완료"}` : "빈 체크리스트";
-  }
-  return stripMarkdown(note.body) || "내용 없음";
-}
-
 function LabelEditor({ labels, suggestions, onChange }: { labels: string[]; suggestions: string[]; onChange: (labels: string[]) => void }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
@@ -152,6 +143,10 @@ export function NotesWorkspace({store}:{store:NotesStore}){
   const ledgerOpen=!!found&&found.type===LEDGER&&!found.readOnly&&!trash;
   const note=ledgerOpen?found:genericView(found);
   const select=(id:string|null,editBody=false)=>{setCreatingSecret(false);setSelected(id);setEditingBody(editBody);setLimitError(null);};
+  const open=useCallback((id:string)=>{setCreatingSecret(false);setSelected(id);setEditingBody(false);setLimitError(null);},[]);
+  /** Closes the editor panel (or the ledger screen) and returns focus to the note's card. */
+  function close(){const id=selected;select(null);if(id)requestAnimationFrame(()=>document.querySelector<HTMLElement>(`.notes-card[data-note-id="${CSS.escape(id)}"]`)?.focus());}
+  useBackHandler(()=>close(),10,!!selected||creatingSecret);
   function newNote(kind:NoteKind="text"){
     if(kind==="secret"&&!revealed){setScope("all");setLabel(null);setQuery("");setSelected(null);setCreatingSecret(true);return;}
     setScope("all");setLabel(null);setQuery("");select(store.create(kind),true);
@@ -181,7 +176,6 @@ export function NotesWorkspace({store}:{store:NotesStore}){
   const scopeButton=(value:Scope,text:string,count?:number)=><button className="workspace-index-link" aria-current={scope===value&&!label?"page":undefined} onClick={()=>{setScope(value);setLabel(null);}}>{text}{count!==undefined&&<span>{count}</span>}</button>;
   const navigation=<div className="notes-index"><div className="notes-scopes">{scopeButton("all","모든 메모",state.notes.filter(n=>!n.deleted&&!n.archived&&!hiddenMonths.has(n.id)).length)}{scopeButton("pinned","고정")}{scopeButton("archive","보관함")}{scopeButton("trash","휴지통")}
       {allLabels.length>0&&<div className="notes-label-index" aria-label="라벨"><span className="notes-label-index__title">라벨</span>{allLabels.map(l=><button key={labelKey(l.label)} className="workspace-index-link" aria-current={label&&labelKey(label)===labelKey(l.label)?"page":undefined} onClick={()=>{setLabel(l.label);if(scope==="trash"||scope==="pinned")setScope("all");}}>{l.label}<span>{l.count}</span></button>)}</div>}</div>
-    <div className="notes-list" aria-label="메모 목록">{notes.map(n=><button key={n.id} className={`notes-list-item${selected===n.id?" is-selected":""}${noteColorValue(n.color)?" has-tint":""}`} style={tint(n.color)} onClick={()=>select(n.id)} aria-current={selected===n.id?"true":undefined}><span className="notes-list-title">{n.pinned&&<BookmarkIcon aria-label="고정됨"/>}{isSecret(n)&&<LockClosedIcon aria-label="암호 메모"/>}{n.type===LEDGER&&<WalletIcon aria-hidden="true"/>}{n.title.trim()||"제목 없는 메모"}{n.conflictCopy&&<span className="notes-copy-mark">사본</span>}{n.conflict&&<span className="notes-conflict-mark" aria-description="충돌 확인 필요">!</span>}</span><span className="notes-list-preview">{preview(n,state.notes)}</span><time dateTime={n.updatedAt}>{new Date(n.updatedAt).toLocaleDateString("ko-KR",{month:"short",day:"numeric"})}</time></button>)}{!!state.unreadable&&<p className="notes-list-empty" role="status">읽을 수 없는 메모 {state.unreadable}개는 목록에서 뺐습니다.</p>}{state.unlocked&&!notes.length&&<p className="notes-list-empty">{query?"검색 결과가 없습니다":trash?"휴지통이 비어 있습니다":scope==="archive"?"보관한 메모가 없습니다":"메모가 없습니다"}</p>}</div>
   </div>;
   const newItems:MenuItem[]=[{id:"text",label:"메모",onSelect:()=>newNote("text")},{id:"checklist",label:"체크리스트",onSelect:()=>newNote("checklist")},{id:"secret",label:"암호 메모",onSelect:()=>newNote("secret")},{id:"ledger",label:"가계부",onSelect:openLedger}];
   const kind=note?noteKind(note):"text";
@@ -205,19 +199,16 @@ export function NotesWorkspace({store}:{store:NotesStore}){
         onBlur={e=>{if(trash)return;const next=e.relatedTarget as Node|null;if(next?e.currentTarget.closest(".notes-editor")?.contains(next):document.hasFocus())setEditingBody(false);}}
         onKeyDown={e=>{if(e.key==="Escape"&&!trash&&!e.nativeEvent.isComposing){e.preventDefault();e.stopPropagation();setEditingBody(false);}}}/>;
   const footer=!note?null:isSecret(note)?"암호 메모 · 이 PC의 PIN으로 잠김":kind==="checklist"&&!note.readOnly?`${(note.items??[]).filter(i=>i.checked).length}/${(note.items??[]).length} 완료`:`${note.body.length.toLocaleString()}자`;
-  const main=!state.ready?<div className="notes-empty">메모를 불러오는 중…</div>
-    :state.keyringLocked?<KeyringLocked store={store} busy={keyringBusy}/>
-    :!state.unlocked?<KeySetup store={store}/>
-    :creatingSecret?<SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create("secret"),true);requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={()=>setCreatingSecret(false)}/>
-    :ledgerOpen&&note?<LedgerView key={note.id} store={store} ledgerId={note.id} actions={<>
-        <Button size="icon" variant="ghost" aria-label={note.pinned?"고정 해제":"메모 고정"} aria-pressed={note.pinned} onClick={()=>edit({pinned:!note.pinned})}><BookmarkIcon/></Button>
-        <Menu label="메모 더보기" items={moreItems} trigger={<EllipsisHorizontalIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>
-        <Button size="icon" variant="ghost" aria-label="메모를 휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button></>}>
-        {note.conflict&&<div className="notes-conflict ledger-banner" role="status"><p>다른 기기에서도 수정됐습니다. 이 메모를 복사본으로 남기고 서버 버전을 불러올 수 있습니다.</p><Button size="sm" disabled={state.syncing||state.saving} onClick={()=>void store.resolve(note,true)}>내 내용 보관 후 서버 버전 불러오기</Button></div>}
-        {limitError&&<p className="notes-limit ledger-banner" role="alert">{limitError}</p>}
-      </LedgerView>
-    :!note?<div className="notes-empty"><span className="notes-eyebrow">NOTES</span><h2>{trash?"휴지통":scope==="archive"?"보관함":"메모"}</h2><p>{notes.length?"왼쪽에서 메모를 선택하세요.":query?"검색 결과가 없습니다.":trash?"삭제한 메모가 없습니다.":scope==="archive"?"보관한 메모가 없습니다.":"아직 작성한 메모가 없습니다."}</p>{!trash&&<Button variant="ghost" onClick={()=>newNote()}>＋ 새 메모</Button>}</div>
-    :<article className={`notes-editor${noteColorValue(note.color)?" has-tint":""}`} style={tint(note.color)}>
+  const pinnedNotes=scope==="all"?notes.filter(n=>n.pinned):[];
+  const otherNotes=pinnedNotes.length?notes.filter(n=>!n.pinned):notes;
+  const board=<div className="notes-board" aria-label="메모 목록">
+    {pinnedNotes.length>0&&<><h2 className="workspace-section-label notes-board__label">고정됨</h2><NoteMasonry notes={pinnedNotes} all={state.notes} selected={selected} onOpen={open}/>
+      {otherNotes.length>0&&<h2 className="workspace-section-label notes-board__label">최근</h2>}</>}
+    {otherNotes.length>0&&<NoteMasonry notes={otherNotes} all={state.notes} selected={selected} onOpen={open}/>}
+    {!!state.unreadable&&<p className="notes-list-empty" role="status">읽을 수 없는 메모 {state.unreadable}개는 목록에서 뺐습니다.</p>}
+    {!notes.length&&<div className="notes-empty"><span className="notes-eyebrow">NOTES</span><h2>{trash?"휴지통":scope==="archive"?"보관함":"메모"}</h2><p>{query?"검색 결과가 없습니다.":trash?"삭제한 메모가 없습니다.":scope==="archive"?"보관한 메모가 없습니다.":"아직 작성한 메모가 없습니다."}</p>{!trash&&scope!=="archive"&&!query&&<Button variant="ghost" onClick={()=>newNote()}>＋ 새 메모</Button>}</div>}
+  </div>;
+  const editor=!note?null:<article className={`notes-editor${noteColorValue(note.color)?" has-tint":""}`} style={tint(note.color)}>
       <div className="notes-editor-actions"><time dateTime={note.updatedAt}>{new Date(note.updatedAt).toLocaleString("ko-KR",{dateStyle:"medium",timeStyle:"short"})}</time><div>
         {canConvert&&<Button size="icon" variant="ghost" aria-label={convertLabel} title={`${convertLabel} (Ctrl+Shift+L)`} onClick={convert}>{kind==="checklist"?<DocumentTextIcon/>:<ListBulletIcon/>}</Button>}
         {!trash&&kind==="text"&&!note.readOnly&&<MarkdownHelpButton/>}
@@ -227,6 +218,7 @@ export function NotesWorkspace({store}:{store:NotesStore}){
         <span className="notes-editor-actions__gap" aria-hidden="true"/>
         {moreItems.length>0&&<Menu label="메모 더보기" items={moreItems} trigger={<EllipsisHorizontalIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>}
         {trash?<Button size="sm" onClick={()=>{edit({deleted:false});setScope("all");}}>복원</Button>:<Button size="icon" variant="ghost" aria-label="메모를 휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button>}
+        <Button size="icon" variant="ghost" aria-label="메모 닫기" onClick={close}><XMarkIcon/></Button>
       </div></div>
       {note.conflict&&<div className="notes-conflict" role="status"><p>다른 기기에서도 수정됐습니다. 이 메모를 복사본으로 남기고 서버 버전을 불러올 수 있습니다.</p><Button size="sm" disabled={state.syncing||state.saving} onClick={()=>void store.resolve(note,true)}>내 내용 보관 후 서버 버전 불러오기</Button></div>}
       {note.conflictCopy&&<div className="notes-conflict" role="status"><p>다른 기기의 수정과 겹쳐 두 내용을 모두 보관했습니다. 이 메모는 이 PC에서 쓴 내용입니다.</p><Button size="sm" variant="ghost" onClick={()=>void store.dismissConflictCopy(note.id)}>확인</Button></div>}
@@ -239,6 +231,19 @@ export function NotesWorkspace({store}:{store:NotesStore}){
       <footer className="notes-editor-footer"><span>{footer}</span>
         <Button size="icon" variant="ghost" className={`notes-sync${state.syncing?" is-syncing":""}${state.error?" is-error":""}`} aria-label="동기화" aria-busy={state.syncing} title={syncTitle} disabled={state.syncing||state.saving} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button></footer>
     </article>;
+  const panel=creatingSecret?<SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create("secret"),true);requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={()=>setCreatingSecret(false)}/>:editor;
+  const main=!state.ready?<div className="notes-empty">메모를 불러오는 중…</div>
+    :state.keyringLocked?<KeyringLocked store={store} busy={keyringBusy}/>
+    :!state.unlocked?<KeySetup store={store}/>
+    :ledgerOpen&&note&&!creatingSecret?<LedgerView key={note.id} store={store} ledgerId={note.id} actions={<>
+        <Button size="icon" variant="ghost" aria-label={note.pinned?"고정 해제":"메모 고정"} aria-pressed={note.pinned} onClick={()=>edit({pinned:!note.pinned})}><BookmarkIcon/></Button>
+        <Menu label="메모 더보기" items={moreItems} trigger={<EllipsisHorizontalIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>
+        <Button size="icon" variant="ghost" aria-label="메모를 휴지통으로" onClick={()=>{edit({deleted:true});select(null);}}><TrashIcon/></Button>
+        <Button size="icon" variant="ghost" aria-label="메모 닫기" onClick={close}><XMarkIcon/></Button></>}>
+        {note.conflict&&<div className="notes-conflict ledger-banner" role="status"><p>다른 기기에서도 수정됐습니다. 이 메모를 복사본으로 남기고 서버 버전을 불러올 수 있습니다.</p><Button size="sm" disabled={state.syncing||state.saving} onClick={()=>void store.resolve(note,true)}>내 내용 보관 후 서버 버전 불러오기</Button></div>}
+        {limitError&&<p className="notes-limit ledger-banner" role="alert">{limitError}</p>}
+      </LedgerView>
+    :<div className={`notes-main${panel?" has-panel":""}`}>{board}{panel&&<div className="notes-panel">{panel}</div>}</div>;
   return <div className="notes-workspace" onKeyDown={e=>{if(e.nativeEvent.isComposing)return;const mod=e.ctrlKey||e.metaKey;const key=e.key.toLowerCase();
       if(mod&&!e.shiftKey&&key==="n"&&state.unlocked){e.preventDefault();newNote();}
       if(mod&&key==="s"){e.preventDefault();void store.sync();}

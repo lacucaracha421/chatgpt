@@ -4,6 +4,7 @@ import { useState, type ButtonHTMLAttributes } from "react";
 import { PhysicalCover } from "./physical/PhysicalCover";
 import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
+import type { ReleaseCaption } from "./releaseCaption";
 
 export function collectionCredit(collection: CollectionSummary): string {
   const credit = collection.type === "manga"
@@ -21,6 +22,7 @@ export function CollectionCard({
   selected,
   scope = "",
   exhibition = false,
+  releaseCaption,
   ...buttonProps
 }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & {
   collection: CollectionSummary;
@@ -29,6 +31,8 @@ export function CollectionCard({
   selected: boolean;
   scope?: string;
   exhibition?: boolean;
+  /** 신간 line from the unread inbox; without it an unread count still reads "신간 알림 N". */
+  releaseCaption?: ReleaseCaption | null;
 }) {
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
   const { privacyMode } = usePrivacy();
@@ -37,6 +41,9 @@ export function CollectionCard({
   const releaseLabel = displayDate(release);
   const seasonRange = collection.type === "movie" ? collection.seasonDateRange : null;
   const seasonLabel = seasonRange ? displayDateRange(...seasonRange) : null;
+  const caption = releaseCaption !== undefined ? releaseCaption
+    : collection.unreadReleaseCount > 0 ? { kind: "new" as const, text: `신간 알림 ${collection.unreadReleaseCount}`, date: null } : null;
+  const captionText = caption ? `${caption.text}${caption.date ? ` · ${caption.date}` : ""}` : undefined;
 
   return (
     <button
@@ -46,6 +53,7 @@ export function CollectionCard({
       data-collection-id={collection.id}
       aria-label={`${collection.name}${collectionCredit(collection) ? ` · ${collectionCredit(collection)}` : ""}`}
       aria-selected={selected}
+      aria-description={captionText}
       onClick={onClick}
     >
       <span className={`collection-card__object collection-card__object--${collection.type}`}>
@@ -65,15 +73,16 @@ export function CollectionCard({
           ) : (
             <span className="collection-card__placeholder" aria-hidden="true" />
           )}
-          {collection.unreadReleaseCount > 0 && (
-            <span className="collection-card__release-badge">신간 {collection.unreadReleaseCount}</span>
-          )}
         </span>
       </span>
       <span className="collection-card__meta">
         <span className="collection-card__name" aria-description={collection.name}>{collection.name}</span>
         <span className="collection-card__credit" aria-description={collectionCredit(collection) || undefined}>{collectionCredit(collection)}</span>
-        {seasonLabel ? <span className="collection-card__credit" aria-description="첫 시즌 시작일 ~ 마지막 시즌 시작일">{seasonLabel}</span> : releaseLabel && <time className="collection-card__credit" dateTime={release ?? undefined}>{releaseLabel}</time>}
+        {caption ? (
+          <span className={`collection-card__release collection-card__release--${caption.kind}`}>
+            {caption.text}{caption.date && <span className="collection-card__release-date"> · {caption.date}</span>}
+          </span>
+        ) : seasonLabel ? <span className="collection-card__credit" aria-description="첫 시즌 시작일 ~ 마지막 시즌 시작일">{seasonLabel}</span> : releaseLabel && <time className="collection-card__credit" dateTime={release ?? undefined}>{releaseLabel}</time>}
       </span>
     </button>
   );

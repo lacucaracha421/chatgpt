@@ -205,6 +205,29 @@ describe("CollectionBrowser", () => {
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" });
   });
 
+  it("names unread Korean volumes and upcoming ones in the manga card caption", async () => {
+    const event = (collectionId: string, id: string, volumeNumber: number, currentValue: string | null, provider: ReleaseInboxItem["provider"] = "kakao"): ReleaseInboxItem =>
+      ({ collectionId, collectionName: collectionId, provider, event: { id, kind: "new_volume", volumeNumber, previousValue: null, currentValue, detectedAt: "2026-09-20T00:00:00Z" } });
+    const year = new Date().getFullYear();
+    const tracking = trackingWith([
+      event("out", "o1", 12, `${year - 1}-12-30`), event("out", "o2", 13, `${year - 1}-12-31`),
+      event("ahead", "a1", 9, `${year + 1}-11-20`),
+      event("jp", "j1", 30, null, "mangadex"),
+    ]);
+    renderBrowser({ collections: [
+      { ...manga, id: "out", name: "나온 권", unreadReleaseCount: 2 },
+      { ...manga, id: "ahead", name: "예약 권", unreadReleaseCount: 1 },
+      { ...manga, id: "jp", name: "일본 권", unreadReleaseCount: 1 },
+    ], typeFilter: "manga", showcase: false, tracking });
+    const out = await screen.findByText("신간 12–13권");
+    expect(out).toHaveClass("collection-card__release--new");
+    expect(out).toHaveTextContent(`신간 12–13권 · ${year - 1}.12.31`);
+    expect(screen.getByText("9권 예약")).toHaveClass("collection-card__release--ahead");
+    expect(screen.getByText("9권 예약")).toHaveTextContent(`9권 예약 · ${year + 1}.11.20`);
+    expect(screen.getByText("신간 알림 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /나온 권/ })).toHaveAttribute("aria-description", `신간 12–13권 · ${year - 1}.12.31`);
+  });
+
   it("lets the inbox switch providers", async () => {
     const onViewChange = vi.fn();
     const tracking = trackingWith([inboxItem("a", "mangadex"), inboxItem("b", "kakao")]);
@@ -233,8 +256,10 @@ describe("CollectionBrowser", () => {
       showcase: false,
     });
 
-    expect(screen.getByText("신간 3")).toBeInTheDocument();
-    expect(screen.queryByText("신간 0")).not.toBeInTheDocument();
+    // Nothing on the cover: the caption line under the title replaces the release date.
+    expect(screen.getByText("신간 알림 3")).toHaveClass("collection-card__release--new");
+    expect(document.querySelector(".collection-card__release-badge")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/신간/)).toHaveLength(1);
   });
 
   it("uses the source thumbnail when a collection has no cover asset", () => {

@@ -96,11 +96,17 @@ describe("CollectionCard", () => {
     expect(screen.getByText("Developer")).not.toHaveAttribute("title");
   });
 
-  it("renders release badges only for positive unread counts", () => {
-    const { rerender } = render(<CollectionCard collection={{ ...sample, unreadReleaseCount: 0 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(screen.queryByText("신간 0")).not.toBeInTheDocument();
-    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 2 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(screen.getByText("신간 2")).toBeInTheDocument();
+  it("shows release notices as a caption line instead of a cover badge", () => {
+    const { rerender } = render(<CollectionCard collection={{ ...sample, unreadReleaseCount: 0, releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(screen.queryByText(/신간/)).not.toBeInTheDocument();
+    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 2, releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(screen.getByText("신간 알림 2")).toBeInTheDocument();
+    expect(document.querySelector(".collection-card__cover")).not.toHaveTextContent(/신간/);
+    // The notice replaces the release date line.
+    expect(document.querySelector("time.collection-card__credit")).not.toBeInTheDocument();
+    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 1 }} releaseCaption={{ kind: "ahead", text: "9권 예약", date: "11.20" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(screen.getByText("9권 예약")).toHaveClass("collection-card__release--ahead");
+    expect(screen.getByText("· 11.20")).toHaveClass("collection-card__release-date");
   });
 
   it("uses a game package shell while manga and movie stay flat", () => {

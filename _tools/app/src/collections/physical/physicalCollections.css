@@ -82,7 +82,7 @@
 .collection-card--exhibition .collection-cover-image { object-fit:contain; background:transparent; }
 .collection-card--exhibition .physical-cover--game > img { object-fit:contain; }
 .collection-card--exhibition .collection-card__meta { position:absolute; bottom:0; left:0; right:0; opacity:0; background:var(--color-bg); padding:var(--space-1); min-height:0; pointer-events:none; text-align:center; }
-.collection-card--exhibition .collection-card__credit,.collection-card--exhibition .collection-card__release-badge { display:none; }
+.collection-card--exhibition .collection-card__credit,.collection-card--exhibition .collection-card__release { display:none; }
 .collection-card--exhibition:hover .collection-card__meta,.collection-card--exhibition:focus-visible .collection-card__meta { opacity:1; }
 .collection-exhibition__pages { flex:none; min-height:36px; display:flex; align-items:center; justify-content:center; gap:var(--space-3); color:var(--color-muted); font-family:var(--font-numeric,var(--font-ui)); }
 .collection-exhibition__pages > button { width:32px; height:28px; border:var(--border-width) solid var(--color-border); background:transparent; color:var(--color-text); border-radius:var(--radius-sm); }

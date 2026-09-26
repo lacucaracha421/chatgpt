@@ -1,5 +1,5 @@
 import { PlusIcon } from "@heroicons/react/24/outline";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -23,6 +23,7 @@ import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { TmdbMovieDialog } from "./TmdbMovieDialog";
 import { ReleaseInbox, inboxProvider } from "./ReleaseInbox";
+import { groupInbox, localDay, releaseCaption } from "./releaseCaption";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 import "./CollectionBrowser.css";
 
@@ -79,6 +80,8 @@ export function CollectionBrowser({
   const unread = { mangadex: 0, kakao: 0 };
   for (const key of new Set(inbox.map(item => `${inboxProvider(item)}:${item.collectionId}`))) unread[key.startsWith("mangadex:") ? "mangadex" : "kakao"] += 1;
   const unreadTotal = unread.mangadex + unread.kakao;
+  const inboxByWork = useMemo(() => groupInbox(inbox), [inbox]);
+  const today = localDay();
   const openInbox = (provider: CollectionUpdateProvider) => onViewChange({ kind: "collections", typeFilter, showcase, releaseProvider: provider });
   const libraryStateRef = useRef(libraryState);
   libraryStateRef.current = libraryState;
@@ -187,6 +190,7 @@ export function CollectionBrowser({
                       : null
                 }
                 selected={false}
+                releaseCaption={releaseCaption(collection, inboxByWork.get(collection.id) ?? [], today)}
                 scope={library?.root ?? ""}
                 exhibition={showcase}
                 onClick={() => {

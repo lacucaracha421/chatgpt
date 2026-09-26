@@ -30,6 +30,19 @@ export function ledgerPreview(ledger: Note, notes: Note[], today = localToday())
   const s = monthSummary(ledger, monthNotesOf(notes, ledger.id), month, today);
   return s.available !== null ? `${monthNumber(month)}월 쓸 수 있는 돈 ${signedWon(s.available)}` : `${monthNumber(month)}월 쓴 돈 ${won(s.spent)}`;
 }
+/** Board card of a ledger: this month's headline figure, how much of the income is spent, the next charge. */
+export function ledgerCard(ledger: Note, notes: Note[], today = localToday()) {
+  const month = today.slice(0, 7);
+  const s = monthSummary(ledger, monthNotesOf(notes, ledger.id), month, today);
+  const next = [...s.upcomingCharges].sort((a, b) => a.date.localeCompare(b.date))[0];
+  return {
+    label: s.available !== null ? `${monthNumber(month)}월 쓸 수 있는 돈` : `${monthNumber(month)}월 쓴 돈`,
+    amount: s.available !== null ? signedWon(s.available) : won(s.spent),
+    over: s.available !== null && s.available < 0,
+    spentRatio: s.income > 0 ? Math.min(1, s.spent / s.income) : null,
+    next: next ? `다음 결제 ${Number(next.date.slice(5, 7))}월 ${Number(next.date.slice(8, 10))}일 · ${next.recurring.name}` : null,
+  };
+}
 /** Month notes stay internal while their ledger exists (also in trash); orphans show read-only in 보관함. */
 export function hiddenLedgerMonths(notes: Note[]): Set<string> {
   const ledgers = new Set(notes.filter((n) => n.type === LEDGER).map((n) => n.id));

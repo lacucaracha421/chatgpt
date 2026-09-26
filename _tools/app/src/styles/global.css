@@ -3831,16 +3831,47 @@ textarea:focus-visible {
 
 /* Browsing hover uses outline/color only. Package depth stays static; showcase adds no extra shadow. */
 
-.collection-card__release-badge {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  padding: 2px var(--space-compact);
-  color: var(--color-bg);
-  font-size: var(--text-xs);
+/* 신간 caption (mobile design C, 2026-09-26): nothing on the cover; the line under the title
+   replaces the release date. Filled square = unread new volume, hollow = upcoming. */
+.collection-card__release {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  overflow: hidden;
+  min-height: var(--line-meta);
+  white-space: nowrap;
+  color: var(--color-accent);
+  font-size: var(--text-sm);
   font-weight: 600;
+  line-height: var(--line-meta);
+}
+
+.collection-card__release::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
   background: var(--color-accent);
-  border-radius: var(--radius-sm);
+}
+
+.collection-card__release-date {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-muted);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.collection-card__release--ahead {
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.collection-card__release--ahead::before {
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid var(--color-muted);
 }
 
 .collection-card__cover img {
