@@ -1028,13 +1028,14 @@ impl CloudClient {
     /// requested wait, so it is allowed `recv_response` instead of the usual 30 s.
     pub(crate) fn for_status_watch(base_url: &str, recv_response: Duration) -> Result<Self, LibraryError> {
         let mut client = Self::new(base_url)?;
-        client.agent = ureq::Agent::config_builder()
-            .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_recv_response(Some(recv_response))
-            .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        client.agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_recv_response(Some(recv_response))
+                .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         Ok(client)
     }
 
@@ -1182,12 +1183,13 @@ impl CloudClient {
         // pages, and the authority codes when the identity/epoch/contract no longer
         // matches. Those demand different recovery, and collapsing them into one
         // generic rejection would make a retryable re-base look like a fatal error.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut response = agent
             .get(url.as_str())
             .header("Authorization", bearer(token)?)
@@ -1229,12 +1231,13 @@ impl CloudClient {
         // `http_status_as_error` is disabled for this request so the coded 409 body
         // survives: an expired cursor and a cursor ahead of the server share a status
         // but demand different recovery, and neither may be read as "no changes".
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut url = url::Url::parse(&self.endpoint("/v1/albums/changes")?)
             .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
         {
@@ -1316,12 +1319,13 @@ impl CloudClient {
         // pages, and the shared authority codes when the identity/epoch/contract no
         // longer matches. Those demand different recovery, and collapsing them into one
         // generic rejection would make a retryable re-base look like a fatal error.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut response = agent
             .get(url.as_str())
             .header("Authorization", bearer(token)?)
@@ -1370,12 +1374,13 @@ impl CloudClient {
         // survives: an expired cursor, a cursor ahead of the server and a changed
         // baseline share a status but demand different recovery, and none may be read
         // as "no changes".
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut url = url::Url::parse(&self.endpoint("/v1/classifications/authority/changes")?)
             .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
         {
@@ -1426,12 +1431,13 @@ impl CloudClient {
         if bytes.len() > 16 * 1024 {
             return Err(LibraryError::InvalidCloudResponse);
         }
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut response = agent
             .put(self.endpoint("/v1/albums/commands")?)
             .header("Authorization", bearer(token)?)
@@ -1506,12 +1512,13 @@ impl CloudClient {
         // survives: the route uses one status for an authority identity failure, a
         // compare-and-set conflict and a semantic structural rejection, and those demand
         // different handling. Collapsing them would make an automatic rebase impossible.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut response = agent
             .put(self.endpoint("/v1/classifications/authority/commands")?)
             .header("Authorization", bearer(token)?)
@@ -1561,7 +1568,7 @@ impl CloudClient {
     pub(crate) fn publish_catalog_visibility(&self,body:&serde_json::Value,token:&str)->Result<(),LibraryError>{
         let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
         if bytes.len()>crate::library::mobile_catalog::MAX_USERS{return Err(LibraryError::InvalidCloudResponse)}
-        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let mut response=agent.put(self.endpoint("/v1/mobile-catalog/visibility")?).header("Authorization",bearer(token)?).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
         let value:serde_json::Value=read_json(&mut response)?;
         if value["publicationRevision"].as_str().is_none(){return Err(LibraryError::InvalidCloudResponse)} Ok(())
@@ -1573,7 +1580,7 @@ impl CloudClient {
     }
     pub(crate) fn upload_mobile_catalog(&self,digest:&str,file:File,token:&str,progress: super::publication::Reporter<'_>)->Result<(),LibraryError>{
         if digest.len()!=64 || !digest.bytes().all(|b|b.is_ascii_hexdigit()) || file.metadata().map_err(|_|LibraryError::InvalidOnlineCatalog)?.len()>crate::library::mobile_catalog::MAX_CONTENT {return Err(LibraryError::InvalidOnlineCatalog);}
-        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let total = file.metadata().map_err(|_|LibraryError::InvalidOnlineCatalog)?.len();
         let mut reader = PublicationReader { file, progress, total, completed: 0, reported: 0 };
         let mut response=agent.put(self.endpoint(&format!("/v1/mobile-catalog/replicas/{digest}"))?).header("Authorization",bearer(token)?).content_type("application/x-ndjson").header("Content-Length", total.to_string()).send(ureq::SendBody::from_reader(&mut reader)).map_err(map_registration_error)?;
@@ -1584,7 +1591,7 @@ impl CloudClient {
         if !crate::library::is_valid_library_id(library_id) {return Err(LibraryError::InvalidCloudResponse);}
         let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
         if bytes.len()>crate::library::mobile_catalog::MAX_USERS+4096 {return Err(LibraryError::InvalidCloudResponse);}
-        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let mut response=agent.put(self.endpoint("/v1/mobile-catalog/publication")?).header("Authorization",bearer(token)?).header("X-Lakomics-Library-Id",library_id).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
         let value:serde_json::Value=read_json(&mut response)?;
         let revision=value["publicationRevision"].as_str().filter(|s|s.len()==64).ok_or(LibraryError::InvalidCloudResponse)?;
@@ -1669,12 +1676,13 @@ impl CloudClient {
         // `http_status_as_error` is disabled for this one request so the coded 409
         // body survives: the route distinguishes a cursor *ahead* of the server
         // from a cursor whose history has expired, and the two share a status.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut response = agent
             .get(self.endpoint(&format!("/v1/mobile-catalog/bookmarks/changes?libraryId={library_id}&epoch={epoch}&after={after}&limit={limit}"))?)
             .header("Authorization", bearer(token)?)
@@ -1758,12 +1766,13 @@ impl CloudClient {
             .map_err(|_| LibraryError::InvalidCloudSyncConfig)?
             .pop_if_empty()
             .extend([provider, work_id]);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut response = agent
             .put(url.as_str())
             .header("Authorization", bearer(token)?)
@@ -1805,7 +1814,7 @@ impl CloudClient {
     }
 
     pub(crate) fn notes_list(&self, vault: &str, cursor:i64, token:&str) -> crate::library::notes::Result<crate::library::notes::Page> {
-        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
+        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build());
         let mut response=agent.get(self.endpoint(&format!("/v1/notes/{vault}?after={cursor}&limit=10"))?)
             .header("Authorization",bearer(token)?).call()
             .map_err(|_|crate::library::notes::Error::Message("메모 서버에 연결하지 못했습니다. PC 저장 내용은 유지됩니다."))?;
@@ -1813,7 +1822,7 @@ impl CloudClient {
     }
     pub(crate) fn notes_put(&self,vault:&str,id:&str,revision:i64,operation:&str,payload:&crate::library::notes::Envelope,token:&str)->crate::library::notes::Result<crate::library::notes::Remote> {
         let body=serde_json::to_vec(&serde_json::json!({"expectedRevision":revision,"operationId":operation,"payload":payload}))?;
-        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
+        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build());
         let mut response=agent.put(self.endpoint(&format!("/v1/notes/{vault}/{id}"))?).header("Authorization",bearer(token)?)
             .content_type("application/json").send(&body).map_err(|error|match error {
                 ureq::Error::StatusCode(409)=>crate::library::notes::Error::Message("다른 기기에서 메모가 변경됐습니다. 다시 동기화해 두 버전을 확인해 주세요."),
@@ -1847,12 +1856,13 @@ impl CloudClient {
         if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) {
             return Err(LibraryError::InvalidCloudResponse);
         }
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         // `editVersion=2`: this PC applies the manga tracking fields (an older server ignores it).
         let path = format!("/v1/collections/personal-edits?libraryId={library_id}&after={after}&limit={limit}&editVersion=2");
         let mut response = agent.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call()
@@ -1908,8 +1918,8 @@ impl CloudClient {
             return Err(LibraryError::InvalidCloudResponse);
         }
         // Signed storage requests never carry the API token, cookies or follow redirects.
-        let upload_agent: ureq::Agent = ureq::Agent::config_builder().max_redirects(0)
-            .timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build().into();
+        let upload_agent = crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0)
+            .timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let request = upload_agent.put(url.as_str()).content_type(&blob.content_type);
         for (name, value) in prepared.required_headers {
             if !name.eq_ignore_ascii_case("content-type") || value != blob.content_type { return Err(LibraryError::InvalidCloudResponse); }
@@ -1954,16 +1964,17 @@ impl CloudClient {
         if metadata.len() > super::collections::MAX_METADATA_BYTES { return Err(LibraryError::InvalidCloudResponse); }
         // Status codes are read here so a coded personal-edit 409 (e.g. the server library
         // is not linked) is distinguishable from a stale base revision.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
-            .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into();
+        let agent = crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
+                .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        );
         let mut response = agent.put(self.endpoint("/v1/collections/replica")?)
             .header("Authorization", bearer(token)?).content_type("application/json").send(metadata).map_err(map_registration_error)?;
         match response.status().as_u16() {
@@ -1996,14 +2007,15 @@ impl CloudClient {
             return Err(LibraryError::InvalidCloudSyncConfig);
         }
         Ok(Self {
-            agent: ureq::Agent::config_builder()
-                .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
-                .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
-                .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
-                .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
-                .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
-                .build()
-                .into(),
+            agent: crate::http_agent::agent(
+                ureq::Agent::config_builder()
+                    .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
+                    .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
+                    .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
+                    .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
+                    .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
+                    .build(),
+            ),
             base_url: parsed,
         })
     }
@@ -2575,16 +2587,17 @@ impl CloudClient {
     }
 
     fn coded_agent(&self) -> Result<ureq::Agent, LibraryError> {
-        Ok(ureq::Agent::config_builder()
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
-            .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
-            .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
-            .build()
-            .into())
+        Ok(crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_send_body(Some(UPLOAD_BODY_TIMEOUT))
+                .timeout_recv_response(Some(SHORT_NETWORK_TIMEOUT))
+                .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
+                .build(),
+        ))
     }
 
     fn coded_request(

@@ -167,16 +167,17 @@ pub(crate) struct ExchangeClient {
 }
 
 fn agent(send_body: Duration, recv_body: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .max_redirects(0)
-        .http_status_as_error(false)
-        .timeout_connect(Some(API_TIMEOUT))
-        .timeout_send_request(Some(API_TIMEOUT))
-        .timeout_send_body(Some(send_body))
-        .timeout_recv_response(Some(Duration::from_secs(120)))
-        .timeout_recv_body(Some(recv_body))
-        .build()
-        .into()
+    crate::http_agent::agent(
+        ureq::Agent::config_builder()
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .timeout_connect(Some(API_TIMEOUT))
+            .timeout_send_request(Some(API_TIMEOUT))
+            .timeout_send_body(Some(send_body))
+            .timeout_recv_response(Some(Duration::from_secs(120)))
+            .timeout_recv_body(Some(recv_body))
+            .build(),
+    )
 }
 
 mod idle {
@@ -252,7 +253,7 @@ mod idle {
 
 /// An agent for presigned transfers: no total body deadline, an idle limit instead.
 fn transfer_agent(idle: Duration) -> ureq::Agent {
-    use ureq::unversioned::transport::{Connector, DefaultConnector};
+    use ureq::unversioned::transport::Connector;
     let config = ureq::Agent::config_builder()
         .max_redirects(0)
         .http_status_as_error(false)
@@ -262,7 +263,7 @@ fn transfer_agent(idle: Duration) -> ureq::Agent {
         .timeout_recv_response(Some(Duration::from_secs(120)))
         .timeout_recv_body(None)
         .build();
-    let connector = DefaultConnector::new().chain(idle::IdleConnector(idle));
+    let connector = crate::http_agent::connector().chain(idle::IdleConnector(idle));
     ureq::Agent::with_parts(
         config,
         connector,

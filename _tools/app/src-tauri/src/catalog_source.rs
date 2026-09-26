@@ -104,12 +104,13 @@ impl VpsCatalogSource {
             return Err(LibraryError::InvalidCatalogTransportPath);
         }
         Ok(Self {
-            agent: ureq::Agent::config_builder()
-                .https_only(parsed.scheme() != "http")
-                .max_redirects(0)
-                .timeout_global(Some(VPS_TIMEOUT))
-                .build()
-                .into(),
+            agent: crate::http_agent::agent(
+                ureq::Agent::config_builder()
+                    .https_only(parsed.scheme() != "http")
+                    .max_redirects(0)
+                    .timeout_global(Some(VPS_TIMEOUT))
+                    .build(),
+            ),
             base_url: parsed,
         })
     }
@@ -223,12 +224,13 @@ impl CatalogSource for VpsCatalogSource {
 /// 갤러리 resolver가 쓰는 공용 agent 설정(https-only, 리다이렉트 차단).
 pub(crate) fn gallery_agent() -> &'static ureq::Agent {
     static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
-        ureq::Agent::config_builder()
-            .https_only(true)
-            .max_redirects(0)
-            .timeout_global(Some(Duration::from_secs(30)))
-            .build()
-            .into()
+        crate::http_agent::agent(
+            ureq::Agent::config_builder()
+                .https_only(true)
+                .max_redirects(0)
+                .timeout_global(Some(Duration::from_secs(30)))
+                .build(),
+        )
     });
     &AGENT
 }

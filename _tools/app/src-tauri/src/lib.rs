@@ -4,6 +4,7 @@ mod cloud;
 mod collectible_cors;
 mod commands;
 mod exchange;
+mod http_agent;
 mod workload;
 mod extension_api;
 pub mod library;
