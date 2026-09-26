@@ -11,7 +11,7 @@ use super::{
     db,
     error::LibraryError,
     models::{BackupKind, MetadataBackup},
-    Library,
+    Library, LockedConnection,
 };
 
 const DAILY_BACKUP_LIMIT: usize = 7;
@@ -55,7 +55,7 @@ impl Library {
             Utc::now(),
             Some(source_version),
         );
-        create_verified_snapshot(&connection, &path)?;
+        create_verified_snapshot_released(connection, &path)?;
         backup_entry(&path)
             .map(|entry| entry.metadata)
             .ok_or(LibraryError::InvalidBackup)
@@ -80,7 +80,7 @@ impl Library {
 
         let path = backup_path(&self.root, BackupKind::Daily, now, None);
         let connection = self.connection()?;
-        create_verified_snapshot(&connection, &path)?;
+        create_verified_snapshot_released(connection, &path)?;
         rotate_daily_backups(&self.root)?;
         Ok(backup_entry(&path).map(|entry| entry.metadata))
     }
@@ -136,7 +136,7 @@ impl Library {
             fs::create_dir_all(parent).map_err(|source| backup_error(parent, source))?;
         }
         let connection = self.connection()?;
-        create_verified_snapshot(&connection, destination)?;
+        create_verified_snapshot_released(connection, destination)?;
         fs::metadata(destination)
             .map(|metadata| metadata.len())
             .map_err(|source| backup_error(destination, source))
@@ -441,6 +441,24 @@ pub(crate) fn create_verified_snapshot(
     source: &Connection,
     destination: &Path,
 ) -> Result<(), LibraryError> {
+    write_snapshot(source, destination)?;
+    verify_or_remove(destination)
+}
+
+/// Copies under the held library connection, then releases the global database lock before
+/// the slow integrity check of the copy. A full `quick_check` of a large library takes
+/// minutes, and holding the lock through it froze every command, including the UI thread's
+/// synchronous ones. The check reads only the snapshot file, so it needs no lock.
+pub(crate) fn create_verified_snapshot_released(
+    source: LockedConnection<'_>,
+    destination: &Path,
+) -> Result<(), LibraryError> {
+    write_snapshot(&source, destination)?;
+    drop(source);
+    verify_or_remove(destination)
+}
+
+fn write_snapshot(source: &Connection, destination: &Path) -> Result<(), LibraryError> {
     OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -456,17 +474,28 @@ pub(crate) fn create_verified_snapshot(
             .map_err(|source| LibraryError::Backup {
                 path: destination.to_path_buf(),
                 source: std::io::Error::other(source),
-            })?;
-        verify_snapshot(destination)
+            })
     })();
     if result.is_err() {
-        fs::remove_file(destination).map_err(|source| LibraryError::Backup {
-            path: destination.to_path_buf(),
-            source,
-        })?;
+        remove_snapshot(destination)?;
     }
-
     result
+}
+
+fn verify_or_remove(destination: &Path) -> Result<(), LibraryError> {
+    run_before_verify_hook();
+    let result = verify_snapshot(destination);
+    if result.is_err() {
+        remove_snapshot(destination)?;
+    }
+    result
+}
+
+fn remove_snapshot(destination: &Path) -> Result<(), LibraryError> {
+    fs::remove_file(destination).map_err(|source| LibraryError::Backup {
+        path: destination.to_path_buf(),
+        source,
+    })
 }
 
 pub(crate) fn pre_migration_snapshot_path(root: &Path, source_version: i64) -> PathBuf {
@@ -528,6 +557,28 @@ fn run_after_reservation_hook(destination: &Path) -> Result<(), LibraryError> {
 fn run_after_reservation_hook(_destination: &Path) -> Result<(), LibraryError> {
     Ok(())
 }
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_VERIFY_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_before_verify_hook(hook: impl FnOnce() + 'static) {
+    BEFORE_VERIFY_HOOK.with(|stored_hook| *stored_hook.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_before_verify_hook() {
+    BEFORE_VERIFY_HOOK.with(|stored_hook| {
+        if let Some(hook) = stored_hook.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn run_before_verify_hook() {}
 
 #[cfg(test)]
 type BeforeRenameHook = Box<dyn Fn(&Path, &Path) -> std::io::Result<()>>;
@@ -594,6 +645,7 @@ mod tests {
 
     use super::{
         create_verified_snapshot, parse_backup_filename, set_after_reservation_hook,
+        set_before_verify_hook,
         set_after_swap_hook, set_before_rename_hook,
     };
     use crate::library::{
@@ -1179,5 +1231,26 @@ mod tests {
         assert!(matches!(error, LibraryError::RestoreAuthorityActive { .. }), "{error}");
         assert_eq!(adopted_state(&library).library_id, before.library_id);
         assert_eq!(adopted_state(&library).outbox, before.outbox);
+    }
+
+    #[test]
+    fn daily_backup_verifies_the_copy_without_holding_the_database_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let lock = std::sync::Arc::clone(&library.database_lock);
+        let free_during_verify = std::rc::Rc::new(std::cell::Cell::new(None));
+        let observed = std::rc::Rc::clone(&free_during_verify);
+        set_before_verify_hook(move || observed.set(Some(lock.try_lock().is_ok())));
+
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 9, 26, 12, 0, 0).unwrap())
+            .unwrap();
+
+        assert!(backup.is_some());
+        assert_eq!(
+            free_during_verify.get(),
+            Some(true),
+            "the minutes-long quick_check must not block every other library command"
+        );
     }
 }
