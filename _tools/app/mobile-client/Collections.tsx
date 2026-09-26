@@ -10,7 +10,7 @@ import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
-import {useLevelMotion} from './motion';
+import {useLevelMotion,useSegmentMotion,useTabIndicator} from './motion';
 import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
@@ -35,6 +35,17 @@ import './Collections.css';
 type CollectionTab = CollectionKind | 'av';
 const labels:Record<CollectionTab,string> = {game:'게임',manga:'만화',movie:'영화',av:'AV'};
 const TABS = Object.keys(labels) as CollectionTab[];
+/** The type tabs: text tabs over one underline that glides to the chosen tab. */
+function TypeTabs({tab,onChoose}:{tab:CollectionTab;onChoose(tab:CollectionTab):void}) {
+  const list=useRef<HTMLDivElement>(null),indicator=useRef<HTMLSpanElement>(null);
+  useTabIndicator(list,indicator,TABS.indexOf(tab));
+  return <div ref={list} className="collection-type-tabs" role="tablist" aria-label="컬렉션 유형">
+    {TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>onChoose(value)}><span data-label={labels[value]}>{labels[value]}</span></button>)}
+    <span ref={indicator} className="collection-type-indicator" aria-hidden="true"/>
+  </div>;
+}
+/** A list query has settled on `key`: its first page (or its failure) is on screen. */
+const settledOn=(list:{key:string;busy:boolean},key:string)=>list.key===key&&!list.busy;
 // The detail pane names the work's own maker role rather than a generic "제작자".
 const makerLabels:Record<CollectionKind,string> = {game:'개발사',manga:'작가',movie:'제작사'};
 /** Manga facts beside the cover: publisher, year and status, then the genres as Korean chips. */
@@ -404,10 +415,12 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
 
   // Typing searches after a short pause; Enter applies at once.
   useEffect(()=>{const value=query.trim();if(value===search)return;const timer=window.setTimeout(()=>setSearch(value),350);return()=>clearTimeout(timer);},[query,search]);
-  const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),JSON.stringify([collectionPath(type,search,false,null,filters),refresh]),live,
+  const mainKey=JSON.stringify([collectionPath(type,search,false,null,filters),refresh]);
+  const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,live,
     result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');});
   const wantShowcase=live&&(showcaseOpen||showcaseAll)&&(!filtered||showcaseAll);
-  const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),JSON.stringify([collectionPath(type,'',true,null),refresh]),wantShowcase);
+  const showcaseKey=JSON.stringify([collectionPath(type,'',true,null),refresh]);
+  const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase);
   const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||showcaseAll||inboxOpen);
   const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
@@ -495,7 +508,7 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
   // scrolling: text tabs centred in the bar with an underline on its edge; while searching they
   // shrink to the right end. 신간 and search keep the right edge like the other tabs' actions.
   // Each label reserves its bold width, so selecting never nudges the centred group.
-  const typeSwitch=<div className="collection-type-tabs" role="tablist" aria-label="컬렉션 유형">{TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>chooseTab(value)}><span data-label={labels[value]}>{labels[value]}</span></button>)}</div>;
+  const typeSwitch=<TypeTabs tab={tab} onChoose={chooseTab}/>;
   const header=selected
     ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
     :inboxOpen
@@ -514,6 +527,9 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
 
   // Opening a work or the whole Showcase is one level deeper; Back returns from the left.
   useLevelMotion(sectionRef,active?`${selected??''}|${showcaseAll}|${inboxOpen}`:null,(selected?1:0)+(showcaseAll||inboxOpen?1:0));
+  // A type switch swaps the list sideways once the new type's list (and its Showcase row, when
+  // open) has settled, so the old type's cards never slide in; the bar stays still.
+  useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,TABS.indexOf(tab));
   return <section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {header}
     <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll||inboxOpen?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>

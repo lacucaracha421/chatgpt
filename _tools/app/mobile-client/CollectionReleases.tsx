@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {BellIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
 import {Button, Dialog, DialogDescription} from './ui';
 import {usePullToRefresh} from './usePullToRefresh';
+import {useSegmentMotion} from './motion';
 import {errorText} from './transport';
 import type {CollectionSummary} from './collectionModel';
 import {commitReleases, invalidateReleases, loadShelf, releaseEpoch, releaseStore, type ReleaseStore} from './releaseStore';
@@ -86,6 +87,8 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
     setNonce(n => n + 1);
   }, []);
   const pull = usePullToRefresh(scroller, reload, status.busy, !active);
+  // 한국 정발 → 일본 swaps what is under the region switch sideways; the switch itself stays still.
+  useSegmentMotion(scroller, region, region === 'kr' ? 0 : 1, host => Array.from(host.children).filter((child): child is HTMLElement => child instanceof HTMLElement && !child.matches('.collection-segments,.pull-refresh')));
 
   /**
    * Drop confirmed Collections' events here, in the kept copy and from the counts; the

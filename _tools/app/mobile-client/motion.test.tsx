@@ -1,8 +1,8 @@
-import {useRef} from 'react';
+import {useRef,type CSSProperties} from 'react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {cleanup,render} from '@testing-library/react';
 import {act} from 'react';
-import {PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useTabMotion} from './motion';
+import {PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,SEGMENT_MOTION_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useSegmentMotion,useTabIndicator,useTabMotion} from './motion';
 import {BarProgress} from './TopBar';
 
 function Level({levelKey,depth}:{levelKey:string|null;depth:number}){const host=useRef<HTMLDivElement>(null);useLevelMotion(host,levelKey,depth);return <div ref={host} data-testid="level"/>;}
@@ -85,6 +85,53 @@ it('leaves a tab that still shows only its bar alone',()=>{
   const view=render(<Loading tab="b"/>);
   view.rerender(<Loading tab="a"/>);
   expect(animate).not.toHaveBeenCalled();
+});
+
+function Segment({segment,index}:{segment:string|null;index:number}){const host=useRef<HTMLDivElement>(null);useSegmentMotion(host,segment,index);return <div ref={host} data-testid="segment"/>;}
+describe('segment swap',()=>{
+  it('slides in from the side of the new tab, after its data commits, within 200 ms',()=>{
+    const view=render(<Segment segment="game" index={0}/>);
+    expect(animate).not.toHaveBeenCalled();
+    // The new tab is still loading: nothing moves over the old content.
+    view.rerender(<Segment segment={null} index={1}/>);
+    expect(animate).not.toHaveBeenCalled();
+    view.rerender(<Segment segment="manga" index={1}/>);
+    expect(animate).toHaveBeenCalledTimes(1);
+    expect(animate.mock.contexts[0]).toBe(view.getByTestId('segment'));
+    expect(firstFrame(0)).toMatchObject({transform:'translateX(14px)',opacity:.5});
+    const options=animate.mock.calls[0][1] as KeyframeAnimationOptions;
+    expect(options.duration).toBeLessThanOrEqual(200);expect(options.easing).toBe('cubic-bezier(0.2,0,0,1)');
+    // A tab to the left comes in from the left; the same tab again does not move.
+    view.rerender(<Segment segment="game" index={0}/>);
+    expect(firstFrame(1).transform).toBe('translateX(-14px)');
+    view.rerender(<Segment segment="game" index={0}/>);
+    expect(animate).toHaveBeenCalledTimes(2);
+  });
+  it('does not move under reduced motion',()=>{
+    reduced(true);
+    const view=render(<Segment segment="game" index={0}/>);
+    view.rerender(<Segment segment="movie" index={2}/>);
+    expect(animate).not.toHaveBeenCalled();
+  });
+});
+
+function Indicator({index}:{index:number}){const list=useRef<HTMLDivElement>(null),bar=useRef<HTMLSpanElement>(null);useTabIndicator(list,bar,index);return <div ref={list} style={{'--tab-inset':'4px'} as CSSProperties}>{[0,1,2].map(i=><button key={i} role="tab" ref={tab=>{if(tab){Object.defineProperty(tab,'offsetLeft',{configurable:true,value:i*60});Object.defineProperty(tab,'offsetWidth',{configurable:true,value:50});}}}/>)}<span ref={bar} data-testid="bar"/></div>;}
+describe('tab underline',()=>{
+  it('is placed without motion, then glides by transform to a newly chosen tab',()=>{
+    const view=render(<Indicator index={0}/>);const bar=view.getByTestId('bar');
+    expect(bar.style.transform).toBe('translateX(4px) scaleX(42)');
+    expect(bar.style.transition).toBe('none');
+    view.rerender(<Indicator index={2}/>);
+    expect(bar.style.transform).toBe('translateX(124px) scaleX(42)');
+    expect(bar.style.transition).toBe(`transform ${SEGMENT_MOTION_MS}ms cubic-bezier(0.2,0,0,1)`);
+  });
+  it('jumps without a transition under reduced motion',()=>{
+    reduced(true);
+    const view=render(<Indicator index={0}/>);const bar=view.getByTestId('bar');
+    view.rerender(<Indicator index={1}/>);
+    expect(bar.style.transform).toBe('translateX(64px) scaleX(42)');
+    expect(bar.style.transition).toBe('none');
+  });
 });
 
 function Presence({active}:{active:boolean}){return <span data-testid="presence">{useDelayedPresence(active)}</span>;}

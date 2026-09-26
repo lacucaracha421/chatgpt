@@ -382,6 +382,31 @@ describe('read-only collections',()=>{
     expect(screen.getByRole('tab',{name:'만화'}).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tab',{name:'게임'}).getAttribute('aria-selected')).toBe('false');
   });
+  it('swaps the list sideways toward the chosen type only once its page commits, and glides one underline',async()=>{
+    const animate=vi.fn(()=>({cancel(){}}));(HTMLElement.prototype as unknown as {animate:unknown}).animate=animate;
+    try{
+      render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+      expect(animate).not.toHaveBeenCalled();
+      const switcher=screen.getByRole('tablist',{name:'컬렉션 유형'});
+      expect(switcher.querySelectorAll('.collection-type-indicator')).toHaveLength(1);
+      let resolveManga!:(value:CollectionPage)=>void;
+      mocks.api.mockImplementation((path:string)=>path.includes('type=manga')&&!path.includes('showcase=true')?new Promise(resolve=>{resolveManga=resolve;}):Promise.resolve(page));
+      pressTab('만화');await act(async()=>{});
+      // Still loading: the game list stays put rather than sliding in stale.
+      expect(animate).not.toHaveBeenCalled();
+      await act(async()=>resolveManga({...page,items:[{...item,id:'manga-2',type:'manga',name:'새 만화'}]}));
+      await screen.findByText('새 만화');
+      const moves=animate.mock.calls as unknown as [Keyframe[],KeyframeAnimationOptions][];
+      expect(moves).toHaveLength(1);
+      expect((animate.mock.contexts as HTMLElement[])[0]).toBe(list());
+      expect(moves[0][0][0].transform).toBe('translateX(14px)');
+      // AV lies to the right as well; back to 게임 comes in from the left.
+      pressTab('AV');await screen.findByText('AV 컬렉션은 준비 중입니다');
+      expect(moves.at(-1)![0][0].transform).toBe('translateX(14px)');
+      pressTab('게임');await screen.findByText('밤의 도서관');
+      await waitFor(()=>expect(moves.at(-1)![0][0].transform).toBe('translateX(-14px)'));
+    }finally{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;}
+  });
   it('shows an AV tab that waits for the PC without requesting an unsupported type',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     expect(screen.getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['게임','만화','영화','AV']);

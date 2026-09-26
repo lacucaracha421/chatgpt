@@ -257,25 +257,25 @@
 /* 게임 / 만화 / 영화 / AV: text tabs centred in the list bar, the selected one white with an
    ivory underline on the bar's bottom edge (user choice B, 2026-09-26). The tabs fill the bar's
    height, so each keeps a 56px hit area. While searching they sit small at the right end. */
-.collection-type-tabs{display:flex;flex-shrink:0}
+.collection-type-tabs{position:relative;display:flex;flex-shrink:0;--tab-inset:14px}
+/* One underline for the whole switch, placed and glided by transform (useTabIndicator). */
+.collection-type-indicator{position:absolute;left:0;bottom:0;width:1px;height:2px;background:var(--color-accent);transform-origin:0 0;pointer-events:none}
 .top-bar .collection-type-tabs{position:absolute;left:50%;top:0;bottom:-1px;transform:translateX(-50%);z-index:1}
 .collection-type-tabs button{position:relative;display:flex;align-items:center;height:100%;padding:0 20px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:16px;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .collection-type-tabs button>span{display:inline-flex;flex-direction:column;align-items:center}
 .collection-type-tabs button>span::after{content:attr(data-label);height:0;overflow:hidden;visibility:hidden;font-weight:600}
 .collection-type-tabs button[aria-selected=true]{color:var(--color-text);font-weight:600}
-.collection-type-tabs button[aria-selected=true]::after{content:'';position:absolute;left:14px;right:14px;bottom:0;height:2px;background:var(--color-accent)}
 .collection-type-tabs button+button::before{content:'';position:absolute;left:0;top:calc(50% - 6px);width:1px;height:12px;background:var(--color-border)}
 .collection-type-tabs button:active:not([aria-selected=true]){color:var(--color-text)}
 .collection-type-tabs button:focus-visible{outline:2px solid var(--color-focus);outline-offset:-8px}
-.top-bar.is-search .collection-type-tabs{position:relative;left:auto;top:auto;bottom:auto;transform:none;align-self:stretch;margin:0 0 -1px 4px}
+.top-bar.is-search .collection-type-tabs{--tab-inset:8px;position:relative;left:auto;top:auto;bottom:auto;transform:none;align-self:stretch;margin:0 0 -1px 4px}
 .top-bar.is-search .collection-type-tabs button{padding:0 12px;font-size:14px}
-.top-bar.is-search .collection-type-tabs button[aria-selected=true]::after{left:8px;right:8px}
 .top-bar.is-search:has(>.collection-type-tabs){padding-right:6px}
 /* Narrow phones: the tabs join the actions in the row; while searching the field keeps the room. */
 @media(max-width:600px){
   .top-bar .collection-type-tabs{position:relative;left:auto;top:auto;bottom:auto;transform:none;align-self:stretch;margin:0 4px -1px 0}
   .collection-type-tabs button{padding:0 8px;font-size:14px}
-  .collection-type-tabs button[aria-selected=true]::after{left:6px;right:6px}
+  .collection-type-tabs{--tab-inset:6px}
   .top-bar.is-search .collection-type-tabs{display:none}
 }
 .collection-list{padding-top:6px}

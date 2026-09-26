@@ -1,4 +1,4 @@
-import {useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
 
 /**
  * Motion spec (transform and opacity only, all ≤ 220 ms, nothing under reduced motion):
@@ -8,10 +8,15 @@ import {useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
  *   first tiles fade in with a short stagger that ends by the same 220 ms.
  * - Shallower level: the content comes back from 20px left, without a stagger (it was retained).
  * - Same depth: a quick fade from 0.6 in SWAP_MOTION_MS.
+ * - Segment swap (a type or region tab inside a screen): the content slides SEGMENT_SHIFT_PX in
+ *   the direction of the tab order (a tab further right brings it in from the right) and fades
+ *   from 0.5 in SEGMENT_MOTION_MS; the tab underline glides to the new tab over the same time.
  */
 export const TAB_MOTION_MS=200;
 export const LEVEL_MOTION_MS=220;
 export const SWAP_MOTION_MS=140;
+export const SEGMENT_MOTION_MS=180;
+export const SEGMENT_SHIFT_PX=14;
 /** A fast start that settles softly, like the system's own screen transitions. */
 export const EASE_OUT='cubic-bezier(0.2,0,0,1)';
 const STAGGER_TILES=10,STAGGER_STEP_MS=12,STAGGER_TILE_MS=110;
@@ -99,6 +104,54 @@ export function useTabMotion(host:RefObject<HTMLElement|null>,tab:string){
     const shown=Array.from(element.children).filter((child):child is HTMLElement=>child instanceof HTMLElement&&!hidden(child));
     run(shown.flatMap(section=>animateAll(motionParts(section,false),[{transform:'translateY(6px)',opacity:.4},{transform:'none',opacity:1}],{duration:TAB_MOTION_MS,easing:EASE_OUT})));
   },[host,tab]);// eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/**
+ * Plays a lateral swap when a segment (a type or region tab) inside a screen changes: the parts
+ * slide in from the side the new tab lies on and fade in. `host` itself moves unless `parts`
+ * picks what moves (for example everything under the segment control).
+ *
+ * Callers pass `null` while the new segment's data is still loading, so the swap plays once,
+ * when the new content commits, and never over stale content. `null` keeps the last shown
+ * segment; the first segment shown and a repeat of the same one do not move.
+ */
+export function useSegmentMotion(host:RefObject<HTMLElement|null>,key:string|null,index:number,parts?:(host:HTMLElement)=>HTMLElement[]){
+  const shown=useRef<{key:string;index:number}|null>(null);
+  const pick=useRef(parts);pick.current=parts;
+  const run=useRunning();
+  useLayoutEffect(()=>{
+    if(key===null)return;
+    const before=shown.current;shown.current={key,index};
+    const element=host.current;
+    if(!before||before.key===key||!element||prefersReducedMotion())return;
+    const step=Math.sign(index-before.index);
+    run(animateAll(pick.current?.(element)??[element],[{transform:`translateX(${step*SEGMENT_SHIFT_PX}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:SEGMENT_MOTION_MS,easing:EASE_OUT}));
+  },[host,key,index]);// eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/**
+ * Places one underline element under the selected tab of `list` (its `[role=tab]` children)
+ * with a transform only: it glides to a newly selected tab, and is placed without motion on
+ * mount, when the tabs change size, and under reduced motion. The underline is 1px wide and
+ * scaled to the tab's width less the list's `--tab-inset` on each side.
+ */
+export function useTabIndicator(list:RefObject<HTMLElement|null>,indicator:RefObject<HTMLElement|null>,index:number){
+  const selected=useRef(index);selected.current=index;
+  const place=useCallback((glide:boolean)=>{
+    const host=list.current,bar=indicator.current;if(!host||!bar)return;
+    const tab=host.querySelectorAll<HTMLElement>('[role=tab]')[selected.current];if(!tab)return;
+    const inset=Number.parseFloat(getComputedStyle(host).getPropertyValue('--tab-inset'))||0;
+    bar.style.transition=glide&&!prefersReducedMotion()?`transform ${SEGMENT_MOTION_MS}ms ${EASE_OUT}`:'none';
+    bar.style.transform=`translateX(${tab.offsetLeft+inset}px) scaleX(${Math.max(0,tab.offsetWidth-2*inset)})`;
+  },[list,indicator]);
+  const placed=useRef(false);
+  useLayoutEffect(()=>{place(placed.current);placed.current=true;},[place,index]);
+  // Sizes settle later (fonts, the screen being shown, a narrower bar); follow them without motion.
+  useEffect(()=>{
+    const host=list.current;if(!host||typeof ResizeObserver!=='function')return;
+    const observer=new ResizeObserver(()=>place(false));observer.observe(host);
+    return()=>observer.disconnect();
+  },[list,place]);
 }
 
 /** A load shorter than this shows nothing. */
