@@ -1,4 +1,4 @@
-import { BookmarkIcon, BookOpenIcon, ExchangeIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
+import { BookmarkIcon, BookOpenIcon, ExchangeIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
@@ -13,7 +13,8 @@ import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
 
-export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault" | "manage" {
+export function workspaceArea(view: AssetView): "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault" | "manage" {
+  if (view.kind === "home") return "home";
   if (view.kind === "notes") return "notes";
   if (view.kind === "exchange") return "exchange";
   if (view.kind === "private_vault") return "private_vault";
@@ -22,8 +23,9 @@ export function workspaceArea(view: AssetView): "assets" | "collections" | "mang
   if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
   return "assets";
 }
-type RailArea = "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault";
+type RailArea = "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault";
 const RAIL_AREAS: { key: RailArea; label: string; Icon: typeof NoteIcon }[] = [
+  { key: "home", label: "홈", Icon: HomeIcon },
   { key: "assets", label: "에셋", Icon: RectangleStackIcon },
   { key: "collections", label: "컬렉션", Icon: BookOpenIcon },
   { key: "manga", label: "망가", Icon: PhotoIcon },
@@ -65,9 +67,10 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const collectionList = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   if (view.kind === "collections") collectionList.current = view;
   const quickAssetView = isArtistView(view) || view.kind === "unsorted";
-  if (!quickAssetView) history.current[area] = view;
+  // A note opened from Home is not where the 메모 rail entry returns to.
+  if (!quickAssetView) history.current[area] = view.kind === "notes" && view.noteId ? { kind: "notes" } : view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
-  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", exchange: "전송", private_vault: "비밀", manage: "더보기" }[area];
+  const areaName = { home: "홈", assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", exchange: "전송", private_vault: "비밀", manage: "더보기" }[area];
   const artistView = isArtistView(view);
   const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : artistView ? "작가" : areaName;
   const enterArea = (next: RailArea) => {
@@ -76,7 +79,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       return;
     }
     if (next === area && !quickAssetView) return;
-    onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : next === "notes" ? { kind: "notes" } : next === "exchange" ? { kind: "exchange" } : next === "private_vault" ? { kind: "private_vault" } : { kind: "classification", classificationId: null }));
+    onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : next === "home" ? { kind: "home" } : next === "notes" ? { kind: "notes" } : next === "exchange" ? { kind: "exchange" } : next === "private_vault" ? { kind: "private_vault" } : { kind: "classification", classificationId: null }));
   };
   const entries = useNavigationEntries({ view, onNavigate, reviewCount, unsortedCount, trashCount, privateVaultAvailable, privateVaultActivity: vaultImportText, onImportFiles });
   // 메모, 전송 and 비밀 are on the rail; the palette still finds them by name.

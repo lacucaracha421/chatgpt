@@ -349,6 +349,21 @@ pub(crate) fn is_live(endpoint: &str) -> bool {
         .is_some_and(|entry| entry.live_owner.is_some())
 }
 
+/// What this process last learned about `endpoint`, for display only (PC Home): whether a
+/// watcher holds long-polls now, when a document was last read or confirmed (unix seconds),
+/// and the capture inbox's pending count from that document. `None` before any observation.
+pub(crate) fn observed(endpoint: &str) -> Option<(bool, i64, Option<i64>)> {
+    let hub = hub();
+    let entry = hub.get(&endpoint_key(endpoint))?;
+    let status = entry.status.as_ref()?;
+    let pending = status
+        .publisher_logs
+        .as_ref()
+        .and_then(|logs| logs.captures)
+        .map(|captures| captures.pending);
+    Some((entry.live_owner.is_some(), entry.confirmed_at, pending))
+}
+
 /// The watcher's current document, when a live watcher vouches for it. The authority pass
 /// uses it instead of reading the status itself.
 pub(crate) fn live_status(endpoint: &str, now: i64) -> Option<SyncStatus> {

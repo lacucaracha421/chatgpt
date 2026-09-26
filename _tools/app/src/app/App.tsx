@@ -75,6 +75,7 @@ const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
 const ArtistHub = lazy(() => import("../artists/ArtistHub").then((module) => ({ default: module.ArtistHub })));
 const ExchangeView = lazy(() => import("../exchange/ExchangeView").then((module) => ({ default: module.ExchangeView })));
+const HomeView = lazy(() => import("../home/HomeView").then((module) => ({ default: module.HomeView })));
 const NotesView = lazy(() => import("../notes/NotesView").then((module) => ({default:module.NotesView})));
 const SettingsView = lazy(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
 const StatisticsPanel = lazy(() => import("../statistics/StatisticsPanel").then((module) => ({ default: module.StatisticsPanel })));
@@ -831,7 +832,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
                         onContentChanged={() => void refreshPrivateVaultStatus()} privacyMode={preferences.privacyMode} />
                     : <DeferredViewFallback />
-                ) : view.kind === "notes" ? <NotesView /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
+                ) : view.kind === "home" ? (
+                  <HomeView collections={collections} reviewCount={reviewCount} unsortedCount={unsortedCount} trashCount={trashCount}
+                    refreshVersion={assetRefresh} onNavigate={navigateView} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)} />
+                ) : view.kind === "notes" ? <NotesView noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}

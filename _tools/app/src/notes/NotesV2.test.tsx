@@ -140,6 +140,11 @@ it("search matches checklist items and labels but only titles of secret notes", 
   expect(noteMatches(secret, "1234")).toBe(false);
   expect(noteMatches(base("장보기", { type: "checklist", items: [{ id: "a", text: "우유", checked: false, order: "V" }] }), "우유")).toBe(true);
   expect(noteMatches(base("x", { labels: ["업무"] }), "업무")).toBe(true);
+  // Korean-aware: 초성, a syllable still being composed, case/space-insensitive.
+  expect(noteMatches(base("서리 메모"), "ㅅㄹ")).toBe(true);
+  expect(noteMatches(base("가락국수"), "갈")).toBe(true);
+  expect(noteMatches(base("Blue Archive"), "bluearchive")).toBe(true);
+  expect(noteMatches(secret, "ㅇㅎ")).toBe(true);
 });
 
 it("secret notes: PIN unlock, masked values with 보기, lock on demand and after idle", async () => {

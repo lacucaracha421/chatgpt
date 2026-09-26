@@ -2,6 +2,7 @@ import type { SVGProps } from "react";
 
 // Small, squared navigation glyphs. Keep symbols legible without decorative HUD detail.
 export const archivePaths = {
+  home: "M3 11l9-8 9 8M5 9v12h14V9M10 21v-6h4v6",
   folder: "M3 6h7l2 3h9v11H3zM3 12h18M6 16h4",
   assets: "M5 3h14v18H5zM8 7h8M8 11h8M8 15h4M2 6v12M22 6v12",
   book: "M3 4h7l2 2 2-2h7v15h-7l-2 2-2-2H3zM12 6v15M6 8h3M15 8h3",
@@ -31,6 +32,7 @@ type Props = SVGProps<SVGSVGElement>;
 function Glyph({ kind, ...props }: Props & { kind: keyof typeof archivePaths }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="square" strokeLinejoin="miter" {...props}><path d={archivePaths[kind]} /></svg>;
 }
+export const HomeIcon = (props: Props) => <Glyph kind="home" {...props} />;
 export const FolderIcon = (props: Props) => <Glyph kind="folder" {...props} />;
 export const RectangleStackIcon = (props: Props) => <Glyph kind="assets" {...props} />;
 export const BookOpenIcon = (props: Props) => <Glyph kind="book" {...props} />;

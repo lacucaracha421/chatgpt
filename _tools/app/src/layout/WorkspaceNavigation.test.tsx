@@ -30,12 +30,12 @@ it("offers a collection list when detail was opened without a remembered list", 
 const baseProps = { collectionType: "game" as const, width: 208, onWidthChange: vi.fn(), assetNavigation: null, reviewCount: 0, trashCount: 0 };
 const assetsView = { kind: "classification" as const, classificationId: null };
 
-it("keeps 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 while its USB is attached, then 찾기 and 더보기", async () => {
+it("keeps 홈, 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 while its USB is attached, then 찾기 and 더보기", async () => {
   const onNavigate = vi.fn();
   render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={onNavigate} privateVaultAvailable />);
   const rail = screen.getByRole("navigation", { name: "주요 영역" });
   expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
-    .toEqual(["에셋", "컬렉션", "망가", "메모", "전송", "비밀", "찾기", "더보기"]);
+    .toEqual(["홈", "에셋", "컬렉션", "망가", "메모", "전송", "비밀", "찾기", "더보기"]);
   expect(within(rail).getByRole("button", { name: "찾기" })).toHaveAttribute("aria-keyshortcuts", "Control+K Control+F");
   expect(screen.queryByRole("button", { name: "작가" })).not.toBeInTheDocument();
   await userEvent.click(within(rail).getByRole("button", { name: "메모" }));
@@ -44,6 +44,23 @@ it("keeps 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 while
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "exchange" });
   await userEvent.click(within(rail).getByRole("button", { name: "비밀" }));
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "private_vault" });
+});
+
+it("opens Home from the first rail entry, marks it current there and names the index 홈", async () => {
+  const onNavigate = vi.fn();
+  const { rerender } = render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={onNavigate} />);
+  const rail = screen.getByRole("navigation", { name: "주요 영역" });
+  await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "home" });
+  rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={onNavigate} />);
+  expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
+  expect(within(rail).getByRole("button", { name: "에셋" })).not.toHaveAttribute("aria-current");
+  expect(document.querySelector(".workspace-index__head")).toHaveAttribute("aria-label", "홈");
+  // A note opened from Home is not where the 메모 rail entry returns to.
+  rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "notes", noteId: "n1" }} onNavigate={onNavigate} />);
+  rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={onNavigate} />);
+  await userEvent.click(within(rail).getByRole("button", { name: "메모" }));
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes" });
 });
 
 it("shows the 더보기 count only for 유사 검토, never for 미분류", () => {

@@ -182,6 +182,7 @@ pub fn run() {
             exchange::exchange_open_folder,
             exchange::exchange_set_token,
             exchange::exchange_thumbnail,
+            commands::home::get_home_overview,
             commands::release_calendar::get_release_calendar,
             commands::release_calendar::refresh_release_calendar,
             commands::release_calendar::list_release_wishlist,

@@ -102,6 +102,12 @@ export type CloudBackfillProgress = {
   lastError: string | null;
 };
 
+/** `get_home_overview`: local counts and the sync watcher's in-memory view of the server; no network. */
+export type HomeOverview = {
+  assets: { total: number; today: number; week: number };
+  server: { configured: boolean; live: boolean; confirmedAt: string | null; capturesPending: number | null };
+};
+
 export type CloudBackfillControlState = "idle" | "running" | "paused";
 
 export type CloudBackfillReconcileReport = {
@@ -344,7 +350,10 @@ export type AssetView =
   | { kind: "similarity_review" }
   | { kind: "trash" }
   | { kind: "statistics" }
-  | { kind: "notes" }
+  /** PC Home (HOME-DASH-001): the information dashboard, first on the rail. */
+  | { kind: "home" }
+  /** `noteId` opens that note (from Home's pinned notes). */
+  | { kind: "notes"; noteId?: string }
   | { kind: "exchange" }
   | { kind: "private_vault" }
   | { kind: "settings"; section?: "general" | "library" | "cloud" | "catalog" | "external_services" | "data" | "about" | "advanced" }
@@ -1249,6 +1258,8 @@ export interface LibraryGateway {
   /** 작가 hub (desktop only; PC-authoritative). */
   artists?: import("../artists/types").ArtistGateway;
   getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
+  /** PC Home: asset totals since local midnight / this Monday and the server's last known state (desktop only). */
+  getHomeOverview?(todayStart: string, weekStart: string): Promise<HomeOverview>;
   measureLibraryDerivativeStorage?(): Promise<import("../statistics/types").DerivativeStorage>;
   recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;
   collectionTracking?: CollectionTrackingGateway;

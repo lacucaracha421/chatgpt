@@ -19,6 +19,7 @@ import { NoteMasonry } from "./NoteBoard";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import QRCode from "qrcode";
 import "./notes.css";
+import { matchesKoreanSearch } from "../shared/koreanSearch";
 
 export function RecoveryKeyReveal({store}:{store:NotesStore}){
   const [key,setKey]=useState<string|null>(null);const [qr,setQr]=useState("");const [error,setError]=useState("");const [needPin,setNeedPin]=useState(false);const [pin,setPin]=useState("");
@@ -58,7 +59,7 @@ const tint = (color: string | null | undefined) => { const value = noteColorValu
 export function noteMatches(note: Note, query: string) {
   if (!query) return true;
   const text = isSecret(note) || isLedgerKind(note) ? note.title : [note.title, note.body, ...(note.items ?? []).map((item) => item.text), ...(note.labels ?? [])].join("\n");
-  return text.toLocaleLowerCase().includes(query.toLocaleLowerCase());
+  return matchesKoreanSearch(text, query);
 }
 function LabelEditor({ labels, suggestions, onChange }: { labels: string[]; suggestions: string[]; onChange: (labels: string[]) => void }) {
   const [adding, setAdding] = useState(false);
@@ -94,10 +95,11 @@ function KeyringLocked({ store, busy }: { store: NotesStore; busy: boolean }) {
     <div className="notes-setup-actions"><Button variant="primary" disabled={busy} onClick={() => void store.unlockKeyring()}>키링 잠금 해제</Button></div></div>;
 }
 
-export function NotesView(){const {library}=useLibrary();return library?<NotesWorkspace key={library.root} store={notesStore(library.root)}/>:null;}
-export function NotesWorkspace({store}:{store:NotesStore}){
+/** `noteId` opens that note on arrival (Home's pinned notes). */
+export function NotesView({noteId}:{noteId?:string}={}){const {library}=useLibrary();return library?<NotesWorkspace key={library.root} store={notesStore(library.root)} initialNoteId={noteId}/>:null;}
+export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNoteId?:string}){
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
-  const [selected,setSelected]=useState<string|null>(null);const [query,setQuery]=useState("");const [scope,setScope]=useState<Scope>("all");const [label,setLabel]=useState<string|null>(null);
+  const [selected,setSelected]=useState<string|null>(initialNoteId??null);const [query,setQuery]=useState("");const [scope,setScope]=useState<Scope>("all");const [label,setLabel]=useState<string|null>(null);
   const [editingBody,setEditingBody]=useState(false);const [creatingSecret,setCreatingSecret]=useState(false);const [keyringBusy,setKeyringBusy]=useState(false);
   const bodyRef=useRef<HTMLTextAreaElement>(null);const titleRef=useRef<HTMLInputElement>(null);
   const [editing,setEditing]=useState(false);

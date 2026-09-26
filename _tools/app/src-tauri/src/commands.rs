@@ -58,6 +58,7 @@ pub(crate) mod av;
 pub(crate) mod video_similarity;
 pub(crate) mod release_calendar;
 pub(crate) mod artists;
+pub(crate) mod home;
 
 #[tauri::command]
 pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {

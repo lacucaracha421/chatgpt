@@ -358,6 +358,19 @@ describe("App", () => {
     expect(screen.queryByText(/(?:Kakao 신간|MangaDex 새 권) 정보가 있는 작품/)).not.toBeInTheDocument();
   });
 
+  it("opens Home from the rail and leaves it for the screen a row owns", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+    await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
+    expect(await screen.findByRole("region", { name: "확인할 것" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
+    await userEvent.click(screen.getByRole("button", { name: "전송 열기" }));
+    await waitFor(() => expect(within(rail).getByRole("button", { name: "전송" })).toHaveAttribute("aria-current", "page"));
+  });
+
   it("renders the trash workspace without loading an asset page", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
@@ -552,7 +565,7 @@ describe("App", () => {
     })));
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     const rail = screen.getByRole("navigation", { name: "주요 영역" });
-    expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["에셋", "컬렉션", "망가", "메모", "전송", "찾기", expect.stringMatching(/^더보기/)]);
+    expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["홈", "에셋", "컬렉션", "망가", "메모", "전송", "찾기", expect.stringMatching(/^더보기/)]);
     expect(screen.queryByRole("navigation", { name: "빠른 보기" })).not.toBeInTheDocument();
 
     await openManagementItem("미분류");
