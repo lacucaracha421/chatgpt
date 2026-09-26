@@ -1,6 +1,6 @@
 import {usePublicationCheck} from './usePublicationCheck';
-import {useCallback,useEffect,useLayoutEffect,useRef,useState,type MutableRefObject} from 'react';
-import {useLevelMotion} from './motion';
+import {useCallback,useEffect,useLayoutEffect,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
+import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
 import {ArrowLeftIcon,BookmarkIcon,BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
@@ -23,6 +23,12 @@ import './Catalog.css';
 function lruGet<K,V>(map:Map<K,V>,key:K){const value=map.get(key);if(value!==undefined){map.delete(key);map.set(key,value);}return value;}
 function lruSet<K,V>(map:Map<K,V>,key:K,value:V,limit:number){map.delete(key);map.set(key,value);while(map.size>limit)map.delete(map.keys().next().value!);}
 
+
+/** A list card; one appended by scrolling stays hidden until its cover is decoded, then rises in whole. */
+function ArrivingCard({arriving,onArrived,disabled,onClick,children}:{arriving:boolean;onArrived():void;disabled:boolean;onClick():void;children(arrival:CardArrival):ReactNode}){
+  const host=useRef<HTMLButtonElement>(null),arrival=useCardArrival(host,arriving,onArrived);
+  return <button ref={host} className="catalog-card" disabled={disabled} onClick={onClick}>{children(arrival)}</button>;
+}
 
 /** The one background reader-manifest request for the currently selected work. */
 type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
@@ -365,6 +371,9 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const now=useNow(active&&!paused);
   const listPull=usePullToRefresh(list,reload,busy,!active||paused||!!selected||!!reader);
   const items=(()=>{const seen=new Set<string>(),all:CatalogItem[]=[];for(const item of [...(page?.items??[]),...(more?.items??[])]){const id=`${item.provider}:${item.groupId}`;if(!seen.has(id)){seen.add(id);all.push(item);}}return all;})();
+  // Cards added by a page append rise in once each; a newly committed first page (its own items
+  // array; a count or bookmark update keeps or merely re-projects it) shows at once.
+  const arrivals=useAppendArrivals(page?.items,items.map(item=>`${item.provider}:${item.groupId}`));
   // Saved 회피 태그 are the user's default, so they keep the chip neutral; only a narrowed
   // category set or the blocked switch differs from that default and lights the chip.
   const filterCount=(preferences.categories!==null?1:0)+(query.revealBlocked?1:0);
@@ -406,7 +415,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
         </div>
         {browseSort!==null&&browseSort!=='latest'&&query.sort==='latest'&&!bookmarkScope&&<p className="catalog-search-note muted" style={{margin:'0 0 8px',fontSize:12}}>검색 중에는 최신순으로 표시합니다</p>}
         {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{committed.current='';setRefresh(n=>n+1);}}>다시 시도</Button></div>}{countError&&<div className="catalog-count-error">개수를 확인하지 못했습니다.<Button size="sm" variant="ghost" onClick={()=>setCountRetry(n=>n+1)}>다시 시도</Button></div>}
-        {wireIssue!=='none'?<div className="empty-state"><h2>검색 조건이 너무 깁니다</h2><p>{wireIssue==='filterTooLarge'?`회피 태그와 분류를 합쳐 ${FILTER_JSON_MAX_BYTES}바이트까지 보낼 수 있습니다.`:'검색어와 회피 태그를 합친 요청이 너무 깁니다. 검색어를 줄여 주세요.'}</p><Button onClick={openSettings}>필터 열기</Button></div>:capability==='checking'?<div className="empty-state" role="status"><h2>카탈로그를 준비하는 중입니다</h2></div>:capability==='failed'?<div className="empty-state"><h2>서버 상태를 확인하지 못했습니다</h2><p>연결을 확인한 뒤 다시 시도해 주세요.</p><Button onClick={()=>{setCapability('checking');setCapabilityRetry(n=>n+1);}}>다시 시도</Button></div>:preferencesBlocked?<div className="empty-state"><h2>이 기기의 설정을 쓸 수 없습니다</h2><p>서버 업데이트 후에는 저장된 회피 태그가 그대로 적용됩니다. 기다리는 동안 설정을 지우면 필터 없이 볼 수 있습니다.</p><Button onClick={resetPreferences}>설정 지우고 계속</Button></div>:page?.ready===false?<div className="empty-state"><BookOpenIcon/><h2>카탈로그가 아직 공유되지 않았습니다</h2><p>PC 설정의 온라인 카탈로그에서 모바일에 게시해 주세요.</p></div>:page?.ready&&<>{items.length?<div className="catalog-grid">{items.map(item=>{const state=visibleGroupBookmark(item);return <button className="catalog-card" disabled={busy||committed.current!==key} key={`${item.provider}:${item.groupId}`} onClick={()=>open(item)}><div className="catalog-cover"><CatalogCover item={item} revision={revision} active={active&&!paused&&!selected&&!reader}/><span className="catalog-cover-pages numeric">{item.fileCount}p</span>{item.versionCount>1&&<span className="catalog-cover-versions">판본 {item.versionCount}</span>}{state.desired&&<BookmarkSolidIcon className={`catalog-saved${state.pending?' catalog-saved--pending':''}`} aria-label={state.pending?'북마크 저장 대기':'북마크됨'}/>}</div><strong aria-description={catalogDisplayTitle(item.title)!==item.title?item.title:undefined}>{catalogDisplayTitle(item.title)}</strong><span>{item.artists.join(' · ')||'작가 미상'}</span></button>;})}</div>:<div className="empty-state"><h2>검색 결과가 없습니다</h2><p>검색어나 필터를 바꿔 보세요.</p></div>}
+        {wireIssue!=='none'?<div className="empty-state"><h2>검색 조건이 너무 깁니다</h2><p>{wireIssue==='filterTooLarge'?`회피 태그와 분류를 합쳐 ${FILTER_JSON_MAX_BYTES}바이트까지 보낼 수 있습니다.`:'검색어와 회피 태그를 합친 요청이 너무 깁니다. 검색어를 줄여 주세요.'}</p><Button onClick={openSettings}>필터 열기</Button></div>:capability==='checking'?<div className="empty-state" role="status"><h2>카탈로그를 준비하는 중입니다</h2></div>:capability==='failed'?<div className="empty-state"><h2>서버 상태를 확인하지 못했습니다</h2><p>연결을 확인한 뒤 다시 시도해 주세요.</p><Button onClick={()=>{setCapability('checking');setCapabilityRetry(n=>n+1);}}>다시 시도</Button></div>:preferencesBlocked?<div className="empty-state"><h2>이 기기의 설정을 쓸 수 없습니다</h2><p>서버 업데이트 후에는 저장된 회피 태그가 그대로 적용됩니다. 기다리는 동안 설정을 지우면 필터 없이 볼 수 있습니다.</p><Button onClick={resetPreferences}>설정 지우고 계속</Button></div>:page?.ready===false?<div className="empty-state"><BookOpenIcon/><h2>카탈로그가 아직 공유되지 않았습니다</h2><p>PC 설정의 온라인 카탈로그에서 모바일에 게시해 주세요.</p></div>:page?.ready&&<>{items.length?<div className="catalog-grid">{items.map(item=>{const state=visibleGroupBookmark(item),id=`${item.provider}:${item.groupId}`;return <ArrivingCard key={id} arriving={arrivals.arriving(id)} onArrived={()=>arrivals.arrived(id)} disabled={busy||committed.current!==key} onClick={()=>open(item)}>{arrival=><><div className="catalog-cover"><CatalogCover item={item} revision={revision} active={active&&!paused&&!selected&&!reader} arrival={arrival}/><span className="catalog-cover-pages numeric">{item.fileCount}p</span>{item.versionCount>1&&<span className="catalog-cover-versions">판본 {item.versionCount}</span>}{state.desired&&<BookmarkSolidIcon className={`catalog-saved${state.pending?' catalog-saved--pending':''}`} aria-label={state.pending?'북마크 저장 대기':'북마크됨'}/>}</div><strong aria-description={catalogDisplayTitle(item.title)!==item.title?item.title:undefined}>{catalogDisplayTitle(item.title)}</strong><span>{item.artists.join(' · ')||'작가 미상'}</span></>}</ArrivingCard>;})}</div>:<div className="empty-state"><h2>검색 결과가 없습니다</h2><p>검색어나 필터를 바꿔 보세요.</p></div>}
           {moreBusy&&<p className="hint catalog-more-status" role="status">더 불러오는 중…</p>}
           {moreError&&<div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" onClick={()=>{setMoreError('');window.setTimeout(loadMore);}}>다시 시도</Button></div>}
           {items.length>0&&!nextCursor&&!moreBusy&&<p className="hint catalog-more-status">마지막 작품입니다</p>}</>}

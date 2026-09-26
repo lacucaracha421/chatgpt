@@ -55,7 +55,7 @@ const chipLabels=async()=>{
   return labels;
 };
 const openFolder=async(name:string)=>{
-  fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
   fireEvent.click(await screen.findByRole('button',{name}));
 };
 
@@ -239,7 +239,7 @@ describe('asset filters',()=>{
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(signal).toBeTruthy());
     expect(screen.getByText('필터 적용 대기')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
     expect(signal.aborted).toBe(true);
     await waitFor(()=>expect(screen.queryByText('필터 적용 대기')).toBeNull());
     await screen.findByRole('heading',{name:'라이브러리'});
@@ -345,7 +345,7 @@ describe('asset filters',()=>{
   it('does not offer filters on Home, where a control would imply a narrowing that is not applied',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     expect(await chipLabels()).toContain('종류');
-    fireEvent.click(screen.getByRole('button',{name:'Home'}));
+    fireEvent.click(screen.getByRole('button',{name:'홈'}));
     await screen.findByText('tile-a1');
     expect(screen.queryByRole('button',{name:'보기 옵션'})).toBeNull();
     expect(screen.queryByRole('button',{name:'종류'})).toBeNull();
@@ -364,15 +364,15 @@ describe('asset filters',()=>{
   it('treats a filter change as a new view rather than reusing the cached unfiltered page',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     // Re-select All: the cached unfiltered page is allowed to serve that identical query.
-    fireEvent.click(screen.getByRole('button',{name:'Library'}));
+    fireEvent.click(screen.getByRole('button',{name:'에셋'}));
     fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
     await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
     // Returning to All must not hand back the filtered page under an unfiltered identity.
-    fireEvent.click(screen.getByRole('button',{name:'Home'}));
+    fireEvent.click(screen.getByRole('button',{name:'홈'}));
     await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'Library'}));
+    fireEvent.click(screen.getByRole('button',{name:'에셋'}));
     await waitFor(()=>expect(lastPagePath()).not.toContain('media_kind=videos'));
   });
 
@@ -383,7 +383,7 @@ describe('asset filters',()=>{
     // Reconfiguring goes through the settings surface, whose own suite covers the clear.
     // Here the guarantee that matters is that the committed filters are reset with the
     // rest of the library state, so a later page cannot carry them to another server.
-    fireEvent.click(screen.getByRole('button',{name:'Home'}));
+    fireEvent.click(screen.getByRole('button',{name:'홈'}));
     fireEvent.click(await screen.findByRole('button',{name:'연결 및 설정'}));
     await screen.findByRole('dialog',{name:/설정/});
     expect(screen.queryByRole('button',{name:'종류'})).toBeNull();

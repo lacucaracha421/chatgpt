@@ -107,7 +107,7 @@ describe('album Library scopes',()=>{
  });
  it('starts a sibling album unfiltered and separates album cache identities',async()=>{
   await openRootAlbum();await choose();await chipShown('영상');
-  fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));fireEvent.click(await screen.findByRole('button',{name:'Other'}));await screen.findByText('other-asset');
+  fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));fireEvent.click(await screen.findByRole('button',{name:'Other'}));await screen.findByText('other-asset');
   await chipShown('종류');expect(albumReads().at(-1)?.[0]).not.toContain('media_kind');
   expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView(tree,albums[2])));
   expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView({...tree,epoch:2},albums[0])));

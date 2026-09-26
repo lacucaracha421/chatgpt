@@ -193,6 +193,63 @@ export function arrive(element:HTMLElement|null,rise=0):boolean{
   return true;
 }
 
+/**
+ * Which items of a growing list were appended by a page load and have not arrived yet. The
+ * first page of a place (`identity`), a replaced list (a new head) and items seen before never
+ * arrive; only items added to the same list do, once each.
+ */
+export function useAppendArrivals(identity:unknown,ids:readonly string[]){
+  const tracked=useRef({identity,head:undefined as string|undefined,known:new Set<string>(),pending:new Set<string>()});
+  const current=tracked.current,head=ids[0];
+  if(current.identity!==identity||!current.known.size||current.head!==head)tracked.current={identity,head,known:new Set(ids),pending:new Set()};
+  else for(const id of ids)if(!current.known.has(id)){current.known.add(id);current.pending.add(id);}
+  const arrived=useRef((id:string)=>{tracked.current.pending.delete(id);}).current;
+  return {arriving:(id:string)=>tracked.current.pending.has(id),arrived};
+}
+
+/** What a card's cover tells its card: whether the card still waits, and that the cover is ready (decoded, failed or absent). */
+export type CardArrival={waiting():boolean;ready():void};
+
+/**
+ * An appended card (`arriving` at mount) stays transparent in its final box until its cover
+ * reports ready, then rises in as one piece (cover, title and meta together). A cover that is
+ * still not decoded ARRIVE_WAIT_MS after the card comes into view does not hold the card any
+ * longer: the card rises in with its placeholder and the cover fades in by itself later.
+ */
+export function useCardArrival(host:RefObject<HTMLElement|null>,arriving:boolean,onArrived:()=>void):CardArrival{
+  const waiting=useRef(false),done=useRef(onArrived);done.current=onArrived;
+  useLayoutEffect(()=>{
+    if(!arriving)return;
+    waiting.current=holdArrival(host.current);
+    if(!waiting.current)done.current();
+  },[]);// eslint-disable-line react-hooks/exhaustive-deps
+  const [arrival]=useState<CardArrival>(()=>({
+    waiting:()=>waiting.current,
+    ready:()=>{if(!waiting.current)return;waiting.current=false;done.current();arrive(host.current,ARRIVE_RISE_PX);},
+  }));
+  useEffect(()=>{
+    const element=host.current;if(!waiting.current||!element)return;
+    let timer=0;
+    const giveUp=()=>{
+      if(!waiting.current)return;
+      // The cover's image, if it is already in place but not decoded, fades in on its own load.
+      holdImage(element.querySelector('img'));
+      arrival.ready();
+    };
+    const start=()=>{if(!timer)timer=window.setTimeout(giveUp,ARRIVE_WAIT_MS);};
+    if(!window.IntersectionObserver){start();return()=>window.clearTimeout(timer);}
+    const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){observer.disconnect();start();}});
+    observer.observe(element);
+    return()=>{observer.disconnect();window.clearTimeout(timer);};
+  },[]);// eslint-disable-line react-hooks/exhaustive-deps
+  return arrival;
+}
+
+/** Calls `then` once `image` is decoded (or cannot be). */
+export function afterDecode(image:HTMLImageElement,then:()=>void){
+  void (typeof image.decode==='function'?image.decode():Promise.resolve()).catch(()=>{}).then(then);
+}
+
 /** A load shorter than this shows nothing. */
 export const PROGRESS_DELAY_MS=350;
 /** Once shown, the line stays at least this long, so it never blinks. */

@@ -36,11 +36,11 @@ import {App} from './App';
 const a = [{id:'a1',kind:'image'},{id:'a2',kind:'image'}], b = [{id:'b1',kind:'image'}];
 const back = () => act(() => {window.dispatchEvent(new Event('lakomics-back'));});
 const nav = (name:string) => screen.getByRole('button',{name,exact:true});
-const onHome = () => nav('Home').getAttribute('aria-current') === 'page';
+const onHome = () => nav('홈').getAttribute('aria-current') === 'page';
 async function startHome(scroll = 300) {
   render(<App/>);
   await screen.findByRole('heading',{name:'라이브러리'});
-  fireEvent.click(nav('Home'));
+  fireEvent.click(nav('홈'));
   const home = await screen.findByLabelText('홈 대시보드');
   home.scrollTop = scroll;
   return home;
@@ -86,15 +86,15 @@ it('forgets the Home origin when the bottom navigation switches tabs',async() =>
   await startHome();
   fireEvent.click(screen.getByRole('button',{name:'home 신간'}));
   await screen.findByRole('region',{name:'collections-screen'});
-  fireEvent.click(nav('Catalog'));
-  fireEvent.click(nav('Collections'));
+  fireEvent.click(nav('카탈로그'));
+  fireEvent.click(nav('컬렉션'));
   expect(screen.getByRole('region',{name:'collections-screen'}).getAttribute('data-from-home')).toBe('false');
   // Library opened from Home, then reselected from the bottom nav: its root Back exits as before.
-  fireEvent.click(nav('Home'));
+  fireEvent.click(nav('홈'));
   await waitFor(() => expect(onHome()).toBe(true));
   fireEvent.click(screen.getByRole('button',{name:'home 최근'}));
   await screen.findByText('tile-a1');
-  fireEvent.click(nav('Library'));
+  fireEvent.click(nav('에셋'));
   await screen.findByRole('heading',{name:'라이브러리'});
   back();
   await waitFor(() => expect(finished()).toBe(true));
@@ -131,12 +131,12 @@ it('steps back inside Library before returning Home when the Library was opened 
 it('keeps Back unchanged for screens reached without Home',async() => {
   render(<App/>);
   fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
-  fireEvent.click(nav('Collections'));
+  fireEvent.click(nav('컬렉션'));
   expect((await screen.findByRole('region',{name:'collections-screen'})).getAttribute('data-from-home')).toBe('false');
   // The tab root falls back to the assets area it was opened over (the Library folder), not Home.
   back();
   await waitFor(() => expect(screen.queryByRole('region',{name:'collections-screen'})).toBeNull());
-  expect(nav('Library').getAttribute('aria-current')).toBe('page');
+  expect(nav('에셋').getAttribute('aria-current')).toBe('page');
   expect(onHome()).toBe(false);
 });
 

@@ -1,7 +1,7 @@
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState,type ReactNode} from 'react';
-import {ARRIVE_RISE_PX, ARRIVE_WAIT_MS, arrive, holdArrival, holdImage} from './motion';
+import {ARRIVE_RISE_PX, ARRIVE_WAIT_MS, arrive, holdArrival, holdImage, useAppendArrivals} from './motion';
 import {observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PlayIcon, PhotoIcon} from '@heroicons/react/24/outline';
 import type {Asset} from './types';
@@ -105,14 +105,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   const oldRows = useRef(rows);
   // Assets added by a page append (same gallery, same head, more items) arrive once each; the
   // first page of a place, a replaced list and tiles re-mounted while scrolling back never do.
-  const arrivals = useRef({identity, head: undefined as string | undefined, known: new Set<string>(), pending: new Set<string>()});
-  {
-    const tracked = arrivals.current, head = items[0]?.id;
-    if (tracked.identity !== identity || !tracked.known.size || tracked.head !== head) {
-      arrivals.current = {identity, head, known: new Set(items.map(asset => asset.id)), pending: new Set()};
-    } else for (const asset of items) if (!tracked.known.has(asset.id)) {tracked.known.add(asset.id); tracked.pending.add(asset.id);}
-  }
-  const arrived = useRef((id: string) => {arrivals.current.pending.delete(id);}).current;
+  const arrivals = useAppendArrivals(identity, useMemo(() => items.map(asset => asset.id), [items]));
   useLayoutEffect(() => {
     const scroll = parent.current;
     if (!scroll) return;
@@ -155,7 +148,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => <div className="gallery-row" key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
-        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} vault={vault} arriving={arrivals.current.pending.has(item.asset.id)} onArrived={arrived}/>) }
+        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} vault={vault} arriving={arrivals.arriving(item.asset.id)} onArrived={arrivals.arrived}/>) }
       </div>)}
     </div>
   </div>;

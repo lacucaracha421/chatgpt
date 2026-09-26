@@ -3,6 +3,7 @@ import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/reac
 import userEvent from '@testing-library/user-event';
 import {Catalog} from './Catalog';
 import {suggestionQuery,type CatalogItem,type CatalogPage} from './catalogModel';
+import * as catalogMedia from './catalogMedia';
 /** Search lives behind the top bar's magnifier; open it once, then use the field. */
 function catalogSearch(role:'textbox'|'combobox'){if(!screen.queryByRole(role,{name:'카탈로그 검색'}))fireEvent.click(screen.getByRole('button',{name:'검색'}));return screen.getByRole(role,{name:'카탈로그 검색'});}
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn(),decode:vi.fn()}));
@@ -694,5 +695,35 @@ describe('duplicate review opened from Home',()=>{
     act(()=>{expect(backRef.current!()).toBe(true);});
     expect(home).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('button',{name:'검토 닫기'})).toBeNull();
+  });
+});
+describe('appended card arrival',()=>{
+  const animate=vi.fn();
+  beforeEach(()=>{animate.mockReset();(HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);};});
+  afterEach(()=>{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+  it('holds a card appended by scrolling until its cover decodes, then rises the whole card in once',async()=>{
+    const second:CatalogItem={...item,providerWorkId:'43',groupId:'group-2',title:'계절의 기록',thumbnailUrl:'https://example.test/c.jpg',versionCount:1};
+    vi.spyOn(catalogMedia,'catalogImageTicket').mockResolvedValue({url:'data:image/png;base64,AA'} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>);
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return capableStatus;
+      if(path.includes('/count?'))return {publicationRevision:'p1',totalCount:2};
+      if(path.includes('cursor=c2'))return {...page,items:[second],nextCursor:null};
+      return {...page,nextCursor:'c2'};
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    const first=(await screen.findByText('밤의 도서관')).closest('.catalog-card') as HTMLElement;
+    const card=(await screen.findByText('계절의 기록')).closest('.catalog-card') as HTMLElement;
+    expect(first.style.opacity).not.toBe('0');
+    // Cover, title and credit stay hidden together until the cover is decoded.
+    expect(card.style.opacity).toBe('0');
+    await waitFor(()=>expect(card.querySelector('img')).not.toBeNull());
+    const cover=card.querySelector('img')!;
+    expect(cover.style.opacity).not.toBe('0');
+    fireEvent.load(cover);await act(async()=>{});
+    expect(card.style.opacity).toBe('');
+    const rises=animate.mock.calls.filter(([element])=>element===card);
+    expect(rises).toHaveLength(1);
+    expect((rises[0][1] as Keyframe[])[0]).toMatchObject({opacity:0,transform:'translateY(8px)'});
+    expect(animate.mock.calls.filter(([element])=>element===first||element===cover)).toHaveLength(0);
   });
 });

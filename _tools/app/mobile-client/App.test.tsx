@@ -17,9 +17,9 @@ const a=[{id:'a1',kind:'image'},{id:'a2',kind:'image'}],b=[{id:'b1',kind:'image'
 async function openFolder(name:string){
   if(!screen.queryByRole('button',{name})){
     // From another tab Library first returns to its last place; reselecting it goes to the root.
-    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
-    await waitFor(()=>expect(screen.getByRole('button',{name:'Library',exact:true}).getAttribute('aria-current')).toBe('page'));
-    if(!screen.queryByRole('heading',{name:'라이브러리'}))fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
+    await waitFor(()=>expect(screen.getByRole('button',{name:'에셋',exact:true}).getAttribute('aria-current')).toBe('page'));
+    if(!screen.queryByRole('heading',{name:'라이브러리'}))fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
     await screen.findByRole('heading',{name:'라이브러리'});
   }
   fireEvent.click(await screen.findByRole('button',{name}));
@@ -128,11 +128,11 @@ it('keeps visited Catalog and Notes panels separate when returning Home',async()
   mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/mobile-catalog')?Promise.resolve({ready:true,publicationRevision:'p1',items:[],totalCount:0,countStatus:'ready',context:'c',nextCursor:null}):api(path));
   mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?{unlocked:true,notes:[]}:{configured:true,endpoint:'https://example.invalid'});
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-  fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});
-  fireEvent.click(screen.getByRole('button',{name:'Notes',exact:true}));await screen.findByRole('button',{name:'동기화',exact:true});
-  fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByText('tile-a1');
+  fireEvent.click(screen.getByRole('button',{name:'카탈로그',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});
+  fireEvent.click(screen.getByRole('button',{name:'메모',exact:true}));await screen.findByRole('button',{name:'동기화',exact:true});
+  fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));await screen.findByText('tile-a1');
   expect(screen.queryByRole('button',{name:'동기화',exact:true})).toBeNull();expect(screen.queryByRole('region',{name:'메모',exact:true})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});expect(screen.queryByRole('button',{name:'동기화',exact:true})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'카탈로그',exact:true}));await screen.findByRole('region',{name:'만화 카탈로그'});expect(screen.queryByRole('button',{name:'동기화',exact:true})).toBeNull();
 });
 it('keeps root Albums live so near-end pagination can append',async()=>{
   vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
@@ -150,7 +150,7 @@ it('keeps root Albums live so near-end pagination can append',async()=>{
     return originalApi(path);
   });
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
-  fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
   fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));
   fireEvent.click(await screen.findByText('업로드용'));
   const first=await screen.findByText('tile-album-1');
@@ -216,15 +216,15 @@ describe('committed view and browsing',()=>{
   });
   it('does not reload or remount committed Home on reselect or return from Collections',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
     await screen.findByRole('button',{name:'전체 보기'});
     const first=screen.getByText('tile-a1');
     const reads=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')||path==='/v1/library/list-generation'||path.includes('/revisit?')||path.includes('/captures/pending')).length;
     const count=reads();
-    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));});
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));});
     expect(reads()).toBe(count);
-    fireEvent.click(screen.getByRole('button',{name:'Collections',exact:true}));
-    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));});
+    fireEvent.click(screen.getByRole('button',{name:'컬렉션',exact:true}));
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));});
     expect(reads()).toBe(count);
     expect(screen.getByText('tile-a1')).toBe(first);
   });
@@ -233,19 +233,19 @@ describe('committed view and browsing',()=>{
     let resolve!:(value:unknown)=>void,reject!:(reason:unknown)=>void,signal!:AbortSignal;
     mocks.api.mockImplementation((path:string,requestSignal:AbortSignal)=>path.includes('classification_id=b')?new Promise((done,fail)=>{resolve=done;reject=fail;signal=requestSignal;}):original(path,requestSignal));
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true})); await screen.findByRole('button',{name:'전체 보기'});
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true})); await screen.findByRole('button',{name:'전체 보기'});
     await openFolder('분류 B, 2개');
     await waitFor(()=>expect(resolve).toBeTypeOf('function'));
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
     expect(signal.aborted).toBe(true);
     await act(async()=>{if(result==='success')resolve({items:b,has_more:false,next_cursor:null});else reject(new Error('late failure'));});
     expect(screen.getByRole('button',{name:'전체 보기'})).toBeTruthy();
-    expect(screen.getByRole('button',{name:'Home',exact:true}).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('button',{name:'홈',exact:true}).getAttribute('aria-current')).toBe('page');
     expect(screen.queryByText('tile-b1')).toBeNull();
     expect(screen.queryByText('connection failed')).toBeNull();
     expect(screen.queryByLabelText('목록 불러오는 중')).toBeNull();
   });
-  it.each(['Home','Library'])('refreshes retained %s on area return when generation checks are unavailable',async(tab)=>{
+  it.each(['홈','에셋'])('refreshes retained %s on area return when generation checks are unavailable',async(tab)=>{
     const original=mocks.api.getMockImplementation()!; let changed=false;
     mocks.api.mockImplementation((path:string)=>{
       if(path==='/v1/library/list-generation')return Promise.reject(new ApiError('missing',404,null));
@@ -253,17 +253,17 @@ describe('committed view and browsing',()=>{
       return original(path);
     });
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
-    if(tab==='Home'){
-      fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
+    if(tab==='홈'){
+      fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
     }else{
       await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
       fireEvent.scroll(screen.getByLabelText('자산 목록'));
     }
-    fireEvent.click(screen.getByRole('button',{name:'Collections',exact:true}));changed=true;
+    fireEvent.click(screen.getByRole('button',{name:'컬렉션',exact:true}));changed=true;
     fireEvent.click(screen.getByRole('button',{name:tab,exact:true}));
     await screen.findByText('tile-updated');
     expect(screen.queryByText('tile-a1')).toBeNull();expect(screen.queryByText('tile-b1')).toBeNull();
-    if(tab==='Library'){
+    if(tab==='에셋'){
       expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
       await waitFor(()=>expect(screen.getAllByLabelText('자산 목록').find(element=>!element.closest('[style="display: none;"]'))?.getAttribute('data-restore-scroll')).toBe('420'));
     }
@@ -285,14 +285,14 @@ describe('committed view and browsing',()=>{
   it('restores the last Library classification when switching tabs',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
     await openFolder('분류 B, 2개'); await screen.findByText('tile-b1');
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true})); await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true})); await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
     await waitFor(()=>expect(screen.getByText('tile-b1')).toBeTruthy());
   });
   it('active Library returns to root and Back there finishes',async()=>{
     render(<App/>);await screen.findByRole('heading',{name:'라이브러리'});
     fireEvent.click(await screen.findByRole('button',{name:'분류 B, 2개'}));await screen.findByText('tile-b1');
-    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
     await screen.findByRole('heading',{name:'라이브러리'});
     act(()=>window.dispatchEvent(new Event('lakomics-back')));
     await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('finish'));
@@ -304,10 +304,10 @@ describe('committed view and browsing',()=>{
     mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/mobile-catalog')?Promise.resolve({ready:true,publicationRevision:'p1',items:[],totalCount:0,countStatus:'ready',context:'c',nextCursor:null}):api(path));
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
     await openFolder('분류 B, 2개'); await screen.findByText('tile-b1');
-    fireEvent.click(screen.getByRole('button',{name:'Catalog',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'카탈로그',exact:true}));
     await screen.findByRole('region',{name:'만화 카탈로그'});
     const reads=mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/library/assets?')||path==='/v1/library/list-generation').length;
-    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));});
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));});
     expect(screen.queryByRole('region',{name:'만화 카탈로그'})).toBeNull();
     expect(screen.getByText('tile-b1')).toBeTruthy();
     expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
@@ -322,15 +322,15 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
   expect(screen.queryByRole('heading',{name:'최근 연 폴더'})).toBeNull();
   expect(document.querySelector('.classification-tree')).toBeNull();
   expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
   await screen.findByRole('button',{name:'연결 및 설정'});
-  fireEvent.click(screen.getByRole('button',{name:'Collections',exact:true}));
+  fireEvent.click(screen.getByRole('button',{name:'컬렉션',exact:true}));
   expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
   // Collections draws its own title bar, so the shared bar and its sidebar button are absent.
   expect(document.querySelector('.app-header')).toBeNull();
   expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   // Catalog and Notes also draw their own title bars; no area offers the old sidebar.
-  for(const area of ['Catalog','Notes']){
+  for(const area of ['카탈로그','메모']){
     fireEvent.click(screen.getByRole('button',{name:area,exact:true}));
     expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
     expect(document.querySelector('.app-header')).toBeNull();
@@ -391,7 +391,7 @@ describe('server list generation',()=>{
     await screen.findByLabelText('자산 목록');
     server.change([]);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
   });
   it('remote restore returns the same ID and new canonical Assets appear without restart',async()=>{
@@ -463,14 +463,14 @@ describe('server list generation',()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
     const first=fetches();
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));await screen.findByText('tile-a1');
     await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
     expect(fetches()).toBeGreaterThan(first);
   });
   it('manual refresh fetches even when generation is unchanged',async()=>{
     fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     const before=mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length;
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
     await screen.findByRole('button',{name:'전체 보기'});
     const reads=mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length;
     fireEvent.click(screen.getByRole('button',{name:'새로고침',exact:true}));
@@ -535,7 +535,7 @@ describe('pages that carry their own list generation',()=>{
   it('loads a Library page in one request once the server carries the generation',async()=>{
     fixture(true);render(<App/>);
     fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));await screen.findByRole('heading',{name:'라이브러리'});await settle();
+    fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));await screen.findByRole('heading',{name:'라이브러리'});await settle();
     const [pages,generations]=[pageReads(),generationReads()];
     fireEvent.click(await screen.findByRole('button',{name:'분류 B, 2개'}));await screen.findByText('tile-b1');await settle();
     expect(pageReads()-pages).toBe(1);
@@ -546,7 +546,7 @@ describe('pages that carry their own list generation',()=>{
     fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     // Learn the capability on one navigation, then commit a fresh page that is bound by it.
     await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
     fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByText('tile-a1');await settle();
     const generations=generationReads();
     fireEvent.scroll(screen.getAllByLabelText('자산 목록').find(element=>!element.closest('[style="display: none;"]'))!);
@@ -562,7 +562,7 @@ describe('pages that carry their own list generation',()=>{
     render(<App/>);
     fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
+    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
     fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByText('tile-a1');await settle();
     const firstPages=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/library/assets?limit=40').length;
     const before=firstPages();
@@ -573,7 +573,7 @@ describe('pages that carry their own list generation',()=>{
   it('keeps the bracketed generation reads against a server whose pages lack the field',async()=>{
     fixture(false);render(<App/>);
     fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));await screen.findByRole('heading',{name:'라이브러리'});await settle();
+    fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));await screen.findByRole('heading',{name:'라이브러리'});await settle();
     const [pages,generations]=[pageReads(),generationReads()];
     fireEvent.click(await screen.findByRole('button',{name:'분류 B, 2개'}));await screen.findByText('tile-b1');await settle();
     expect(pageReads()-pages).toBe(1);

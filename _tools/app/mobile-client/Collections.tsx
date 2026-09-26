@@ -10,7 +10,7 @@ import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
 import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
-import {useLevelMotion,useSegmentMotion,useTabIndicator} from './motion';
+import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,useTabIndicator,type CardArrival} from './motion';
 import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
@@ -135,7 +135,8 @@ type Retries={source:string;failed:number;busy:number};
  * the same ticket, and falls back to the flat image if that renderer cannot draw it; list
  * cards never pass it, so 3D stays inside the work detail.
  */
-export function Artwork({item,id,revision,original=false,active=true,label,physical}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string;physical?:'book'|'game'}) {
+export function Artwork({item,id,revision,original=false,active=true,label,physical,arrival}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string;physical?:'book'|'game';
+  /** The list card this cover belongs to, held until the cover is decoded (or cannot be). */arrival?:CardArrival}) {
   const memory=useContext(ArtworkMemoryContext),kept=original?null:memory;
   const source=artworkSource(item,id,revision,original);
   const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [failed,setFailed]=useState<string|null>(null);
@@ -179,7 +180,12 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
   const broken=failed===source,ready=!!image&&!broken&&(!!id||!!item.coverAssetId);
   shown.current=ready?image.url:null;
   const solid=ready&&physical&&flat!==source;
-  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onError={()=>{loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
+  // A card with no cover to wait for (none, or it failed) arrives at once.
+  const absent=!id&&!item.coverAssetId;
+  useEffect(()=>{if(absent||broken)arrival?.ready();},[absent,broken,arrival]);
+  // While the card still waits, the card's arrival shows this cover; it does not fade on its own.
+  if(ready&&arrival?.waiting())arriving.current=false;
+  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onLoad={arrival&&(event=>{const element=event.currentTarget;afterDecode(element,()=>{arrival.ready();arrive(element);});})} onError={()=>{arrival?.ready();loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
 }
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};
@@ -343,10 +349,12 @@ const ReleaseLine=({caption}:{caption:ReleaseCaption})=><span className={`collec
  * never wraps: when it is too narrow the year drops out first (it wraps onto a hidden second
  * row), then the marker ends in an ellipsis. The DOM order is reversed for that (row-reverse).
  */
-function WorkCard({work,revision,active,meta=true,caption,onOpen}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;caption?:ReleaseCaption|null;onOpen(id:string):void}) {
+function WorkCard({work,revision,active,meta=true,caption,onOpen,arriving=false,onArrived}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;caption?:ReleaseCaption|null;onOpen(id:string):void;
+  /** Appended by scrolling and not shown yet: the whole card rises in once its cover is decoded. */arriving?:boolean;onArrived?(id:string):void}) {
+  const host=useRef<HTMLButtonElement>(null),arrival=useCardArrival(host,arriving,()=>onArrived?.(work.id));
   const credit=collectionCardCredit(work),date=meta?collectionCardDate(work):null,score=meta?work.myScore??null:null;
   const tail=(score!=null||caption)&&<span className="collection-card-meta__tail">{score!=null&&<Stars score={score}/>}{score!=null&&caption&&<span className="collection-card-meta__sep" aria-hidden="true">·</span>}{caption&&<ReleaseLine caption={caption}/>}</span>;
-  return <button className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{(date||tail)&&<span className="collection-card-meta">{tail}{date&&<span className="collection-date numeric">{date}</span>}</span>}</button>;
+  return <button ref={host} className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active} arrival={arrival}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{(date||tail)&&<span className="collection-card-meta">{tail}{date&&<span className="collection-date numeric">{date}</span>}</span>}</button>;
 }
 
 type ListState={key:string;items:CollectionSummary[];page:CollectionPage|null;next:string|null;busy:boolean;more:boolean;error:string;moreError:string;legacy:boolean};
@@ -614,6 +622,10 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,TABS.indexOf(tab));
   // The grid keeps the layout of the type it shows until the new type's page commits.
   const shownType=main.items[0]?.type??type;
+  // Cards appended by scrolling rise in once each; a committed first page (a type switch, a
+  // remembered list, a refresh) shows at once.
+  const mainArrivals=useAppendArrivals(main.page,main.items.map(work=>work.id));
+  const showcaseArrivals=useAppendArrivals(showcase.page,showcase.items.map(work=>work.id));
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {header}
     <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll||inboxOpen?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
@@ -632,7 +644,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
           {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
         </div></div>
         {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
-        <div className={`collection-grid collection-grid-${shownType}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork}/>)}</div>
+        <div className={`collection-grid collection-grid-${shownType}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
         {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
@@ -642,7 +654,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
       {showcasePull}
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork}/>)}</div>}
+      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
     </>}</div>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}

@@ -649,3 +649,52 @@ describe('type switch continuity',()=>{
     expect(screen.getByRole('img',{name:game.name}).classList.contains('collection-art-arrive')).toBe(false);
   });
 });
+
+describe('appended card arrival',()=>{
+  const animate=vi.fn();
+  beforeEach(()=>{animate.mockReset();(HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);};});
+  afterEach(()=>{vi.useRealTimers();delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+  const card=(name:string)=>screen.getByText(name).closest('.collection-tile') as HTMLElement;
+  const cardAnimations=(name:string)=>animate.mock.calls.filter(([element])=>element===card(name));
+  const paged=()=>mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('cursor=')?{...page,nextCursor:null,items:[{...item,id:'second',name:'Second page',selectedWorkArtworkId:'cover-2'}]}:{...page,nextCursor:'page-2'});
+
+  it('holds a card appended by scrolling until its cover decodes, then rises the whole card in once',async()=>{
+    paged();
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    await screen.findByText(item.name);
+    expect(card(item.name).style.opacity).not.toBe('0');
+    scrollToEnd(list());await screen.findByText('Second page');
+    // Cover, title and meta stay hidden together in the card's final box.
+    expect(card('Second page').style.opacity).toBe('0');
+    const cover=await screen.findByRole('img',{name:'Second page'});
+    expect(cover.classList.contains('collection-art-arrive')).toBe(false);
+    fireEvent.load(cover);await act(async()=>{});
+    expect(card('Second page').style.opacity).toBe('');
+    expect(cardAnimations('Second page')).toHaveLength(1);
+    const [,frames]=cardAnimations('Second page')[0] as [HTMLElement,Keyframe[]];
+    expect(frames[0]).toMatchObject({opacity:0,transform:'translateY(8px)'});
+    // A later load or re-render never replays it, and the first page never arrived.
+    fireEvent.load(cover);await act(async()=>{});
+    expect(cardAnimations('Second page')).toHaveLength(1);
+    expect(cardAnimations(item.name)).toHaveLength(0);
+  });
+
+  it('shows an appended card with a placeholder after the wait when its cover is slow',async()=>{
+    paged();
+    let resolveCover!:(value:unknown)=>void;
+    mocks.native.mockImplementation(async(_op:string,payload:{artworkId:string})=>payload.artworkId==='cover-2'?new Promise(resolve=>{resolveCover=resolve;}):{url:'https://example.invalid/cover',expires_in:300});
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    await screen.findByText(item.name);
+    vi.useFakeTimers();
+    scrollToEnd(list());await act(async()=>{});await act(async()=>{});
+    expect(card('Second page').style.opacity).toBe('0');
+    act(()=>{vi.advanceTimersByTime(600);});
+    expect(card('Second page').style.opacity).toBe('');
+    expect(cardAnimations('Second page')).toHaveLength(1);
+    expect(card('Second page').querySelector('.collection-art-placeholder')).not.toBeNull();
+    // The cover that comes later fades in on its own.
+    await act(async()=>{resolveCover({url:'https://example.invalid/late',expires_in:300});});
+    expect(screen.getByRole('img',{name:'Second page'}).classList.contains('collection-art-arrive')).toBe(true);
+    expect(cardAnimations('Second page')).toHaveLength(1);
+  });
+});
