@@ -1,4 +1,4 @@
-import {useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
 import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
 import type {ComponentType, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
@@ -102,6 +102,10 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const video = useRef<HTMLVideoElement>(null);
   const videoResume = useRef({id:'',time:0,playing:false});
   const stallTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Library video: no metadata within PROGRESS_MS of loadstart (or an element error) renews the
+  // stream once, silently, before the delay/error message is shown.
+  const progressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const autoRetry = useRef({id:'',used:false});
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
   useEffect(() => {
     if (vault) {
@@ -131,8 +135,23 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       } catch (reason) { if(!span.done)span.log('end',controller.signal.aborted?'canceled':'error');if (!controller.signal.aborted) setError(errorText(reason)); }
     };
     if(!prepared.current.has(asset.id)||asset.kind==='video'||retry)void load();
-    return () => {controller.abort();if(!span.done)span.log('end','canceled');clearTimeout(stallTimer.current);};
+    return () => {controller.abort();if(!span.done)span.log('end','canceled');clearTimeout(stallTimer.current);clearTimeout(progressTimer.current);};
   }, [asset.id, asset.pending, retry]);
+  useEffect(() => {autoRetry.current={id:asset.id,used:false};}, [asset.id]);
+  // A replaced or closed library video must stop its own network: a detached element keeps
+  // its media request (and the native stream behind it) open otherwise. A stable ref callback
+  // sees each element leave, including one inside the dialog's portal.
+  const libraryVideo = useRef(!vault);
+  libraryVideo.current = !vault;
+  const videoRef = useCallback((element: HTMLVideoElement | null) => {
+    video.current = element;
+    if (!element) return;
+    return () => {
+      if (video.current === element) video.current = null;
+      if (!libraryVideo.current) return;
+      try { element.pause(); element.removeAttribute('src'); element.load(); } catch { /* Already released. */ }
+    };
+  }, []);
   // Observe React's committed src, not setDecoded() scheduling or a screen paint.
   useLayoutEffect(() => {
     const observation=timing.current;
@@ -166,6 +185,30 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     const timer = setTimeout(() => setChrome(false), 4000); return () => clearTimeout(timer);
   }, [chrome, info, albumOpen, classificationOpen, exclusion, addOpen, asset.id, asset.kind]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
+  const renewVideo = (element: HTMLVideoElement | null, intendPlay: boolean) => {
+    clearTimeout(progressTimer.current);
+    if(element)videoResume.current={id:asset.id,time:element.currentTime,playing:intendPlay};
+    if(!vault)invalidateTicket(asset, 'original');
+    setRetry(value => value + 1);
+  };
+  /** Spends the one silent renewal of this asset; false when it was already used. */
+  const autoRenew = (element: HTMLVideoElement | null) => {
+    if(vault||autoRetry.current.id!==asset.id||autoRetry.current.used)return false;
+    autoRetry.current.used=true;
+    if(element)videoEvent(asset.id,'retry',element);
+    renewVideo(element,!element||!element.paused||element.autoplay);
+    return true;
+  };
+  const loadStart = (event: SyntheticEvent<HTMLVideoElement>) => {
+    track(event);
+    if(vault||!original)return;
+    const element=event.currentTarget;
+    clearTimeout(progressTimer.current);
+    progressTimer.current=setTimeout(() => {
+      if(element.readyState>=1||autoRenew(element))return;
+      clearTimeout(stallTimer.current);setError('영상 연결이 지연되고 있습니다. 계속 기다리거나 다시 시도해 주세요.');
+    },PROGRESS_MS);
+  };
   const waiting = () => {clearTimeout(stallTimer.current);stallTimer.current=setTimeout(() => setError('영상 연결이 지연되고 있습니다. 계속 기다리거나 다시 시도해 주세요.'),15000);};
   // Library video element states go to the native perf log; vault playback stays unlogged.
   const track = (event: SyntheticEvent<HTMLVideoElement>) => {if(!vault)videoEvent(asset.id, event.type as Parameters<typeof videoEvent>[1], event.currentTarget);};
@@ -236,18 +279,18 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
         else if (asset.kind!=='video' && g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
       }} onPointerCancel={() => gesture.current.points.clear()}>
-        {asset.kind === 'video' ? <video ref={video} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing} loop playsInline preload="auto" onWaiting={event => {track(event);waiting();}} onStalled={event => {track(event);waiting();}} onPlaying={event => {track(event);playing();}} onCanPlay={event => {track(event);playing();}} onLoadStart={track} onSuspend={track} onAbort={track} onEmptied={track} onLoadedMetadata={event => {
-          track(event);const saved=videoResume.current;if(saved.id!==asset.id)return;
+        {asset.kind === 'video' ? <video ref={videoRef} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing} loop playsInline preload="auto" onWaiting={event => {track(event);waiting();}} onStalled={event => {track(event);waiting();}} onPlaying={event => {track(event);playing();}} onCanPlay={event => {track(event);playing();}} onLoadStart={loadStart} onSuspend={track} onAbort={track} onEmptied={track} onLoadedMetadata={event => {
+          track(event);clearTimeout(progressTimer.current);const saved=videoResume.current;if(saved.id!==asset.id)return;
           event.currentTarget.currentTime=Math.min(saved.time,Number.isFinite(event.currentTarget.duration)?event.currentTarget.duration:saved.time);
           if(saved.playing)void event.currentTarget.play().catch(() => {});
-        }} onError={event => {track(event);if(original){clearTimeout(stallTimer.current);setError(`영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.${vault?mediaErrorCode(event.currentTarget.error):''}`);}}} {...(vault?{controlsList:'nodownload noremoteplayback',disablePictureInPicture:true}:{})}/>
+        }} onError={event => {track(event);if(original){clearTimeout(stallTimer.current);clearTimeout(progressTimer.current);if(autoRenew(event.currentTarget))return;setError(`영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.${vault?mediaErrorCode(event.currentTarget.error):''}`);}}} {...(vault?{controlsList:'nodownload noremoteplayback',disablePictureInPicture:true}:{})}/>
           : vault ? <>
             {asset.preview && loaded !== asset.id && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
             <img key={asset.id} className="viewer-image" src={original} alt={vault.label(asset)} draggable={false} onLoad={() => setLoaded(asset.id)} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded === asset.id ? undefined : 0}}/>
           </>
           : (original || asset.preview) ? <img key={asset.id} className="viewer-image" src={original || asset.preview} alt={asset.creator_name || asset.creator_handle || '저장한 이미지'} draggable={false} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
       </div>
-      {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {if(video.current)videoResume.current={id:asset.id,time:video.current.currentTime,playing:!video.current.paused};if(!vault)invalidateTicket(asset, 'original'); setRetry(value => value + 1);}}><ArrowPathIcon/>다시 시도</Button></div>}
+      {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}
       {transform.scale > 1 && <div className="zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={() => setTransform({scale:1,x:0,y:0})}/></div>}
       <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className={vault ? 'viewer-title' : undefined}>{vault ? vault.label(asset) : asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
       {!vault&&<>
@@ -262,6 +305,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     </div>
   </Dialog>;
 }
+
+/** How long a library video may go from loadstart to loadedmetadata before it is renewed. */
+const PROGRESS_MS = 8000;
 
 /**
  * The media element's own error class for a vault video, e.g. ` (오류 2 · PIPELINE_ERROR_READ)`.

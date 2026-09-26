@@ -76,7 +76,7 @@ final class MediaRepository {
    }
   }
  }
- void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache.clear();}finally{tickets.clear();}}}
+ void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache.clear();}finally{tickets.clear();proxy.clear();}}}
  InputStream stream(String key,long generation)throws IOException{return cache.open(key,generation);}
  private final ScheduledExecutorService ticketWorker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
  private final TicketBatcher<Scope,JSONObject> tickets=new TicketBatcher<>(ticketWorker,this::fetchTickets,MediaRepository::ticketExpiry,System::currentTimeMillis);
@@ -127,10 +127,41 @@ final class MediaRepository {
   }finally{active.remove(signal);}
  }
  private JSONObject directTicket(String id,Scope scope,CancellationSignal signal)throws Exception{
-  // WebView streams these bytes directly, so it cannot promise digest verification.
+  // The proxy streams these bytes to WebView as they arrive, so it cannot promise digest verification.
   PerfLog.Op perf=PerfLog.current.get();long started=System.nanoTime();
   try{return client.apiFor(scope.connection,"/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","original"),signal);}
   finally{if(perf!=null)perf.ticket+=System.nanoTime()-started;}
+ }
+ /** Library media the WebView streams (videos, oversized images) goes through this proxy, never straight to storage. */
+ private final MediaStreamProxy proxy=new MediaStreamProxy(PerfLog::write);
+ MediaStreamProxy.Response stream(String token,String method,String range){return proxy.serve(token,method,range);}
+ private static MediaStreamProxy.Ticket proxyTicket(JSONObject ticket)throws Exception{
+  long expires=ticketExpiry(ticket);
+  if(expires<=0)expires=System.currentTimeMillis()+1000L*ticket.optLong("expires_in",60);
+  return new MediaStreamProxy.Ticket(ticket.getString("url"),expires,ticket.optLong("size_bytes",0));
+ }
+ /**
+  * A `/media-stream/` URL for one original. The first ticket is fetched here so a missing
+  * Asset still fails this call; later tickets are renewed by the proxy on expiry or 403.
+  * The token dies with the cache generation: a cleared cache or replaced connection clears it.
+  */
+ private JSONObject proxied(String id,Scope scope,String mime,CancellationSignal signal)throws Exception{
+  JSONObject first=directTicket(id,scope,signal);signal.throwIfCanceled();
+  String type=MediaStreamProxy.safeMime(first.optString("content_type",""));
+  if(type.equals("application/octet-stream"))type=MediaStreamProxy.safeMime(mime);
+  MediaStreamProxy.Ticket initial=proxyTicket(first);String token;
+  synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
+   if(scope.generation!=cache.generation())throw new IOException("Cache invalidated");
+   token=proxy.register(id,type,fresh->{
+    CancellationSignal renew=new CancellationSignal();
+    synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){if(scope.generation!=cache.generation())throw new IOException("Cache invalidated");active.add(renew);}
+    try{return proxyTicket(client.apiFor(scope.connection,"/v1/library/assets/"+Uri.encode(id)+"/media-ticket"+(fresh?"?fresh_head=true":""),"POST",new JSONObject().put("variant","original"),renew));}
+    finally{active.remove(renew);}
+   },initial);
+  }
+  JSONObject result=new JSONObject().put("url","https://app.lakomics.local"+MediaStreamProxy.PREFIX+token).put("expires_in",1800).put("content_type",type);
+  if(initial.size>0)result.put("size_bytes",initial.size);
+  return result;
  }
  static boolean imageMime(String mime){return mime!=null && mime.matches("image/(jpeg|png|webp|gif|avif|heic|heif|bmp)");}
  private JSONObject local(Scope scope,String mime)throws Exception{
@@ -145,7 +176,7 @@ final class MediaRepository {
   if(signal==null)signal=new CancellationSignal();signal.throwIfCanceled();
   Scope scope=scope(id,variant,revision);
   PerfLog.Op perf=PerfLog.current.get();
-  if(variant.equals("original") && mime!=null && !mime.isEmpty() && !imageMime(mime)){if(perf!=null)perf.cache="bypass";return directTicket(id,scope,signal);}
+  if(variant.equals("original") && mime!=null && !mime.isEmpty() && !imageMime(mime)){if(perf!=null)perf.cache="proxy";return proxied(id,scope,mime,signal);}
   // Hold the existing reentrant fill lock before requesting a ticket: a caller
   // arriving during another image's download must recheck the cache, not issue a ticket.
   LockEntry entry=retainLock(scope.key);boolean locked=false;
@@ -155,7 +186,7 @@ final class MediaRepository {
    signal.throwIfCanceled();
    try{cache.file(scope.key,scope.generation);if(perf!=null)perf.cache="hit";return local(scope,variant.equals("thumbnail")?"image/webp":imageMime(mime)?mime:cachedImageMime(scope));}catch(FileNotFoundException ignored){if(perf!=null)perf.cache="miss";}
    JSONObject first=ticket(id,variant,scope,signal);
-   if(variant.equals("original") && (!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>MAX_VIEW_IMAGE)){if(perf!=null)perf.cache="bypass";return directTicket(id,scope,signal);}
+   if(variant.equals("original") && (!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>MAX_VIEW_IMAGE)){if(perf!=null)perf.cache="proxy";return proxied(id,scope,first.optString("content_type",mime),signal);}
    fill(id,variant,scope,signal,first);signal.throwIfCanceled();
    return local(scope,variant.equals("thumbnail")?"image/webp":first.optString("content_type",mime));
   }finally{releaseLock(scope.key,entry,locked);}

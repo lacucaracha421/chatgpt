@@ -23,7 +23,8 @@ export function viewerTiming(id:string, kind:string|undefined, prepared:boolean)
   return {media,log,get done(){return done;}};
 }
 
-type VideoEvent = 'loadstart'|'loadedmetadata'|'canplay'|'playing'|'waiting'|'stalled'|'suspend'|'abort'|'emptied'|'error';
+/** Element states, plus `retry`: the viewer renewed a library video that made no progress. */
+type VideoEvent = 'loadstart'|'loadedmetadata'|'canplay'|'playing'|'waiting'|'stalled'|'suspend'|'abort'|'emptied'|'error'|'retry';
 /**
  * One line per media-element state change of a library video: the event, the element's
  * network/ready state and, on error, the MediaError code and Chromium's leading error name.

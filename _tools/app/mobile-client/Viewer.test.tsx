@@ -12,8 +12,9 @@ vi.mock('./ClassificationAssignmentEditor',()=>({ClassificationAssignmentEditor:
 vi.mock('./ViewerInfo',()=>({ViewerInfo:(props:{asset:Asset;mediaError:string;onClose():void})=>{mocks.info(props);return <div>viewer-info-open<button aria-label="정보 닫기" onClick={props.onClose}/></div>;}}));
 import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
-afterEach(()=>{cleanup();delete window.LakomicsNative;});
-beforeEach(()=>{mocks.ticket.mockReset();mocks.decode.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));});
+afterEach(()=>{cleanup();delete window.LakomicsNative;vi.restoreAllMocks();});
+// jsdom has no media playback; the viewer's own calls (resume, release) are observed instead.
+beforeEach(()=>{vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});mocks.ticket.mockReset();mocks.decode.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));});
 describe('progressive viewer',()=>{
   it('logs the original commit only after decode and observes prepared neighbour reuse',async()=>{
     const events:Record<string,unknown>[]=[];
@@ -95,10 +96,72 @@ describe('progressive viewer',()=>{
   it('renews a failed video and restores its playback position',async()=>{
     render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toContain('original-v'));
-    const previous=document.querySelector('video')!;previous.currentTime=25;fireEvent.error(previous);
-    fireEvent.click(await screen.findByRole('button',{name:'다시 시도'}));
+    // The first failure renews the stream once without a message.
+    const failed=document.querySelector('video')!;failed.currentTime=25;fireEvent.error(failed);
     await waitFor(()=>expect(mocks.ticket).toHaveBeenCalledTimes(2));
-    const next=document.querySelector('video')!;expect(next).not.toBe(previous);fireEvent.loadedMetadata(next);expect(next.currentTime).toBe(25);
+    expect(screen.queryByRole('button',{name:'다시 시도'})).toBeNull();
+    const renewed=document.querySelector('video')!;expect(renewed).not.toBe(failed);
+    await waitFor(()=>expect(renewed.getAttribute('src')).toContain('original-v'));
+    fireEvent.loadedMetadata(renewed);expect(renewed.currentTime).toBe(25);
+    // A second failure is shown, and 다시 시도 renews again at the same position.
+    renewed.currentTime=30;fireEvent.error(renewed);
+    fireEvent.click(await screen.findByRole('button',{name:'다시 시도'}));
+    await waitFor(()=>expect(mocks.ticket).toHaveBeenCalledTimes(3));
+    const next=document.querySelector('video')!;expect(next).not.toBe(renewed);fireEvent.loadedMetadata(next);expect(next.currentTime).toBe(30);
+  });
+  describe('library video without progress',()=>{
+    beforeEach(()=>{vi.useFakeTimers({shouldAdvanceTime:true});});
+    afterEach(()=>{vi.useRealTimers();});
+    const source=async()=>{await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')??'').toContain('original-v'));return document.querySelector('video')!;};
+    it('renews once with a fresh ticket when metadata does not arrive, then shows the delay message',async()=>{
+      const events:Record<string,unknown>[]=[];
+      window.LakomicsNative={request:(_id,op,payload)=>{if(op==='perfLog')events.push(JSON.parse(payload));},cancel:vi.fn()};
+      const media=await import('./media');
+      render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      const first=await source();fireEvent.loadStart(first);
+      await act(async()=>{vi.advanceTimersByTime(7900);});
+      expect(mocks.ticket).toHaveBeenCalledTimes(1);
+      await act(async()=>{vi.advanceTimersByTime(200);});
+      await waitFor(()=>expect(mocks.ticket).toHaveBeenCalledTimes(2));
+      expect(media.invalidateTicket).toHaveBeenCalledWith(expect.objectContaining({id:'v'}),'original');
+      await waitFor(()=>expect(events.some(p=>p.event==='video'&&p.media==='retry'&&p.id==='v')).toBe(true));
+      expect(screen.queryByText(/영상 연결이 지연되고/)).toBeNull();
+      // The stalled element is released: no src, network stopped.
+      expect(first.hasAttribute('src')).toBe(false);expect(HTMLMediaElement.prototype.load).toHaveBeenCalled();
+      const second=await source();expect(second).not.toBe(first);expect(second.autoplay).toBe(true);
+      fireEvent.loadStart(second);
+      await act(async()=>{vi.advanceTimersByTime(8100);});
+      expect(await screen.findByText(/영상 연결이 지연되고/)).toBeTruthy();
+      expect(mocks.ticket).toHaveBeenCalledTimes(2);
+    });
+    it('leaves a video alone once its metadata arrived',async()=>{
+      render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      const player=await source();fireEvent.loadStart(player);fireEvent.loadedMetadata(player);
+      await act(async()=>{vi.advanceTimersByTime(20000);});
+      expect(mocks.ticket).toHaveBeenCalledTimes(1);expect(document.querySelector('video')).toBe(player);
+      expect(screen.queryByText(/영상 연결이 지연되고/)).toBeNull();
+    });
+    it('cancels the pending check and releases the element when the asset changes or the viewer closes',async()=>{
+      mocks.decode.mockResolvedValue(undefined);
+      const all:Asset[]=[{id:'v',kind:'video'},items[1]];
+      const view=render(<Viewer items={all} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      const player=await source();fireEvent.loadStart(player);
+      view.rerender(<Viewer items={all} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+      expect(player.hasAttribute('src')).toBe(false);
+      expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();expect(HTMLMediaElement.prototype.load).toHaveBeenCalled();
+      await act(async()=>{vi.advanceTimersByTime(9000);});
+      expect(mocks.ticket.mock.calls.filter(([a])=>a.id==='v')).toHaveLength(1);
+      view.rerender(<Viewer items={all} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      const again=await source();view.unmount();
+      expect(again.hasAttribute('src')).toBe(false);
+    });
+    it('never renews vault videos',async()=>{
+      const vault={original:(asset:Asset)=>`https://app.lakomics.local/vault/${'a'.repeat(32)}/${asset.id}`,label:(asset:Asset)=>asset.id};
+      render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}} vault={vault}/>);
+      const player=document.querySelector('video')!;fireEvent.loadStart(player);
+      await act(async()=>{vi.advanceTimersByTime(20000);});
+      expect(document.querySelector('video')).toBe(player);expect(player.getAttribute('src')).toContain('/vault/');expect(mocks.ticket).not.toHaveBeenCalled();
+    });
   });
   it('retains the thumbnail until original decoding completes',async()=>{
     let finish!:()=>void; mocks.decode.mockImplementation(()=>new Promise<void>(resolve=>{finish=resolve;}));

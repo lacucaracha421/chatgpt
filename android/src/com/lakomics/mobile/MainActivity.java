@@ -91,7 +91,7 @@ public final class MainActivity extends Activity {
   web.addJavascriptInterface(new Bridge(),"LakomicsNative");ExchangeService.get(this).addListener(exchangeListener);
   web.setWebViewClient(new WebViewClient(){
    @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest r){return !bundled(r.getUrl());}
-   @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u)){if(u.getPath()!=null && u.getPath().startsWith("/vault/"))return vault.serve(r);return asset(u);}if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
+   @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u)){if(u.getPath()!=null && u.getPath().startsWith("/vault/"))return vault.serve(r);if(u.getPath()!=null && u.getPath().startsWith(MediaStreamProxy.PREFIX))return mediaStream(r);return asset(u);}if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
    @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){h.cancel();}
    @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail d){vault.lock("");finish();return true;}
   });web.loadUrl(ORIGIN+"/index.html");
@@ -101,6 +101,16 @@ public final class MainActivity extends Activity {
  private static final String FAULT_GAME_CSP="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' blob:; font-src data:; media-src blob:; connect-src 'self' blob:; frame-src 'none'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'; form-action 'none'";
  static boolean faultGame(String path){return path!=null && path.matches("/assets/fault-[A-Za-z0-9_-]+\\.html");}
  private static boolean bundled(Uri u){return "https".equals(u.getScheme()) && "app.lakomics.local".equals(u.getHost()) && u.getPort()==-1 && u.getUserInfo()==null;}
+ /** Library media through the native Range proxy; blocks this WebView thread until storage answers. */
+ private WebResourceResponse mediaStream(WebResourceRequest r){
+  Uri u=r.getUrl();String path=u.getPath();
+  if(media==null || r.isForMainFrame() || u.getQuery()!=null || u.getFragment()!=null || path==null || !path.matches("/media-stream/[0-9a-f]{32}"))return denied();
+  String range=null;for(Map.Entry<String,String> e:r.getRequestHeaders().entrySet())if(e.getKey().equalsIgnoreCase("Range"))range=e.getValue();
+  MediaStreamProxy.Response response;
+  try{response=media.stream(path.substring(MediaStreamProxy.PREFIX.length()),r.getMethod(),range);}catch(RuntimeException e){return denied();}
+  try{return new WebResourceResponse(response.mime,null,response.status,response.reason,response.headers,response.body);}
+  catch(RuntimeException e){try{response.body.close();}catch(IOException ignored){}return denied();}
+ }
  private WebResourceResponse denied(){return new WebResourceResponse("text/plain","UTF-8",403,"Forbidden",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));}
  private WebResourceResponse asset(Uri u){try{String p=u.getPath();if(p==null || p.contains("..") || p.contains("\\"))return denied();if(p.startsWith("/media-cache/") || p.startsWith("/thumbnail-cache/")){String[] parts=p.split("/");if(parts.length!=4 || media==null)return denied();String type=u.getQueryParameter("mime");if(!MediaRepository.imageMime(type))type="image/webp";Map<String,String> cacheHeaders=new HashMap<>();cacheHeaders.put("Cache-Control","private, max-age="+ThumbnailCache.MAX_AGE_SECONDS+", immutable");cacheHeaders.put("X-Content-Type-Options","nosniff");return new WebResourceResponse(type,null,200,"OK",cacheHeaders,media.stream(parts[3],Long.parseLong(parts[2])));}if(p.equals("/"))p="/index.html";String mime=p.endsWith(".html")?"text/html":p.endsWith(".js")?"text/javascript":p.endsWith(".css")?"text/css":p.endsWith(".woff2")?"font/woff2":p.endsWith(".ttf")?"font/ttf":p.endsWith(".svg")?"image/svg+xml":"application/octet-stream";
   Map<String,String> headers=new HashMap<>();headers.put("Cache-Control","no-store");headers.put("X-Content-Type-Options","nosniff");headers.put("Content-Security-Policy",faultGame(p)?FAULT_GAME_CSP:"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src https: blob:; font-src 'self'; connect-src https:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'");return new WebResourceResponse(mime,"UTF-8",200,"OK",headers,getAssets().open(p.substring(1)));}catch(Exception e){return denied();}}
