@@ -125,13 +125,14 @@ const collections:CollectionDetail[]=(['game','manga','movie'] as const).flatMap
 // 신간 알림 and tracking in the preview: manga works carry the upgraded PC's keys, and a few
 // unread release events exercise the entry badge, the cards' 신간 lines and the 신간 screen highlights.
 for(const [i,item] of collections.filter(item=>item.type==='manga').entries()){item.releaseWatch={enabled:i%3===0,available:i%4!==3};item.ownedVolumes=i%2===0?[{editionIndex:0,count:Math.min(5,i+1)}]:[];}
-// 신간 screen: per-volume release data on the watched works (0, 3, 6, 9) from an upgraded PC.
+// 신간 screen: per-volume release data on the watched works (0, 3, 6, 9) from an upgraded PC;
+// once read, 0/3/6 show unowned Korean volumes on the grid and 9 its pre-registered volume.
 const kakaoDemo=(dates:(string|null)[],upcomingFrom:number)=>({editionIndex:0,checkedAt:'2026-09-25T08:00:00Z',volumes:dates.map((date,i)=>({volumeNumber:i+1,date,status:(i+1>=upcomingFrom?'upcoming':'released') as 'upcoming'|'released'}))});
 const demoSchedules:Record<string,CollectionDetail['releaseSchedule']>={
   'collection-manga-0':{kakao:kakaoDemo(['2025-03-10','2025-07-14','2025-12-02','2026-04-20','2026-08-28','2026-10-03','2026-11-15'],6),mangadex:{checkedAt:'2026-09-25T08:00:00Z',latestVolume:9,volumes:Array.from({length:9},(_,i)=>({volumeNumber:i+1,editionIndex:null}))}},
   'collection-manga-3':{kakao:kakaoDemo(['2026-02-11','2026-06-03','2026-09-16','2026-10-10'],4),mangadex:{checkedAt:'2026-09-25T08:00:00Z',latestVolume:8,volumes:Array.from({length:8},(_,i)=>({volumeNumber:i+1,editionIndex:null}))}},
   'collection-manga-6':{kakao:kakaoDemo(['2024-05-01','2024-09-01','2025-01-15','2025-06-01','2026-01-20','2026-09-02'],7),mangadex:null},
-  'collection-manga-9':{kakao:kakaoDemo([null],1),mangadex:{checkedAt:null,latestVolume:2,volumes:[{volumeNumber:1,editionIndex:null},{volumeNumber:2,editionIndex:null}]}},
+  'collection-manga-9':{kakao:kakaoDemo(['2026-11-20',null],1),mangadex:{checkedAt:null,latestVolume:2,volumes:[{volumeNumber:1,editionIndex:null},{volumeNumber:2,editionIndex:null}]}},
 };
 for(const item of collections)if(item.type==='manga')item.releaseSchedule=demoSchedules[item.id]??{kakao:null,mangadex:null};
 let demoReleases=[

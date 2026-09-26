@@ -284,11 +284,17 @@ function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:st
     {!!item.series?.cast.length&&<p className="collection-cast">출연 · {item.series.cast.join(' · ')}</p>}</section>;
 }
 const Stars=({score}:{score:number})=><span className="collection-score" aria-label={`내 별점 ${score.toFixed(1)}점`}><StarSolid aria-hidden="true"/><span className="numeric">{score.toFixed(1)}</span></span>;
-/** A manga's 신간 line under the title; the cover itself stays clean (user choice C, 2026-09-26). */
-const ReleaseLine=({caption}:{caption:ReleaseCaption})=><span className={`collection-release-line${caption.kind==='ahead'?' is-ahead':''}`}>{caption.text}{caption.date&&<span className="numeric"> · {caption.date}</span>}</span>;
-function WorkCard({work,revision,active,meta=true,caption,onOpen}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;/** The 신간 line, which takes the year/rating line's place. */caption?:ReleaseCaption|null;onOpen(id:string):void}) {
-  const credit=collectionCardCredit(work),date=collectionCardDate(work);
-  return <button className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{caption?<ReleaseLine caption={caption}/>:meta&&(date||work.myScore!=null)&&<span className="collection-card-meta">{date&&<span className="collection-date numeric">{date}</span>}{work.myScore!=null&&<Stars score={work.myScore}/>}</span>}</button>;
+/** A work's 신간 marker after the stars; the cover itself stays clean (user choice C, 2026-09-26). */
+const ReleaseLine=({caption}:{caption:ReleaseCaption})=><span className={`collection-release-line is-${caption.kind}`}>{caption.text}{caption.date&&<span className="numeric"> · {caption.date}</span>}</span>;
+/**
+ * A tile: cover, title, credit, then one meta line of year, stars and the 신간 marker. The line
+ * never wraps: when it is too narrow the year drops out first (it wraps onto a hidden second
+ * row), then the marker ends in an ellipsis. The DOM order is reversed for that (row-reverse).
+ */
+function WorkCard({work,revision,active,meta=true,caption,onOpen}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;caption?:ReleaseCaption|null;onOpen(id:string):void}) {
+  const credit=collectionCardCredit(work),date=meta?collectionCardDate(work):null,score=meta?work.myScore??null:null;
+  const tail=(score!=null||caption)&&<span className="collection-card-meta__tail">{score!=null&&<Stars score={score}/>}{score!=null&&caption&&<span className="collection-card-meta__sep" aria-hidden="true">·</span>}{caption&&<ReleaseLine caption={caption}/>}</span>;
+  return <button className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{(date||tail)&&<span className="collection-card-meta">{tail}{date&&<span className="collection-date numeric">{date}</span>}</span>}</button>;
 }
 
 type ListState={key:string;items:CollectionSummary[];page:CollectionPage|null;next:string|null;busy:boolean;more:boolean;error:string;moreError:string;legacy:boolean};
@@ -446,7 +452,6 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const watching=(work:CollectionSummary)=>work.type==='manga'&&!!work.releaseWatch&&edits.visible(work.id,'releaseWatch',work.releaseWatch.enabled).value;
   const today=localToday();
   const captionOf=(work:CollectionSummary)=>{
-    if(work.type!=='manga')return null;
     const kakao=work.releaseSchedule?.kakao;
     return releaseCaption(work,unreadOf(work),kakao?ownedOf(work,kakao.editionIndex):null,watching(work),today);
   };
