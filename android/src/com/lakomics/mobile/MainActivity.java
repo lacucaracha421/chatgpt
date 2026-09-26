@@ -309,13 +309,14 @@ public final class MainActivity extends Activity {
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();
     }if(perf!=null)perf.status="ok";if(!signal.isCanceled())reply(id,true,data,null);
-   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}finally{active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(signal.isCanceled())perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}}};
-   // An abandoned media request leaves the queue at once instead of holding one of its slots
-   // until a worker reaches it. Once the task runs, its network calls replace this listener.
-   if(mediaWork)signal.setOnCancelListener(()->{if(mediaWorkers.remove(task)){active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}}});
-   try{(mediaWork?mediaWorkers:workers).execute(task);}catch(RejectedExecutionException e){if(mediaWork)signal.setOnCancelListener(null);active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){perf.status="rejected";perfPool.remove(perf);perf.finish(payload);}
+   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}};
+   CancellableDispatch dispatch=new CancellableDispatch(new CancellableDispatch.Cancellation(){
+    public boolean isCanceled(){return signal.isCanceled();}
+    public void setListener(Runnable listener){signal.setOnCancelListener(listener==null?null:listener::run);}
+   },task,status->{active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(status!=null)perf.status=status;perfPool.remove(perf);perf.finish(payload);}});
+   try{dispatch.submit(mediaWork?mediaWorkers:workers,mediaWork);}catch(RejectedExecutionException e){
     // A full media queue means the request never started: the "media_busy" code lets a visible caller retry it later instead of showing it as broken.
-    reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
+    if(!signal.isCanceled())reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
   }
  }
  @Override public void onTrimMemory(int level){if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}

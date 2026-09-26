@@ -20,7 +20,8 @@ import java.util.concurrent.*;
  * Everything is foreground-only. Arrivals are noticed through the `exchange.revision` field
  * of the `/v1/sync/status` read the Library pass already makes ({@link #observeStatus}) and of
  * the foreground status long-poll; the open 보내기/받기 screen adds a 5 s inbox/outbox refresh
- * only while that long-poll is not live ({@link #setStatusLive}). Nothing is polled, retried or
+ * only while that long-poll is not live ({@link #setStatusLive}). Failed arrival reads retry
+ * after 5/15/60 s (capped at 60 s) while the screen is visible. Nothing is polled, retried or
  * started while the activity is paused; a transfer already moving is allowed to finish.
  *
  * The exchange refuses the shared Library token, so this device keeps a second, device-only
@@ -79,13 +80,13 @@ final class ExchangeService {
     private ExchangeTransfer.Ledger ledger;
     private String code = "";
     private String registeredKey = "";
-    private long revision = -1;
+    private final ExchangeRefreshState refreshState = new ExchangeRefreshState();
     private int unseen;
     /** Resumed Lakomics activities (the main app and the share sheet). */
     private int resumed;
     private boolean foreground, visible, refreshing, refreshAgain, refreshDevices, emitScheduled, statusLive;
     private long lastEmit;
-    private ScheduledFuture<?> poll;
+    private ScheduledFuture<?> poll, refreshRetry;
     /** Advances on every reset so work started for a replaced connection records nothing. */
     private int epoch;
 
@@ -185,12 +186,13 @@ final class ExchangeService {
     void reset() {
         synchronized (this) {
             epoch++;
+            stopRefreshRetry();
             for (Row row : incoming.values()) row.cancelled = true;
             for (Row row : outgoing.values()) row.cancelled = true;
             for (Row row : outgoing.values()) discard(row);
             incoming.clear(); outgoing.clear(); queued.clear(); deferred.clear(); announced.clear();
             outbox = new JSONArray(); devices = new JSONArray();
-            registeredKey = ""; code = ""; revision = -1; unseen = 0;
+            registeredKey = ""; code = ""; refreshState.reset(); unseen = 0;
             conditional.clear();
             preferences.edit().remove("sends").commit();
         }
@@ -208,8 +210,8 @@ final class ExchangeService {
         synchronized (this) {
             resumed = Math.max(0, resumed + (value ? 1 : -1));
             foreground = resumed > 0;
-            if (!foreground) { stopPoll(); return; }
-            if (visible) startPoll();
+            if (!foreground) { stopPoll(); stopRefreshRetry(); return; }
+            if (visible) { startPoll(); scheduleRefreshRetry(); }
             retry = new ArrayList<>(deferred);
             deferred.clear();
         }
@@ -221,7 +223,7 @@ final class ExchangeService {
         synchronized (this) {
             visible = value;
             if (value) { unseen = 0; if (foreground) startPoll(); }
-            else stopPoll();
+            else { stopPoll(); stopRefreshRetry(); }
         }
         if (value) requestRefresh(true);
         changed();
@@ -236,8 +238,8 @@ final class ExchangeService {
         synchronized (this) {
             if (statusLive == value) return;
             statusLive = value;
-            if (value) stopPoll();
-            else if (foreground && visible) startPoll();
+            if (value) { stopPoll(); scheduleRefreshRetry(); }
+            else { stopRefreshRetry(); if (foreground && visible) startPoll(); }
         }
     }
 
@@ -251,6 +253,24 @@ final class ExchangeService {
 
     private void stopPoll() { if (poll != null) { poll.cancel(false); poll = null; } }
 
+    /** Called with the service monitor held; only one visible-screen retry can be queued. */
+    private void scheduleRefreshRetry() {
+        long delay = refreshState.retryDelay(foreground, visible, statusLive);
+        if (delay < 0 || refreshRetry != null) return;
+        refreshRetry = net.schedule(() -> {
+            synchronized (this) {
+                refreshRetry = null;
+                if (refreshState.retryDelay(foreground, visible, statusLive) < 0 || refreshing) return;
+                refreshDevices = true;
+            }
+            refresh(false);
+        }, delay, TimeUnit.MILLISECONDS);
+    }
+
+    private void stopRefreshRetry() {
+        if (refreshRetry != null) { refreshRetry.cancel(false); refreshRetry = null; }
+    }
+
     /** The Library pass read `/v1/sync/status`; a moved exchange revision means something changed. */
     void observeStatus(String status) {
         long next;
@@ -260,8 +280,9 @@ final class ExchangeService {
             next = exchange.getLong("revision");
         } catch (JSONException ignored) { return; }
         synchronized (this) {
-            if (next == revision || !foreground) return;
-            revision = next;
+            if (!foreground || (refreshing && next == refreshState.revision())) return;
+            if (!refreshState.observe(next)) return;
+            stopRefreshRetry();
         }
         requestRefresh(true);
     }
@@ -270,6 +291,7 @@ final class ExchangeService {
 
     void requestRefresh(boolean withDevices) {
         synchronized (this) {
+            if (!foreground) return;
             if (withDevices) refreshDevices = true;
             if (refreshing) { refreshAgain = true; return; }
             refreshing = true;
@@ -289,6 +311,7 @@ final class ExchangeService {
 
     private void refresh(boolean owned) {
         try {
+            synchronized (this) { if (!foreground) return; }
             JSONObject connection = connection();
             if (connection == null) { synchronized (this) { code = "tokenMissing"; } changed(); }
             else pass(connection, false);
@@ -298,7 +321,7 @@ final class ExchangeService {
         } finally {
             if (owned) {
                 boolean again;
-                synchronized (this) { again = refreshAgain; refreshAgain = false; refreshing = again; }
+                synchronized (this) { again = refreshAgain && foreground; refreshAgain = false; refreshing = again; }
                 if (again) try { net.execute(() -> refresh(true)); } catch (RejectedExecutionException ignored) { synchronized (this) { refreshing = false; } }
             }
         }
@@ -306,7 +329,11 @@ final class ExchangeService {
 
     private void pass(JSONObject connection, boolean rethrow) throws Exception {
         int started;
-        synchronized (this) { started = epoch; }
+        long startedRevision;
+        synchronized (this) {
+            if (!foreground) return;
+            started = epoch; startedRevision = refreshState.revision();
+        }
         try {
             register(connection);
             boolean withDevices;
@@ -326,8 +353,21 @@ final class ExchangeService {
                 }
             }
             applyInbox(inbox, started);
+            synchronized (this) {
+                if (started == epoch) {
+                    refreshState.succeeded(startedRevision);
+                    if (!refreshState.pending()) stopRefreshRetry();
+                }
+            }
         } catch (Exception e) {
-            synchronized (this) { if (started == epoch) { code = failureCode(e); if ("exchangeDeviceUnknown".equals(code)) registeredKey = ""; } }
+            synchronized (this) {
+                if (started == epoch) {
+                    code = failureCode(e);
+                    if ("exchangeDeviceUnknown".equals(code)) registeredKey = "";
+                    refreshState.failed(startedRevision);
+                    scheduleRefreshRetry();
+                }
+            }
             changed();
             if (rethrow) throw e;
             return;
