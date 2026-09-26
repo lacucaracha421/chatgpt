@@ -7,7 +7,7 @@ import { modalDialogOpen } from "./modalDialog";
 import type { ChromeSearchInfo } from "./WorkspaceChromeContext";
 import { matchesEntry, NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "./navigationEntries";
 
-const GROUP_ORDER: NavigationEntryGroup[] = ["search", "place", "queue", "go", "action", "settings"];
+const GROUP_ORDER: NavigationEntryGroup[] = ["search", "tag", "place", "queue", "go", "action", "settings"];
 
 export type PaletteSearch = { info: ChromeSearchInfo; apply: (query: string) => void; open: (draft: string) => void };
 
@@ -32,7 +32,7 @@ function searchEntries(search: PaletteSearch | null | undefined, text: string): 
  * The 찾기 palette: searches the current view when it supports search, then moves to destinations
  * and runs a few commands by name. It never searches asset text where the view has no search.
  */
-export function CommandPalette({ open, onClose, entries, search, findPlaces, fallbackFocus }: { open: boolean; onClose: () => void; entries: NavigationEntry[]; search?: PaletteSearch | null; findPlaces?: (query: string) => NavigationEntry[]; fallbackFocus?: () => HTMLElement | null }) {
+export function CommandPalette({ open, onClose, entries, search, findPlaces, findTags, fallbackFocus }: { open: boolean; onClose: () => void; entries: NavigationEntry[]; search?: PaletteSearch | null; findPlaces?: (query: string) => NavigationEntry[]; findTags?: (query: string) => NavigationEntry[]; fallbackFocus?: () => HTMLElement | null }) {
   const [query, setQuery] = useState("");
   // Tracked by id: when a queue count arrives an entry can move between groups, and the highlight must follow it.
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -49,7 +49,7 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fal
 
   // Settings sections are only offered once the user types, so the default list stays short.
   // Folders, albums and characters are offered only once the user types (see placeEntries).
-  const visible = [...searchEntries(search, query), ...(findPlaces?.(query) ?? []), ...entries.filter((entry) => (query.trim() || entry.group !== "settings") && matchesEntry(entry, query))];
+  const visible = [...searchEntries(search, query), ...(findTags?.(query) ?? []), ...(findPlaces?.(query) ?? []), ...entries.filter((entry) => (query.trim() || entry.group !== "settings") && matchesEntry(entry, query))];
   const ordered = GROUP_ORDER.flatMap((group) => visible.filter((entry) => entry.group === group));
   const found = ordered.findIndex((entry) => entry.id === activeId);
   const current = found >= 0 ? found : 0;
@@ -60,11 +60,12 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fal
     listRef.current?.querySelector(`[id="${optionId(current)}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [current]);
 
-  const run = (entry: NavigationEntry | undefined) => {
+  const run = (entry: NavigationEntry | undefined, alternate = false) => {
     if (!entry) return;
     onClose();
-    entry.run();
+    (alternate && entry.runAlternate ? entry.runAlternate : entry.run)();
   };
+  const hasAlternate = ordered.some((entry) => entry.runAlternate);
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     // Korean IME: Enter or arrows that confirm a composition must not run a command.
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
@@ -79,7 +80,7 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fal
       event.preventDefault(); setActive(Math.max(0, ordered.length - 1));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      run(ordered[current]);
+      run(ordered[current], event.shiftKey);
     }
   };
 
@@ -117,7 +118,7 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fal
                   aria-label={entry.count === undefined ? (entry.context ? `${entry.label} · ${entry.context}` : undefined) : `${entry.label} ${entry.count.toLocaleString("ko-KR")}개`}
                   aria-current={entry.selected ? "page" : undefined}
                   className="command-palette__option" onPointerMove={() => { if (own !== current) setActive(own); }}
-                  onMouseDown={(event) => event.preventDefault()} onClick={() => run(entry)}>
+                  onMouseDown={(event) => event.preventDefault()} onClick={(event) => run(entry, event.shiftKey)}>
                   <span className="command-palette__icon" aria-hidden="true">{entry.icon}</span>
                   <span className="command-palette__label">{entry.label}</span>
                   {entry.context && <span className="command-palette__meta command-palette__context">{entry.context}</span>}
@@ -129,7 +130,7 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fal
           })}
         </div>
         <div id={`${id}-hint`} className="command-palette__foot">
-          <span><kbd>↑↓</kbd> 선택 <kbd>Enter</kbd> 열기 <kbd>Esc</kbd> 닫기</span>
+          <span><kbd>↑↓</kbd> 선택 <kbd>Enter</kbd> 열기{hasAlternate && <> <kbd>Shift</kbd>+<kbd>Enter</kbd> 태그 제외</>} <kbd>Esc</kbd> 닫기</span>
           <span>{search ? `${search.info.scope}에서 검색하거나 이름으로 이동합니다` : "이 화면은 검색이 없어 이름으로 이동만 합니다"}</span>
         </div>
       </RadixDialog.Content>

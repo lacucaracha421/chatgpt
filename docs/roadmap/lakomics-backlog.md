@@ -158,7 +158,7 @@ Mobile app:
 
 ## USER-REQ-20260926B — User requests, 2026-09-26 (second batch)
 
-Status: `PARTIAL` — the four mobile UI items (release caption, type tabs, connect row, sticky notes) shipped in 0.8.34 (`a3e4846`) and were accepted on the tablet by the user 2026-09-26; PC Notes board and release captions landed in `a83209c` (native PC check pending). File exchange redesign: chat-style timeline (direction A of docs/prototypes/exchange-redesign-20260926) on PC (`7379d92`) and tablet (0.8.37). Tablet Home rebuilt as dashboard H3 (docs/prototypes/home-dashboard-20260926/round2.html) in 0.8.37, with refined tab/folder motion and a delayed loading line. Remaining: tablet character creation, tablet Collection creation. Follow `MOBILE-DESIGN-001`'s process for visual changes (browser mockups at 800×1280 before the APK).
+Status: `PARTIAL` — 2026-09-27: the user confirmed the pending native PC checks (Notes board, release captions, Collections, 전송). Earlier: the four mobile UI items (release caption, type tabs, connect row, sticky notes) shipped in 0.8.34 (`a3e4846`) and were accepted on the tablet by the user 2026-09-26; PC Notes board and release captions landed in `a83209c` (native PC check pending). File exchange redesign: chat-style timeline (direction A of docs/prototypes/exchange-redesign-20260926) on PC (`7379d92`) and tablet (0.8.37). Tablet Home rebuilt as dashboard H3 (docs/prototypes/home-dashboard-20260926/round2.html) in 0.8.37, with refined tab/folder motion and a delayed loading line. Remaining: tablet character creation, tablet Collection creation. Follow `MOBILE-DESIGN-001`'s process for visual changes (browser mockups at 800×1280 before the APK).
 
 Mobile app:
 - Collections: show a work's new-release notification (신간 알림) on its tile in the grid, not only on the 신간 screen.
@@ -178,6 +178,15 @@ Mobile designs chosen 2026-09-26 from [the mockups](../prototypes/mobile-request
 ## HOME-DASH-001 — Information dashboard Home (tablet first)
 
 Status: `IN PROGRESS` — phase 1+2 shipped in 0.8.39 (layout R2 of round3.html; 자산 현황 from the new `/v1/library/summary`, deployed `54e835c`); next: 오늘의 AV 배우 and game/movie releases need PC-published data. 2026-09-26 the user rejected the image-centred H3 Home on the device and chose an information-only dashboard (no recent-saves images; small covers only in the 신간 list). Cards: 확인할 것, 신간, 발매 예정, 전송, 라이브러리 현황, 메모, 시스템 상태 (round 3 mockups in `docs/prototypes/home-dashboard-20260926/round3.html`). Decided 2026-09-26: games/movies use a **six-month release calendar** (IGDB upcoming games, TMDB `region=KR` upcoming movies) from which the user picks titles into a wishlist that is then tracked like manga releases (design: [research](../research/home-upcoming-sources-20260926.md)); AV Collection data **may leave the PC** (server/tablet) for 오늘의 AV 배우. User request 2026-09-27: the Home 캐릭터 검토 entry (tablet and PC) should be split by **series and character** (e.g. 백합 › 라라 N, 마리 N) instead of one total, each opening that series/character's review. Related (same day): a bulk "다른 캐릭터로 옮기기" for images confirmed under the wrong character (e.g. 마리 images in 라라 created before 마리 existed) if the current selection tools are awkward. User decision 2026-09-27 (character recognition scope): **turn off** the broad-folder rule (images saved directly in a non-series folder such as 게임 are compared with every registered series below it — 2026-09-12 rule); keep it as a setting (default off) so it can be re-enabled later. Seen: 명조 review showed 10 candidates from the 게임 root. When implementing, decide what happens to already-computed broad-folder candidates (hide from review while off). Later cards requested by the user: 게임 신작 예정, 만화 신간 예정, 영화 신작 예정 (needs game/movie release sources), 오늘의 AV 배우 (from AV Collections), 자산 현황, 캐릭터 검토, 서버 등 상태. PC Home: mockups `docs/prototypes/home-dashboard-20260926/pc.html`; user chose **B (priority ledger, lines instead of card boxes)** 2026-09-26, placed as a new first rail entry "홈" with pinned notes and connection rows in the index; PC adds 미분류, trash count, game/movie upcoming from the release calendar and wishlist events.
+
+## AUTO-TAG-001 — Automatic image tags and tagger character signal
+
+Status: `IN PROGRESS` — 2026-09-27. Findings: [tagger-character-signal-20260927](../research/tagger-character-signal-20260927.md). Mockups: `docs/prototypes/auto-tags-20260927/`.
+
+- PC phase 1 (in progress): 자동 태그 imported from the PixAI v0.9 backfill (user-triggered import; production import needs approval). Inspector: 주요 태그 row above 출처 = 추정 character only (score ≥ 0.85, no confirmed character; series from the name qualifier or a small map); full tags below 출처 grouped by kind (mockup 1B); sexual tags shown like others. Edit = remove/undo + add (2B). Search = Ctrl+K tag filters with include/exclude (3A). Korean labels only, English on hover (4). PC only; no server/tablet.
+- Character signal: PixAI agrees with 89 % of manual confirmations and only 2 % of rejections (30 of 64 targets); 451 undecided candidates. Next: use as a second signal in character classification (agree → auto, disagree → review, PixAI-only → candidates) after checking a sample of the candidates.
+- Newer taggers: wd-eva02 2026 canary (data to 2026-05-18, most 2025 명조/젠레스 characters) trial on 1,147 labelled images running; if better, re-tag the library with it (~13 h CPU on the laptop).
+- PixAI v1.0 (series + artist tags, most characters) is too slow on the laptop CPU (~75 h). Options: main PC GPU (unavailable for now) or a rented GPU (RunPod Secure Cloud RTX 4090, ~$1–2 estimated); needs the user's account, approval for images leaving the PC, and provisioning approval.
 
 ## PC-CHAR-UI-20260927 — Character folder fixes requested by the user
 
@@ -201,7 +210,7 @@ Ideas to carry to mobile (MOBILE-DESIGN-001): single status indicator, zero-hidi
 
 ## MOBILE-DESIGN-001 — Premium mobile layout pass (Galaxy Tab S11 portrait)
 
-Status: `IN PROGRESS` — implemented in Android 0.8.12 (49) on 2026-09-25, not yet accepted on the tablet. Brief given by the user 2026-09-24. Home screen content is out of scope (waits for the Revisit rebuild).
+Status: `DONE` — implemented in Android 0.8.12 (49) on 2026-09-25; accepted on the tablet by the user 2026-09-27. Brief given by the user 2026-09-24. Home screen content is out of scope (waits for the Revisit rebuild).
 
 2026-09-26: all listed items are implemented (last: smooth arrival of tiles loaded on scroll, 0.8.43); only Tab S11 device acceptance remains (layout fit, touch feel, tile arrival). Open question: whether appended Collections/Catalog cards should also rise in as whole cards (today only their covers fade in).
 

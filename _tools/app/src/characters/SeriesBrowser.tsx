@@ -369,7 +369,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             setSelection(emptySelection());
           })}>이 캐릭터에서 제외</Button>}
         </>}
-        {!picking && !currentGroup && editorPanel}
+        {!picking && (!currentGroup || editor) && editorPanel}
         {!current && !currentGroup && !picking && <Menu label="시리즈 더보기" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={seriesMenuItems} />}
         {currentGroup && !picking && <Menu label="그룹 더보기" disabled={busy} trigger={<PeopleIcon aria-hidden="true" />} items={[
           { id: "edit-group", label: "그룹 편집", icon: <PencilIcon aria-hidden="true" />, onSelect: () => setGroupEditRequest(v => v + 1) },
@@ -431,7 +431,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       </div>}
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && !current && !excludedOnly && <div className="series-browser__overview">
-          {!currentGroup && series.heroAssetId && <img className={`series-hero${privacyMode ? " character-private" : ""}`} src={assetUrl(series.heroAssetId)} alt={`${name} 히어로 이미지`} />}
+          {!currentGroup && series.heroAssetId && <img draggable={false} className={`series-hero${privacyMode ? " character-private" : ""}`} src={assetUrl(series.heroAssetId)} alt={`${name} 히어로 이미지`} />}
           <CharacterGroups key={`${series.classificationId}:${currentGroup?.id ?? "series"}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} rows={1}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
             onGroupsChanged={onChanged} headerAccessory={candidateReview} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest}
@@ -442,7 +442,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               const excluded = folderExclusions.includes(folder.id) || exclusion.disabled;
               return <article className={`series-character${excluded ? " series-character--excluded" : ""}`} key={folder.id}>
                 <button className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
-                  {item.thumbnailAssetId ? <img loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
+                  {item.thumbnailAssetId ? <img draggable={false} loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
                   {excluded && <span className="series-character__tag" aria-hidden="true">제외</span>}
                   <strong><FolderIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{folder.name}</span></strong>
                 </button>
@@ -453,7 +453,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               const description = [...(status.warning ? ["확인 필요"] : []), ...status.detail].join(" · ");
               return <article className="series-character" key={target.id}>
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
-                {(target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
+                {(target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img draggable={false} loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
                 <strong>{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
               </button>
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
@@ -508,7 +508,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     {s36Setup && <Dialog open title="S36 자동 분류" onClose={() => setS36Setup(false)}>
       <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
     </Dialog>}
-    <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} />
+    <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} onAutoTagFilterApplied={() => onNavigate({ kind: "classification", classificationId: null })} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />
   </section>;
 }

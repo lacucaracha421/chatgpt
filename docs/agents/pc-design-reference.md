@@ -144,6 +144,7 @@ This covers Collection cards/info/details, TV seasons/episodes and Asset date he
 
 - Menus, context menus, anchored panels and search surfaces use thin borders, small radii, shallow contrast and only `--shadow-floating`; dialogs (`--shadow-dialog`) are reserved for modal confirmation or genuinely blocking flows.
 - No tooltips on hover or keyboard focus, including shared tooltip overlays and native `title` bubbles (user, 2026-09-12; supersedes the tooltip allowance in ADR-0034, whose other decisions still apply).
+  - Exception (user, 2026-09-27): 자동 태그 chips show a small hover card with the English Danbooru name and library count, because labels are Korean-only; the same text is in `aria-description`.
 - Keep `aria-label` and keyboard-accessible naming; supplementary text may use `aria-description`. Keep real headings and dialog titles.
 - Focus, selected, disabled, open, destructive and hover states must remain distinguishable without color alone.
 

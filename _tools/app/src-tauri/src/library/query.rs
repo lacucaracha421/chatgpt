@@ -195,9 +195,49 @@ fn count_filtered_assets(
     Ok(u64::try_from(total.max(0)).unwrap_or(0))
 }
 
+/// The listing and count statements all start their filters with this clause.
+const NORMAL_ASSET_CLAUSE: &str = "WHERE asset.status = 'normal'";
+
+/// Adds the 자동 태그 filter (`auto_tags.rs`) after the normal-asset clause.
+fn with_auto_tag_filter<'a>(
+    sql: std::borrow::Cow<'a, str>,
+    query: &AssetQuery,
+) -> Result<std::borrow::Cow<'a, str>, LibraryError> {
+    let conditions = super::auto_tags::filter_conditions(query.auto_tags.as_ref())?;
+    if conditions.is_empty() {
+        return Ok(sql);
+    }
+    debug_assert!(sql.contains(NORMAL_ASSET_CLAUSE));
+    Ok(std::borrow::Cow::Owned(sql.replacen(
+        NORMAL_ASSET_CLAUSE,
+        &format!("{NORMAL_ASSET_CLAUSE}{conditions}"),
+        1,
+    )))
+}
+
 /// Small scopes benefit from primary-key lookups; broad scopes need the existing
 /// ordered scan. Probe at most 1,001 links so choosing a plan stays bounded.
+/// The 자동 태그 filter is applied here too, so every listing path shares it.
 fn scoped_asset_sql<'a>(
+    connection: &rusqlite::Connection,
+    sql: &'a str,
+    query: &AssetQuery,
+    classification_parameter: usize,
+    collection_parameter: usize,
+) -> Result<std::borrow::Cow<'a, str>, LibraryError> {
+    with_auto_tag_filter(
+        membership_scoped_sql(
+            connection,
+            sql,
+            query,
+            classification_parameter,
+            collection_parameter,
+        )?,
+        query,
+    )
+}
+
+fn membership_scoped_sql<'a>(
     connection: &rusqlite::Connection,
     sql: &'a str,
     query: &AssetQuery,
@@ -263,7 +303,8 @@ impl Library {
         let (start, end) = collected_range_bounds(&query)?;
         let connection = self.connection()?;
         let select = "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id";
-        let sql = ASSET_COUNT_SQL.replace("SELECT COUNT(*) FROM assets AS asset", select)
+        let sql = with_auto_tag_filter(ASSET_COUNT_SQL.into(), &query)?
+            .replace("SELECT COUNT(*) FROM assets AS asset", select)
             + " AND asset.id IN (SELECT value FROM json_each(?12))";
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map(params![query.classification_id, query.album_id,

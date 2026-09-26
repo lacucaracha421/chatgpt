@@ -190,6 +190,20 @@ it("shows a mosaic group card and opens the group asset union",async()=>{
   expect(await screen.findByRole("dialog",{name:"캐릭터 그룹 편집"})).toBeVisible();
 });
 
+it("opens a member character editor from inside a group view", async () => {
+  const groups: CharacterGroup[] = [{ id: "duo", seriesId: "series", name: "선도부", revision: 1, targetIds: ["hina", "kisaki"] }];
+  await mount(undefined, false, groups, "duo");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "히나 편집" }));
+  expect(await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" })).toBeVisible();
+});
+
+it("disables native dragging on character card thumbnails", async () => {
+  await mount();
+  const card = await screen.findByRole("button", { name: "히나 열기" });
+  expect(card.querySelector("img")).toHaveAttribute("draggable", "false");
+});
+
 it("selects in the existing gallery and preserves the editor draft",async()=>{
   const {api,browse,navigate}=await mount(); const saveSettings=vi.spyOn(api,"saveSettings"); const user=userEvent.setup();
   await user.click(await screen.findByRole("button",{name:"히나 편집"}));

@@ -4,8 +4,8 @@ import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/type
 import { useExchangeSnapshot } from "../exchange/exchangeStore";
 import { ActivityIcon, BookmarkIcon, Cog6ToothIcon, ExchangeIcon, FolderIcon, InboxIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 
-/** search: the current view's own search (palette only); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
-export type NavigationEntryGroup = "search" | "place" | "queue" | "go" | "action" | "settings";
+/** search: the current view's own search (palette only); tag: 자동 태그 filters for the 에셋 screen (palette only, while typing); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
+export type NavigationEntryGroup = "search" | "tag" | "place" | "queue" | "go" | "action" | "settings";
 
 export type NavigationEntry = {
   id: string;
@@ -21,10 +21,13 @@ export type NavigationEntry = {
   context?: string;
   selected?: boolean;
   run: () => void;
+  /** Shift+Enter or Shift+click, e.g. exclude a tag instead of including it. */
+  runAlternate?: () => void;
 };
 
 export const NAVIGATION_GROUP_LABELS: Record<NavigationEntryGroup, string> = {
   search: "검색",
+  tag: "자동 태그",
   place: "폴더·앨범·캐릭터",
   queue: "확인할 것",
   go: "이동",

@@ -6,6 +6,7 @@ import { useVaultExportJob, vaultExportProgressText } from "../external-vault/va
 import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
 import { ArtistIndex, ArtistIndexCount, isArtistView } from "../artists/ArtistIndex";
 import { CommandPalette } from "./CommandPalette";
+import { useAutoTagPaletteSearch } from "../autotags/autoTagPalette";
 import { MoreEntryList, MorePanel } from "./MorePanel";
 import { placeEntries, useNavigationEntries, type PlaceSources } from "./navigationEntries";
 import { modalDialogOpen } from "./modalDialog";
@@ -90,6 +91,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const searchInfo = chrome?.meta?.search ?? null;
   const paletteSearch = searchInfo && chrome ? { info: searchInfo, apply: chrome.applySearch, open: chrome.openSearch } : null;
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const findTags = useAutoTagPaletteSearch(paletteOpen, view, onNavigate);
   const paletteButton = useRef<HTMLButtonElement>(null);
   const queuesRequested = useRef(onQueuesRequested);
   queuesRequested.current = onQueuesRequested;
@@ -157,6 +159,6 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         }}
       />
     </aside>
-    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={entries} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} fallbackFocus={() => paletteButton.current} />
+    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={entries} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
   </div>;
 }

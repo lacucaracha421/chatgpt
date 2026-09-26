@@ -58,6 +58,7 @@ pub(crate) mod av;
 pub(crate) mod video_similarity;
 pub(crate) mod release_calendar;
 pub(crate) mod artists;
+pub(crate) mod auto_tags;
 pub(crate) mod home;
 
 #[tauri::command]
@@ -449,6 +450,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::MangaSeriesNotFound => "manga_series_not_found",
             LibraryError::ArtistNotFound => "artist_not_found",
             LibraryError::InvalidArtist(_) => "invalid_artist",
+            LibraryError::InvalidAutoTag(_) => "invalid_auto_tag",
         };
         Self { code, message }
     }

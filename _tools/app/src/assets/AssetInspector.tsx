@@ -27,6 +27,7 @@ import {
   sourceLabel,
 } from "./assetMetadata";
 import { assetThumbnailUrl } from "./mediaUrl";
+import { AutoTagHighlights, AutoTagList, useAssetAutoTags } from "../autotags/AutoTagSections";
 
 type Props = {
   assets: AssetSummary[];
@@ -35,6 +36,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   onOpenAsset?: (asset: AssetSummary) => void;
   onAssetUpdated?: (asset: AssetSummary) => void;
+  /** After a 자동 태그 chip applied its tag as an 에셋 filter, e.g. to open the 에셋 screen. */
+  onAutoTagFilterApplied?: () => void;
 };
 
 type MetadataDraft = {
@@ -50,6 +53,7 @@ export function AssetInspector({
   onOpenChange,
   onOpenAsset,
   onAssetUpdated = () => undefined,
+  onAutoTagFilterApplied,
 }: Props) {
   const { gateway } = useLibrary();
   const [editing, setEditing] = useState(false);
@@ -64,6 +68,7 @@ export function AssetInspector({
   const restoreEditFocusRef = useRef(false);
   const assetIds = assets.map((asset) => asset.id).join(",");
   const asset = assets.length === 1 ? assets[0] : null;
+  const autoTags = useAssetAutoTags(gateway.autoTags, open && asset ? asset.id : null, onAutoTagFilterApplied);
 
   useEffect(() => {
     setEditing(false);
@@ -222,6 +227,7 @@ export function AssetInspector({
               </div>
             </section>
           )}
+          <AutoTagHighlights state={autoTags.state} />
           <section className="asset-inspector__section">
             <h3>출처</h3>
             <dl className="asset-inspector__metadata">
@@ -244,6 +250,7 @@ export function AssetInspector({
               </div>
             </dl>
           </section>
+          <AutoTagList state={autoTags.state} />
           <section className="asset-inspector__section">
             <h3>파일</h3>
             <dl className="asset-inspector__metadata">
@@ -305,6 +312,7 @@ export function AssetInspector({
         </section>
       )}
       {copyError && <Toast tone="error" onDismiss={() => setCopyError(null)}>{copyError}</Toast>}
+      {autoTags.notices}
     </aside>
   );
 }

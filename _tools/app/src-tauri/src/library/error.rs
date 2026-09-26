@@ -635,6 +635,8 @@ pub enum LibraryError {
     ArtistNotFound,
     #[error("{0}")]
     InvalidArtist(String),
+    #[error("{0}")]
+    InvalidAutoTag(String),
 }
 
 impl From<super::catalog_query::CatalogQueryError> for LibraryError {

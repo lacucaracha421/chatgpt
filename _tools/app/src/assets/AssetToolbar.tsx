@@ -6,6 +6,7 @@ import { Button } from "../shared/ui/Button";
 import { Select } from "../shared/ui/Select";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { GalleryDisplaySettings } from "./GalleryDisplaySettings";
+import { hasAutoTagFilter, useAutoTagFilter } from "../autotags/autoTagFilter";
 
 type AssetToolbarProps = {
   galleryLayout?: "masonry" | "justified";
@@ -48,8 +49,9 @@ export function AssetToolbar({
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
   const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
-  // Folder counts are unfiltered, so they are hidden while a media or aspect filter narrows the view.
-  const countSummary = mediaFilter === "all" && aspectFilter === "all" ? folderCountSummary(rawView, classifications, directOnly) : null;
+  const autoTagFiltered = hasAutoTagFilter(useAutoTagFilter());
+  // Folder counts are unfiltered, so they are hidden while a media, aspect or 자동 태그 filter narrows the view.
+  const countSummary = mediaFilter === "all" && aspectFilter === "all" && !autoTagFiltered ? folderCountSummary(rawView, classifications, directOnly) : null;
   const location = title ?? (view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체");
 
   return (

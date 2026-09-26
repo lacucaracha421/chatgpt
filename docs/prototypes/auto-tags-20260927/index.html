@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto Tags Mockups</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-control:#232425; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --color-filter-selected:#383838; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo);
+  --selection-mark-size:7px;
+  --asset-selection-tint:rgb(36 125 137 / 55%);
+  --radius-tile:2px; --radius-sm:4px;
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --inspector-width:272px;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.muted { color:var(--color-muted); }
+img { display:block; }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:2560px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.toolbar a { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; color:var(--color-text); text-decoration:none; font-size:13px; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; width:28px; height:28px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1250px; line-height:1.7; margin-top:8px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.notes code { font-size:12px; color:#cfd3d6; background:var(--color-surface); padding:0 4px; border-radius:2px; }
+.rec { display:inline-block; font-size:12px; font-weight:600; padding:1px 7px; border-radius:2px; background:#2c3a33; color:#bfe0cc; margin-left:6px; vertical-align:1px; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:14px; color:var(--color-muted); margin-bottom:10px; line-height:1.6; max-width:800px; }
+figcaption b { color:var(--color-text); }
+.panels figcaption { max-width:272px; min-height:70px; }
+.panels.wide figcaption { max-width:340px; }
+.scaled { zoom:.5; }
+.scaled figcaption { font-size:26px; max-width:1600px; }
+.scaled .rec { font-size:22px; }
+body.shot .scaled .rec { font-size:12px; }
+/* Screenshot mode: one topic at 1:1, no document chrome. */
+body.shot .doc>header, body.shot section.topic:not(.shown) { display:none; }
+body.shot .doc { padding:24px; max-width:none; }
+body.shot section.topic { margin:0; border:0; padding:0; }
+body.shot section.topic>.notes, body.shot section.topic>h2 { display:none; }
+body.shot .scaled { zoom:1; }
+body.shot .scaled figcaption { font-size:15px; }
+body.shot .row { margin-top:0; margin-bottom:28px; }
+
+/* ===== PC window 1600 × 1000 ===== */
+.win { position:relative; width:1600px; height:1000px; display:flex; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); }
+.rail { width:64px; flex:none; display:flex; flex-direction:column; gap:6px; padding:6px 6px 10px; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.rail .mk { height:38px; display:grid; place-items:center; margin-bottom:4px; color:var(--color-accent); }
+.rail .mk svg { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.ri { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:56px; color:var(--color-muted); font-size:12px; line-height:14px; }
+.ri svg.i { width:20px; height:20px; }
+.ri.on { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.rail .tail { margin-top:auto; display:flex; flex-direction:column; gap:6px; }
+.index { width:248px; flex:none; display:flex; flex-direction:column; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.index-body { flex:1; min-height:0; overflow:hidden; padding:14px 14px 12px; display:flex; flex-direction:column; gap:2px; }
+.index-foot { flex:none; border-top:1px solid var(--color-border); padding:10px 14px; display:flex; align-items:center; gap:8px; font-size:13px; color:var(--color-muted); }
+.index-foot svg.i { width:18px; height:18px; }
+.slabel { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--color-muted); letter-spacing:.3px; margin:12px 0 4px; }
+.slabel:first-child { margin-top:0; }
+.slabel::before { content:''; width:5px; height:5px; background:rgba(221,216,202,.6); flex:none; }
+.slabel::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06)); }
+.irow { position:relative; display:flex; align-items:center; gap:8px; min-height:32px; padding:3px 10px; color:var(--color-text); font-size:14px; }
+.irow svg.i { width:16px; height:16px; color:var(--color-muted); }
+.irow .txt { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.irow .n { font:500 13px var(--font-numeric); color:var(--color-muted); }
+.irow.d1 { padding-left:30px; } .irow.d2 { padding-left:52px; }
+.irow .cdot { width:8px; height:8px; border-radius:1px; flex:none; }
+.irow.sel { background:var(--color-accent); color:var(--color-on-accent); box-shadow:var(--selection-echo); }
+.irow.sel svg.i, .irow.sel .n { color:var(--color-on-accent); }
+.irow.sel::after { content:''; width:var(--selection-mark-size); height:var(--selection-mark-size); background:var(--color-on-accent); flex:none; }
+.main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
+.titlebar { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding-left:18px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.titlebar h2 { font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.titlebar h2::before { content:''; width:5px; height:5px; background:var(--color-accent); }
+.titlebar .st { font-size:13px; color:var(--color-muted); white-space:nowrap; }
+.titlebar .space { flex:1; }
+.winctl { display:flex; height:100%; margin-left:8px; }
+.winctl span { width:44px; height:100%; display:grid; place-items:center; color:var(--color-muted); }
+.winctl svg.i { width:14px; height:14px; stroke-width:1.3; }
+.work { flex:1; min-height:0; display:flex; position:relative; }
+.gallery { flex:1; min-width:0; overflow:hidden; padding:4px 16px 0; position:relative; }
+.gallery::after { content:''; position:absolute; left:0; right:0; bottom:0; height:40px; background:linear-gradient(transparent,var(--color-bg)); }
+.dhead { font:500 15px var(--font-numeric); color:var(--color-text); display:flex; gap:8px; align-items:baseline; margin:12px 0 8px; }
+.dhead small { font:13px var(--font-ui); color:var(--color-muted); }
+.mason { column-gap:6px; }
+.tile { break-inside:avoid; margin-bottom:6px; position:relative; }
+.tile .th { width:100%; }
+.cap { display:flex; justify-content:space-between; font-size:12px; color:var(--color-muted); padding:3px 2px 0; }
+.cap .numeric { font-size:12.5px; }
+.tile.sel .th { position:relative; }
+.tile.sel .th::after { content:''; position:absolute; inset:0; background:var(--asset-selection-tint); }
+.tile.sel::before { content:''; position:absolute; left:6px; top:6px; width:8px; height:8px; background:var(--color-accent); z-index:2; }
+.th { display:block; background:var(--color-surface); overflow:hidden; border-radius:var(--radius-tile); }
+.th img { width:100%; height:100%; object-fit:cover; }
+
+/* ===== Inspector (asset-inspector) ===== */
+.insp { width:var(--inspector-width); flex:none; background:var(--color-surface-elevated); border-left:1px solid var(--color-border); padding:12px; font-size:13.5px; position:relative; overflow:hidden; }
+.win .insp { height:100%; }
+.insp.alone { border:1px solid var(--color-border); }
+.insp-head { display:flex; justify-content:flex-end; gap:4px; height:28px; margin-bottom:6px; color:var(--color-muted); }
+.insp-head span { width:28px; height:28px; display:grid; place-items:center; }
+.insp-head svg.i { width:18px; height:18px; }
+.insp .preview { height:200px; background:#2d2e2f; display:grid; place-items:center; margin-bottom:12px; overflow:hidden; }
+.insp .preview img { height:200px; width:auto; }
+.sec + .sec { margin-top:14px; }
+.sec h3 { display:flex; align-items:center; gap:6px; margin:0 0 8px; color:var(--color-muted); font-size:12px; font-weight:600; }
+.sec h3 .n { font:500 12.5px var(--font-numeric); color:var(--color-faint); }
+.sec h3 .sp { flex:1; }
+.sec h3 .act { display:inline-flex; align-items:center; gap:3px; font-weight:500; color:var(--color-muted); }
+.sec h3 svg.i { width:15px; height:15px; }
+.strip { display:flex; gap:4px; }
+.strip .th { width:52px; height:52px; border:1px solid var(--color-border); }
+.strip .th.cur { outline:2px solid var(--color-accent); outline-offset:-2px; }
+dl.meta { display:grid; gap:4px; margin:0; }
+dl.meta div { display:grid; grid-template-columns:6rem minmax(0,1fr); gap:8px; }
+dl.meta dt { color:var(--color-text); }
+dl.meta dt.link { color:var(--color-accent); }
+dl.meta dd { margin:0; overflow-wrap:anywhere; }
+.sec.new { position:relative; }
+.sec.new::before { content:''; position:absolute; left:-12px; top:-4px; bottom:-4px; width:2px; background:var(--color-accent); opacity:.7; }
+.fadebelow { position:relative; max-height:var(--h); overflow:hidden; }
+.fadebelow::after { content:''; position:absolute; left:0; right:0; bottom:0; height:40px; background:linear-gradient(transparent,var(--color-surface-elevated)); }
+
+/* Auto tag chip: outline + dashed = machine guess; user Classification tags stay solid. */
+.tags { display:flex; flex-wrap:wrap; gap:5px; }
+.atag { position:relative; display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 7px; border:1px dashed #5d6164; border-radius:3px; font-size:12.5px; color:#d9dcdf; background:transparent; white-space:nowrap; }
+.atag.low { color:var(--color-faint); border-color:#45484b; }
+.atag.en { font-family:"Barlow",sans-serif; }
+.atag.char { border-color:rgba(221,216,202,.5); color:var(--color-accent); }
+.atag .est { font-size:10.5px; color:var(--color-muted); padding-left:5px; border-left:1px solid #4a4d50; line-height:12px; }
+.atag.hov { background:var(--color-surface-hover); border-style:solid; border-color:var(--color-filter-border); padding-right:3px; }
+.atag .x { width:16px; height:16px; display:grid; place-items:center; color:var(--color-text); border-radius:2px; }
+.atag .x svg.i { width:12px; height:12px; stroke-width:2; }
+.atag.hov .x { background:#3c3e40; }
+.atag.mine { border-style:solid; border-color:#5d6164; }
+.atag.mine::after { content:''; width:4px; height:4px; background:var(--color-muted); margin-left:1px; }
+.atag.on { background:var(--color-filter-selected); border-style:solid; border-color:var(--color-filter-border); }
+.atag .cnt { font:500 12px var(--font-numeric); color:var(--color-muted); }
+.atag.two { height:36px; flex-direction:column; align-items:flex-start; justify-content:center; gap:0; line-height:1.15; padding:0 8px; }
+.atag.two small { font:11px "Barlow",sans-serif; color:var(--color-faint); }
+.more { display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 6px; font-size:12.5px; color:var(--color-muted); }
+.more svg.i { width:13px; height:13px; }
+.utag { display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px; background:var(--color-control-pressed); border:1px solid var(--color-border-strong); border-radius:3px; font-size:12.5px; color:var(--color-text); box-shadow:var(--inset-light); }
+.utag i { width:8px; height:8px; border-radius:1px; }
+.grp + .grp { margin-top:9px; }
+.grp .gl { font-size:11.5px; color:var(--color-faint); margin-bottom:4px; display:flex; gap:6px; align-items:baseline; }
+.grp .gl .numeric { font-size:12px; }
+.inline { line-height:1.75; color:#d0d3d6; font-size:13px; }
+.inline a { color:inherit; text-decoration:none; }
+.inline a.h { text-decoration:underline; text-decoration-color:var(--color-muted); text-underline-offset:3px; }
+.inline .sepc { color:var(--color-faint); }
+.inline .charx { color:var(--color-accent); }
+.inline .charx small { font-size:11px; color:var(--color-muted); }
+
+/* Floating bits: tooltip, menu, toast, autocomplete */
+.tip { position:absolute; z-index:6; background:#0f1011; border:1px solid var(--color-border-strong); border-radius:3px; padding:5px 8px; font-size:12px; line-height:1.45; color:var(--color-text); white-space:nowrap; box-shadow:var(--shadow-floating); }
+.tip .en { font-family:"Barlow",sans-serif; }
+.tip small { color:var(--color-muted); font-size:11.5px; }
+.menu { position:absolute; z-index:6; min-width:200px; background:var(--color-surface-elevated); border:1px solid var(--color-border-strong); border-radius:4px; padding:4px; box-shadow:var(--shadow-floating); font-size:13.5px; }
+.mi { display:flex; align-items:center; gap:10px; height:32px; padding:0 10px; border-radius:3px; color:var(--color-text); white-space:nowrap; }
+.mi svg.i { width:16px; height:16px; color:var(--color-muted); }
+.mi.hl { background:var(--color-surface-hover); }
+.mi .en { font-family:"Barlow",sans-serif; color:var(--color-muted); font-size:12.5px; }
+.mi .cnt { margin-left:auto; font:500 13px var(--font-numeric); color:var(--color-muted); }
+.mi.dim { color:var(--color-muted); }
+.msep { height:1px; background:var(--color-border); margin:4px 2px; }
+.mhead { font-size:11.5px; color:var(--color-faint); padding:6px 10px 2px; }
+.toast { position:absolute; z-index:7; display:flex; align-items:center; gap:12px; background:#2d2e2f; border:1px solid var(--color-border-strong); border-radius:4px; padding:8px 8px 8px 12px; box-shadow:var(--shadow-floating); font-size:13.5px; white-space:nowrap; }
+.toast b { color:var(--color-accent); font-weight:600; padding:3px 8px; }
+.field { display:flex; align-items:center; gap:6px; height:28px; padding:0 8px; background:var(--color-control); border:1px solid var(--color-border); border-radius:3px; font-size:13px; color:var(--color-muted); }
+.field.focus { border-color:var(--color-focus); color:var(--color-text); }
+.field svg.i { width:14px; height:14px; }
+.caret { display:inline-block; width:1px; height:15px; background:var(--color-text); margin-left:-4px; }
+.addbtn { display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 7px; font-size:12.5px; color:var(--color-muted); border:1px solid transparent; }
+.addbtn svg.i { width:13px; height:13px; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:28px; padding:0 10px; font-size:13px; font-weight:500; white-space:nowrap; border-radius:4px; border:1px solid var(--color-border); background:var(--color-control); box-shadow:var(--inset-light); color:var(--color-text); }
+.btn.ghost { background:transparent; border-color:transparent; box-shadow:none; color:var(--color-muted); }
+.btn svg.i { width:15px; height:15px; }
+.brow { display:flex; align-items:center; gap:8px; height:30px; padding:0 4px; border-radius:3px; font-size:13px; }
+.brow .l { flex:1; }
+.brow .numeric { color:var(--color-muted); font-size:13px; }
+.brow.hl { background:var(--color-surface-hover); }
+.brow .btn { height:24px; font-size:12px; padding:0 8px; }
+.mosaic { display:grid; grid-template-columns:repeat(4,1fr); gap:3px; margin-bottom:12px; }
+.mosaic .th { aspect-ratio:1; }
+
+/* Filter badges in the view header and palette */
+.fchip { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 4px 0 8px; background:var(--color-filter-selected); border:1px solid var(--color-filter-border); border-radius:3px; font-size:13px; white-space:nowrap; }
+.fchip .sg { font:600 13px var(--font-ui); color:var(--color-muted); width:14px; text-align:center; }
+.fchip.ex { background:transparent; border-style:dashed; color:var(--color-muted); }
+.fchip.ex .lbl { text-decoration:line-through; text-decoration-color:rgba(160,163,165,.7); }
+.fchip .x { width:18px; height:18px; display:grid; place-items:center; color:var(--color-muted); }
+.fchip .x svg.i { width:12px; height:12px; stroke-width:2; }
+.fchip .tg { width:9px; height:9px; border:1px dashed var(--color-muted); border-radius:1px; }
+.palette { position:absolute; z-index:8; left:50%; top:80px; transform:translateX(-50%); width:640px; background:var(--color-surface-elevated); border:1px solid var(--color-border-strong); border-radius:4px; box-shadow:var(--shadow-floating); overflow:hidden; }
+.palette .pin { display:flex; align-items:center; gap:10px; height:48px; padding:0 14px; border-bottom:1px solid var(--color-border); font-size:16px; }
+.palette .pin svg.i { width:18px; height:18px; color:var(--color-muted); }
+.palette .pin .scope { margin-left:auto; font-size:12px; color:var(--color-muted); border:1px solid var(--color-border); border-radius:3px; padding:1px 6px; }
+.palette .plist { padding:6px; }
+.palette .mi { height:36px; font-size:14px; }
+.palette .mi .tg { width:12px; height:12px; border:1px dashed var(--color-muted); border-radius:2px; flex:none; }
+.palette .pfoot { display:flex; gap:16px; padding:8px 14px; border-top:1px solid var(--color-border); font-size:12px; color:var(--color-muted); }
+.palette kbd, .kbd { font:500 11px var(--font-ui); border:1px solid var(--color-border-strong); border-radius:3px; padding:0 4px; color:var(--color-text); }
+.frow { flex:none; display:flex; align-items:center; gap:8px; min-height:44px; padding:8px 16px; border-bottom:1px solid var(--color-border); background:var(--color-bg); flex-wrap:wrap; }
+.frow .lbl0 { font-size:12.5px; color:var(--color-muted); }
+.frow .space { flex:1; }
+.frow .rel { display:flex; align-items:center; gap:5px; font-size:12.5px; color:var(--color-muted); }
+.frow .rel .atag { height:24px; }
+
+/* Topic 4 comparison */
+.cmp { width:272px; }
+.cmp .insp { padding-bottom:14px; }
+.legend { display:flex; flex-direction:column; gap:10px; padding:14px; border:1px solid var(--color-border); background:var(--color-surface-elevated); width:360px; font-size:13px; color:var(--color-muted); }
+.legend .lr { display:flex; align-items:center; gap:10px; }
+.legend .lr>span:first-child { width:130px; flex:none; }
+.settings { width:520px; background:var(--color-bg); border:1px solid var(--color-border); padding:18px 20px; font-size:14px; }
+.settings h4 { margin:0 0 12px; font-size:18px; font-weight:600; }
+.srow { display:flex; align-items:center; gap:12px; min-height:44px; border-bottom:1px solid var(--color-border); }
+.srow .l { flex:1; display:grid; line-height:1.35; }
+.srow .l small { color:var(--color-muted); font-size:12.5px; }
+.toggle { width:34px; height:18px; border-radius:9px; background:var(--color-accent); position:relative; flex:none; }
+.toggle::after { content:''; position:absolute; right:2px; top:2px; width:14px; height:14px; border-radius:50%; background:var(--color-on-accent); }
+.hid { display:flex; align-items:center; gap:10px; height:36px; padding-left:8px; font-size:13.5px; }
+.hid .en { font-family:"Barlow",sans-serif; color:var(--color-muted); font-size:12.5px; }
+.hid .numeric { color:var(--color-muted); margin-left:auto; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>자동 태그 목업 — PC</h1>
+  <p class="lead">PixAI 태거 v0.9가 붙인 <b>자동 태그</b>를 PC 에셋 화면에 보여 주는 안입니다. 이미지 <span class="numeric">8,915</span>장, 이미지당 평균 <span class="numeric">54</span>개(점수 ≥ 0.35), 태그 종류 <span class="numeric">11,737</span>개 기준의 가상 데이터입니다. 자동 태그는 <b>점선 테두리</b> 칩으로, 사용자가 만든 분류 태그(면이 채워진 칩)와 구분합니다. 성적 태그도 다른 태그와 똑같이 보여 줍니다. 이미지는 모두 자리표시용 도형입니다. 창 크기는 1600 × 1000, 정보 패널 폭은 지금 앱과 같은 272px입니다.</p>
+  <div class="toolbar">바로가기
+    <a href="#t1">1 정보 패널</a><a href="#t2">2 잘못된 태그 편집</a><a href="#t3">3 태그로 찾기</a><a href="#t4">4 한국어 표시</a>
+  </div>
+</header>
+
+<section class="topic" id="t1">
+  <h2><span class="k">1</span>정보 패널의 자동 태그 섹션</h2>
+  <div class="notes">자동 태그 섹션은 <b>같은 게시물</b>과 <b>출처</b> 사이에 들어갑니다(아래 패널의 왼쪽 세로선). 공통 규칙: 흔해서 정보가 적은 태그(여자 1명, 단독, 정면 응시, 단색 배경, 흰 배경 …)는 맨 뒤로 보내고 흐리게 표시합니다. 캐릭터 태그는 점수 0.85 이상이고 확정 캐릭터가 없을 때만 <b>추정</b> 표시와 함께 맨 앞에 나오며, 확정 캐릭터가 있으면 숨깁니다. 칩을 누르면 그 태그로 거른 에셋 목록이 열립니다. 사전에 없는 태그는 영어(밑줄 → 띄어쓰기)로 보입니다.
+  <ul><li><b>추천: A</b>. 가장 단순하고 패널 높이가 일정합니다. B는 사전 약 500개에 분류를 더 달아야 하고, 사전 밖 태그가 “기타”로 몰립니다. C는 가장 작지만 눌러서 거르기·빼기가 불편합니다.</li></ul></div>
+  <div class="row scaled" id="r1a"></div>
+  <div class="row panels" id="r1b"></div>
+</section>
+
+<section class="topic" id="t2">
+  <h2><span class="k">2</span>잘못된 태그 편집</h2>
+  <div class="notes">잘못 붙은 태그는 칩에 마우스를 올리면 나오는 <b>✕</b>로 이 에셋에서만 뺍니다. 뺀 태그는 나중에 다시 태깅해도 다시 붙지 않고, 바로 아래에 <b>되돌리기</b> 알림이 뜹니다. <b>+ 태그 추가</b>는 태거 어휘(한국어·영어)에서 골라 붙이며 라이브러리 개수를 함께 보여 줍니다. 직접 붙인 태그는 실선 테두리 + 작은 점으로 구분합니다.
+  <ul><li><b>추천: B</b> (빼기 + 추가). C의 전체 숨기기와 여러 개 선택 편집은 쓰임이 확인되면 나중에 더합니다. 전체 숨기기 목록은 설정에서 되살릴 수 있어야 합니다.</li></ul></div>
+  <div class="row panels wide" id="r2a"></div>
+  <div class="row" id="r2b"></div>
+</section>
+
+<section class="topic" id="t3">
+  <h2><span class="k">3</span>태그로 찾기 (에셋 화면)</h2>
+  <div class="notes">에셋 화면에는 늘 떠 있는 검색창이 없다는 규칙(pc-design-reference §5)을 지킵니다. 자동 태그는 자유 문장 검색이 아니라 <b>정확한 태그 필터</b>입니다. 여러 태그는 <b>모두 포함(AND)</b>으로 합치고, 칩 앞의 <b>+/−</b>를 눌러 제외로 바꿉니다. 결과 개수는 제목 옆에 바로 보입니다. 정보 패널의 칩을 누르면 같은 필터가 적용된 상태로 이 화면이 열립니다.
+  <ul><li><b>추천: A</b> (찾기 팔레트에서 추가, 제목줄에 필터 배지). 지금의 찾기(<span class="kbd">Ctrl+K</span>)와 검색 해제 규칙을 그대로 씁니다. B의 “함께 많이 나온 태그”는 A에도 나중에 붙일 수 있습니다.</li></ul></div>
+  <div class="row scaled" id="r3a"></div>
+  <div class="row scaled" id="r3b"></div>
+</section>
+
+<section class="topic" id="t4">
+  <h2><span class="k">4</span>한국어 표시 방식</h2>
+  <div class="notes">같은 태그를 세 가지로 적어 봤습니다. 사전(약 500개, 전체 태그 등장의 약 62%)에 있는 태그는 한국어, 없는 태그는 영어로 나옵니다. 검색은 어느 방식이든 한국어·영어를 모두 받습니다.
+  <ul><li><b>추천: 한국어만 (마우스를 올리면 영어 이름 + 라이브러리 개수)</b>. 칩 한 줄에 가장 많이 들어가고, 영어가 필요할 때만 보입니다.</li></ul></div>
+  <div class="row panels" id="r4a"></div>
+</section>
+</div>
+
+<script>
+const IC={
+  MagnifyingGlass:["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],
+  ArrowsUpDown:["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],
+  AdjustmentsHorizontal:["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],
+  ChevronDown:["m19.5 8.25-7.5 7.5-7.5-7.5"],
+  ChevronRight:["m8.25 4.5 7.5 7.5-7.5 7.5"],
+  Photo:["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z"],
+  RectangleStack:["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],
+  BookOpen:["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],
+  PencilSquare:["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],
+  Tag:["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],
+  Folder:["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],
+  XMark:["M6 18 18 6M6 6l12 12"],
+  Plus:["M12 4.5v15m7.5-7.5h-15"],
+  Minus:["M5 12h14"],
+  Square2Stack:["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],
+  ArrowTopRightOnSquare:["M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"],
+  ClipboardDocument:["M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5A3.375 3.375 0 0 0 6.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0 0 15 2.25h-1.5a2.251 2.251 0 0 0-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v12c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5a9 9 0 0 0-9-9Z"],
+  EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+  EyeSlash:["M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"],
+  Funnel:["M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"],
+  NoSymbol:["M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"],
+  InformationCircle:["m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"],
+  Clock:["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  UserGroup:["M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],
+};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${(IC[n]||[]).map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const fmt=n=>n.toLocaleString('en-US');
+
+/* Placeholder artwork (same generator as the artist-hub mockups). No real images. */
+const P=[['#c9b6b0','#5a3c3c','#93706a','#efe0cc'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#b6b7c4','#363d57','#737c93','#d4cbc3'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#a9b9a0','#34443a','#6d8466','#dfe3c8'],['#9fb0c8','#2e3a52','#5f7596','#e0d6c4'],['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#d0b8c6','#4a3448','#8c6784','#f0dde2'],['#c2c9a4','#3f452c','#7d875a','#ebe8cf'],['#a8c4cc','#26404a','#5a8894','#e6ecdf']];
+const R=[0.72,1,1.35,0.66,0.8,1.5,0.75,1.1,0.62,1.25,0.9,0.7];
+const art=(pal,j,ratio=1)=>{const p=P[pal%P.length];const k=j%4;const W=300,H=Math.round(300/ratio);
+  const cy=H*(0.25+0.1*(j%3)),r=W*(0.12+0.03*k);
+  const fig=k%2?`<ellipse cx="${W*0.5}" cy="${H*0.62}" rx="${W*0.16}" ry="${H*0.3}" fill="${p[1]}" opacity=".9"/><circle cx="${W*0.5}" cy="${H*0.3}" r="${W*0.09}" fill="${p[1]}"/>`:'';
+  return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="${p[0]}"/><circle cx="${W*(0.25+0.17*k)}" cy="${cy}" r="${r}" fill="${p[3]}"/><path d="M0 ${H*0.62}L${W*0.3} ${H*(0.42+0.04*k)} ${W*0.58} ${H*0.7} ${W*0.8} ${H*0.5} ${W} ${H*0.6}V${H}H0Z" fill="${p[2]}"/>${fig}<path d="M0 ${H*0.8}L${W*0.4} ${H*0.66} ${W*0.7} ${H*0.82} ${W} ${H*0.74}V${H}H0Z" fill="${p[1]}" opacity=".85"/></svg>`);};
+const th=(pal,j,style='',ratio=1,cls='')=>`<span class="th ${cls}" style="${style}"><img src="${art(pal,j,ratio)}" alt=""></span>`;
+
+/* ===== Vocabulary (mock). key: [Korean label or '' if not in the ~500 dictionary, group, library count] ===== */
+const T={
+  long_hair:['긴 머리','body',6412], '1girl':['여자 1명','body',6288], looking_at_viewer:['정면 응시','pose',5870], breasts:['가슴','body',5640],
+  simple_background:['단색 배경','scene',4210], smile:['미소','pose',4105], solo:['단독','body',4080], blush:['홍조','pose',3960],
+  white_background:['흰 배경','scene',3120], long_sleeves:['긴 소매','wear',2870], shirt:['셔츠','wear',2640], open_mouth:['벌린 입','pose',2580],
+  holding:['들고 있음','pose',2310], navel:['배꼽','body',2240], multiple_girls:['여러 여자','body',2190], short_hair:['짧은 머리','body',2050],
+  large_breasts:['큰 가슴','body',2010], collarbone:['쇄골','body',1960], hair_ornament:['머리 장식','wear',1880], thighs:['허벅지','body',1870],
+  bare_shoulders:['드러난 어깨','body',1780], nipples:['유두','sex',1720], skirt:['치마','wear',1690], blue_eyes:['파란 눈','body',1650],
+  hair_between_eyes:['눈 사이 앞머리','body',1580], very_long_hair:['아주 긴 머리','body',1540], black_hair:['검은 머리','body',1520],
+  medium_breasts:['보통 가슴','body',1450], thighhighs:['사이하이','wear',1410], white_shirt:['흰 셔츠','wear',1390], sitting:['앉은 자세','pose',1360],
+  cleavage:['가슴골','sex',1340], sweat:['땀','pose',1330], ahoge:['바보털','body',1190], yellow_eyes:['노란 눈','body',980], nude:['나체','sex',980],
+  school_uniform:['교복','wear',930], pleated_skirt:['주름 치마','wear',880], pussy:['음부','sex',870], lying:['누운 자세','pose',820],
+  indoors:['실내','scene',740], black_thighhighs:['검은 사이하이','wear',720], halo:['헤일로','body',690], spread_legs:['다리 벌림','sex',640],
+  pink_hair:['분홍 머리','body',610], bed:['침대','scene',610], sex:['성행위','sex',590], open_shirt:['풀어헤친 셔츠','wear',560], glasses:['안경','wear',540],
+  pillow:['베개','scene',520], on_back:['등 대고 누움','pose',510], bed_sheet:['침대 시트','scene',480], breasts_out:['가슴 노출','sex',470],
+  serafuku:['세일러복','wear',410], from_above:['위에서 본 구도','scene',390], no_panties:['노팬티','sex',350], white_thighhighs:['흰 사이하이','wear',310],
+  heterochromia:['오드아이','body',260], thigh_strap:['허벅지 끈','wear',240], 'heart-shaped_pupils':['','etc',140], wing_collar:['','etc',170], fang_out:['','etc',90],
+  thighband_pantyhose:['','etc',60], 'hoshino_(blue_archive)':['호시노','char',318],
+};
+const LOW=new Set(['1girl','solo','looking_at_viewer','simple_background','white_background']);
+const GROUPS=[['char','캐릭터 (추정)'],['body','인물·외모'],['wear','옷·소품'],['pose','표정·포즈'],['sex','성적 표현'],['scene','장면·배경'],['etc','기타']];
+const ko=k=>T[k][0]||k.replace(/_/g,' ');
+const isEn=k=>!T[k][0];
+/* The sample asset: 54 tags at score >= .35; the 40 below plus 14 low-score tags outside the dictionary. */
+const ASSET=[['hoshino_(blue_archive)',.91],['1girl',.99],['solo',.97],['long_hair',.96],['breasts',.95],['pink_hair',.94],['halo',.93],['nipples',.92],['heterochromia',.90],['ahoge',.89],['blush',.88],['white_shirt',.87],['navel',.85],['open_shirt',.84],['lying',.83],['black_thighhighs',.82],['on_back',.81],['breasts_out',.80],['bed_sheet',.79],['looking_at_viewer',.78],['collarbone',.77],['bed',.75],['medium_breasts',.74],['open_mouth',.72],['sweat',.70],['long_sleeves',.69],['spread_legs',.66],['pussy',.64],['indoors',.61],['no_panties',.60],['pillow',.58],['yellow_eyes',.57],['blue_eyes',.55],['hair_between_eyes',.53],['very_long_hair',.52],['bare_shoulders',.50],['heart-shaped_pupils',.47],['from_above',.46],['fang_out',.43],['wing_collar',.41]];
+const TOTAL=54, UNLISTED=TOTAL-ASSET.length;
+/* Display order: estimated character first, then confidence, low-information tags last. */
+const ORDERED=[...ASSET.filter(([k])=>T[k][1]==='char'),...ASSET.filter(([k])=>T[k][1]!=='char'&&!LOW.has(k)),...ASSET.filter(([k])=>LOW.has(k))];
+
+const chip=(k,s,extra='',inner='')=>{
+  if(T[k][1]==='char') return `<span class="atag char ${extra}">${ko(k)}<span class="est">추정</span>${inner}</span>`;
+  return `<span class="atag ${LOW.has(k)?'low':''} ${isEn(k)?'en':''} ${extra}">${ko(k)}${inner}</span>`;
+};
+const xBtn=`<span class="x">${I('XMark')}</span>`;
+
+/* ===== Window shell ===== */
+const RAIL=[['RectangleStack','에셋'],['BookOpen','컬렉션'],['Photo','망가'],['PencilSquare','메모'],['ArrowsUpDown','전송']];
+const rail=`<nav class="rail"><div class="mk">${MARK}</div>${RAIL.map(([ic,l])=>`<div class="ri ${l==='에셋'?'on':''}">${I(ic)}<span>${l}</span></div>`).join('')}<div class="tail"><div class="ri">${I('MagnifyingGlass')}<span>찾기</span></div><div class="ri">${I('EllipsisHorizontal')}<span>더보기</span></div></div></nav>`;
+const winctl=`<span class="winctl"><span>${I('Minus')}</span><span>${I('Square2Stack')}</span><span>${I('XMark')}</span></span>`;
+const index=(sel='전체')=>`<aside class="index"><div class="index-body">
+  <div class="slabel">보기</div>
+  <div class="irow ${sel==='전체'?'sel':''}">${I('Photo')}<span class="txt">전체</span><span class="n">8,915</span></div>
+  <div class="irow">${I('Clock')}<span class="txt">최근 추가</span><span class="n">146</span></div>
+  <div class="irow">${I('Folder')}<span class="txt">미분류</span><span class="n">2,304</span></div>
+  <div class="slabel">분류</div>
+  <div class="irow">${I('ChevronDown')}<span class="txt">블루 아카이브</span><span class="n">1,208</span></div>
+  <div class="irow d1"><i class="cdot" style="background:#e8a3b8"></i><span class="txt">호시노</span><span class="n">286</span></div>
+  <div class="irow d1"><i class="cdot" style="background:#9fb7d8"></i><span class="txt">시로코</span><span class="n">241</span></div>
+  <div class="irow d1"><i class="cdot" style="background:#c9c1a6"></i><span class="txt">유우카</span><span class="n">198</span></div>
+  <div class="irow">${I('ChevronRight')}<span class="txt">원신</span><span class="n">842</span></div>
+  <div class="irow">${I('ChevronRight')}<span class="txt">오리지널</span><span class="n">1,930</span></div>
+  <div class="irow">${I('ChevronDown')}<span class="txt">태그</span><span class="n">612</span></div>
+  <div class="irow d1"><i class="cdot" style="background:#8fb9a8"></i><span class="txt">수영복</span><span class="n">174</span></div>
+  <div class="irow d1"><i class="cdot" style="background:#b7a1d3"></i><span class="txt">메이드</span><span class="n">96</span></div>
+  <div class="slabel">앨범</div>
+  <div class="irow">${I('Folder')}<span class="txt">즐겨찾기</span><span class="n">420</span></div>
+  <div class="irow">${I('Folder')}<span class="txt">배경화면 후보</span><span class="n">58</span></div>
+  </div><div class="index-foot">${I('AdjustmentsHorizontal')}보기 설정</div></aside>`;
+const gallery=(cols,seed=0,selIdx=-1,dates=[['9월 27일','토요일 · 38개'],['9월 26일','금요일 · 52개']])=>{
+  const names=['hanamori_ink','yunseul_art','kuroneko_draws','mizu_aoi','','kagura_rin','sandglass_k','tetsu_sketch','','lemonbalm_d'];
+  let n=0;
+  return dates.map(([d,s],di)=>`<div class="dhead">${d} <small>${s}</small></div><div class="mason" style="column-count:${cols}">${Array.from({length:cols*3-(di?0:1)},(_,j)=>{const idx=n++;const r=R[(idx*5+seed)%R.length];const pal=(idx*3+seed)%10;
+    return `<div class="tile ${idx===selIdx?'sel':''}">${th(pal,idx+seed,`aspect-ratio:${r}`,r)}<div class="cap"><span>${names[idx%names.length]}</span><span class="numeric">${String(23-(idx%12)).padStart(2,'0')}:${String((idx*17)%60).padStart(2,'0')}</span></div></div>`;}).join('')}</div>`).join('');
+};
+const win=({title='전체',status='8,915개',headExtra='',frow='',body,insp='',overlay=''})=>`<div class="win">${rail}${index()}<div class="main"><header class="titlebar"><h2>${title}</h2><span class="st">${status}</span>${headExtra}<span class="space"></span>${winctl}</header>${frow}<div class="work">${body}${insp}</div>${overlay}</div></div>`;
+
+/* ===== Inspector pieces ===== */
+const inspTop=(pal=7,j=5)=>`<div class="insp-head"><span>${I('PencilSquare')}</span><span>${I('XMark')}</span></div>
+  <div class="preview"><img src="${art(pal,j,0.72)}" alt=""></div>
+  <section class="sec"><h3>같은 게시물<span class="sp"></span><span class="n">3개</span></h3><div class="strip">${th(pal,j,'',1,'cur')}${th(pal,j+1)}${th(pal,j+2)}</div></section>`;
+const inspBottom=`<section class="sec"><h3>출처</h3><dl class="meta"><div><dt class="link">↗ 출처</dt><dd>x.com/hanamori_ink</dd></div><div><dt>제작자</dt><dd>하나모리 (@hanamori_ink)</dd></div><div><dt>게시 시각</dt><dd>2026. 9. 26. 21:14</dd></div></dl></section>
+  <section class="sec"><h3>파일</h3><dl class="meta"><div><dt>해상도</dt><dd>2480×3508</dd></div><div><dt>크기</dt><dd>4.8 MB</dd></div></dl></section>
+  <section class="sec"><h3>가져오기</h3><dl class="meta"><div><dt>가져온 날짜</dt><dd>2026. 9. 27.</dd></div><div><dt>가져온 방식</dt><dd>수집기</dd></div></dl></section>`;
+const tagHead=(extra='')=>`<h3>자동 태그<span class="n">${TOTAL}</span><span class="sp"></span>${extra}</h3>`;
+
+/* Topic 1 variants */
+const secA=(opts={})=>{const vis=ORDERED.slice(0,12);
+  return `<section class="sec new">${tagHead(opts.head||'')}<div class="tags">${vis.map(([k,s],i)=>chip(k,s,(opts.hover===i?'hov':'')+(opts.on===i?' on':''),opts.hover===i&&opts.x?xBtn:'')).join('')}${opts.added?opts.added:''}<span class="more">더 보기 (${TOTAL-12})${I('ChevronDown')}</span>${opts.add?opts.add:''}</div>${opts.after||''}</section>`;};
+const secB=()=>{const by={};ORDERED.forEach(([k,s])=>{(by[T[k][1]]=by[T[k][1]]||[]).push([k,s]);});
+  return `<section class="sec new">${tagHead(`<span class="act">${I('ChevronDown')}모두 펼침</span>`)}${GROUPS.filter(([g])=>by[g]).map(([g,l])=>{const list=by[g];const extra=g==='etc'?UNLISTED:0;
+    return `<div class="grp"><div class="gl">${l}<span class="numeric">${list.length+extra}</span></div><div class="tags">${list.map(([k,s])=>chip(k,s)).join('')}${extra?`<span class="more">외 ${extra}개</span>`:''}</div></div>`;}).join('')}</section>`;};
+const secC=()=>{const vis=ORDERED.slice(0,18);
+  return `<section class="sec new">${tagHead()}<div class="inline">${vis.map(([k],i)=>T[k][1]==='char'?`<a class="charx">${ko(k)} <small>(추정)</small></a>`:`<a class="${i===4?'h':''}" style="${LOW.has(k)?'color:var(--color-faint)':''}">${ko(k)}</a>`).join('<span class="sepc">, </span>')}<span class="sepc"> … </span><a style="color:var(--color-muted)">외 ${TOTAL-18}개</a></div></section>`;};
+const panel=(sec,{bottom=true,top=true,style=''}={})=>`<aside class="insp alone" style="${style}">${top?inspTop():''}${sec}${bottom?inspBottom:''}</aside>`;
+
+/* ---- Topic 1 ---- */
+const w1=win({body:`<div class="gallery">${gallery(5,0,2)}</div>`,insp:`<aside class="insp">${inspTop()}${secA()}${inspBottom}</aside>`});
+document.getElementById('r1a').innerHTML=`<figure><figcaption><b>1 · 전체 화면 (A안 적용)</b> — 에셋 화면에서 이미지 하나를 고르면 오른쪽 정보 패널에 자동 태그 섹션이 같은 게시물과 출처 사이에 나옵니다.</figcaption>${w1}</figure>`;
+const tipA=`<div class="tip" style="left:60px;top:420px">long_hair · 점수 0.96<br><small>라이브러리 ${fmt(6412)}장 · 누르면 이 태그로 찾기</small></div>`;
+const legend=`<div class="legend"><div class="lr"><span>분류 태그 (사용자)</span><span class="utag"><i style="background:#8fb9a8"></i>수영복</span><span class="utag"><i style="background:#e8a3b8"></i>호시노</span></div><div class="lr"><span>자동 태그</span><span class="atag">긴 머리</span><span class="atag">유두</span></div><div class="lr"><span>추정 캐릭터</span><span class="atag char">호시노<span class="est">추정</span></span></div><div class="lr"><span>흔한 태그 (맨 뒤)</span><span class="atag low">여자 1명</span><span class="atag low">단독</span></div><div class="lr"><span>사전 밖 태그</span><span class="atag en">heart-shaped pupils</span></div><div style="font-size:12px;line-height:1.6">분류 태그는 면이 채워진 칩 + 색 표식, 자동 태그는 점선 테두리만. 확정 캐릭터가 있으면 추정 칩은 나오지 않습니다.</div></div>`;
+document.getElementById('r1b').innerHTML=
+  `<figure><figcaption><b>A · 신뢰도순 칩</b> <span class="rec">추천</span><br>12개 + 더 보기 (42). 마우스를 올리면 영어 이름·점수·개수.</figcaption><div style="position:relative">${panel(secA({on:1}))}${tipA}</div></figure>`+
+  `<figure><figcaption><b>B · 종류별 묶음</b><br>사전 500개에 종류를 달아 나눕니다. 사전 밖 태그는 기타로.</figcaption>${panel(secB())}</figure>`+
+  `<figure><figcaption><b>C · 한 줄 글자 목록</b><br>쉼표로 이은 글자만. 가장 작지만 누르기 어렵습니다.</figcaption><div style="position:relative">${panel(secC())}<div class="tip" style="left:150px;top:404px">halo · 라이브러리 ${fmt(690)}장</div></div></figure>`+
+  `<figure><figcaption><b>칩 구분</b><br>사용자 분류 태그와 자동 태그를 나란히 놓은 모습.</figcaption>${legend}</figure>`;
+
+/* ---- Topic 2 ---- */
+const toast=(style)=>`<div class="toast" style="${style}">태그 1개 뺌 · <span>유두</span><b>되돌리기</b></div>`;
+const p2a=`<div style="position:relative">${panel(secA({hover:5,x:true}),{bottom:false,top:false,style:'width:272px'})}${toast('left:12px;top:200px')}</div>`;
+const acList=[['사이하이','thighhighs',1410,true],['검은 사이하이','black_thighhighs',720],['흰 사이하이','white_thighhighs',310],['허벅지 끈','thigh_strap',240],['thighband pantyhose','thighband_pantyhose',60]];
+const ac=`<div class="menu" style="left:12px;top:218px;width:300px"><div class="mhead">“사이하”와 맞는 태그 · 라이브러리 개수</div>${acList.map(([k,e,c,h])=>`<div class="mi ${h?'hl':''}"><span>${k}</span>${k!==e.replace(/_/g,' ')?`<span class="en">${e}</span>`:''}<span class="cnt">${fmt(c)}</span></div>`).join('')}</div>`;
+const addField=`<div class="field focus" style="margin-top:8px">${I('Plus')}<span style="color:var(--color-text)">사이하</span><span class="caret" style="margin-left:0"></span></div>`;
+const p2b=`<div style="position:relative;width:340px">${panel(secA({hover:5,x:true,added:`<span class="atag mine">허벅지</span>`,after:addField}),{bottom:false,top:false,style:'width:272px'})}${ac}</div>`;
+const menuC=`<div class="menu" style="left:40px;top:140px;width:230px"><div class="mhead">분홍 머리 · pink_hair · ${fmt(610)}장</div><div class="mi">${I('Funnel')}이 태그로 찾기</div><div class="mi">${I('Minus')}이 태그 빼고 찾기</div><div class="msep"></div><div class="mi">${I('XMark')}이 에셋에서 빼기</div><div class="mi hl">${I('EyeSlash')}이 태그 전체에서 숨기기</div><div class="msep"></div><div class="mi dim">${I('ClipboardDocument')}영어 이름 복사</div></div>`;
+const p2c=`<div style="position:relative;width:300px">${panel(secA({on:3,add:`<span class="addbtn">${I('Plus')}태그 추가</span>`}),{bottom:false,top:false,style:'width:272px'})}${menuC}</div>`;
+const bulk=[['긴 머리',4],['가슴',4],['홍조',4],['헤일로',4],['흰 셔츠',3],['누운 자세',3],['유두',2]];
+const p2d=`<aside class="insp alone" style="width:272px"><div class="insp-head"><span>${I('XMark')}</span></div><div style="font-size:15px;font-weight:600;margin-bottom:8px">4개 선택</div><div class="mosaic">${[0,1,2,3].map(j=>th(7,j+5)).join('')}</div>
+  <section class="sec new"><h3>공통 자동 태그<span class="sp"></span><span class="act">${I('Plus')}4개에 추가</span></h3>
+  ${bulk.map(([l,c],i)=>`<div class="brow ${i===1?'hl':''}"><span class="atag" style="${c<4?'color:var(--color-muted)':''}">${l}</span><span class="l"></span><span class="numeric">${c}/4</span>${i===1?`<span class="btn">선택한 4개에서 빼기</span>`:''}</div>`).join('')}
+  <div class="more" style="margin-top:4px">4개 모두 가진 태그 21개 · 일부만 가진 태그 63개</div></section></aside>`;
+const settings=`<div class="settings"><h4>설정 › 자동 태그</h4>
+  <div class="srow"><div class="l">정보 패널에 자동 태그 보이기</div><span class="toggle"></span></div>
+  <div class="srow"><div class="l">추정 캐릭터<small>점수 0.85 이상이고 확정 캐릭터가 없을 때만</small></div><span class="btn">0.85 ${I('ChevronDown')}</span></div>
+  <div class="srow" style="border:0"><div class="l"><span>숨긴 자동 태그 <span class="numeric muted">3</span></span><small>모든 에셋에서 보이지 않고 찾기에도 나오지 않습니다.</small></div></div>
+  ${[['워터마크','watermark',1210],['서명','signature',2380],['작가 이름','artist_name',960]].map(([k,e,c])=>`<div class="hid"><span>${k}</span><span class="en">${e}</span><span class="numeric">${fmt(c)}장</span><span class="btn ghost">다시 보이기</span></div>`).join('')}
+  <div class="srow" style="margin-top:6px;border-top:1px solid var(--color-border)"><div class="l"><span>에셋에서 뺀 태그 <span class="numeric muted">27</span></span><small>다시 태깅해도 다시 붙지 않습니다. 에셋 정보에서 되돌릴 수 있습니다.</small></div></div></div>`;
+document.getElementById('r2a').innerHTML=
+  `<figure><figcaption><b>A · 빼기만</b><br>칩에 올리면 ✕(유두). 누른 뒤에는 아래 되돌리기 알림이 뜹니다.</figcaption>${p2a}</figure>`+
+  `<figure><figcaption><b>B · 빼기 + 추가</b> <span class="rec">추천</span><br>+ 태그 추가에서 한국어·영어로 찾아 붙입니다. 직접 붙인 칩은 실선 + 점.</figcaption>${p2b}</figure>`+
+  `<figure><figcaption><b>C · B + 전체 숨기기</b><br>칩 오른쪽 클릭 메뉴에 “이 태그 전체에서 숨기기”.</figcaption>${p2c}</figure>`+
+  `<figure><figcaption><b>C · 여러 개 선택</b><br>여러 에셋을 고르면 공통 태그와 “선택한 N개에서 빼기”.</figcaption>${p2d}</figure>`;
+document.getElementById('r2b').innerHTML=`<figure><figcaption><b>C · 설정의 숨긴 태그 목록</b> — 전체에서 숨긴 태그를 다시 보이게 하는 곳.</figcaption>${settings}</figure>`;
+
+/* ---- Topic 3 ---- */
+const badges=`<span style="display:flex;gap:6px;align-items:center;margin-left:6px">
+  <span class="fchip"><span class="sg">+</span><span class="tg"></span><span class="lbl">교복</span><span class="x">${I('XMark')}</span></span>
+  <span class="fchip"><span class="sg">+</span><span class="tg"></span><span class="lbl">검은 사이하이</span><span class="x">${I('XMark')}</span></span>
+  <span class="fchip ex"><span class="sg">−</span><span class="tg"></span><span class="lbl">안경</span><span class="x">${I('XMark')}</span></span>
+  <span class="st">모두 포함</span><span class="btn ghost" style="height:26px">검색 해제</span></span>`;
+const palRows=[['검은 사이하이','black_thighhighs',720,true],['사이하이','thighhighs',1410],['흰 사이하이','white_thighhighs',310],['허벅지 끈','thigh_strap',240]];
+const palette=`<div class="palette"><div class="pin">${I('MagnifyingGlass')}<span>사이하</span><span class="caret" style="margin-left:-6px"></span><span class="scope">에셋 · 전체</span></div>
+  <div class="plist"><div class="mhead">자동 태그 · 지금 결과 안 개수 / 전체</div>${palRows.map(([k,e,c,h],i)=>`<div class="mi ${h?'hl':''}"><span class="tg"></span><span>${k}</span><span class="en">${e}</span><span class="cnt">${[118,203,41,37][i]} / ${fmt(c)}</span></div>`).join('')}
+  <div class="msep"></div><div class="mhead">분류 · 앨범</div><div class="mi dim">${I('Folder')}<span>사이하이 모음</span><span class="cnt">앨범 · 64</span></div></div>
+  <div class="pfoot"><span><kbd>Enter</kbd> 포함해서 거르기</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> 제외</span><span><kbd>Esc</kbd> 닫기 (필터는 남음)</span></div></div>`;
+const w3a=win({title:'전체',status:'312개',headExtra:badges,body:`<div class="gallery">${gallery(5,3,-1,[['9월 27일','토요일 · 14개'],['9월 21일','일요일 · 9개']])}</div>`,insp:`<aside class="insp">${inspTop(2,8)}${secA()}${inspBottom}</aside>`,overlay:palette});
+document.getElementById('r3a').innerHTML=`<figure><figcaption><b>A · 찾기 팔레트 + 제목줄 필터 배지</b> <span class="rec">추천</span> — 찾기(Ctrl+K)에 “사이하”를 치면 자동 태그가 한국어·영어·개수와 함께 나옵니다. 고른 태그는 제목줄 배지로 남고 모두 포함(AND)으로 합쳐집니다. 배지 앞의 +/−로 제외 전환, 결과 312개.</figcaption>${w3a}</figure>`;
+const frowB=`<div class="frow"><span class="lbl0">태그</span>
+  <span class="fchip"><span class="sg">+</span><span class="lbl">교복</span><span class="x">${I('XMark')}</span></span>
+  <span class="fchip"><span class="sg">+</span><span class="lbl">검은 사이하이</span><span class="x">${I('XMark')}</span></span>
+  <span class="fchip ex"><span class="sg">−</span><span class="lbl">안경</span><span class="x">${I('XMark')}</span></span>
+  <span class="field focus" style="width:180px">${I('Plus')}<span style="color:var(--color-text)">주름</span><span class="caret" style="margin-left:0"></span></span>
+  <span class="space"></span>
+  <span class="rel">함께 많이 나온 태그 <span class="atag">주름 치마 <span class="cnt">164</span></span><span class="atag">세일러복 <span class="cnt">121</span></span><span class="atag">홍조 <span class="cnt">198</span></span></span>
+  <span class="btn ghost" style="height:26px">모두 해제</span></div>`;
+const acB=`<div class="menu" style="left:420px;top:86px;width:300px"><div class="mhead">“주름” · 지금 결과 안 / 전체</div><div class="mi hl"><span>주름 치마</span><span class="en">pleated_skirt</span><span class="cnt">164 / 880</span></div><div class="mi"><span>주름 장식</span><span class="en">frills</span><span class="cnt">87 / 1,240</span></div><div class="mi"><span>치마 주름 잡기</span><span class="en">skirt_hold</span><span class="cnt">9 / 150</span></div><div class="msep"></div><div class="mi dim" style="font-size:12.5px">Enter 포함 · Shift+Enter 제외</div></div>`;
+const w3b=win({title:'전체',status:'312개 · 태그 3개 모두 포함',frow:frowB,body:`<div class="gallery">${gallery(6,5,-1,[['9월 27일','토요일 · 17개'],['9월 21일','일요일 · 9개']])}</div>`,overlay:acB});
+document.getElementById('r3b').innerHTML=`<figure><figcaption><b>B · 제목줄 아래 태그 필터 줄</b> — 태그 필터가 있을 때만 생기는 줄. 그 자리에서 + 입력으로 태그를 더하고, 오른쪽에 지금 결과에서 함께 많이 나온 태그를 권합니다. 대신 늘 보이는 입력 줄이 하나 늘어납니다.</figcaption>${w3b}</figure>`;
+
+/* ---- Topic 4 ---- */
+const T4=['long_hair','pink_hair','halo','nipples','heterochromia','ahoge','blush','white_shirt','open_shirt','black_thighhighs','bed_sheet','heart-shaped_pupils','1girl','solo'];
+const cmpPanel=(title,body,cap,rec='')=>`<figure class="cmp"><figcaption><b>${title}</b>${rec?' <span class="rec">추천</span>':''}<br>${cap}</figcaption><aside class="insp alone" style="${rec?'padding-bottom:58px':''}">${body}</aside></figure>`;
+const koOnly=`<section class="sec">${tagHead()}<div class="tags" style="position:relative">${T4.map(k=>`<span class="atag ${LOW.has(k)?'low':''} ${isEn(k)?'en':''} ${k==='heterochromia'?'on':''}">${ko(k)}</span>`).join('')}</div></section><div class="tip" style="left:12px;top:168px"><span class="en">heterochromia</span> · 라이브러리 ${fmt(260)}장</div>`;
+const koEn=`<section class="sec">${tagHead()}<div class="tags">${T4.map(k=>isEn(k)?`<span class="atag en">${ko(k)}</span>`:`<span class="atag two ${LOW.has(k)?'low':''}">${ko(k)}<small>${k}</small></span>`).join('')}</div></section>`;
+const enOnly=`<section class="sec">${tagHead()}<div class="tags">${T4.map(k=>`<span class="atag en ${LOW.has(k)?'low':''}">${k.replace(/_/g,' ')}</span>`).join('')}</div></section>`;
+const searchBoth=`<figure class="cmp"><figcaption><b>검색은 어느 쪽이든</b><br>한국어로 쳐도, 영어로 쳐도 같은 태그를 찾습니다.</figcaption><div style="position:relative;height:250px">
+  <div class="menu" style="position:static;width:272px"><div class="field focus" style="margin:2px 2px 6px">${I('MagnifyingGlass')}<span style="color:var(--color-text)">오드</span><span class="caret" style="margin-left:0"></span></div><div class="mi hl"><span>오드아이</span><span class="en">heterochromia</span><span class="cnt">260</span></div></div>
+  <div class="menu" style="position:static;width:272px;margin-top:12px"><div class="field focus" style="margin:2px 2px 6px">${I('MagnifyingGlass')}<span style="color:var(--color-text)">hetero</span><span class="caret" style="margin-left:0"></span></div><div class="mi hl"><span>오드아이</span><span class="en">heterochromia</span><span class="cnt">260</span></div></div></div></figure>`;
+document.getElementById('r4a').innerHTML=
+  cmpPanel('한국어만',`<div style="position:relative">${koOnly}</div>`,'올리면 영어 이름과 개수. 사전 밖 태그는 영어.','1')+
+  cmpPanel('한국어 + 작은 영어',koEn,'칩이 두 줄이라 같은 자리에 절반 정도만 들어갑니다.')+
+  cmpPanel('영어만',enOnly,'태거 원래 이름 그대로. 번역 사전이 필요 없습니다.')+
+  searchBoth;
+
+const params=new URLSearchParams(location.search);
+if(params.get('shot')){document.body.classList.add('shot');document.getElementById(params.get('shot')).classList.add('shown');}
+</script>
+</body>
+</html>

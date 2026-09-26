@@ -946,6 +946,8 @@ export type AssetQuery = {
   before?: AssetCursor | null;
   aroundDate?: string | null;
   collectedRange?: UtcDateRange | null;
+  /** 자동 태그 filter; omitted when no tag is applied. */
+  autoTags?: import("../autotags/types").AutoTagFilter;
   limit: number;
 };
 
@@ -1257,6 +1259,8 @@ export interface LibraryGateway {
   releaseCalendar?: ReleaseCalendarGateway;
   /** 작가 hub (desktop only; PC-authoritative). */
   artists?: import("../artists/types").ArtistGateway;
+  /** 자동 태그 (desktop only; never published). */
+  autoTags?: import("../autotags/types").AutoTagGateway;
   getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
   /** PC Home: asset totals since local midnight / this Monday and the server's last known state (desktop only). */
   getHomeOverview?(todayStart: string, weekStart: string): Promise<HomeOverview>;

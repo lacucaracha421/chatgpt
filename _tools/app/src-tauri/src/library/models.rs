@@ -634,7 +634,16 @@ pub struct AssetQuery {
     pub before: Option<AssetCursor>,
     pub around_date: Option<String>,
     pub collected_range: Option<UtcDateRange>,
+    /// 자동 태그 filter (`auto_tags.rs`): every included tag and none of the excluded ones.
+    pub auto_tags: Option<AutoTagFilter>,
     pub limit: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AutoTagFilter {
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

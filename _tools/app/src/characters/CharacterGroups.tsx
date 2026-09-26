@@ -160,7 +160,7 @@ function CharacterGroupCard({ group, members, privacyMode, onOpen, onEdit }: { g
       <span className="character-group-card__mosaic" data-count={Math.max(1, previews.length)}>
         {previews.length ? previews.map(target => {
           const assetId = target.thumbnailAssetId ?? target.references.find(reference => reference.status === "ready")?.assetId;
-          return assetId ? <img key={target.id} loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(assetId)} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
+          return assetId ? <img key={target.id} draggable={false} loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(assetId)} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
         }) : <span className="character-group-card__slot"><PeopleIcon aria-hidden="true" /></span>}
       </span>
       <strong><PeopleIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>

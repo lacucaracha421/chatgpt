@@ -27,6 +27,7 @@ import { MobileCatalogPublishSettings } from "./MobileCatalogPublishSettings";
 import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
 import { CharacterAutomationSettings } from "./CharacterAutomationSettings";
 import { CharacterAugmentationSettings } from "./CharacterAugmentationSettings";
+import { AutoTagSettings } from "../autotags/AutoTagSettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -809,6 +810,9 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {library ? <CharacterAutomationSettings key={library.root} disabled={pending} onBusyChange={setCharacterAutomationBusy} />
           : <p className="settings-view__row-note">라이브러리를 연 뒤 설정할 수 있습니다.</p>}
         <p className="settings-view__row-note">S36 시험 채점과 캐릭터 누락 보완은 <AdvancedLink onOpen={() => openSection("advanced")} />에 있습니다.</p>
+        <h3 className="settings-view__group-title">자동 태그</h3>
+        {library ? <AutoTagSettings key={`auto-tags:${library.root}`} disabled={pending} />
+          : <p className="settings-view__row-note">라이브러리를 연 뒤 설정할 수 있습니다.</p>}
       </div>
     )}
     {section === "about" && (

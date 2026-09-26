@@ -208,6 +208,13 @@ export const libraryGateway: LibraryGateway = {
       : { assetIds, artistId: null, newName: target.newName }),
     setSettings: (settings) => invoke("set_artist_settings", { settings }),
   },
+  autoTags: {
+    assetTags: (assetId) => invoke("get_asset_auto_tags", { assetId }),
+    vocabulary: () => invoke("list_auto_tag_vocabulary"),
+    edit: (assetId, tag, edit) => invoke("edit_asset_auto_tag", { assetId, tag, edit }),
+    importSummary: () => invoke("get_auto_tag_import_summary"),
+    importFile: (path) => invoke("import_auto_tags", { path }),
+  },
   releaseCalendar: {
     calendar: () => invoke("get_release_calendar"),
     refresh: (force) => invoke("refresh_release_calendar", { force }),
