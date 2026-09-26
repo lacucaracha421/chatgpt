@@ -8,6 +8,8 @@ import type {
   AssetSummary, EncryptedVaultImportReport, EncryptedVaultItem,
   EncryptedVaultItemKind, EncryptedVaultStatus, LibraryGateway,
 } from "../library/types";
+import { ArrowUpTrayIcon, ArrowUturnLeftIcon, DocumentPlusIcon, FilmIcon, FolderArrowDownIcon, LockClosedIcon, PencilSquareIcon, PhotoIcon, Squares2X2Icon, TrashIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import type { ComponentType, SVGProps } from "react";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
@@ -310,30 +312,34 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   return <section className="external-vault-browser" aria-label="비밀">
     <header className="external-vault-browser__toolbar">
       <div className="external-vault-browser__filters" role="group" aria-label="미디어 필터">
-        {(["all", "image", "video"] as const).map((value) => <Button key={value} size="sm"
-          variant={filter === value ? "secondary" : "ghost"} aria-pressed={filter === value}
-          onClick={() => changeFilter(value)}>{{ all: "전체", image: "이미지", video: "영상" }[value]}</Button>)}
+        {(["all", "image", "video"] as const).map((value) => {
+          const { label, Icon } = { all: { label: "전체", Icon: Squares2X2Icon }, image: { label: "이미지", Icon: PhotoIcon }, video: { label: "영상", Icon: FilmIcon } }[value];
+          return <Button key={value} size="icon" variant={filter === value ? "secondary" : "ghost"} aria-pressed={filter === value}
+            aria-label={label} title={label} onClick={() => changeFilter(value)}><Icon aria-hidden="true" /></Button>;
+        })}
         <span className="external-vault-browser__divider" aria-hidden="true" />
-        <Button size="sm" variant={trashView ? "secondary" : "ghost"} aria-pressed={trashView} onClick={() => changeFilter("trash")}
-          aria-label={trashedCount ? `휴지통 ${trashedCount.toLocaleString()}` : "휴지통"}>
-          휴지통{trashedCount ? <span className="external-vault-browser__count" aria-hidden="true"> {trashedCount.toLocaleString()}</span> : null}
+        <Button size="sm" className="external-vault-browser__icon-count" variant={trashView ? "secondary" : "ghost"} aria-pressed={trashView} onClick={() => changeFilter("trash")}
+          aria-label={trashedCount ? `휴지통 ${trashedCount.toLocaleString()}` : "휴지통"} title="휴지통">
+          <TrashIcon aria-hidden="true" />{trashedCount ? <span className="external-vault-browser__count" aria-hidden="true">{trashedCount.toLocaleString()}</span> : null}
         </Button>
       </div>
       <div className="external-vault-browser__actions">
         {trashView ? <>
-          <Button size="sm" variant="ghost" disabled={busy || readOnly || selectedIds.length === 0} onClick={() => restore(selectedIds)}>복원{selectedLabel}</Button>
-          <Button size="sm" variant="ghost" disabled={busy || readOnly || selectedIds.length === 0} onClick={() => askDelete(selectedIds)}>영구 삭제{selectedLabel}</Button>
-          <Button size="sm" variant="ghost" disabled={busy || readOnly || (totalCount === 0 && !trashedCount)} onClick={() => setConfirm({ kind: "empty" })}>휴지통 비우기</Button>
+          <ToolbarAction label={`복원${selectedLabel}`} title="복원" count={selectedIds.length} Icon={ArrowUturnLeftIcon} disabled={busy || readOnly || selectedIds.length === 0} onClick={() => restore(selectedIds)} />
+          <ToolbarAction label={`영구 삭제${selectedLabel}`} title="영구 삭제" count={selectedIds.length} Icon={XCircleIcon} disabled={busy || readOnly || selectedIds.length === 0} onClick={() => askDelete(selectedIds)} />
+          <ToolbarAction label="휴지통 비우기" Icon={TrashIcon} disabled={busy || readOnly || (totalCount === 0 && !trashedCount)} onClick={() => setConfirm({ kind: "empty" })} />
         </> : <>
           {selectedIds.length > 0 && <>
-            <Button size="sm" variant="ghost" disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)}>{exporting ? "내보내는 중…" : `내보내기${selectedLabel}`}</Button>
-            <Button size="sm" variant="ghost" disabled={busy || readOnly || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)}>휴지통으로</Button>
+            <ToolbarAction label={exporting ? "내보내는 중…" : `내보내기${selectedLabel}`} title="PC로 내보내기" count={exporting ? 0 : selectedIds.length} Icon={ArrowUpTrayIcon} disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)} />
+            <ToolbarAction label="휴지통으로" Icon={TrashIcon} disabled={busy || readOnly || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)} />
           </>}
-          <Button size="sm" variant="ghost" disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)}>제목 변경</Button>
-          <Button size="sm" variant="ghost" disabled={importing || readOnly || !gateway.importFilesIntoEncryptedVault} onClick={() => void addFiles()}>파일 추가</Button>
-          <Button size="sm" variant="ghost" disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()}>{importing ? "가져오는 중…" : "가져오기"}</Button>
+          <ToolbarAction label="제목 변경" Icon={PencilSquareIcon} disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)} />
+          <span className="external-vault-browser__divider" aria-hidden="true" />
+          <ToolbarAction label="파일 추가" Icon={DocumentPlusIcon} disabled={importing || readOnly || !gateway.importFilesIntoEncryptedVault} onClick={() => void addFiles()} />
+          <ToolbarAction label={importing ? "가져오는 중…" : "가져오기"} title="폴더 가져오기" Icon={FolderArrowDownIcon} disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()} />
         </>}
-        <Button size="sm" variant="ghost" disabled={importing || locking} onClick={() => void lock()}>잠그기</Button>
+        <span className="external-vault-browser__divider" aria-hidden="true" />
+        <ToolbarAction label="잠그기" Icon={LockClosedIcon} disabled={importing || locking} onClick={() => void lock()} />
       </div>
     </header>
     {importJob?.running && <div className="external-vault-browser__progress" role="status">
@@ -465,4 +471,12 @@ function toAssetSummary(item: EncryptedVaultItem): AssetSummary {
       ? { kind: "video", durationMs: 0, preparationState: "ready", scrubFrameCount: 0 }
       : { kind: "image" },
   };
+}
+
+/** A toolbar icon button: the accessible name stays the full action (with its count), the tooltip names the action. */
+function ToolbarAction({ label, title, Icon, count = 0, disabled, onClick }: { label: string; title?: string; Icon: ComponentType<SVGProps<SVGSVGElement>>; count?: number; disabled?: boolean; onClick: () => void }) {
+  return count > 0
+    ? <Button size="sm" variant="ghost" className="external-vault-browser__icon-count" aria-label={label} title={title ?? label} disabled={disabled} onClick={onClick}>
+      <Icon aria-hidden="true" /><span className="external-vault-browser__count" aria-hidden="true">{count.toLocaleString()}</span></Button>
+    : <Button size="icon" variant="ghost" aria-label={label} title={title ?? label} disabled={disabled} onClick={onClick}><Icon aria-hidden="true" /></Button>;
 }

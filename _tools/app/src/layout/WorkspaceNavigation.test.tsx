@@ -30,17 +30,20 @@ it("offers a collection list when detail was opened without a remembered list", 
 const baseProps = { collectionType: "game" as const, width: 208, onWidthChange: vi.fn(), assetNavigation: null, reviewCount: 0, trashCount: 0 };
 const assetsView = { kind: "classification" as const, classificationId: null };
 
-it("keeps 에셋, 컬렉션, 망가 and 메모 in the rail, followed by 찾기 and 더보기", async () => {
+it("keeps 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 while its USB is attached, then 찾기 and 더보기", async () => {
   const onNavigate = vi.fn();
   render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={onNavigate} privateVaultAvailable />);
   const rail = screen.getByRole("navigation", { name: "주요 영역" });
   expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
-    .toEqual(["에셋", "컬렉션", "망가", "메모", "찾기", "더보기"]);
+    .toEqual(["에셋", "컬렉션", "망가", "메모", "전송", "비밀", "찾기", "더보기"]);
   expect(within(rail).getByRole("button", { name: "찾기" })).toHaveAttribute("aria-keyshortcuts", "Control+K Control+F");
   expect(screen.queryByRole("button", { name: "다시보기" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "비밀" })).not.toBeInTheDocument();
   await userEvent.click(within(rail).getByRole("button", { name: "메모" }));
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes" });
+  await userEvent.click(within(rail).getByRole("button", { name: "전송" }));
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "exchange" });
+  await userEvent.click(within(rail).getByRole("button", { name: "비밀" }));
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "private_vault" });
 });
 
 it("shows the 더보기 count only for 유사 검토, never for 미분류", () => {
@@ -93,9 +96,9 @@ it("reaches every former rail and 관리 destination from 더보기 with focus r
   expect(within(queues).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["유사 검토 2개"]);
   const destinations = within(panel).getByRole("navigation", { name: "이동" });
   expect(within(destinations).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
-    .toEqual(["미분류", "보내기/받기", "비밀", "다시보기", "통계", "휴지통 3개", "설정"]);
+    .toEqual(["미분류", "다시보기", "통계", "휴지통 3개", "설정"]);
 
-  const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }], ["보내기/받기", { kind: "exchange" }], ["비밀", { kind: "private_vault" }],
+  const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }],
     ["다시보기", { kind: "revisit" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 검토 2개", { kind: "similarity_review" }]];
   for (const [name, view] of expected) {
     if (!screen.queryByRole("dialog", { name: "더보기" })) await user.click(trigger);
@@ -372,4 +375,11 @@ it("lists at most eight name matches, above other destinations", async () => {
   const options = screen.getAllByRole("option");
   expect(options.slice(0, 8).every((option) => option.textContent?.startsWith("설정 폴더"))).toBe(true);
   expect(options[8]).toHaveTextContent(/^설정$/);
+});
+
+it("hides 비밀 from the rail while no vault USB is attached", () => {
+  render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
+  const rail = screen.getByRole("navigation", { name: "주요 영역" });
+  expect(within(rail).queryByRole("button", { name: "비밀" })).not.toBeInTheDocument();
+  expect(within(rail).getByRole("button", { name: "전송" })).toBeInTheDocument();
 });

@@ -66,7 +66,7 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
     { id: "unsorted", group: queued(unsortedCount) ? "queue" : "go", label: "미분류", icon: <InboxIcon />, count: queued(unsortedCount) ? unsortedCount ?? undefined : undefined, selected: view.kind === "unsorted", run: go({ kind: "unsorted" }) },
     { id: "notes", group: "go", label: "메모", icon: <NoteIcon />, selected: view.kind === "notes", run: go({ kind: "notes" }) },
     // Utility outside the Library: listed as a queue only while received files are unseen.
-    { id: "exchange", group: queued(received) ? "queue" : "go", label: "보내기/받기", keywords: ["파일 보내기", "파일 받기", "받은 파일", "태블릿", "전송"], icon: <ExchangeIcon />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
+    { id: "exchange", group: queued(received) ? "queue" : "go", label: "전송", keywords: ["보내기/받기", "파일 보내기", "파일 받기", "받은 파일", "태블릿"], icon: <ExchangeIcon />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
     ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: "비밀", keywords: ["비밀 보관함"], icon: <BookmarkIcon />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
     { id: "revisit", group: "go", label: "다시보기", icon: <CalendarIcon />, selected: REVISIT_KINDS.includes(view.kind), run: go({ kind: "revisit" }) },
     { id: "statistics", group: "go", label: "통계", icon: <ActivityIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },

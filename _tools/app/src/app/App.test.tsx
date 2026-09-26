@@ -272,16 +272,15 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
 
-    await userEvent.click(await screen.findByRole("button", { name: /^더보기/ }));
-    await userEvent.click(await within(await screen.findByRole("dialog", { name: "더보기" })).findByRole("button", { name: "비밀" }));
+    const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+    await userEvent.click(await within(rail).findByRole("button", { name: "비밀" }));
     const view = await screen.findByRole("region", { name: "비밀" });
     expect(within(view).getByLabelText("비밀번호")).toBeVisible();
     expect(libraryGateway.listEncryptedVaultItems).not.toHaveBeenCalled();
 
     act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() => expect(screen.queryByRole("region", { name: "비밀" })).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole("button", { name: /^더보기/ }));
-    expect(within(await screen.findByRole("dialog", { name: "더보기" })).queryByRole("button", { name: "비밀" })).not.toBeInTheDocument();
+    await waitFor(() => expect(within(rail).queryByRole("button", { name: "비밀" })).not.toBeInTheDocument());
     expect(await screen.findByText("비밀 보관함의 연결이 끊겼습니다.")).toBeVisible();
   });
 
@@ -553,7 +552,7 @@ describe("App", () => {
     })));
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     const rail = screen.getByRole("navigation", { name: "주요 영역" });
-    expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["에셋", "컬렉션", "망가", "메모", "찾기", expect.stringMatching(/^더보기/)]);
+    expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["에셋", "컬렉션", "망가", "메모", "전송", "찾기", expect.stringMatching(/^더보기/)]);
     expect(screen.queryByRole("navigation", { name: "빠른 보기" })).not.toBeInTheDocument();
 
     await openManagementItem("미분류");

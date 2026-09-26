@@ -185,7 +185,7 @@ it("carries the former work tray: import progress once, then results with their 
   expect(openExisting).toHaveBeenCalledWith("asset-b");
 });
 
-it("shows a running Private Vault import on the 더보기 rail item and in the status panel", async () => {
+it("shows a running Private Vault import on the 비밀 rail item and in the status panel", async () => {
   const user = userEvent.setup();
   let progress!: (value: { processed: number; total: number; imported: number; skipped: number; failed: number }) => void;
   let finish!: (value: unknown) => void;
@@ -202,12 +202,12 @@ it("shows a running Private Vault import on the 더보기 rail item and in the s
   act(() => progress({ processed: 7, total: 20, imported: 7, skipped: 0, failed: 0 }));
 
   const rail = screen.getByRole("navigation", { name: "주요 영역" });
-  expect(within(rail).getByRole("button", { name: "더보기" })).toHaveAccessibleDescription("가져오는 중 7 / 20");
+  expect(within(rail).getByRole("button", { name: "비밀" })).toHaveAccessibleDescription("가져오는 중 7 / 20");
   await user.click(screen.getByRole("button", { name: "상태 · 작업 1개 진행 중" }));
   expect(screen.getByRole("status", { name: "비밀 보관함 가져오기" })).toHaveTextContent("비밀 보관함 가져오기 · 가져오는 중 7 / 20");
 
   await act(async () => finish({ total: 20, imported: 19, skipped: 0, failed: 1, withoutThumbnail: 0, legacyTitles: 0, legacyThumbnails: 0 }));
-  expect(within(rail).getByRole("button", { name: "더보기" })).not.toHaveAccessibleDescription();
+  expect(within(rail).getByRole("button", { name: "비밀" })).not.toHaveAccessibleDescription();
   expect(screen.getByRole("status", { name: "비밀 보관함 가져오기" })).toHaveTextContent("완료 · 가져옴 19개 · 실패 1개");
   await user.click(screen.getByRole("button", { name: "닫기" }));
   expect(screen.queryByRole("status", { name: "비밀 보관함 가져오기" })).not.toBeInTheDocument();

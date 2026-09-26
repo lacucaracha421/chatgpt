@@ -1,4 +1,4 @@
-import { BookOpenIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
+import { BookmarkIcon, BookOpenIcon, ExchangeIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
@@ -12,20 +12,22 @@ import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
 
-export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "notes" | "private_vault" | "manage" {
+export function workspaceArea(view: AssetView): "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault" | "manage" {
   if (view.kind === "notes") return "notes";
+  if (view.kind === "exchange") return "exchange";
   if (view.kind === "private_vault") return "private_vault";
   if (view.kind === "collections" || view.kind === "collection") return "collections";
   if (view.kind === "manga") return "manga";
-  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics" || view.kind === "exchange") return "manage";
+  if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
   return "assets";
 }
-type RailArea = "assets" | "collections" | "manga" | "notes";
+type RailArea = "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault";
 const RAIL_AREAS: { key: RailArea; label: string; Icon: typeof NoteIcon }[] = [
   { key: "assets", label: "에셋", Icon: RectangleStackIcon },
   { key: "collections", label: "컬렉션", Icon: BookOpenIcon },
   { key: "manga", label: "망가", Icon: PhotoIcon },
   { key: "notes", label: "메모", Icon: NoteIcon },
+  { key: "exchange", label: "전송", Icon: ExchangeIcon },
 ];
 
 type Props = {
@@ -64,7 +66,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const quickAssetView = view.kind === "revisit" || view.kind === "creators" || view.kind === "creator" || view.kind === "calendar" || view.kind === "revisited-bundle" || view.kind === "unsorted";
   if (!quickAssetView) history.current[area] = view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
-  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", private_vault: "비밀", manage: "더보기" }[area];
+  const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", exchange: "전송", private_vault: "비밀", manage: "더보기" }[area];
   const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : areaName;
   const enterArea = (next: RailArea) => {
     if (next === "collections" && view.kind === "collection") {
@@ -72,11 +74,14 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       return;
     }
     if (next === area && !quickAssetView) return;
-    onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : next === "notes" ? { kind: "notes" } : { kind: "classification", classificationId: null }));
+    onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : next === "notes" ? { kind: "notes" } : next === "exchange" ? { kind: "exchange" } : next === "private_vault" ? { kind: "private_vault" } : { kind: "classification", classificationId: null }));
   };
   const entries = useNavigationEntries({ view, onNavigate, reviewCount, unsortedCount, trashCount, privateVaultAvailable, privateVaultActivity: vaultImportText, onImportFiles });
-  // 메모 is on the rail; the palette still finds it by name.
-  const moreEntries = entries.filter((entry) => entry.id !== "notes");
+  // 메모, 전송 and 비밀 are on the rail; the palette still finds them by name.
+  const moreEntries = entries.filter((entry) => entry.id !== "notes" && entry.id !== "exchange" && entry.id !== "private_vault");
+  const exchangeCount = entries.find((entry) => entry.id === "exchange")?.count ?? 0;
+  // 비밀 joins the rail only while its USB is attached.
+  const railAreas = privateVaultAvailable ? [...RAIL_AREAS, { key: "private_vault" as const, label: "비밀", Icon: BookmarkIcon }] : RAIL_AREAS;
   const searchInfo = chrome?.meta?.search ?? null;
   const paletteSearch = searchInfo && chrome ? { info: searchInfo, apply: chrome.applySearch, open: chrome.openSearch } : null;
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -100,14 +105,20 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   return <div className="workspace-navigation">
     <nav className="workspace-rail" aria-label="주요 영역">
       <span className="workspace-mark"><img src={lakomicsMark} alt="Lakomics" width="32" height="32" /></span>
-      {RAIL_AREAS.map(({ key, label, Icon }) =>
-        <button key={key} type="button" className="workspace-rail__item" aria-current={area === key ? "page" : undefined} onClick={() => enterArea(key)}><Icon aria-hidden="true" /><span>{label}</span></button>)}
+      {railAreas.map(({ key, label, Icon }) => {
+        const count = key === "exchange" ? exchangeCount : 0;
+        const activity = key === "private_vault" ? vaultImportText : undefined;
+        return <button key={key} type="button" className="workspace-rail__item" aria-current={area === key ? "page" : undefined}
+          aria-description={count > 0 ? `받은 파일 ${count}개` : activity} onClick={() => enterArea(key)}>
+          <span className="workspace-rail__icon"><Icon aria-hidden="true" />{count > 0 && <span className="workspace-rail__count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}</span>
+          <span>{label}</span>{activity && <span className="workspace-rail__activity" aria-hidden="true" />}</button>;
+      })}
       <div className="workspace-rail__tail">
         <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+K Control+F"
           aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+K)` : "이름으로 이동하거나 명령 실행 (Ctrl+K)"} onClick={openPalette}>
           <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl K</kbd>
         </button>
-        <MorePanel entries={moreEntries} current={area === "private_vault" || area === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
+        <MorePanel entries={moreEntries} current={area === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
     <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
