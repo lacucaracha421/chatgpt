@@ -11,6 +11,7 @@ import {ApiError, api, native} from './transport';
 import type {RefreshJob} from './CatalogRefresh';
 import {fetchLibrarySummary, type LibrarySummary} from './librarySummary';
 import type {CharacterIndex} from './characterModel';
+import type {Asset, Revisit} from './types';
 import {byOrder, noteColorValue, stripMarkdown} from '../src/notes/model';
 import type {Note, NotesState} from '../src/notes/store';
 import {LEDGER, LEDGER_MONTH} from '../src/notes/ledger/model';
@@ -146,6 +147,84 @@ export function characterTagging(index: CharacterIndex | null | undefined) {
     all += total; left += Math.min(open, total); seen = true;
   }
   return seen && all > 0 ? {done: (all - left) / all, left} : null;
+}
+
+/* ---- 신간 · 발매 예정 cover shelf ---- */
+/** A `YYYY-MM-DD` date from `shortReleaseDate`'s "9.24" / "2025.9.24" (the year defaults to today's). */
+export function releaseDateOf(short: string | null | undefined, today = localToday()) {
+  const parts = short?.split('.').map(Number) ?? [];
+  if (parts.length < 2 || parts.length > 3 || parts.some(part => !Number.isFinite(part))) return null;
+  const [year, month, day] = parts.length === 3 ? parts : [Number(today.slice(0, 4)), ...parts];
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+export type ShelfEntry =
+  | {kind: 'new'; id: string; name: string; date: string | null; volumes: string}
+  | {kind: 'upcoming'; id: string; name: string; date: string; volumeNumber: number; days: number};
+/**
+ * The cover shelf, left to right: the newly released volumes (newest first; one without a known
+ * date counts as today's), then the dated volumes due within `window` days, soonest first.
+ */
+export function shelfEntries(releases: ReleaseRow[], upcoming: UpcomingRow[], today = localToday(), window = UPCOMING_DAYS): ShelfEntry[] {
+  const fresh = releases.map((row): ShelfEntry => {
+    const text = row.caption?.text ?? `신간 알림 ${row.unread}`;
+    return {kind: 'new', id: row.id, name: row.name, date: row.caption?.kind === 'new' ? releaseDateOf(row.caption.date, today) : null,
+      volumes: text.startsWith('신간 알림') ? text : text.replace(/^신간 /, '')};
+  }).sort((a, b) => (b.date ?? today).localeCompare(a.date ?? today));
+  const soon = upcoming.map(row => ({...row, days: daysAfter(row.date, today)}))
+    .filter(row => row.days >= 0 && row.days <= window)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, 'ko') || a.volumeNumber - b.volumeNumber)
+    .map((row): ShelfEntry => ({kind: 'upcoming', ...row}));
+  return [...fresh, ...soon];
+}
+
+/* ---- 다시 보기 ---- */
+export type RevisitGroup = {key: string; title: string; name?: string; count: number; items: Asset[]; label: string};
+const dotDate = (at: string | null | undefined) => {
+  const date = at ? new Date(at) : null;
+  return date && Number.isFinite(date.getTime()) ? `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}` : null;
+};
+const savedAt = (asset: Asset) => asset.collected_at ?? asset.created_at ?? null;
+/**
+ * The two 다시 보기 groups from `/v1/library/revisit`: 과거의 이날 (saved around this date in
+ * earlier years) and the first 다시 만난 작가 group. Empty groups are left out.
+ */
+export function revisitGroups(reply: Revisit | null | undefined, now = Date.now()): RevisitGroup[] {
+  const groups: RevisitGroup[] = [];
+  for (const bundle of reply?.bundles ?? []) {
+    if (bundle.kind === 'date' && bundle.items?.length) {
+      const dates = bundle.items.map(savedAt).filter((at): at is string => !!at && Number.isFinite(Date.parse(at))).sort();
+      const first = dotDate(dates[0]), last = dotDate(dates[dates.length - 1]);
+      const when = first && last ? (first === last ? `${first} 저장` : `${first} – ${last} 저장`) : '예전에 저장';
+      groups.push({key: 'date', title: bundle.title || '과거의 이날', count: bundle.items.length, items: bundle.items, label: `${when} · ${bundle.items.length}장`});
+    }
+    if (bundle.kind === 'creator') {
+      const group = bundle.groups?.find(entry => entry.items?.length);
+      if (!group) continue;
+      const name = group.creator_name || group.creator_handle;
+      const newest = group.items.map(savedAt).filter((at): at is string => !!at && Number.isFinite(Date.parse(at))).sort().reverse()[0];
+      const months = newest ? Math.floor((now - Date.parse(newest)) / (30.44 * 86_400_000)) : 0;
+      const gap = months >= 12 ? `${Math.floor(months / 12)}년 만 · ` : months >= 1 ? `${months}개월 만 · ` : '';
+      groups.push({key: group.creator_key, title: `${bundle.title || '다시 만난 작가'} · ${name}`, name, count: group.asset_count, items: group.items, label: `${gap}소장 ${group.asset_count.toLocaleString('ko-KR')}장`});
+    }
+  }
+  return groups;
+}
+export const REVISIT_PATH = '/v1/library/revisit?limit=12';
+/**
+ * Reads 다시 보기 once per visit (the server's groups only change by day) and again after
+ * `key` moves (다시 연결). A failed read keeps what was shown; nothing shown means no section.
+ */
+export function useHomeRevisit(enabled: boolean, key: unknown) {
+  const [groups, setGroups] = useState<RevisitGroup[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    void api<Revisit>(REVISIT_PATH, controller.signal).then(reply => {
+      if (!controller.signal.aborted) setGroups(revisitGroups(reply));
+    }, () => {});
+    return () => controller.abort();
+  }, [enabled, key]);
+  return groups;
 }
 
 /* ---- 메모 ---- */

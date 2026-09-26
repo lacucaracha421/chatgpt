@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tablet Home Redesign</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css and mobile-client/mobile.css (same as round3.html). */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-control:#232425; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-filter-selected:#383838; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --radius-tile:2px; --radius-sm:4px;
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --ok:#7fb88a; --soft:#c4c6c8; --dim:#6f7274;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+svg.i.solid { fill:currentColor; stroke:none; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:1900px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1250px; margin:10px 0 0; line-height:1.75; }
+.lead b { color:var(--color-text); font-weight:600; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.toolbar button { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; cursor:pointer; color:var(--color-text); font-size:13px; }
+.toolbar button[aria-pressed=true] { background:var(--color-filter-selected); border-color:var(--color-filter-border); }
+.toolbar a { color:inherit; }
+section.topic { margin-top:52px; border-top:1px solid var(--color-border); padding-top:26px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:30px; height:30px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 17px var(--font-numeric); }
+.rec { font:600 12.5px var(--font-ui); padding:3px 9px; border-radius:2px; background:#1d3a28; color:#9fdcb0; border:1px solid #2f6a45; letter-spacing:.3px; }
+.pair { display:flex; gap:32px; align-items:flex-start; margin-top:20px; flex-wrap:wrap; }
+.zoom { zoom:.56; flex:none; }
+body.full .zoom { zoom:1; }
+.notes { flex:1 1 420px; max-width:640px; min-width:340px; }
+.notes h3 { font-size:15px; font-weight:600; margin:0 0 6px; color:var(--color-text); }
+.notes h3 + ul { margin-top:0; }
+.notes ul { margin:0 0 20px; padding-left:18px; color:var(--color-muted); line-height:1.7; font-size:14px; }
+.notes ul b { color:var(--color-text); font-weight:600; }
+.notes .calmcap { font-size:13px; color:var(--color-muted); margin:6px 0 8px; }
+.calmwrap { zoom:.5; }
+body.full .calmwrap { zoom:.8; }
+table.data { border-collapse:collapse; margin-top:16px; font-size:14px; max-width:1300px; width:100%; }
+table.data th, table.data td { text-align:left; vertical-align:top; padding:9px 12px; border-bottom:1px solid var(--color-border); line-height:1.55; }
+table.data th { color:var(--color-muted); font-weight:500; font-size:13px; }
+table.data td:first-child { white-space:nowrap; font-weight:600; }
+table.data td.n { font-family:var(--font-numeric); font-size:17px; white-space:nowrap; }
+table.data td.m { color:var(--color-muted); }
+table.data tr.best td { background:rgba(127,184,138,.06); }
+table.data code { font-size:12.5px; color:#d6d0c0; }
+.dk { display:inline-block; font:600 11px var(--font-ui); padding:1px 6px; border-radius:2px; white-space:nowrap; border:1px solid; }
+.dk.ok { background:#1d3a28; color:#9fdcb0; border-color:#2f6a45; }
+.dk.part { background:#3b3320; color:#e6cf91; border-color:#6d5c30; }
+.dk.new { background:#1c2d4a; color:#a8c8ff; border-color:#3a5f9c; }
+body.shot { background:var(--color-bg); }
+body.shot .frame { border:0; }
+
+/* ===== App frame: Galaxy Tab S11 portrait, 800 × 1280 CSS px ===== */
+.frame { position:relative; width:800px; height:1280px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); display:flex; flex-direction:column; }
+.frame.clip { height:700px; }
+.content { flex:1; min-height:0; overflow:hidden; position:relative; }
+.content::after { content:''; position:absolute; left:0; right:0; bottom:0; height:26px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:7; }
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 16px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar .brand { display:flex; align-items:center; color:var(--color-accent); margin-right:14px; flex-shrink:0; }
+.bar .brand svg.mark { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.bar .hometitle { font-size:20px; font-weight:600; letter-spacing:-.2px; }
+.bar .space { flex:1; min-width:4px; }
+.ib { width:48px; height:48px; display:inline-grid; place-items:center; color:var(--color-text); position:relative; flex-shrink:0; }
+.xbadge { position:absolute; top:5px; right:4px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--color-accent); color:var(--color-on-accent); font:600 11px/16px var(--font-numeric); text-align:center; }
+.nav { flex-shrink:0; height:60px; margin-bottom:8px; padding:3px 0; display:flex; justify-content:space-around; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav > span { flex:1 1 0; max-width:150px; min-height:53px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:var(--color-muted); position:relative; font-size:11.5px; line-height:1.2; }
+.nav > span.active { color:var(--color-text); }
+.nav > span.active::after { content:''; position:absolute; top:-3px; left:calc(50% - 8px); width:16px; height:2px; background:currentColor; }
+
+.page { padding:12px 16px 24px; display:flex; flex-direction:column; }
+.page > * + * { margin-top:18px; }
+.page > .tight { margin-top:10px; }
+
+/* Section heading: the app's index label (5px square + fading hairline, DESIGN.md §6), then a 44px "전체 ›". */
+.sh { display:flex; align-items:center; gap:8px; height:36px; min-width:0; }
+.sh::before { content:''; width:5px; height:5px; background:var(--color-muted); flex:none; }
+.sh h2 { font-size:15.5px; font-weight:600; white-space:nowrap; }
+.sh .meta { font-size:13px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.sh .meta .numeric { font-size:15px; color:var(--color-text); }
+.sh .rule { flex:1; min-width:12px; height:1px; background:linear-gradient(90deg,var(--color-border-strong),transparent); }
+.sh .more { display:inline-flex; align-items:center; gap:2px; height:44px; padding:0 0 0 8px; margin-right:-6px; font-size:13.5px; color:var(--color-muted); white-space:nowrap; }
+.sh .more svg.i { width:15px; height:15px; }
+.sh + * { margin-top:6px; }
+
+/* Number tiles: one surface cut by 1px lines, never separate floating cards. */
+.tiles { display:grid; gap:1px; background:var(--color-border); border:1px solid var(--color-border); border-radius:3px; overflow:hidden; }
+.tile { background:var(--color-surface); min-height:74px; padding:10px 12px 9px 14px; display:flex; flex-direction:column; justify-content:space-between; gap:4px; min-width:0; position:relative; }
+.tile .n { font:500 30px/1 var(--font-numeric); color:var(--color-text); white-space:nowrap; }
+.tile .n small { font:500 13px var(--font-ui); color:var(--color-muted); margin-left:3px; }
+.tile .l { font-size:13.5px; font-weight:500; color:var(--soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tile .s { font-size:12px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:-3px; }
+.tile.act { background:var(--color-surface-elevated); }
+.tile.act .n { color:var(--color-accent); font-size:34px; }
+.tile.act .l { color:var(--color-text); }
+.tile .chev { position:absolute; right:8px; top:10px; width:16px; height:16px; color:var(--color-muted); }
+.tile .bp { margin-top:2px; }
+.tile.ok { justify-content:center; flex-direction:row; align-items:center; gap:8px; color:var(--color-muted); font-size:14px; }
+.tile.ok svg.i { width:18px; height:18px; color:var(--ok); }
+.tile.sm { min-height:60px; padding:8px 10px 7px 12px; gap:3px; }
+.tile.sm .n { font-size:24px; }
+.tile.sm.act .n { font-size:26px; }
+.tile.sm .l { font-size:12.5px; }
+.bp { height:3px; background:var(--color-border); border-radius:2px; overflow:hidden; }
+.bp i { display:block; height:100%; background:var(--color-muted); }
+.bp.hot i { background:var(--color-accent); }
+
+/* One status line for everything calm, plus a running transfer. */
+.status { display:flex; align-items:center; gap:0; min-height:48px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:3px; padding:0 8px 0 14px; font-size:14px; color:var(--color-muted); white-space:nowrap; overflow:hidden; }
+.status .seg { display:flex; align-items:center; gap:7px; min-width:0; height:46px; }
+.status .seg + .seg::before { content:''; width:1px; height:20px; background:var(--color-border); margin:0 14px 0 0; flex:none; }
+.status .seg + .seg { margin-left:14px; }
+.status svg.i { width:18px; height:18px; }
+.status .okc { color:var(--ok); }
+.status b { color:var(--color-text); font-weight:500; }
+.status .numeric { font-size:17px; color:var(--color-text); }
+.status .grow { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.status .bp { width:84px; flex:none; }
+.status .chev { width:16px; height:16px; margin-left:8px; flex:none; }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--ok); flex:none; }
+
+/* Release shelf: a date rail above the covers, covers at their own ratio, bled to the frame edge. */
+.shelf { display:flex; gap:14px; align-items:flex-end; margin-right:-16px; overflow:hidden; padding-right:16px; }
+.cv { flex:none; display:flex; flex-direction:column; min-width:0; }
+.cv .when { display:flex; align-items:baseline; gap:5px; height:26px; border-bottom:1px solid var(--color-border); margin-bottom:8px; white-space:nowrap; }
+.cv .when .d { font:500 17px/1 var(--font-numeric); color:var(--color-text); }
+.cv .when .w { font-size:12px; color:var(--color-muted); }
+.cv .when .dd { margin-left:auto; font:500 14px/1 var(--font-numeric); color:var(--color-muted); }
+.cv .when.new { border-bottom-color:var(--color-accent); }
+.cv .when.new .d { font:600 13.5px/1 var(--font-ui); color:var(--color-accent); }
+.cv .art { position:relative; border-radius:var(--radius-tile); overflow:hidden; background:var(--color-surface-elevated); }
+.cv .art img { display:block; width:100%; height:100%; }
+.cv .art.game { box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+.cv .art.game::after { content:''; position:absolute; inset:0; border-left:5px solid rgba(0,0,0,.28); pointer-events:none; }
+.cv .newmark { position:absolute; left:0; top:0; background:var(--color-accent); color:var(--color-on-accent); font:600 11.5px/20px var(--font-ui); padding:0 6px; }
+.cv .tt { margin-top:7px; font-size:14px; font-weight:500; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cv .st { font-size:12.5px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.45; }
+.kind { display:inline-block; font:500 11px var(--font-ui); color:var(--color-muted); border:1px solid var(--color-border-strong); border-radius:2px; padding:0 4px; line-height:15px; margin-right:5px; vertical-align:1px; }
+.shelf .endcap { flex:none; width:64px; align-self:stretch; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; color:var(--color-muted); font-size:12.5px; border-left:1px solid var(--color-border); }
+.shelf .endcap .numeric { font-size:22px; color:var(--color-text); }
+
+/* 다시 보기: justified rows (every image at its own ratio, no crop), caption under, never over. */
+.rv { min-width:0; display:flex; flex-direction:column; }
+.jrow { display:flex; gap:4px; }
+.jrow + .jrow { margin-top:4px; }
+.jrow img { display:block; border-radius:1px; }
+.rvcap { display:flex; align-items:center; gap:8px; min-height:48px; padding:4px 0 0; min-width:0; }
+.rvcap .tx { flex:1; min-width:0; display:flex; flex-direction:column; }
+.rvcap strong { font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.35; }
+.rvcap small { font-size:12.5px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rvcap small .numeric { font-size:14px; color:var(--soft); }
+.rvcap .chev { width:16px; height:16px; color:var(--color-muted); flex:none; }
+.av { width:22px; height:22px; border-radius:50%; overflow:hidden; flex:none; }
+.av img { width:100%; height:100%; display:block; }
+.two { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+
+/* Memos: compact two-column cards. */
+.memos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.memo { display:flex; align-items:center; gap:12px; min-height:62px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:3px; overflow:hidden; padding-right:10px; min-width:0; }
+.memo .strip { width:3px; align-self:stretch; flex:none; }
+.memo > svg.i { width:18px; height:18px; color:var(--color-muted); }
+.memo .tx { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.memo strong { font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.memo small { font-size:12.5px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.memo small .numeric { font-size:14.5px; color:var(--color-text); }
+.memo .chev { width:16px; height:16px; color:var(--color-muted); flex:none; }
+.memos.list { grid-template-columns:1fr; gap:0; border:1px solid var(--color-border); border-radius:3px; overflow:hidden; }
+.memos.list .memo { border:0; border-radius:0; }
+.memos.list .memo + .memo { border-top:1px solid var(--color-border); }
+
+/* B: two columns. */
+.cols { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:18px; align-items:start; }
+.lane { display:flex; flex-direction:column; min-width:0; }
+.lane > * + * { margin-top:16px; }
+.lane > .sh + * { margin-top:6px; }
+.cgrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px 10px; align-items:stretch; }
+.cgrid .cv .art { margin-top:auto; }
+.cgrid .cv { width:auto; }
+.cgrid .cv .when { height:24px; margin-bottom:6px; }
+.qlist { border:1px solid var(--color-border); border-radius:3px; overflow:hidden; }
+.qrow { display:flex; align-items:center; gap:12px; min-height:60px; padding:6px 8px 6px 12px; background:var(--color-surface); }
+.qrow + .qrow { border-top:1px solid var(--color-border); }
+.qrow.act { background:var(--color-surface-elevated); }
+.qrow .n { font:500 30px/1 var(--font-numeric); color:var(--color-text); min-width:58px; text-align:right; white-space:nowrap; }
+.qrow.act .n { color:var(--color-accent); }
+.qrow .n small { font:500 12.5px var(--font-ui); color:var(--color-muted); margin-left:2px; }
+.qrow .t { flex:1; min-width:0; font-size:14.5px; font-weight:500; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qrow .t small { display:block; font-size:12px; font-weight:400; color:var(--color-muted); overflow:hidden; text-overflow:ellipsis; }
+.qrow .t .bp { margin-top:6px; }
+.qrow .chev { width:16px; height:16px; color:var(--color-muted); flex:none; }
+.subq { display:flex; align-items:center; gap:8px; min-height:44px; padding:0 8px 0 24px; background:var(--color-surface-elevated); border-top:1px solid var(--color-border); font-size:13.5px; color:var(--soft); }
+.subq > span:first-child { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.subq i { font-style:normal; color:var(--dim); }
+.subq .numeric { font-size:17px; color:var(--color-accent); }
+.subq .chev { width:14px; height:14px; color:var(--color-muted); }
+.subq.more { min-height:36px; font-size:12.5px; color:var(--color-muted); }
+.subq.more .numeric { font-size:14px; color:var(--soft); }
+.qrow + .subq, .subq + .qrow { border-top:1px solid var(--color-border); }
+.okline { display:flex; align-items:center; gap:8px; min-height:48px; padding:0 12px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:3px; font-size:14px; color:var(--color-muted); white-space:nowrap; overflow:hidden; }
+.okline svg.i { width:18px; height:18px; color:var(--ok); }
+
+/* C: hero rediscovery. */
+.hero { display:flex; flex-direction:column; min-width:0; }
+.hero .pic { position:relative; border-radius:var(--radius-tile); overflow:hidden; }
+.hero .pic img { display:block; width:100%; }
+.hero .cap { display:flex; align-items:center; gap:14px; min-height:64px; padding:8px 0 0; }
+.hero .cap .tx { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.hero .cap .kick { font-size:12.5px; color:var(--color-muted); display:flex; align-items:center; gap:6px; }
+.hero .cap .kick::before { content:''; width:5px; height:5px; background:var(--color-accent); }
+.hero .cap strong { font-size:17px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hero .cap strong small { font-size:13.5px; font-weight:400; color:var(--color-muted); margin-left:8px; }
+.hero .thumbs { display:flex; gap:3px; flex:none; }
+.hero .thumbs img { display:block; height:48px; border-radius:1px; opacity:.9; }
+.hero .page-n { font:500 14px var(--font-numeric); color:var(--color-muted); flex:none; }
+.hero .go { display:inline-flex; align-items:center; gap:3px; height:44px; padding:0 4px 0 12px; border-left:1px solid var(--color-border); font-size:14px; color:var(--color-text); white-space:nowrap; flex:none; }
+.hero .go svg.i { width:15px; height:15px; color:var(--color-muted); }
+.band { display:flex; flex-direction:column; gap:8px; }
+</style>
+</head>
+<body>
+<div class="doc" id="doc">
+<header>
+  <h1>태블릿 홈 다시 짜기 · 밀도와 이미지 (Galaxy Tab S11 세로 800 × 1280)</h1>
+  <p class="lead">지금 홈의 문제 — <b>숫자 하나가 가로 한 줄을 통째로 차지</b>하고(자산 현황 숫자 5개 = 5줄), <b>조용한 카드도 카드 한 장</b>(“새 신간 없음”, “받은 파일 · 보낼 파일 없음”)을 씁니다. 그래서 한 화면에 보이는 게 적고 이미지는 거의 없습니다.
+  세 방향 모두 같은 원칙을 따릅니다: <b>숫자는 타일 한 칸</b>(선으로 나눈 한 면), <b>조용한 것은 한 줄로 접기</b>, 이미지는 <b>신간 · 발매 표지</b>와 <b>다시 보기</b>(예전 자산)만 — 최근 저장 이미지는 쓰지 않습니다.
+  이미지는 모두 원래 비율 그대로(다시 보기는 줄 맞춤 배치, 자르지 않음), 설명은 이미지 아래에 둡니다. 큰 틀은 “바쁨” 상태(확인할 것 있음 · 새 권 나옴 · 전송 중), 오른쪽 작은 틀은 “평온” 상태에서 접히는 모습입니다. 제목 · 이미지는 모두 가짜 예시입니다.</p>
+  <div class="toolbar"><button id="toggle-full" aria-pressed="false">실제 크기 (1:1)</button><span>PNG: a.png · b.png · c.png · a-calm.png (1:1) · 지금 화면: <a href="current-home.jpg">current-home.jpg</a> · 이전 시안: <a href="../home-dashboard-20260926/round3.html">round3.html</a></span></div>
+</header>
+<div id="sections"></div>
+<section class="topic" id="compare">
+  <h2>비교</h2>
+  <p class="lead" style="margin-top:8px">첫 화면 항목 수와 이미지 면적은 이 페이지가 그려진 틀에서 직접 잰 값입니다(콘텐츠 영역 800 × 1,156 기준, 반 이상 보이는 항목만 셈). 지금 화면은 스크린숏 기준 어림값.</p>
+  <table class="data" id="cmp"></table>
+</section>
+<section class="topic" id="data">
+  <h2>데이터 — 지금 있는 것과 새로 필요한 것</h2>
+  <table class="data" id="dtable"></table>
+</section>
+</div>
+<script>
+const IC={"MagnifyingGlass":["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],"Trash":["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],"ArrowPath":["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],"ArrowsUpDown":["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],"AdjustmentsHorizontal":["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],"ArrowLeft":["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],"EllipsisVertical":["M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z"],"ChevronDown":["m19.5 8.25-7.5 7.5-7.5-7.5"],"ChevronRight":["m8.25 4.5 7.5 7.5-7.5 7.5"],"Funnel":["M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"],"Bookmark":["M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"],"Home":["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],"Photo":["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"RectangleStack":["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],"BookOpen":["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],"PencilSquare":["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],"Tag":["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],"Folder":["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],"InformationCircle":["m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"],"UserPlus":["M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"XMark":["M6 18 18 6M6 6l12 12"],"Plus":["M12 4.5v15m7.5-7.5h-15"],"CloudArrowDown":["M12 9.75v6.75m0 0-3-3m3 3 3-3m-8.25 6a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],"Cog6Tooth":["M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z","M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],"UserMinus":["M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"Squares2X2":["M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"],"Square2Stack":["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],"FolderOpen":["M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"],"Sparkles":["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"]};
+Object.assign(IC,{
+  Bell:["M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"],
+  BellSlash:["M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"],
+  LockClosed:["M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"],
+  Link:["M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"],
+  Wallet:["M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3"],
+  Check:["m4.5 12.75 6 6 9-13.5"],
+  ChevronUp:["m4.5 15.75 7.5-7.5 7.5 7.5"],
+  EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+  Pin:["M15.75 3.75 20.25 8.25M18 6l-4.5 4.5 1.5 5.25-2.25 2.25-3.375-3.375L4.5 19.5M9.375 14.625 6 11.25 8.25 9l5.25 1.5"],
+  Star:["M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"],
+});
+const SOLID={
+  Bell:"M5.25 9a6.75 6.75 0 0 1 13.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 0 1-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 1 1-7.48 0 24.585 24.585 0 0 1-4.831-1.244.75.75 0 0 1-.298-1.205A8.217 8.217 0 0 0 5.25 9.75V9Zm4.502 8.9a2.25 2.25 0 1 0 4.496 0 25.057 25.057 0 0 1-4.496 0Z",
+  Sparkles:"M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576l-2.846-.813a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 7.466 7.89l.813-2.846A.75.75 0 0 1 9 4.5Z",
+};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n].map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const S=(n,cls='')=>`<svg class="i solid ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${SOLID[n]}"/></svg>`;
+const STAR='<svg class="i solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z"/></svg>';
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const ib=(n,extra='',solid=false)=>`<span class="ib ${extra}">${solid?S(n):I(n)}</span>`;
+Object.assign(IC,{
+  InboxArrowDown:["M9 3.75H6.912a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859M12 3v8.25m0 0-3-3m3 3 3-3"],
+  UserCircle:["M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],
+  Square2Stack:["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],
+  DocumentDuplicate:["M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"],
+  SignalSlash:["m3 3 8.735 8.735m0 0a.374.374 0 1 1 .53.53m-.53-.53.53.53m0 0L21 21M14.652 9.348a3.75 3.75 0 0 1 0 5.304m2.121-7.425a6.75 6.75 0 0 1 0 9.546m2.121-11.667c3.808 3.807 3.808 9.98 0 13.788m-9.546-4.242a3.733 3.733 0 0 1-1.06-2.122m-1.061 4.243a6.75 6.75 0 0 1-1.625-6.929m-.496 9.05c-3.068-3.067-3.664-7.67-1.79-11.334M12 12h.008v.008H12V12Z"],
+  CloudArrowUp:["M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],
+  CalendarDays:["M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"],
+  ComputerDesktop:["M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"],
+  ArrowUpRight:["m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"],
+  CheckCircle:["M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  Clock:["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  PhotoSm:["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z"],
+});
+
+Object.assign(IC,{
+  ChartBar:["M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"],
+  ListBullet:["M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],
+  DocumentText:["M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"],
+  ServerStack:["M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z"],
+});
+
+/* ===== Placeholder art (never real images). Seeded, drawn at the exact ratio it is shown at. ===== */
+const rng=seed=>{let a=(seed*2654435761)>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};};
+/* bgTop, bgBottom, hair, cloth, light, skin, ink */
+const PAL=[
+  ['#2b3656','#d7a39b','#2f2838','#e9e1d4','#f3c77a','#f2dccb','#1b1b24'],
+  ['#8fb8cc','#e9eef0','#5a4038','#34507a','#ffffff','#f5ded0','#23303e'],
+  ['#3a2c3d','#b36a78','#ecdcc2','#27202f','#ffb7a8','#f0d6c5','#1d1620'],
+  ['#1e3837','#86ac9d','#c9c2b3','#2d2a2a','#ead67f','#efd9c7','#132221'],
+  ['#e5d6c0','#c29a80','#2c2932','#7c3c3e','#fff4dc','#f6e1d1','#2a2224'],
+  ['#232840','#56628f','#d8dcea','#a54b5c','#a2d2ff','#eedacd','#15182a'],
+  ['#4b3a2e','#d8b27c','#8b3a2f','#f1e6cf','#fff0c2','#f4dccb','#2b1f18'],
+  ['#2d3b2a','#a9b98e','#3b2c24','#d9d2bd','#f7f0c9','#f2dccb','#1b2418'],
+];
+const svgURI=s=>'data:image/svg+xml,'+encodeURIComponent(s);
+function figure(cx,cy,r,p,rand,opts={}){
+  const hair=opts.hair||p[2], cloth=opts.cloth||p[3], skin=p[5];
+  const sway=(rand()-.5)*r*.5, long=rand()>.35;
+  const back=long?`<path d="M${cx-r*1.25} ${cy-r*.2} Q${cx-r*1.5} ${cy+r*2.4} ${cx-r*1.05+sway} ${cy+r*3.1} L${cx+r*1.05+sway} ${cy+r*3.1} Q${cx+r*1.5} ${cy+r*2.4} ${cx+r*1.25} ${cy-r*.2} Z" fill="${hair}"/>`:'';
+  const body=`<path d="M${cx-r*.42} ${cy+r*.8} L${cx-r*1.9} ${cy+r*2.2} Q${cx-r*2.6} ${cy+r*3.2} ${cx-r*2.9} ${cy+r*9} L${cx+r*2.9} ${cy+r*9} Q${cx+r*2.6} ${cy+r*3.2} ${cx+r*1.9} ${cy+r*2.2} L${cx+r*.42} ${cy+r*.8} Z" fill="${cloth}"/>`;
+  const collar=`<path d="M${cx-r*.9} ${cy+r*1.55} L${cx} ${cy+r*2.6} L${cx+r*.9} ${cy+r*1.55}" fill="none" stroke="${p[6]}" stroke-opacity=".35" stroke-width="${r*.12}"/>`;
+  const neck=`<rect x="${cx-r*.32}" y="${cy+r*.5}" width="${r*.64}" height="${r*1.1}" fill="${skin}"/><rect x="${cx-r*.32}" y="${cy+r*.5}" width="${r*.64}" height="${r*.45}" fill="${p[6]}" opacity=".12"/>`;
+  const face=`<ellipse cx="${cx}" cy="${cy}" rx="${r*.95}" ry="${r*1.05}" fill="${skin}"/>`;
+  const eyes=`<ellipse cx="${cx-r*.36}" cy="${cy+r*.12}" rx="${r*.12}" ry="${r*.18}" fill="${p[6]}"/><ellipse cx="${cx+r*.36}" cy="${cy+r*.12}" rx="${r*.12}" ry="${r*.18}" fill="${p[6]}"/><ellipse cx="${cx-r*.33}" cy="${cy+r*.05}" rx="${r*.04}" ry="${r*.05}" fill="#fff"/><ellipse cx="${cx+r*.39}" cy="${cy+r*.05}" rx="${r*.04}" ry="${r*.05}" fill="#fff"/><ellipse cx="${cx-r*.55}" cy="${cy+r*.42}" rx="${r*.16}" ry="${r*.07}" fill="#e8908a" opacity=".45"/><ellipse cx="${cx+r*.55}" cy="${cy+r*.42}" rx="${r*.16}" ry="${r*.07}" fill="#e8908a" opacity=".45"/>`;
+  const bangs=`<path d="M${cx-r*1.08} ${cy+r*.25} Q${cx-r*1.15} ${cy-r*1.3} ${cx} ${cy-r*1.28} Q${cx+r*1.15} ${cy-r*1.3} ${cx+r*1.08} ${cy+r*.25} L${cx+r*.8} ${cy-r*.35} L${cx+r*.45} ${cy-r*.05} L${cx+r*.25} ${cy-r*.5} L${cx-r*.05} ${cy-r*.1} L${cx-r*.3} ${cy-r*.55} L${cx-r*.6} ${cy-r*.1} L${cx-r*.85} ${cy-r*.4} Z" fill="${hair}"/>`;
+  const acc=opts.acc?`<circle cx="${cx+r*.8}" cy="${cy-r*.8}" r="${r*.2}" fill="${p[4]}"/>`:'';
+  return back+body+collar+neck+face+eyes+bangs+acc;
+}
+/* An illustration (다시 보기): sky gradient, soft light, often a character. */
+function illo(seed,w,h){
+  const rand=rng(seed+11),p=PAL[seed%PAL.length];let s='';
+  s+=`<defs><linearGradient id="g" x1="0" y1="0" x2="${rand()>.5?1:0}" y2="1"><stop offset="0" stop-color="${p[0]}"/><stop offset="1" stop-color="${p[1]}"/></linearGradient><radialGradient id="l" cx="${.2+rand()*.6}" cy="${.15+rand()*.3}" r=".6"><stop offset="0" stop-color="${p[4]}" stop-opacity=".55"/><stop offset="1" stop-color="${p[4]}" stop-opacity="0"/></radialGradient></defs>`;
+  s+=`<rect width="${w}" height="${h}" fill="url(#g)"/><rect width="${w}" height="${h}" fill="url(#l)"/>`;
+  for(let k=0;k<7;k++){const r=(.02+rand()*.06)*Math.max(w,h);s+=`<circle cx="${rand()*w}" cy="${rand()*h*.8}" r="${r}" fill="${p[4]}" opacity="${.06+rand()*.16}"/>`;}
+  const scene=seed%5===3;
+  const gy=h*(.62+rand()*.12);
+  s+=`<path d="M0 ${gy} C${w*.3} ${gy-h*.08} ${w*.6} ${gy+h*.05} ${w} ${gy-h*.04} V${h} H0Z" fill="${p[6]}" opacity=".35"/>`;
+  if(scene){
+    s+=`<path d="M0 ${h*.78} L${w*.25} ${h*.55} L${w*.42} ${h*.7} L${w*.66} ${h*.46} L${w} ${h*.74} V${h} H0Z" fill="${p[6]}" opacity=".55"/>`;
+    for(let k=0;k<5;k++){const x=rand()*w,y=h*(.3+rand()*.3);s+=`<rect x="${x}" y="${y}" width="${w*.004+1}" height="${h}" fill="${p[4]}" opacity=".12"/>`;}
+  } else {
+    const r=Math.min(w,h)*(.1+rand()*.05);const cx=w*(.32+rand()*.36);const cy=h*(.3+rand()*.12)+r;
+    s+=figure(cx,cy,r,p,rand,{acc:rand()>.5});
+    if(w>h*1.2&&rand()>.3){const r2=r*.85,cx2=cx+(cx<w/2?1:-1)*w*.3;const q=PAL[(seed+3)%PAL.length];s+=figure(cx2,cy+r*.3,r2,[p[0],p[1],q[2],q[3],p[4],p[5],p[6]],rand);}
+  }
+  return svgURI(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`);
+}
+/* Manga volume cover 2:3: paper, character, title block, volume number. */
+function mangaCover(seed,vol){
+  const w=400,h=600,rand=rng(seed+101),p=PAL[seed%PAL.length];let s='';
+  s+=`<rect width="${w}" height="${h}" fill="#efe9de"/>`;
+  s+=`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p[1]}"/><stop offset="1" stop-color="${p[0]}"/></linearGradient></defs>`;
+  s+=`<rect x="0" y="${h*.2}" width="${w}" height="${h*.8}" fill="url(#g)"/>`;
+  for(let k=0;k<5;k++)s+=`<circle cx="${rand()*w}" cy="${h*.25+rand()*h*.4}" r="${10+rand()*40}" fill="${p[4]}" opacity="${.1+rand()*.2}"/>`;
+  s+=figure(w*(.45+rand()*.12),h*.43,w*.14,p,rand,{acc:true});
+  s+=`<rect x="0" y="0" width="${w}" height="${h*.2}" fill="#efe9de"/>`;
+  s+=`<rect x="26" y="26" width="${230+rand()*80}" height="34" fill="${p[6]}"/><rect x="26" y="68" width="${150+rand()*60}" height="14" fill="${p[6]}" opacity=".55"/><rect x="26" y="90" width="80" height="8" fill="${p[6]}" opacity=".35"/>`;
+  s+=`<rect x="${w-74}" y="${h-74}" width="52" height="52" fill="#efe9de"/><text x="${w-48}" y="${h-36}" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="30" fill="${p[6]}">${vol}</text>`;
+  return svgURI(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`);
+}
+/* Game cover 3:4 (IGDB t_cover_big): dark key art, a logo block; no platform band (DESIGN.md §8). */
+function gameCover(seed){
+  const w=450,h=600,rand=rng(seed+303),p=PAL[seed%PAL.length];let s='';
+  s+=`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p[0]}"/><stop offset=".7" stop-color="${p[6]}"/><stop offset="1" stop-color="#050506"/></linearGradient><radialGradient id="l" cx=".5" cy=".3" r=".55"><stop offset="0" stop-color="${p[4]}" stop-opacity=".7"/><stop offset="1" stop-color="${p[4]}" stop-opacity="0"/></radialGradient></defs>`;
+  s+=`<rect width="${w}" height="${h}" fill="url(#g)"/><rect width="${w}" height="${h}" fill="url(#l)"/>`;
+  s+=`<path d="M0 ${h*.62} L${w*.2} ${h*.48} L${w*.35} ${h*.58} L${w*.6} ${h*.4} L${w} ${h*.6} V${h} H0Z" fill="#000" opacity=".45"/>`;
+  s+=figure(w*.5,h*.3,w*.1,[p[0],p[1],'#15151b','#1f1f27',p[4],'#caa89a','#0d0d10'],rand);
+  s+=`<rect x="${w*.14}" y="${h*.72}" width="${w*.72}" height="46" fill="#f4f1e8"/><rect x="${w*.14+12}" y="${h*.72+12}" width="${w*.72-24}" height="22" fill="${p[6]}" opacity=".9"/><rect x="${w*.3}" y="${h*.72+58}" width="${w*.4}" height="10" fill="#f4f1e8" opacity=".75"/>`;
+  return svgURI(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`);
+}
+/* Movie poster 2:3 (TMDB w342): photographic gradient, figure, title and credit block. */
+function moviePoster(seed){
+  const w=400,h=600,rand=rng(seed+505),p=PAL[seed%PAL.length];let s='';
+  s+=`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p[1]}"/><stop offset=".55" stop-color="${p[0]}"/><stop offset="1" stop-color="#0b0b0d"/></linearGradient></defs>`;
+  s+=`<rect width="${w}" height="${h}" fill="url(#g)"/>`;
+  s+=`<circle cx="${w*.7}" cy="${h*.22}" r="${w*.16}" fill="${p[4]}" opacity=".55"/>`;
+  s+=figure(w*.42,h*.36,w*.12,p,rand);
+  s+=`<rect x="0" y="${h*.68}" width="${w}" height="${h*.32}" fill="#0b0b0d" opacity=".55"/>`;
+  s+=`<rect x="${w*.12}" y="${h*.74}" width="${w*.76}" height="40" fill="#f2efe6"/><rect x="${w*.25}" y="${h*.74+52}" width="${w*.5}" height="10" fill="#f2efe6" opacity=".6"/>`;
+  for(let k=0;k<3;k++)s+=`<rect x="${w*.1}" y="${h*.9+k*9}" width="${w*.8}" height="3" fill="#f2efe6" opacity=".22"/>`;
+  return svgURI(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`);
+}
+
+/* ===== Sample data (fictional titles) ===== */
+const TODAY=new Date(2026,8,27);
+const WD='일월화수목금토';
+const dinfo=s=>{const [m,d]=s.split('.').map(Number);const dt=new Date(2026,m-1,d);return {d:s,w:WD[dt.getDay()],left:Math.round((dt-TODAY)/864e5)};};
+/* 신간 (나옴) first, then 발매 예정 in date order: manga, game and movie mixed. */
+const NEWV=[{k:'만화',n:'달의 도서관',v:'22권',seed:4,vol:22},{k:'만화',n:'바다 건너 편지',v:'13권',seed:0,vol:13,when:'9.24'}];
+const UP=[
+  {k:'만화',n:'마법소녀를 동경해서',v:'8권',d:'9.30',seed:2,vol:8},
+  {k:'만화',n:'하루 한 그릇',v:'15권',d:'10.2',seed:6,vol:15},
+  {k:'게임',n:'들판의 기록 II',v:'Switch 2 · PS5',d:'10.16',seed:3},
+  {k:'영화',n:'여름의 끝',v:'극장 개봉',d:'10.22',seed:1},
+  {k:'만화',n:'푸른 역',v:'6권',d:'10.23',seed:7,vol:6},
+  {k:'게임',n:'별의 항로',v:'PC · PS5',d:'11.19',seed:5},
+];
+const MEMO=[
+  {c:'#5fae6e',ic:'DocumentText',t:'Todo',d:'nai 확장 fault 모바일 앱 PC 라코믹스'},
+  {c:'#c9a86a',ic:'Wallet',t:'가계부',d:'9월 식비 <span class="numeric">−412,300</span>원'},
+];
+const STATS={today:5,week:511,total:'9,375',uncl:40,tag:35,tagLeft:'4,111'};
+
+/* ===== Pieces ===== */
+const chev=(c='chev')=>I('ChevronRight',c);
+const homeBar=s=>`<header class="bar"><span class="brand">${MARK}</span><span class="hometitle">홈</span><span class="space"></span><span class="ib">${I('ArrowPath')}</span><span class="ib">${I('ArrowsUpDown')}${s.busy?'<span class="xbadge">2</span>':''}</span><span class="ib">${I('AdjustmentsHorizontal')}</span></header>`;
+const TABS=[['Home','홈'],['Photo','에셋'],['RectangleStack','컬렉션'],['BookOpen','카탈로그'],['PencilSquare','메모']];
+const nav=()=>`<nav class="nav">${TABS.map(([ic,l],k)=>`<span class="${k===0?'active':''}">${I(ic)}<span>${l}</span></span>`).join('')}</nav>`;
+const frame=(s,body,clip)=>`<div class="frame${clip?' clip':''}">${homeBar(s)}<div class="content">${body}</div>${clip?'':nav()}</div>`;
+const sh=(title,meta='',more='전체')=>`<div class="sh"><h2>${title}</h2>${meta?`<span class="meta">${meta}</span>`:''}<span class="rule"></span>${more?`<span class="more">${more}${chev()}</span>`:''}</div>`;
+const bp=(v,hot)=>`<div class="bp${hot?' hot':''}"><i style="width:${v}%"></i></div>`;
+const tile=({n,u='',l,s='',act,cls='',style='',bar,item=true})=>`<div class="tile ${act?'act':''} ${cls}" ${style?`style="${style}"`:''} ${item?'data-i':''}><span class="n">${n}${u?`<small>${u}</small>`:''}</span><span><span class="l" style="display:block">${l}</span>${s?`<span class="s" style="display:block">${s}</span>`:''}${bar!=null?`<div class="bp" style="margin-top:6px"><i style="width:${bar}%"></i></div>`:''}</span></div>`;
+const okTile=(t,style='')=>`<div class="tile ok" style="${style}" data-i>${I('CheckCircle')}<span>${t}</span></div>`;
+
+/* A release cover with its date rail. h = cover height; widths follow the medium's ratio. */
+function cover(r,h,{rail=true,grid=false}={}){
+  const game=r.k==='게임',ratio=game?3/4:2/3,w=Math.round(h*ratio);
+  const src=r.k==='만화'?mangaCover(r.seed,r.vol):game?gameCover(r.seed):moviePoster(r.seed);
+  let when='';
+  if(rail){
+    if(r.isNew) when=`<div class="when new"><span class="d">${r.when?`${r.when} 나옴`:'새 권 · 오늘'}</span></div>`;
+    else {const di=dinfo(r.d);when=`<div class="when"><span class="d">${di.d}</span><span class="w">${di.w}</span><span class="dd">D-${di.left}</span></div>`;}
+  }
+  const sub=`<span class="kind">${r.k}</span>${r.v}`;
+  return `<div class="cv" style="${grid?'':`width:${w}px`}" data-i>${when}<div class="art ${game?'game':''}" style="${grid?`aspect-ratio:${ratio}`:`width:${w}px;height:${h}px`}"><img src="${src}" alt="">${r.isNew&&!r.when?'<span class="newmark">NEW</span>':''}</div><div class="tt">${r.n}</div><div class="st">${sub}</div></div>`;
+}
+const releases=s=>[...(s.busy?NEWV.map(r=>({...r,isNew:true})):[]),...UP];
+
+/* Justified rows: each image keeps its own ratio; the row height is what fills the width. */
+function jrow(ratios,width,seed0,gap=4){
+  const sum=ratios.reduce((a,b)=>a+b,0),h=(width-gap*(ratios.length-1))/sum;let used=0;
+  return `<div class="jrow">${ratios.map((r,k)=>{let w=Math.floor(r*h);if(k===ratios.length-1)w=Math.round(width-used-gap*(ratios.length-1));used+=w;const H=Math.round(h);return `<img src="${illo(seed0+k,Math.round(w*2),H*2)}" style="width:${w}px;height:${H}px" alt="">`;}).join('')}</div>`;
+}
+const avatar=seed=>`<span class="av"><img src="${illo(seed,44,44)}" alt=""></span>`;
+function revisit(kind,width,rows,{avatarSeed}={}){
+  const R={
+    date:{seed:40,t:'1년 전 오늘',m:'<span class="numeric">2025.9.27</span> 저장 · <span class="numeric">14</span>장'},
+    artist:{seed:60,t:'다시 만난 작가 · Ranzu',m:'<span class="numeric">5</span>개월 만 · 소장 <span class="numeric">38</span>장'},
+    chara:{seed:80,t:'라라 · 백합',m:'한동안 안 본 캐릭터 · <span class="numeric">212</span>장'},
+  }[kind];
+  return `<div class="rv" data-i>${rows.map((r,k)=>jrow(r,width,R.seed+k*10)).join('')}<div class="rvcap">${avatarSeed!=null?avatar(avatarSeed):''}<span class="tx"><strong>${R.t}</strong><small>${R.m}</small></span>${chev()}</div></div>`;
+}
+const memoCard=m=>`<div class="memo" data-i><span class="strip" style="background:${m.c}"></span>${I(m.ic)}<span class="tx"><strong>${m.t}</strong><small>${m.d}</small></span>${chev()}</div>`;
+
+/* ===== A · 표지 선반 + 숫자 타일 ===== */
+function dirA(s){
+  const todo=s.busy
+    ? tile({n:'610',u:'건',l:'캐릭터 검토',s:'백합 312 · 명조 180 외',act:1})+tile({n:'97',u:'건',l:'중복 판본',s:'카탈로그 · 같은 작품',act:1})
+    : okTile('모두 확인함','grid-row:span 2');
+  const calmTop=`<div>${sh('자산 현황','','전체')}<div class="tiles" style="grid-template-columns:repeat(4,minmax(0,1fr)) minmax(0,1.4fr)">${tile({n:STATS.today,u:'장',l:'오늘 추가'})}${tile({n:STATS.week,u:'장',l:'이번 주'})}${tile({n:STATS.total,u:'장',l:'전체'})}${tile({n:STATS.uncl,u:'장',l:'분류 안 됨'})}${tile({n:STATS.tag,u:'%',l:'캐릭터 자동 태그',bar:STATS.tag})}</div></div>`;
+  const top=!s.busy?calmTop:`<div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,3fr);gap:10px">
+    <div>${sh('확인할 것','','')}<div class="tiles" style="grid-template-rows:1fr 1fr;height:172px">${todo}</div></div>
+    <div>${sh('자산 현황','','전체')}<div class="tiles" style="grid-template-columns:repeat(3,minmax(0,1fr));height:172px">
+      ${tile({n:STATS.today,u:'장',l:'오늘 추가'})}${tile({n:STATS.week,u:'장',l:'이번 주'})}${tile({n:STATS.total,u:'장',l:'전체'})}
+      ${tile({n:STATS.uncl,u:'장',l:'분류 안 됨'})}${tile({n:STATS.tag,u:'%',l:'캐릭터 자동 태그',s:`미지정 ${STATS.tagLeft}장`,bar:STATS.tag,style:'grid-column:span 2'})}
+    </div></div></div>`;
+  const status=s.busy
+    ? `<div class="status tight" data-i><span class="seg grow">${I('ArrowsUpDown')}<b>보내는 중</b><span class="numeric">62%</span>${bp(62,1)}<span class="grow" style="margin-left:4px">IMG_2041.png 외 3 → 작업실 PC</span></span><span class="seg"><b>받은 파일</b><span class="numeric" style="color:var(--color-accent)">2</span></span><span class="seg"><span class="dot"></span>서버</span>${chev()}</div>`
+    : `<div class="status tight" data-i><span class="seg grow">${I('CheckCircle','okc')}<span class="grow">확인할 것 없음 · 받은 · 보낼 파일 없음</span></span><span class="seg">새 신간 없음 · 만화 <span class="numeric">9</span>편 지켜보는 중</span><span class="seg"><span class="dot"></span>서버</span>${chev()}</div>`;
+  const rel=releases(s);
+  const shelf=`${sh(s.busy?'신간 · 발매 예정':'발매 예정',s.busy?'새 권 <span class="numeric">2</span> · <span class="numeric">60</span>일 안 <span class="numeric">6</span>':'<span class="numeric">60</span>일 안 <span class="numeric">6</span>')}<div class="shelf">${rel.map(r=>cover(r,200)).join('')}</div>`;
+  const rv=`${sh('다시 보기','예전에 모은 것','')}<div class="two">${revisit('date',376,[[.72,1.42,.75],[1,.66,1.5,.8]])}${revisit('artist',376,[[1.33,.7,.8],[.75,1.5,.66,1]],{avatarSeed:63})}</div>`;
+  const memo=`${sh('메모','고정 <span class="numeric">2</span>')}<div class="memos">${MEMO.map(memoCard).join('')}</div>`;
+  return `<div class="page">${top}${status}<div>${shelf}</div><div>${rv}</div><div>${memo}</div></div>`;
+}
+
+/* ===== B · 두 칼럼 대시보드 ===== */
+function dirB(s){
+  const rel=releases(s).slice(0,6);
+  const left=`<div class="lane">${sh(s.busy?'신간 · 발매 예정':'발매 예정',s.busy?'새 권 <span class="numeric">2</span>':'')}<div class="cgrid">${rel.map(r=>cover(r,0,{grid:true})).join('')}</div>
+    ${sh('다시 보기','','')}${revisit('date',451,[[.72,1.42,.75],[1,.66,1.5,.8]])}${revisit('artist',451,[[1.33,.7,.8],[.75,1.5,.66,1]],{avatarSeed:63})}</div>`;
+  const q=(n,u,t,sub,act,extra='')=>`<div class="qrow ${act?'act':''}" data-i><span class="n">${n}<small>${u}</small></span><span class="t">${t}<small>${sub}</small>${extra}</span>${chev()}</div>`;
+  const sub=(a,b,n)=>`<div class="subq" data-i><span>${a} <i>›</i> ${b}</span><span class="numeric">${n}</span>${chev()}</div>`;
+  const todo=s.busy?`<div class="qlist">${q('610','건','캐릭터 검토','시리즈 · 캐릭터별',1)}${sub('백합','라라',212)}${sub('명조','카르티시아',180)}${sub('백합','마리',100)}<div class="subq more"><span>외 <span class="numeric">4</span>명 · <span class="numeric">118</span>건</span></div>${q('97','건','중복 판본','카탈로그 · 같은 작품',1)}</div>`:`<div class="okline" data-i>${I('CheckCircle')}모두 확인함</div>`;
+  const xfer=s.busy?`<div class="qlist">${q('62','%','보내는 중','IMG_2041.png 외 3 → 작업실 PC',0,bp(62,1))}${q('2','개','받은 파일','작업실 PC에서 · 아직 안 봄',1)}</div>`:`<div class="okline" data-i>${I('CheckCircle')}받은 · 보낼 파일 없음</div>`;
+  const assets=`<div class="tiles" style="grid-template-columns:1fr 1fr">${tile({n:STATS.today,u:'장',l:'오늘 추가'})}${tile({n:STATS.week,u:'장',l:'이번 주'})}${tile({n:STATS.total,u:'장',l:'전체'})}${tile({n:STATS.uncl,u:'장',l:'분류 안 됨'})}${tile({n:STATS.tag,u:'%',l:'캐릭터 자동 태그',s:`미지정 ${STATS.tagLeft}장`,bar:STATS.tag,style:'grid-column:span 2'})}</div>`;
+  const memo=`<div class="memos list">${MEMO.map(memoCard).join('')}</div>`;
+  const right=`<div class="lane">${sh('확인할 것','','')}${todo}${sh('전송','','')}${xfer}${sh('자산 현황')}${assets}${sh('메모','고정 <span class="numeric">2</span>')}${memo}${sh('서버','','')}<div class="okline" data-i><span class="dot"></span>연결됨 · 작업실 PC 방금</div></div>`;
+  return `<div class="page"><div class="cols">${left}${right}</div></div>`;
+}
+
+/* ===== C · 히어로 다시 보기 ===== */
+function dirC(s){
+  const hero=`<div class="hero" data-i><div class="pic"><img src="${illo(21,1536,840)}" style="height:420px;object-fit:fill" alt=""></div>
+    <div class="cap"><span class="tx"><span class="kick">1년 전 오늘 · <span class="numeric">2025.9.27</span></span><strong>라라 · 백합<small>Ranzu</small></strong></span>
+    <span class="thumbs">${[.72,1.4,.8,1].map((r,k)=>`<img src="${illo(40+k,Math.round(96*r),96)}" style="width:${Math.round(48*r)}px" alt="">`).join('')}</span><span class="page-n">1 / 14</span><span class="go">더 보기${chev()}</span></div></div>`;
+  const row1=s.busy
+    ? `<div class="tiles" style="grid-template-columns:repeat(4,minmax(0,1fr))">${tile({n:'610',u:'건',l:'캐릭터 검토',act:1,cls:'sm'})}${tile({n:'97',u:'건',l:'중복 판본',act:1,cls:'sm'})}${tile({n:'62',u:'%',l:'보내는 중 · 외 3',cls:'sm',bar:62})}${tile({n:'2',u:'개',l:'받은 파일',act:1,cls:'sm'})}</div>`
+    : `<div class="okline" data-i>${I('CheckCircle')}모두 확인함 · 받은 파일 · 보낼 파일 없음 · 새 신간 없음</div>`;
+  const row2=`<div class="tiles" style="grid-template-columns:repeat(5,minmax(0,1fr))">${tile({n:STATS.today,u:'장',l:'오늘 추가',cls:'sm'})}${tile({n:STATS.week,u:'장',l:'이번 주',cls:'sm'})}${tile({n:STATS.total,u:'장',l:'전체',cls:'sm'})}${tile({n:STATS.uncl,u:'장',l:'분류 안 됨',cls:'sm'})}${tile({n:STATS.tag,u:'%',l:'자동 태그',cls:'sm',bar:STATS.tag})}</div>`;
+  const rel=releases(s);
+  const shelf=`${sh(s.busy?'신간 · 발매 예정':'발매 예정',s.busy?'새 권 <span class="numeric">2</span>':'')}<div class="shelf">${rel.map(r=>cover(r,162)).join('')}</div>`;
+  const memo=`${sh('메모','고정 <span class="numeric">2</span>')}<div class="memos">${MEMO.map(memoCard).join('')}</div>`;
+  return `<div class="page">${hero}<div class="band tight">${row1}${row2}</div><div>${shelf}</div><div>${memo}</div></div>`;
+}
+
+const DIRS=[
+  {id:'a',k:'A',t:'표지 선반 + 숫자 타일',rec:true,fn:dirA,
+   changed:['<b>숫자 7개가 타일 한 덩어리(150px)</b>: 왼쪽 확인할 것 2칸(한 단계 밝은 면 · 강조 숫자), 오른쪽 자산 현황 3×2. 지금은 같은 숫자가 7줄 ≈ 750px.',
+            '<b>전송 · 서버 · 신간 없음은 상태 한 줄</b>(48px). 전송 중이면 그 줄 안에 진행률, 받은 파일 수가 붙습니다.',
+            '<b>신간 · 발매 예정 선반</b>: 날짜 레일(날짜 · 요일 · D-day) 위에 표지를 매체 비율 그대로 — 만화 2:3, 게임 3:4, 영화 2:3. 새 권은 맨 앞, 옆으로 밀어 더 봄.',
+            '<b>다시 보기 두 묶음</b>(1년 전 오늘 · 다시 만난 작가), 이미지는 자르지 않고 줄 맞춤. <b>메모는 두 칸</b>.'],
+   why:['읽는 순서가 지금과 같습니다: 할 일 → 새로 나온 것 → 볼 거리 → 메모. 한 줄기라 세로 태블릿에서 시선이 지그재그로 가지 않습니다.',
+        '첫 화면에 모든 섹션이 다 들어오고, 이미지 면적도 지금의 거의 0에서 크게 늘어납니다. 그러면서 이미지가 “할 일”을 밀어내지 않아 9-26에 거절된 이미지 중심 홈과 다릅니다.'],
+   calm:'평온: 확인할 것 칸이 통째로 사라지고 자산 현황이 한 줄(5칸)로 펴집니다. 상태 줄은 “확인할 것 없음 · 받은 · 보낼 파일 없음 · 새 신간 없음 · 서버”. 선반은 발매 예정만 — 표지와 다시 보기가 그만큼 위로 올라옵니다.'},
+  {id:'b',k:'B',t:'두 칼럼 대시보드',fn:dirB,
+   changed:['<b>왼쪽 60% = 이미지</b>: 신간 · 발매 표지 3열 그리드(바닥 맞춤이라 게임 3:4 표지도 자르지 않음), 그 아래 다시 보기.',
+            '<b>오른쪽 40% = 정보</b>: 확인할 것 · 전송은 숫자 먼저인 줄, 자산 현황 2×3 타일, 메모 목록.',
+            '두 번째 다시 보기 묶음만 첫 화면 아래로 내려갑니다.'],
+   why:['표지가 가장 크게(≈140px 폭) 여러 권 보이고 정보는 항상 오른쪽 같은 자리에 있습니다.',
+        '대신 오른쪽 칼럼(≈300px)이 좁아 캐릭터 검토의 시리즈 나눔 같은 설명이 잘리기 쉽고, 눈이 먼저 가는 왼쪽 위가 “할 일”이 아니라 표지입니다. 두 줄기라 한쪽이 길어지면 반대쪽에 빈자리가 생깁니다.'],
+   calm:'평온: 오른쪽 확인할 것 · 전송이 각각 한 줄로 접혀 자산 현황과 메모가 위로 올라옵니다. 왼쪽은 발매 예정 표지만.'},
+  {id:'c',k:'C',t:'히어로 다시 보기',fn:dirC,
+   changed:['<b>맨 위에 다시 보기 한 장을 크게</b>(768 × 420) — 설명은 이미지 아래 한 줄(어떤 묶음 · 캐릭터 · 작가), 오른쪽에 같은 묶음 썸네일과 “더 보기”.',
+            '<b>숫자는 작은 타일 두 줄</b>: 윗줄 할 일 + 전송, 아랫줄 자산 현황 5개.',
+            '그 아래 좀 더 작은 표지 선반, 메모 두 칸.'],
+   why:['첫인상이 가장 “내 라이브러리”답고 이미지 비중이 가장 큽니다.',
+        '하지만 매일 바뀌는 한 장이 화면 3분의 1을 차지해 할 일 숫자가 작아지고 아래로 밀립니다(9-26에 거절된 이미지 중심 홈에 가장 가까움). 가로 이미지가 아닌 세로 그림이 뽑히면 그림을 가운데 두고 양옆이 비거나 썸네일로 채워야 합니다.'],
+   calm:'평온: 윗줄 타일 4칸이 “모두 확인함 · 전송 없음 · 새 신간 없음” 한 줄로 접혀 선반이 위로 올라옵니다.'},
+];
+
+const params=new URLSearchParams(location.search);
+const shot=params.get('shot');
+if(shot){
+  const d=DIRS.find(x=>x.id===shot);
+  document.body.classList.add('shot');
+  document.body.innerHTML=frame({busy:!params.get('calm')},d.fn({busy:!params.get('calm')}));
+} else {
+  document.getElementById('sections').innerHTML=DIRS.map(d=>`<section class="topic" id="${d.id}">
+    <h2><span class="k">${d.k}</span>${d.t}${d.rec?'<span class="rec">추천</span>':''}</h2>
+    <div class="pair"><div class="zoom" id="f-${d.id}">${frame({busy:true},d.fn({busy:true}))}</div>
+    <div class="notes"><h3>무엇이 바뀌었나</h3><ul>${d.changed.map(x=>`<li>${x}</li>`).join('')}</ul>
+      <h3>왜 / 대가</h3><ul>${d.why.map(x=>`<li>${x}</li>`).join('')}</ul>
+      <h3>평온할 때</h3><p class="calmcap">${d.calm}</p><div class="calmwrap">${frame({busy:false},d.fn({busy:false}),true)}</div></div></div></section>`).join('');
+
+  const DATA=[
+    ['캐릭터 검토 · 중복 판본','ok','지금 홈이 읽는 수(<code>/v1/library/characters/review</code> 등). 시리즈별 나눔 수는 0.8.49의 시리즈 · 캐릭터 검토 수(<code>c7efc4cc</code>)'],
+    ['자산 현황 5개','ok','<code>/v1/library/summary</code>(오늘 · 이번 주 · 전체 · 분류 안 됨) + 앱이 들고 있는 캐릭터 색인(자동 태그 %)'],
+    ['전송 진행 · 받은 파일','ok','<code>ExchangeSnapshot</code>(앱이 이미 들고 있음)'],
+    ['신간(새 권) 표지','ok','컬렉션 선반의 작품 표지(<code>collectionCover</code>). 권마다 다른 표지가 아니라 작품 대표 표지'],
+    ['만화 발매 예정 표지','part','일정은 있음(지금 홈 목록). 표지는 작품 대표 표지로 대신 — 나올 권 자체의 표지는 없음'],
+    ['게임 · 영화 발매 예정 표지','new','서버 계약은 있음(<code>home_upcoming.py</code>: IGDB/TMDB 이미지 URL). PC가 6개월 캘린더와 위시리스트를 아직 게시하지 않아 태블릿에 올 데이터가 없음 — PC 게시 작업 필요'],
+    ['다시 보기: 1년 전 오늘 · 다시 만난 작가','ok','<code>/v1/library/revisit</code>(묶음 “과거의 이날”, “다시 만난 작가”) 이미 있음. 홈에서 부를 때 개수 제한(예: 묶음당 8장)만 정하면 됨'],
+    ['다시 보기: 캐릭터별 (C의 캡션 “라라 · 백합”)','part','캐릭터 색인은 태블릿에 있음. “한동안 안 본 캐릭터” 고르기와 자산→캐릭터 이름 붙이기는 새 규칙 필요'],
+    ['다시 보기 히어로 한 장 (C)','part','revisit 묶음에서 첫 장을 쓰면 됨. 가로 그림을 고르는 규칙(비율)이나 세로 그림 배치는 새로 정해야 함'],
+    ['메모','ok','기기 안 메모(고정 메모) — 오프라인에서도 그대로'],
+  ];
+  const lab={ok:'지금 있음',part:'부분',new:'새 데이터'};
+  document.getElementById('dtable').innerHTML='<tr><th>항목</th><th>상태</th><th>근거 · 필요한 것</th></tr>'+DATA.map(([a,k,b])=>`<tr><td>${a}</td><td><span class="dk ${k}">${lab[k]}</span></td><td class="m">${b}</td></tr>`).join('');
+
+  /* Measure each busy frame: items at least half visible, and image area inside the content viewport. */
+  const measure=()=>{
+    const rows=DIRS.map(d=>{
+      const f=document.querySelector(`#f-${d.id} .content`),cr=f.getBoundingClientRect();
+      const items=[...f.querySelectorAll('[data-i]')].filter(el=>{const r=el.getBoundingClientRect();const vis=Math.min(r.bottom,cr.bottom)-Math.max(r.top,cr.top);return vis>=r.height/2;}).length;
+      let area=0;f.querySelectorAll('img').forEach(im=>{const r=im.getBoundingClientRect();const w=Math.max(0,Math.min(r.right,cr.right)-Math.max(r.left,cr.left)),h=Math.max(0,Math.min(r.bottom,cr.bottom)-Math.max(r.top,cr.top));area+=w*h;});
+      return {d,items,share:Math.round(area/(cr.width*cr.height)*100)};
+    });
+    const T={a:['1 (타일)','1 (선반 표지 → 작품)','1 (메모 카드)','없음'],b:['1 (오른쪽 줄)','1 (표지 그리드)','1 (메모 목록)','없음'],c:['1 (작은 타일)','1 (선반)','1 (메모 카드)','없음 (맨 아래, 3개째부터 스크롤)']};
+    document.getElementById('cmp').innerHTML='<tr><th>방향</th><th>첫 화면 항목 수</th><th>이미지 면적</th><th>캐릭터 검토</th><th>신간</th><th>메모</th><th>스크롤 필요</th></tr>'
+      +'<tr><td>지금 홈</td><td class="n">≈ 11</td><td class="n">≈ 0%</td><td class="m">1</td><td class="m">1 (카드 머리 → 신간 화면)</td><td class="m">1, 두 번째 메모는 스크롤</td><td class="m">메모 · 서버 상태</td></tr>'
+      +rows.map(r=>`<tr class="${r.d.rec?'best':''}"><td>${r.d.k} · ${r.d.t}${r.d.rec?' <span class="rec">추천</span>':''}</td><td class="n">${r.items}</td><td class="n">${r.share}%</td><td class="m">${T[r.d.id][0]}</td><td class="m">${T[r.d.id][1]}</td><td class="m">${T[r.d.id][2]}</td><td class="m">${T[r.d.id][3]}</td></tr>`).join('');
+  };
+  (document.fonts?document.fonts.ready:Promise.resolve()).then(measure);
+  const toggle=document.getElementById('toggle-full');
+  toggle.addEventListener('click',()=>{const on=document.body.classList.toggle('full');toggle.setAttribute('aria-pressed',String(on));measure();});
+}
+</script>
+</body>
+</html>

@@ -8,109 +8,118 @@
 @media (max-width:480px) { .home-cover-group { height:132px; } }
 
 /*
- * Home: an information-only dashboard (HOME-DASH-001, layout R2). 확인할 것 and 신간 span the
- * width; the other cards pair up in two columns. Cards are one tone step + a 1px line with a
- * small radius and no shadow (DESIGN.md §4).
+ * Home (HOME-DASH-002, direction A: cover shelf + number tiles). Numbers are tiles cut from one
+ * surface by 1px lines; everything quiet folds into one status line; the only images are the
+ * 신간 · 발매 예정 covers and 다시 보기. No shadows, small radii (DESIGN.md §4).
  */
-.home-scroll { flex:1; min-height:0; overflow:auto; padding:14px 16px 24px; scrollbar-width:thin; display:flex; flex-direction:column; gap:12px; }
-.home-scroll h3 { margin:0; font-size:15.5px; font-weight:600; white-space:nowrap; }
+.home-scroll { flex:1; min-height:0; overflow:auto; padding:12px 16px 24px; scrollbar-width:thin; display:flex; flex-direction:column; gap:18px; }
 .home-scroll button { font:inherit; color:inherit; text-align:left; }
-
-.home-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:stretch; }
-.home-cell { display:flex; min-width:0; }
-.home-cell > .home-card { flex:1; }
-/* An odd last card takes the whole row instead of leaving an empty cell. */
-.home-cell:last-child:nth-child(odd) { grid-column:1 / -1; }
-
-.home-card { display:flex; flex-direction:column; min-width:0; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
-/* A calm card next to a taller neighbour stretches to the row's height with its line centred,
-   so the pair stays one aligned row instead of leaving a gap under the short card. */
-.home-card.is-calm { justify-content:center; }
-.home-card.is-alert { border-color:#5a3838; }
-.home-card.is-alert .home-card-icon:first-child { color:var(--color-danger); }
-
-.home-card-head { display:flex; align-items:center; gap:8px; width:100%; min-width:0; min-height:52px; padding:0 8px 0 14px; border:0; background:none; }
-.home-card-head:active, .home-row:active, .home-release:active, .home-upcoming:active, .home-memo:active { background:var(--color-surface-pressed, var(--color-control-pressed)); }
-.home-card-icon { width:18px; height:18px; flex:none; color:var(--color-muted); }
-.home-space { flex:1; min-width:4px; }
-/* A short meaning after the title (신간 · 나온 권); it gives way first when the header is tight. */
-.home-card-hint { flex:0 1 auto; min-width:0; overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-scroll > .home-status { margin-top:-8px; }
+.home-icon { width:18px; height:18px; flex:none; color:var(--color-muted); }
 .home-chev { width:16px; height:16px; flex:none; color:var(--color-muted); }
-.home-sum { font-size:22px; font-weight:500; line-height:1; color:var(--color-accent); white-space:nowrap; }
-.home-sum.is-plain { color:var(--color-text); }
-.home-sum small { margin-left:3px; font:500 13px var(--font-ui); color:var(--color-muted); }
-.home-calm { display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; font-size:14px; color:var(--color-muted); white-space:nowrap; }
-.home-calm > span { overflow:hidden; text-overflow:ellipsis; }
-.home-calm b { font-size:16px; font-weight:500; color:var(--color-text); }
-.home-ok { width:17px; height:17px; flex:none; color:#7fb88a; }
-.home-stale { flex:none; padding:0 5px; border:1px solid var(--color-border); border-radius:2px; font-size:12px; line-height:20px; color:var(--color-muted); white-space:nowrap; }
+.home-ok { width:18px; height:18px; flex:none; color:#7fb88a; }
+.home-stale { flex:none; margin-left:8px; padding:0 5px; border:1px solid var(--color-border); border-radius:2px; font-size:12px; line-height:20px; color:var(--color-muted); white-space:nowrap; vertical-align:1px; }
 
-.home-card-body { display:flex; flex-direction:column; min-height:0; border-top:1px solid var(--color-border); }
-.home-card .home-card-body > * + * { border-top:1px solid var(--color-border); }
-/* Two columns of rows inside a full-width card. */
-.home-cols { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
-.home-card .home-cols > * { border-top:1px solid var(--color-border); }
-.home-card .home-cols > :nth-child(-n+2) { border-top:0; }
-.home-card .home-cols > :nth-child(2n) { border-left:1px solid var(--color-border); }
+/* Section heading: the index label (5px square + fading hairline, DESIGN.md §6), then 전체 ›. */
+.home-sec { display:flex; flex-direction:column; min-width:0; }
+.home-sh { display:flex; align-items:center; gap:8px; min-height:36px; min-width:0; margin-bottom:6px; }
+.home-sh::before { content:''; width:5px; height:5px; flex:none; background:var(--color-muted); }
+.home-sh h2 { margin:0; font-size:15.5px; font-weight:600; white-space:nowrap; }
+.home-sh-meta { display:flex; align-items:center; min-width:0; overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-sh-meta .numeric { margin:0 2px; font-size:15px; color:var(--color-text); }
+.home-sh-rule { flex:1; min-width:12px; height:1px; background:linear-gradient(90deg,var(--color-border-strong),transparent); }
+.home-sh-more { display:inline-flex; align-items:center; gap:2px; flex:none; min-width:44px; height:44px; margin:-4px -6px -4px 0; padding:0 4px 0 8px; border:0; background:none; font-size:13.5px; color:var(--color-muted); white-space:nowrap; }
+.home-sh-more svg { width:15px; height:15px; }
 
-/* Number-first rows: the figure large on the left, its meaning right beside it. */
-.home-row { display:flex; align-items:center; gap:12px; width:100%; min-width:0; min-height:56px; padding:6px 8px 6px 14px; border:0; background:none; }
-.home-row-num { min-width:52px; flex:none; font-size:30px; font-weight:500; line-height:1; color:var(--color-accent); text-align:right; white-space:nowrap; }
-.home-row-num small { margin-left:2px; font:500 13px var(--font-ui); color:var(--color-muted); }
-.home-row.is-stat .home-row-num { min-width:64px; font-size:26px; color:var(--color-text); }
-.home-row-text { display:flex; flex-direction:column; flex:1; min-width:0; font-size:15px; font-weight:500; line-height:1.3; white-space:nowrap; }
-.home-row-text > small { overflow:hidden; font-size:12.5px; font-weight:400; color:var(--color-muted); text-overflow:ellipsis; }
-.home-row-text .home-progress { margin-top:5px; }
-.home-scroll.is-stale .home-row-num { color:#c4c6c8; }
+/* Number tiles. */
+.home-top { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,3fr); gap:10px; align-items:stretch; }
+.home-top > .home-sec > .home-tiles { flex:1; min-height:172px; }
+.home-tiles { display:grid; gap:1px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
+.home-todo { grid-auto-rows:minmax(0,1fr); }
+.home-tile { position:relative; display:flex; flex-direction:column; justify-content:space-between; gap:4px; min-width:0; min-height:74px; padding:10px 12px 9px 14px; border:0; border-radius:0; background:var(--color-surface); }
+.home-tile:active, .home-seg:active, .home-memo:active, .home-shelf-item:active .home-shelf-art, .home-revisit:active .home-revisit-pics { background:var(--color-surface-pressed, var(--color-control-pressed)); }
+.home-tile-n { font-size:30px; font-weight:500; line-height:1; color:var(--color-text); white-space:nowrap; }
+.home-tile-n small { margin-left:3px; font:500 13px var(--font-ui); color:var(--color-muted); }
+.home-tile-text { display:flex; flex-direction:column; min-width:0; }
+.home-tile-l { overflow:hidden; font-size:13.5px; font-weight:500; line-height:1.4; color:#c4c6c8; white-space:nowrap; text-overflow:ellipsis; }
+.home-tile-s { overflow:hidden; font-size:12px; line-height:1.4; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-tile-text .home-progress { margin-top:6px; }
+.home-tile.is-act { background:var(--color-surface-elevated); }
+.home-tile.is-act .home-tile-n { font-size:34px; color:var(--color-accent); }
+.home-tile.is-act .home-tile-l { color:var(--color-text); }
+/* Three or four counts: two by two (the third spans the row), the notes left out, so the row keeps its height. */
+.home-todo.is-many { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.home-todo.is-many .home-tile:last-child:nth-child(odd) { grid-column:1 / -1; }
+.home-todo.is-many .home-tile { min-height:60px; padding:8px 10px 7px 12px; gap:3px; }
+.home-todo.is-many .home-tile .home-tile-n { font-size:26px; }
+.home-todo.is-many .home-tile-s { display:none; }
+.home-stats.is-row .home-tile { min-height:74px; }
+.home-scroll.is-stale .home-tile-n { color:#c4c6c8; }
 
 .home-progress { display:block; height:3px; overflow:hidden; border-radius:2px; background:var(--color-border); }
 .home-progress > i { display:block; height:100%; background:var(--color-accent); }
 .home-progress.is-muted > i { background:var(--color-muted); }
 
-/* 신간: the only place with (small) covers. */
-.home-release { display:flex; align-items:center; gap:12px; width:100%; min-width:0; min-height:66px; padding:8px 8px 8px 14px; border:0; background:none; }
-.home-release-cover { width:34px; flex:none; }
-.home-release-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
-.home-release-text strong { overflow:hidden; font-size:15px; font-weight:500; white-space:nowrap; text-overflow:ellipsis; }
-.home-release-text small { overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-release-text small.is-new { font-weight:600; color:var(--color-accent); }
-.home-release-text small.is-new .numeric { font-weight:500; color:var(--color-muted); }
-.home-release-text small.is-new::before { content:''; display:inline-block; width:6px; height:6px; margin:0 6px 1px 0; background:var(--color-accent); }
-
-/* 발매 예정: kind chips, then a date timeline. */
-.home-seg { display:flex; gap:6px; padding:8px 14px; overflow:hidden; }
-.home-seg button { display:inline-flex; align-items:center; gap:5px; flex:none; height:30px; padding:0 9px; border:1px solid var(--color-border); border-radius:3px; background:none; font-size:13px; color:var(--color-muted); white-space:nowrap; }
-.home-seg button[aria-pressed="true"] { border-color:var(--color-filter-border); background:var(--color-filter-selected); color:var(--color-text); }
-.home-seg button .numeric { font-size:15px; color:var(--color-text); }
-.home-seg button:disabled { border-style:dashed; opacity:.7; }
-.home-seg button small { font-size:11.5px; }
-.home-upcoming { display:grid; grid-template-columns:44px minmax(0,1fr) auto 16px; gap:10px; align-items:center; width:100%; min-height:54px; padding:4px 8px 4px 14px; border:0; background:none; }
-.home-upcoming-date { font-size:21px; font-weight:500; line-height:1; }
-.home-upcoming-date small { display:block; margin-top:3px; font:500 12px var(--font-ui); color:var(--color-muted); }
-.home-upcoming-name { overflow:hidden; font-size:14.5px; font-weight:500; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
-.home-upcoming-name small { display:block; font-size:12.5px; font-weight:400; color:var(--color-text); }
-.home-kind { display:inline-block; margin-right:5px; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; font-size:11.5px; line-height:16px; color:var(--color-muted); vertical-align:1px; }
-.home-upcoming-left { font-size:14px; color:var(--color-muted); white-space:nowrap; }
-
-/* 메모 */
-.home-memo { display:flex; align-items:center; gap:12px; width:100%; min-width:0; min-height:60px; padding:8px 8px 8px 0; border:0; background:none; }
-.home-memo-strip { width:3px; align-self:stretch; flex:none; background:var(--color-border-strong); }
-.home-memo-text { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; }
-.home-memo-text strong { overflow:hidden; font-size:15px; font-weight:500; line-height:1.25; white-space:nowrap; text-overflow:ellipsis; }
-.home-memo-text small { display:flex; align-items:center; gap:6px; overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-memo-text small .numeric { font-size:16px; color:var(--color-text); }
-.home-memo-text small .home-progress { width:72px; flex:none; margin-left:4px; }
-
-/* 서버 상태 */
+/* The status line: quiet things in one line, a running transfer with its progress, the server dot. */
+.home-status { display:flex; align-items:center; min-width:0; min-height:48px; overflow:hidden; padding:0 4px 0 6px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); font-size:14px; color:var(--color-muted); white-space:nowrap; }
+.home-status.is-alert { border-color:#5a3838; }
+.home-seg { position:relative; display:flex; align-items:center; gap:7px; flex:none; min-width:0; height:46px; padding:0 8px; border:0; background:none; color:var(--color-muted); }
+.home-seg + .home-seg::before { content:''; position:absolute; left:0; top:13px; width:1px; height:20px; background:var(--color-border); }
+.home-seg + .home-seg { padding-left:14px; }
+.home-seg.is-grow { flex:1 1 auto; }
+.home-seg.is-news { flex:0 1 auto; }
+.home-seg b { font-weight:500; color:var(--color-text); }
+.home-seg .numeric { font-size:17px; color:var(--color-text); }
+.home-seg .numeric.is-accent { color:var(--color-accent); }
+.home-seg .home-progress { width:84px; flex:none; }
+.home-seg-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.home-seg-text .numeric { margin:0 2px; }
+.home-seg.is-server { margin-left:auto; }
+.home-seg.is-server .home-seg-text { max-width:260px; }
 .home-dot { display:inline-block; width:8px; height:8px; flex:none; border-radius:50%; background:#7fb88a; }
-.home-dot.is-idle { background:var(--color-muted); }
 .home-dot.is-busy { background:#d8c07a; }
 .home-dot.is-off { background:var(--color-danger); }
-.home-server { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
-.home-server > span { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; padding:10px 14px; font-size:14.5px; }
-.home-server > span + span { border-left:1px solid var(--color-border); }
-.home-server em { flex-basis:100%; font-style:normal; font-size:13px; color:var(--color-muted); }
-.home-server small { color:var(--color-muted); font-size:13px; }
+
+/* 신간 · 발매 예정: a date rail above each cover, covers at the book ratio, bled to the right edge. */
+.home-shelf { display:flex; gap:14px; align-items:flex-start; margin-right:-16px; padding-right:16px; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
+.home-shelf::-webkit-scrollbar { display:none; }
+.home-shelf-item { display:flex; flex-direction:column; flex:none; width:133px; min-width:0; padding:0; border:0; background:none; }
+.home-rail { display:flex; align-items:baseline; gap:5px; height:26px; margin-bottom:8px; border-bottom:1px solid var(--color-border); white-space:nowrap; }
+.home-rail-d { font-size:13.5px; font-weight:600; color:var(--color-text); }
+.home-rail-d.numeric, .home-rail-d .numeric { font-size:17px; font-weight:500; line-height:1; }
+.home-rail-w { font-size:12px; color:var(--color-muted); }
+.home-rail-dd { margin-left:auto; font-size:14px; line-height:1; color:var(--color-muted); }
+.home-rail.is-new { border-bottom-color:var(--color-accent); }
+.home-rail.is-new .home-rail-d { color:var(--color-accent); }
+.home-shelf-art { position:relative; display:block; overflow:hidden; border-radius:var(--radius-tile); background:var(--color-surface-elevated); }
+.home-newmark { position:absolute; left:0; top:0; padding:0 6px; background:var(--color-accent); font:600 11.5px/20px var(--font-ui); color:var(--color-on-accent); }
+.home-shelf-title { margin-top:7px; overflow:hidden; font-size:14px; font-weight:500; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
+.home-shelf-sub { display:flex; align-items:center; overflow:hidden; font-size:12.5px; line-height:1.45; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-shelf-sub .numeric { font-size:14px; color:var(--color-muted); }
+.home-kind { display:inline-block; flex:none; margin-right:5px; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; font-size:11px; font-weight:500; line-height:15px; color:var(--color-muted); }
+
+/* 다시 보기: justified rows (every image at its own ratio), the caption under, never over. */
+.home-revisits { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.home-revisit { display:flex; flex-direction:column; min-width:0; padding:0; border:0; background:none; }
+.home-revisit-pics { display:flex; flex-direction:column; gap:4px; }
+.home-jrow { display:flex; gap:4px; }
+.home-jcell { display:block; flex-basis:0; min-width:0; overflow:hidden; border-radius:1px; background:var(--color-surface); }
+.home-jcell .home-cover { width:100%; height:100%; }
+.home-revisits.is-single .home-jrow { max-height:220px; }
+.home-revisit-cap { display:flex; align-items:center; gap:8px; min-width:0; min-height:48px; padding-top:4px; }
+.home-revisit-text { display:flex; flex-direction:column; flex:1; min-width:0; }
+.home-revisit-text strong { overflow:hidden; font-size:14.5px; font-weight:600; line-height:1.35; white-space:nowrap; text-overflow:ellipsis; }
+.home-revisit-text small { overflow:hidden; font-size:12.5px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+
+/* 메모: compact two-column cards. */
+.home-memos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.home-memo { display:flex; align-items:center; gap:12px; min-width:0; min-height:62px; overflow:hidden; padding:0 10px 0 0; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
+.home-memo-strip { width:3px; align-self:stretch; flex:none; background:var(--color-border-strong); }
+.home-memo-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.home-memo-text strong { overflow:hidden; font-size:14.5px; font-weight:600; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
+.home-memo-text small { display:flex; align-items:center; gap:4px; overflow:hidden; font-size:12.5px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-memo-text small .numeric { font-size:14.5px; color:var(--color-text); }
+.home-memo-text small .home-progress { width:64px; flex:none; margin-left:4px; }
 
 /* Offline notice with 다시 연결. */
 .home-offline { display:flex; align-items:center; gap:12px; padding:9px 14px; border:1px solid #4a3232; border-radius:3px; background:#231d1d; }
@@ -118,10 +127,10 @@
 .home-offline > div { flex:1; min-width:0; }
 .home-offline strong { font-size:15px; font-weight:600; }
 .home-offline p { margin:2px 0 0; font-size:13px; color:#cfc4c4; }
-.home-retry { flex:none; min-height:40px; padding:0 12px; border:1px solid #6a4545; border-radius:4px; background:none; font-size:13.5px; white-space:nowrap; }
+.home-retry { flex:none; min-height:44px; padding:0 12px; border:1px solid #6a4545; border-radius:4px; background:none; font-size:13.5px; white-space:nowrap; }
 
 @media (max-width:700px) {
-  .home-grid, .home-cols { grid-template-columns:1fr; }
-  .home-card .home-cols > :nth-child(2) { border-top:1px solid var(--color-border); }
-  .home-card .home-cols > :nth-child(2n) { border-left:0; }
+  .home-top, .home-revisits, .home-memos { grid-template-columns:1fr; }
+  .home-stats.is-row { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+  .home-status { flex-wrap:wrap; }
 }

@@ -1,11 +1,11 @@
-import {useMemo, useState, useSyncExternalStore, type ComponentType, type ReactNode, type SVGProps} from 'react';
-import {ArrowsUpDownIcon, BookOpenIcon, CalendarDaysIcon, ChartBarIcon, CheckCircleIcon, ChevronRightIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, RectangleStackIcon, ServerStackIcon, SignalSlashIcon, WalletIcon} from '@heroicons/react/24/outline';
-import {PinIcon} from './PinIcon';
+import {useMemo, useState, useSyncExternalStore, type ComponentType, type CSSProperties, type ReactNode, type SVGProps} from 'react';
+import {ArrowsUpDownIcon, CheckCircleIcon, ChevronRightIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, RectangleStackIcon, SignalSlashIcon, WalletIcon} from '@heroicons/react/24/outline';
 import {Artwork} from './Collections';
 import {collectionCover} from './collectionModel';
 import {localToday} from './collectionReleases';
+import {Cover} from './CoverGroup';
 import {currentShelf, subscribeReleases} from './releaseStore';
-import {addedToday, agoLabel, characterTagging, clockLabel, dateBlock, daysAfter, PENDING_LIMIT, TODO_LABELS, UPCOMING_DAYS, useHomeDashboard, useHomeMemos, type MemoRow, type TodoKey} from './homeDashboard';
+import {addedToday, agoLabel, characterTagging, clockLabel, dateBlock, daysAfter, PENDING_LIMIT, shelfEntries, TODO_LABELS, UPCOMING_DAYS, useHomeDashboard, useHomeMemos, useHomeRevisit, type MemoRow, type RevisitGroup, type ShelfEntry, type TodoKey} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchange';
 import type {Asset} from './types';
@@ -28,6 +28,8 @@ export interface HomeProps {
   onReleases():void; onWork(id:string):void; onSettings():void;
   /** The recent saves list, and the Library root (캐릭터 자동 태그). */
   onRecent():void; onLibrary():void;
+  /** A 다시 보기 group's full list: `date` (과거의 이날) or a creator key. */
+  onRevisit?(key:string,title:string):void;
   /** Notes, optionally opening one note. */
   onNotes(id?:string):void;
   /** 다시 연결: re-read the page behind Home as well. */
@@ -36,48 +38,35 @@ export interface HomeProps {
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 const grouped = (amount:number) => `${amount < 0 ? '−' : ''}${String(Math.trunc(Math.abs(amount))).replace(/\B(?=(\d{3})+(?!\d))/g,',')}`;
+const count = (value:number) => value.toLocaleString('ko-KR');
 
 function Stale({at}:{at:number|null|undefined}) {
   return at ? <span className="home-stale numeric">{clockLabel(at)} 기준</span> : null;
-}
-function Ok({children}:{children:ReactNode}) {
-  return <><CheckCircleIcon className="home-ok" aria-hidden="true"/><span>{children}</span></>;
-}
-
-/**
- * One dashboard card: a header row that opens the card's screen, then its rows. A card with
- * nothing to act on is calm: only the header, with a one-line summary.
- */
-function Card({icon:IconType,title,hint,sum,calm,at,onOpen,label,className = '',children}:{icon:Icon;title:string;hint?:string;sum?:ReactNode;calm?:ReactNode;at?:number|null;onOpen():void;label?:string;className?:string;children?:ReactNode}) {
-  const quiet = !children;
-  return <section className={`home-card${quiet ? ' is-calm' : ''} ${className}`} aria-label={title}>
-    <button className="home-card-head" onClick={onOpen} aria-label={label}>
-      <IconType className="home-card-icon" aria-hidden="true"/><h3>{title}</h3>{hint && <span className="home-card-hint">· {hint}</span>}{sum}
-      {calm && <span className="home-calm">{calm}</span>}
-      <span className="home-space"/>
-      <Stale at={at}/>
-      <ChevronRightIcon className="home-chev" aria-hidden="true"/>
-    </button>
-    {children && <div className="home-card-body">{children}</div>}
-  </section>;
-}
-function Sum({value,unit,plain}:{value:ReactNode;unit:string;plain?:boolean}) {
-  return <span className={`home-sum numeric${plain ? ' is-plain' : ''}`}>{value}<small>{unit}</small></span>;
-}
-/** A number-first row: the figure, its meaning right beside it, then ›. */
-function Row({value,unit,title,note,onOpen,label,stat,children}:{value:ReactNode;unit?:string;title:string;note?:ReactNode;onOpen():void;label?:string;stat?:boolean;children?:ReactNode}) {
-  return <button className={`home-row${stat ? ' is-stat' : ''}`} onClick={onOpen} aria-label={label}>
-    <span className="home-row-num numeric">{value}{unit && <small>{unit}</small>}</span>
-    <span className="home-row-text">{title}{note && <small>{note}</small>}{children}</span>
-    <ChevronRightIcon className="home-chev" aria-hidden="true"/>
-  </button>;
 }
 function Progress({value,muted}:{value:number;muted?:boolean}) {
   return <span className={`home-progress${muted ? ' is-muted' : ''}`} aria-hidden="true"><i style={{width:`${Math.round(Math.max(0,Math.min(1,value))*100)}%`}}/></span>;
 }
 
+/** A section: the app's index label (square + fading hairline), then an optional 전체 ›. */
+function Section({title,meta,onMore,moreLabel,className = '',children}:{title:string;meta?:ReactNode;onMore?():void;moreLabel?:string;className?:string;children:ReactNode}) {
+  return <section className={`home-sec ${className}`} aria-label={title}>
+    <div className="home-sh"><h2>{title}</h2>{meta && <span className="home-sh-meta">{meta}</span>}<span className="home-sh-rule" aria-hidden="true"/>
+      {onMore && <button className="home-sh-more" onClick={onMore} aria-label={moreLabel ?? `${title} 전체`}>전체<ChevronRightIcon aria-hidden="true"/></button>}
+    </div>
+    {children}
+  </section>;
+}
+
+/** One number tile: the figure first, its meaning under it. Tiles share one surface cut by 1px lines. */
+function Tile({value,unit,title,note,act,bar,onOpen,label,style}:{value:ReactNode;unit?:string;title:string;note?:ReactNode;act?:boolean;bar?:number;onOpen():void;label:string;style?:CSSProperties}) {
+  return <button className={`home-tile${act ? ' is-act' : ''}`} onClick={onOpen} aria-label={label} style={style}>
+    <span className="home-tile-n numeric">{value}{unit && <small>{unit}</small>}</span>
+    <span className="home-tile-text"><span className="home-tile-l">{title}</span>{note && <span className="home-tile-s">{note}</span>}{bar !== undefined && <Progress value={bar} muted/>}</span>
+  </button>;
+}
+
 const MEMO_ICONS:Record<MemoRow['kind'],Icon> = {checklist:ListBulletIcon,ledger:WalletIcon,secret:LockClosedIcon,text:DocumentTextIcon};
-function MemoLine({row,onOpen}:{row:MemoRow;onOpen():void}) {
+function MemoCard({row,onOpen}:{row:MemoRow;onOpen():void}) {
   const IconType = MEMO_ICONS[row.kind];
   const detail = row.kind === 'checklist' ? (row.total ? <><span className="numeric">{row.done}/{row.total}</span> 완료<Progress value={row.done/row.total} muted/></> : '빈 체크리스트')
     : row.kind === 'ledger' ? <>{row.month}월 {row.label} <span className="numeric">{grouped(row.amount)}</span>원</>
@@ -85,157 +74,164 @@ function MemoLine({row,onOpen}:{row:MemoRow;onOpen():void}) {
     : row.snippet || '내용 없음';
   return <button className="home-memo" onClick={onOpen}>
     <span className="home-memo-strip" style={row.color ? {background:row.color} : undefined} aria-hidden="true"/>
-    <IconType className="home-card-icon" aria-hidden="true"/>
+    <IconType className="home-icon" aria-hidden="true"/>
     <span className="home-memo-text"><strong>{row.title || '제목 없음'}</strong><small>{detail}</small></span>
     <ChevronRightIcon className="home-chev" aria-hidden="true"/>
   </button>;
 }
 
-type Kind = 'all'|'manga';
+/** A shelf cover under its date rail: 새 권 (newly out) or the release date with its D-day. */
+function ShelfCover({entry,cover,today,onOpen}:{entry:ShelfEntry;cover:ReactNode;today:string;onOpen():void}) {
+  const fresh = entry.kind === 'new';
+  const todayNew = fresh && (!entry.date || entry.date === today);
+  const block = entry.date ? dateBlock(entry.date,today) : null;
+  const rail = fresh
+    ? <span className="home-rail is-new"><span className="home-rail-d">{todayNew ? '새 권 · 오늘' : <><span className="numeric">{block!.day}</span> 나옴</>}</span></span>
+    : <span className="home-rail"><span className="home-rail-d numeric">{block!.day}</span><span className="home-rail-w">{block!.weekday.slice(0,1)}</span><span className="home-rail-dd numeric">{entry.days === 0 ? '오늘' : `D-${entry.days}`}</span></span>;
+  const volumes = fresh ? entry.volumes : `${entry.volumeNumber}권`;
+  const when = fresh ? (todayNew ? '새 권' : `${block!.day} 나옴`) : `${block!.day} 발매`;
+  return <button className="home-shelf-item" onClick={onOpen} aria-label={`${entry.name} ${volumes} · ${when}`}>
+    {rail}
+    <span className="home-shelf-art">{cover}{todayNew && <span className="home-newmark">NEW</span>}</span>
+    <span className="home-shelf-title">{entry.name}</span>
+    <span className="home-shelf-sub"><span className="home-kind">만화</span><span className="numeric">{volumes}</span></span>
+  </button>;
+}
+
+/** Justified rows: every image at its own ratio (the flex weight), the row as tall as fills the width. */
+function RevisitCard({group,paused,onOpen}:{group:RevisitGroup;paused:boolean;onOpen():void}) {
+  const items = group.items.slice(0,7);
+  const rows = items.length >= 5 ? [items.slice(0,3),items.slice(3)] : [items];
+  const ratio = (asset:Asset) => Number(asset.width) > 0 && Number(asset.height) > 0 ? Math.max(.4,Math.min(2.6,Number(asset.width)/Number(asset.height))) : 1;
+  return <button className="home-revisit" onClick={onOpen} aria-label={`${group.title}, ${group.label}`}>
+    <span className="home-revisit-pics">{rows.map((row,index) => <span key={index} className="home-jrow">{row.map(asset => <span key={asset.id} className="home-jcell" style={{flexGrow:ratio(asset),aspectRatio:String(ratio(asset))}}><Cover asset={asset} paused={paused}/></span>)}</span>)}</span>
+    <span className="home-revisit-cap"><span className="home-revisit-text"><strong>{group.title}</strong><small>{group.label}</small></span><ChevronRightIcon className="home-chev" aria-hidden="true"/></span>
+  </button>;
+}
 
 export function Home(props:HomeProps) {
   const {items,captures,paused,secondaryError} = props;
   const pending = captures ? captures.length : null;
   const d = useHomeDashboard({enabled:!paused,scope:props.scope,pending,reviewEnabled:props.review.enabled,reviewKey:props.review.refreshKey,similarityKey:props.similarityKey,exchange:props.exchange});
   const memos = useHomeMemos(!paused,d.probe);
+  const [retries,setRetries] = useState(0);
+  const revisit = useHomeRevisit(!paused,`${d.offline}:${retries}`);
   const shelf = useSyncExternalStore(subscribeReleases,currentShelf);
   const works = useMemo(() => new Map((shelf?.works ?? []).map(work => [work.id,work])),[shelf]);
-  const [kind,setKind] = useState<Kind>('all');
   const stale = d.offline;
   const today = localToday();
 
-  // ① 확인할 것
+  // 확인할 것: only the counts waiting on the user, as tiles; nothing waiting folds into the status line.
   const open:Record<TodoKey,() => void> = {pending:props.onPending,character:props.onReview,similar:props.onSimilarity,duplicates:props.onDuplicates};
   const due = d.applicable.filter(key => (d.todos[key] ?? 0) > 0);
   const unknown = d.applicable.some(key => d.todos[key] === null);
-  const firstDue = due[0];
-  const todo = <Card icon={CheckCircleIcon} title="확인할 것" className="is-full" at={d.todosAt} onOpen={firstDue ? open[firstDue] : props.onLibrary}
-    calm={due.length ? undefined : unknown ? <span>{stale ? '마지막 값 없음' : '확인하는 중…'}</span> : <Ok>모두 확인함</Ok>}>
-    {due.length > 0 && <div className="home-cols">{due.map(key => {
-      const value = d.todos[key]!, more = key === 'pending' && value >= PENDING_LIMIT, {label,unit,note} = TODO_LABELS[key];
-      return <Row key={key} value={`${value}${more ? '+' : ''}`} unit={unit} title={label} note={note} onOpen={open[key]} label={`${label} ${value}${more ? '+' : ''}${unit}`}/>;
-    })}</div>}
-  </Card>;
+  const todoTiles = due.map(key => {
+    const value = d.todos[key]!, more = key === 'pending' && value >= PENDING_LIMIT, {label,unit,note} = TODO_LABELS[key];
+    const shown = `${count(value)}${more ? '+' : ''}`;
+    return <Tile key={key} act value={shown} unit={unit} title={label} note={note} onOpen={open[key]} label={`${label} ${value}${more ? '+' : ''}${unit}`}/>;
+  });
 
-  // ② 신간
-  const releases = d.releases ?? [];
-  const cover = (id:string,name:string) => {
-    const work = works.get(id);
-    return work ? <Artwork item={work} id={collectionCover(work)} revision={shelf?.revision ?? ''} active={!paused} label={name}/> : <span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>;
-  };
-  const unread = d.unreadWorks ?? 0;
-  const news = <Card icon={BookOpenIcon} title="신간" hint="나온 권" className="is-full" at={stale ? d.releasesAt : null} onOpen={props.onReleases}
-    sum={unread > 0 && releases.length > 0 ? <Sum value={unread} unit="편 안 읽음"/> : undefined}
-    calm={unread > 0 && releases.length > 0 ? undefined : d.unreadWorks === null ? <span>{stale ? '마지막 값 없음' : '확인하는 중…'}</span>
-      : <Ok>새 신간 없음{d.watched ? <> · 만화 <span className="numeric">{d.watched}</span>편 지켜보는 중</> : null}</Ok>}>
-    {unread > 0 && releases.length > 0 && <div className="home-cols">{releases.slice(0,stale ? 2 : 4).map(row => <button key={row.id} className="home-release" onClick={() => props.onWork(row.id)}>
-      <span className="home-release-cover">{cover(row.id,row.name)}</span>
-      <span className="home-release-text"><strong>{row.name}</strong><small className={`is-${row.caption?.kind ?? 'new'}`}>{row.caption ? <>{row.caption.text}{row.caption.date && <span className="numeric"> · {row.caption.date}</span>}</> : `신간 알림 ${row.unread}`}</small></span>
-      <ChevronRightIcon className="home-chev" aria-hidden="true"/>
-    </button>)}</div>}
-  </Card>;
-
-  // ③ 발매 예정: only 만화 has a source today; 게임 · 영화 wait for PC-published data.
-  const allUpcoming = d.upcoming ?? [];
-  const soon = allUpcoming.filter(row => {const days = daysAfter(row.date,today); return days >= 0 && days <= UPCOMING_DAYS;});
-  const later = allUpcoming.find(row => daysAfter(row.date,today) > UPCOMING_DAYS);
-  const upcomingCard = <Card icon={CalendarDaysIcon} title="발매 예정" hint="나올 권" at={stale ? d.upcomingAt : null} onOpen={props.onReleases}
-    sum={soon.length ? <Sum value={soon.length} unit={`권 · ${UPCOMING_DAYS}일 안`} plain/> : undefined}
-    calm={soon.length ? undefined : d.upcoming === null ? <span>{stale ? '마지막 값 없음' : '불러오는 중…'}</span>
-      : d.watched === 0 ? <span>신간 알림을 켠 만화 없음</span>
-      : <span>{UPCOMING_DAYS}일 안에 없음{later && <> · 다음 <b className="numeric">{dateBlock(later.date,today).day}</b></>}</span>}>
-    {soon.length > 0 && <>
-      <div className="home-seg" role="group" aria-label="발매 예정 종류">
-        <button aria-pressed={kind === 'all'} onClick={() => setKind('all')}>전체 <span className="numeric">{soon.length}</span></button>
-        <button aria-pressed={kind === 'manga'} onClick={() => setKind('manga')}>만화 <span className="numeric">{soon.length}</span></button>
-        <button disabled>게임 <small>준비 중</small></button>
-        <button disabled>영화 <small>준비 중</small></button>
-      </div>
-      {soon.slice(0,stale ? 2 : 3).map(row => {const block = dateBlock(row.date,today), days = daysAfter(row.date,today); return <button key={`${row.id}:${row.volumeNumber}`} className="home-upcoming" onClick={() => props.onWork(row.id)}>
-        <span className="home-upcoming-date numeric">{block.day}<small>{block.weekday}</small></span>
-        <span className="home-upcoming-name">{row.name}<small><span className="home-kind">만화</span>{row.volumeNumber}권</small></span>
-        <span className="home-upcoming-left numeric">{days === 0 ? '오늘' : `${days}일 후`}</span>
-        <ChevronRightIcon className="home-chev" aria-hidden="true"/>
-      </button>;})}
-    </>}
-  </Card>;
-
-  // ④ 전송
-  const exchange = props.exchange;
-  const arrived = exchange?.configured ? exchange.unseen : 0;
-  const sending = d.sending;
-  const transfer = <Card icon={ArrowsUpDownIcon} title="전송" onOpen={props.onExchange}
-    calm={arrived || sending ? undefined : exchange && !exchange.configured ? <span>연결한 기기 없음</span> : <Ok>받은 파일 · 보낼 파일 없음</Ok>}>
-    {(arrived > 0 || sending) && <>
-      {arrived > 0 && <Row value={arrived} unit="개" title="받은 파일" note={`${d.peer?.name ? `${d.peer.name}에서 · ` : ''}아직 안 봄`} onOpen={props.onExchange} label={`받은 파일 ${arrived}개`}/>}
-      {sending && (stale
-        ? <Row value={1 + sending.more} unit="개" title="보내기 멈춤" note="연결되면 이어서 보냄" onOpen={props.onExchange} label={`보내기 멈춤 ${1 + sending.more}개`}/>
-        : <Row value={sending.progress === null ? '…' : Math.round(sending.progress*100)} unit={sending.progress === null ? undefined : '%'} title="보내는 중" onOpen={props.onExchange}
-          label={`보내는 중 ${sending.name}${sending.more ? ` 외 ${sending.more}개` : ''}${sending.peer ? ` → ${sending.peer}` : ''}`}
-          note={`${sending.name}${sending.more ? ` 외 ${sending.more}` : ''}${sending.peer ? ` → ${sending.peer}` : ''}`}>
-          {sending.progress !== null && <Progress value={sending.progress}/>}
-        </Row>)}
-    </>}
-  </Card>;
-
-  // ⑤ 자산 현황: the library summary; an older server falls back to counting the first page.
+  // 자산 현황: the library summary; an older server falls back to counting the first page.
   const summary = d.summary;
   const fallback = addedToday(items,props.hasMore);
   const added = summary ? {count:summary.addedToday,more:false} : fallback;
   const tagging = characterTagging(props.characters);
-  const addedText = `${added.count.toLocaleString('ko-KR')}${added.more ? '+' : ''}`;
-  const tagRow = tagging && <Row stat value={Math.floor(tagging.done*100)} unit="%" title="캐릭터 자동 태그" note={`미지정 ${tagging.left.toLocaleString('ko-KR')}장 남음`} onOpen={props.onLibrary} label={`캐릭터 자동 태그 ${Math.floor(tagging.done*100)}%`}>
-    <Progress value={tagging.done} muted/>
-  </Row>;
-  const assetsCalm = !added.count && !summary?.unclassified;
-  const assets = <Card icon={ChartBarIcon} title="자산 현황" at={summary ? d.summaryAt : null} onOpen={props.onRecent}
-    calm={assetsCalm ? <span>{props.busy && !items.length && !summary ? '불러오는 중…' : <>{summary && <>이번 주 <b className="numeric">{summary.addedThisWeek.toLocaleString('ko-KR')}</b>장 · </>}오늘 <b className="numeric">0</b></>}{tagging && <> · 자동 태그 <b className="numeric">{Math.floor(tagging.done*100)}</b>%</>}</span> : undefined}>
-    {!assetsCalm && <>
-      <Row stat value={addedText} unit="장" title="오늘 추가" note={summary ? '오늘 0시부터' : '최근 저장에서 셈'} onOpen={props.onRecent} label={`오늘 추가 ${addedText}장`}/>
-      {summary && <>
-        <Row stat value={summary.addedThisWeek.toLocaleString('ko-KR')} unit="장" title="이번 주 추가" note="월요일부터" onOpen={props.onRecent} label={`이번 주 추가 ${summary.addedThisWeek}장`}/>
-        <Row stat value={summary.total.toLocaleString('ko-KR')} unit="장" title="전체" note="모든 에셋" onOpen={props.onRecent} label={`전체 ${summary.total}장`}/>
-        {/* The tablet has no 미분류 view yet: Library is the closest place. */}
-        <Row stat value={summary.unclassified.toLocaleString('ko-KR')} unit="장" title="분류 안 됨" note="분류가 하나도 없는 자산" onOpen={props.onLibrary} label={`분류 안 됨 ${summary.unclassified}장`}/>
-      </>}
-      {tagRow}
-    </>}
-  </Card>;
+  const addedText = `${count(added.count)}${added.more ? '+' : ''}`;
+  const wide = due.length === 0;
+  const stats:{key:string;tile:(style?:CSSProperties) => ReactNode}[] = [
+    {key:'today',tile:style => <Tile key="today" style={style} value={addedText} unit="장" title="오늘 추가" note={summary || wide ? undefined : '최근 저장에서 셈'} onOpen={props.onRecent} label={`오늘 추가 ${addedText}장`}/>},
+    ...(summary ? [
+      {key:'week',tile:(style?:CSSProperties) => <Tile key="week" style={style} value={count(summary.addedThisWeek)} unit="장" title="이번 주" onOpen={props.onRecent} label={`이번 주 추가 ${summary.addedThisWeek}장`}/>},
+      {key:'total',tile:(style?:CSSProperties) => <Tile key="total" style={style} value={count(summary.total)} unit="장" title="전체" onOpen={props.onRecent} label={`전체 ${summary.total}장`}/>},
+      // The tablet has no 미분류 view yet: Library is the closest place.
+      {key:'unclassified',tile:(style?:CSSProperties) => <Tile key="unclassified" style={style} value={count(summary.unclassified)} unit="장" title="분류 안 됨" onOpen={props.onLibrary} label={`분류 안 됨 ${summary.unclassified}장`}/>},
+    ] : []),
+    ...(tagging ? [{key:'tag',tile:(style?:CSSProperties) => <Tile key="tag" style={style} value={Math.floor(tagging.done*100)} unit="%" title="캐릭터 자동 태그" note={wide ? undefined : `미지정 ${count(tagging.left)}장`} bar={tagging.done} onOpen={props.onLibrary} label={`캐릭터 자동 태그 ${Math.floor(tagging.done*100)}%`}/>}] : []),
+  ];
+  // Beside 확인할 것: three columns, the last tile filling its row. Alone: one row, 자동 태그 a little wider.
+  const columns = Math.min(3,stats.length);
+  const statGrid = wide
+    ? <div className="home-tiles home-stats is-row" style={{gridTemplateColumns:stats.map(stat => stat.key === 'tag' ? 'minmax(0,1.4fr)' : 'minmax(0,1fr)').join(' ')}}>{stats.map(stat => stat.tile())}</div>
+    : <div className="home-tiles home-stats" style={{gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`}}>{stats.map((stat,index) => stat.tile(index === stats.length - 1 ? {gridColumn:`span ${columns - (index % columns)}`} : undefined))}</div>;
+  const assets = <Section title="자산 현황" meta={<Stale at={summary ? d.summaryAt : null}/>} onMore={props.onRecent} moreLabel="최근 저장 전체">{statGrid}</Section>;
+  const top = wide ? assets : <div className="home-top">
+    <Section title="확인할 것" meta={<Stale at={d.todosAt}/>} className="home-todo-sec"><div className={`home-tiles home-todo${due.length > 2 ? ' is-many' : ''}`}>{todoTiles}</div></Section>
+    {assets}
+  </div>;
 
-  // ⑥ 메모: on-device, so it never goes stale offline.
-  const pinned = memos?.rows ?? [];
-  const memo = <Card icon={PinIcon} title="메모" onOpen={() => props.onNotes()}
-    sum={pinned.length ? <Sum value={pinned.length} unit="개 고정" plain/> : undefined}
-    calm={pinned.length ? undefined : <span>{memos === null ? '불러오는 중…' : memos.locked ? '메모가 잠겨 있음' : '고정한 메모 없음'}</span>}>
-    {pinned.length > 0 && pinned.slice(0,3).map(row => <MemoLine key={row.id} row={row} onOpen={() => props.onNotes(row.id)}/>)}
-  </Card>;
+  // 신간 · 발매 예정: one cover shelf, newly released volumes first, then the next 30 days by date.
+  const unread = d.unreadWorks ?? 0;
+  const releases = unread > 0 ? d.releases ?? [] : [];
+  const entries = shelfEntries(releases,d.upcoming ?? [],today);
+  const newCount = entries.filter(entry => entry.kind === 'new').length;
+  const soonCount = entries.length - newCount;
+  const later = (d.upcoming ?? []).find(row => daysAfter(row.date,today) > UPCOMING_DAYS);
+  const cover = (id:string,name:string) => {
+    const work = works.get(id);
+    return work ? <Artwork item={work} id={collectionCover(work)} revision={shelf?.revision ?? ''} active={!paused} label={name}/> : <span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>;
+  };
+  const shelfTitle = newCount && soonCount ? '신간 · 발매 예정' : newCount ? '신간' : '발매 예정';
+  const shelfSection = entries.length > 0 && <Section title={shelfTitle} onMore={props.onReleases} moreLabel="신간 · 발매 예정 전체"
+    meta={<>{newCount > 0 && <>새 권 <span className="numeric">{newCount}</span></>}{newCount > 0 && soonCount > 0 && ' · '}{soonCount > 0 && <><span className="numeric">{UPCOMING_DAYS}</span>일 안 <span className="numeric">{soonCount}</span></>}<Stale at={stale ? d.releasesAt ?? d.upcomingAt : null}/></>}>
+    <div className="home-shelf">{entries.slice(0,stale ? 8 : 16).map(entry => <ShelfCover key={`${entry.kind}:${entry.id}:${entry.kind === 'upcoming' ? entry.volumeNumber : ''}`} entry={entry} today={today} cover={cover(entry.id,entry.name)} onOpen={() => props.onWork(entry.id)}/>)}</div>
+  </Section>;
 
-  // ⑧ 서버 상태: one line unless something is wrong.
+  // The status line: everything quiet in one line, a running transfer with its progress, the server dot.
+  const exchange = props.exchange;
+  const arrived = exchange?.configured ? exchange.unseen : 0;
+  const sending = d.sending;
+  const quiet:string[] = [];
+  if (!due.length) quiet.push(unknown ? (stale ? '확인할 것 마지막 값 없음' : '확인하는 중…') : '확인할 것 없음');
+  if (!arrived && !sending && exchange) quiet.push(exchange.configured ? '받은 · 보낼 파일 없음' : '연결한 기기 없음');
+  const releasesKnown = d.unreadWorks !== null;
+  const newsQuiet = releasesKnown && newCount === 0;
   const job = d.catalogJob;
   const catalogRunning = job?.state === 'queued' || job?.state === 'running';
   const catalogFailed = job?.state === 'failed';
   const peerLine = d.peer ? `${d.peer.name} · ${agoLabel(d.peer.lastSeenAt)}` : 'PC 기록 없음';
-  const catalogLine = catalogRunning ? `갱신 중${job.pages ? ` · ${job.pages}쪽` : ''}` : catalogFailed ? (job.error || '갱신 실패') : job?.state === 'completed' ? '갱신 완료' : '—';
-  const wrong = stale || catalogFailed;
-  const server = <Card icon={stale ? SignalSlashIcon : ServerStackIcon} title="서버 상태" className={wrong ? 'is-alert' : ''} onOpen={props.onSettings}
-    calm={wrong ? undefined : <><span className={`home-dot${catalogRunning ? ' is-busy' : ''}`} aria-hidden="true"/><span>{catalogRunning ? `카탈로그 ${catalogLine}` : `연결됨 · ${peerLine}`}</span></>}>
-    {wrong && <div className="home-server">
-      <span><em>서버</em><span className={`home-dot${stale ? ' is-off' : ''}`} aria-hidden="true"/>{stale ? <>연결 안 됨{d.since && <small> · 마지막 연결 <span className="numeric">{clockLabel(d.since)}</span></small>}</> : '연결됨'}</span>
-      <span><em>PC</em><span className="home-dot is-idle" aria-hidden="true"/>{peerLine}</span>
-      {!stale && <span><em>카탈로그</em><span className={`home-dot${catalogFailed ? ' is-off' : ' is-idle'}`} aria-hidden="true"/>{catalogLine}</span>}
-    </div>}
-  </Card>;
+  const serverText = stale ? '연결 안 됨' : catalogFailed ? (job.error || '카탈로그 갱신 실패') : catalogRunning ? `카탈로그 갱신 중${job.pages ? ` · ${job.pages}쪽` : ''}` : '서버';
+  const status = <div className={`home-status${stale || catalogFailed ? ' is-alert' : ''}`} role="group" aria-label="상태">
+    {sending && <button className="home-seg is-grow" onClick={props.onExchange}
+      aria-label={stale ? `보내기 멈춤 ${1 + sending.more}개` : `보내는 중 ${sending.name}${sending.more ? ` 외 ${sending.more}개` : ''}${sending.peer ? ` → ${sending.peer}` : ''}`}>
+      <ArrowsUpDownIcon className="home-icon" aria-hidden="true"/>
+      {stale ? <><b>보내기 멈춤</b><span className="numeric">{1 + sending.more}</span>개<span className="home-seg-text">연결되면 이어서 보냄</span></>
+        : <><b>보내는 중</b>{sending.progress !== null && <><span className="numeric">{Math.round(sending.progress*100)}%</span><Progress value={sending.progress}/></>}
+          <span className="home-seg-text">{sending.name}{sending.more ? ` 외 ${sending.more}` : ''}{sending.peer ? ` → ${sending.peer}` : ''}</span></>}
+    </button>}
+    {arrived > 0 && <button className="home-seg" onClick={props.onExchange} aria-label={`받은 파일 ${arrived}개`}><b>받은 파일</b><span className="numeric is-accent">{arrived}</span></button>}
+    {quiet.length > 0 && <span className="home-seg is-grow is-quiet">{!unknown || due.length ? <CheckCircleIcon className="home-ok" aria-hidden="true"/> : null}<span className="home-seg-text">{quiet.join(' · ')}</span></span>}
+    {newsQuiet && <button className="home-seg is-news" onClick={props.onReleases} aria-label="신간 · 발매 예정">
+      <span className="home-seg-text">새 신간 없음{d.watched ? <> · 만화 <span className="numeric">{d.watched}</span>편 지켜보는 중</> : null}{!soonCount && later ? <> · 다음 발매 <span className="numeric">{dateBlock(later.date,today).day}</span></> : null}</span>
+    </button>}
+    <button className="home-seg is-server" onClick={props.onSettings} aria-label={`서버 상태: ${stale ? `연결 안 됨${d.since ? ` · 마지막 연결 ${clockLabel(d.since)}` : ''}` : `연결됨 · ${peerLine}${job ? ` · 카탈로그 ${catalogRunning ? '갱신 중' : catalogFailed ? '갱신 실패' : '갱신 완료'}` : ''}`}`}>
+      <span className={`home-dot${stale || catalogFailed ? ' is-off' : catalogRunning ? ' is-busy' : ''}`} aria-hidden="true"/><span className="home-seg-text">{serverText}</span>
+      <ChevronRightIcon className="home-chev" aria-hidden="true"/>
+    </button>
+  </div>;
 
-  // Fixed order; the lower cards pair up two by two (the last one alone spans the row).
-  const lower = [upcomingCard,transfer,assets,memo,server];
+  // 다시 보기: 과거의 이날 and 다시 만난 작가, only when the server has them.
+  const revisitSection = revisit.length > 0 && <Section title="다시 보기" meta="예전에 모은 것">
+    <div className={`home-revisits${revisit.length === 1 ? ' is-single' : ''}`}>{revisit.slice(0,2).map(group => <RevisitCard key={group.key} group={group} paused={paused}
+      onOpen={() => props.onRevisit?.(group.key,group.key === 'date' ? group.title : group.name ?? group.title)}/>)}</div>
+  </Section>;
+
+  // 메모: on-device, so it never goes stale offline.
+  const pinned = memos?.rows ?? [];
+  const memo = <Section title="메모" onMore={() => props.onNotes()} moreLabel="메모 전체"
+    meta={pinned.length ? <>고정 <span className="numeric">{pinned.length}</span></> : memos === null ? '불러오는 중…' : memos.locked ? '메모가 잠겨 있음' : '고정한 메모 없음'}>
+    {pinned.length > 0 && <div className="home-memos">{pinned.slice(0,4).map(row => <MemoCard key={row.id} row={row} onOpen={() => props.onNotes(row.id)}/>)}</div>}
+  </Section>;
+
   return <div className={`home-scroll${stale ? ' is-stale' : ''}`} aria-label="홈">
     {stale && <div className="home-offline" role="status"><SignalSlashIcon aria-hidden="true"/><div>
       <strong>오프라인 — 서버에 닿지 않습니다</strong>
       <p>{d.since ? <>숫자와 목록은 <span className="numeric">{clockLabel(d.since)}</span> 기준으로 남겨 둔 값입니다. 메모는 그대로 쓸 수 있습니다.</> : '연결되면 다시 불러옵니다. 메모는 그대로 쓸 수 있습니다.'}</p>
-    </div><button className="home-retry" onClick={() => {d.retry(); props.onRefresh?.();}}>다시 연결</button></div>}
-    {todo}
-    {news}
-    <div className="home-grid">{lower.map((card,index) => <div key={index} className="home-cell">{card}</div>)}</div>
+    </div><button className="home-retry" onClick={() => {d.retry(); setRetries(n => n + 1); props.onRefresh?.();}}>다시 연결</button></div>}
+    {top}
+    {status}
+    {shelfSection}
+    {revisitSection}
+    {memo}
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}
   </div>;
 }

@@ -13,7 +13,7 @@ vi.mock('./transport',async() => {
 vi.mock('./media',() => ({loadThumbnail:mocks.loadThumbnail,mediaTicket:vi.fn()}));
 import {ApiError} from './transport';
 import {Home, type HomeProps} from './Home';
-import {addedToday, characterTagging, daysAfter, HOME_SNAPSHOT_KEY, memoRows, releaseRows, sendingSummary, upcomingReleases} from './homeDashboard';
+import {addedToday, characterTagging, daysAfter, HOME_SNAPSHOT_KEY, memoRows, releaseDateOf, releaseRows, revisitGroups, sendingSummary, shelfEntries, upcomingReleases} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {Note} from '../src/notes/store';
 import {releaseStore, resetReleaseStore} from './releaseStore';
@@ -25,7 +25,7 @@ const works:CollectionSummary[] = [
   {id:'sea',name:'바다의 시간',type:'manga',showcase:false,releaseWatch:{enabled:true,available:true},ownedVolumes:[{editionIndex:0,count:1}],releaseSchedule:{kakao:kakao([[2,'2026-10-15','upcoming']]),mangadex:null}},
   {id:'quiet',name:'조용한 숲',type:'manga',showcase:false,releaseWatch:{enabled:false,available:true},ownedVolumes:[],releaseSchedule:{kakao:kakao([[1,'2026-10-01','upcoming']]),mangadex:null}},
 ];
-type Server = {offline:boolean;publication:string;pendingReview:number;similar:number;duplicates:number;unread:Record<string,number>;catalog:unknown;summary:unknown};
+type Server = {offline:boolean;publication:string;pendingReview:number;similar:number;duplicates:number;unread:Record<string,number>;catalog:unknown;summary:unknown;revisit:unknown};
 let server:Server;
 const shelfReads = () => mocks.api.mock.calls.filter(([path]) => String(path).startsWith('/v1/collections?')).length;
 const exchange = (unseen:number,sending=false):ExchangeSnapshot => ({configured:true,tokenConfigured:true,receiveSupported:true,deviceId:'tablet',deviceName:'태블릿',code:'',
@@ -39,6 +39,11 @@ const props = (overrides:Partial<HomeProps> = {}):HomeProps => ({items,hasMore:f
 const note = (id:string,values:Partial<Note>):Note => ({id,title:'',body:'',pinned:true,deleted:false,createdAt:'2026-09-01T00:00:00Z',updatedAt:'2026-09-01T00:00:00Z',localRevision:1,pending:false,conflict:false,...values});
 const summaryReply = (values:Record<string,number> = {}) => ({total:1500,addedToday:12,addedThisWeek:80,unclassified:7,todayStart:'2026-09-24T15:00:00Z',weekStart:'2026-09-20T15:00:00Z',listGeneration:'a'.repeat(64),...values});
 const month = '2026-09';
+const old = (id:string,at:string,width = 600,height = 800):Asset => ({id,kind:'image',width,height,collected_at:at,thumbnail_available:true});
+const revisitReply = () => ({bundles:[
+  {kind:'date',title:'과거의 이날',items:[old('d1','2025-09-25T03:00:00Z'),old('d2','2025-09-25T05:00:00Z',900,600),old('d3','2024-09-22T05:00:00Z')]},
+  {kind:'creator',title:'다시 만난 작가',groups:[{creator_key:'ranzu',creator_name:'Ranzu',creator_handle:'ranzu',asset_count:38,items:[old('r1','2026-04-20T00:00:00Z'),old('r2','2026-01-02T00:00:00Z')]},{creator_key:'other',creator_name:'Other',creator_handle:'other',asset_count:5,items:[old('o1','2025-01-01T00:00:00Z')]}]},
+]});
 let notes:Note[];
 const pinnedNotes = ():Note[] => [
   note('shop',{type:'checklist',title:'장보기',color:'green',updatedAt:'2026-09-25T08:00:00Z',items:[{id:'i1',text:'우유',checked:true,order:'a'},{id:'i2',text:'계란',checked:false,order:'b'},{id:'i3',text:'두부',checked:true,order:'c'}]}),
@@ -60,7 +65,7 @@ beforeEach(() => {
   mocks.loadThumbnail.mockImplementation(async (asset:Asset) => ({...asset,preview:`blob:${asset.id}`}));
   notes = pinnedNotes();
   mocks.native.mockImplementation(async (op:string) => op === 'notesState' ? {unlocked:true,notes,lastSyncedAt:null} : {url:'https://example.invalid/cover',expires_in:300});
-  server = {offline:false,publication:'r1',pendingReview:14,similar:6,duplicates:2,unread:{night:2},catalog:null,summary:summaryReply()};
+  server = {offline:false,publication:'r1',pendingReview:14,similar:6,duplicates:2,unread:{night:2},catalog:null,summary:summaryReply(),revisit:revisitReply()};
   mocks.api.mockImplementation(async (path:string) => {
     if (server.offline) throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);
     if (path.startsWith('/v1/library/characters/review')) return {ready:true,counts:{total:server.pendingReview}};
@@ -70,6 +75,7 @@ beforeEach(() => {
     if (path === '/v1/collections/status') return {revision:server.publication};
     if (path === '/v1/mobile-catalog/refresh') return {job:server.catalog};
     if (path.startsWith('/v1/library/summary?')) { if (server.summary === 404) throw new ApiError('없음',404,null); return server.summary; }
+    if (path.startsWith('/v1/library/revisit?')) return server.revisit;
     if (path.startsWith('/v1/collections?')) return {ready:true,filterVersion:1,revision:server.publication,items:works,nextCursor:null};
     throw new Error(`unexpected ${path}`);
   });
@@ -96,6 +102,25 @@ describe('home model',() => {
     expect(sendingSummary(exchange(0,true))).toEqual({name:'스케치.zip',more:0,peer:'작업실 PC',progress:.62});
     expect(sendingSummary(exchange(0))).toBeNull();
   });
+  it('orders the cover shelf: new volumes newest first, then the next 30 days by date',() => {
+    const release = (id:string,date:string|null,text = '신간 4권') => ({id,name:id,unread:1,caption:{kind:'new' as const,text,date}});
+    const entries = shelfEntries([release('older','9.16'),release('today',null,'신간 알림 2'),release('recent','9.24','신간 12–13권')],
+      [{id:'far',name:'far',date:'2026-10-30',volumeNumber:9},{id:'late',name:'late',date:'2026-10-15',volumeNumber:2},{id:'soon',name:'soon',date:'2026-09-30',volumeNumber:8},{id:'past',name:'past',date:'2026-09-20',volumeNumber:1}],'2026-09-25');
+    expect(entries.map(entry => entry.id)).toEqual(['today','recent','older','soon','late']);
+    expect(entries.slice(0,3).map(entry => entry.kind === 'new' && entry.volumes)).toEqual(['신간 알림 2','12–13권','4권']);
+    expect(entries[3]).toMatchObject({kind:'upcoming',days:5,volumeNumber:8});
+    expect(releaseDateOf('2025.12.3','2026-09-25')).toBe('2025-12-03');
+    expect(releaseDateOf(null)).toBeNull();
+  });
+  it('builds 다시 보기 from the revisit bundles: 과거의 이날 with its dates, the first creator group, nothing when empty',() => {
+    const groups = revisitGroups(revisitReply() as never,new Date(2026,8,25).getTime());
+    expect(groups.map(group => [group.key,group.title,group.label])).toEqual([
+      ['date','과거의 이날','2024.9.22 – 2025.9.25 저장 · 3장'],
+      ['ranzu','다시 만난 작가 · Ranzu','5개월 만 · 소장 38장'],
+    ]);
+    expect(revisitGroups({bundles:[{kind:'date',title:'과거의 이날',items:[]},{kind:'creator',title:'다시 만난 작가',groups:[]}]})).toEqual([]);
+    expect(revisitGroups(null)).toEqual([]);
+  });
   it('counts 오늘 추가 from the first page and says N+ when the whole page is from today',() => {
     const now = new Date(2026,8,25,14,32);
     expect(addedToday(items,false,now)).toEqual({count:5,more:false});
@@ -118,74 +143,99 @@ describe('home model',() => {
   });
 });
 
+
 describe('Home',() => {
   const region = (name:string) => screen.getByRole('region',{name});
+  const status = () => screen.getByRole('group',{name:'상태'});
 
-  it('busy: every card shows its rows and opens the right screen',async() => {
-    const input = props({captures:Array.from({length:40},(_,i) => ({id:`c${i}`,kind:'image'})),exchange:exchange(3,true),characters:characterIndex(200,50)});
+  it('busy: 확인할 것 tiles with counts, 자산 현황 tiles, a sending status line, the cover shelf, 다시 보기 and memo cards',async() => {
+    const onRevisit = vi.fn();
+    const input = props({captures:Array.from({length:40},(_,i) => ({id:`c${i}`,kind:'image'})),exchange:exchange(3,true),characters:characterIndex(200,50),onRevisit});
     render(<Home {...input}/>);
-    // ① 확인할 것: one row per waiting count.
+    // 확인할 것: one tile per waiting count.
     const todo = region('확인할 것');
     fireEvent.click(await within(todo).findByRole('button',{name:'캐릭터 검토 14건'})); expect(input.onReview).toHaveBeenCalled();
     fireEvent.click(within(todo).getByRole('button',{name:'처리 대기 40+건'})); expect(input.onPending).toHaveBeenCalled();
     fireEvent.click(await within(todo).findByRole('button',{name:'유사 이미지 6쌍'})); expect(input.onSimilarity).toHaveBeenCalled();
     fireEvent.click(await within(todo).findByRole('button',{name:'중복 판본 2건'})); expect(input.onDuplicates).toHaveBeenCalled();
-    // ② 신간: small covers only here.
-    const news = region('신간');
-    fireEvent.click(await within(news).findByRole('button',{name:/밤의 도서관/})); expect(input.onWork).toHaveBeenLastCalledWith('night');
-    fireEvent.click(within(news).getAllByRole('button')[0]); expect(input.onReleases).toHaveBeenCalledTimes(1);
-    // ③ 발매 예정: the next 30 days; 게임 · 영화 wait for data.
-    const upcoming = region('발매 예정');
-    await within(upcoming).findByText('바다의 시간');
-    expect(within(upcoming).getByRole('button',{name:/게임/}).hasAttribute('disabled')).toBe(true);
-    expect(within(upcoming).getByRole('button',{name:/영화/}).hasAttribute('disabled')).toBe(true);
-    expect(within(upcoming).getByRole('button',{name:/밤의 도서관/}).textContent).toContain('13일 후');
-    fireEvent.click(within(upcoming).getByRole('button',{name:/바다의 시간/})); expect(input.onWork).toHaveBeenLastCalledWith('sea');
-    // ④ 전송
-    const transfer = region('전송');
-    fireEvent.click(within(transfer).getByRole('button',{name:'받은 파일 3개'})); expect(input.onExchange).toHaveBeenCalledTimes(1);
-    expect(within(transfer).getByRole('button',{name:'보내는 중 스케치.zip → 작업실 PC'}).textContent).toContain('62');
-    // ⑤ 자산 현황: counted, never shown as images.
+    expect(within(todo).getAllByRole('button').map(tile => tile.className)).toEqual(Array(4).fill('home-tile is-act'));
+    // 자산 현황: counted, never shown as images.
     const assets = region('자산 현황');
     fireEvent.click(await within(assets).findByRole('button',{name:'오늘 추가 12장'})); expect(input.onRecent).toHaveBeenCalledTimes(1);
     fireEvent.click(within(assets).getByRole('button',{name:'이번 주 추가 80장'})); expect(input.onRecent).toHaveBeenCalledTimes(2);
     fireEvent.click(within(assets).getByRole('button',{name:'전체 1500장'})); expect(input.onRecent).toHaveBeenCalledTimes(3);
     fireEvent.click(within(assets).getByRole('button',{name:'분류 안 됨 7장'})); expect(input.onLibrary).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(assets).getByRole('button',{name:'캐릭터 자동 태그 75%'})); expect(input.onLibrary).toHaveBeenCalledTimes(2);
+    const tag = within(assets).getByRole('button',{name:'캐릭터 자동 태그 75%'});
+    expect(tag.textContent).toContain('미지정 50장'); expect(tag.style.gridColumn).toBe('span 2');
+    fireEvent.click(tag); expect(input.onLibrary).toHaveBeenCalledTimes(2);
     expect(within(assets).getByRole('button',{name:'전체 1500장'}).textContent).toContain('1,500');
+    fireEvent.click(within(assets).getByRole('button',{name:'최근 저장 전체'})); expect(input.onRecent).toHaveBeenCalledTimes(4);
     expect(document.querySelector('[data-asset-id]')).toBeNull();
-    // ⑥ 메모: pinned notes from the device store.
+    // The status line: the running send with its progress, the received files, the server dot.
+    const line = status();
+    const send = within(line).getByRole('button',{name:'보내는 중 스케치.zip → 작업실 PC'});
+    expect(send.textContent).toContain('62%'); fireEvent.click(send); expect(input.onExchange).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(line).getByRole('button',{name:'받은 파일 3개'})); expect(input.onExchange).toHaveBeenCalledTimes(2);
+    expect(line.textContent).not.toContain('확인할 것 없음');
+    fireEvent.click(within(line).getByRole('button',{name:'서버 상태: 연결됨 · 작업실 PC · 3분 전'})); expect(input.onSettings).toHaveBeenCalled();
+    // The cover shelf: the new volume first, then the next 30 days by date.
+    const shelf = await screen.findByRole('region',{name:'신간 · 발매 예정'});
+    await waitFor(() => expect(within(shelf).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual([
+      '신간 · 발매 예정 전체','밤의 도서관 4권 · 9.16 나옴','밤의 도서관 5권 · 10.8 발매','바다의 시간 2권 · 10.15 발매']));
+    expect(shelf.textContent).toContain('새 권 1 · 30일 안 2');
+    expect(within(shelf).getByRole('button',{name:/밤의 도서관 5권/}).textContent).toContain('D-13');
+    fireEvent.click(within(shelf).getByRole('button',{name:/바다의 시간/})); expect(input.onWork).toHaveBeenLastCalledWith('sea');
+    fireEvent.click(within(shelf).getByRole('button',{name:'신간 · 발매 예정 전체'})); expect(input.onReleases).toHaveBeenCalledTimes(1);
+    // 다시 보기: 과거의 이날 and 다시 만난 작가, each opening its list.
+    const revisit = await screen.findByRole('region',{name:'다시 보기'});
+    const groups = within(revisit).getAllByRole('button');
+    expect(groups.map(group => group.getAttribute('aria-label'))).toEqual(['과거의 이날, 2024.9.22 – 2025.9.25 저장 · 3장','다시 만난 작가 · Ranzu, 5개월 만 · 소장 38장']);
+    expect(groups[0].querySelectorAll('.home-jcell')).toHaveLength(3);
+    fireEvent.click(groups[0]); expect(onRevisit).toHaveBeenLastCalledWith('date','과거의 이날');
+    fireEvent.click(groups[1]); expect(onRevisit).toHaveBeenLastCalledWith('ranzu','Ranzu');
+    // 메모: pinned notes from the device store, as two-column cards.
     const memo = region('메모');
-    const rows = await within(memo).findAllByRole('button',{name:/장보기|가계부|서버 이사 메모/});
-    expect(rows.map(row => row.textContent)).toEqual(['장보기2/3 완료','가계부9월 쓸 수 있는 돈 750,000원','서버 이사 메모할 일 VPS 스냅샷 확인 R2 주소']);
+    const rows = await within(memo).findAllByRole('button',{name:/장보기|가계부|서버 이사 메모|계정/});
+    expect(rows.map(row => row.textContent)).toEqual(['장보기2/3 완료','가계부9월 쓸 수 있는 돈 750,000원','서버 이사 메모할 일 VPS 스냅샷 확인 R2 주소','계정암호 메모']);
+    expect(memo.textContent).toContain('고정 4');
     fireEvent.click(rows[1]); expect(input.onNotes).toHaveBeenLastCalledWith('ledger');
-    fireEvent.click(within(memo).getAllByRole('button')[0]); expect(input.onNotes).toHaveBeenLastCalledWith();
-    // ⑧ 서버 상태: one line while all is well.
-    const serverCard = region('서버 상태');
-    expect(serverCard.className).toContain('is-calm');
-    expect(serverCard.textContent).toContain('연결됨 · 작업실 PC · 3분 전');
-    fireEvent.click(within(serverCard).getByRole('button')); expect(input.onSettings).toHaveBeenCalled();
-    expect(screen.queryByRole('region',{name:'오늘의 AV 배우'})).toBeNull();
+    fireEvent.click(within(memo).getByRole('button',{name:'메모 전체'})); expect(input.onNotes).toHaveBeenLastCalledWith();
   });
 
-  it('calm: cards with nothing to act on collapse to one line',async() => {
+  it('calm: no 확인할 것 tiles, 자산 현황 in one row, quiet things in one status line',async() => {
     Object.assign(server,{pendingReview:0,similar:0,duplicates:0,unread:{},summary:summaryReply({addedToday:0,addedThisWeek:41,unclassified:0})});
     notes = pinnedNotes().map(entry => ({...entry,pinned:false}));
     vi.setSystemTime(new Date(2026,7,1,9,0));
-    render(<Home {...props({items:[]})}/>);
-    const todo = region('확인할 것');
-    expect(within(todo).getByText('확인하는 중…')).toBeTruthy();
-    await within(todo).findByText('모두 확인함');
-    await within(region('신간')).findByText(/새 신간 없음/);
-    expect(region('신간').textContent).toContain('만화 2편 지켜보는 중');
-    await within(region('발매 예정')).findByText(/30일 안에 없음 · 다음/);
-    expect(region('전송').textContent).toContain('받은 파일 · 보낼 파일 없음');
-    await waitFor(() => expect(region('자산 현황').textContent).toContain('이번 주 41장 · 오늘 0'));
+    render(<Home {...props({items:[],characters:characterIndex(200,50)})}/>);
+    expect(status().textContent).toContain('확인하는 중…');
+    await waitFor(() => expect(status().textContent).toContain('확인할 것 없음 · 받은 · 보낼 파일 없음'));
+    expect(screen.queryByRole('region',{name:'확인할 것'})).toBeNull();
+    await waitFor(() => expect(status().textContent).toContain('새 신간 없음 · 만화 2편 지켜보는 중 · 다음 발매 9.16'));
+    expect(status().textContent).toContain('서버');
+    const assets = region('자산 현황');
+    const row = assets.querySelector('.home-stats')!;
+    expect(row.className).toContain('is-row');
+    await waitFor(() => expect([...assets.querySelectorAll('.home-tile')].map(tile => tile.getAttribute('aria-label'))).toEqual(['오늘 추가 0장','이번 주 추가 41장','전체 1500장','분류 안 됨 0장','캐릭터 자동 태그 75%']));
+    expect((row as HTMLElement).style.gridTemplateColumns).toBe('minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr)');
+    // Nothing due in 30 days: no shelf, no empty placeholders.
+    expect(screen.queryByRole('region',{name:/발매 예정|신간/})).toBeNull();
     await within(region('메모')).findByText('고정한 메모 없음');
-    for (const name of ['확인할 것','신간','발매 예정','전송','자산 현황','메모','서버 상태']) {
-      expect(region(name).className).toContain('is-calm');
-      expect(region(name).querySelector('.home-card-body')).toBeNull();
-    }
+    expect(region('메모').querySelector('.home-memo')).toBeNull();
+  });
+
+  it('hides 다시 보기 when the server has nothing to revisit (or cannot answer)',async() => {
+    server.revisit = {bundles:[{kind:'date',title:'과거의 이날',items:[]},{kind:'creator',title:'다시 만난 작가',groups:[]}]};
+    const first = render(<Home {...props()}/>);
+    await waitFor(() => expect(mocks.api.mock.calls.some(([path]) => String(path).startsWith('/v1/library/revisit?'))).toBe(true));
+    await screen.findByRole('region',{name:'신간 · 발매 예정'});
+    expect(screen.queryByRole('region',{name:'다시 보기'})).toBeNull();
+    first.unmount();
+    server.revisit = {bundles:[{kind:'creator',title:'다시 만난 작가',groups:[{creator_key:'ranzu',creator_name:'Ranzu',creator_handle:'ranzu',asset_count:3,items:[old('r1','2026-09-01T00:00:00Z'),old('r2','2026-08-01T00:00:00Z'),old('r3','2026-07-01T00:00:00Z'),old('r4','2026-06-01T00:00:00Z'),old('r5','2026-05-01T00:00:00Z')]}]}]};
+    render(<Home {...props()}/>);
+    const revisit = await screen.findByRole('region',{name:'다시 보기'});
+    expect(within(revisit).getAllByRole('button')).toHaveLength(1);
+    expect(revisit.querySelectorAll('.home-jrow')).toHaveLength(2);
+    expect(within(revisit).getByRole('button').getAttribute('aria-label')).toBe('다시 만난 작가 · Ranzu, 소장 3장');
   });
 
   it('falls back to counting the first page when the server has no library summary',async() => {
@@ -199,24 +249,24 @@ describe('Home',() => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  it('shows a running catalog refresh on the one-line 서버 상태, and a failed one expanded',async() => {
+  it('shows a running catalog refresh on the status line, and a failed one as an alert',async() => {
     server.catalog = {id:'j',language:'korean',state:'running',pages:3,added:0,hasMore:true,error:null,publicationRevision:null};
     const first = render(<Home {...props()}/>);
-    await within(region('서버 상태')).findByText('카탈로그 갱신 중 · 3쪽');
+    await within(status()).findByText('카탈로그 갱신 중 · 3쪽');
     first.unmount();
     server.catalog = {id:'j',language:'korean',state:'failed',pages:0,added:0,hasMore:false,error:'갱신하지 못했습니다.',publicationRevision:null};
     render(<Home {...props()}/>);
-    await within(region('서버 상태')).findByText('갱신하지 못했습니다.');
-    expect(region('서버 상태').className).toContain('is-alert');
+    await within(status()).findByText('갱신하지 못했습니다.');
+    expect(status().className).toContain('is-alert');
   });
 
   it('does not read the manga shelf again on reopening Home, only after the publication moved',async() => {
     const first = render(<Home {...props()}/>);
-    await within(region('신간')).findByRole('button',{name:/밤의 도서관/});
+    await screen.findByRole('button',{name:/밤의 도서관 4권/});
     expect(shelfReads()).toBe(1);
     first.unmount();
     render(<Home {...props()}/>);
-    await within(region('신간')).findByRole('button',{name:/밤의 도서관/});
+    await screen.findByRole('button',{name:/밤의 도서관 4권/});
     await waitFor(() => expect(mocks.api.mock.calls.filter(([path]) => path === '/v1/collections/status')).toHaveLength(2));
     expect(shelfReads()).toBe(1);
     // A newer publication makes the kept shelf stale: the next visit reads it once more.
@@ -229,14 +279,14 @@ describe('Home',() => {
 
   it('shares the shelf read with the 신간 screen store instead of reading it twice',async() => {
     render(<Home {...props()}/>);
-    await within(region('신간')).findByRole('button',{name:/밤의 도서관/});
+    await screen.findByRole('button',{name:/밤의 도서관 4권/});
     expect(releaseStore.current.shelf?.works).toHaveLength(3);
     expect(releaseStore.current.loaded).toBe(false);
   });
 
   it('offline: a notice with 다시 연결, the last values with their time, 메모 as usual',async() => {
     const first = render(<Home {...props({captures:[{id:'c',kind:'image'}]})}/>);
-    await within(region('신간')).findByRole('button',{name:/밤의 도서관/});
+    await screen.findByRole('button',{name:/밤의 도서관 4권/});
     await waitFor(() => expect(JSON.parse(localStorage.getItem(HOME_SNAPSHOT_KEY)!).counts.duplicates.value).toBe(2));
     first.unmount(); resetReleaseStore();
     vi.setSystemTime(new Date(2026,8,25,15,10));
@@ -250,13 +300,15 @@ describe('Home',() => {
     expect(within(todo).getByText('14:32 기준')).toBeTruthy();
     expect(within(todo).getByRole('button',{name:'처리 대기 1건'})).toBeTruthy();
     expect(within(todo).getByRole('button',{name:'캐릭터 검토 14건'})).toBeTruthy();
-    expect(within(region('신간')).getByText('14:32 기준')).toBeTruthy();
+    const shelf = region('신간 · 발매 예정');
+    expect(within(shelf).getByText('14:32 기준')).toBeTruthy();
+    expect(within(shelf).getByRole('button',{name:/바다의 시간/})).toBeTruthy();
     expect(within(region('자산 현황')).getByText('14:32 기준')).toBeTruthy();
     expect(within(region('자산 현황')).getByRole('button',{name:'분류 안 됨 7장'})).toBeTruthy();
-    expect(within(region('발매 예정')).getByText('밤의 도서관')).toBeTruthy();
-    expect(within(region('전송')).getByRole('button',{name:'보내기 멈춤 1개'})).toBeTruthy();
-    expect(region('서버 상태').className).toContain('is-alert');
-    expect(region('서버 상태').textContent).toContain('연결 안 됨');
+    expect(within(status()).getByRole('button',{name:'보내기 멈춤 1개'})).toBeTruthy();
+    expect(status().className).toContain('is-alert');
+    expect(within(status()).getByRole('button',{name:/서버 상태: 연결 안 됨/}).textContent).toContain('연결 안 됨');
+    expect(screen.queryByRole('region',{name:'다시 보기'})).toBeNull();
     await within(region('메모')).findByText('장보기');
     const reads = mocks.api.mock.calls.length;
     fireEvent.click(within(notice).getByRole('button',{name:'다시 연결'}));
