@@ -582,3 +582,70 @@ it('shows a manga 원제 small under the title only when it differs from the tit
     view.unmount();
   }
 });
+describe('type switch continuity',()=>{
+  const game=item,manga:CollectionDetail={...item,id:'manga-2',type:'manga',name:'새 만화',selectedWorkArtworkId:'manga-cover'};
+  const movie:CollectionDetail={...item,id:'movie-3',type:'movie',name:'새 영화',selectedWorkArtworkId:'movie-cover'};
+  const listCalls=(type:string)=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith(`/v1/collections?type=${type}&`)&&!String(path).includes('showcase=true'));
+  const coverCalls=(id:string)=>mocks.native.mock.calls.filter(([op,payload])=>op==='collectionArtwork'&&payload.artworkId===id);
+  const grid=()=>list().querySelector('.collection-grid') as HTMLElement;
+  const serve=(pages:Record<string,CollectionPage|Promise<CollectionPage>>)=>mocks.api.mockImplementation(async(path:string)=>{
+    const type=/type=(\w+)/.exec(path)?.[1];
+    return path.startsWith('/v1/collections?')&&type&&pages[type]?pages[type]:path.endsWith('/status')?{revision:'r1'}:page;
+  });
+
+  it('keeps the previous type on screen until the new page commits, never an empty or placeholder grid',async()=>{
+    let resolveManga!:(value:CollectionPage)=>void;
+    serve({game:page,manga:new Promise<CollectionPage>(resolve=>{resolveManga=resolve;})});
+    render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(game.name);
+    const seen:{tiles:number;placeholders:number;type:string}[]=[];
+    const observer=new MutationObserver(()=>{const node=grid();seen.push({tiles:node.querySelectorAll('.collection-tile').length,placeholders:node.querySelectorAll('.collection-art-placeholder').length,type:node.className});});
+    observer.observe(list(),{subtree:true,childList:true,attributes:true});
+    pressTab('만화');await act(async()=>{});
+    // Loading: the game cards stay, laid out as the game grid they are.
+    expect(screen.getByText(game.name)).toBeTruthy();
+    expect(grid().className).toContain('collection-grid-game');
+    await act(async()=>resolveManga({...page,items:[manga]}));
+    await screen.findByText(manga.name);
+    observer.disconnect();
+    expect(grid().className).toContain('collection-grid-manga');
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(frame=>frame.tiles>0)).toBe(true);
+    // The first screen's covers were readied before the swap: they are there in the commit.
+    expect(seen.every(frame=>frame.placeholders===0)).toBe(true);
+    expect(screen.getByRole('img',{name:manga.name}).classList.contains('collection-art-arrive')).toBe(false);
+    expect(coverCalls('manga-cover')).toHaveLength(1);
+  });
+
+  it('shows a type switched back to from memory without a request until a newer revision is read',async()=>{
+    serve({game:page,manga:{...page,items:[manga]},movie:{...page,revision:'r2',items:[movie]}});
+    render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(game.name);
+    pressTab('만화');await screen.findByText(manga.name);
+    const games=listCalls('game').length,mangas=listCalls('manga').length,gameCovers=coverCalls('cover').length;
+    pressTab('게임');
+    await act(async()=>{});
+    expect(screen.getByText(game.name)).toBeTruthy();expect(screen.queryByText(manga.name)).toBeNull();
+    pressTab('만화');await act(async()=>{});
+    expect(screen.getByText(manga.name)).toBeTruthy();
+    expect(listCalls('game')).toHaveLength(games);expect(listCalls('manga')).toHaveLength(mangas);
+    expect(coverCalls('cover')).toHaveLength(gameCovers);
+    // 영화 was read under a newer publication: the remembered 게임 list shows at once and re-reads quietly.
+    pressTab('영화');await screen.findByText(movie.name);
+    let resolveGame!:(value:CollectionPage)=>void;
+    serve({game:new Promise<CollectionPage>(resolve=>{resolveGame=resolve;})});
+    pressTab('게임');await act(async()=>{});
+    expect(screen.getByText(game.name)).toBeTruthy();
+    expect(list().querySelector('.loading-line')).toBeNull();
+    expect(listCalls('game')).toHaveLength(games+1);
+    await act(async()=>resolveGame({...page,revision:'r2',items:[{...game,name:'갱신된 게임'}]}));
+    expect(await screen.findByText('갱신된 게임')).toBeTruthy();
+  });
+
+  it('fades in a cover that arrives after its card, not one this screen already decoded',async()=>{
+    serve({game:page,manga:{...page,items:[manga]}});
+    render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(game.name);
+    expect((await screen.findByRole('img',{name:game.name})).classList.contains('collection-art-arrive')).toBe(true);
+    pressTab('만화');await screen.findByText(manga.name);
+    pressTab('게임');await screen.findByText(game.name);
+    expect(screen.getByRole('img',{name:game.name}).classList.contains('collection-art-arrive')).toBe(false);
+  });
+});

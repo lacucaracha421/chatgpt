@@ -9,7 +9,7 @@ import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCou
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
-import {useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
+import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
 import {useLevelMotion,useSegmentMotion,useTabIndicator} from './motion';
 import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
@@ -90,6 +90,37 @@ async function decoded(url:string) {
 }
 const validArtworkUrl=(url:string)=>/^https:\/\//.test(url)||(import.meta.env.DEV&&url.startsWith('data:image/'));
 type LoadedArtwork = {source:string;url:string};
+/** A decoded list cover is reused for this long unless its ticket says otherwise. */
+const ARTWORK_KEEP_MS=4*60_000;
+/**
+ * The Collections screen's decoded list covers, by artwork source. A card that mounts again
+ * (a type switched back, a list re-read) shows its cover in its first frame, and the covers a
+ * type swap pre-decodes are handed to the cards instead of being requested twice.
+ */
+class ArtworkMemory {
+  private urls=new Map<string,{url:string;until:number}>();
+  private loads=new Map<string,Promise<string>>();
+  get(source:string){const hit=this.urls.get(source);if(hit&&hit.until>Date.now())return hit.url;this.urls.delete(source);return null;}
+  put(source:string,ticket:Ticket){this.urls.set(source,{url:ticket.url,until:Date.now()+(ticket.expires_in?ticket.expires_in*1000:ARTWORK_KEEP_MS)});}
+  forget(source:string){this.urls.delete(source);}
+  /** A pre-decode of `source` still under way, if any. */
+  pending(source:string){return this.loads.get(source)??null;}
+  /** Requests and decodes the list covers of `items` that are not ready yet. */
+  preload(items:CollectionSummary[],revision:string,signal:AbortSignal){
+    return Promise.all(items.map(item=>{
+      const id=collectionCover(item),source=artworkSource(item,id,revision,false);
+      if((!id&&!item.coverAssetId)||this.get(source))return undefined;
+      const running=this.loads.get(source);if(running)return running.catch(()=>undefined);
+      const load=artworkTicket(item,id,revision,false,signal).then(async ticket=>{
+        if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');
+        await decoded(ticket.url);this.put(source,ticket);return ticket.url;
+      }).finally(()=>{if(this.loads.get(source)===load)this.loads.delete(source);});
+      this.loads.set(source,load);
+      return load.catch(()=>undefined);
+    }));
+  }
+}
+const ArtworkMemoryContext=createContext<ArtworkMemory|null>(null);
 /**
  * A visible artwork that failed tries again after these delays, then stays failed until its tab
  * or visibility changes. A full native media queue ("media_busy") never started the request, so
@@ -105,9 +136,13 @@ type Retries={source:string;failed:number;busy:number};
  * cards never pass it, so 3D stays inside the work detail.
  */
 export function Artwork({item,id,revision,original=false,active=true,label,physical}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string;physical?:'book'|'game'}) {
-  const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [image,setImage]=useState<LoadedArtwork|null>(null), [failed,setFailed]=useState<string|null>(null);
+  const memory=useContext(ArtworkMemoryContext),kept=original?null:memory;
+  const source=artworkSource(item,id,revision,original);
+  const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [failed,setFailed]=useState<string|null>(null);
+  // A cover this screen already decoded is shown in the first frame; one that arrives later fades in.
+  const [image,setImage]=useState<LoadedArtwork|null>(()=>{const url=kept?.get(source);return url?{source,url}:null;});
   const [flat,setFlat]=useState<string|null>(null);
-  const source=artworkSource(item,id,revision,original),loaded=useRef<string|null>(null),shown=useRef<string|null>(null);
+  const loaded=useRef<string|null>(image?.source??null),shown=useRef<string|null>(null),arriving=useRef(!image);
   const [attempt,setAttempt]=useState(0),retries=useRef<Retries>({source,failed:0,busy:0}),retryTimer=useRef(0);
   /** Schedules the next try of this source, or returns false once its retries are spent. */
   const retryLater=(error:unknown)=>{
@@ -126,12 +161,17 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
     if(!active||!visible){retries.current={source,failed:0,busy:0};return;}
     if((!id&&!item.coverAssetId)||loaded.current===source)return;
     setFailed(null);const controller=new AbortController();
-    void artworkTicket(item,id,revision,original,controller.signal).then(async ticket=>{
+    const remembered=kept?.get(source);
+    if(remembered){loaded.current=source;setImage({source,url:remembered});return;}
+    // A swap's pre-decode of this cover is joined rather than repeated.
+    const preloaded=kept?.pending(source)?.then(url=>({url}) as Ticket,()=>null)??Promise.resolve(null);
+    void preloaded.then(ticket=>ticket??artworkTicket(item,id,revision,original,controller.signal)).then(async ticket=>{
       if(controller.signal.aborted)return;
       if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');
       // A replacement keeps the shown image until its own bytes are ready; the same URL just stays.
       if(shown.current&&shown.current!==ticket.url)await decoded(ticket.url);
       if(controller.signal.aborted)return;
+      kept?.put(source,ticket);
       loaded.current=source;setImage({source,url:ticket.url});
     }).catch(error=>{if(!controller.signal.aborted&&!retryLater(error))setFailed(source);});
     return()=>{controller.abort();window.clearTimeout(retryTimer.current);};
@@ -139,7 +179,7 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
   const broken=failed===source,ready=!!image&&!broken&&(!!id||!!item.coverAssetId);
   shown.current=ready?image.url:null;
   const solid=ready&&physical&&flat!==source;
-  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} onError={()=>{loaded.current=null;if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
+  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onError={()=>{loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
 }
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};
@@ -311,33 +351,67 @@ function WorkCard({work,revision,active,meta=true,caption,onOpen}:{work:Collecti
 
 type ListState={key:string;items:CollectionSummary[];page:CollectionPage|null;next:string|null;busy:boolean;more:boolean;error:string;moreError:string;legacy:boolean};
 const EMPTY_LIST:ListState={key:'',items:[],page:null,next:null,busy:false,more:false,error:'',moreError:'',legacy:false};
+/** Covers readied before a swap: the S11 portrait first screen (4 columns x 3 rows). */
+const FIRST_SCREEN_COVERS=12;
+/** A swap waits at most this long for the new first screen's covers before it commits. */
+const SWAP_PREPARE_MS=250;
+/** Resolves when `work` settles or after `ms`, whichever is first. */
+function settleWithin(work:Promise<unknown>,ms:number){
+  let timer=0;
+  return Promise.race([work.catch(()=>undefined),new Promise<void>(resolve=>{timer=window.setTimeout(resolve,ms);})]).finally(()=>clearTimeout(timer));
+}
 /**
  * One continuously scrolled Collection query. The first page commits the query; later pages
  * are appended only while they come from the same publication revision, otherwise the query
  * restarts. A committed query is not re-read when the tab is merely shown again.
+ *
+ * Switching queries keeps the previous list on screen until the new first page commits, and
+ * `prepare` (capped at SWAP_PREPARE_MS) readies what that page shows first before it does. Each
+ * `slot` (a Collection type) remembers its last committed query: switching back to a slot whose
+ * query is unchanged shows it without a request, re-read in the background only when a newer
+ * publication revision has been read since. A refresh (`key` changes), a new search or filter
+ * within the slot, or a revision change mid-scroll reads the server as before.
  */
-function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:boolean,validate?:(page:CollectionPage)=>void) {
+function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:boolean,{slot='',validate,prepare}:{slot?:string;validate?:(page:CollectionPage)=>void;prepare?:(page:CollectionPage,signal:AbortSignal)=>Promise<unknown>}={}) {
   const [state,setState]=useState<ListState>(EMPTY_LIST);
   const latest=useRef(state);latest.current=state;
   const committed=useRef(''),more=useRef<AbortController|null>(null);
+  const memory=useRef(new Map<string,ListState>()),shownSlot=useRef(slot),newest=useRef<string|null>(null);
   const [nonce,setNonce]=useState(0);
   const pathRef=useRef(path);pathRef.current=path;
   const validateRef=useRef(validate);validateRef.current=validate;
+  const prepareRef=useRef(prepare);prepareRef.current=prepare;
+  // Each slot remembers its committed query as it grows.
+  useEffect(()=>{
+    if(!state.page||state.busy||state.error||state.key!==committed.current||state.key!==key)return;
+    memory.current.set(slot,{...state,more:false,moreError:''});shownSlot.current=slot;
+  },[state]);// eslint-disable-line react-hooks/exhaustive-deps
   useEffect(()=>{
     if(!enabled)return;
     if(committed.current===key){setState(current=>current.busy?{...current,busy:false}:current);return;}
     more.current?.abort();
     const controller=new AbortController();
+    const firstPage=()=>api<CollectionPage>(pathRef.current(null),controller.signal).then(result=>{validateRef.current?.(result);newest.current=result.revision;return result;});
+    const commit=(result:CollectionPage)=>{committed.current=key;setState({key,items:result.items,page:result,next:result.nextCursor,busy:false,more:false,error:'',moreError:'',legacy:false});};
+    const kept=slot!==shownSlot.current?memory.current.get(slot):undefined;
+    if(kept?.key===key){
+      committed.current=key;setState(kept);
+      // Shown at once; re-read quietly only if a newer publication was read since.
+      if(kept.page?.revision!==newest.current)void firstPage().then(result=>{if(!controller.signal.aborted)commit(result);}).catch(()=>{});
+      return()=>controller.abort();
+    }
+    const swapping=latest.current.items.length>0;
     setState(current=>({...current,key,busy:true,error:'',legacy:false,moreError:''}));
-    void api<CollectionPage>(pathRef.current(null),controller.signal).then(result=>{
+    void firstPage().then(async result=>{
       if(controller.signal.aborted)return;
-      validateRef.current?.(result);
-      committed.current=key;
-      setState({key,items:result.items,page:result,next:result.nextCursor,busy:false,more:false,error:'',moreError:'',legacy:false});
+      // The previous list stays until the new first screen is ready (or the cap passes).
+      if(swapping&&prepareRef.current)await settleWithin(prepareRef.current(result,controller.signal),SWAP_PREPARE_MS);
+      if(controller.signal.aborted)return;
+      commit(result);
     }).catch(reason=>{if(controller.signal.aborted)return;const legacy=(reason as {status?:number}).status===404;setState(current=>({...current,busy:false,legacy,error:legacy?'':errorText(reason)}));});
     return()=>controller.abort();
   },[key,enabled,nonce]);
-  const reload=useCallback(()=>{committed.current='';setNonce(n=>n+1);},[]);
+  const restart=useCallback(()=>{committed.current='';setNonce(n=>n+1);},[]);
   const loadMore=useCallback(()=>{
     const current=latest.current;
     if(!enabled||current.busy||current.more||current.moreError||!current.next||current.key!==committed.current)return;
@@ -346,13 +420,13 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
     void api<CollectionPage>(pathRef.current(current.next),controller.signal).then(result=>{
       if(controller.signal.aborted||latest.current.key!==current.key)return;
       validateRef.current?.(result);
-      if(result.revision!==current.page?.revision){committed.current='';setNonce(n=>n+1);return;}
+      if(result.revision!==current.page?.revision){newest.current=result.revision;restart();return;}
       if(result.nextCursor&&result.nextCursor===current.next)throw new Error('목록 커서가 진행되지 않습니다.');
       setState(value=>{const seen=new Set(value.items.map(work=>work.id));return {...value,items:[...value.items,...result.items.filter(work=>!seen.has(work.id))],next:result.nextCursor,more:false};});
     }).catch(reason=>{if(!controller.signal.aborted)setState(value=>({...value,more:false,moreError:errorText(reason)}));});
-  },[enabled]);
+  },[enabled,restart]);
   const retryMore=useCallback(()=>{setState(value=>({...value,moreError:''}));},[]);
-  return {...state,reload,loadMore,retryMore,committed:state.key===committed.current&&!!state.page};
+  return {...state,reload:restart,loadMore,retryMore,committed:state.key===committed.current&&!!state.page};
 }
 const nearEnd=(element:HTMLElement)=>element.clientHeight>0&&element.scrollHeight-element.scrollTop-element.clientHeight<element.clientHeight;
 
@@ -415,12 +489,15 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
 
   // Typing searches after a short pause; Enter applies at once.
   useEffect(()=>{const value=query.trim();if(value===search)return;const timer=window.setTimeout(()=>setSearch(value),350);return()=>clearTimeout(timer);},[query,search]);
+  // Covers decoded on this screen; a list swap readies the new first screen's covers first.
+  const [artworks]=useState(()=>new ArtworkMemory());
+  const prepareCovers=useCallback((page:CollectionPage,signal:AbortSignal)=>artworks.preload(page.items.slice(0,FIRST_SCREEN_COVERS),page.revision??'',signal),[artworks]);
   const mainKey=JSON.stringify([collectionPath(type,search,false,null,filters),refresh]);
   const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,live,
-    result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');});
+    {slot:type,prepare:prepareCovers,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
   const wantShowcase=live&&(showcaseOpen||showcaseAll)&&(!filtered||showcaseAll);
   const showcaseKey=JSON.stringify([collectionPath(type,'',true,null),refresh]);
-  const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase);
+  const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase,{slot:type,prepare:prepareCovers});
   const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||showcaseAll||inboxOpen);
   const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
@@ -451,7 +528,8 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
   // A list read under a newer publication than the kept 신간 shelf (read here or by Home) outdates it.
   useEffect(()=>observePublication(main.page?.revision),[main.page?.revision]);
   // Restore the list position when its committed query is shown again, before it is painted.
-  useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,main.committed,active]);
+  // A remembered query (a type switched back to) commits without passing through loading.
+  useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,main.committed,main.key,active]);
 
   const back=useCallback(()=>{
     if(coverIndex!==null){setCoverIndex(null);return true;}
@@ -530,7 +608,9 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
   // A type switch swaps the list sideways once the new type's list (and its Showcase row, when
   // open) has settled, so the old type's cards never slide in; the bar stays still.
   useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,TABS.indexOf(tab));
-  return <section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
+  // The grid keeps the layout of the type it shows until the new type's page commits.
+  const shownType=main.items[0]?.type??type;
+  return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {header}
     <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll||inboxOpen?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
@@ -548,7 +628,7 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
           {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
         </div></div>
         {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
-        <div className={`collection-grid collection-grid-${type}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork}/>)}</div>
+        <div className={`collection-grid collection-grid-${shownType}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork}/>)}</div>
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
         {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
@@ -594,5 +674,5 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>
       <div className="collection-cover-stage"><CoverStage key={`${edition}:${coverIndex}:${coverMode}`} item={item} id={covers[coverIndex].id} revision={detail!.revision} label={covers[coverIndex].label} mode={physical?coverMode:'flat'} onFlat={()=>setCoverMode('flat')}/></div>
       <footer><IconButton label="이전 표지" icon={ChevronLeftIcon} disabled={coverIndex===0} onClick={()=>setCoverIndex(value=>value!-1)}/><span className="numeric muted">{coverIndex+1} / {covers.length}</span><IconButton label="다음 표지" icon={ChevronRightIcon} disabled={coverIndex===covers.length-1} onClick={()=>setCoverIndex(value=>value!+1)}/></footer></div></Dialog>}
-  </section>;
+  </section></ArtworkMemoryContext.Provider>;
 }

@@ -45,6 +45,9 @@
 .collection-art{display:block;position:relative;width:100%;aspect-ratio:2/3;overflow:hidden;background:var(--color-surface);border-radius:var(--radius-tile)}
 .collection-art-game{aspect-ratio:3/4}
 .collection-art img{height:100%;width:100%;object-fit:cover;display:block}
+/* A cover that arrives after its card is on screen fades in instead of popping; a remembered one is simply there. */
+.collection-art img.collection-art-arrive{animation:collection-art-arrive 160ms var(--ease-standard)}
+@keyframes collection-art-arrive{from{opacity:0}}
 .collection-art.is-physical{background:transparent;overflow:visible}
 .collection-art.is-physical .physical-cover{display:block;width:100%;height:100%}
 .collection-art.is-physical .physical-cover img{object-fit:contain}
