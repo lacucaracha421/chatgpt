@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Dashboard Round 3</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css and mobile-client/mobile.css (same as round2.html). */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-control:#232425; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-filter-selected:#383838; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --work-shadow-rest:0 3px 4px rgba(0,0,0,.28);
+  --radius-tile:2px; --radius-sm:4px;
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --ok:#7fb88a; --soft:#c4c6c8;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+svg.i.solid { fill:currentColor; stroke:none; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:2560px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b { color:var(--color-text); font-weight:600; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.toolbar button, .toolbar a.btn { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; cursor:pointer; color:var(--color-text); text-decoration:none; font-size:13px; }
+.toolbar button[aria-pressed=true] { background:var(--color-filter-selected); border-color:var(--color-filter-border); }
+.toolbar a { color:inherit; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-numeric); }
+section.topic>p { color:var(--color-muted); max-width:1300px; line-height:1.7; margin-top:8px; }
+section.topic>p b { color:var(--color-text); font-weight:600; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:14px; color:var(--color-muted); margin-bottom:10px; width:800px; line-height:1.6; min-height:68px; }
+figcaption b { color:var(--color-text); }
+.tag { display:inline-block; font:600 12px var(--font-ui); letter-spacing:1px; padding:1px 7px; margin-right:6px; border-radius:2px; background:var(--color-surface-elevated); color:var(--color-text); vertical-align:1px; }
+.tag.a { background:var(--color-accent); color:var(--color-on-accent); }
+.tag.b { background:#2c3a3a; }
+.tag.now { background:#3a2c2c; }
+.scaled { zoom:.5; }
+.scaled figcaption { font-size:26px; min-height:120px; }
+body.full .scaled { zoom:1; }
+body.full .scaled figcaption { font-size:14px; min-height:68px; }
+body.shot .doc>header, body.shot section.topic:not(.shown) { display:none; }
+body.shot .doc { padding:24px; max-width:none; }
+body.shot section.topic { margin:0; border:0; padding:0; }
+body.shot section.topic>p { display:none; }
+body.shot .scaled { zoom:1; }
+body.shot .scaled figcaption { font-size:15px; min-height:72px; }
+body.shot .row { flex-wrap:nowrap; }
+.legend { display:flex; gap:14px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--color-muted); margin-top:12px; }
+.legend .dtag { position:static; }
+table.data { border-collapse:collapse; margin-top:16px; font-size:14px; max-width:1500px; width:100%; }
+table.data th, table.data td { text-align:left; vertical-align:top; padding:9px 12px; border-bottom:1px solid var(--color-border); line-height:1.55; }
+table.data th { color:var(--color-muted); font-weight:500; font-size:13px; }
+table.data td:first-child { white-space:nowrap; font-weight:600; }
+table.data td .dtag { position:static; margin-right:6px; }
+table.data code { font-size:12.5px; color:#d6d0c0; }
+table.data td.m { color:var(--color-muted); }
+
+/* ===== App frame: Galaxy Tab S11 portrait, 800 × 1280 CSS px ===== */
+.frame { position:relative; width:800px; height:1280px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); display:flex; flex-direction:column; }
+.content { flex:1; min-height:0; overflow:hidden; position:relative; }
+.content.fade::after { content:''; position:absolute; left:0; right:0; bottom:0; height:28px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:7; }
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 16px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar .brand { display:flex; align-items:center; color:var(--color-accent); margin-right:12px; flex-shrink:0; }
+.bar .brand svg.mark { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.bar .hometitle { font-size:20px; font-weight:600; letter-spacing:-.2px; }
+.bar .space { flex:1; min-width:4px; }
+.ib { width:44px; height:44px; display:inline-grid; place-items:center; border:0; background:transparent; color:var(--color-muted); border-radius:4px; position:relative; flex-shrink:0; }
+.xbadge { position:absolute; top:4px; right:2px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--color-accent); color:var(--color-on-accent); font:600 10px/16px var(--font-numeric); text-align:center; }
+.offchip { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 10px; margin-right:4px; border:1px solid var(--color-border-strong); border-radius:4px; font-size:13px; color:var(--color-text); white-space:nowrap; }
+.offchip svg.i { width:17px; height:17px; color:var(--color-danger); }
+.nav { flex-shrink:0; height:60px; margin-bottom:8px; padding:3px 0; display:flex; justify-content:center; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav button { flex:1 1 0; max-width:122px; min-height:53px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:0; background:transparent; color:var(--color-muted); position:relative; font-size:11px; line-height:1.2; }
+.nav button.active { color:var(--color-accent); }
+.nav button.active::after { content:''; position:absolute; top:-3px; left:calc(50% - 8px); width:16px; height:2px; background:currentColor; }
+
+/* ===== Round 3: information-only cards ===== */
+.page { padding:14px 16px 24px; }
+.grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.lane { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.r1 { align-items:start; }
+.full { grid-column:1/-1; }
+.grid2 > .dc.calm { align-self:start; }
+
+/* Card: one tone step + 1px line, small radius, no shadow (DESIGN.md §4). */
+.dc { position:relative; background:var(--color-surface); border:1px solid var(--color-border); border-radius:3px; min-width:0; display:flex; flex-direction:column; }
+.dc-hd { display:flex; align-items:center; gap:8px; min-height:52px; padding:0 8px 0 14px; }
+.dc-hd > svg.i { width:18px; height:18px; color:var(--color-muted); }
+.dc-hd h3 { font-size:15.5px; font-weight:600; white-space:nowrap; }
+.dc-hd .sum { font:500 22px/1 var(--font-numeric); color:var(--color-accent); white-space:nowrap; }
+.dc-hd .sum small { font:500 13px var(--font-ui); color:var(--color-muted); margin-left:3px; }
+.dc-hd .sp { flex:1; min-width:4px; }
+.dc-hd .cm { display:flex; align-items:center; gap:6px; min-width:0; font-size:14px; color:var(--color-muted); white-space:nowrap; overflow:hidden; }
+.dc-hd .cm span { overflow:hidden; text-overflow:ellipsis; }
+.dc-hd .cm b { color:var(--color-text); font-weight:500; }
+.dc-hd .cm svg.i { width:17px; height:17px; color:var(--ok); }
+.dc-hd .cm .numeric { font-size:16px; color:var(--color-text); }
+.dc-hd > svg.i.chev, .chev { width:16px !important; height:16px !important; color:var(--color-muted); }
+.dc-bd { border-top:1px solid var(--color-border); display:flex; flex-direction:column; min-height:0; }
+.stale { font:500 12px/20px var(--font-numeric); color:var(--color-muted); border:1px solid var(--color-border); border-radius:2px; padding:0 5px; white-space:nowrap; }
+.dc.calm .dc-hd { min-height:52px; }
+
+/* Rows: number first, its label immediately to the right (round2 diagnosis 1–2). */
+.qrow { display:flex; align-items:center; gap:12px; min-height:56px; padding:0 8px 0 14px; border-top:1px solid var(--color-border); }
+.qrow:first-child { border-top:0; }
+.qrow .n { font:500 30px/1 var(--font-numeric); color:var(--color-accent); min-width:52px; text-align:right; white-space:nowrap; }
+.qrow .n small { font:500 13px var(--font-ui); color:var(--color-muted); margin-left:2px; }
+.qrow .t { flex:1; min-width:0; font-size:15px; font-weight:500; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qrow .t small { display:block; font-size:12.5px; font-weight:400; color:var(--color-muted); overflow:hidden; text-overflow:ellipsis; }
+.qrow.stat .n { font-size:26px; color:var(--color-text); min-width:64px; }
+.qrow.off .n { color:var(--soft); }
+.qrow .bar-prog { margin-top:5px; }
+.bar-prog { height:3px; background:var(--color-border); border-radius:2px; overflow:hidden; }
+.bar-prog i { display:block; height:100%; background:var(--color-accent); }
+.bar-prog.muted i { background:var(--color-muted); }
+.cols2 { display:grid; grid-template-columns:1fr 1fr; }
+.cols2 > * { border-top:1px solid var(--color-border); }
+.cols2 > *:nth-child(-n+2) { border-top:0; }
+.cols2 > *:nth-child(2n) { border-left:1px solid var(--color-border); }
+
+/* 신간: small cover rows only here. */
+.rrow { display:flex; gap:12px; align-items:center; padding:8px 8px 8px 14px; border-top:1px solid var(--color-border); min-height:66px; }
+.rrow:first-child { border-top:0; }
+.cov { position:relative; aspect-ratio:2/3; width:34px; background:var(--color-surface-elevated); border-radius:var(--radius-tile); overflow:hidden; flex:none; }
+.cov img { width:100%; height:100%; object-fit:cover; display:block; }
+.rrow .tx { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
+.rrow .tt { font-size:15px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cnew { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--color-accent); white-space:nowrap; overflow:hidden; }
+.cnew::before { content:''; width:6px; height:6px; background:var(--color-accent); flex:none; }
+.cnew .numeric { font-weight:500; font-size:14px; color:var(--color-muted); }
+.cnew.info { color:var(--color-muted); font-weight:500; }
+.cnew.info::before { background:var(--color-muted); }
+
+/* 발매 예정: type segments + date timeline. */
+.seg { display:flex; gap:6px; padding:8px 14px; border-bottom:1px solid var(--color-border); flex-wrap:nowrap; overflow:hidden; }
+.seg span { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px; border:1px solid var(--color-border); border-radius:3px; font-size:13px; color:var(--color-muted); white-space:nowrap; }
+.seg span.on { background:var(--color-filter-selected); border-color:var(--color-filter-border); color:var(--color-text); }
+.seg span .numeric { font-size:15px; color:var(--color-text); }
+.seg span.nd { border-style:dashed; }
+.urow { display:grid; grid-template-columns:44px minmax(0,1fr) auto 16px; gap:10px; align-items:center; min-height:54px; padding:0 8px 0 14px; border-top:1px solid var(--color-border); }
+.urow:first-child { border-top:0; }
+.urow .d { font:500 21px/1 var(--font-numeric); color:var(--color-text); }
+.urow .d small { display:block; font:500 12px var(--font-ui); color:var(--color-muted); margin-top:3px; }
+.urow .tt { font-size:14.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3; }
+.urow .tt small { display:block; font-size:12.5px; font-weight:400; color:var(--color-muted); }
+.urow .tt small em { font-style:normal; color:var(--color-text); }
+.urow .left { font:500 14px var(--font-numeric); color:var(--color-muted); white-space:nowrap; }
+.urow.nd { background:repeating-linear-gradient(135deg,transparent 0 8px,rgba(255,255,255,.018) 8px 16px); }
+.urow.nd .tt, .urow.nd .d { color:#b9bbbd; }
+.kind { display:inline-block; font:500 11.5px var(--font-ui); color:var(--color-muted); border:1px solid var(--color-border-strong); border-radius:2px; padding:0 4px; line-height:16px; margin-right:5px; vertical-align:1px; }
+
+/* 메모 */
+.mrow { display:flex; align-items:center; gap:12px; min-height:60px; padding:8px 8px 8px 0; border-top:1px solid var(--color-border); }
+.mrow:first-child { border-top:0; }
+.mrow .strip { width:3px; align-self:stretch; flex:none; margin-left:0; }
+.mrow > svg.i { width:18px; height:18px; color:var(--color-muted); }
+.mrow .tx { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.mrow .tt { font-size:15px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.25; }
+.mrow .dd { font-size:13px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:8px; }
+.mrow .dd .numeric { font-size:16px; color:var(--color-text); }
+.mrow .dd .bar-prog { width:72px; flex:none; }
+
+/* 오늘의 AV 배우 */
+.actor { display:flex; gap:14px; align-items:center; padding:12px 8px 12px 14px; }
+.actor .pic { width:60px; aspect-ratio:3/4; border-radius:var(--radius-tile); overflow:hidden; flex:none; background:var(--color-surface-elevated); }
+.actor .pic img { width:100%; height:100%; object-fit:cover; display:block; }
+.actor .tx { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.actor .nm { font-size:16px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.actor .nm small { font-size:13px; font-weight:400; color:var(--color-muted); margin-left:6px; }
+.actor .dd { font-size:13px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.actor .dd .numeric { font-size:15px; color:var(--color-text); }
+
+/* 서버 · 동기화 상태 */
+.srow { display:flex; align-items:center; gap:10px; min-height:40px; padding:0 8px 0 14px; border-top:1px solid var(--color-border); font-size:14.5px; }
+.srow:first-child { border-top:0; }
+.srow .lb { flex:none; width:74px; color:var(--color-muted); font-size:13.5px; }
+.srow .v { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.srow .v .numeric { font-size:16px; }
+.srow .v small { color:var(--color-muted); font-size:13px; }
+.srow .bar-prog { width:56px; flex:none; }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--ok); display:inline-block; flex:none; }
+.dot.idle { background:var(--color-muted); }
+.dot.off { background:var(--color-danger); }
+.dot.busy { background:#d8c07a; }
+.dc.alert { border-color:#5a3838; }
+.dc.alert .dc-hd > svg.i:first-child { color:var(--color-danger); }
+.srvline { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+.srvline .srow { border-top:0; border-left:1px solid var(--color-border); flex-direction:column; align-items:flex-start; justify-content:center; gap:2px; padding:8px 12px; min-height:62px; }
+.srvline .srow:first-child { border-left:0; }
+.srvline .srow .lb { width:auto; display:flex; align-items:center; gap:6px; }
+.srvline .srow .v { width:100%; }
+
+/* Offline banner */
+.offc { display:flex; align-items:center; gap:12px; padding:9px 14px; background:#231d1d; border:1px solid #4a3232; border-radius:3px; }
+.offc > svg.i { width:22px; height:22px; color:var(--color-danger); }
+.offc b { font-size:15px; font-weight:600; }
+.offc p { font-size:13px; color:#cfc4c4; margin-top:2px; }
+.offc .sp { flex:1; }
+.offc .retry { height:36px; padding:0 12px; display:inline-flex; align-items:center; border:1px solid #6a4545; border-radius:4px; font-size:13.5px; white-space:nowrap; }
+
+/* Data availability annotations (document layer, toggled). */
+.dtag { position:absolute; z-index:6; top:-9px; right:8px; font:600 10.5px var(--font-ui); letter-spacing:.3px; padding:1px 6px; border-radius:2px; background:#1d3a28; color:#9fdcb0; border:1px solid #2f6a45; white-space:nowrap; pointer-events:none; }
+.dtag.new { background:#1c2d4a; color:#a8c8ff; border-color:#3a5f9c; }
+.dtag.part { background:#3b3320; color:#e6cf91; border-color:#6d5c30; }
+.dtag.in { position:static; flex:none; }
+body.nodata .dtag { display:none; }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>태블릿 홈 대시보드 · 3차: 정보만 있는 대시보드 (Galaxy Tab S11 세로 800 × 1280)</h1>
+  <p class="lead">2026-09-26 기기에서 본 뒤의 결정: <b>이미지 중심 홈이 아니라 정보만 있는 대시보드.</b> 최근 저장 이미지는 모두 빼고, 작은 표지는 <b>신간</b> 목록에만 남깁니다. 카드 순서는 고정 — ① 확인할 것 ② 신간 ③ 발매 예정 ④ 전송 ⑤ 자산 현황 ⑥ 메모 ⑦ 오늘의 AV 배우 ⑧ 서버 · 동기화 상태. 모든 칸은 같은 폭의 2열(필요하면 전체 폭), 숫자는 <b>왼쪽에 크게, 바로 오른쪽에 뜻</b>(2차 진단 1·2번), 할 일이 없는 카드는 <b>한 줄로 접혀</b> 평소에는 화면이 짧습니다. 모든 카드 머리와 줄은 눌러서 해당 화면으로 가며 오른쪽에 › 가 있습니다. 표본 데이터는 모두 가상입니다.</p>
+  <div class="toolbar"><button id="toggle-full" aria-pressed="false">실제 크기 (1:1)</button><button id="toggle-data" aria-pressed="true">데이터 꼬리표</button><span>기본은 절반 크기 · PNG: r3-r1.png, r3-r2.png · 이전: <a href="round2.html">round2.html</a>, <a href="index.html">index.html</a></span></div>
+  <div class="legend"><span class="dtag">기존</span>태블릿이 이미 읽는 데이터 <span class="dtag part">부분</span>데이터는 있으나 셈/보관을 새로 해야 함(또는 상한이 있음) <span class="dtag new">새 데이터</span>서버나 PC에 새 계약이 필요</div>
+</header>
+
+<section class="topic" id="r1">
+  <h2><span class="k">R1</span>두 줄기 — 왼쪽 "할 일", 오른쪽 "상태"</h2>
+  <p>같은 폭의 두 세로 줄기. <b>왼쪽</b>은 손이 가야 하는 것(확인할 것 · 신간 · 발매 예정 · 전송), <b>오른쪽</b>은 들여다보기만 하는 것(자산 현황 · 메모 · 오늘의 AV 배우 · 서버 상태). 두 줄기는 각자 위로 붙어 쌓이므로 한쪽이 길어져도 다른 쪽이 밀리지 않습니다. 평온할 때 왼쪽은 네 줄, 오른쪽은 메모와 배우 카드만 크게 남습니다. 새 카드(게임/영화 발매, 배우)는 줄기 끝이나 기존 카드 안의 줄로 들어갑니다.</p>
+  <div class="row scaled" id="r1-row"></div>
+</section>
+
+<section class="topic" id="r2">
+  <h2><span class="k">R2</span>우선순위 쌓기 — 위 두 칸은 전체 폭, 아래는 2 × 3</h2>
+  <p><b>확인할 것</b>과 <b>신간</b>이 전체 폭으로 맨 위에 오고 속의 줄을 두 열로 나눠 짧게 만듭니다. 그 아래는 같은 크기의 2 × 3 칸(발매 예정 | 전송, 자산 현황 | 메모, 오늘의 배우 | 서버 상태) — 같은 줄의 두 칸은 높이가 같습니다. 읽는 순서가 왼→오, 위→아래로 한 가지뿐이라 카드 순서가 그대로 보입니다. 평온할 때는 위 두 칸이 한 줄씩으로 접힙니다.</p>
+  <div class="row scaled" id="r2-row"></div>
+</section>
+
+<section class="topic" id="data">
+  <h2><span class="k">D</span>카드별 데이터 — 지금 태블릿이 받을 수 있는 것</h2>
+  <p>서버 경로(<code>server/lakomics-api</code>)와 태블릿 코드(<code>_tools/app/mobile-client</code>)를 읽고 확인한 결과입니다. 실제 기기에서 요청을 보내 확인한 것은 아닙니다.</p>
+  <table class="data" id="data-table"></table>
+</section>
+
+<section class="topic" id="future">
+  <h2><span class="k">+</span>나중에 들어올 카드 — 자리와 모자란 데이터</h2>
+  <p>사용자가 앞으로 홈에서 보고 싶다고 한 카드들. 두 안 모두 이 카드들이 <b>새 칸을 만들지 않고</b> 기존 카드 안의 줄/분류로 들어가거나(발매 예정의 게임·영화, 확인할 것의 캐릭터 검토, 서버 상태), 줄기 끝의 한 칸(오늘의 AV 배우)으로 들어가도록 짰습니다.</p>
+  <table class="data" id="future-table"></table>
+</section>
+</div>
+
+<script>
+const IC={"MagnifyingGlass":["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],"Trash":["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],"ArrowPath":["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],"ArrowsUpDown":["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],"AdjustmentsHorizontal":["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],"ArrowLeft":["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],"EllipsisVertical":["M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z"],"ChevronDown":["m19.5 8.25-7.5 7.5-7.5-7.5"],"ChevronRight":["m8.25 4.5 7.5 7.5-7.5 7.5"],"Funnel":["M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"],"Bookmark":["M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"],"Home":["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],"Photo":["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"RectangleStack":["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],"BookOpen":["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],"PencilSquare":["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],"Tag":["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],"Folder":["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],"InformationCircle":["m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"],"UserPlus":["M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"XMark":["M6 18 18 6M6 6l12 12"],"Plus":["M12 4.5v15m7.5-7.5h-15"],"CloudArrowDown":["M12 9.75v6.75m0 0-3-3m3 3 3-3m-8.25 6a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],"Cog6Tooth":["M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z","M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],"UserMinus":["M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"Squares2X2":["M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"],"Square2Stack":["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],"FolderOpen":["M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"],"Sparkles":["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"]};
+Object.assign(IC,{
+  Bell:["M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"],
+  BellSlash:["M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"],
+  LockClosed:["M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"],
+  Link:["M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"],
+  Wallet:["M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3"],
+  Check:["m4.5 12.75 6 6 9-13.5"],
+  ChevronUp:["m4.5 15.75 7.5-7.5 7.5 7.5"],
+  EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+  Pin:["M15.75 3.75 20.25 8.25M18 6l-4.5 4.5 1.5 5.25-2.25 2.25-3.375-3.375L4.5 19.5M9.375 14.625 6 11.25 8.25 9l5.25 1.5"],
+  Star:["M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"],
+});
+const SOLID={
+  Bell:"M5.25 9a6.75 6.75 0 0 1 13.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 0 1-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 1 1-7.48 0 24.585 24.585 0 0 1-4.831-1.244.75.75 0 0 1-.298-1.205A8.217 8.217 0 0 0 5.25 9.75V9Zm4.502 8.9a2.25 2.25 0 1 0 4.496 0 25.057 25.057 0 0 1-4.496 0Z",
+  Sparkles:"M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576l-2.846-.813a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 7.466 7.89l.813-2.846A.75.75 0 0 1 9 4.5Z",
+};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n].map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const S=(n,cls='')=>`<svg class="i solid ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${SOLID[n]}"/></svg>`;
+const STAR='<svg class="i solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z"/></svg>';
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const ib=(n,extra='',solid=false)=>`<span class="ib ${extra}">${solid?S(n):I(n)}</span>`;
+
+/* Placeholder cover art: flat shapes in muted palettes, a title band for manga covers. */
+const P=[['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3'],['#c9b6b0','#5a3c3c','#93706a','#efe0cc'],['#a9b9a0','#34443a','#6d8466','#dfe3c8']];
+const art=(i,manga=true)=>{const p=P[i%P.length];const k=i%3;
+  const band=manga?`<rect x="60" y="${70+k*14}" width="${340-k*50}" height="30" fill="${p[1]}" opacity=".85"/><rect x="60" y="${112+k*14}" width="${200+k*30}" height="12" fill="${p[1]}" opacity=".55"/>`:'';
+  return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" preserveAspectRatio="none"><rect width="600" height="900" fill="${p[0]}"/><circle cx="${190+k*95}" cy="330" r="${80+k*10}" fill="${p[3]}"/><path d="M0 560L150 360 330 660 470 440 600 560V900H0" fill="${p[2]}"/><path d="M0 700L240 500 430 720 600 610V900H0" fill="${p[1]}"/><path d="M280 900L360 690 333 560 383 690 336 900" fill="${p[3]}" opacity=".7"/>${band}</svg>`);};
+const img=(i,manga=true)=>`<img src="${art(i,manga)}" alt="">`;
+
+const TABS=[['Home','Home'],['Photo','Library'],['RectangleStack','Collections'],['BookOpen','Catalog'],['PencilSquare','Notes']];
+const nav=active=>`<nav class="nav">${TABS.map(([icon,label])=>`<button class="${label===active?'active':''}">${I(icon)}<span>${label}</span></button>`).join('')}</nav>`;
+const fig=(tag,cls,caption,body)=>`<figure><figcaption><span class="tag ${cls}">${tag}</span>${caption}</figcaption>${body}</figure>`;
+
+Object.assign(IC,{
+  InboxArrowDown:["M9 3.75H6.912a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859M12 3v8.25m0 0-3-3m3 3 3-3"],
+  UserCircle:["M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],
+  Square2Stack:["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],
+  DocumentDuplicate:["M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"],
+  SignalSlash:["m3 3 8.735 8.735m0 0a.374.374 0 1 1 .53.53m-.53-.53.53.53m0 0L21 21M14.652 9.348a3.75 3.75 0 0 1 0 5.304m2.121-7.425a6.75 6.75 0 0 1 0 9.546m2.121-11.667c3.808 3.807 3.808 9.98 0 13.788m-9.546-4.242a3.733 3.733 0 0 1-1.06-2.122m-1.061 4.243a6.75 6.75 0 0 1-1.625-6.929m-.496 9.05c-3.068-3.067-3.664-7.67-1.79-11.334M12 12h.008v.008H12V12Z"],
+  CloudArrowUp:["M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],
+  CalendarDays:["M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"],
+  ComputerDesktop:["M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"],
+  ArrowUpRight:["m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"],
+  CheckCircle:["M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  Clock:["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  PhotoSm:["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z"],
+});
+
+Object.assign(IC,{
+  ChartBar:["M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"],
+  ListBullet:["M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],
+  DocumentText:["M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"],
+  ServerStack:["M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z"],
+});
+
+/* ===== Sample data (fictional) ===== */
+const TODAY=new Date(2026,8,26);
+const DAY=s=>{const [m,d]=s.split('.').map(Number);return new Date(2026,m-1,d);};
+const weekday=s=>'일월화수목금토'[DAY(s).getDay()];
+const dleft=s=>Math.round((DAY(s)-TODAY)/864e5);
+
+const TODO=[
+  ['pending','InboxArrowDown','처리 대기','건','수집 요청 · 분류 전'],
+  ['character','UserCircle','캐릭터 검토','건','자동 분류 후보 확인'],
+  ['similar','Square2Stack','유사 이미지','쌍','같은 그림일 수 있음'],
+  ['dup','DocumentDuplicate','중복 판본','건','카탈로그 · 같은 작품'],
+];
+const REL=[
+  {n:'바다 건너 편지',i:0,t:'신간 13권',d:'9.24'},
+  {n:'달의 도서관',i:4,t:'신간 22권',d:'9.19'},
+  {n:'은빛 검술사',i:6,t:'신간 5–7권',d:'9.12'},
+  {n:'여름 교실',i:7,t:'신간 3권',d:'9.21'},
+  {n:'검은 숲의 기사',i:2,t:'일본 12권 · 한국보다 3권 앞',d:'',info:true},
+  {n:'하루 한 그릇',i:5,t:'15권 발매일 10.2로 당겨짐',d:'',info:true},
+];
+const UP=[
+  {d:'9.30',k:'만화',n:'별빛 식당',v:'8권'},
+  {d:'10.2',k:'만화',n:'하루 한 그릇',v:'15권'},
+  {d:'10.8',k:'만화',n:'이세계 우체국',v:'4권'},
+  {d:'10.16',k:'게임',n:'들판의 기록 II',v:'Switch · 예약함',nd:true},
+  {d:'10.22',k:'영화',n:'여름의 끝',v:'극장 개봉',nd:true},
+  {d:'10.23',k:'만화',n:'푸른 역',v:'6권'},
+];
+const MEMO=[
+  {c:'#8fa37f',ic:'ListBullet',t:'장보기',kind:'check',done:2,all:6},
+  {c:'#c9a86a',ic:'Wallet',t:'가계부',kind:'ledger',left:'412,300',next:'10.1 넷플릭스 13,500원'},
+  {c:'#8a9bb8',ic:'DocumentText',t:'서버 이사 메모',kind:'text',snip:'VPS 스냅샷 확인 → R2 주소 바뀌면 태블릿 허용 목록도'},
+];
+const STATES={
+  calm:{label:'평온',todo:{},unread:0,up:[],nextUp:'11.20 검은 숲의 기사 9권',arrived:0,sending:null,
+        stats:{today:0,week:41,uncl:1208,charPct:82,charLeft:1930},
+        srv:{server:'연결됨',pc:'작업실 PC · 3분 전',pub:'14:28',catalog:'12분 전 갱신',catBusy:false},off:false,badge:0},
+  busy:{label:'바쁨',todo:{pending:23,character:14,similar:6,dup:2},unread:6,up:UP,arrived:3,sending:{name:'스케치_0926.zip',more:1,pct:62},
+        stats:{today:37,week:214,uncl:1208,charPct:82,charLeft:1930},
+        srv:{server:'연결됨',pc:'작업실 PC · 방금',pub:'14:31',catalog:'한국어 갱신 중 · 3쪽',catBusy:true},off:false,badge:3},
+  off:{label:'오프라인',todo:{pending:23,character:14,similar:6,dup:2},unread:6,up:UP,arrived:3,sending:{name:'스케치_0926.zip',more:1,pct:62},queued:2,
+        stats:{today:37,week:214,uncl:1208,charPct:82,charLeft:1930},
+        srv:{server:'연결 안 됨',pc:'작업실 PC · 14:31',pub:'14:31',catalog:'14:20 갱신',catBusy:false},off:true,since:'14:31',badge:3},
+};
+const ORDER=['calm','busy','off'];
+
+/* ===== Pieces ===== */
+const dt=(kind,text,cls='')=>`<span class="dtag ${kind==='ok'?'':kind} ${cls}">${text}</span>`;
+const chev=()=>I('ChevronRight','chev');
+const stale=s=>s.off?`<span class="stale">${s.since} 기준</span>`:'';
+const homeBar=s=>`<header class="bar"><span class="brand">${MARK}</span><span class="hometitle">홈</span><span class="space"></span>${s.off?`<span class="offchip">${I('SignalSlash')}오프라인</span>`:''}<span class="ib">${I('ArrowsUpDown')}${s.badge?`<span class="xbadge">${s.badge}</span>`:''}</span><span class="ib">${I('AdjustmentsHorizontal')}</span></header>`;
+const frame=(s,body,fade)=>`<div class="frame">${homeBar(s)}<div class="content ${fade?'fade':''}">${body}</div>${nav('Home')}</div>`;
+/* A card: header (icon, title, summary, calm text, ›) and an optional body. */
+const card=({icon,title,sum='',calm='',tag='',body='',cls='',extra=''})=>`<section class="dc ${cls}">${tag}<header class="dc-hd">${I(icon)}<h3>${title}</h3>${sum}${extra}${calm?`<span class="cm">${calm}</span>`:''}<span class="sp"></span>${chev()}</header>${body?`<div class="dc-bd">${body}</div>`:''}</section>`;
+const ok=t=>`${I('CheckCircle')}<span>${t}</span>`;
+const sum=(n,unit)=>`<span class="sum">${n}<small>${unit}</small></span>`;
+
+/* ① 확인할 것 */
+function todoCard(s,wide){
+  const rows=TODO.filter(([k])=>s.todo[k]>0);
+  const tag=dt(s.off?'part':'ok',s.off?'부분 · 마지막 값':'기존 · 처리 대기는 40+ 상한');
+  if(!rows.length) return card({icon:'CheckCircle',title:'확인할 것',calm:ok('모두 확인함'),tag,cls:'calm'});
+  const body=rows.map(([k,ic,l,u,sub])=>`<div class="qrow ${s.off?'off':''}"><span class="n">${s.todo[k]}<small>${u}</small></span><div class="t">${l}<small>${sub}</small></div>${chev()}</div>`).join('');
+  return card({icon:'CheckCircle',title:'확인할 것',extra:stale(s),tag,body:wide?`<div class="cols2">${body}</div>`:body});
+}
+/* ② 신간 */
+function relCard(s,max,wide){
+  const tag=dt(s.off?'part':'ok',s.off?'부분 · 마지막 6편':'기존 · 신간 알림 + 만화 선반');
+  if(!s.unread) return card({icon:'BookOpen',title:'신간',calm:ok('새 신간 없음 · 만화 18편 지켜보는 중'),tag,cls:'calm'});
+  const rows=REL.slice(0,max).map(r=>`<div class="rrow"><div class="cov">${img(r.i)}</div><div class="tx"><div class="tt">${r.n}</div><div class="cnew ${r.info?'info':''}">${r.t}${r.d?` <span class="numeric">· ${r.d}</span>`:''}</div></div>${chev()}</div>`).join('');
+  return card({icon:'BookOpen',title:'신간',sum:sum(s.unread,'편 안 읽음'),extra:stale(s),tag,body:wide?`<div class="cols2">${rows}</div>`:rows});
+}
+/* ③ 발매 예정: one card for every media type; only 만화 has data today. */
+function upCard(s,max){
+  const tag=dt(s.off?'part':'ok',s.off?'부분 · 마지막 값':'기존 · 만화만');
+  if(!s.up.length) return card({icon:'CalendarDays',title:'발매 예정',calm:`<span>30일 안에 없음 · 다음 <b class="numeric">${s.nextUp.split(' ')[0]}</b></span>`,tag,cls:'calm'});
+  const n=k=>s.up.filter(u=>k==='전체'||u.k===k).length;
+  const seg=`<div class="seg"><span class="on">전체 <span class="numeric">${n('전체')}</span></span><span>만화 <span class="numeric">${n('만화')}</span></span><span class="nd">게임 <span class="numeric">${n('게임')}</span></span><span class="nd">영화 <span class="numeric">${n('영화')}</span></span></div>`;
+  const rows=s.up.slice(0,max).map(u=>`<div class="urow ${u.nd?'nd':''}"><div class="d numeric">${u.d}<small>${weekday(u.d)}요일</small></div><div class="tt">${u.n}<small><span class="kind">${u.k}</span><em>${u.v}</em></small></div>${u.nd?dt('new','새 데이터','in'):`<span class="left">${dleft(u.d)}일 후</span>`}${chev()}</div>`).join('');
+  return card({icon:'CalendarDays',title:'발매 예정',sum:`<span class="sum" style="color:var(--color-text)">30<small>일 안</small></span>`,extra:stale(s),tag,body:seg+rows});
+}
+/* ④ 전송 */
+function xCard(s){
+  const tag=dt('ok','기존 · 기기 전송 상태');
+  if(!s.arrived&&!s.sending) return card({icon:'ArrowsUpDown',title:'전송',calm:ok('받은 파일 · 보낼 파일 없음'),tag,cls:'calm'});
+  const rows=[];
+  if(s.arrived) rows.push(`<div class="qrow"><span class="n">${s.arrived}<small>개</small></span><div class="t">받은 파일<small>작업실 PC에서 · 아직 안 봄</small></div>${chev()}</div>`);
+  if(s.sending) rows.push(s.off
+    ?`<div class="qrow off"><span class="n">${s.queued}<small>개</small></span><div class="t">보내기 멈춤<small>연결되면 이어서 보냄</small></div>${chev()}</div>`
+    :`<div class="qrow"><span class="n">${s.sending.pct}<small>%</small></span><div class="t">보내는 중<small>${s.sending.name} 외 ${s.sending.more} → 작업실 PC</small><div class="bar-prog"><i style="width:${s.sending.pct}%"></i></div></div>${chev()}</div>`);
+  return card({icon:'ArrowsUpDown',title:'전송',tag,body:rows.join('')});
+}
+/* ⑤ 자산 현황 */
+function statCard(s,rowsMax=4){
+  const t=s.stats;
+  const tag=dt('part','부분 · 줄마다 다름');
+  if(!s.off&&!t.today&&!s.todo.pending) return card({icon:'ChartBar',title:'자산 현황',calm:`<span>이번 주 <b class="numeric">${t.week}</b>장 · 오늘 <b class="numeric">0</b></span>`,tag,cls:'calm'});
+  const rows=[
+    `<div class="qrow stat ${s.off?'off':''}"><span class="n">${t.today}<small>장</small></span><div class="t">오늘 추가<small>최근 페이지에서 셈</small></div>${dt('part','부분','in')}${chev()}</div>`,
+    `<div class="qrow stat ${s.off?'off':''}"><span class="n">${t.week}<small>장</small></span><div class="t">이번 주 추가<small>월요일부터</small></div>${dt('new','새 데이터','in')}${chev()}</div>`,
+    `<div class="qrow stat ${s.off?'off':''}"><span class="n">${t.uncl.toLocaleString()}</span><div class="t">분류 안 됨<small>분류가 하나도 없는 자산</small></div>${dt('new','새 데이터','in')}${chev()}</div>`,
+    `<div class="qrow stat ${s.off?'off':''}"><span class="n">${t.charPct}<small>%</small></span><div class="t">캐릭터 자동 태그<small>미지정 ${t.charLeft.toLocaleString()}장 남음</small><div class="bar-prog muted"><i style="width:${t.charPct}%"></i></div></div>${dt('part','부분','in')}${chev()}</div>`,
+  ].slice(0,rowsMax);
+  return card({icon:'ChartBar',title:'자산 현황',extra:stale(s),tag,body:rows.join('')});
+}
+/* ⑥ 메모 (on-device store: works offline) */
+function memoCard(s,max=3){
+  const rows=MEMO.slice(0,max).map(m=>{
+    const dd=m.kind==='check'?`<span class="numeric">${m.done}/${m.all}</span>완료<div class="bar-prog muted"><i style="width:${m.done/m.all*100}%"></i></div>`
+      :m.kind==='ledger'?`9월 쓸 수 있는 돈 <span class="numeric">${m.left}</span>원`
+      :m.snip;
+    return `<div class="mrow"><span class="strip" style="background:${m.c}"></span>${I(m.ic)}<div class="tx"><div class="tt">${m.t}</div><div class="dd">${dd}</div></div>${chev()}</div>`;
+  }).join('');
+  return card({icon:'Pin',title:'메모',sum:`<span class="sum" style="color:var(--color-text)">${MEMO.length}<small>개 고정</small></span>`,tag:dt('ok','기존 · 기기 메모 (오프라인 OK)'),body:rows});
+}
+/* ⑦ 오늘의 AV 배우 */
+function actorCard(s){
+  const body=`<div class="actor"><div class="pic">${img(3,false)}</div><div class="tx"><div class="nm">미즈키 하루<small>水樹はる</small></div><div class="dd">소장 <span class="numeric">11</span>편 · 출연 <span class="numeric">18</span>편</div><div class="dd">최근 <span class="numeric">2025.8</span> · 마지막으로 본 날 <span class="numeric">6.14</span></div></div>${chev()}</div>`;
+  return card({icon:'Star',title:'오늘의 AV 배우',extra:s.off?'<span class="stale">어제 고른 사람</span>':'',tag:dt('new','새 데이터 · AV 게시 없음'),body});
+}
+/* ⑧ 서버 · 동기화 상태 */
+function srvRows(s){
+  const v=s.srv;
+  return [
+    `<div class="srow"><span class="lb">서버</span><span class="dot ${s.off?'off':''}"></span><span class="v">${v.server}${s.off?` <small>· 마지막 연결 <span class="numeric">${s.since}</span></small>`:''}</span>${dt('ok','기존','in')}</div>`,
+    `<div class="srow"><span class="lb">PC</span><span class="dot ${s.off?'idle':''}"></span><span class="v">${v.pc}</span>${dt('ok','기존','in')}</div>`,
+    `<div class="srow"><span class="lb">PC 게시</span><span class="dot idle"></span><span class="v"><span class="numeric">${v.pub}</span> <small>분류 · 캐릭터</small></span>${dt('part','부분','in')}</div>`,
+    `<div class="srow"><span class="lb">카탈로그</span><span class="dot ${v.catBusy?'busy':'idle'}"></span><span class="v">${v.catalog}</span>${v.catBusy?'<div class="bar-prog"><i style="width:38%"></i></div>':''}${dt('ok','기존','in')}</div>`,
+  ];
+}
+function srvCard(s){
+  const tag='';
+  if(!s.off) return card({icon:'ServerStack',title:'서버 상태',calm:s.srv.catBusy?`<span class="dot busy"></span><span>카탈로그 갱신 중 · 3쪽</span>`:`<span class="dot"></span><span>모두 정상 · ${s.srv.pc}</span>`,tag:dt('ok','기존 (PC 게시 시각은 부분)'),cls:'calm'});
+  return card({icon:s.off?'SignalSlash':'ServerStack',title:'서버 상태',cls:s.off?'alert':'',tag,body:srvRows(s).join('')});
+}
+const offBanner=s=>s.off?`<div class="offc full">${I('SignalSlash')}<div><b>오프라인 — 서버에 닿지 않습니다</b><p>숫자와 목록은 ${s.since} 기준으로 남겨 둔 값입니다. 메모는 그대로 쓸 수 있습니다.</p></div><span class="sp"></span><span class="offc-r retry">다시 연결</span></div>`:'';
+
+/* ===== R1: two lanes ===== */
+function dirR1(key){
+  const s=STATES[key];
+  const left=[todoCard(s),relCard(s,s.off?2:3),upCard(s,s.off?2:4),xCard(s)];
+  const right=[statCard(s),memoCard(s),actorCard(s),srvCard(s)];
+  const body=`<div class="page">${s.off?`<div style="margin-bottom:12px">${offBanner(s)}</div>`:''}<div class="grid2 r1"><div class="lane">${left.join('')}</div><div class="lane">${right.join('')}</div></div></div>`;
+  return frame(s,body,key!=='calm');
+}
+/* ===== R2: priority stack ===== */
+function dirR2(key){
+  const s=STATES[key];
+  const cells=[offBanner(s),`<div class="full">${todoCard(s,true)}</div>`,`<div class="full">${relCard(s,s.off?2:4,true)}</div>`,
+    upCard(s,s.off?2:3),xCard(s),statCard(s),memoCard(s),actorCard(s),srvCard(s)].filter(Boolean);
+  return frame(s,`<div class="page"><div class="grid2">${cells.join('')}</div></div>`,key!=='calm');
+}
+
+/* ===== Render ===== */
+const CAPS={
+  r1:{calm:'<b>평온</b> — 할 일 카드 네 개가 모두 한 줄. 오른쪽은 현황 한 줄, 고정 메모 세 개, 오늘의 배우, 서버 한 줄. 화면의 절반 가까이가 비어 "지금은 할 일 없음"이 바로 읽힘.',
+      busy:'<b>바쁨</b> — 왼쪽: 확인할 것 네 줄(숫자 30px 바로 옆 이름) → 신간 네 편(작은 표지) → 발매 예정 30일(만화 + 게임·영화 자리) → 받은 파일 · 보내는 중. 오른쪽: 현황 네 줄, 메모, 배우, 서버 한 줄(카탈로그 갱신 중도 한 줄 — 펼치는 것은 문제가 있을 때뿐).',
+      off:'<b>오프라인</b> — 맨 위 전체 폭 경고. 신간 두 편 · 발매 예정 두 줄로 줄여 한 화면에. 숫자는 흐리게 하지 않고 카드 머리에 "14:31 기준". 보내기는 "멈춤 2개", 서버 카드는 빨간 선으로 펼쳐짐. 메모는 기기에 있으므로 평소와 같음.'},
+  r2:{calm:'<b>평온</b> — 위의 전체 폭 두 칸이 한 줄씩, 아래 2 × 3 칸도 대부분 한 줄. 한 줄로 접힌 칸은 옆 칸 높이로 늘이지 않으므로 메모 옆에 빈 자리가 생김 — R2의 약점.',
+      busy:'<b>바쁨</b> — 확인할 것 네 줄이 두 열(2 × 2)로, 신간 네 편도 두 열로. 아래 칸: 발매 예정(세 줄) | 전송, 현황 | 메모, 배우 | 서버 상태(한 줄).',
+      off:'<b>오프라인</b> — 경고 칸이 맨 위 전체 폭, 나머지는 바쁨과 같은 자리에 "기준" 표시. 신간 한 줄(두 편) · 발매 예정 두 줄로 줄이고, 서버 상태만 펼쳐 빨간 선.'},
+};
+const TAGCLS={calm:'b',busy:'a',off:'now'};
+[['r1',dirR1],['r2',dirR2]].forEach(([id,fn])=>{
+  document.getElementById(`${id}-row`).innerHTML=ORDER.map(k=>fig(STATES[k].label,TAGCLS[k],CAPS[id][k],fn(k))).join('');
+});
+
+const DATA=[
+  ['① 확인할 것','ok','기존','처리 대기(태블릿 수집 요청 목록, 한 번에 40개까지 읽어 "40+"로 표시), 캐릭터 검토 <code>/v1/library/characters/review</code>, 유사 이미지 검토, 중복 판본 <code>catalog_duplicates</code> — 지금 홈이 이미 쓰는 수(<code>homeDashboard.ts</code>). 오프라인 값은 홈 스냅숏에 남아 있음.'],
+  ['② 신간','ok','기존','신간 알림 수(<code>collection_releases</code>의 읽지 않은 수)와 만화 선반(<code>/v1/collections</code>, <code>releaseStore.ts</code>). 표지는 컬렉션 표지 썸네일.'],
+  ['③ 발매 예정 · 만화','ok','기존','지켜보는 만화의 카카오 예약 권(<code>KakaoSchedule.volumes[].date/status</code>)을 <code>upcomingReleases()</code>로 계산. 30일 창과 "n일 후"는 화면에서 계산만 하면 됨.'],
+  ['③ 발매 예정 · 게임/영화','new','새 데이터','태블릿 컬렉션에는 이미 등록한 작품의 <code>releaseDate</code>만 있음. 아직 없는 신작(관심 목록)과 영화 개봉일은 PC가 모아 게시해야 함.'],
+  ['④ 전송','ok','기존','기기 전송 스냅숏(<code>/v1/exchange/inbox·outbox·devices</code>, 앱이 들고 있는 <code>ExchangeSnapshot</code>): 안 본 받은 파일 수, 보내는 중 진행률.'],
+  ['⑤ 현황 · 오늘 추가','part','부분','<code>/v1/library/assets?sort=newest&limit=100</code> 첫 페이지에서 오늘 날짜를 셈 — 100을 넘으면 "100+". 총수 경로는 없음.'],
+  ['⑤ 현황 · 이번 주 / 전체','new','새 데이터','<code>/v1/library/assets</code>는 커서 페이지만 주고 총수를 주지 않음. 날짜 구간별 수를 돌려주는 가벼운 경로가 필요.'],
+  ['⑤ 현황 · 분류 안 됨','new','새 데이터','<code>/v1/library/classifications</code>는 분류마다 <code>asset_count</code>만 줌. "분류가 하나도 없는 자산" 수는 서버에서 새로 세야 함.'],
+  ['⑤ 현황 · 캐릭터 자동 태그','part','부분','<code>/v1/library/characters</code> 색인의 scope마다 <code>totalCount</code>(filter: all · unclassified · needs_review)가 있음 → 시리즈를 합하면 미지정 수/비율. 색인 읽기가 무거워 홈에서는 캐시 필요. 서버에 공유된 자산 기준(sourceCount와 다를 수 있음).'],
+  ['⑥ 메모','ok','기존','기기 메모 저장소(<code>Notes.tsx</code>, <code>src/notes/model</code>): 고정 여부, 체크리스트 완료 수, 가계부 <code>monthSummary()</code>의 "쓸 수 있는 돈", 텍스트 앞부분. 서버 없이도 읽힘.'],
+  ['⑦ 오늘의 AV 배우','new','새 데이터','PC에는 AV 컬렉션과 출연자(<code>av_collection.rs</code>, <code>collection_people</code>)가 있지만 태블릿 컬렉션 경로는 <code>game · manga · movie</code>만 받음. AV 게시, 배우 목록·사진, "오늘의" 선택 규칙이 필요.'],
+  ['⑧ 서버 · PC · 카탈로그','ok','기존','서버 연결: 홈의 오프라인 판정. PC: 전송 기기의 <code>lastSeenAt</code>. 카탈로그 갱신: <code>/v1/mobile-catalog/refresh</code> 작업 상태(queued/running/completed)와 게시 시각.'],
+  ['⑧ PC 게시 시각','part','부분','분류 <code>published_at</code>, 캐릭터 <code>publishedAt</code>는 각각 있음. "마지막 동기화"를 하나로 보여 주려면 태블릿이 둘을 모아 저장하거나 <code>/v1/sync/status</code>에 시각을 더해야 함.'],
+];
+const FUTURE=[
+  ['게임 신작 예정','③ 발매 예정의 "게임" 분류 줄','new','등록한 게임의 <code>releaseDate</code>는 있음','아직 등록 안 한 관심 신작 목록, 플랫폼·예약 여부, PC 게시'],
+  ['만화 신간 예정','③ 발매 예정의 "만화" 분류 줄 (지금 동작)','ok','카카오 예약 권, 지켜보기 설정','—'],
+  ['영화 신작 예정','③ 발매 예정의 "영화" 분류 줄','new','등록한 영화의 <code>releaseDate</code>(개봉일 형식 제각각)','관심 영화 목록, 극장/OTT 구분, PC 게시'],
+  ['오늘의 AV 배우','R1 오른쪽 줄기 · R2 셋째 줄 왼쪽 칸','new','PC의 AV 컬렉션 · 출연자 관계','태블릿용 AV 게시, 배우 이름·사진·소장 수, 하루 한 명 고르는 규칙'],
+  ['자산 현황','⑤ 카드 (지금 네 줄)','part','최신 페이지, 분류별 수, 캐릭터 색인 수','날짜 구간별 추가 수, 분류 없는 자산 수, 전체 수'],
+  ['캐릭터 검토','① 확인할 것의 "캐릭터 검토" 줄 + ⑤의 자동 태그 줄','ok','검토 대기 수(<code>/v1/library/characters/review</code>)','자동 태그 진행률은 색인 합산(부분)'],
+  ['서버 등 상태','⑧ 서버 상태 카드 (평소 한 줄, 문제 있으면 펼침)','part','오프라인 판정, PC lastSeen, 카탈로그 갱신 작업','하나로 묶인 "마지막 동기화" 시각, 서버 디스크·백업 같은 건강 지표'],
+];
+const dtag=(k,t)=>`<span class="dtag ${k==='ok'?'':k}">${t}</span>`;
+document.getElementById('data-table').innerHTML=`<tr><th>카드 · 줄</th><th>상태</th><th>근거</th></tr>`+DATA.map(([c,k,t,w])=>`<tr><td>${c}</td><td>${dtag(k,t)}</td><td class="m">${w}</td></tr>`).join('');
+document.getElementById('future-table').innerHTML=`<tr><th>카드</th><th>들어갈 자리</th><th>상태</th><th>지금 있는 데이터</th><th>모자란 것</th></tr>`+FUTURE.map(([c,p,k,h,m])=>`<tr><td>${c}</td><td class="m">${p}</td><td>${dtag(k,k==='ok'?'기존':k==='part'?'부분':'새 데이터')}</td><td class="m">${h}</td><td class="m">${m}</td></tr>`).join('');
+
+const params=new URLSearchParams(location.search);
+if(params.get('shot')){document.body.classList.add('shot');document.getElementById(params.get('shot')).classList.add('shown');}
+if(params.get('nodata'))document.body.classList.add('nodata');
+const toggle=document.getElementById('toggle-full');
+toggle.addEventListener('click',()=>{const on=document.body.classList.toggle('full');toggle.setAttribute('aria-pressed',String(on));});
+const dtog=document.getElementById('toggle-data');
+dtog.addEventListener('click',()=>{const off=document.body.classList.toggle('nodata');dtog.setAttribute('aria-pressed',String(!off));});
+</script>
+</body>
+</html>
