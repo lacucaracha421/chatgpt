@@ -112,6 +112,15 @@ fn validate_tag(tag: &str) -> Result<(), LibraryError> {
     Ok(())
 }
 
+/// Guessed characters count only from this score, as in the inspector (`CHARACTER_MIN_SCORE`
+/// in `autoTagModel.ts`); weaker character guesses stay stored but never match or count.
+const CHARACTER_MIN_SCORE: f64 = 0.85;
+
+/// Whether the machine row aliased `tagged` counts as carried.
+fn machine_row_counts_sql(alias: &str) -> String {
+    format!("({alias}.score >= {CHARACTER_MIN_SCORE} OR NOT EXISTS (SELECT 1 FROM auto_tag_vocabulary AS character_vocabulary WHERE character_vocabulary.tag = {alias}.tag AND character_vocabulary.category = 'character'))")
+}
+
 fn sql_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
@@ -120,7 +129,8 @@ fn sql_literal(value: &str) -> String {
 fn carries_tag_sql(tag: &str) -> String {
     let literal = sql_literal(tag);
     format!(
-        "COALESCE((SELECT auto_tag_edit.state = 'added' FROM asset_auto_tag_edits AS auto_tag_edit WHERE auto_tag_edit.asset_id = asset.id AND auto_tag_edit.tag = {literal}), EXISTS (SELECT 1 FROM asset_auto_tags AS auto_tag WHERE auto_tag.asset_id = asset.id AND auto_tag.tag = {literal}))"
+        "COALESCE((SELECT auto_tag_edit.state = 'added' FROM asset_auto_tag_edits AS auto_tag_edit WHERE auto_tag_edit.asset_id = asset.id AND auto_tag_edit.tag = {literal}), EXISTS (SELECT 1 FROM asset_auto_tags AS auto_tag WHERE auto_tag.asset_id = asset.id AND auto_tag.tag = {literal} AND {counts}))",
+        counts = machine_row_counts_sql("auto_tag")
     )
 }
 
@@ -228,11 +238,13 @@ pub(crate) fn vocabulary(
 ) -> Result<Vec<AutoTagVocabularyEntry>, LibraryError> {
     let mut counts: HashMap<String, i64> = HashMap::new();
     {
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare(&format!(
             "SELECT tagged.tag, COUNT(*) FROM asset_auto_tags AS tagged
              JOIN assets AS asset ON asset.id = tagged.asset_id AND asset.status = 'normal'
+             WHERE {}
              GROUP BY tagged.tag",
-        )?;
+            machine_row_counts_sql("tagged")
+        ))?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -241,15 +253,16 @@ pub(crate) fn vocabulary(
             counts.insert(tag, count);
         }
         // Edits are few: correct the machine counts per edited tag.
-        let mut statement = connection.prepare(
+        let mut statement = connection.prepare(&format!(
             "SELECT edit.tag,
                     SUM(CASE WHEN edit.state = 'added' AND tagged.asset_id IS NULL THEN 1
                              WHEN edit.state = 'removed' AND tagged.asset_id IS NOT NULL THEN -1 ELSE 0 END)
              FROM asset_auto_tag_edits AS edit
              JOIN assets AS asset ON asset.id = edit.asset_id AND asset.status = 'normal'
-             LEFT JOIN asset_auto_tags AS tagged ON tagged.asset_id = edit.asset_id AND tagged.tag = edit.tag
+             LEFT JOIN asset_auto_tags AS tagged ON tagged.asset_id = edit.asset_id AND tagged.tag = edit.tag AND {}
              GROUP BY edit.tag",
-        )?;
+            machine_row_counts_sql("tagged")
+        ))?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;

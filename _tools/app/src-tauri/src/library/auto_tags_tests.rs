@@ -685,3 +685,51 @@ fn auto_tags_real_file_probe() {
         started.elapsed()
     );
 }
+
+#[test]
+fn weak_character_guesses_neither_match_nor_count() {
+    let (temp, library) = fixture(&["a", "b", "c"]);
+    let file = import_file(
+        temp.path(),
+        "characters.sqlite",
+        "pixai-v0.9",
+        VOCABULARY,
+        &[
+            ("a", "hoshino_(blue_archive)", 0.95),
+            ("b", "hoshino_(blue_archive)", 0.82),
+            ("b", "glasses", 0.4),
+            ("c", "hoshino_(blue_archive)", 0.5),
+        ],
+    );
+    library.import_auto_tags(&file).unwrap();
+    // A weak general tag still matches; a weak character guess does not.
+    assert_eq!(
+        ids(&library, filtered(&["glasses"], &[], AssetSort::default())).0,
+        vec!["b".to_owned()]
+    );
+    assert_eq!(
+        ids(
+            &library,
+            filtered(&["hoshino_(blue_archive)"], &[], AssetSort::default())
+        ),
+        (vec!["a".to_owned()], 1)
+    );
+    // The user's own addition always counts.
+    library
+        .edit_asset_auto_tag("c", "hoshino_(blue_archive)", AutoTagEdit::Add)
+        .unwrap();
+    let (mut matched, total) = ids(
+        &library,
+        filtered(&["hoshino_(blue_archive)"], &[], AssetSort::default()),
+    );
+    matched.sort();
+    assert_eq!((matched, total), (vec!["a".to_owned(), "c".to_owned()], 2));
+    let count = library
+        .auto_tag_vocabulary()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.tag == "hoshino_(blue_archive)")
+        .unwrap()
+        .count;
+    assert_eq!(count, 2);
+}
