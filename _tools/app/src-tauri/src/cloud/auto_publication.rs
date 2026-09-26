@@ -92,7 +92,12 @@ impl Library {
         }
         let generation:Option<i64>={
             use rusqlite::OptionalExtension;
-            self.connection()?.query_row("SELECT generation FROM mobile_publication_state WHERE kind=?1 AND endpoint=?2 AND generation<>published_generation AND retry_after<=unixepoch() AND (last_dirty<=unixepoch()-30 OR first_dirty<=unixepoch()-300)",params![kind,endpoint],|r|r.get(0)).optional()?
+            // Collections are small to publish (the list query is ~6 ms) and a new or edited
+            // collection should reach the tablet quickly, but creating one triggers a burst of
+            // follow-up writes (cover, metadata) that kept resetting a 30 s quiet window until
+            // the 5 min cap. Other lanes keep the longer debounce.
+            let (quiet,cap)=if kind=="collections" {(5,60)} else {(30,300)};
+            self.connection()?.query_row("SELECT generation FROM mobile_publication_state WHERE kind=?1 AND endpoint=?2 AND generation<>published_generation AND retry_after<=unixepoch() AND (last_dirty<=unixepoch()-?3 OR first_dirty<=unixepoch()-?4)",params![kind,endpoint,quiet,cap],|r|r.get(0)).optional()?
         };
         let Some(generation)=generation else {
             if kind=="characters" {
