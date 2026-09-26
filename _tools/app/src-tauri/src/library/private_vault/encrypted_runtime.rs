@@ -631,10 +631,11 @@ struct LegacyEntry {
 }
 
 impl Library {
-    /// Cheap enough for window focus and a few-second poll: when unlocked it only checks that
-    /// the vault folder still exists; when locked or absent it probes the cached root, the
-    /// last root and the mount roots for `.lakomics-vault/vault.json`. It never writes the
-    /// library database. A vault whose folder disappeared is locked (key dropped).
+    /// Cheap enough for window focus, mount-change events and the open-view poll: when
+    /// unlocked it only checks that the vault folder still exists; when locked or absent it
+    /// probes the cached root, the last root and the mount roots for
+    /// `.lakomics-vault/vault.json`. It never writes the library database. A vault whose
+    /// folder disappeared is locked (key dropped).
     pub fn encrypted_vault_status(&self) -> Result<EncryptedVaultStatus, LibraryError> {
         let runtime = &*self.encrypted_vault;
         let unlocked = runtime.state().session.as_ref().map(|session| {

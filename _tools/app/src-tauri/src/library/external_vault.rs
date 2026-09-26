@@ -13,10 +13,13 @@ mod crypto;
 mod encrypted_store;
 #[path = "private_vault/encrypted_runtime.rs"]
 mod encrypted_runtime;
+#[path = "private_vault/watch.rs"]
+mod watch;
 
 pub(crate) use encrypted_runtime::{
     EncryptedVaultMedia, EncryptedVaultMediaVariant, EncryptedVaultRuntime,
 };
+pub(crate) use watch::{start_mount_watcher, stop_mount_watcher, VAULT_MOUNTS_CHANGED_EVENT};
 
 use std::{
     fs,

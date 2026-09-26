@@ -101,6 +101,15 @@ pub fn run() {
             );
             // File exchange (보내기/받기): native threads, so receiving continues in the tray.
             exchange::start(app.handle().clone());
+            // Private Vault: re-read the vault status only when drives are mounted or removed.
+            let vault_handle = app.handle().clone();
+            library::external_vault::start_mount_watcher(move || {
+                let _ = tauri::Emitter::emit(
+                    &vault_handle,
+                    library::external_vault::VAULT_MOUNTS_CHANGED_EVENT,
+                    (),
+                );
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -125,6 +134,7 @@ pub fn run() {
                     // ADR-0039: drop the Private Vault key on app exit.
                     library.lock_encrypted_vault();
                 }
+                library::external_vault::stop_mount_watcher();
                 window.app_handle().exit(0);
             }
         })

@@ -1,7 +1,9 @@
-// PERF-ALL-001 phase 1: measurement-only render/commit harness for the desktop React app.
-// Runs only with LAKOMICS_PERF=1 (it prints one `PERF <label> <json>` line per measurement and
-// asserts no thresholds yet), from _tools/app/:
+// PERF-ALL-001: render/commit harness for the desktop React app.
+// The measurement suite runs only with LAKOMICS_PERF=1 (it prints one `PERF <label> <json>` line
+// per measurement and asserts no thresholds), from _tools/app/:
 //   LAKOMICS_PERF=1 npx vitest run src/app/App.perf.test.tsx --reporter=verbose --silent=false
+// The idle gate at the end always runs: its thresholds only tighten (docs/agents/implementation.md,
+// "Performance work"). Raise one only with a measured, justified reason.
 // Method: the whole App sits under one React <Profiler>; `commits` counts its onRender
 // callbacks (one per React commit that touched the tree). Selected components are wrapped
 // through vi.mock so their render-function calls are counted, and `tiles` counts gallery
@@ -151,30 +153,32 @@ async function startWorkspace(gateway: ReturnType<typeof perfGateway>) {
   expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
 }
 
+// Shared by the measurement suite and the idle gate.
+// Lazy views resolve through real module loading; warm them so fake time can drive them.
+beforeAll(async () => {
+  await Promise.all([import("../collections/CollectionBrowser"), import("../notes/NotesView"), import("../collections/CollectionOverlay")]);
+});
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "requestAnimationFrame", "cancelAnimationFrame"] });
+  localStorage.clear();
+  localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: { invoke: nativeInvoke } });
+  Object.defineProperties(HTMLElement.prototype, {
+    offsetWidth: { configurable: true, get: () => 1400 }, clientWidth: { configurable: true, get: () => 1200 },
+    offsetHeight: { configurable: true, get: () => 900 }, clientHeight: { configurable: true, get: () => 900 },
+    setPointerCapture: { configurable: true, value: vi.fn() },
+  });
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  probe.reset();
+  probe.state.stableCharacterStatus = QUIET;
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 describe.skipIf(!RUN)("desktop render/commit baseline (PERF-ALL-001)", () => {
-  // Lazy views resolve through real module loading; warm them so fake time can drive them.
-  beforeAll(async () => {
-    await Promise.all([import("../collections/CollectionBrowser"), import("../notes/NotesView"), import("../collections/CollectionOverlay")]);
-  });
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "requestAnimationFrame", "cancelAnimationFrame"] });
-    localStorage.clear();
-    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
-    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: { invoke: nativeInvoke } });
-    Object.defineProperties(HTMLElement.prototype, {
-      offsetWidth: { configurable: true, get: () => 1400 }, clientWidth: { configurable: true, get: () => 1200 },
-      offsetHeight: { configurable: true, get: () => 900 }, clientHeight: { configurable: true, get: () => 900 },
-      setPointerCapture: { configurable: true, value: vi.fn() },
-    });
-    vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    probe.reset();
-    probe.state.stableCharacterStatus = QUIET;
-  });
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  });
 
   it("startup: open library to a settled Library grid", async () => {
     const gateway = gw();
@@ -379,5 +383,32 @@ describe.skipIf(!RUN)("desktop render/commit baseline (PERF-ALL-001)", () => {
     probe.reset(); resetCalls(gateway);
     await advance(300_000);
     report("unfocused-visible(300s)", snapshot(gateway));
+  });
+});
+
+// Tighten-only gate (PERF-ALL-001): an idle, visible, focused Library grid must not re-render
+// the workspace. Every status read returns a fresh object here, as real IPC does, so a poller
+// that stores a new-but-equal value in workspace state fails this test.
+// The only idle commits allowed are the cloud progress indicator's own 10 s refresh, which
+// re-renders StatusCenter alone (CloudStatusCenter in App.tsx): at most 6 per minute.
+const IDLE_GATE = { commitsPerMinute: 6, rootRenders: 0, tileRenders: 0 };
+
+describe("desktop idle re-render gate (PERF-ALL-001)", () => {
+  it("an idle Library grid re-renders neither the workspace nor its tiles for a minute", async () => {
+    probe.state.stableCharacterStatus = false;
+    const gateway = perfGateway({});
+    await startWorkspace(gateway);
+    await advance(30_000); // past every startup one-shot
+    probe.reset(); resetCalls(gateway);
+    await advance(60_000);
+    const idle = snapshot(gateway);
+    // The character poller really ran with fresh objects; otherwise the gate proves nothing.
+    // The vault is event-driven (mount watcher), so an idle window reads its status never.
+    expect(idle.gateway.getEncryptedVaultStatus ?? 0).toBe(0);
+    expect(idle.invoke.character_incremental_status).toBeGreaterThan(0);
+    expect(idle.renders.AppShell ?? 0).toBeLessThanOrEqual(IDLE_GATE.rootRenders);
+    expect(idle.renders["tile(thumbnailUrl)"] ?? 0).toBeLessThanOrEqual(IDLE_GATE.tileRenders);
+    expect(Object.keys(idle.renders).filter(name => name !== "StatusCenter")).toEqual([]);
+    expect(idle.commits).toBeLessThanOrEqual(IDLE_GATE.commitsPerMinute);
   });
 });
