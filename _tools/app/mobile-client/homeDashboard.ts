@@ -7,29 +7,40 @@ import {useCharacterReviewCount} from './useCharacterReview';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useDuplicateCount} from './CatalogDuplicates';
 import {useVisibleInterval} from './useVisibleInterval';
-import {ApiError, api} from './transport';
+import {ApiError, api, native} from './transport';
+import type {RefreshJob} from './CatalogRefresh';
+import {fetchLibrarySummary, type LibrarySummary} from './librarySummary';
+import type {CharacterIndex} from './characterModel';
+import {byOrder, noteColorValue, stripMarkdown} from '../src/notes/model';
+import type {Note, NotesState} from '../src/notes/store';
+import {LEDGER, LEDGER_MONTH} from '../src/notes/ledger/model';
+import {monthNotesOf, monthSummary} from '../src/notes/ledger/summary';
 
 /**
- * Home's dashboard: the to-do counts, 신간 and 발매 예정, the 보내는 중 strip and the
- * connection line, from data the tablet already reads elsewhere.
+ * Home's information dashboard (HOME-DASH-001, layout R2), from data the tablet already reads
+ * elsewhere.
  *
- * - Counts: the same single-row reads the Library root and Catalog use for their review rows.
+ * - 확인할 것: the same single-row count reads the Library root and Catalog use.
  * - 신간 / 발매 예정: the release counts read (tiny) and the manga shelf from the shared release
  *   store, read at most once per Collections publication whichever of Home and the 신간 screen
  *   asks first.
- * - 받은 파일 / 보내는 중 / PC: the native exchange snapshot the App already holds.
+ * - 전송 / PC: the native exchange snapshot the App already holds.
+ * - 자산 현황: the library summary (`/v1/library/summary`); an older server without it falls
+ *   back to counting the first page of recent saves. 캐릭터 자동 태그 comes from the character
+ *   index the App already holds.
+ * - 메모: the on-device notes store (works offline).
+ * - 서버 상태: reachability, the PC's last visit and the catalog refresh job.
  * - Offline: the last fresh values are kept in a small per-connection snapshot so Home can say
  *   what it last knew and when.
  */
-export type TodoKey = 'pending' | 'character' | 'similar' | 'duplicates' | 'arrived';
-export const TODO_LABELS: Record<TodoKey, {label: string; unit: string}> = {
-  pending: {label: '처리 대기', unit: '건'},
-  character: {label: '캐릭터', unit: '건'},
-  similar: {label: '유사', unit: '쌍'},
-  duplicates: {label: '중복 판본', unit: '건'},
-  arrived: {label: '받은 파일', unit: '개'},
+export type TodoKey = 'pending' | 'character' | 'similar' | 'duplicates';
+export const TODO_LABELS: Record<TodoKey, {label: string; unit: string; note: string}> = {
+  pending: {label: '처리 대기', unit: '건', note: '수집 요청 · 분류 전'},
+  character: {label: '캐릭터 검토', unit: '건', note: '자동 분류 후보 확인'},
+  similar: {label: '유사 이미지', unit: '쌍', note: '같은 그림일 수 있음'},
+  duplicates: {label: '중복 판본', unit: '건', note: '카탈로그 · 같은 작품'},
 };
-export const TODO_ORDER: TodoKey[] = ['pending', 'character', 'similar', 'duplicates', 'arrived'];
+export const TODO_ORDER: TodoKey[] = ['pending', 'character', 'similar', 'duplicates'];
 /** The pending-capture read's page size: a full page reads as "40+". */
 export const PENDING_LIMIT = 40;
 
@@ -59,6 +70,14 @@ export function upcomingReleases(shelf: MangaShelf | null, today = localToday())
     .map(volume => ({id: row.work.id, name: row.work.name, date: volume.date, volumeNumber: volume.volumeNumber})))
     .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, 'ko') || a.volumeNumber - b.volumeNumber);
 }
+
+/** How many days after `today` a `YYYY-MM-DD` date falls (local calendar days). */
+export function daysAfter(date: string, today = localToday()) {
+  const day = (value: string) => { const [y, m, d] = value.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86_400_000; };
+  return Math.round(day(date) - day(today));
+}
+/** The 발매 예정 window. */
+export const UPCOMING_DAYS = 30;
 
 export function watchedCount(shelf: MangaShelf | null) { return (shelf?.works ?? []).filter(watching).length; }
 
@@ -98,6 +117,77 @@ export function agoLabel(at: string, now = Date.now()) {
   return `${date.getMonth() + 1}.${date.getDate()} ${clockLabel(date.getTime())}`;
 }
 
+/**
+ * 자산 현황's 오늘 추가, counted from the first page of recent saves (newest first). When every
+ * asset on a page that has more is from today, the true count is unknown: `more` says "N+".
+ */
+export function addedToday(items: {collected_at?: string | null; created_at?: string | null}[], hasMore: boolean, now = new Date()) {
+  const today = localToday(now);
+  const count = items.filter(item => {
+    const at = item.collected_at ?? item.created_at;
+    const date = at ? new Date(at) : null;
+    return !!date && Number.isFinite(date.getTime()) && localToday(date) === today;
+  }).length;
+  return {count, more: hasMore && count > 0 && count === items.length};
+}
+
+/**
+ * 캐릭터 자동 태그 progress from the character index the App already holds: each series'
+ * `unclassified` scope against its `all` scope. Null when the index has no such scopes.
+ */
+export function characterTagging(index: CharacterIndex | null | undefined) {
+  if (!index?.ready) return null;
+  let all = 0, left = 0, seen = false;
+  for (const node of index.nodes) {
+    if (node.kind !== 'series') continue;
+    const total = index.scopes.find(scope => scope.nodeId === node.id && scope.filter === 'all')?.totalCount;
+    const open = index.scopes.find(scope => scope.nodeId === node.id && scope.filter === 'unclassified')?.totalCount;
+    if (typeof total !== 'number' || typeof open !== 'number') continue;
+    all += total; left += Math.min(open, total); seen = true;
+  }
+  return seen && all > 0 ? {done: (all - left) / all, left} : null;
+}
+
+/* ---- 메모 ---- */
+export type MemoRow =
+  | {id: string; title: string; color: string | null; kind: 'checklist'; done: number; total: number}
+  | {id: string; title: string; color: string | null; kind: 'ledger'; month: number; label: '쓸 수 있는 돈' | '쓴 돈'; amount: number}
+  | {id: string; title: string; color: string | null; kind: 'secret'}
+  | {id: string; title: string; color: string | null; kind: 'text'; snippet: string};
+/** Pinned notes, most recently edited first, as one line each; month notes of a 가계부 never show. */
+export function memoRows(notes: Note[], today = localToday()): MemoRow[] {
+  return notes.filter(note => note.pinned && !note.deleted && !note.archived && note.type !== LEDGER_MONTH)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((note): MemoRow => {
+      const base = {id: note.id, title: note.title.trim(), color: noteColorValue(note.color)};
+      if (note.type === 'secret') return {...base, kind: 'secret'};
+      if (note.type === LEDGER) {
+        const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
+        return {...base, title: base.title || '가계부', kind: 'ledger', month: Number(today.slice(5, 7)),
+          ...(summary.available !== null ? {label: '쓸 수 있는 돈' as const, amount: summary.available} : {label: '쓴 돈' as const, amount: summary.spent})};
+      }
+      if (note.type === 'checklist' && !note.readOnly) {
+        const items = [...(note.items ?? [])].sort(byOrder);
+        return {...base, kind: 'checklist', done: items.filter(item => item.checked).length, total: items.length};
+      }
+      return {...base, kind: 'text', snippet: note.body.split('\n').map(stripMarkdown).map(line => line.trim()).filter(Boolean).join(' ').slice(0, 160)};
+    });
+}
+export type HomeMemos = {rows: MemoRow[]; locked: boolean} | null;
+/** Reads the on-device notes (no network) whenever Home is shown and `key` moves. */
+export function useHomeMemos(enabled: boolean, key: unknown): HomeMemos {
+  const [memos, setMemos] = useState<HomeMemos>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    void native<NotesState>('notesState', {}).then(state => {
+      if (live) setMemos({rows: memoRows(state.notes ?? []), locked: !state.unlocked});
+    }, () => { if (live) setMemos(current => current ?? {rows: [], locked: true}); });
+    return () => { live = false; };
+  }, [enabled, key]);
+  return memos;
+}
+
 /* ---- Offline snapshot ---- */
 export const HOME_SNAPSHOT_KEY = 'lakomics.mobile.homeSnapshot';
 type Stamped<T> = {value: T; at: number};
@@ -106,6 +196,7 @@ export type HomeSnapshot = {
   counts: Partial<Record<TodoKey | 'releases', Stamped<number>>>;
   releases?: Stamped<ReleaseRow[]>;
   upcoming?: Stamped<UpcomingRow[]>;
+  summary?: Stamped<LibrarySummary>;
 };
 const SNAPSHOT_ROWS = 6;
 export function readHomeSnapshot(scope: string): HomeSnapshot {
@@ -119,7 +210,7 @@ function writeHomeSnapshot(snapshot: HomeSnapshot) {
   try { localStorage.setItem(HOME_SNAPSHOT_KEY, JSON.stringify(snapshot)); } catch { /* Optional: offline values only. */ }
 }
 /** Merge fresh values into the snapshot; unknown values keep what was there. */
-export function rememberHomeValues(scope: string, fresh: {counts: Partial<Record<TodoKey | 'releases', number | null>>; releases?: ReleaseRow[] | null; upcoming?: UpcomingRow[] | null}, now = Date.now()) {
+export function rememberHomeValues(scope: string, fresh: {counts: Partial<Record<TodoKey | 'releases', number | null>>; releases?: ReleaseRow[] | null; upcoming?: UpcomingRow[] | null; summary?: LibrarySummary | null}, now = Date.now()) {
   const current = readHomeSnapshot(scope);
   const counts = {...current.counts};
   let changed = false;
@@ -130,6 +221,7 @@ export function rememberHomeValues(scope: string, fresh: {counts: Partial<Record
   const next: HomeSnapshot = {...current, counts};
   if (fresh.releases) { next.releases = {value: fresh.releases.slice(0, SNAPSHOT_ROWS), at: now}; changed = true; }
   if (fresh.upcoming) { next.upcoming = {value: fresh.upcoming.slice(0, SNAPSHOT_ROWS), at: now}; changed = true; }
+  if (fresh.summary) { next.summary = {value: fresh.summary, at: now}; changed = true; }
   if (changed) writeHomeSnapshot(next);
   return next;
 }
@@ -155,6 +247,9 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
   const duplicates = useDuplicateCount(enabled);
   const [counts, setCounts] = useState<ReleaseCounts | null>(null);
   const [probe, setProbe] = useState(0);
+  const [catalogJob, setCatalogJob] = useState<RefreshJob | null>(null);
+  /** undefined: not read yet; null: this server has no summary route (count the first page instead). */
+  const [summary, setSummary] = useState<LibrarySummary | null | undefined>(undefined);
   const [unreachable, setUnreachable] = useState(false);
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
   const epoch = useSyncExternalStore(subscribeReleases, releaseEpoch);
@@ -182,6 +277,14 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
     void api<{revision?: string | null}>('/v1/collections/status', controller.signal).then(reply => {
       if (!controller.signal.aborted) observePublication(reply?.revision ?? null);
     }, fail);
+    // 자산 현황: one small aggregate read per visit and per minute, like the other counts.
+    void fetchLibrarySummary(controller.signal).then(reply => {
+      if (!controller.signal.aborted) setSummary(reply);
+    }, fail);
+    // The catalog refresh job for 서버 상태 (older servers answer with an error: no job).
+    void api<{job?: RefreshJob | null}>('/v1/mobile-catalog/refresh', controller.signal).then(reply => {
+      if (!controller.signal.aborted) setCatalogJob(reply?.job ?? null);
+    }, () => {});
     return () => controller.abort();
   }, [enabled, probe]);
 
@@ -191,28 +294,28 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
     const controller = new AbortController();
     void loadShelf(controller.signal).catch(reason => { if (!controller.signal.aborted && isOffline(reason)) setUnreachable(true); });
     return () => controller.abort();
-  }, [enabled, epoch]);
+  }, [enabled, epoch, probe]);
 
   const offline = !online || unreachable;
-  const arrived = exchange?.configured ? exchange.unseen : null;
-  const live: Record<TodoKey, number | null> = {pending, character: reviewEnabled ? character : null, similar, duplicates, arrived};
+  const live: Record<TodoKey, number | null> = {pending, character: reviewEnabled ? character : null, similar, duplicates};
   const releases = counts && shelf ? releaseRows(shelf, counts) : null;
   const upcoming = shelf ? upcomingReleases(shelf) : null;
 
   // Keep the last fresh values for an offline Home (only what was actually read).
-  const freshKey = offline ? '' : JSON.stringify([live, counts?.unread ?? null, releases, upcoming]);
+  const freshKey = offline ? '' : JSON.stringify([live, counts?.unread ?? null, releases, upcoming, summary ?? null]);
   useEffect(() => {
     if (!freshKey) return;
-    const {arrived: _arrived, ...stored} = live;
-    setSnapshot(rememberHomeValues(scope, {counts: {...stored, releases: counts ? Object.keys(counts.byCollection).length : null}, releases, upcoming}));
+    setSnapshot(rememberHomeValues(scope, {counts: {...live, releases: counts ? Object.keys(counts.byCollection).length : null}, releases, upcoming, summary}));
   }, [freshKey, scope]);
 
   const pick = <T,>(value: T | null, kept: Stamped<T> | undefined) => value ?? kept?.value ?? null;
-  const todos = Object.fromEntries(TODO_ORDER.map(key => [key, pick(live[key], key === 'arrived' ? undefined : snapshot.counts[key])])) as Record<TodoKey, number | null>;
+  const todos = Object.fromEntries(TODO_ORDER.map(key => [key, pick(live[key], snapshot.counts[key])])) as Record<TodoKey, number | null>;
   const kept = Object.values(snapshot.counts).map(entry => entry?.at ?? 0);
   return {
     todos,
-    applicable: TODO_ORDER.filter(key => key !== 'character' || reviewEnabled).filter(key => key !== 'arrived' || !!exchange?.configured),
+    /** Offline: when the kept to-do counts were last fresh. */
+    todosAt: offline ? Math.max(0, ...TODO_ORDER.map(key => snapshot.counts[key]?.at ?? 0)) || null : null,
+    applicable: TODO_ORDER.filter(key => key !== 'character' || reviewEnabled),
     unreadWorks: counts ? Object.keys(counts.byCollection).length : snapshot.counts.releases?.value ?? null,
     releases: pick(releases, snapshot.releases),
     releasesAt: offline || !releases ? snapshot.releases?.at ?? null : null,
@@ -221,6 +324,15 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
     watched: shelf ? watchedCount(shelf) : null,
     sending: sendingSummary(exchange),
     peer: lastPeer(exchange),
+    catalogJob: offline ? null : catalogJob,
+    /** The library summary: fresh, else the kept one; null when neither exists. */
+    summary: summary === null && !offline ? null : (offline ? null : summary) ?? snapshot.summary?.value ?? null,
+    summaryAt: offline ? snapshot.summary?.at ?? null : null,
+    /** The server answered without a summary route: count the first page instead. */
+    summaryUnsupported: summary === null && !offline,
+    /** Re-check now (the offline notice's 다시 연결). */
+    retry: () => { setOnline(typeof navigator === 'undefined' || navigator.onLine !== false); setProbe(n => n + 1); },
+    probe,
     offline,
     /** When the values shown offline were last fresh. */
     since: kept.length ? Math.max(...kept) : null,

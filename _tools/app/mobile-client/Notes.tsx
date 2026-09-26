@@ -123,7 +123,7 @@ function RecoveryKey({store}:{store:NotesStore}) {
   </div>;
 }
 
-export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<(()=>boolean)|null>}) {
+export function Notes({active,backRef,request}:{active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null}) {
   const [store]=useState(()=>new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');
@@ -175,6 +175,8 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   useEffect(()=>{if(!state.moved)return;if(selected===state.moved.from)setSelected(state.moved.to);store.clearMoved();},[state.moved,selected,store]);
   // ---- Navigation
   const select=(id:string|null,editBody=false)=>{setCreatingSecret(false);setSelected(id);setEditingBody(editBody);setLimitError(null);};
+  // Home opens a note by id (its pinned rows); each request opens once.
+  useEffect(()=>{if(request){setSheet(null);setScope('all');setLabel(null);setQuery('');select(request.id);}},[request?.key]);
   const leave=()=>{select(null);void store.flush();};
   const kind=note?noteKind(note):'text';
   const editable=!!note&&!note.deleted&&!note.readOnly&&!note.redacted;

@@ -7,7 +7,7 @@ const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'connection failed',
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
-vi.mock('./Home',()=>({Home:({items,onOpen,onSelect,recentFolders,classifications}:HomeProps)=><div>{classifications.map(f=><button key={f.id} onClick={()=>onSelect({tab:"library",classification:f.id,title:f.name})}>{`${f.name}, ${f.asset_count}개`}</button>)}<button onClick={()=>onSelect({tab:'library',title:'최근 저장'})}>전체 보기</button><span>{`recent-folders:${recentFolders.join(',')}`}</span>{items.slice(0,12).map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
+vi.mock('./Home',()=>({Home:({items,onRecent}:HomeProps)=><div><button onClick={onRecent}>전체 보기</button>{items.slice(0,12).map(a=><span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
 vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
@@ -16,7 +16,10 @@ import {outboxConnection,setOutboxConnection} from './outboxConnection';
 const a=[{id:'a1',kind:'image'},{id:'a2',kind:'image'}],b=[{id:'b1',kind:'image'},{id:'b2',kind:'image'}];
 async function openFolder(name:string){
   if(!screen.queryByRole('button',{name})){
+    // From another tab Library first returns to its last place; reselecting it goes to the root.
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
+    await waitFor(()=>expect(screen.getByRole('button',{name:'Library',exact:true}).getAttribute('aria-current')).toBe('page'));
+    if(!screen.queryByRole('heading',{name:'라이브러리'}))fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
     await screen.findByRole('heading',{name:'라이브러리'});
   }
   fireEvent.click(await screen.findByRole('button',{name}));
@@ -211,20 +214,6 @@ describe('committed view and browsing',()=>{
     expect(screen.queryByText('다시, 이어서.')).toBeNull();
     expect(screen.queryByRole('button',{name:/이어보기/})).toBeNull();
   });
-  it('opening the retained gallery cancels a pending replacement and keeps viewer provenance',async()=>{
-    const original=mocks.api.getMockImplementation()!; let resolveB!:(value:unknown)=>void;
-    mocks.api.mockImplementation((path:string)=>path.includes('classification_id=b')?new Promise(resolve=>{resolveB=resolve;}):original(path));
-    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
-    await screen.findByRole('button',{name:'전체 보기'});
-    await openFolder('분류 B, 2개');
-    await waitFor(()=>expect(resolveB).toBeTypeOf('function'));
-    expect(screen.getByText('tile-a1')).toBeTruthy();
-    fireEvent.click(screen.getByText('tile-a1'));
-    await act(async()=>{resolveB({items:b,has_more:false,next_cursor:null});});
-    fireEvent.click(screen.getByText('viewer next')); fireEvent.click(screen.getByText('viewer close'));
-    expect(screen.getByText('tile-a1')).toBeTruthy(); expect(screen.queryByText('tile-b1')).toBeNull();
-  });
   it('does not reload or remount committed Home on reselect or return from Collections',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
     fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));
@@ -297,7 +286,6 @@ describe('committed view and browsing',()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
     await openFolder('분류 B, 2개'); await screen.findByText('tile-b1');
     fireEvent.click(screen.getByRole('button',{name:'Home',exact:true})); await screen.findByText('tile-a1');
-    expect(screen.getByText('recent-folders:b')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));
     await waitFor(()=>expect(screen.getByText('tile-b1')).toBeTruthy());
   });

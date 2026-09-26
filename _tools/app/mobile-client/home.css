@@ -1,102 +1,125 @@
-.home-scroll { flex:1; min-height:0; overflow:auto; padding:10px var(--mobile-gutter) 20px; scrollbar-width:thin; display:flex; flex-direction:column; gap:10px; }
-.home-scroll h3 { font-size:15px; font-weight:600; margin:0; }
-
 /* Shared cover primitives (Library root and folder cards use them too). */
 .home-cover { display:flex; position:relative; align-items:center; justify-content:center; background:var(--color-surface); overflow:hidden; min-width:0; height:100%; }
 .home-cover img { width:100%; height:100%; object-fit:cover; display:block; }
 .home-cover-group { display:grid; grid-template-columns:2fr 1fr; grid-template-rows:1fr 1fr; gap:2px; height:clamp(130px,16vw,190px); }
 .home-cover-group .home-cover:first-child { grid-row:1 / 3; }
 .home-cover-group.single { grid-template-columns:1fr; }
-
-/* Offline notice. */
-.home-offline { display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid #4a3232; border-radius:3px; background:#231d1d; }
-.home-offline > svg { width:22px; height:22px; flex:none; color:var(--color-danger); }
-.home-offline strong { font-size:15px; font-weight:600; }
-.home-offline p { margin:2px 0 0; font-size:13px; color:#c4b9b9; }
-
-/* Number tiles: label on top, the numeral right under it. */
-.home-summary { display:flex; flex-direction:column; gap:8px; padding-bottom:12px; border-bottom:1px solid var(--color-border); margin:0 calc(-1 * var(--mobile-gutter)); padding-inline:var(--mobile-gutter); }
-.home-tiles { display:grid; gap:8px; }
-.home-tile { display:flex; flex-direction:column; gap:8px; min-width:0; min-height:96px; padding:12px 6px 12px 12px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); color:var(--color-text); text-align:left; font:inherit; }
-button.home-tile:active { background:var(--color-surface-pressed); }
-.home-tile-label { display:flex; align-items:center; gap:6px; min-width:0; font-size:14px; font-weight:500; white-space:nowrap; }
-.home-tile-label svg { width:15px; height:15px; margin-left:auto; flex:none; color:var(--color-muted); }
-.home-tile-num { display:flex; align-items:baseline; gap:6px; min-width:0; font-size:40px; font-weight:500; line-height:1; color:var(--color-accent); }
-.home-tile-num small { overflow:hidden; font:500 13px var(--font-ui); color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-tiles.is-calm .home-tile-num { color:var(--color-text); }
-.home-calm-line { display:flex; align-items:center; gap:8px; font-size:17px; font-weight:500; line-height:1.3; }
-.home-calm-line svg { width:22px; height:22px; flex:none; color:#7fb88a; }
-.home-tile-note { overflow:hidden; margin-top:-2px; font-size:12.5px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-summary.is-stale .home-tile-num { color:var(--color-muted); }
-
-.home-send { display:flex; align-items:center; gap:12px; min-height:46px; padding:0 14px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); color:var(--color-text); font:inherit; font-size:14px; text-align:left; }
-.home-send > svg { width:18px; height:18px; flex:none; color:var(--color-muted); }
-.home-send-name { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; min-width:0; }
-.home-send-name span { color:var(--color-muted); }
-.home-send-bar { flex:1; min-width:60px; height:3px; background:var(--color-border); }
-.home-send-bar > span { display:block; height:100%; background:var(--color-accent); }
-.home-send-pct { font-size:20px; font-weight:500; }
-.home-send.is-stale { color:var(--color-muted); }
-.home-send.is-stale .home-send-bar > span { background:var(--color-muted); }
-
-/* Body: recent saves on the left, 신간 / 발매 예정 / 연결 on the right. */
-.home-body { display:grid; grid-template-columns:minmax(0,56fr) minmax(0,44fr); gap:0; margin:-10px calc(-1 * var(--mobile-gutter)) 0; }
-.home-feed { min-width:0; padding:10px 12px 0 var(--mobile-gutter); }
-.home-side { display:flex; flex-direction:column; gap:10px; min-width:0; padding:12px var(--mobile-gutter) 0 12px; border-left:1px solid var(--color-border); }
-.home-feed-head { display:flex; align-items:baseline; gap:8px; min-height:44px; }
-.home-card-count { font-size:24px; font-weight:500; line-height:1; color:var(--color-text); }
-.home-card-count small { margin-left:4px; font:500 13px var(--font-ui); color:var(--color-muted); }
-.home-card-more { display:inline-flex; align-items:center; gap:2px; align-self:center; min-height:var(--touch); margin-left:auto; padding:0 6px; border:0; background:none; color:var(--color-muted); font:inherit; font-size:13px; white-space:nowrap; }
-.home-card-more svg { width:15px; height:15px; }
-
-.home-feed-tile { display:block; width:100%; min-width:0; padding:0; border:0; background:none; color:var(--color-text); text-align:left; font:inherit; }
-.home-feed-media { display:block; overflow:hidden; border-radius:2px; background:var(--color-surface); }
-.home-feed-tile.is-feature .home-feed-media { height:clamp(200px,30vw,300px); }
-.home-feed-tile.is-unsized:not(.is-feature) .home-cover img { object-fit:contain; }
-.home-feed-caption { display:flex; justify-content:space-between; gap:8px; height:24px; align-items:center; font-size:12.5px; color:#c4c6c8; }
-.home-feed-caption > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; min-width:0; }
-.home-feed-caption time { flex:none; font-size:12px; color:var(--color-muted); }
-.home-feed-tile.is-feature { margin-bottom:6px; }
-.home-masonry { display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:start; }
-.home-masonry > div { display:flex; flex-direction:column; gap:6px; min-width:0; }
-.home-empty { display:flex; align-items:center; min-height:200px; margin:0; color:var(--color-muted); }
-
-.home-card { display:flex; flex-direction:column; min-width:0; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
-.home-card-head { display:flex; align-items:center; gap:8px; min-height:46px; padding:0 4px 0 14px; border-bottom:1px solid var(--color-border); }
-.home-card-head > svg { width:18px; height:18px; flex:none; color:var(--color-muted); }
-.home-card-head .home-card-count { font-size:20px; }
-.home-stale { font-size:12px; color:var(--color-muted); white-space:nowrap; }
-.home-card-empty { margin:0; padding:14px; font-size:13.5px; color:var(--color-muted); }
-
-.home-release { display:flex; align-items:center; gap:12px; min-height:76px; padding:8px 10px 8px 14px; border:0; border-top:1px solid var(--color-border); background:none; color:var(--color-text); text-align:left; font:inherit; }
-.home-card-head + .home-release { border-top:0; }
-.home-release-cover { width:40px; flex:none; }
-.home-release-text { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; }
-.home-release-text strong { overflow:hidden; font-size:15px; font-weight:500; white-space:nowrap; text-overflow:ellipsis; }
-.home-release-text small { overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-release-text small.is-new { color:var(--color-text); }
-.home-release-text small.is-new::before { content:''; display:inline-block; width:6px; height:6px; margin:0 6px 1px 0; background:var(--color-accent); }
-.home-release > svg { width:15px; height:15px; flex:none; color:var(--color-muted); }
-
-.home-upcoming { display:grid; grid-template-columns:52px minmax(0,1fr) auto; gap:10px; align-items:center; min-height:52px; padding:4px 14px; border:0; border-top:1px solid var(--color-border); background:none; color:var(--color-text); text-align:left; font:inherit; }
-.home-card-head + .home-upcoming { border-top:0; }
-.home-upcoming-date { font-size:20px; font-weight:500; line-height:1; }
-.home-upcoming-date small { display:block; margin-top:3px; font:500 11.5px var(--font-ui); color:var(--color-muted); }
-.home-upcoming-name { overflow:hidden; font-size:14.5px; white-space:nowrap; text-overflow:ellipsis; }
-.home-upcoming-volume { font-size:13px; color:var(--color-muted); white-space:nowrap; }
-
-.home-connection { gap:5px; padding:10px 14px 12px; color:var(--color-muted); text-align:left; font:inherit; font-size:13.5px; }
-.home-connection-line { display:flex; align-items:center; gap:8px; white-space:nowrap; overflow:hidden; }
-.home-connection-line strong { color:var(--color-text); font-weight:500; }
-.home-connection-line svg { width:16px; height:16px; flex:none; }
-.home-dot { width:7px; height:7px; flex:none; background:#7fb88a; }
-.home-dot.is-off { background:var(--color-danger); }
-
-@media (max-width:700px) {
-  .home-body { grid-template-columns:1fr; }
-  .home-side { border-left:0; padding-left:var(--mobile-gutter); }
-  .home-tiles:not(.is-calm) { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
-  .home-tile-num { font-size:32px; }
-}
 @media (max-width:1000px) { .home-cover-group { height:170px; } }
 @media (max-width:480px) { .home-cover-group { height:132px; } }
+
+/*
+ * Home: an information-only dashboard (HOME-DASH-001, layout R2). 확인할 것 and 신간 span the
+ * width; the other cards pair up in two columns. Cards are one tone step + a 1px line with a
+ * small radius and no shadow (DESIGN.md §4).
+ */
+.home-scroll { flex:1; min-height:0; overflow:auto; padding:14px 16px 24px; scrollbar-width:thin; display:flex; flex-direction:column; gap:12px; }
+.home-scroll h3 { margin:0; font-size:15.5px; font-weight:600; white-space:nowrap; }
+.home-scroll button { font:inherit; color:inherit; text-align:left; }
+
+.home-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:stretch; }
+.home-cell { display:flex; min-width:0; }
+.home-cell > .home-card { flex:1; }
+/* An odd last card takes the whole row instead of leaving an empty cell. */
+.home-cell:last-child:nth-child(odd) { grid-column:1 / -1; }
+
+.home-card { display:flex; flex-direction:column; min-width:0; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
+/* A calm card next to a taller neighbour stretches to the row's height with its line centred,
+   so the pair stays one aligned row instead of leaving a gap under the short card. */
+.home-card.is-calm { justify-content:center; }
+.home-card.is-alert { border-color:#5a3838; }
+.home-card.is-alert .home-card-icon:first-child { color:var(--color-danger); }
+
+.home-card-head { display:flex; align-items:center; gap:8px; width:100%; min-width:0; min-height:52px; padding:0 8px 0 14px; border:0; background:none; }
+.home-card-head:active, .home-row:active, .home-release:active, .home-upcoming:active, .home-memo:active { background:var(--color-surface-pressed, var(--color-control-pressed)); }
+.home-card-icon { width:18px; height:18px; flex:none; color:var(--color-muted); }
+.home-space { flex:1; min-width:4px; }
+.home-chev { width:16px; height:16px; flex:none; color:var(--color-muted); }
+.home-sum { font-size:22px; font-weight:500; line-height:1; color:var(--color-accent); white-space:nowrap; }
+.home-sum.is-plain { color:var(--color-text); }
+.home-sum small { margin-left:3px; font:500 13px var(--font-ui); color:var(--color-muted); }
+.home-calm { display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; font-size:14px; color:var(--color-muted); white-space:nowrap; }
+.home-calm > span { overflow:hidden; text-overflow:ellipsis; }
+.home-calm b { font-size:16px; font-weight:500; color:var(--color-text); }
+.home-ok { width:17px; height:17px; flex:none; color:#7fb88a; }
+.home-stale { flex:none; padding:0 5px; border:1px solid var(--color-border); border-radius:2px; font-size:12px; line-height:20px; color:var(--color-muted); white-space:nowrap; }
+
+.home-card-body { display:flex; flex-direction:column; min-height:0; border-top:1px solid var(--color-border); }
+.home-card .home-card-body > * + * { border-top:1px solid var(--color-border); }
+/* Two columns of rows inside a full-width card. */
+.home-cols { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.home-card .home-cols > * { border-top:1px solid var(--color-border); }
+.home-card .home-cols > :nth-child(-n+2) { border-top:0; }
+.home-card .home-cols > :nth-child(2n) { border-left:1px solid var(--color-border); }
+
+/* Number-first rows: the figure large on the left, its meaning right beside it. */
+.home-row { display:flex; align-items:center; gap:12px; width:100%; min-width:0; min-height:56px; padding:6px 8px 6px 14px; border:0; background:none; }
+.home-row-num { min-width:52px; flex:none; font-size:30px; font-weight:500; line-height:1; color:var(--color-accent); text-align:right; white-space:nowrap; }
+.home-row-num small { margin-left:2px; font:500 13px var(--font-ui); color:var(--color-muted); }
+.home-row.is-stat .home-row-num { min-width:64px; font-size:26px; color:var(--color-text); }
+.home-row-text { display:flex; flex-direction:column; flex:1; min-width:0; font-size:15px; font-weight:500; line-height:1.3; white-space:nowrap; }
+.home-row-text > small { overflow:hidden; font-size:12.5px; font-weight:400; color:var(--color-muted); text-overflow:ellipsis; }
+.home-row-text .home-progress { margin-top:5px; }
+.home-scroll.is-stale .home-row-num { color:#c4c6c8; }
+
+.home-progress { display:block; height:3px; overflow:hidden; border-radius:2px; background:var(--color-border); }
+.home-progress > i { display:block; height:100%; background:var(--color-accent); }
+.home-progress.is-muted > i { background:var(--color-muted); }
+
+/* 신간: the only place with (small) covers. */
+.home-release { display:flex; align-items:center; gap:12px; width:100%; min-width:0; min-height:66px; padding:8px 8px 8px 14px; border:0; background:none; }
+.home-release-cover { width:34px; flex:none; }
+.home-release-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.home-release-text strong { overflow:hidden; font-size:15px; font-weight:500; white-space:nowrap; text-overflow:ellipsis; }
+.home-release-text small { overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-release-text small.is-new { font-weight:600; color:var(--color-accent); }
+.home-release-text small.is-new .numeric { font-weight:500; color:var(--color-muted); }
+.home-release-text small.is-new::before { content:''; display:inline-block; width:6px; height:6px; margin:0 6px 1px 0; background:var(--color-accent); }
+
+/* 발매 예정: kind chips, then a date timeline. */
+.home-seg { display:flex; gap:6px; padding:8px 14px; overflow:hidden; }
+.home-seg button { display:inline-flex; align-items:center; gap:5px; flex:none; height:30px; padding:0 9px; border:1px solid var(--color-border); border-radius:3px; background:none; font-size:13px; color:var(--color-muted); white-space:nowrap; }
+.home-seg button[aria-pressed="true"] { border-color:var(--color-filter-border); background:var(--color-filter-selected); color:var(--color-text); }
+.home-seg button .numeric { font-size:15px; color:var(--color-text); }
+.home-seg button:disabled { border-style:dashed; opacity:.7; }
+.home-seg button small { font-size:11.5px; }
+.home-upcoming { display:grid; grid-template-columns:44px minmax(0,1fr) auto 16px; gap:10px; align-items:center; width:100%; min-height:54px; padding:4px 8px 4px 14px; border:0; background:none; }
+.home-upcoming-date { font-size:21px; font-weight:500; line-height:1; }
+.home-upcoming-date small { display:block; margin-top:3px; font:500 12px var(--font-ui); color:var(--color-muted); }
+.home-upcoming-name { overflow:hidden; font-size:14.5px; font-weight:500; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
+.home-upcoming-name small { display:block; font-size:12.5px; font-weight:400; color:var(--color-text); }
+.home-kind { display:inline-block; margin-right:5px; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; font-size:11.5px; line-height:16px; color:var(--color-muted); vertical-align:1px; }
+.home-upcoming-left { font-size:14px; color:var(--color-muted); white-space:nowrap; }
+
+/* 메모 */
+.home-memo { display:flex; align-items:center; gap:12px; width:100%; min-width:0; min-height:60px; padding:8px 8px 8px 0; border:0; background:none; }
+.home-memo-strip { width:3px; align-self:stretch; flex:none; background:var(--color-border-strong); }
+.home-memo-text { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; }
+.home-memo-text strong { overflow:hidden; font-size:15px; font-weight:500; line-height:1.25; white-space:nowrap; text-overflow:ellipsis; }
+.home-memo-text small { display:flex; align-items:center; gap:6px; overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-memo-text small .numeric { font-size:16px; color:var(--color-text); }
+.home-memo-text small .home-progress { width:72px; flex:none; margin-left:4px; }
+
+/* 서버 상태 */
+.home-dot { display:inline-block; width:8px; height:8px; flex:none; border-radius:50%; background:#7fb88a; }
+.home-dot.is-idle { background:var(--color-muted); }
+.home-dot.is-busy { background:#d8c07a; }
+.home-dot.is-off { background:var(--color-danger); }
+.home-server { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+.home-server > span { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; padding:10px 14px; font-size:14.5px; }
+.home-server > span + span { border-left:1px solid var(--color-border); }
+.home-server em { flex-basis:100%; font-style:normal; font-size:13px; color:var(--color-muted); }
+.home-server small { color:var(--color-muted); font-size:13px; }
+
+/* Offline notice with 다시 연결. */
+.home-offline { display:flex; align-items:center; gap:12px; padding:9px 14px; border:1px solid #4a3232; border-radius:3px; background:#231d1d; }
+.home-offline > svg { width:22px; height:22px; flex:none; color:var(--color-danger); }
+.home-offline > div { flex:1; min-width:0; }
+.home-offline strong { font-size:15px; font-weight:600; }
+.home-offline p { margin:2px 0 0; font-size:13px; color:#cfc4c4; }
+.home-retry { flex:none; min-height:40px; padding:0 12px; border:1px solid #6a4545; border-radius:4px; background:none; font-size:13.5px; white-space:nowrap; }
+
+@media (max-width:700px) {
+  .home-grid, .home-cols { grid-template-columns:1fr; }
+  .home-card .home-cols > :nth-child(2) { border-top:1px solid var(--color-border); }
+  .home-card .home-cols > :nth-child(2n) { border-left:0; }
+}

@@ -252,3 +252,12 @@ it('shows sticky-note cards: pin, checklist progress with done items struck, mas
  fireEvent.click(card);
  expect(await screen.findByRole('button',{name:'메모 목록'})).toBeTruthy();
 });
+it('opens the note Home asks for, once per request',async()=>{
+ const other={...note,id:'b'.repeat(32),title:'다른 메모',body:'다른 내용'};
+ mock.native.mockImplementation(state([note,other]));
+ const view=render(<Notes active backRef={{current:null}} request={{id:other.id,key:1}}/>);
+ expect(await rendered('다른 내용')).toBeTruthy();
+ expect((screen.getByRole('textbox',{name:'메모 제목'}) as HTMLInputElement).value).toBe('다른 메모');
+ view.rerender(<Notes active backRef={{current:null}} request={{id:note.id,key:2}}/>);
+ expect(await rendered('내용')).toBeTruthy();
+});

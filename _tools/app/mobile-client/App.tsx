@@ -53,7 +53,7 @@ import {setOutboxConnection} from './outboxConnection';
 /** The durable outboxes follow the connection before any screen re-renders against it. */
 const adoptConnection=(next:Status)=>{setOutboxConnection(next.configured?next.endpoint:null);return next;};
 
-const HOME: View = {tab:'home', title:'최근 저장'};
+const HOME: View = {tab:'home', title:'홈'};
 const LIBRARY = LIBRARY_ROOT;
 async function readPage(view:View,cursor:string|null,filters:AssetFiltersValue,signal:AbortSignal):Promise<Page> {
   const path=pagePath(view,cursor,filters);
@@ -118,11 +118,14 @@ export function App() {
   const [characterIndex,setCharacterIndex]=useState<CharacterIndex>();
   const [indexRevision,setIndexRevision]=useState(0);
   const [classifications, setClassifications] = useState<Classification[]>([]);
-  const [recentFolders,setRecentFolders] = useState<string[]>([]);
+  // Recent folder visits are still recorded per connection (no screen shows them at the moment).
+  const [,setRecentFolders] = useState<string[]>([]);
   // Pending captures for Home's 처리 대기 tile; null until the first read.
   const [captures, setCaptures] = useState<Asset[]|null>(null);
   // Places Home asks the Collections and Catalog tabs to open.
   const [collectionRequest,setCollectionRequest]=useState<CollectionsRequest|null>(null),[duplicateRequest,setDuplicateRequest]=useState(0);
+  // A note Home asks the Notes tab to open.
+  const [noteRequest,setNoteRequest]=useState<{id:string;key:number}|null>(null);
   const [secondaryError, setSecondaryError] = useState('');
   const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'; character?:ViewerCharacterContext|null} | null>(null);
   // Library Trash: local hiding, the undo snackbar and the trash browser.
@@ -528,7 +531,7 @@ export function App() {
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
-    setViewer(null); setReview(null); setSimilarity(false); setExchangeOpen(false); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); setCaptures(null); setCollectionRequest(null); setDuplicateRequest(0); resetReleaseStore();
+    setViewer(null); setReview(null); setSimilarity(false); setExchangeOpen(false); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
     lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
@@ -588,9 +591,11 @@ export function App() {
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
         <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:()=>setReview({target:null})}:undefined} similarity={{enabled:true,refreshKey:similarityClosed,onOpen:()=>setSimilarity(true)}}/>
-        {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? <Home items={visibleItems} classifications={classifications} recentFolders={recentFolders} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot}
+        {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
           review={{enabled:!!reviewLibrary,refreshKey:`${characterIndex?.revision}:${reviewClosed}`}} similarityKey={similarityClosed}
-          onSelect={select} onOpen={openCurrent} onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
+          onRecent={() => select({tab:'library',title:'최근 저장'})} onLibrary={openLibrary} onRefresh={refresh}
+          onNotes={id => {setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
+          onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
           onReview={() => setReview({target:null})} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCollections({kind:'releases'})} onWork={id => openCollections({kind:'work',id})}/> : <>
@@ -606,7 +611,7 @@ export function App() {
         </div>
       </main>
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest}/>}
-      {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack}/>}
+      {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={openHome}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={openLibrary}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}

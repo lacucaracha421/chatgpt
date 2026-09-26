@@ -193,6 +193,8 @@ function demoBindings(url:URL,payload:Record<string,unknown>):unknown{
  */
 const homeDemo=typeof location==='undefined'?null:new URLSearchParams(location.search).get('home');
 if(homeDemo==='calm')demoReleases=[];
+// busy: 37 of the first page were saved today (자산 현황's 오늘 추가).
+if(homeDemo==='busy')assets.slice(0,37).forEach((asset,i)=>{const at=new Date();at.setMinutes(at.getMinutes()-i*7);asset.collected_at=at.toISOString();});
 const homeDemoExchange=()=>({configured:true,tokenConfigured:true,receiveSupported:true,deviceId:'tablet',deviceName:'태블릿',code:'',
   devices:[{deviceId:'pc',name:'작업실 PC',kind:'pc',lastSeenAt:new Date(Date.now()-3*60_000).toISOString()}],incoming:[],unseen:homeDemo==='calm'?0:3,
   outgoing:homeDemo==='calm'?[]:[{transferId:'demo-send',batchId:'demo-batch',fileName:'스케치_0926.zip',sizeBytes:100,bytes:62,peer:'pc',peerId:'pc',state:'uploading',code:'',createdAt:new Date().toISOString()}]});
@@ -283,7 +285,12 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   }
   if (op !== 'api') return {};
   const url = new URL(String(payload.path),'https://preview.invalid');
-  if(homeDemo==='offline'&&/^\/v1\/(captures|collections|library\/(characters\/review|similarity)|mobile-catalog\/duplicates)/.test(url.pathname))throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);
+  if(homeDemo==='offline'&&/^\/v1\/(captures|collections|library\/(characters\/review|similarity)|library\/summary|mobile-catalog\/(duplicates|refresh))/.test(url.pathname))throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);
+  if(url.pathname==='/v1/library/summary'){
+    // Home ⑤ 자산 현황: calm has nothing today and nothing unclassified.
+    const midnight=new Date();midnight.setHours(0,0,0,0);const monday=new Date(midnight);monday.setDate(monday.getDate()-(monday.getDay()+6)%7);
+    return {total:homeDemo==='calm'?1172:1209,addedToday:homeDemo==='calm'?0:37,addedThisWeek:homeDemo==='calm'?41:214,unclassified:homeDemo==='calm'?0:58,todayStart:midnight.toISOString(),weekStart:monday.toISOString(),listGeneration:'d'.repeat(64)};
+  }
   if(homeDemo&&url.pathname==='/v1/library/characters/review')return {ready:true,counts:{total:homeDemo==='calm'?0:14},items:[]};
   if(homeDemo&&url.pathname==='/v1/library/similarity/review')return {ready:true,counts:{open:homeDemo==='calm'?0:6},items:[]};
   if(homeDemo&&url.pathname==='/v1/mobile-catalog/duplicates')return {counts:{undecided:homeDemo==='calm'?0:2},items:[]};
@@ -296,7 +303,8 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
       {id:'folder:demo',kind:'folder',sourceId:'demo',seriesId:'demo',parentId:'series:demo',name:'배경 자료',description:'',thumbnailAssetId:'demo-4',manualOnly:false,excluded:true},
       ...Array.from({length:15},(_,i)=>({id:`character:demo-${i}`,kind:'character',sourceId:`demo-${i}`,seriesId:'demo',parentId:i<3?'group:demo':'series:demo',name:['서하','유리','하늘'][i%3]+(i>2?` ${i+1}`:''),description:'보관된 캐릭터 자료',thumbnailAssetId:`demo-${i}`,manualOnly:i%3===0,excluded:false}))
     ];
-    const scopes=nodes.flatMap(n=>(n.kind==='series'?['all','unclassified','needs_review']:['all']).map(filter=>({nodeId:n.id,filter,totalCount:filter==='all'?120:0,sourceCount:filter==='all'?120:0})));
+    // Home demos leave a fifth of the series unclassified (자산 현황's 캐릭터 자동 태그).
+    const scopes=nodes.flatMap(n=>(n.kind==='series'?['all','unclassified','needs_review']:['all']).map(filter=>({nodeId:n.id,filter,totalCount:filter==='all'?120:homeDemo&&filter==='unclassified'?22:0,sourceCount:filter==='all'?120:0})));
     if(url.pathname.endsWith('/characters'))return {version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false,...(homeDemo?{characterReview:true}:{})},...(homeDemo?{libraryId:'a'.repeat(32)}:{}),ready:true,revision,publishedAt:'2026-09-13T00:00:00Z',nodes,scopes};
     const selected=url.searchParams.get('filter')==='all'?assets:[];
     const offset=Number(url.searchParams.get('cursor')??0),limit=40;
@@ -323,6 +331,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     return {version:1,operationId:body.operationId,collectionId:body.collectionId,field:body.field,value:body.value,sequence:1,revision:'demo-1',changed:true};
   }
   if(url.pathname==='/v1/mobile-catalog/status')return {publicationRevision:'demo-catalog',authorityLibraryId:demoLibraryId,authorityEpoch:1,authorityContractVersion:1,capabilities:{providers:['kHentai'],read:true,bookmarkWrite:true,refreshRequest:true,displayPreferencesVersion:1}};
+  if(homeDemo==='busy'&&url.pathname==='/v1/mobile-catalog/refresh'&&payload.method!=='POST')return {job:{id:'demo-refresh',language:'korean',state:'running',pages:3,added:0,hasMore:true,error:null,publicationRevision:null}};
   if(url.pathname==='/v1/mobile-catalog/refresh'){
     if(payload.method==='POST'){
       const body=payload.body as {operationId:string;language:'korean'|'japanese'};

@@ -177,7 +177,7 @@ Mobile designs chosen 2026-09-26 from [the mockups](../prototypes/mobile-request
 
 ## HOME-DASH-001 — Information dashboard Home (tablet first)
 
-Status: `IN PROGRESS` — 2026-09-26 the user rejected the image-centred H3 Home on the device and chose an information-only dashboard (no recent-saves images; small covers only in the 신간 list). Cards: 확인할 것, 신간, 발매 예정, 전송, 라이브러리 현황, 메모, 시스템 상태 (round 3 mockups in `docs/prototypes/home-dashboard-20260926/round3.html`). Later cards requested by the user: 게임 신작 예정, 만화 신간 예정, 영화 신작 예정 (needs game/movie release sources), 오늘의 AV 배우 (from AV Collections), 자산 현황, 캐릭터 검토, 서버 등 상태. PC Home to follow once the tablet version is settled.
+Status: `IN PROGRESS` — phase 1+2 shipped in 0.8.39 (layout R2 of round3.html; 자산 현황 from the new `/v1/library/summary`, deployed `54e835c`); next: 오늘의 AV 배우 and game/movie releases need PC-published data. 2026-09-26 the user rejected the image-centred H3 Home on the device and chose an information-only dashboard (no recent-saves images; small covers only in the 신간 list). Cards: 확인할 것, 신간, 발매 예정, 전송, 라이브러리 현황, 메모, 시스템 상태 (round 3 mockups in `docs/prototypes/home-dashboard-20260926/round3.html`). Later cards requested by the user: 게임 신작 예정, 만화 신간 예정, 영화 신작 예정 (needs game/movie release sources), 오늘의 AV 배우 (from AV Collections), 자산 현황, 캐릭터 검토, 서버 등 상태. PC Home to follow once the tablet version is settled.
 
 ## TEST-BASELINE-20260926 — Full-suite baseline
 
