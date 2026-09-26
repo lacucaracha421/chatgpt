@@ -13,7 +13,8 @@ vi.mock('./transport',async() => {
 vi.mock('./media',() => ({loadThumbnail:mocks.loadThumbnail,mediaTicket:vi.fn()}));
 import {ApiError} from './transport';
 import {Home, type HomeProps} from './Home';
-import {addedToday, characterTagging, daysAfter, HOME_SNAPSHOT_KEY, memoRows, releaseRows, sendingSummary, upcomingReleases} from './homeDashboard';
+import {addedToday, characterTagging, daysAfter, HOME_SNAPSHOT_KEY, memoRows, releaseRows, reviewLines, sendingSummary, upcomingReleases} from './homeDashboard';
+import {groupReviewItems} from './useCharacterReview';
 import type {CharacterIndex} from './characterModel';
 import type {Note} from '../src/notes/store';
 import {releaseStore, resetReleaseStore} from './releaseStore';
@@ -25,7 +26,7 @@ const works:CollectionSummary[] = [
   {id:'sea',name:'바다의 시간',type:'manga',showcase:false,releaseWatch:{enabled:true,available:true},ownedVolumes:[{editionIndex:0,count:1}],releaseSchedule:{kakao:kakao([[2,'2026-10-15','upcoming']]),mangadex:null}},
   {id:'quiet',name:'조용한 숲',type:'manga',showcase:false,releaseWatch:{enabled:false,available:true},ownedVolumes:[],releaseSchedule:{kakao:kakao([[1,'2026-10-01','upcoming']]),mangadex:null}},
 ];
-type Server = {offline:boolean;publication:string;pendingReview:number;similar:number;duplicates:number;unread:Record<string,number>;catalog:unknown;summary:unknown};
+type Server = {offline:boolean;publication:string;pendingReview:number;reviewPages?:unknown[];similar:number;duplicates:number;unread:Record<string,number>;catalog:unknown;summary:unknown};
 let server:Server;
 const shelfReads = () => mocks.api.mock.calls.filter(([path]) => String(path).startsWith('/v1/collections?')).length;
 const exchange = (unseen:number,sending=false):ExchangeSnapshot => ({configured:true,tokenConfigured:true,receiveSupported:true,deviceId:'tablet',deviceName:'태블릿',code:'',
@@ -39,6 +40,11 @@ const props = (overrides:Partial<HomeProps> = {}):HomeProps => ({items,hasMore:f
 const note = (id:string,values:Partial<Note>):Note => ({id,title:'',body:'',pinned:true,deleted:false,createdAt:'2026-09-01T00:00:00Z',updatedAt:'2026-09-01T00:00:00Z',localRevision:1,pending:false,conflict:false,...values});
 const summaryReply = (values:Record<string,number> = {}) => ({total:1500,addedToday:12,addedThisWeek:80,unclassified:7,todayStart:'2026-09-24T15:00:00Z',weekStart:'2026-09-20T15:00:00Z',listGeneration:'a'.repeat(64),...values});
 const month = '2026-09';
+const reviewTargets = {lara:{name:'라라',seriesId:'yuri',seriesName:'백합',references:[]},mari:{name:'마리',seriesId:'yuri',seriesName:'백합',references:[]},rover:{name:'방랑자',seriesId:'wuwa',seriesName:'명조',references:[]}};
+const candidates = (spec:[string,number][]) => spec.flatMap(([targetId,count]) => Array.from({length:count},(_,i) => ({targetId,assetId:`${targetId}-${i}`,sources:['s36'],verdict:'recommended',knn3:null,basis:'b',asset:{id:`${targetId}-${i}`,kind:'image'}})));
+/** Review pages as the server answers them (cursor = the next page's index). */
+const reviewPages = (total:number,pages:[string,number][][]) => pages.map((spec,index) => ({version:1,ready:true,counts:{total},items:candidates(spec),targets:reviewTargets,
+  nextCursor:index + 1 < pages.length ? String(index + 1) : null,hasMore:index + 1 < pages.length}));
 let notes:Note[];
 const pinnedNotes = ():Note[] => [
   note('shop',{type:'checklist',title:'장보기',color:'green',updatedAt:'2026-09-25T08:00:00Z',items:[{id:'i1',text:'우유',checked:true,order:'a'},{id:'i2',text:'계란',checked:false,order:'b'},{id:'i3',text:'두부',checked:true,order:'c'}]}),
@@ -63,7 +69,11 @@ beforeEach(() => {
   server = {offline:false,publication:'r1',pendingReview:14,similar:6,duplicates:2,unread:{night:2},catalog:null,summary:summaryReply()};
   mocks.api.mockImplementation(async (path:string) => {
     if (server.offline) throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);
-    if (path.startsWith('/v1/library/characters/review')) return {ready:true,counts:{total:server.pendingReview}};
+    if (path.startsWith('/v1/library/characters/review')) {
+      if (!server.reviewPages) return {ready:true,counts:{total:server.pendingReview}};
+      const cursor = new URLSearchParams(path.split('?')[1]).get('cursor');
+      return server.reviewPages[cursor ? Number(cursor) : 0];
+    }
     if (path.startsWith('/v1/library/similarity/review')) return {ready:true,counts:{open:server.similar}};
     if (path.startsWith('/v1/mobile-catalog/duplicates')) return {counts:{undecided:server.duplicates}};
     if (path.startsWith('/v1/collections/releases')) return {version:1,revision:1,counts:{unread:Object.values(server.unread).reduce((a,b) => a+b,0),collections:Object.entries(server.unread).map(([collectionId,unread]) => ({collectionId,unread}))},items:[],nextCursor:null,hasMore:false};
@@ -107,6 +117,21 @@ describe('home model',() => {
     expect(characterTagging(characterIndex(200,50))).toEqual({done:.75,left:50});
     expect(characterTagging({...characterIndex(200,50),scopes:[]})).toBeNull();
     expect(characterTagging(null)).toBeNull();
+  });
+  it('splits character review candidates by series and character, busiest first, leaving queued pairs out',() => {
+    const items = candidates([['lara',5],['rover',1],['mari',2]]);
+    const groups = groupReviewItems(items as never,reviewTargets,new Set(['lara:lara-0']));
+    expect(groups).toEqual([
+      {seriesId:'yuri',seriesName:'백합',count:6,characters:[{id:'lara',name:'라라',count:4},{id:'mari',name:'마리',count:2}]},
+      {seriesId:'wuwa',seriesName:'명조',count:1,characters:[{id:'rover',name:'방랑자',count:1}]},
+    ]);
+    // Only non-zero rows; everything not named folds into rest (other series, unread pages).
+    expect(reviewLines({total:20,groups,rest:13})).toEqual({lines:groups,rest:13});
+    const many = Array.from({length:5},(_,i) => ({seriesId:`s${i}`,seriesName:`시리즈${i}`,count:5 - i,characters:[{id:`c${i}`,name:`캐릭터${i}`,count:5 - i}]}));
+    const shown = reviewLines({total:15,groups:many,rest:0});
+    expect(shown.lines.map(line => line.seriesId)).toEqual(['s0','s1','s2']);
+    expect(shown.rest).toBe(3);
+    expect(reviewLines(null)).toEqual({lines:[],rest:0});
   });
   it('lists pinned notes newest first as one line each; month notes, unpinned and deleted notes never show',() => {
     expect(memoRows(pinnedNotes(),'2026-09-25')).toEqual([
@@ -166,6 +191,23 @@ describe('Home',() => {
     expect(serverCard.textContent).toContain('연결됨 · 작업실 PC · 3분 전');
     fireEvent.click(within(serverCard).getByRole('button')); expect(input.onSettings).toHaveBeenCalled();
     expect(screen.queryByRole('region',{name:'오늘의 AV 배우'})).toBeNull();
+  });
+
+  it('splits 캐릭터 검토 by series and character, each opening its own review, reading at most two pages',async() => {
+    server.reviewPages = reviewPages(30,[[['lara',3],['rover',1]],[['lara',2],['mari',2]],[['mari',9]]]);
+    const input = props();
+    render(<Home {...input}/>);
+    const todo = region('확인할 것');
+    const series = await within(todo).findByRole('button',{name:'백합 캐릭터 검토 7건'});
+    expect(series.closest('.home-review-line')!.textContent).toBe('백합라라 5마리 2');
+    expect(within(todo).getByRole('button',{name:'명조 캐릭터 검토 1건'})).toBeTruthy();
+    // 30 left, 8 read: the rest is shown as one line, not guessed.
+    expect(within(todo).getByText(/^외/).textContent).toBe('외 22건');
+    const reads = mocks.api.mock.calls.filter(([path]) => String(path).startsWith('/v1/library/characters/review'));
+    expect(reads.map(([path]) => new URLSearchParams(String(path).split('?')[1]).get('cursor'))).toEqual([null,'1']);
+    fireEvent.click(series); expect(input.onReview).toHaveBeenLastCalledWith({series:{id:'yuri',name:'백합'}});
+    fireEvent.click(within(todo).getByRole('button',{name:'마리 캐릭터 검토 2건'})); expect(input.onReview).toHaveBeenLastCalledWith({target:{id:'mari',name:'마리'}});
+    fireEvent.click(within(todo).getByRole('button',{name:'캐릭터 검토 30건'})); expect(input.onReview).toHaveBeenLastCalledWith();
   });
 
   it('calm: cards with nothing to act on collapse to one line',async() => {
@@ -262,6 +304,21 @@ describe('Home',() => {
     fireEvent.click(within(notice).getByRole('button',{name:'다시 연결'}));
     expect(input.onRefresh).toHaveBeenCalled();
     await waitFor(() => expect(mocks.api.mock.calls.length).toBeGreaterThan(reads));
+  });
+
+  it('offline: keeps the last series/character split of 캐릭터 검토',async() => {
+    server.reviewPages = reviewPages(4,[[['lara',3],['rover',1]]]);
+    const first = render(<Home {...props()}/>);
+    await within(region('확인할 것')).findByRole('button',{name:'백합 캐릭터 검토 3건'});
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(HOME_SNAPSHOT_KEY)!).review.value.total).toBe(4));
+    first.unmount();
+    server.offline = true;
+    render(<Home {...props({captures:null})}/>);
+    const todo = region('확인할 것');
+    expect(within(todo).getByRole('button',{name:'캐릭터 검토 4건'})).toBeTruthy();
+    expect(within(todo).getByRole('button',{name:'라라 캐릭터 검토 3건'})).toBeTruthy();
+    expect(within(todo).getByRole('button',{name:'방랑자 캐릭터 검토 1건'})).toBeTruthy();
+    expect(within(todo).queryByText(/^외/)).toBeNull();
   });
 
   it('ignores a snapshot written for another connection',() => {

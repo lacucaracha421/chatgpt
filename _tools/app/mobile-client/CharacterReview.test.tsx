@@ -56,6 +56,25 @@ describe('character review screen',()=>{
     // Warming runs in a passive effect, which React may flush after the DOM this test waited for.
     await waitFor(()=>expect(vi.mocked(warmThumbnail).mock.calls.map(([a])=>a.id)).toEqual(['a2','a3']));
   });
+  it('opens on one series: filters its candidates here and walks pages without any',async()=>{
+    const other={o:{name:'남',seriesId:'x',seriesName:'다른 시리즈',references:[]}};
+    mocks.api.mockImplementation(async(path:string)=>{
+      const cursor=new URLSearchParams(path.split('?')[1]).get('cursor');
+      if(!cursor)return feed({items:[item('o1','o')],targets:other,nextCursor:'p2',hasMore:true});
+      if(cursor==='p2')return feed({items:[item('o2','o')],targets:other,nextCursor:'p3',hasMore:true});
+      return feed({items:[item('a1'),item('o3','o'),item('a3','d')],nextCursor:null,hasMore:false,targets:{...feed().targets,...other}});
+    });
+    render(<CharacterReview libraryId={LIBRARY} series={{id:'s',name:'시리즈'}} backRef={{current:null}} onClose={vi.fn()}/>);
+    expect(await screen.findByText('루미')).toBeTruthy();
+    expect(screen.getByRole('heading',{name:'시리즈 검토'})).toBeTruthy();
+    expect(screen.getByText('0 / 2')).toBeTruthy();
+    // The series filter is local: no `target` goes to the server.
+    expect(mocks.api.mock.calls.every(([path])=>!String(path).includes('target='))).toBe(true);
+    fireEvent.click(screen.getByRole('button',{name:/맞음/}));
+    expect(await screen.findByText('둘째')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:/아님/}));
+    expect(await screen.findByText('모두 검토했습니다')).toBeTruthy();
+  });
   it('queues 맞음/아님 from buttons and swipes, skips locally, and hides queued pairs',async()=>{
     install(feed());mount();
     await screen.findByText('루미');

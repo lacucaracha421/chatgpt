@@ -54,15 +54,20 @@ function ReviewImage({asset, className, label}: {asset: Asset; className?: strin
   return shown ? <img className={className} src={shown} alt={label} draggable={false}/> : <span className={`${className ?? ''} review-missing`}><PhotoIcon aria-hidden="true"/></span>;
 }
 
+/** What a review opens on: one character (`target`, filtered by the server) or one series (filtered here). */
+export type ReviewScope = {target?: {id: string; name: string} | null; series?: {id: string; name: string} | null};
+
 /**
  * Full-screen character-candidate review: one candidate at a time, swiped right for "맞음",
  * left for "아님" and up for "건너뛰기" (local only). Decisions go through the durable
  * review outbox; the PC applies them later, so an accepted Asset joins the character's
  * gallery only after the PC's next publication.
  */
-export function CharacterReview({libraryId, target, onClose, backRef}: {
+export function CharacterReview({libraryId, target, series, onClose, backRef}: {
   libraryId: string;
   target?: {id: string; name: string} | null;
+  /** Only this series' candidates. The review route has no series filter, so pages are filtered here. */
+  series?: {id: string; name: string} | null;
   onClose(): void;
   backRef: MutableRefObject<(() => boolean) | null>;
 }) {
@@ -104,13 +109,14 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
   }, []);
 
   /** Rows this device already handled (queued or decided this session) never reappear; skipped rows go last. */
-  const fresh = useCallback((items: ReviewItem[]) => {
+  const fresh = useCallback((items: ReviewItem[], described: Record<string, ReviewTarget>) => {
     const hidden = queuedReviewPairs();
     return items.filter(item => {
+      if (series && described[item.targetId]?.seriesId !== series.id) return false;
       const key = reviewPairKey(item.targetId, item.assetId);
       return !hidden.has(key) && !done.current.has(key);
     });
-  }, []);
+  }, [series?.id]);
 
   const load = useCallback(async (restart: boolean) => {
     if (more.current) return;
@@ -122,11 +128,13 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
       cursor.current = feed.hasMore ? feed.nextCursor : null;
       setCounts(feed.counts);
       setTargets(current => ({...current, ...feed.targets}));
-      if (restart) setTotal(feed.counts.total);
+      // A series count is only known as far as the pages read so far.
+      if (series) setTotal(value => (restart ? 0 : value) + feed.items.filter(item => feed.targets?.[item.targetId]?.seriesId === series.id).length);
+      else if (restart) setTotal(feed.counts.total);
       setQueue(current => {
         const seen = new Set(current.map(item => reviewPairKey(item.targetId, item.assetId)));
         const skipped = readSkippedPairs();
-        const incoming = fresh(feed.items);
+        const incoming = fresh(feed.items, feed.targets ?? {});
         if (restart) deferred.current = [];
         const later = new Set(deferred.current.map(item => reviewPairKey(item.targetId, item.assetId)));
         for (const item of incoming){ const key = reviewPairKey(item.targetId, item.assetId); if (skipped.has(key) && !later.has(key)){ deferred.current.push(item); later.add(key); } }
@@ -149,7 +157,7 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
     } finally {
       more.current = false;
     }
-  }, [fresh, target?.id]);
+  }, [fresh, target?.id, series?.id]);
 
   useEffect(() => { void load(true); }, [load]);
   // Keep a few candidates ahead, and warm the next three thumbnails.
@@ -254,7 +262,9 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
     const timer = setTimeout(() => setSnackVisible(false), 2500);
     return () => clearTimeout(timer);
   }, [undo.length, lastUndo]);
-  const title = target ? `${target.name} 검토` : '캐릭터 검토';
+  const title = target ? `${target.name} 검토` : series ? `${series.name} 검토` : '캐릭터 검토';
+  // A series walks pages that may hold none of its candidates: keep loading until the feed ends.
+  const walking = !!series && !!cursor.current;
   const {width} = size();
   return <div className="review-overlay" role="dialog" aria-modal="true" aria-label={title}>
     <header className="review-bar">
@@ -275,7 +285,8 @@ export function CharacterReview({libraryId, target, onClose, backRef}: {
       <h2>PC 업데이트가 필요합니다</h2>
       <p>PC 앱이 아직 캐릭터 검토 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 검토할 수 있습니다.</p>
     </div>}
-    {state.phase === 'ready' && state.ready && !current && <div className="empty-state review-empty">
+    {state.phase === 'ready' && state.ready && !current && walking && !notice && <div className="loading-line" role="status" aria-label="검토 목록 불러오는 중"/>}
+    {state.phase === 'ready' && state.ready && !current && (!walking || !!notice) && <div className="empty-state review-empty">
       <h2>모두 검토했습니다</h2>
       <p>{pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 캐릭터 갤러리에 나타납니다.` : 'PC가 새 후보를 보내면 여기에 나타납니다.'}</p>
       {!cursor.current && deferred.current.length > 0 && <Button onClick={replaySkipped}>건너뛴 {deferred.current.length}개 다시 보기</Button>}

@@ -5,7 +5,7 @@ import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
 import {characterReviewLibrary,validCharacterIndex,type CharacterIndex} from './characterModel';
-import {CharacterReview} from './CharacterReview';
+import {CharacterReview,type ReviewScope} from './CharacterReview';
 import {useCharacterReviewBackgroundFlush} from './useCharacterReview';
 import {SimilarityReview} from './SimilarityReview';
 import {LibraryTrash} from './LibraryTrash';
@@ -90,7 +90,7 @@ export function App() {
   // Queued character-review decisions are sent the same way, and when the network returns.
   useCharacterReviewBackgroundFlush(status.configured);
   // The full-screen character review, optionally filtered to one character.
-  const [review,setReview]=useState<{target:{id:string;name:string}|null}|null>(null);
+  const [review,setReview]=useState<ReviewScope|null>(null);
   const [reviewClosed,setReviewClosed]=useState(0);
   const reviewBack=useRef<(()=>boolean)|null>(null);
   // Similarity review decisions wait out their undo window, then go the same way.
@@ -635,7 +635,7 @@ export function App() {
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
           onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
           onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
-          onReview={() => setReview({target:null})} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
+          onReview={scope => setReview({target:scope?.target??null,series:scope?.series??null})} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => {setHomeOrigin({area:'collections'});openCollections({kind:'releases'});}} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
         <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused}/>
@@ -660,7 +660,7 @@ export function App() {
     {settings && <Settings onOpenVault={()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
     {fault && <FaultGame items={fault} onClose={() => setFault(null)}/>}
     {similarity && <SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/>}
-    {review && reviewLibrary && <CharacterReview key={review.target?.id??'all'} libraryId={reviewLibrary} target={review.target} backRef={reviewBack} onClose={closeReview}/>}
+    {review && reviewLibrary && <CharacterReview key={review.target?.id??(review.series?`series:${review.series.id}`:'all')} libraryId={reviewLibrary} target={review.target} series={review.series} backRef={reviewBack} onClose={closeReview}/>}
     {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} reviewLibrary={reviewLibrary} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <LibraryTrash key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/>}
     {!viewer && trash.snackbar}
