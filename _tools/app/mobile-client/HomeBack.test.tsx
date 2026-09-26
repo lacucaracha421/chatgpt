@@ -18,7 +18,17 @@ vi.mock('./Home', () => ({Home:(props:HomeProps) => <div className="home-scroll"
   <button onClick={props.onDuplicates}>home 중복</button>
   <button onClick={props.onRecent}>home 최근</button>
   <button onClick={props.onLibrary}>home 라이브러리</button>
+  <button onClick={props.onReview}>home 캐릭터 검토</button>
 </div>}));
+// The review overview and the review: stand-ins that close on Back like the real ones.
+vi.mock('./CharacterReviewOverview', () => ({CharacterReviewOverview:({backRef,onOpen,onClose,refreshKey}:{backRef:MutableRefObject<(() => boolean)|null>;onOpen(scope:unknown):void;onClose():void;refreshKey:unknown}) => {
+  backRef.current = () => {onClose(); return true;};
+  return <section aria-label="review-overview" data-refresh={String(refreshKey)}><button onClick={() => onOpen({target:{id:'lara',name:'라라'}})}>overview 라라</button></section>;
+}}));
+vi.mock('./CharacterReview', () => ({CharacterReview:({backRef,onClose}:{backRef:MutableRefObject<(() => boolean)|null>;onClose():void}) => {
+  backRef.current = () => {onClose(); return true;};
+  return <section aria-label="review-screen"/>;
+}, CharacterReviewEntry:() => null, CharacterReviewChip:() => null}));
 vi.mock('./Gallery', () => ({Gallery:({intro,items}:{intro?:ReactNode;items:Asset[]}) => <div aria-label="자산 목록">{intro}{items.map(a => <span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
 vi.mock('./Viewer', () => ({Viewer:() => null}));
 type AreaProps = {active:boolean; backRef:MutableRefObject<(() => boolean)|null>; onReturnHome?:() => void; onHomeEntryGone?:() => void};
@@ -151,5 +161,27 @@ it('forgets the Notes Home origin once the note opened from Home is trashed (Bac
   // The list root falls back to the assets area it was opened over, which is Home here.
   back();
   await waitFor(() => expect(onHome()).toBe(true));
+  expect(finished()).toBe(false);
+});
+
+it('opens the character review overview from Home; Back returns review → overview (re-read) → Home',async() => {
+  const base = mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string) => path === '/v1/library/characters'
+    ? {version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false,characterReview:true},libraryId:'e'.repeat(32),ready:true,revision:'a'.repeat(64),publishedAt:null,nodes:[],scopes:[]}
+    : base(path));
+  const home = await startHome();
+  fireEvent.click(screen.getByRole('button',{name:'home 캐릭터 검토'}));
+  const overview = await screen.findByRole('region',{name:'review-overview'});
+  const before = overview.getAttribute('data-refresh');
+  fireEvent.click(screen.getByRole('button',{name:'overview 라라'}));
+  await screen.findByRole('region',{name:'review-screen'});
+  back();
+  await waitFor(() => expect(screen.queryByRole('region',{name:'review-screen'})).toBeNull());
+  expect(screen.getByRole('region',{name:'review-overview'}).getAttribute('data-refresh')).not.toBe(before);
+  back();
+  await waitFor(() => expect(screen.queryByRole('region',{name:'review-overview'})).toBeNull());
+  expect(onHome()).toBe(true);
+  expect(screen.getByLabelText('홈 대시보드')).toBe(home);
+  expect(home.scrollTop).toBe(300);
   expect(finished()).toBe(false);
 });

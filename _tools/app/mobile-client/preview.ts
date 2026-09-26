@@ -291,7 +291,8 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     const midnight=new Date();midnight.setHours(0,0,0,0);const monday=new Date(midnight);monday.setDate(monday.getDate()-(monday.getDay()+6)%7);
     return {total:homeDemo==='calm'?1172:1209,addedToday:homeDemo==='calm'?0:37,addedThisWeek:homeDemo==='calm'?41:214,unclassified:homeDemo==='calm'?0:58,todayStart:midnight.toISOString(),weekStart:monday.toISOString(),listGeneration:'d'.repeat(64)};
   }
-  if(homeDemo&&url.pathname==='/v1/library/characters/review')return {ready:true,counts:{total:homeDemo==='calm'?0:14},items:[]};
+  // busy: exact per-character counts (an upgraded server), shown by the review overview.
+  if(homeDemo&&url.pathname==='/v1/library/characters/review')return {ready:true,counts:{total:homeDemo==='calm'?0:14},items:[],targets:{},...(homeDemo==='busy'?{countsByTarget:[{targetId:'demo-0',seriesId:'demo',pending:5},{targetId:'demo-1',seriesId:'demo',pending:3},{targetId:'demo-4',seriesId:'demo',pending:2},{targetId:'lily-1',seriesId:'lily',pending:4,name:'라라',seriesName:'백합'}]}:{})};
   if(homeDemo&&url.pathname==='/v1/library/similarity/review')return {ready:true,counts:{open:homeDemo==='calm'?0:6},items:[]};
   if(homeDemo&&url.pathname==='/v1/mobile-catalog/duplicates')return {counts:{undecided:homeDemo==='calm'?0:2},items:[]};
   if(homeDemo==='busy'&&url.pathname.includes('/captures'))return {captures:assets.slice(0,23)};

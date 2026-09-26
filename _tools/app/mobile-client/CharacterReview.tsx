@@ -54,8 +54,12 @@ function ReviewImage({asset, className, label}: {asset: Asset; className?: strin
   return shown ? <img className={className} src={shown} alt={label} draggable={false}/> : <span className={`${className ?? ''} review-missing`}><PhotoIcon aria-hidden="true"/></span>;
 }
 
-/** What a review opens on: one character (`target`, filtered by the server) or one series (filtered here). */
-export type ReviewScope = {target?: {id: string; name: string} | null; series?: {id: string; name: string} | null};
+/**
+ * What a review opens on: one character (`target`, filtered by the server) or one series. A series
+ * is filtered by the server when it accepts `series=` (`serverSeries`, known from `countsByTarget`),
+ * and here in any case.
+ */
+export type ReviewScope = {target?: {id: string; name: string} | null; series?: {id: string; name: string} | null; serverSeries?: boolean};
 
 /**
  * Full-screen character-candidate review: one candidate at a time, swiped right for "맞음",
@@ -63,11 +67,12 @@ export type ReviewScope = {target?: {id: string; name: string} | null; series?: 
  * review outbox; the PC applies them later, so an accepted Asset joins the character's
  * gallery only after the PC's next publication.
  */
-export function CharacterReview({libraryId, target, series, onClose, backRef}: {
+export function CharacterReview({libraryId, target, series, serverSeries = false, onClose, backRef}: {
   libraryId: string;
   target?: {id: string; name: string} | null;
-  /** Only this series' candidates. The review route has no series filter, so pages are filtered here. */
+  /** Only this series' candidates: asked of the server when `serverSeries`, and filtered here in any case. */
   series?: {id: string; name: string} | null;
+  serverSeries?: boolean;
   onClose(): void;
   backRef: MutableRefObject<(() => boolean) | null>;
 }) {
@@ -122,14 +127,15 @@ export function CharacterReview({libraryId, target, series, onClose, backRef}: {
     if (more.current) return;
     more.current = true;
     try {
-      const feed = await api<ReviewFeed>(reviewPath({target: target?.id, cursor: restart ? null : cursor.current, limit: PAGE}));
+      const feed = await api<ReviewFeed>(reviewPath({target: target?.id, series: serverSeries ? series?.id : null, cursor: restart ? null : cursor.current, limit: PAGE}));
       if (!alive.current) return;
       if (feed?.version !== 1 || !Array.isArray(feed.items)) throw new Error('캐릭터 검토 응답을 확인할 수 없습니다.');
       cursor.current = feed.hasMore ? feed.nextCursor : null;
       setCounts(feed.counts);
       setTargets(current => ({...current, ...feed.targets}));
-      // A series count is only known as far as the pages read so far.
-      if (series) setTotal(value => (restart ? 0 : value) + feed.items.filter(item => feed.targets?.[item.targetId]?.seriesId === series.id).length);
+      // A series count is exact from the per-character counts, else known only as far as the pages read.
+      if (series && Array.isArray(feed.countsByTarget)) { if (restart) setTotal(feed.countsByTarget.filter(row => row.seriesId === series.id).reduce((sum, row) => sum + (Number.isSafeInteger(row.pending) ? row.pending : 0), 0)); }
+      else if (series) setTotal(value => (restart ? 0 : value) + feed.items.filter(item => feed.targets?.[item.targetId]?.seriesId === series.id).length);
       else if (restart) setTotal(feed.counts.total);
       setQueue(current => {
         const seen = new Set(current.map(item => reviewPairKey(item.targetId, item.assetId)));
@@ -157,7 +163,7 @@ export function CharacterReview({libraryId, target, series, onClose, backRef}: {
     } finally {
       more.current = false;
     }
-  }, [fresh, target?.id, series?.id]);
+  }, [fresh, target?.id, series?.id, serverSeries]);
 
   useEffect(() => { void load(true); }, [load]);
   // Keep a few candidates ahead, and warm the next three thumbnails.

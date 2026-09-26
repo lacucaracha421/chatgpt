@@ -49,3 +49,24 @@
 .review-overlay > * { flex:none; }
 .review-overlay > .review-body { flex:1 1 0; min-height:0; }
 .review-overlay > .review-empty { flex:1 1 0; min-height:0; display:flex; flex-direction:column; justify-content:center; }
+
+/* The review overview (Home › 캐릭터 검토): series sections with character tiles and counts. */
+.review-stale { flex:none; padding:0 5px; border:1px solid var(--color-border); border-radius:2px; font-size:12px; line-height:20px; color:var(--color-muted); white-space:nowrap; }
+.review-overlay > .overview-scroll { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:4px var(--mobile-gutter, 16px) 24px; }
+.overview-series { margin-bottom:20px; }
+.overview-series-head { display:flex; align-items:center; gap:10px; width:100%; min-height:var(--touch, 44px); padding:6px 4px 6px 0; border:0; border-bottom:1px solid var(--color-border); background:none; color:inherit; font:inherit; text-align:left; }
+.overview-series-head strong { flex:1; min-width:0; font-size:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.overview-series-head > svg { width:16px; height:16px; color:var(--color-muted); }
+.overview-cover { flex:none; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:var(--radius-sm, 8px); background:var(--color-surface); overflow:hidden; color:var(--color-muted); }
+.overview-cover img, .overview-portrait img { width:100%; height:100%; object-fit:cover; }
+.overview-cover svg { width:18px; height:18px; }
+.overview-count { color:var(--color-accent); font-weight:600; font-size:15px; }
+.overview-characters { display:grid; grid-template-columns:repeat(auto-fill, minmax(112px, 1fr)); gap:12px; padding-top:12px; }
+.overview-character { display:flex; flex-direction:column; min-width:0; padding:0; border:0; background:none; color:inherit; font:inherit; text-align:left; }
+.overview-portrait { display:flex; align-items:center; justify-content:center; width:100%; aspect-ratio:3/4; border-radius:var(--radius-sm, 8px); background:var(--color-surface); overflow:hidden; color:var(--color-muted); }
+.overview-portrait svg { width:28px; height:28px; }
+.overview-caption { display:flex; align-items:baseline; justify-content:space-between; gap:6px; padding:6px 2px 0; font-size:13px; }
+.overview-caption strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+.overview-caption .numeric { color:var(--color-accent); font-weight:600; }
+.overview-character:active .overview-portrait, .overview-series-head:active { opacity:.75; }
+.overview-rest { margin:0; font-size:13px; color:var(--color-muted); }

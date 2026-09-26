@@ -69,11 +69,18 @@ describe('character review screen',()=>{
     expect(screen.getByRole('heading',{name:'시리즈 검토'})).toBeTruthy();
     expect(screen.getByText('0 / 2')).toBeTruthy();
     // The series filter is local: no `target` goes to the server.
-    expect(mocks.api.mock.calls.every(([path])=>!String(path).includes('target='))).toBe(true);
+    expect(mocks.api.mock.calls.every(([path])=>!String(path).includes('target=')&&!String(path).includes('series='))).toBe(true);
     fireEvent.click(screen.getByRole('button',{name:/맞음/}));
     expect(await screen.findByText('둘째')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:/아님/}));
     expect(await screen.findByText('모두 검토했습니다')).toBeTruthy();
+  });
+  it('opens on one series filtered by an upgraded server, with its exact count',async()=>{
+    install(feed({items:[item('a1'),item('a3','d')],countsByTarget:[{targetId:'c',seriesId:'s',pending:7},{targetId:'d',seriesId:'s',pending:2},{targetId:'o',seriesId:'x',pending:9}]}));
+    render(<CharacterReview libraryId={LIBRARY} series={{id:'s',name:'시리즈'}} serverSeries backRef={{current:null}} onClose={vi.fn()}/>);
+    expect(await screen.findByText('루미')).toBeTruthy();
+    expect(new URLSearchParams(String(mocks.api.mock.calls[0][0]).split('?')[1]).get('series')).toBe('s');
+    expect(screen.getByText('0 / 9')).toBeTruthy();
   });
   it('queues 맞음/아님 from buttons and swipes, skips locally, and hides queued pairs',async()=>{
     install(feed());mount();

@@ -125,15 +125,3 @@
   .home-card .home-cols > :nth-child(2) { border-top:1px solid var(--color-border); }
   .home-card .home-cols > :nth-child(2n) { border-left:0; }
 }
-
-/* 확인할 것 › 캐릭터 검토 by series and character ("백합 › 라라 5 · 마리 2"). */
-.home-review { display:flex; flex-direction:column; min-width:0; }
-.home-review-lines { display:flex; flex-direction:column; gap:2px; padding:0 8px 8px 78px; }
-.home-review-line, .home-review-rest { display:flex; flex-wrap:wrap; align-items:center; gap:2px 4px; margin:0; font-size:13px; color:var(--color-muted); }
-.home-review-series, .home-review-character { display:inline-flex; align-items:center; gap:2px; min-height:32px; padding:0 6px; border:0; border-radius:6px; background:none; color:var(--color-text); font:inherit; white-space:nowrap; }
-.home-review-series { font-weight:600; }
-.home-review-series svg { width:12px; height:12px; color:var(--color-muted); }
-.home-review-character + .home-review-character::before { content:'·'; margin-right:6px; color:var(--color-muted); }
-.home-review-character .numeric { color:var(--color-accent); font-weight:600; }
-.home-review-series:active, .home-review-character:active { background:var(--color-surface-pressed, var(--color-control-pressed)); }
-.home-review-rest { padding:0 6px; }

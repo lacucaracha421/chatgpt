@@ -31,16 +31,22 @@ export type ReviewSource = 's36' | 'b36' | 'doubtful';
 export type ReviewCounts = {total: number; s36: number; b36: number; doubtful: number; pendingPc: number; skipped: number};
 export type ReviewItem = {targetId: string; assetId: string; sources: ReviewSource[]; verdict: string; knn3: number | null; basis: string; asset: Asset};
 export type ReviewTarget = {name: string; seriesId: string; seriesName: string | null; references: Asset[]};
+/** One character's exact waiting count (an upgraded server; `name`/`seriesName` only if it sends them). */
+export type ReviewTargetCount = {targetId: string; seriesId: string; pending: number; name?: string; seriesName?: string | null};
 export type ReviewFeed = {
   version: 1; ready: boolean; libraryId: string | null; revision: string | null; generatedAt: string | null;
   counts: ReviewCounts; items: ReviewItem[]; targets: Record<string, ReviewTarget>;
   nextCursor: string | null; hasMore: boolean;
+  /** Exact per-character counts. Its presence also means the route accepts `series=`. */
+  countsByTarget?: ReviewTargetCount[];
 };
 export type ReviewAssetTargets = {version: 1; ready: boolean; assetId: string; targets: {targetId: string; name: string; seriesId: string; seriesName: string | null}[]};
 
-export function reviewPath(params: {target?: string | null; cursor?: string | null; limit?: number}) {
+/** `series` only for a server that sends `countsByTarget`: an older one refuses unknown parameters. */
+export function reviewPath(params: {target?: string | null; series?: string | null; cursor?: string | null; limit?: number}) {
   const query = new URLSearchParams({limit: String(params.limit ?? 20)});
   if (params.target) query.set('target', params.target);
+  if (params.series) query.set('series', params.series);
   if (params.cursor) query.set('cursor', params.cursor);
   return `${REVIEW_PATH}?${query}`;
 }

@@ -3,7 +3,7 @@ import {rowView, type ExchangeSnapshot} from './exchange';
 import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, shortReleaseDate, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import type {CollectionSummary} from './collectionModel';
 import {currentShelf, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
-import {useCharacterReviewBreakdown, type ReviewBreakdown} from './useCharacterReview';
+import {useCharacterReviewCount} from './useCharacterReview';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useDuplicateCount} from './CatalogDuplicates';
 import {useVisibleInterval} from './useVisibleInterval';
@@ -20,9 +20,7 @@ import {monthNotesOf, monthSummary} from '../src/notes/ledger/summary';
  * Home's information dashboard (HOME-DASH-001, layout R2), from data the tablet already reads
  * elsewhere.
  *
- * - 확인할 것: the same single-row count reads the Library root and Catalog use; 캐릭터 검토 reads
- *   the first candidate pages instead, to split its total by series and character (the review
- *   route has no per-character counts).
+ * - 확인할 것: the same single-row count reads the Library root and Catalog use.
  * - 신간 / 발매 예정: the release counts read (tiny) and the manga shelf from the shared release
  *   store, read at most once per Collections publication whichever of Home and the 신간 screen
  *   asks first.
@@ -71,21 +69,6 @@ export function upcomingReleases(shelf: MangaShelf | null, today = localToday())
     .filter((volume): volume is typeof volume & {date: string} => volume.upcoming && !!volume.date)
     .map(volume => ({id: row.work.id, name: row.work.name, date: volume.date, volumeNumber: volume.volumeNumber})))
     .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, 'ko') || a.volumeNumber - b.volumeNumber);
-}
-
-/** Series and characters shown under 캐릭터 검토; the rest folds into "외 N건". */
-export const REVIEW_SERIES = 3, REVIEW_CHARACTERS = 3;
-/**
- * 캐릭터 검토's lines ("백합 › 라라 5 · 마리 2"): the busiest series and characters, only non-zero,
- * and `rest`, every candidate not shown by name (other series or characters, or not yet read).
- */
-export function reviewLines(review: ReviewBreakdown | null) {
-  if (!review) return {lines: [], rest: 0};
-  const lines = review.groups.filter(group => group.count > 0).slice(0, REVIEW_SERIES).map(group => ({
-    ...group, characters: group.characters.filter(entry => entry.count > 0).slice(0, REVIEW_CHARACTERS),
-  }));
-  const named = lines.reduce((sum, line) => sum + line.characters.reduce((all, entry) => all + entry.count, 0), 0);
-  return {lines, rest: Math.max(0, review.total - named)};
 }
 
 /** How many days after `today` a `YYYY-MM-DD` date falls (local calendar days). */
@@ -214,8 +197,6 @@ export type HomeSnapshot = {
   releases?: Stamped<ReleaseRow[]>;
   upcoming?: Stamped<UpcomingRow[]>;
   summary?: Stamped<LibrarySummary>;
-  /** 캐릭터 검토 split by series and character. */
-  review?: Stamped<ReviewBreakdown>;
 };
 const SNAPSHOT_ROWS = 6;
 export function readHomeSnapshot(scope: string): HomeSnapshot {
@@ -229,7 +210,7 @@ function writeHomeSnapshot(snapshot: HomeSnapshot) {
   try { localStorage.setItem(HOME_SNAPSHOT_KEY, JSON.stringify(snapshot)); } catch { /* Optional: offline values only. */ }
 }
 /** Merge fresh values into the snapshot; unknown values keep what was there. */
-export function rememberHomeValues(scope: string, fresh: {counts: Partial<Record<TodoKey | 'releases', number | null>>; releases?: ReleaseRow[] | null; upcoming?: UpcomingRow[] | null; summary?: LibrarySummary | null; review?: ReviewBreakdown | null}, now = Date.now()) {
+export function rememberHomeValues(scope: string, fresh: {counts: Partial<Record<TodoKey | 'releases', number | null>>; releases?: ReleaseRow[] | null; upcoming?: UpcomingRow[] | null; summary?: LibrarySummary | null}, now = Date.now()) {
   const current = readHomeSnapshot(scope);
   const counts = {...current.counts};
   let changed = false;
@@ -241,7 +222,6 @@ export function rememberHomeValues(scope: string, fresh: {counts: Partial<Record
   if (fresh.releases) { next.releases = {value: fresh.releases.slice(0, SNAPSHOT_ROWS), at: now}; changed = true; }
   if (fresh.upcoming) { next.upcoming = {value: fresh.upcoming.slice(0, SNAPSHOT_ROWS), at: now}; changed = true; }
   if (fresh.summary) { next.summary = {value: fresh.summary, at: now}; changed = true; }
-  if (fresh.review) { next.review = {value: {...fresh.review, groups: fresh.review.groups.slice(0, SNAPSHOT_ROWS)}, at: now}; changed = true; }
   if (changed) writeHomeSnapshot(next);
   return next;
 }
@@ -262,8 +242,7 @@ export type HomeDashboardInput = {
 const CHECK_MS = 60_000;
 
 export function useHomeDashboard({enabled, scope, pending, reviewEnabled, reviewKey, similarityKey, exchange}: HomeDashboardInput) {
-  const review = useCharacterReviewBreakdown(enabled && reviewEnabled, reviewKey);
-  const character = review?.total ?? null;
+  const character = useCharacterReviewCount(enabled && reviewEnabled, null, reviewKey);
   const similar = useSimilarityReviewCount(enabled, similarityKey);
   const duplicates = useDuplicateCount(enabled);
   const [counts, setCounts] = useState<ReleaseCounts | null>(null);
@@ -323,10 +302,10 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
   const upcoming = shelf ? upcomingReleases(shelf) : null;
 
   // Keep the last fresh values for an offline Home (only what was actually read).
-  const freshKey = offline ? '' : JSON.stringify([live, counts?.unread ?? null, releases, upcoming, summary ?? null, reviewEnabled ? review : null]);
+  const freshKey = offline ? '' : JSON.stringify([live, counts?.unread ?? null, releases, upcoming, summary ?? null]);
   useEffect(() => {
     if (!freshKey) return;
-    setSnapshot(rememberHomeValues(scope, {counts: {...live, releases: counts ? Object.keys(counts.byCollection).length : null}, releases, upcoming, summary, review: reviewEnabled ? review : null}));
+    setSnapshot(rememberHomeValues(scope, {counts: {...live, releases: counts ? Object.keys(counts.byCollection).length : null}, releases, upcoming, summary}));
   }, [freshKey, scope]);
 
   const pick = <T,>(value: T | null, kept: Stamped<T> | undefined) => value ?? kept?.value ?? null;
@@ -336,8 +315,6 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
     todos,
     /** Offline: when the kept to-do counts were last fresh. */
     todosAt: offline ? Math.max(0, ...TODO_ORDER.map(key => snapshot.counts[key]?.at ?? 0)) || null : null,
-    /** 캐릭터 검토 by series and character (fresh, else the kept split); null when unknown. */
-    review: reviewEnabled ? (live.character !== null ? review : snapshot.review?.value ?? null) : null,
     applicable: TODO_ORDER.filter(key => key !== 'character' || reviewEnabled),
     unreadWorks: counts ? Object.keys(counts.byCollection).length : snapshot.counts.releases?.value ?? null,
     releases: pick(releases, snapshot.releases),

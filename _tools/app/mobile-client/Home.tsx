@@ -5,11 +5,10 @@ import {Artwork} from './Collections';
 import {collectionCover} from './collectionModel';
 import {localToday} from './collectionReleases';
 import {currentShelf, subscribeReleases} from './releaseStore';
-import {addedToday, agoLabel, characterTagging, reviewLines, clockLabel, dateBlock, daysAfter, PENDING_LIMIT, TODO_LABELS, UPCOMING_DAYS, useHomeDashboard, useHomeMemos, type MemoRow, type TodoKey} from './homeDashboard';
+import {addedToday, agoLabel, characterTagging, clockLabel, dateBlock, daysAfter, PENDING_LIMIT, TODO_LABELS, UPCOMING_DAYS, useHomeDashboard, useHomeMemos, type MemoRow, type TodoKey} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchange';
 import type {Asset} from './types';
-import type {ReviewScope} from './CharacterReview';
 import './home.css';
 
 export interface HomeProps {
@@ -25,8 +24,7 @@ export interface HomeProps {
   characters?:CharacterIndex|null;
   /** Character review (only when the library supports it) and similarity review, with the keys that re-read their counts. */
   review:{enabled:boolean;refreshKey:unknown}; similarityKey:unknown;
-  /** Character review: all candidates, or one series' or one character's. */
-  onPending():void; onReview(scope?:ReviewScope):void; onSimilarity():void; onDuplicates():void; onExchange():void;
+  onPending():void; onReview():void; onSimilarity():void; onDuplicates():void; onExchange():void;
   onReleases():void; onWork(id:string):void; onSettings():void;
   /** The recent saves list, and the Library root (캐릭터 자동 태그). */
   onRecent():void; onLibrary():void;
@@ -107,8 +105,7 @@ export function Home(props:HomeProps) {
   const today = localToday();
 
   // ① 확인할 것
-  const open:Record<TodoKey,() => void> = {pending:props.onPending,character:() => props.onReview(),similar:props.onSimilarity,duplicates:props.onDuplicates};
-  const review = reviewLines(d.review);
+  const open:Record<TodoKey,() => void> = {pending:props.onPending,character:props.onReview,similar:props.onSimilarity,duplicates:props.onDuplicates};
   const due = d.applicable.filter(key => (d.todos[key] ?? 0) > 0);
   const unknown = d.applicable.some(key => d.todos[key] === null);
   const firstDue = due[0];
@@ -116,16 +113,7 @@ export function Home(props:HomeProps) {
     calm={due.length ? undefined : unknown ? <span>{stale ? '마지막 값 없음' : '확인하는 중…'}</span> : <Ok>모두 확인함</Ok>}>
     {due.length > 0 && <div className="home-cols">{due.map(key => {
       const value = d.todos[key]!, more = key === 'pending' && value >= PENDING_LIMIT, {label,unit,note} = TODO_LABELS[key];
-      const row = <Row key={key} value={`${value}${more ? '+' : ''}`} unit={unit} title={label} note={key === 'character' && review.lines.length ? undefined : note} onOpen={open[key]} label={`${label} ${value}${more ? '+' : ''}${unit}`}/>;
-      if (key !== 'character' || !review.lines.length) return row;
-      // 캐릭터 검토 by series and character: "백합 › 라라 5 · 마리 2", each opening its own review.
-      return <div key={key} className="home-review">{row}<div className="home-review-lines">
-        {review.lines.map(line => <p key={line.seriesId} className="home-review-line">
-          <button className="home-review-series" onClick={() => props.onReview({series:{id:line.seriesId,name:line.seriesName}})} aria-label={`${line.seriesName} 캐릭터 검토 ${line.count}건`}>{line.seriesName}<ChevronRightIcon aria-hidden="true"/></button>
-          {line.characters.map(entry => <button key={entry.id} className="home-review-character" onClick={() => props.onReview({target:{id:entry.id,name:entry.name}})} aria-label={`${entry.name} 캐릭터 검토 ${entry.count}건`}>{entry.name} <span className="numeric">{entry.count}</span></button>)}
-        </p>)}
-        {review.rest > 0 && <p className="home-review-rest">외 <span className="numeric">{review.rest}</span>건</p>}
-      </div></div>;
+      return <Row key={key} value={`${value}${more ? '+' : ''}`} unit={unit} title={label} note={note} onOpen={open[key]} label={`${label} ${value}${more ? '+' : ''}${unit}`}/>;
     })}</div>}
   </Card>;
 
