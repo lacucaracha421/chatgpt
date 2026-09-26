@@ -10,6 +10,7 @@ import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { groupReleases, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine } from "./releaseCalendarFormat";
 import "./releaseCalendar.css";
+import { createKoreanMatcher } from "../shared/koreanSearch";
 
 type KindFilter = "all" | "game" | "movie";
 type Tile = ReleaseTitle & { watched: boolean; unread: ReleaseWishlistEvent[]; released?: boolean };
@@ -85,9 +86,9 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
   }, [api, loadWishlist]);
 
   const wishById = useMemo(() => new Map((wishlist ?? []).map(item => [item.id, item])), [wishlist]);
-  const needle = query.trim().toLocaleLowerCase();
-  const matches = (title: ReleaseTitle) => (kind === "all" || title.kind === kind)
-    && (!needle || title.title.toLocaleLowerCase().includes(needle) || (title.originalTitle ?? "").toLocaleLowerCase().includes(needle));
+  const needle = query.trim();
+  const matchesQuery = createKoreanMatcher(needle);
+  const matches = (title: ReleaseTitle) => (kind === "all" || title.kind === kind) && matchesQuery([title.title, title.originalTitle]);
   const tiles: Tile[] = watchOnly
     ? (wishlist ?? []).filter(matches).map(item => ({ ...item, watched: true }))
     : (calendar?.entries ?? []).filter(matches).map(entry => ({ ...entry, watched: wishById.has(entry.id), unread: wishById.get(entry.id)?.unread ?? [] }));

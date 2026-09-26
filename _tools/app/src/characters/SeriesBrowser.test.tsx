@@ -381,6 +381,11 @@ it("keeps character assignment collapsed and filters the list on demand", async 
   await user.type(within(panel).getByRole("textbox", { name: "캐릭터 찾기" }), "키사");
   expect(within(panel).getByRole("checkbox", { name: "키사키" })).toBeInTheDocument();
   expect(within(panel).queryByRole("checkbox", { name: "히나" })).not.toBeInTheDocument();
+  // 초성 finds the same character.
+  const search = within(panel).getByRole("textbox", { name: "캐릭터 찾기" });
+  await user.clear(search); await user.type(search, "ㅎㄴ");
+  expect(within(panel).getByRole("checkbox", { name: "히나" })).toBeInTheDocument();
+  expect(within(panel).queryByRole("checkbox", { name: "키사키" })).not.toBeInTheDocument();
 });
 
 it("leads the character panel with references and folds rename and maintenance under 관리", async () => {

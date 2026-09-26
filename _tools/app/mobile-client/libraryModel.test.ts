@@ -20,6 +20,10 @@ it('searches all merged levels by case-insensitive name, including groups and ch
  expect(searchLibraryEntries(entries,'  group  ').map(e=>e.characterKind)).toEqual(['group']);
  expect(searchLibraryEntries(entries,'CHARACTER').map(e=>e.characterKind)).toEqual(['character']);
  expect(searchLibraryEntries(entries,'missing')).toEqual([]);
+ const korean=[{id:'k',name:'서리 은하',parent_id:null,asset_count:1},{id:'o',name:'별빛',parent_id:null,asset_count:1}];
+ expect(searchLibraryEntries(korean,'ㅅㄹ').map(e=>e.id)).toEqual(['k']);
+ expect(searchLibraryEntries(korean,'설').map(e=>e.id)).toEqual(['k']);
+ expect(searchLibraryEntries(korean,'').map(e=>e.id)).toEqual(['k','o']);
 });
 it('uses navigation order, roots orphan folders, ignores unpublished characters and bounds cyclic ancestors',()=>{
  const folders=[{id:'b',name:'B',parent_id:'missing',asset_count:1},{id:'a',name:'A',parent_id:null,asset_count:1}];

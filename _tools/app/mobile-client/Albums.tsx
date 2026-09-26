@@ -6,6 +6,7 @@ import {CoverGroup} from './CoverGroup';
 import {FolderCard} from './FolderCards';
 import {albumAncestors,albumPage,albumView,type AlbumAssetPage,type AlbumTree,type NativeAlbum} from './albumModel';
 import type {Asset,View} from './types';
+import {createKoreanMatcher} from '../src/shared/koreanSearch';
 export {albumPath} from './albumModel';
 export type {AlbumTree,NativeAlbum} from './albumModel';
 
@@ -59,8 +60,8 @@ function AlbumResult({album,path,items,paused,onVisible,onSelect}:{album:NativeA
   return <button ref={host} className="library-result" aria-label={`${album.name}, ${path}`} onClick={onSelect}><span className="album-result-cover"><CoverGroup items={items.slice(0,1)} paused={paused||!visible}/></span><span className="result-name"><strong>{album.name}</strong><small>{path}</small></span>{album.assetCount!==undefined&&<span className="numeric muted">{album.assetCount}</span>}<ChevronRightIcon/></button>;
 }
 export function Albums({tree,paused,revision,onSelect,query='',parentId}:{tree:AlbumTree;paused:boolean;revision:number;onSelect(view:View):void;query?:string;parentId?:string}) {
-  const known=new Set(tree.albums.map(album=>album.id)),search=query.trim().toLocaleLowerCase();
-  const items=tree.albums.filter(album=>search?album.name.toLocaleLowerCase().includes(search):parentId?album.parentId===parentId&&album.id!==parentId:!album.parentId||!known.has(album.parentId));
+  const known=new Set(tree.albums.map(album=>album.id)),search=query.trim(),matches=createKoreanMatcher(search);
+  const items=tree.albums.filter(album=>search?matches(album.name):parentId?album.parentId===parentId&&album.id!==parentId:!album.parentId||!known.has(album.parentId));
   const {covers,onVisible}=useAlbumCovers(tree,items,paused,revision);
   if(!tree.adopted||!tree.libraryId||tree.epoch===null)return null;
   return <div className={search?'library-results':parentId?'library-children':'library-folder-grid'}>{items.map(album=>search

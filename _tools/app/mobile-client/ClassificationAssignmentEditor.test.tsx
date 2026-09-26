@@ -89,6 +89,9 @@ describe('Classification assignment picker',()=>{
     expect(searchAssignmentTree(classifications,'애니').map(row=>row.classification.id)).toEqual(['anime']);
     expect(searchAssignmentTree(classifications,'  ')).toEqual([]);
     expect(searchAssignmentTree(classifications,'없는분류')).toEqual([]);
+    // 초성 and a syllable still being composed both find 원신.
+    expect(searchAssignmentTree(classifications,'ㅇㅅ').map(row=>row.classification.id)).toContain('genshin');
+    expect(searchAssignmentTree(classifications,'원시').map(row=>row.classification.id)).toEqual(['genshin']);
   });
 
   it('loads the whole tree from the native assignment-state bridge',async()=>{

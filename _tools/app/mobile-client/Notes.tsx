@@ -20,6 +20,7 @@ import {NoteChecklist} from './NoteChecklist';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
 import {revealCaret} from './noteCaret';
 import './notes.css';
+import {matchesKoreanSearch} from '../src/shared/koreanSearch';
 
 /** A decrypted note as native returns it (Notes v2 fields are optional: v1 notes lack them). */
 export type MobileNote=Note;
@@ -47,7 +48,7 @@ export function noteMatches(note:Note,query:string) {
   if(!query)return true;
   // A ledger matches by title only; its entries are searched inside the ledger.
   const text=isSecret(note)||isLedgerKind(note)?note.title:[note.title,note.body,...(note.items??[]).map(item=>item.text),...(note.labels??[])].join('\n');
-  return text.toLocaleLowerCase().includes(query.toLocaleLowerCase());
+  return matchesKoreanSearch(text,query);
 }
 const CARD_CHECKS=8,CARD_FIELDS=4;
 /** A sticky note's content: text, a checklist with its progress, or a secret note's masked fields. */

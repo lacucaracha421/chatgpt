@@ -3,6 +3,7 @@ import {BackspaceIcon,CalendarIcon,XMarkIcon} from '@heroicons/react/24/outline'
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {addDays,addMonths,localToday,nextCharges} from '../src/notes/ledger/cycle';
 import {LEDGER_LIMITS,monthLabel,won,type LedgerEntry,type LedgerUnit,type Planned,type Recurring} from '../src/notes/ledger/model';
+import {matchesKoreanSearch} from '../src/shared/koreanSearch';
 
 /**
  * Sheets of the tablet ledger (가계부): the entry sheet with its in-app number pad (the
@@ -57,7 +58,7 @@ export function EntrySheet({initial,names,error,onSave,onDelete,onClose}:{initia
   const linked=!!(initial.planned||initial.recurring);
   const editing=!!initial.id;
   const typed=name.trim();
-  const chips=names.filter(entry=>entry!==typed&&(!typed||entry.includes(typed))).slice(0,5);
+  const chips=names.filter(entry=>entry!==typed&&matchesKoreanSearch(entry,typed)).slice(0,5);
   // A 0-won entry only makes sense as a skipped charge.
   const canSave=!busy&&(amountOf(digits)>0||!!initial.recurring);
   async function save(again:boolean){

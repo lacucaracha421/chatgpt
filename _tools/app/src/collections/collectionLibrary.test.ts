@@ -57,6 +57,14 @@ describe("collection library derivation", () => {
     expect(result.map((item) => item.name)).toEqual(["NieR:Automata"]);
   });
 
+  it("matches titles Korean-aware: 초성, composing syllables, case and spaces", () => {
+    const items = [game("서리의 별", 4), game("Blue Archive", 4), game("가락", 4)];
+    const found = (query: string) => deriveCollectionLibrary(items, "game", { query, sort: "name", direction: "asc", rating: "all" }).map((item) => item.name);
+    expect(found("ㅅㄹ")).toEqual(["서리의 별"]);
+    expect(found("갈")).toEqual(["가락"]);
+    expect(found("bluearchive")).toEqual(["Blue Archive"]);
+  });
+
   it("filters unrated separately from zero stars", () => {
     expect(names({ query: "", sort: "recent", direction: "desc", rating: "unrated" })).toEqual(["Unrated"]);
     expect(names({ query: "", sort: "recent", direction: "desc", rating: 0 })).toEqual(["Zero"]);

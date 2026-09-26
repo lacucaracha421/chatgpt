@@ -10,6 +10,7 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { groupInbox, japanReleases, koreanReleases, koreanVolumeLine, localDay, releaseLine } from "./releaseCaption";
 import { updateCachedInbox, type ReleaseData } from "./releaseData";
 import "./collectionReleases.css";
+import { createKoreanMatcher } from "../shared/koreanSearch";
 
 /** Volumes ahead of the Korean edition shown as chips before the rest fold into "외 N권". */
 const AHEAD_CHIPS = 16;
@@ -76,8 +77,8 @@ export function CollectionReleases({ provider, collections, data, loading, error
   }, [api, provider, restricted, hidden]);
 
   const today = localDay();
-  const needle = query.trim().toLocaleLowerCase();
-  const works = collections.filter(work => work.type === "manga" && (!needle || work.name.toLocaleLowerCase().includes(needle)));
+  const matchesQuery = createKoreanMatcher(query);
+  const works = collections.filter(work => work.type === "manga" && matchesQuery(work.name));
   const board = data?.board ?? new Map();
   const inbox = data?.inbox ?? [];
   const byWork = groupInbox(inbox);
@@ -86,7 +87,7 @@ export function CollectionReleases({ provider, collections, data, loading, error
   const watched = works.filter(work => board.get(work.id)?.releaseWatch.enabled);
   const shown = new Set([...korean, ...japan].map(row => row.work.id));
   const news = { kr: korean.filter(row => row.volumes.some(volume => volume.fresh)).length, jp: japan.filter(row => row.aheadVolumes.some(volume => volume.fresh)).length };
-  const others = [...groupInbox(inbox.filter(item => !shown.has(item.collectionId) && (!needle || item.collectionName.toLocaleLowerCase().includes(needle)))).entries()];
+  const others = [...groupInbox(inbox.filter(item => !shown.has(item.collectionId) && matchesQuery(item.collectionName))).entries()];
   const waiting = Boolean(status?.retryAt && Date.parse(status.retryAt) > Date.now());
   const busy = working !== null;
   const byId = new Map(collections.map(work => [work.id, work]));

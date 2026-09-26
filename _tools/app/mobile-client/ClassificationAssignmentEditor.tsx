@@ -6,6 +6,7 @@ import {Dialog,DialogDescription,IconButton} from './ui';
 import {errorText,native} from './transport';
 import {treeBreadcrumb} from './homeModel';
 import {ClassificationIcon,classificationColor} from '../src/classification/classificationAppearance';
+import {createKoreanMatcher} from '../src/shared/koreanSearch';
 
 /**
  * One live Classification from the native replica.
@@ -96,10 +97,10 @@ export function flattenAssignmentTree(rows:AssignmentClassification[],collapsed:
  * bare name would not say which one a result is.
  */
 export function searchAssignmentTree(rows:AssignmentClassification[],query:string):{classification:AssignmentClassification;breadcrumb:string}[] {
-  const needle=query.trim().toLocaleLowerCase('ko');
-  if(!needle)return [];
+  if(!query.trim())return [];
+  const matches=createKoreanMatcher(query);
   return rows
-    .filter(row=>row.name.toLocaleLowerCase('ko').includes(needle))
+    .filter(row=>matches(row.name))
     .map(row=>({classification:row,breadcrumb:treeBreadcrumb(row,rows)}))
     .sort((a,b)=>a.classification.name.localeCompare(b.classification.name,'ko')
       ||a.breadcrumb.localeCompare(b.breadcrumb,'ko')||a.classification.id.localeCompare(b.classification.id));

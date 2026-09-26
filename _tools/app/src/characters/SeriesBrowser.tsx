@@ -36,6 +36,7 @@ import { characterApi, draftReferenceRegions, type CharacterApi, type CharacterT
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
 import "./SeriesBrowser.css";
+import { matchesKoreanSearch } from "../shared/koreanSearch";
 
 export type CharacterGalleryDrag = Pick<ComponentProps<typeof AssetGallery>, "onPointerDragStart" | "onPointerDragMove" | "onPointerDragEnd" | "onPointerDragCancel">;
 type Props = {
@@ -406,11 +407,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             <summary>캐릭터 지정…{assignTo.length ? ` · ${assignTo.length}명` : ""}</summary>
             <fieldset disabled={busy}>
               <TextField label="캐릭터 찾기" value={assignmentQuery} onChange={event => setAssignmentQuery(event.target.value)} />
-              <div className="series-assignment__options">{members.filter(target => target.displayName.toLocaleLowerCase().includes(assignmentQuery.trim().toLocaleLowerCase())).map(target => <label key={target.id}>
+              <div className="series-assignment__options">{members.filter(target => matchesKoreanSearch(target.displayName, assignmentQuery)).map(target => <label key={target.id}>
                 <input type="checkbox" checked={assignTo.includes(target.id)} onChange={event => { const checked = event.target.checked; setAssignTo(old => checked ? [...old, target.id] : old.filter(id => id !== target.id)); }} />
                 {target.displayName}{!target.enabled && !target.manualOnly ? " · 자동 분석 꺼짐" : ""}
               </label>)}</div>
-              {assignmentQuery.trim() && !members.some(target => target.displayName.toLocaleLowerCase().includes(assignmentQuery.trim().toLocaleLowerCase())) && <small>일치하는 캐릭터가 없습니다.</small>}
+              {assignmentQuery.trim() && !members.some(target => matchesKoreanSearch(target.displayName, assignmentQuery)) && <small>일치하는 캐릭터가 없습니다.</small>}
             </fieldset>
           </details>
           <Button size="sm" disabled={busy || !assignTo.length || selectedIds.length * assignTo.length > 200} onClick={() => void action(async () => {

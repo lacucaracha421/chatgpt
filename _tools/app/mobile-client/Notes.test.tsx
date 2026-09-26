@@ -131,6 +131,11 @@ it('filters by label chips and searches secret notes by title only',async()=>{
  fireEvent.click(screen.getByRole('button',{name:/^개인/}));
  fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'계정'}});
  expect(screen.getByText('서버 계정')).toBeTruthy();expect(screen.queryByText('여행')).toBeNull();
+ // Korean-aware search: 초성 and a syllable still being composed.
+ fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'ㅇㅎ'}});
+ expect(screen.getByText('여행')).toBeTruthy();expect(screen.queryByText('서버 계정')).toBeNull();
+ fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'섭'}});
+ expect(screen.getByText('서버 계정')).toBeTruthy();expect(screen.queryByText('여행')).toBeNull();
 });
 it('opens a secret note with the PIN, copies natively and drops its content when the app goes to the background',async()=>{
  const locked:MobileNote={...note,id:'d'.repeat(32),type:'secret',schema:2,title:'서버 계정',body:'',redacted:true};

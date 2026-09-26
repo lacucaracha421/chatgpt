@@ -15,6 +15,7 @@ import { Slider } from "../shared/ui/Slider";
 import { Select } from "../shared/ui/Select";
 import { Toggle } from "../shared/ui/Toggle";
 import { MangaSourceTabs, OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
+import { createKoreanMatcher } from "../shared/koreanSearch";
 
 type MangaSort = "recent" | "title_asc" | "author_asc" | "pages_desc";
 
@@ -39,10 +40,8 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
 
   const visibleSeries = useMemo(() => {
     if (!series) return [];
-    const normalized = query.trim().toLocaleLowerCase();
-    const filtered = normalized
-      ? series.filter((entry) => `${entry.title}\n${entry.author}`.toLocaleLowerCase().includes(normalized))
-      : series;
+    const matches = createKoreanMatcher(query);
+    const filtered = query.trim() ? series.filter((entry) => matches([entry.title, entry.author])) : series;
     if (sort === "recent") return filtered;
     return [...filtered].sort((left, right) => {
       if (sort === "pages_desc") return right.pageCount - left.pageCount;

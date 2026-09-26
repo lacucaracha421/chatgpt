@@ -1,5 +1,6 @@
 import type {Classification,View} from './types';
 import type {CharacterIndex,CharacterNode} from './characterModel';
+import {createKoreanMatcher} from '../src/shared/koreanSearch';
 export type Entry=Classification&{characterNode?:string;characterKind?:Exclude<CharacterNode['kind'],'series'>};
 export const LIBRARY_ROOT:View={tab:'library',root:true,title:'에셋'};
 export const ALL_ASSETS:View={tab:'library',title:'모든 자산'};
@@ -27,7 +28,7 @@ export function ancestorsOf(entries:Entry[],id?:string):Entry[]{
  while(current?.parent_id&&!seen.has(current.parent_id)){seen.add(current.parent_id);current=entries.find(e=>e.id===current!.parent_id);if(current)result.unshift(current);}
  return result;
 }
-export function searchLibraryEntries(entries:Entry[],query:string){const q=query.trim().toLocaleLowerCase();return entries.filter(entry=>entry.name.toLocaleLowerCase().includes(q));}
+export function searchLibraryEntries(entries:Entry[],query:string){const matches=createKoreanMatcher(query);return entries.filter(entry=>matches(entry.name));}
 export function entryView(entry:Entry):View{return entry.characterNode?{tab:'library',characters:true,characterNode:entry.characterNode,title:entry.name}:{tab:'library',classification:entry.id,title:entry.name};}
 export function isAll(view:View){return view.tab==='library'&&!view.root&&!view.characters&&!view.classification&&!view.revisit;}
 

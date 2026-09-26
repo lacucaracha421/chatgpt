@@ -1,4 +1,5 @@
 import type { CollectionSummary, CollectionType } from "../library/types";
+import { createKoreanMatcher } from "../shared/koreanSearch";
 
 export type CollectionLibrarySort = "recent" | "name" | "media_date";
 export type CollectionLibraryDirection = "asc" | "desc";
@@ -30,10 +31,10 @@ export function deriveCollectionLibrary(
   type: CollectionType,
   state: CollectionLibraryState,
 ): CollectionSummary[] {
-  const query = state.query.trim().toLocaleLowerCase();
+  const matches = createKoreanMatcher(state.query);
   return collections
     .filter((item) => item.type === type)
-    .filter((item) => !query || item.name.toLocaleLowerCase().includes(query))
+    .filter((item) => matches(item.name))
     .filter((item) => matchesRating(item.myScore, state.rating))
     .slice()
     .sort((left, right) => compareCollections(left, right, state));
