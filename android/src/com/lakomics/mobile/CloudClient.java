@@ -92,7 +92,7 @@ final class CloudClient {
   try{return client.api("/v1/library/list-generation","GET",null,signal).getString("generation");}
   catch(HttpFailure unavailable){if(unavailable.status==404)return null;throw unavailable;}
  }
- static void prepare(HttpURLConnection c,CancellationSignal signal){c.setConnectTimeout(12000);c.setReadTimeout(20000);c.setInstanceFollowRedirects(false);if(signal!=null){signal.throwIfCanceled();signal.setOnCancelListener(c::disconnect);}}
+ static void prepare(HttpURLConnection c,CancellationSignal signal){c.setConnectTimeout(3000);c.setReadTimeout(20000);c.setInstanceFollowRedirects(false);if(signal!=null){signal.throwIfCanceled();signal.setOnCancelListener(c::disconnect);}}
  static void copy(InputStream in,OutputStream out,long max,CancellationSignal signal)throws IOException {byte[] b=new byte[32768];long deadline=System.currentTimeMillis()+90000;long count=0;int n;while((n=in.read(b))!=-1){if(signal!=null)signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new SocketTimeoutException("Transfer deadline exceeded");count+=n;if(count>max)throw new IOException("Media exceeds cache limit");out.write(b,0,n);}}
  void download(String url,File file,long max,CancellationSignal signal)throws Exception {
   PerfLog.Op perf=PerfLog.current.get();long downloadStarted=System.nanoTime();
