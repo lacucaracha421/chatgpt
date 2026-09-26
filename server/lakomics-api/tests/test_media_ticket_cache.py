@@ -483,6 +483,29 @@ class CommittedMediaTicketTests(AssetAuthorityFixture):
                 api_app._ticket_head({**asset, **changes}, "original", key, **flags)
                 self.assertEqual(head.call_count, 1)
 
+    def test_thumbnail_receipt_fill_does_not_move_the_list_generation(self):
+        api_app.startup_replication()
+        with api_app.get_db() as db:
+            before = api_app.list_generation(db)
+            asset_id, key = db.execute("SELECT id, thumbnail_key FROM assets LIMIT 1").fetchone()
+            db.execute("UPDATE assets SET thumbnail_metadata_key=?, thumbnail_size_bytes=10, "
+                       "thumbnail_content_type='image/webp' WHERE id=?", (key, asset_id))
+            db.commit()
+            self.assertEqual(api_app.list_generation(db), before,
+                             "a ticket-only receipt must not look like a library change to tablets")
+            db.execute("UPDATE assets SET thumbnail_key=? WHERE id=?", (key + "-v2", asset_id))
+            db.commit()
+            self.assertNotEqual(api_app.list_generation(db), before)
+
+    def test_mobile_asset_items_carry_a_thumbnail_revision_that_follows_the_key(self):
+        with api_app.get_db() as db:
+            row = db.execute("SELECT * FROM assets LIMIT 1").fetchone()
+        item = api_app.mobile_asset_item(row)
+        self.assertRegex(item["thumbnail_revision"], r"^[0-9a-f]{16}$")
+        changed = api_app.mobile_asset_item({**dict(row), "thumbnail_key": row["thumbnail_key"] + "-v2"})
+        self.assertNotEqual(changed["thumbnail_revision"], item["thumbnail_revision"])
+        self.assertIsNone(api_app.mobile_asset_item({**dict(row), "thumbnail_key": None})["thumbnail_revision"])
+
     def test_additive_migration_does_not_invent_historical_metadata(self):
         columns = ("thumbnail_metadata_key", "thumbnail_size_bytes", "thumbnail_content_type")
         with api_app.get_db() as db:

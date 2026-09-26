@@ -159,6 +159,19 @@ class AssetCreate(BaseModel):
     sha256: str | None = None
 
 
+THUMBNAIL_RECEIPT_COLUMNS = ("thumbnail_metadata_key", "thumbnail_size_bytes", "thumbnail_content_type")
+
+
+def thumbnail_revision(row):
+    """Opaque token that changes whenever the Asset's thumbnail object changes.
+
+    Thumbnail keys are content-addressed (`derived/...`), so a regenerated thumbnail gets a
+    new key; clients key their caches and local URLs by this token.
+    """
+    key = row["thumbnail_key"]
+    return hashlib.sha256(key.encode()).hexdigest()[:16] if key else None
+
+
 def startup_replication():
     """CLOUD-006 배치 2: 전체 라이브러리 복제용 가산 스키마.
 
@@ -193,6 +206,17 @@ def startup_replication():
         for column, definition in additions.items():
             if column not in columns:
                 db.execute(f"ALTER TABLE assets ADD COLUMN {column} {definition}")
+        # The ticket-only thumbnail receipt is filled lazily on cold tickets. Writing it must
+        # not move the Asset list generation, or every fill would look like a library change
+        # to the tablets (list re-reads, Photo Picker walks). Recreate the update trigger to
+        # fire on every column except the receipt, from the live column list.
+        watched = [row["name"] for row in db.execute("PRAGMA table_info(assets)")
+                   if row["name"] not in THUMBNAIL_RECEIPT_COLUMNS]
+        db.execute("DROP TRIGGER IF EXISTS asset_list_update")
+        db.execute("CREATE TRIGGER asset_list_update AFTER UPDATE OF "
+                   + ",".join(f'"{name}"' for name in watched)
+                   + " ON assets BEGIN UPDATE asset_list_generation SET generation=generation+1 "
+                     "WHERE singleton=1; END")
         db.execute("CREATE INDEX IF NOT EXISTS idx_assets_committed ON assets(committed)")
         db.execute(
             """
@@ -2296,6 +2320,7 @@ def mobile_asset_item(row, classification_ids: list[str] | None = None) -> dict:
         "classification_ids": list(classification_ids or []),
         "original_available": bool(row["object_key"]),
         "thumbnail_available": bool(row["thumbnail_key"]),
+        "thumbnail_revision": thumbnail_revision(row),
         "committed": True,
     }
 
