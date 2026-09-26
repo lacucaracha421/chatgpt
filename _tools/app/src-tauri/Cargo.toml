@@ -71,3 +71,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package."gif:0.14.2"]
 opt-level = 3
+# SQL-heavy paths ran 2.5-5.5x slower in dev with the bundled SQLite unoptimized (PERF-ALL-001).
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3

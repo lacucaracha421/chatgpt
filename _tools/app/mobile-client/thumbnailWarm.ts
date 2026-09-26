@@ -18,9 +18,10 @@ import type {Page} from './types';
  * restart resumes, and a finished pass repeats after a day to pick up new assets.
  */
 export type WarmState = {status:'off'|'waiting'|'running'|'metered'|'done'|'error'; warmed:number; completedAt:number|null};
-type Saved = {scope:string; cursor:string|null; warmed:number; completedAt:number|null};
+/** `failures` counts consecutive failed reads of the page at `cursor`. */
+type Saved = {scope:string; cursor:string|null; warmed:number; completedAt:number|null; failures?:number};
 const PROGRESS_KEY = 'lakomics.mobile.thumbnailWarm', OFF_KEY = 'lakomics.mobile.thumbnailWarmOff';
-const WARM_PAGE = 100, REPEAT_AFTER = 24 * 60 * 60 * 1000, RETRY_AFTER = 60_000;
+const WARM_PAGE = 100, REPEAT_AFTER = 24 * 60 * 60 * 1000, RETRY_AFTER = 60_000, MAX_PAGE_FAILURES = 3;
 // Let the first screen load before background work starts after launch or return.
 const START_DELAY = 5_000;
 const EVENT = 'lakomics-thumbnail-warm';
@@ -41,6 +42,13 @@ export function setWarmEnabled(enabled:boolean) { write(OFF_KEY, !enabled); wind
 /** Forget progress, e.g. after the media cache was cleared or the connection changed. */
 export function resetWarmProgress() { try {localStorage.removeItem(PROGRESS_KEY);} catch { /* optional */ } }
 
+/** A client error other than auth, timeout or rate limit: the saved cursor cannot be resumed. */
+function cursorRejected(error:unknown) {
+  // Read structurally (transport's ApiError carries the server status; network errors have none).
+  const status = (error as {status?:unknown} | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status);
+}
+
 export type BatteryState={charging:boolean;level:number;powerSave:boolean};
 export function batteryAllowsWarm(battery:BatteryState|undefined) {
   return !!battery&&(battery.charging===true||(battery.level>=50&&battery.powerSave===false));
@@ -60,8 +68,14 @@ async function pass(scope:string, signal:AbortSignal) {
     try { page = normalizePage(await api<Page>(pagePath(ALL_ASSETS, progress.cursor, EMPTY_FILTERS, WARM_PAGE), signal)); }
     catch (error) {
       if (signal.aborted) throw error;
-      // A cursor from an older list generation is not resumable; start the pass again.
-      progress = {scope, cursor:null, warmed:0, completedAt:null}; write(PROGRESS_KEY, progress);
+      // A transient failure keeps the walk where it is, so the retry resumes at this page.
+      // A cursor the server rejects (from an older list generation) is not resumable, and
+      // repeated failures at one page may be that too: then the pass starts again.
+      const failures = (progress.failures ?? 0) + 1;
+      progress = cursorRejected(error) || failures >= MAX_PAGE_FAILURES
+        ? {scope, cursor:null, warmed:0, completedAt:null}
+        : {...progress, failures};
+      write(PROGRESS_KEY, progress);
       throw error;
     }
     await Promise.all(page.items.map(asset => warmThumbnail(asset, signal)));

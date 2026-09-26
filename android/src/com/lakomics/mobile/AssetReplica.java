@@ -7,15 +7,28 @@ import java.util.concurrent.locks.Lock;
 final class AssetReplica {
     interface Storage {
         Snapshot readAssets(String scope);
+        /**
+         * The adopted authority identity and cursor without the rows, or null.
+         *
+         * Idle paths (the unchanged-cursor check, outbox delivery, "is it adopted") need only
+         * this. A full {@link #readAssets} parses every Asset row (~9,300 on the tablet), so
+         * a real database overrides this with a single-row read.
+         */
+        default Header readAssetHeader(String scope) { return readAssets(scope); }
         void replaceAssets(String scope, Snapshot snapshot);
         void clearAssets();
     }
-    static final class Snapshot {
+    static class Header {
         final String library;
         final long epoch, cursor;
+        Header(String library, long epoch, long cursor) {
+            this.library=library; this.epoch=epoch; this.cursor=cursor;
+        }
+    }
+    static final class Snapshot extends Header {
         final Map<String, Map<String,Object>> rows;
         Snapshot(String library, long epoch, long cursor, Map<String,Map<String,Object>> rows) {
-            this.library=library; this.epoch=epoch; this.cursor=cursor;
+            super(library, epoch, cursor);
             this.rows=Collections.unmodifiableMap(new TreeMap<>(rows));
         }
     }
@@ -33,6 +46,9 @@ final class AssetReplica {
     private Snapshot read(String scope) {
         lock.lock(); try {return storage.readAssets(scope);} finally {lock.unlock();}
     }
+    private Header header(String scope) {
+        lock.lock(); try {return storage.readAssetHeader(scope);} finally {lock.unlock();}
+    }
     private void save(String scope, Snapshot snapshot) {
         lock.lock(); try {storage.replaceAssets(scope,snapshot);} finally {lock.unlock();}
     }
@@ -43,16 +59,19 @@ final class AssetReplica {
             if(domain!=null) throw new IllegalArgumentException("Ambiguous Asset domain");
             domain=d;
         }
-        Snapshot local=read(scope);
+        // The cursor comparison needs only the header; the rows are read when they are applied.
+        Header head=header(scope);
         if(domain==null) {
-            if(local!=null) throw new IllegalArgumentException("Adopted Asset domain disappeared");
+            if(head!=null) throw new IllegalArgumentException("Adopted Asset domain disappeared");
             return false;
         }
         if(domain.contractVersion!=1) throw new IllegalArgumentException("Unsupported Asset contract");
-        if(local!=null && (!local.library.equals(domain.libraryId)||local.epoch!=domain.epoch))
-            throw new IllegalArgumentException("Asset authority identity changed");
+        identity(head,domain);
+        if(head==null) {baseline(scope,domain);return true;}
+        if(head.cursor==domain.cursor && skipUnchanged.getAsBoolean())return false;
+        Snapshot local=read(scope);
+        identity(local,domain);
         if(local==null) {baseline(scope,domain);return true;}
-        if(local.cursor==domain.cursor && skipUnchanged.getAsBoolean())return false;
         boolean changed=false;
         try {
             for(int page=0;page<2000;page++) {
@@ -97,6 +116,10 @@ final class AssetReplica {
             if(items.isEmpty()||!previous.equals(next))throw new IllegalArgumentException("Invalid baseline continuation");after=previous;
         }
         throw new IllegalArgumentException("Baseline traversal bound");
+    }
+    private static void identity(Header local,AlbumReplica.Domain domain) {
+        if(local!=null && (!local.library.equals(domain.libraryId)||local.epoch!=domain.epoch))
+            throw new IllegalArgumentException("Asset authority identity changed");
     }
     private static String path(AlbumReplica.Domain domain,String kind) {return "/v1/assets/authority/"+kind+"?libraryId="+domain.libraryId+"&epoch="+domain.epoch;}
     private static void envelope(Map<String,Object> response,AlbumReplica.Domain domain) {

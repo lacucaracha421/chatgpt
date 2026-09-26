@@ -29,18 +29,25 @@ final class PickerLibrary {
     private CancellationSignal active;
     private boolean running=false;
     private int scanned=0;
-    private String error="",connection="";
+    /** When an unchanged-source check last confirmed the snapshot (not persisted). */
+    private long verifiedAt=0;
+    /** {@link PickerRefreshSchedule#sourceKey} of the stored snapshot; empty when unknown. */
+    private String error="",connection="",source="";
+    /** A manual refresh is pending: the next walk ignores the unchanged-source skip. */
+    private boolean forceWalk;
     private PickerLibrary(Context c){context=c.getApplicationContext();settings=new SecureSettings(context);client=new CloudClient(settings);file=new AtomicFile(new File(context.getNoBackupFilesDir(),"picker-library.json"));load();}
     // The encrypted settings envelope is an opaque local connection revision, never returned or logged.
     private String revision(){return context.getSharedPreferences("connection",0).getString("encrypted","");}
-    private void load(){try{connection=revision();if(connection.isEmpty())return;try(InputStream in=file.openRead()){ByteArrayOutputStream out=new ByteArrayOutputStream();CloudClient.copy(in,out,96L*1024*1024,null);JSONObject o=new JSONObject(out.toString("UTF-8"));if(!o.getString("connection").equals(connection))return;snapshot=decode(o);}}catch(Exception ignored){file.delete();}}
-    synchronized JSONObject status(){try{return new JSONObject().put("syncing",running).put("scanned",scanned).put("mediaCount",snapshot.media.size()).put("albumCount",snapshot.albums.size()).put("lastSyncedAt",snapshot.syncedAt).put("error",error).put("ready",snapshot.syncedAt>0);}catch(JSONException e){throw new IllegalStateException(e);}}
+    private void load(){try{connection=revision();if(connection.isEmpty())return;try(InputStream in=file.openRead()){ByteArrayOutputStream out=new ByteArrayOutputStream();CloudClient.copy(in,out,96L*1024*1024,null);JSONObject o=new JSONObject(out.toString("UTF-8"));if(!o.getString("connection").equals(connection))return;snapshot=decode(o);source=o.optString("source","");}}catch(Exception ignored){file.delete();}}
+    synchronized JSONObject status(){try{return new JSONObject().put("syncing",running).put("scanned",scanned).put("mediaCount",snapshot.media.size()).put("albumCount",snapshot.albums.size()).put("lastSyncedAt",Math.max(snapshot.syncedAt,verifiedAt)).put("error",error).put("ready",snapshot.syncedAt>0);}catch(JSONException e){throw new IllegalStateException(e);}}
     PickerSnapshot current(){refresh(false);return snapshot;}
     synchronized void resume(){schedule.resume();refresh(false);}
     synchronized void pause(){
         schedule.pause();if(trailing!=null){trailing.cancel(false);trailing=null;}
         if(active!=null)active.cancel();
     }
+    /** The user's 앨범 새로고침: always walks, even when the source key says nothing moved. */
+    synchronized void refreshManual(){forceWalk=true;refresh(true);}
     synchronized void refresh(boolean force){
         String current=revision();if(current.isEmpty())return;
         if(!current.equals(connection)){reset();connection=current;}
@@ -57,17 +64,21 @@ final class PickerLibrary {
             String current=revision();if(current.isEmpty())return;
             schedule.started(SystemClock.elapsedRealtime());
             running=true;scanned=0;error="";lastAttempt=System.currentTimeMillis();
-            long attempt=epoch;CancellationSignal signal=new CancellationSignal();active=signal;
-            worker.execute(()->sync(attempt,current,signal));
+            long attempt=epoch;CancellationSignal signal=new CancellationSignal();active=signal;boolean forced=forceWalk;forceWalk=false;
+            worker.execute(()->sync(attempt,current,signal,forced));
         }},delay,TimeUnit.MILLISECONDS);
     }
     /** Call under CONNECTION_LOCK after settings write/clear, before exposing the new connection. */
-    synchronized void reset(){epoch++;schedule.reset();if(trailing!=null){trailing.cancel(false);trailing=null;}if(active!=null)active.cancel();active=null;running=false;lastAttempt=0;scanned=0;error="";connection=revision();snapshot=PickerSnapshot.empty();file.delete();notifyPicker();}
+    synchronized void reset(){epoch++;forceWalk=false;schedule.reset();if(trailing!=null){trailing.cancel(false);trailing=null;}if(active!=null)active.cancel();active=null;running=false;lastAttempt=0;scanned=0;verifiedAt=0;error="";source="";connection=revision();snapshot=PickerSnapshot.empty();file.delete();notifyPicker();}
     private void check(long attempt,String revision,CancellationSignal signal){signal.throwIfCanceled();synchronized(this){if(attempt!=epoch||!revision.equals(revision()))throw new OperationCanceledException();}}
-    private void sync(long attempt,String revision,CancellationSignal signal){
+    private void sync(long attempt,String revision,CancellationSignal signal,boolean forced){
         try{
             long deadline=SystemClock.elapsedRealtime()+10L*60*1000;
-            check(attempt,revision,signal);String listGeneration=CloudClient.listGeneration(client,null,signal);JSONArray classes=client.api("/v1/library/classifications","GET",null,signal).getJSONArray("items");
+            check(attempt,revision,signal);String listGeneration=CloudClient.listGeneration(client,null,signal);
+            // Nothing the walk reads has moved since the stored snapshot: skip ~94 requests.
+            String unchanged=PickerRefreshSchedule.sourceKey(listGeneration,AlbumReplicaService.get(context).collections());
+            synchronized(this){check(attempt,revision,signal);if(!forced&&PickerRefreshSchedule.unchanged(source,unchanged,snapshot.syncedAt>0)){error="";verifiedAt=System.currentTimeMillis();return;}}
+            JSONArray classes=client.api("/v1/library/classifications","GET",null,signal).getJSONArray("items");
             if(classes.length()>10000)throw new IOException("Classification bound exceeded");
             Map<String,String> parents=new HashMap<>(),names=new TreeMap<>();
             for(int i=0;i<classes.length();i++){JSONObject o=classes.getJSONObject(i);String id=o.getString("id");names.put(id,o.optString("name",id));parents.put(id,o.isNull("parent_id")?null:o.optString("parent_id",null));}
@@ -89,8 +100,10 @@ final class PickerLibrary {
             albums.putAll(authoritative.names);
             String after=CloudClient.listGeneration(client,null,signal);
             if(listGeneration!=null&&after!=null&&!listGeneration.equals(after))throw new IOException("Library changed during refresh");
-            PickerSnapshot next=snapshot.merge(authoritative.merge(rows),albums,System.currentTimeMillis());byte[] encoded=encode(next,revision);
-            synchronized(this){check(attempt,revision,signal);save(encoded);snapshot=next;error="";}
+            // The generation did not move during the walk, so this snapshot reflects it.
+            String key=PickerRefreshSchedule.sourceKey(listGeneration!=null&&listGeneration.equals(after)?after:null,authoritative);
+            PickerSnapshot next=snapshot.merge(authoritative.merge(rows),albums,System.currentTimeMillis());byte[] encoded=encode(next,revision,key);
+            synchronized(this){check(attempt,revision,signal);save(encoded);snapshot=next;source=key==null?"":key;error="";}
             notifyPicker();
         }catch(Exception e){synchronized(this){if(epoch==attempt)error=e instanceof OperationCanceledException?"":"Library refresh failed. Previous library remains available; retry from Lakomics.";}}
         finally{synchronized(this){if(epoch==attempt){running=false;active=null;schedule.finished();schedulePending();}}}
@@ -102,8 +115,8 @@ final class PickerLibrary {
         Set<String> albums=new TreeSet<>();JSONArray ids=o.optJSONArray("classification_ids");if(ids!=null)for(int j=0;j<ids.length();j++)albums.add("class:"+ids.getString(j));
         return new PickerSnapshot.Media(id,mime,date(o),size,Math.max(0,o.optLong("duration_ms",0)),Math.max(0,o.optInt("width",0)),Math.max(0,o.optInt("height",0)),albums,0);
     }
-    private static byte[] encode(PickerSnapshot s,String revision)throws Exception {
-        JSONObject o=new JSONObject().put("connection",revision).put("collection",s.collection).put("generation",s.generation).put("syncedAt",s.syncedAt).put("albums",new JSONObject(s.albums)).put("deleted",new JSONObject(s.deleted));JSONArray rows=new JSONArray();
+    private static byte[] encode(PickerSnapshot s,String revision,String source)throws Exception {
+        JSONObject o=new JSONObject().put("connection",revision).put("source",source==null?"":source).put("collection",s.collection).put("generation",s.generation).put("syncedAt",s.syncedAt).put("albums",new JSONObject(s.albums)).put("deleted",new JSONObject(s.deleted));JSONArray rows=new JSONArray();
         for(PickerSnapshot.Media m:s.media.values())rows.put(new JSONObject().put("id",m.id).put("mime",m.mime).put("date",m.date).put("size",m.size).put("duration",m.duration).put("width",m.width).put("height",m.height).put("generation",m.generation).put("albums",new JSONArray(m.albums)));
         byte[] bytes=o.put("media",rows).toString().getBytes(StandardCharsets.UTF_8);if(bytes.length>96L*1024*1024)throw new IOException("Snapshot bound exceeded");return bytes;
     }

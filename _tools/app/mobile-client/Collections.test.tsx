@@ -154,7 +154,8 @@ describe('tab return retention',()=>{
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision}:{...page,revision,items:[work]});
     mocks.native.mockRejectedValueOnce(new Error('media offline')).mockImplementation(async(_op,payload)=>({url:`https://example.invalid/${payload.revision}-${payload.digest}`}));
     const props={active:true,paused:false,backRef:{current:null}};const view=render(<Collections {...props}/>);
-    await screen.findByText('이미지를 불러오지 못했습니다');
+    // The failure schedules a timed retry; returning to the tab first retries at once and cancels it.
+    await waitFor(()=>expect(artworkCalls('cover')).toHaveLength(1));await act(async()=>{});
     view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);
     const image=await screen.findByRole('img',{name:item.name});expect(artworkCalls('cover')).toHaveLength(2);
     fireEvent.error(image);view.rerender(<Collections {...props} paused/>);view.rerender(<Collections {...props}/>);
@@ -202,6 +203,68 @@ describe('tab return retention',()=>{
     await waitFor(()=>expect(document.querySelector('.collection-hero-original')?.getAttribute('src')).toContain('-two'));
     work={...work,artworks:work.artworks.map(art=>({...art,originalAvailable:false}))};pull(detailPane());
     await waitFor(()=>expect(document.querySelector('.collection-hero-original')).toBeNull());
+  });
+});
+
+describe('visible artwork retries',()=>{
+  const coverCalls=()=>mocks.native.mock.calls.filter(([op,payload])=>op==='collectionArtwork'&&payload.artworkId==='cover');
+  const advance=(ms=0)=>act(async()=>{await vi.advanceTimersByTimeAsync(ms);});
+  const broken=()=>screen.queryByText('이미지를 불러오지 못했습니다');
+  const cover=()=>screen.queryByRole('img',{name:item.name});
+  /** The native reply for a full media queue: the request never started. */
+  const busy=()=>Object.assign(new Error('요청이 많습니다. 잠시 후 다시 시도해 주세요.'),{status:null,details:{code:'media_busy'}});
+  const props={active:true,paused:false,backRef:{current:null}};
+  beforeEach(()=>{vi.useFakeTimers();});
+  afterEach(()=>{cleanup();vi.useRealTimers();});
+
+  it('shows a cover that failed once without a tab change',async()=>{
+    mocks.native.mockRejectedValueOnce(new Error('media offline'));
+    render(<Collections {...props}/>);await advance();
+    expect(coverCalls()).toHaveLength(1);expect(cover()).toBeNull();expect(broken()).toBeNull();
+    await advance(999);expect(coverCalls()).toHaveLength(1);
+    await advance(1);expect(coverCalls()).toHaveLength(2);
+    expect(cover()?.getAttribute('src')).toBe('https://example.invalid/cover');
+    await advance(60_000);expect(coverCalls()).toHaveLength(2);
+  });
+
+  it('retries a full native queue without showing the cover as broken',async()=>{
+    mocks.native.mockRejectedValueOnce(busy()).mockRejectedValueOnce(busy());
+    render(<Collections {...props}/>);await advance();
+    expect(coverCalls()).toHaveLength(1);expect(broken()).toBeNull();
+    await advance(2000);expect(coverCalls()).toHaveLength(2);expect(broken()).toBeNull();
+    await advance(2000);expect(coverCalls()).toHaveLength(3);
+    expect(cover()).not.toBeNull();expect(broken()).toBeNull();
+  });
+
+  it.each([
+    ['failure',()=>new Error('media offline'),4],
+    ['full queue',busy,14],
+  ] as const)('bounds the retries of a %s, then waits for a tab change',async(_kind,error,calls)=>{
+    mocks.native.mockImplementation(async()=>{throw error();});
+    const view=render(<Collections {...props}/>);await advance();
+    for(let second=0;second<120;second++)await advance(1000);
+    expect(coverCalls()).toHaveLength(calls);expect(broken()).not.toBeNull();
+    await advance(30*60_000);expect(coverCalls()).toHaveLength(calls);
+    // Returning to the tab starts a fresh budget.
+    view.rerender(<Collections {...props} active={false}/>);view.rerender(<Collections {...props}/>);await advance();
+    expect(coverCalls()).toHaveLength(calls+1);
+  });
+
+  it('cancels a pending retry when the cover scrolls away or unmounts',async()=>{
+    const observers:{callback:IntersectionObserverCallback;element?:Element}[]=[];
+    vi.stubGlobal('IntersectionObserver',class {
+      entry:{callback:IntersectionObserverCallback;element?:Element};
+      constructor(callback:IntersectionObserverCallback){this.entry={callback};observers.push(this.entry);}
+      observe(element:Element){this.entry.element=element;}
+      disconnect(){} unobserve(){} takeRecords(){return [];}
+    });
+    const show=(visible:boolean)=>act(async()=>{for(const {callback,element} of observers)if(element)callback([{isIntersecting:visible,target:element} as IntersectionObserverEntry],{} as IntersectionObserver);});
+    mocks.native.mockRejectedValue(new Error('media offline'));
+    const view=render(<Collections {...props}/>);await advance();await show(true);await advance();
+    expect(coverCalls()).toHaveLength(1);
+    await show(false);await advance(60_000);expect(coverCalls()).toHaveLength(1);
+    await show(true);await advance();expect(coverCalls()).toHaveLength(2);
+    view.unmount();await advance(60_000);expect(coverCalls()).toHaveLength(2);
   });
 });
 

@@ -8,8 +8,10 @@ public final class AssetReplicaTest {
  static int assertions=0;
  static void check(boolean value){assertions++;if(!value)throw new AssertionError("Assertion "+assertions);}
  static class Db implements AssetReplica.Storage {
-  AssetReplica.Snapshot snapshot;String scope;
-  public AssetReplica.Snapshot readAssets(String s){return s.equals(scope)?snapshot:null;}
+  AssetReplica.Snapshot snapshot;String scope;int fullReads;
+  public AssetReplica.Snapshot readAssets(String s){fullReads++;return s.equals(scope)?snapshot:null;}
+  /** Like the Android database: one header row, no Asset rows parsed. */
+  public AssetReplica.Header readAssetHeader(String s){return s.equals(scope)?snapshot:null;}
   public void replaceAssets(String s,AssetReplica.Snapshot p){scope=s;snapshot=p;}
   public void clearAssets(){snapshot=null;scope=null;}
  }
@@ -25,6 +27,21 @@ public final class AssetReplicaTest {
    String changes=after==cursor?"":"{\"sequence\":"+(gap?cursor+1:cursor)+",\"assetId\":\"asset-a\",\"asset\":"+projection+"}";
    return "{"+envelope+",\"items\":["+changes+"],\"nextAfter\":"+cursor+",\"hasMore\":false}";
   }
+ }
+ /**
+  * PERF-ALL-001: the idle pass compares cursors before touching the rows. Before, every pass
+  * parsed the whole replica (~9,300 rows on the tablet, ~60 passes per idle hour) first.
+  */
+ static void idleCursorCheckReadsNoRows()throws Exception {
+  Db db=new Db();Server server=new Server();AssetReplica engine=new AssetReplica(server,db,new ReentrantLock(),()->true);
+  check(engine.sync("account"));check(db.fullReads==0);
+  for(int pass=0;pass<60;pass++)check(!engine.sync("account"));
+  check(db.fullReads==0);
+  server.cursor=1;server.life="trash";check(engine.sync("account"));
+  check(db.fullReads==1);check(db.snapshot.rows.get("asset-a").get("lifecycle").equals("trash"));
+  // Identity is still checked from the header alone.
+  db.snapshot=new AssetReplica.Snapshot("ffffffffffffffffffffffffffffffff",1,1,db.snapshot.rows);
+  try{engine.sync("account");throw new AssertionError("Identity change accepted");}catch(IllegalArgumentException expected){check(db.fullReads==1);}
  }
  public static void main(String[] args)throws Exception {
   Db db=new Db();Server server=new Server();AssetReplica engine=new AssetReplica(server,db,new ReentrantLock());
@@ -43,6 +60,7 @@ public final class AssetReplicaTest {
   check(db.readAssets("another-account")==null);
   NetworkPolicy.api("/v1/assets/authority/baseline?libraryId="+LIB,"GET");
   try{NetworkPolicy.api("/v1/assets/authority/activate","POST");throw new AssertionError("Activate accepted");}catch(IllegalArgumentException expected){check(true);}
+  idleCursorCheckReadsNoRows();
   System.out.println("AssetReplicaTest: "+assertions+" assertions passed");
  }
 }

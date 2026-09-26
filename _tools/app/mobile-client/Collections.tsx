@@ -79,6 +79,15 @@ async function decoded(url:string) {
 const validArtworkUrl=(url:string)=>/^https:\/\//.test(url)||(import.meta.env.DEV&&url.startsWith('data:image/'));
 type LoadedArtwork = {source:string;url:string};
 /**
+ * A visible artwork that failed tries again after these delays, then stays failed until its tab
+ * or visibility changes. A full native media queue ("media_busy") never started the request, so
+ * it has its own, longer budget and is not shown as broken while it waits.
+ */
+const ARTWORK_RETRY_MS=[1000,3000,10_000] as const;
+const ARTWORK_BUSY_RETRY_MS=2000, ARTWORK_BUSY_RETRIES=10;
+const mediaBusy=(error:unknown)=>(error as {details?:{code?:unknown}|null}|null)?.details?.code==='media_busy';
+type Retries={source:string;failed:number;busy:number};
+/**
  * One artwork image. `physical` renders the shared PC collectible (the game case) from
  * the same ticket, and falls back to the flat image if that renderer cannot draw it; list
  * cards never pass it, so 3D stays inside the work detail.
@@ -87,9 +96,23 @@ function Artwork({item,id,revision,original=false,active=true,label,physical}:{i
   const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [image,setImage]=useState<LoadedArtwork|null>(null), [failed,setFailed]=useState<string|null>(null);
   const [flat,setFlat]=useState<string|null>(null);
   const source=artworkSource(item,id,revision,original),loaded=useRef<string|null>(null),shown=useRef<string|null>(null);
+  const [attempt,setAttempt]=useState(0),retries=useRef<Retries>({source,failed:0,busy:0}),retryTimer=useRef(0);
+  /** Schedules the next try of this source, or returns false once its retries are spent. */
+  const retryLater=(error:unknown)=>{
+    if(retries.current.source!==source)retries.current={source,failed:0,busy:0};
+    const state=retries.current,busy=mediaBusy(error)&&state.busy<ARTWORK_BUSY_RETRIES;
+    const delay=busy?ARTWORK_BUSY_RETRY_MS:ARTWORK_RETRY_MS[state.failed];
+    if(delay===undefined)return false;
+    if(busy)state.busy++;else state.failed++;
+    window.clearTimeout(retryTimer.current);retryTimer.current=window.setTimeout(()=>setAttempt(value=>value+1),delay);
+    return true;
+  };
+  useEffect(()=>()=>window.clearTimeout(retryTimer.current),[]);
   useEffect(()=>{if(original || !host.current)return; if(!('IntersectionObserver' in window)){setVisible(true);return;} const observer=new IntersectionObserver(entries=>setVisible(entries.some(entry=>entry.isIntersecting)),{rootMargin:'120px'});observer.observe(host.current);return()=>observer.disconnect();},[original]);
   useEffect(()=>{
-    if(!active||!visible||(!id&&!item.coverAssetId)||loaded.current===source)return;
+    // Leaving the tab or the screen ends the retries; coming back starts a fresh budget.
+    if(!active||!visible){retries.current={source,failed:0,busy:0};return;}
+    if((!id&&!item.coverAssetId)||loaded.current===source)return;
     setFailed(null);const controller=new AbortController();
     void artworkTicket(item,id,revision,original,controller.signal).then(async ticket=>{
       if(controller.signal.aborted)return;
@@ -98,13 +121,13 @@ function Artwork({item,id,revision,original=false,active=true,label,physical}:{i
       if(shown.current&&shown.current!==ticket.url)await decoded(ticket.url);
       if(controller.signal.aborted)return;
       loaded.current=source;setImage({source,url:ticket.url});
-    }).catch(()=>{if(!controller.signal.aborted)setFailed(source);});
-    return()=>controller.abort();
-  },[source,active,visible]);
+    }).catch(error=>{if(!controller.signal.aborted&&!retryLater(error))setFailed(source);});
+    return()=>{controller.abort();window.clearTimeout(retryTimer.current);};
+  },[source,active,visible,attempt]);
   const broken=failed===source,ready=!!image&&!broken&&(!!id||!!item.coverAssetId);
   shown.current=ready?image.url:null;
   const solid=ready&&physical&&flat!==source;
-  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} onError={()=>{loaded.current=null;setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
+  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} onError={()=>{loaded.current=null;if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
 }
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};

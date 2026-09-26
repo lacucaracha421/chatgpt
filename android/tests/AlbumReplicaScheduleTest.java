@@ -114,6 +114,7 @@ public final class AlbumReplicaScheduleTest {
         conditionalResponses();
         backoffAndWake();
         pickerBurstAndPause();
+        pickerSkipsUnchangedLibrary();
         startsPollingAndReconcilesImmediately();
         repeatedResumeDoesNotDuplicateWork();
         pauseStopsPollingWithoutTouchingTheReplica();
@@ -241,6 +242,47 @@ public final class AlbumReplicaScheduleTest {
         s.request(true,600000);s.started(600000);s.pause();s.finished();
         equal(-1L,s.delay(602000),"Pause keeps cancelled walk pending without a timer");
         s.resume();equal(0L,s.delay(610000),"Resume retries an interrupted walk");
+    }
+
+    /**
+     * PERF-ALL-001: a Photo Picker refresh whose source did not move costs one list-generation
+     * read instead of a full walk (list generation, classifications, 93 pages of 100 for 9,300
+     * Assets, list generation = 96 requests). The walk below follows PickerLibrary.sync's
+     * request order and uses the same decision.
+     */
+    private static void pickerSkipsUnchangedLibrary() {
+        final String[] generation={"g1"};
+        final AlbumCollections[] albums={AlbumCollections.empty()};
+        final int[] requests={0};
+        final String[] stored={""};
+        final boolean[] ready={false};
+        Runnable walk=()->{
+            requests[0]++;String listGeneration=generation[0];
+            if(PickerRefreshSchedule.unchanged(stored[0],PickerRefreshSchedule.sourceKey(listGeneration,albums[0]),ready[0]))return;
+            requests[0]+=1+93+1;
+            String key=PickerRefreshSchedule.sourceKey(listGeneration,albums[0]);
+            stored[0]=key==null?"":key;ready[0]=true;
+        };
+        PickerRefreshSchedule s=new PickerRefreshSchedule();s.resume();
+        long now=0;int walks=0;
+        // Cold start and nine resumes 15+ minutes apart on an unchanged Library.
+        for(int resume=0;resume<10;resume++,now+=16*60_000L){
+            s.request(false,now);equal(0L,s.delay(now),"Resume after 15 min is due");s.started(now);walk.run();s.finished();walks++;
+        }
+        equal(10,walks,"Every resume still checks");
+        equal(96+9,requests[0],"Unchanged resumes cost one list-generation read each (was 10 x 96)");
+        requests[0]=0;generation[0]="g2";walk.run();
+        equal(96,requests[0],"A moved list generation walks the Library");
+        requests[0]=0;walk.run();equal(1,requests[0],"...and the next check is cheap again");
+        java.util.Map<String,AlbumReplica.Album> albumMap=new java.util.TreeMap<>();albumMap.put("a1",new AlbumReplica.Album("a1","Trip",null,null,null,false,1));
+        java.util.Map<String,AlbumReplica.Member> members=new java.util.TreeMap<>();members.put("a1/x",new AlbumReplica.Member("a1","x",true,1));
+        albums[0]=AlbumCollections.build(albumMap,members);
+        requests[0]=0;walk.run();equal(96,requests[0],"A local Album collection change walks even at the same generation");
+        members.put("a1/y",new AlbumReplica.Member("a1","y",true,1));albums[0]=AlbumCollections.build(albumMap,members);
+        requests[0]=0;walk.run();equal(96,requests[0],"A membership change walks");
+        requests[0]=0;generation[0]=null;walk.run();walk.run();equal(192,requests[0],"No server generation: never skipped");
+        equal(false,PickerRefreshSchedule.unchanged("",PickerRefreshSchedule.sourceKey("g1",AlbumCollections.empty()),true),"A snapshot stored without a source walks once");
+        equal(false,PickerRefreshSchedule.unchanged(PickerRefreshSchedule.sourceKey("g1",AlbumCollections.empty()),PickerRefreshSchedule.sourceKey("g1",AlbumCollections.empty()),false),"An empty snapshot always walks");
     }
 
     private static void conditionalResponses() throws Exception {

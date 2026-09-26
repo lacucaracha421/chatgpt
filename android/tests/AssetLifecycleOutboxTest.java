@@ -36,7 +36,10 @@ public final class AssetLifecycleOutboxTest {
         String scope;
         final TreeMap<Long, AssetLifecycleOutbox.Row> rows = new TreeMap<>();
 
-        public AssetReplica.Snapshot readAssets(String s) { return s.equals(scope) ? snapshot : null; }
+        /** Full row reads; a real database answers the header without parsing the rows. */
+        int fullReads;
+        public AssetReplica.Snapshot readAssets(String s) { fullReads++; return s.equals(scope) ? snapshot : null; }
+        public AssetReplica.Header readAssetHeader(String s) { return s.equals(scope) ? snapshot : null; }
         public void replaceAssets(String s, AssetReplica.Snapshot p) { scope = s; snapshot = p; }
         public void clearAssets() { snapshot = null; scope = null; }
         public List<AssetLifecycleOutbox.Row> lifecycleOutbox() { return new ArrayList<>(rows.values()); }
@@ -151,8 +154,12 @@ public final class AssetLifecycleOutboxTest {
         equal(1, db.rows.size(), "a repeated trash is not queued twice");
 
         server.accept("trashAsset", "asset-a", "trash", 4, operation);
+        int reads = db.fullReads;
         AssetLifecycleOutbox.Flush flush = outbox.flush("account");
         equal(1, flush.sent, "accepted");
+        equal(reads, db.fullReads, "delivery reads only the authority header, never every Asset row");
+        equal(0, outbox.flush("account").sent, "an empty outbox sends nothing");
+        equal(reads, db.fullReads, "an idle flush reads no Asset rows");
         equal(0, db.rows.size(), "an accepted intent is retired");
         equal(row.payload, server.sent.get(0), "the frozen bytes are what was sent");
 

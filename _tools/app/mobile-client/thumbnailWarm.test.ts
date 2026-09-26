@@ -84,3 +84,36 @@ it('allows charging even below fifty percent',async()=>{
   stop=startThumbnailWarm('charging-test');await vi.advanceTimersByTimeAsync(5500);
   expect(mocks.api).toHaveBeenCalledTimes(2);
 });
+
+const cursors=()=>mocks.api.mock.calls.map(([path])=>new URL(path as string,'https://x.invalid').searchParams.get('cursor')??'first');
+it('resumes at the failed page after a transient error',async()=>{
+  let fail=1;
+  mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw new Error('network');return pages[cursor];});
+  stop=startThumbnailWarm('https://server.invalid');
+  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('error'));
+  await vi.advanceTimersByTimeAsync(65_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+  expect(cursors()).toEqual(['first','c2','c2']);
+  expect(warmState().warmed).toBe(3);
+});
+it('starts again from the first page when the server rejects the saved cursor',async()=>{
+  let fail=1;
+  mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw Object.assign(new Error('Invalid cursor'),{status:400});return pages[cursor];});
+  stop=startThumbnailWarm('https://server.invalid');
+  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('error'));
+  await vi.advanceTimersByTimeAsync(65_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+  expect(cursors()).toEqual(['first','c2','first','c2']);
+  expect(warmState().warmed).toBe(3);
+});
+it('bounds retries at one page: the third consecutive failure starts the pass again',async()=>{
+  let fail=3;
+  mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw new Error('network');return pages[cursor];});
+  stop=startThumbnailWarm('https://server.invalid');
+  await vi.advanceTimersByTimeAsync(5_500);
+  for(let retry=0;retry<3;retry++)await vi.advanceTimersByTimeAsync(65_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+  expect(cursors()).toEqual(['first','c2','c2','c2','first','c2']);
+});

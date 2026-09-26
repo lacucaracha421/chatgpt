@@ -82,6 +82,11 @@ final class AndroidReplicaDb implements ReplicaDb, AssetLifecycleOutbox.Storage 
             return new AssetReplica.Snapshot(c.getString(0),c.getLong(1),c.getLong(2),rows);
         }
     }
+    @Override public AssetReplica.Header readAssetHeader(String scope) {
+        try(Cursor c=db.rawQuery("SELECT library_id,epoch,cursor FROM asset_authority WHERE singleton=1 AND scope=?",new String[]{scope})) {
+            return c.moveToFirst()?new AssetReplica.Header(c.getString(0),c.getLong(1),c.getLong(2)):null;
+        }
+    }
     @Override public void replaceAssets(String scope,AssetReplica.Snapshot snapshot) {
         db.beginTransaction();
         try {

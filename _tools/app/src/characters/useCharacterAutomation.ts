@@ -58,6 +58,18 @@ const defaultApi: AutomaticCharacterApi = {
   setup: () => invoke("setup_character_runtime"),
 };
 
+/** Flat records (primitive fields only) with the same fields and values. */
+function sameRecord<T extends object>(left: T | null, right: T | null) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const keys = Object.keys(left) as (keyof T)[];
+  return keys.length === Object.keys(right).length && keys.every(key => Object.is(left[key], right[key]));
+}
+
+function sameRefreshes(left: CharacterRefreshProgress[], right: CharacterRefreshProgress[]) {
+  return left.length === right.length && left.every((item, index) => sameRecord(item, right[index]));
+}
+
 /** Quiet status/control only. Native mutations and the native owner discover all work. */
 export function useCharacterAutomation(
   onChanged: (membershipChanged: boolean) => void,
@@ -98,8 +110,12 @@ export function useCharacterAutomation(
         if (!active) return;
         setPaused(status.paused);
         setHistoryRefreshActive(status.historyRefreshActive);
-        setActiveWork(status.activeWork ?? null);
-        setHistoryRefreshes(status.historyRefreshes ?? []);
+        // Each status read is a fresh IPC object: keep the current value when nothing changed,
+        // so the 5 s idle poll does not re-render the whole workspace.
+        const nextActiveWork = status.activeWork ?? null;
+        setActiveWork(current => sameRecord(current, nextActiveWork) ? current : nextActiveWork);
+        const nextRefreshes = status.historyRefreshes ?? [];
+        setHistoryRefreshes(current => sameRefreshes(current, nextRefreshes) ? current : nextRefreshes);
         interval = status.workActive ? 1000 : 5000;
         if (completed !== null && completed !== status.completed) {
           latest.current(confirmed !== status.confirmed);

@@ -56,9 +56,9 @@ final class LibraryReplicaStore implements AlbumReplica.State, ClassificationRep
     void clearAssets() {
         lock.lock();try {((AssetReplica.Storage)db).clearAssets();((AssetLifecycleOutbox.Storage)db).clearLifecycle();}finally {lock.unlock();}
     }
-    /** The adopted lifecycle replica for this scope, or null. */
-    AssetReplica.Snapshot assetSnapshot(String scope) {
-        lock.lock();try {return ((AssetReplica.Storage)db).readAssets(scope);}finally {lock.unlock();}
+    /** The adopted lifecycle replica's identity and cursor for this scope (no rows), or null. */
+    AssetReplica.Header assetHeader(String scope) {
+        lock.lock();try {return ((AssetReplica.Storage)db).readAssetHeader(scope);}finally {lock.unlock();}
     }
     /** The Library Trash writer over the same database and lock as the lifecycle replica. */
     AssetLifecycleOutbox assetLifecycle(AssetLifecycleOutbox.Transport transport) {

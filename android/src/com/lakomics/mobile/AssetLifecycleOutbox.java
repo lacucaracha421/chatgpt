@@ -300,10 +300,11 @@ final class AssetLifecycleOutbox {
      */
     Flush flush(String scope) throws Failure {
         Flush report = new Flush();
-        AssetReplica.Snapshot authority;
+        // Only the authority identity is needed here, so every pass avoids a full row read.
+        AssetReplica.Header authority;
         lock.lock();
         try {
-            authority = storage.readAssets(scope);
+            authority = storage.readAssetHeader(scope);
         } finally {
             lock.unlock();
         }
@@ -473,7 +474,7 @@ final class AssetLifecycleOutbox {
      * A changed command must return the Asset in the target state at exactly the next
      * revision; an accepted no-op returns no Asset.
      */
-    private static boolean parseAccepted(String body, Row row, AssetReplica.Snapshot authority)
+    private static boolean parseAccepted(String body, Row row, AssetReplica.Header authority)
             throws Failure {
         try {
             Map<String, Object> root = AssetReplica.object(Json.parse(body));

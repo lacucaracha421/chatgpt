@@ -969,7 +969,7 @@ final class AlbumReplicaService {
                 String scope = scopeOrNull();
                 if (scope.isEmpty()) return value.put("available", false).put("items", items);
                 engine();
-                AssetReplica.Snapshot adopted = store.assetSnapshot(scope);
+                AssetReplica.Header adopted = store.assetHeader(scope);
                 value.put("available", adopted != null);
                 for (AssetLifecycleOutbox.Row row : lifecycleWriter.rows()) {
                     items.put(new JSONObject()

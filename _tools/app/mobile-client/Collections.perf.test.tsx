@@ -1,10 +1,10 @@
 /**
- * PERF-ALL-001 measurement harness (measurement only, no product change): the Collections
+ * PERF-ALL-001 measurement harness: the Collections
  * cold-start cover path and the Collections tab's idle request volume.
  *
- * Metrics are printed as `[perf] …` lines and are deterministic under fake timers. The
- * assertions only check that the scenario ran; they are not gates yet (a gate is added
- * once an improvement is verified on the tablet, per docs/agents/implementation.md).
+ * Metrics are printed as `[perf] …` lines and are deterministic under fake timers. Most
+ * assertions only check that the scenario ran; the saturated cold start is a gate for the
+ * visible-cover retry (harness before the fix: 4 of 16 covers shown and 12 failed at 30 s).
  */
 import {act, cleanup, render} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
@@ -66,6 +66,30 @@ it('cold start: first-screen game covers are fetched at most four at a time', as
   console.info(`[perf] collections cold covers: firstScreen=${FIRST_SCREEN} requested=${result.requested} peakConcurrent=${result.peak} firstCoverMs=${result.firstCoverMs} allFirstScreenMs=${result.allFirstScreenMs} (2000 ms per uncached cover)`);
   expect(result.requested).toBeGreaterThanOrEqual(FIRST_SCREEN);
   expect(result.allFirstScreenMs).toBeGreaterThan(0);
+});
+
+it('cold start with a saturated native media lane: every first-screen cover shows within 30 s', async()=>{
+  // Gate (MOBILE-PERF-002): the first 8 cover requests meet a full native queue ("media_busy")
+  // and the next 4 fail outright (a bridge timeout or native "Media busy"); the rest take 2 s.
+  // Before the retry, those 12 covers stayed blank until the tab changed.
+  let requests=0;
+  mocks.native.mockImplementation((op:string)=>{
+    if(op!=='collectionArtwork')return Promise.resolve({});
+    const n=++requests;
+    if(n<=8)return Promise.reject(Object.assign(new Error('요청이 많습니다. 잠시 후 다시 시도해 주세요.'),{status:null,details:{code:'media_busy'}}));
+    if(n<=12)return new Promise((_,reject)=>setTimeout(()=>reject(new Error('Media busy')),500));
+    return new Promise(resolve=>setTimeout(()=>resolve({url:'https://app.lakomics.local/media-cache/0/x',expires_in:240}),2000));
+  });
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+  for(let t=0;t<30;t++)await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+  const shown=document.querySelectorAll('.collection-art img').length;
+  const failed=[...document.querySelectorAll('.collection-art-placeholder')].filter(node=>node.textContent==='이미지를 불러오지 못했습니다').length;
+  console.info(`[perf] collections saturated cold start: firstScreen=${FIRST_SCREEN} requested=${requests} shownAt30s=${shown} failedAt30s=${failed}`);
+  expect(failed).toBe(0);
+  expect(shown).toBe(FIRST_SCREEN);
+  // 16 covers, 8 busy and 4 failed replies each retried once: never a retry storm.
+  expect(requests).toBeLessThanOrEqual(FIRST_SCREEN+12);
 });
 
 it('idle Collections tab: conditional polls per hour', async()=>{

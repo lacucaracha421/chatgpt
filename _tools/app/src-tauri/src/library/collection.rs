@@ -10,6 +10,13 @@ use super::{
     validated_asset_ids, Library,
 };
 
+/// One summary row per collection. The two per-collection asset subqueries (fallback cover and
+/// asset count) use `CROSS JOIN`, which SQLite documents as a fixed join order: the
+/// collection's `collection_assets` rows drive and each asset is probed by id. With a plain
+/// `JOIN` and no `sqlite_stat1`, the planner walks every normal asset through
+/// `assets_by_trash_age` for every collection (measured: 343 collections x 9,147 assets,
+/// 31 M VM steps, ~350 ms release). The gate is
+/// `list_collections_vm_steps_stay_proportional_to_memberships`.
 pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
     collection.id,
     collection.name,
@@ -26,7 +33,7 @@ pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
         (
             SELECT fallback_link.asset_id
             FROM collection_assets AS fallback_link
-            JOIN assets AS fallback_asset ON fallback_asset.id = fallback_link.asset_id
+            CROSS JOIN assets AS fallback_asset ON fallback_asset.id = fallback_link.asset_id
             WHERE fallback_link.collection_id = collection.id
               AND fallback_asset.status = 'normal'
             ORDER BY fallback_link.added_at, fallback_link.asset_id
@@ -70,7 +77,7 @@ pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
     (
         SELECT COUNT(*)
         FROM collection_assets AS count_link
-        JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+        CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
         WHERE count_link.collection_id = collection.id
           AND count_asset.status = 'normal'
     ),
@@ -109,12 +116,7 @@ FROM collections AS collection";
 impl Library {
     pub fn list_collections(&self) -> Result<Vec<CollectionSummary>, LibraryError> {
         let connection = self.connection()?;
-        let sql = format!(
-            "{COLLECTION_SUMMARY_SQL}
-             WHERE collection.legacy_kind IS NULL OR collection.legacy_kind <> 'gacha'
-             ORDER BY collection.updated_at DESC, collection.id DESC"
-        );
-        let mut statement = connection.prepare(&sql)?;
+        let mut statement = connection.prepare(&list_collections_sql())?;
         let entries = statement
             .query_map([], collection_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -499,6 +501,14 @@ pub(crate) fn require_collection(connection: &Connection, id: &str) -> Result<()
     } else {
         Err(LibraryError::CollectionNotFound)
     }
+}
+
+fn list_collections_sql() -> String {
+    format!(
+        "{COLLECTION_SUMMARY_SQL}
+         WHERE collection.legacy_kind IS NULL OR collection.legacy_kind <> 'gacha'
+         ORDER BY collection.updated_at DESC, collection.id DESC"
+    )
 }
 
 pub(crate) fn collection_by_id(
@@ -1430,6 +1440,178 @@ mod tests {
                 .unread_release_count,
             2
         );
+    }
+
+    /// PERF-ALL-001 tighten-only gate. The collection list must cost VM steps in proportion to
+    /// memberships, not collections x assets. The planner-chosen plain-`JOIN` form (the query
+    /// before the fix) runs on the same fixture to prove identical rows and that the threshold
+    /// catches the regression. Lower `MAX_VM_STEPS` after a verified improvement; raise it only
+    /// with a justified, measured reason.
+    #[test]
+    fn list_collections_vm_steps_stay_proportional_to_memberships() {
+        const ASSETS: usize = 2_000;
+        const COLLECTIONS: usize = 60;
+        const LINKS_PER_COLLECTION: usize = 25;
+        // Measured on this fixture (bundled SQLite of rusqlite 0.40): fixed query 35,361,
+        // plain-`JOIN` plan 1,002,596.
+        const MAX_VM_STEPS: i32 = 40_000;
+
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collections = (0..COLLECTIONS)
+            .map(|index| create(&library, &format!("Collection {index:02}")))
+            .collect::<Vec<_>>();
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            {
+                let mut asset = transaction
+                    .prepare(
+                        "INSERT INTO assets (
+                            id, content_hash, media_kind, original_name, relative_path,
+                            thumbnail_relative_path, byte_size, width, height, collected_at,
+                            status
+                         ) VALUES (?1, 'hash-' || ?1, 'image', ?1 || '.png',
+                            'assets/' || ?1 || '.png', 'thumbnails/' || ?1 || '.webp',
+                            1, 1, 1, '2026-08-16T00:00:00Z', ?2)",
+                    )
+                    .unwrap();
+                for index in 0..ASSETS {
+                    let status = if index % 7 == 3 { "trash" } else { "normal" };
+                    asset
+                        .execute(rusqlite::params![format!("asset-{index:05}"), status])
+                        .unwrap();
+                }
+                let mut link = transaction
+                    .prepare(
+                        "INSERT INTO collection_assets (collection_id, asset_id, added_at)
+                         VALUES (?1, ?2, ?3)",
+                    )
+                    .unwrap();
+                for (position, collection) in collections.iter().enumerate() {
+                    // Every tenth collection stays empty; the others share some assets and
+                    // tie on added_at so the fallback cover's asset_id tiebreak is exercised.
+                    if position % 10 == 0 {
+                        continue;
+                    }
+                    for slot in 0..LINKS_PER_COLLECTION {
+                        let asset = (position * 31 + slot * 53) % ASSETS;
+                        link.execute(rusqlite::params![
+                            collection.id,
+                            format!("asset-{asset:05}"),
+                            format!("2026-08-{:02}T00:00:00Z", 1 + slot % 5),
+                        ])
+                        .unwrap();
+                    }
+                }
+            }
+            // Explicit covers: a normal member, a trashed member or a normal non-member.
+            for (position, collection) in collections.iter().enumerate().skip(1).step_by(4) {
+                let pick = match (position / 4) % 3 {
+                    0 => {
+                        "SELECT link.asset_id FROM collection_assets AS link
+                         JOIN assets AS asset ON asset.id = link.asset_id
+                         WHERE link.collection_id = ?1 AND asset.status = 'normal'
+                         ORDER BY link.asset_id DESC LIMIT 1"
+                    }
+                    1 => {
+                        "SELECT link.asset_id FROM collection_assets AS link
+                         JOIN assets AS asset ON asset.id = link.asset_id
+                         WHERE link.collection_id = ?1 AND asset.status = 'trash'
+                         ORDER BY link.asset_id LIMIT 1"
+                    }
+                    _ => {
+                        "SELECT id FROM assets
+                         WHERE status = 'normal' AND id NOT IN (
+                             SELECT asset_id FROM collection_assets WHERE collection_id = ?1
+                         )
+                         ORDER BY id LIMIT 1"
+                    }
+                };
+                let cover: String = transaction
+                    .query_row(pick, [&collection.id], |row| row.get(0))
+                    .unwrap();
+                transaction
+                    .execute(
+                        "UPDATE collections SET cover_asset_id = ?2, updated_at = ?3
+                         WHERE id = ?1",
+                        rusqlite::params![collection.id, cover, "2026-09-01T00:00:00Z"],
+                    )
+                    .unwrap();
+            }
+            transaction.commit().unwrap();
+        }
+
+        let connection = library.connection().unwrap();
+        let (fixed_rows, fixed_steps, planner_rows, planner_steps) =
+            list_collections_fixed_and_plain_join(&connection);
+        eprintln!("list_collections VM steps: fixed {fixed_steps}, plain JOIN {planner_steps}");
+
+        assert_eq!(fixed_rows.len(), COLLECTIONS);
+        assert_eq!(fixed_rows, planner_rows);
+        let counted = fixed_rows
+            .iter()
+            .filter(|row| row[8] != rusqlite::types::Value::Integer(0))
+            .count();
+        assert_eq!(counted, COLLECTIONS - COLLECTIONS / 10);
+        assert!(
+            fixed_steps <= MAX_VM_STEPS,
+            "list_collections VM steps {fixed_steps} exceed the gate {MAX_VM_STEPS}"
+        );
+        assert!(
+            planner_steps > MAX_VM_STEPS,
+            "the pre-fix plan ({planner_steps} VM steps) no longer exceeds the gate"
+        );
+    }
+
+    /// Real-data equality check for the list query rewrite. Point
+    /// `LAKOMICS_COLLECTIONS_SNAPSHOT_DB` at the `library.sqlite` of a snapshot copy (for
+    /// example one kept by `perf_probe --keep-snapshot`), never at the live library; it is
+    /// opened read-only.
+    #[test]
+    #[ignore = "needs LAKOMICS_COLLECTIONS_SNAPSHOT_DB"]
+    fn list_collections_matches_plain_join_plan_on_snapshot() {
+        let path = std::env::var_os("LAKOMICS_COLLECTIONS_SNAPSHOT_DB")
+            .expect("LAKOMICS_COLLECTIONS_SNAPSHOT_DB");
+        let connection =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let (fixed_rows, fixed_steps, planner_rows, planner_steps) =
+            list_collections_fixed_and_plain_join(&connection);
+        eprintln!(
+            "rows {}; VM steps: fixed {fixed_steps}, plain JOIN {planner_steps}",
+            fixed_rows.len()
+        );
+        assert_eq!(fixed_rows, planner_rows);
+    }
+
+    type Rows = Vec<Vec<rusqlite::types::Value>>;
+
+    /// Runs the product list query and its plain-`JOIN` form (the query before the fix) and
+    /// returns every column of every row with each statement's VM steps.
+    fn list_collections_fixed_and_plain_join(
+        connection: &rusqlite::Connection,
+    ) -> (Rows, i32, Rows, i32) {
+        let fixed_sql = super::list_collections_sql();
+        assert_eq!(fixed_sql.matches("CROSS JOIN").count(), 2);
+        let run = |sql: &str| {
+            let mut statement = connection.prepare(sql).unwrap();
+            let columns = statement.column_count();
+            let rows = statement
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+            (rows, steps)
+        };
+        let (fixed_rows, fixed_steps) = run(&fixed_sql);
+        let (planner_rows, planner_steps) = run(&fixed_sql.replace("CROSS JOIN", "JOIN"));
+        (fixed_rows, fixed_steps, planner_rows, planner_steps)
     }
 
     fn create(library: &Library, name: &str) -> CollectionSummary {

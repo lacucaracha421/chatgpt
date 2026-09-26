@@ -174,3 +174,30 @@ it("refreshes promptly on visibility and reports whether membership changed", as
   expect(changed).toHaveBeenLastCalledWith(false);
   visibility.mockRestore();
 });
+
+it("keeps the same work objects while status polls return equal values, and replaces them when progress moves", async () => {
+  vi.useFakeTimers();
+  const activeWork = { active: true, seriesName: "젠레스", targetName: "레미엘", cause: "ingestion", freshRemaining: 12 };
+  const refresh = { targetId: "a", targetName: "레미엘", seriesName: "젠레스", state: "running" as const, total: 700, processed: 32, remaining: 668, failed: 0 };
+  let processed = 32;
+  // Fresh objects and arrays on every read, like a real IPC round-trip.
+  const api: AutomaticCharacterApi = {
+    status: vi.fn(async () => ({ ...idle, activeWork: { ...activeWork }, historyRefreshes: [{ ...refresh, processed }] })),
+    pause: vi.fn(),
+  };
+  const { result } = renderHook(() => useCharacterAutomation(vi.fn(), api));
+  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  const firstWork = result.current.activeWork;
+  const firstRefreshes = result.current.historyRefreshes;
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(api.status).toHaveBeenCalledTimes(2);
+  expect(result.current.activeWork).toBe(firstWork);
+  expect(result.current.historyRefreshes).toBe(firstRefreshes);
+
+  processed = 33;
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(result.current.activeWork).toBe(firstWork);
+  expect(result.current.historyRefreshes).not.toBe(firstRefreshes);
+  expect(result.current.historyRefreshes?.[0]).toMatchObject({ processed: 33 });
+});

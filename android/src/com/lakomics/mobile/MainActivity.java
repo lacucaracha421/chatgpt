@@ -67,6 +67,7 @@ public final class MainActivity extends Activity {
  }
  private boolean batteryAllowsWarm(){try{JSONObject b=batteryState();return b.optBoolean("charging")||(b.optInt("level",-1)>=50&&!b.optBoolean("powerSave",true));}catch(Exception e){return false;}}
  private JSONObject connectionStatus()throws Exception{return settings.status().put("battery",batteryState());}
+ private static JSONObject mediaBusy(){try{return new JSONObject().put("code","media_busy");}catch(JSONException e){return null;}}
  private static boolean optionalWork(String op){return Arrays.asList("thumbnail","media","collectionArtwork","catalogImage","mediaTickets","pickerRefresh").contains(op);}
  private void cancelOptional(String id,CancellationSignal signal){
   signal.cancel();nonEssential.remove(id,signal);
@@ -223,7 +224,8 @@ public final class MainActivity extends Activity {
    final long vaultEpoch=vault.epoch();
    if(optionalWork(operation)){synchronized(MainActivity.this){nonEssential.put(id,signal);if(stopped)cancelOptional(id,signal);}}
    final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")?perfPool.submit(operation,mediaWorkers.getQueue().size()):null;
-   try{(operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage")?mediaWorkers:workers).execute(()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
+   final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage");
+   final Runnable task=()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
     if(perf!=null){perf.asset=PerfLog.id(p.optString("assetId"));perf.request=PerfLog.id(p.optString("perfId"));}
     switch(operation){
      case "vaultPick":data=vault.pick();break;
@@ -271,7 +273,7 @@ public final class MainActivity extends Activity {
      case "assetLifecycleState":data=AlbumReplicaService.get(MainActivity.this).assetLifecycleState();break;
      case "assetLifecycleSet":data=AlbumReplicaService.get(MainActivity.this).setAssetLifecycle(p.getString("assetId"),p.getString("command"),p.optLong("seenRevision",0));break;
      case "assetLifecycleDismiss":data=AlbumReplicaService.get(MainActivity.this).dismissAssetLifecycle(p.getString("assetId"));break;
-     case "pickerRefresh":PickerLibrary.get(MainActivity.this).refresh(true);data=pickerStatus();break;
+     case "pickerRefresh":PickerLibrary.get(MainActivity.this).refreshManual();data=pickerStatus();break;
      case "openPickerSettings":if(Build.VERSION.SDK_INT<33)throw new UnsupportedOperationException();Intent pickerSettings=new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES_SETTINGS);if(pickerSettings.resolveActivity(getPackageManager())==null)throw new UnsupportedOperationException();runOnUiThread(()->{try{startActivity(pickerSettings);}catch(ActivityNotFoundException ignored){}});data=new JSONObject();break;
      case "configure": String endpoint=NetworkPolicy.endpoint(p.getString("endpoint"),p.optBoolean("allowPrivateHttp",false));String token=p.getString("token");client.validate(endpoint,token,signal);LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();settings.write(endpoint,token,p.optBoolean("allowPrivateHttp",false));client.clearConditional();cancelOtherRequests(signal);if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();
       // A replacement connection clears the old replica and keeps Album reconciliation
@@ -305,7 +307,13 @@ public final class MainActivity extends Activity {
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();
     }if(perf!=null)perf.status="ok";if(!signal.isCanceled())reply(id,true,data,null);
-   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}finally{active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(signal.isCanceled())perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}}});}catch(RejectedExecutionException e){active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){perf.status="rejected";perfPool.remove(perf);perf.finish(payload);}reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,null);}
+   }catch(Exception e){if(!signal.isCanceled())reply(id,false,null,errorMessage(e),e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).status:null,e instanceof CloudClient.HttpFailure?((CloudClient.HttpFailure)e).detailObject():null);}finally{active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(signal.isCanceled())perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}}};
+   // An abandoned media request leaves the queue at once instead of holding one of its slots
+   // until a worker reaches it. Once the task runs, its network calls replace this listener.
+   if(mediaWork)signal.setOnCancelListener(()->{if(mediaWorkers.remove(task)){active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}}});
+   try{(mediaWork?mediaWorkers:workers).execute(task);}catch(RejectedExecutionException e){if(mediaWork)signal.setOnCancelListener(null);active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){perf.status="rejected";perfPool.remove(perf);perf.finish(payload);}
+    // A full media queue means the request never started: the "media_busy" code lets a visible caller retry it later instead of showing it as broken.
+    reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
   }
  }
  @Override public void onTrimMemory(int level){if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}

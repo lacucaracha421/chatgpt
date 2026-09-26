@@ -1,4 +1,4 @@
-import {visibleInterval} from './useVisibleInterval';
+import {onVisible, visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {errorText} from './transport';
 import type {Asset} from './types';
@@ -8,6 +8,8 @@ import {TrashSnackbar} from './LibraryTrash';
 const UNDO_MS = 6000;
 /** How long after a local trash/restore a list-generation change keeps the viewer open. */
 const OWN_CHANGE_MS = 60_000;
+/** Availability poll while the lifecycle replica is not adopted yet. */
+const AVAILABILITY_POLL_MS = 15_000;
 
 type ViewerLike = {items: Asset[]; index: number};
 
@@ -37,19 +39,29 @@ export function useLibraryTrash<V extends ViewerLike>(configured: boolean, endpo
   useEffect(() => {
     if (!configured) return;
     let active = true;
+    // The lifecycle replica is adopted by the first native pass, so availability can arrive
+    // late: poll only until it has. After that every local edit arrives as an event, and a
+    // resume re-reads once (a replaced connection or intents queued before a restart).
+    let poll: (() => void) | undefined;
+    const polling = (on: boolean) => {
+      if (on && !poll && active) poll = visibleInterval(read, AVAILABILITY_POLL_MS);
+      else if (!on && poll) { poll(); poll = undefined; }
+    };
     const apply = (state: LifecycleState) => {
       if (!active) return;
       setAvailable(state.available);
+      polling(!state.available);
       const pending = pendingTrashIds(state);
       if (pending.length) setHidden(current => pending.every(id => current.has(id)) ? current : new Set([...current, ...pending]));
     };
-    const read = () => { void readLifecycle().then(apply, () => {}); };
+    function read() { void readLifecycle().then(apply, () => {}); }
     const onEvent = (event: Event) => { const detail = (event as CustomEvent<LifecycleState>).detail; if (detail) apply(detail); };
     if(document.visibilityState!=='hidden')read();
-    // The lifecycle replica is adopted by the first native pass, so availability can arrive late.
-    const timer = visibleInterval(read, 15_000);
+    polling(true);
+    // While polling, the interval already reads on resume.
+    const removeResume = onVisible(() => { if (!poll) read(); });
     window.addEventListener(ASSET_LIFECYCLE_EVENT, onEvent);
-    return () => { active = false; timer(); window.removeEventListener(ASSET_LIFECYCLE_EVENT, onEvent); };
+    return () => { active = false; polling(false); removeResume(); window.removeEventListener(ASSET_LIFECYCLE_EVENT, onEvent); };
   }, [configured, endpoint]);
 
   useEffect(() => {

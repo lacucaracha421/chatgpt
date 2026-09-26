@@ -105,6 +105,35 @@ describe('Viewer trash and undo',()=>{
     expect(viewer?.index).toBe(1);
   });
 
+  // PERF-ALL-001: each native state read parses the whole 9,300-row Asset replica. It used to
+  // run every 15 s on every tab (240/h); once the replica is adopted, idle reads are 0.
+  const stateReads=()=>mocks.native.mock.calls.filter(([op])=>op==='assetLifecycleState').length;
+  it('stops the lifecycle poll once the replica is adopted: one read per idle hour',async()=>{
+    vi.useFakeTimers({shouldAdvanceTime:true});
+    render(<Harness/>);
+    await vi.waitFor(()=>expect(latest?.available).toBe(true));
+    await act(async()=>{await vi.advanceTimersByTimeAsync(60*60_000);});
+    expect(stateReads()).toBe(1);
+    // A resume re-reads once; it does not restart the poll.
+    await act(async()=>{window.dispatchEvent(new Event('lakomics-resume'));await vi.advanceTimersByTimeAsync(10*60_000);});
+    expect(stateReads()).toBe(2);
+  });
+
+  it('polls until the replica is adopted, then stops',async()=>{
+    vi.useFakeTimers({shouldAdvanceTime:true});
+    let adopted=false;
+    mocks.native.mockImplementation(()=>Promise.resolve(state([],{available:adopted})));
+    render(<Harness/>);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(45_000);});
+    expect(latest?.available).toBe(false);
+    expect(stateReads()).toBe(4);
+    adopted=true;
+    await act(async()=>{await vi.advanceTimersByTimeAsync(15_000);});
+    expect(latest?.available).toBe(true);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(60*60_000);});
+    expect(stateReads()).toBe(5);
+  });
+
   it('dismisses the undo snackbar after about six seconds',async()=>{
     render(<Harness/>);
     await waitFor(()=>expect(latest?.available).toBe(true));

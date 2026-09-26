@@ -1,7 +1,9 @@
 /**
- * PERF-ALL-001 measurement harness (measurement only, no product change): the cost of one
- * Library thumbnail warm-up pass in bridge calls, and what a transient page failure costs.
- * Metrics are printed as `[perf] …` lines; assertions only check that the scenario ran.
+ * PERF-ALL-001 measurement harness: the cost of one Library thumbnail warm-up pass in bridge
+ * calls, and what a transient page failure costs. Metrics are printed as `[perf] …` lines.
+ * The failure scenario is a gate (baseline 134 pages / 13,300 thumbnail calls when a failure
+ * restarted the walk): the retry resumes at the failed page, so the pass reads each page once
+ * plus the one retry. Thresholds may only tighten.
  */
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
@@ -37,7 +39,7 @@ it('one full pass: pages, status checks and thumbnail bridge calls', async()=>{
   expect(warmState().warmed).toBe(ASSETS);
 });
 
-it('a transient page failure mid-pass restarts the walk from the first page', async()=>{
+it('a transient page failure mid-pass resumes at the failed page', async()=>{
   let failed=false;
   mocks.api.mockImplementation(async(path:string)=>{
     const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor');
@@ -54,4 +56,9 @@ it('a transient page failure mid-pass restarts the walk from the first page', as
   const firstRetryPath=(mocks.api.mock.calls[before]?.[0] as string)??'';
   console.info(`[perf] warm-up after one failed page at 4000/${ASSETS}: pagesBeforeFailure=${before} pagesTotal=${mocks.api.mock.calls.length} retryStartsAt=${new URL(firstRetryPath,'https://x.invalid').searchParams.get('cursor')??'first page'} nativeThumbnail=${tally().get('thumbnail')??0}`);
   expect(failed).toBe(true);
+  expect(before).toBe(41);
+  expect(new URL(firstRetryPath,'https://x.invalid').searchParams.get('cursor')).toBe('4000');
+  expect(mocks.api).toHaveBeenCalledTimes(ASSETS/PAGE+1);
+  expect(tally().get('thumbnail')).toBe(ASSETS);
+  expect(warmState().warmed).toBe(ASSETS);
 });
