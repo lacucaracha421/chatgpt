@@ -133,6 +133,21 @@ pub async fn pause_character_automation(
 }
 
 #[tauri::command]
+pub async fn set_character_broad_folder_scope(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library
+            .set_character_broad_folder_scope(enabled)
+            .map_err(Into::into)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+}
+
+#[tauri::command]
 pub async fn pause_character_reference_refresh(
     paused: bool,
     app: tauri::AppHandle,

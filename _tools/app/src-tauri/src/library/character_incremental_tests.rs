@@ -1324,6 +1324,7 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
     // An intermediate parent exercises the same policy as a top-level category.
     for (intermediate, competing_votes, expected) in [(false, 0, 1), (true, 0, 1), (true, 2, 0)] {
         let f = Fixture::new();
+        f.library.set_character_broad_folder_scope(true).unwrap();
         let a = f.ready("A");
         let b = f.ready_in_series("Nested B", &f.child);
         add_learned_reference(&f, &a.id);
@@ -1772,6 +1773,7 @@ fn arbitration_accepts_a_six_vote_region_even_when_best_crop_has_only_two_votes(
 fn manual_decisions_recalculate_cross_series_review_state_from_saved_regions() {
     use super::super::characters::{DecisionKind, DecisionRequest};
     let f = Fixture::new();
+    f.library.set_character_broad_folder_scope(true).unwrap();
     let a = f.ready("A");
     let b = f.ready_in_series("B", &f.child);
     f.library.connection().unwrap().execute(
@@ -2391,4 +2393,86 @@ fn review_regression_ineligible_retries_do_not_spin() {
         assert!(f.library.next_character_retry_at(true, now).unwrap().is_none());
         execute("UPDATE character_autotag_jobs SET cause='ingestion'");
     }
+}
+
+#[test]
+fn broad_folder_rule_is_off_by_default_and_hides_without_deleting() {
+    let f = Fixture::new();
+    let a = f.ready("A");
+    let b = f.ready_in_series("Nested B", &f.child);
+    let c = f.library.connection().unwrap();
+    let root: String = c
+        .query_row("SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |r| r.get(0))
+        .unwrap();
+    c.execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'", [&root])
+        .unwrap();
+    drop(c);
+    // Off (the default): no job for an image saved directly in the broad folder.
+    assert!(!f.library.character_incremental_status().unwrap().broad_folder_enabled);
+    let c = f.library.connection().unwrap();
+    assert!(!character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+    let jobs = |c: &rusqlite::Connection| -> Vec<String> {
+        c.prepare("SELECT state FROM character_autotag_jobs WHERE asset_id='asset-5'").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+    };
+    assert!(jobs(&c).is_empty());
+    drop(c);
+
+    // On: a job; switched off before it runs, it waits unclaimed and does not count as work.
+    f.library.set_character_broad_folder_scope(true).unwrap();
+    let c = f.library.connection().unwrap();
+    assert!(character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+    drop(c);
+    f.library.set_character_broad_folder_scope(false).unwrap();
+    assert!(f.library.claim_character_autotag().unwrap().is_none());
+    assert!(f.library.next_character_retry_at(false, 0).unwrap().is_none());
+    assert!(!f.library.character_incremental_status().unwrap().work_active);
+    f.library.set_character_broad_folder_scope(true).unwrap();
+    assert!(f.library.character_incremental_status().unwrap().broad_folder_enabled);
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
+
+    // Compared with both series; the competing vote keeps "A" a recommendation.
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    let context = f.library.character_autotag_context(&tx, &job, &"a".repeat(64)).unwrap();
+    assert_eq!(context.targets.len(), 2);
+    let predictions = [(&a, 6), (&b, 2)].into_iter().map(|(target, votes)| Prediction {
+        target_id: target.id.clone(),
+        result: ScanResult {
+            asset_id: job.asset_id.clone(), content_hash: job.content_hash.clone(),
+            state: "recommended".into(), error: None,
+            evidence: Some(json!({"passed": votes >= 2, "wholeFallback": false,
+                "queryBoxes": [[0,0,40,100]], "evidence": [{"matchedReferences": (0..votes).collect::<Vec<_>>(), "referenceDistances": vec![0.1; 6]}]})),
+        },
+    }).collect::<Vec<_>>();
+    f.library
+        .finalize_incremental(&tx, &job, &context, &predictions, &BTreeSet::new(), &BTreeSet::new())
+        .unwrap();
+    tx.commit().unwrap();
+    drop(c);
+    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+
+    let listed = |f: &Fixture| -> (bool, Vec<String>, bool) {
+        let page = f.library.character_review_page(super::super::character_scan::ReviewQuery {
+            series_id: f.series.clone(), target_id: Some(a.id.clone()), filter: "recommended".into(), after: None, limit: 10,
+        }).unwrap();
+        (
+            f.library.character_review_pending(&f.series, &a.id).unwrap(),
+            page.rows.iter().map(|row| row.asset.id.clone()).collect(),
+            f.library.b36_recommended_pairs().unwrap().iter().any(|(_, asset)| asset == "asset-5"),
+        )
+    };
+    assert_eq!(listed(&f), (true, vec!["asset-5".to_string()], true));
+
+    // Off: hidden from review; re-saving the same image keeps the job and its evidence.
+    f.library.set_character_broad_folder_scope(false).unwrap();
+    assert_eq!(listed(&f), (false, Vec::new(), false));
+    let c = f.library.connection().unwrap();
+    assert!(!character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Classification).unwrap());
+    assert_eq!(jobs(&c), vec!["completed".to_string()]);
+    drop(c);
+
+    // On again: the same candidate is back.
+    f.library.set_character_broad_folder_scope(true).unwrap();
+    assert_eq!(listed(&f), (true, vec!["asset-5".to_string()], true));
 }

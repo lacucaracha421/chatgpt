@@ -366,6 +366,7 @@ pub fn run() {
             commands::characters::failed_character_asset_count,
             commands::characters::character_incremental_status,
             commands::characters::pause_character_automation,
+            commands::characters::set_character_broad_folder_scope,
             commands::characters::pause_character_reference_refresh,
             commands::characters::cancel_character_scan,
             commands::characters::character_scan_results,

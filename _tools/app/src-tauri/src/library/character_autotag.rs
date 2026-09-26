@@ -50,7 +50,7 @@ pub(super) const FAILED_SCOPE_CTES: &str = r#"WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
     UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
 ), ancestors(id,parent_id) AS (
-    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    SELECT id,parent_id FROM classification_entries WHERE id=?1 AND EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1)
     UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
 )"#;
 
@@ -318,6 +318,17 @@ pub(super) fn enqueue(
         return Ok(false);
     };
     if super::character_scope::resolve_character_scope(connection, asset_id)?.is_none() {
+        if super::character_scope::broad_scope_switched_off(connection, asset_id)? {
+            // The broad-folder rule is off: no new job. A job for the same inputs keeps its
+            // evidence (hidden meanwhile) for when the rule is turned back on; only a job
+            // for outdated inputs is superseded.
+            let classification =
+                serde_json::to_string(&folders(connection, asset_id)?).expect("string list");
+            connection.execute("UPDATE character_autotag_jobs SET state='superseded',review_state='superseded',claim_id=NULL,error=NULL,updated_at=?5
+                WHERE asset_id=?1 AND state<>'superseded' AND (content_hash<>?2 OR relative_path<>?3 OR classification_ids<>?4)",
+                params![asset_id,hash,path,classification,chrono::Utc::now().to_rfc3339()])?;
+            return Ok(false);
+        }
         // Superseding is terminal, so review_state must move with state; otherwise
         // the row keeps claiming unresolved work that no worker will ever claim.
         connection.execute("UPDATE character_autotag_jobs SET state='superseded',review_state='superseded',claim_id=NULL,error=NULL,updated_at=?2 WHERE asset_id=?1 AND state<>'superseded'",
@@ -602,14 +613,15 @@ impl Library {
         let transaction = connection.transaction()?;
         let id: Option<String> = transaction
             .query_row(
-                "SELECT asset_id FROM character_autotag_jobs
+                &format!("SELECT asset_id FROM character_autotag_jobs j
             WHERE state='pending' AND retry_at<=?1
               AND (?2 = 0 OR cause NOT IN ('reconsideration', 'manual_scan'))
               AND (cause<>'reconsideration' OR NOT EXISTS(
                   SELECT 1 FROM character_autotag_control
                   WHERE singleton=1 AND reference_refresh_paused=1
               ))
-            ORDER BY priority,updated_at,asset_id LIMIT 1",
+              AND {}
+            ORDER BY priority,updated_at,asset_id LIMIT 1", super::character_scope::JOB_SCOPE_ALLOWED_SQL),
                 params![chrono::Utc::now().timestamp(), restricted],
                 |r| r.get(0),
             )

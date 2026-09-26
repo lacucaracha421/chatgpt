@@ -291,6 +291,33 @@ impl Library {
                 .collect::<std::result::Result<std::collections::BTreeSet<_>, _>>()?;
             rows.retain(|row| in_series.contains(&row.target_id));
         }
+        // With the broad-folder rule off, scores of images filed outside every registered
+        // series stay in the cache but are not offered (turning the rule on shows them again).
+        if !super::character_scope::broad_folder_scope_enabled(&c)? {
+            let covered = super::character_scope::series_covered_folders(&c)?;
+            let mut folders =
+                c.prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1")?;
+            let mut inside: BTreeMap<String, bool> = BTreeMap::new();
+            let mut kept = Vec::with_capacity(rows.len());
+            for row in rows {
+                let keep = match inside.get(&row.asset_id) {
+                    Some(keep) => *keep,
+                    None => {
+                        let keep = folders
+                            .query_map([&row.asset_id], |r| r.get::<_, String>(0))?
+                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .iter()
+                            .any(|id| covered.contains(id));
+                        inside.insert(row.asset_id.clone(), keep);
+                        keep
+                    }
+                };
+                if keep {
+                    kept.push(row);
+                }
+            }
+            rows = kept;
+        }
         // Pairs the native pass already accepted automatically come after new findings
         // and are labelled as such; each group keeps the stable pseudo-random order.
         // (Backfill rows recorded "none" as the native outcome for them.)
@@ -577,6 +604,54 @@ mod tests {
                 series_id: None,
             })
             .unwrap()
+    }
+
+    #[test]
+    fn character_shadow_review_hides_broad_folder_scores_while_the_rule_is_off() {
+        let f = Fixture::new();
+        let target = f.ready("Shadow");
+        series_asset(&f, "inside");
+        series_asset(&f, "broad");
+        // "broad" is filed directly in the series' parent folder (no registered series above).
+        f.library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE asset_classifications SET classification_id=(SELECT parent_id FROM classification_entries WHERE id=?1)
+                 WHERE asset_id='broad'",
+                [&f.series],
+            )
+            .unwrap();
+        let rows: Vec<_> = ["inside", "broad"]
+            .iter()
+            .map(|id| {
+                (
+                    *id,
+                    target.id.as_str(),
+                    "recommended",
+                    0.2,
+                    "v1",
+                    "none",
+                    "2026-09-23T01:00:00Z",
+                )
+            })
+            .collect();
+        insert(f.temp.path(), &rows);
+        let ids = |f: &Fixture| {
+            let mut ids: Vec<_> = page(f, 0, 50)
+                .items
+                .into_iter()
+                .map(|i| i.asset_id)
+                .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids(&f), vec!["inside"]);
+        assert_eq!(page(&f, 0, 50).summary.recommended.pending, 1);
+        f.library.set_character_broad_folder_scope(true).unwrap();
+        assert_eq!(ids(&f), vec!["broad", "inside"]);
+        f.library.set_character_broad_folder_scope(false).unwrap();
+        assert_eq!(ids(&f), vec!["inside"]);
     }
 
     #[test]

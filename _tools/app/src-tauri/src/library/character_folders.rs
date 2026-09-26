@@ -381,6 +381,7 @@ mod tests {
             )
             .unwrap();
         move_asset(&f, "asset-6", &root);
+        f.library.set_character_broad_folder_scope(true).unwrap();
         let scope = resolve_character_scope(&f.library.connection().unwrap(), "asset-6")
             .unwrap()
             .unwrap();

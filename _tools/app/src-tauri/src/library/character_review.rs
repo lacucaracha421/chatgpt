@@ -45,7 +45,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
     UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
 ), ancestors(id,parent_id) AS (
-    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    SELECT id,parent_id FROM classification_entries WHERE id=?1 AND EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1)
     UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
 ), candidates(id,content_hash) AS (
     SELECT key,value FROM json_each(?3)
@@ -69,7 +69,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
     UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
 ), ancestors(id,parent_id) AS (
-    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    SELECT id,parent_id FROM classification_entries WHERE id=?1 AND EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1)
     UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
 )
 SELECT EXISTS(
@@ -102,7 +102,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
     UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
 ), ancestors(id,parent_id) AS (
-    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    SELECT id,parent_id FROM classification_entries WHERE id=?1 AND EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1)
     UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
 ), candidates(id,content_hash) AS (
     SELECT key,value FROM json_each(?3)
@@ -138,7 +138,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
     UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
 ), ancestors(id,parent_id) AS (
-    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    SELECT id,parent_id FROM classification_entries WHERE id=?1 AND EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1)
     UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
 )
 SELECT e.id,e.asset_id,e.content_hash,a.relative_path,p.result_json,p.target_fingerprint,e.runtime_fingerprint,
@@ -188,7 +188,7 @@ LIMIT ?5
 const REVIEW_INPUT_SQL: &str = "WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1 UNION
     SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
-    ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL
+    ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 AND EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1) UNION ALL
     SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
     SELECT a.id,a.content_hash,a.relative_path FROM assets a
     WHERE +a.status='normal' AND +a.media_kind='image' AND a.id > COALESCE(?2, '')
@@ -232,7 +232,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
     UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id
 ), ancestors(id,parent_id) AS (
-    SELECT id,parent_id FROM classification_entries WHERE id=?1
+    SELECT id,parent_id FROM classification_entries WHERE id=?1 AND EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1)
     UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id
 )
 SELECT e.asset_id,e.content_hash,p.result_json

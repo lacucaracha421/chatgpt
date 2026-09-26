@@ -1029,6 +1029,7 @@ fn review_pending_fast_path_reads_durable_predictions_and_latest_decision() {
 #[test]
 fn review_pending_memory_fast_path_preserves_automatic_root_candidates() {
     let f = Fixture::new();
+    f.library.set_character_broad_folder_scope(true).unwrap();
     let target = f.ready("A");
     seed_prediction(&f, &target, "memory-root");
     let root: String = f

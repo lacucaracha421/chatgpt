@@ -228,6 +228,8 @@ pub struct Status {
     running: bool,
     work_active: bool,
     automation_enabled: bool,
+    /// The broad-folder character recognition rule (library setting, default off).
+    broad_folder_enabled: bool,
     paused: bool,
     completed: i64,
     confirmed: i64,
@@ -357,19 +359,20 @@ impl Library {
             )
         };
         let c = self.connection()?;
-        let (paused, completed, confirmed, pending, history_refresh_active, automation_enabled) = c.query_row(
-            "SELECT reference_refresh_paused,completed,confirmed,
-                EXISTS(SELECT 1 FROM character_autotag_jobs WHERE state='pending'),
+        let (paused, completed, confirmed, pending, history_refresh_active, automation_enabled, broad_folder_enabled) = c.query_row(
+            &format!("SELECT reference_refresh_paused,completed,confirmed,
+                EXISTS(SELECT 1 FROM character_autotag_jobs j WHERE state='pending' AND {scope}),
                 EXISTS(SELECT 1 FROM character_reference_refreshes WHERE state IN ('pending','running')),
-                NOT paused
-             FROM character_autotag_control WHERE singleton=1",
+                NOT paused,broad_folder_scope
+             FROM character_autotag_control WHERE singleton=1", scope = super::character_scope::JOB_SCOPE_ALLOWED_SQL),
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, bool>(3)?, r.get(4)?, r.get(5)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, bool>(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
         )?;
         active_work.fresh_remaining = c
             .query_row(
-                "SELECT COUNT(*) FROM character_autotag_jobs
-            WHERE state IN ('pending','processing') AND cause<>'reconsideration'",
+                &format!("SELECT COUNT(*) FROM character_autotag_jobs j
+            WHERE state IN ('pending','processing') AND cause<>'reconsideration' AND {}",
+                    super::character_scope::JOB_SCOPE_ALLOWED_SQL),
                 [],
                 |r| r.get::<_, i64>(0),
             )?
@@ -379,6 +382,7 @@ impl Library {
             running,
             work_active: work_active || pending,
             automation_enabled,
+            broad_folder_enabled,
             paused,
             completed,
             confirmed,
@@ -411,6 +415,17 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         (engine.turns, engine.idle_turns)
+    }
+    /// Turns the broad-folder rule on or off. Nothing is deleted: while off, broad-folder
+    /// images get no new jobs and their candidates are hidden; turning it back on shows
+    /// them again and lets waiting jobs run.
+    pub fn set_character_broad_folder_scope(&self, enabled: bool) -> Result<()> {
+        self.connection()?.execute(
+            "UPDATE character_autotag_control SET broad_folder_scope=?1 WHERE singleton=1",
+            [enabled],
+        )?;
+        self.character_wake.notify();
+        Ok(())
     }
     pub fn set_character_incremental_paused(&self, paused: bool) -> Result<()> {
         self.connection()?.execute(
@@ -572,14 +587,15 @@ impl Library {
     }
     fn next_character_retry_at(&self, restricted: bool, now_ms: i64) -> Result<Option<Instant>> {
         let next: Option<i64> = self.connection()?.query_row(
-            "SELECT MIN(retry_at) FROM character_autotag_jobs
+            &format!("SELECT MIN(retry_at) FROM character_autotag_jobs j
              WHERE state='pending'
                AND NOT EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND paused=1)
                AND (?1 = 0 OR cause NOT IN ('reconsideration', 'manual_scan'))
                AND (cause<>'reconsideration' OR NOT EXISTS(
                    SELECT 1 FROM character_autotag_control
                    WHERE singleton=1 AND reference_refresh_paused=1
-               ))",
+               ))
+               AND {}", super::character_scope::JOB_SCOPE_ALLOWED_SQL),
             [restricted],
             |row| row.get(0),
         )?;
@@ -1138,10 +1154,11 @@ impl Library {
             return Ok(false);
         }
         Ok(self.connection()?.query_row(
-            "SELECT NOT paused AND NOT reference_refresh_paused
-                AND NOT EXISTS(SELECT 1 FROM character_autotag_jobs WHERE state IN ('pending','processing'))
+            &format!("SELECT NOT paused AND NOT reference_refresh_paused
+                AND NOT EXISTS(SELECT 1 FROM character_autotag_jobs WHERE state='processing')
+                AND NOT EXISTS(SELECT 1 FROM character_autotag_jobs j WHERE state='pending' AND {})
                 AND NOT EXISTS(SELECT 1 FROM character_reference_refreshes WHERE state IN ('pending','running'))
-             FROM character_autotag_control WHERE singleton=1", [], |row| row.get(0),
+             FROM character_autotag_control WHERE singleton=1", super::character_scope::JOB_SCOPE_ALLOWED_SQL), [], |row| row.get(0),
         )?)
     }
 

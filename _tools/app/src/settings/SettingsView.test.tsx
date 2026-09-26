@@ -11,7 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command: string) => command === "character_augmentation_settings"
   ? { enabled: false, shadowEnabled: false, modelName: null, modelReady: false, runtimeConfigured: true, managedByEnvironment: false }
-  : { automationEnabled: false, paused: false }) }));
+  : { automationEnabled: false, broadFolderEnabled: false, paused: false }) }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { open } from "@tauri-apps/plugin-dialog";
@@ -35,6 +35,24 @@ it("exposes persisted whole-engine automation in library settings without using 
   await waitFor(() => expect(toggle).not.toBeChecked());
   expect(invoke).toHaveBeenCalledWith("pause_character_automation", { paused: true });
   expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "pause_character_reference_refresh")).toBe(false);
+});
+
+it("exposes the broad-folder character recognition setting, off by default", async () => {
+  localStorage.setItem("lakomics.libraryPath", "C:\\Current");
+  vi.mocked(invoke).mockClear();
+  const gateway = createGateway();
+  vi.mocked(gateway.openLibrary).mockResolvedValue({ root: "C:\\Current" });
+  render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="library" /></LibraryProvider>);
+  const toggle = await screen.findByRole("checkbox", { name: "넓은 폴더 캐릭터 인식" });
+  await waitFor(() => expect(toggle).toBeEnabled());
+  expect(toggle).not.toBeChecked();
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(invoke).toHaveBeenCalledWith("set_character_broad_folder_scope", { enabled: true });
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(invoke).toHaveBeenCalledWith("set_character_broad_folder_scope", { enabled: false });
+  expect(invoke).not.toHaveBeenCalledWith("pause_character_automation", expect.anything());
 });
 
 it("shows the manga folder as unset on this PC with the other PC's path as a hint", async () => {

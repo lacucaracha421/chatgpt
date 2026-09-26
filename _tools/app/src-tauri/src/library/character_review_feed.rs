@@ -325,21 +325,24 @@ impl Library {
         let scored = super::character_shadow_review::shadow_cache_scored_marker(self.root())
             .map_err(character_error)?;
         let connection = self.connection()?;
-        let (decisions, predictions, targets): (Option<i64>, Option<i64>, Option<String>) = connection
+        let (decisions, predictions, targets, broad): (Option<i64>, Option<i64>, Option<String>, Option<bool>) = connection
             .query_row(
                 "SELECT (SELECT MAX(sequence) FROM character_decisions),
                         (SELECT MAX(rowid) FROM character_autotag_predictions),
-                        (SELECT MAX(updated_at) || ':' || COUNT(*) || ':' || SUM(revision) FROM character_targets)",
+                        (SELECT MAX(updated_at) || ':' || COUNT(*) || ':' || SUM(revision) FROM character_targets),
+                        (SELECT broad_folder_scope FROM character_autotag_control WHERE singleton=1)",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )?;
+        // The broad-folder setting hides or shows candidates, so it is part of the input.
         let input = serde_json::json!([
             decisions,
             scored,
             predictions,
             targets,
             acknowledged,
-            s36_series
+            s36_series,
+            broad
         ]);
         Ok(hex(input.to_string()))
     }

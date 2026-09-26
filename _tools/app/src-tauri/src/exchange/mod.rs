@@ -48,6 +48,8 @@ const MAX_RECEIVED_ROWS: usize = 200;
 const POLL: Duration = Duration::from_secs(5);
 /// Hidden in the tray or minimised.
 const POLL_HIDDEN: Duration = Duration::from_secs(15);
+/// Lightweight mode (`workload::is_restricted`): about one status read a minute.
+const POLL_RESTRICTED: Duration = Duration::from_secs(60);
 /// Parked until the user acts (a token is saved), which wakes the thread early.
 const WAIT_FOR_USER: Duration = Duration::from_secs(24 * 3600);
 /// A send stops retrying on its own after this many stalled attempts in a row.
@@ -839,7 +841,7 @@ const STATUS_WAIT: u64 = 50;
 /// 19 per 15 minutes).
 #[cfg(test)]
 pub(crate) fn idle_status_requests(window: Duration, hidden: bool) -> usize {
-    let cycle = Duration::from_secs(STATUS_WAIT) + if hidden { POLL_HIDDEN } else { POLL };
+    let cycle = Duration::from_secs(STATUS_WAIT) + pass_interval(hidden, false);
     (window.as_secs_f64() / cycle.as_secs_f64()).ceil() as usize
 }
 
@@ -1019,12 +1021,19 @@ fn set_availability(availability: Availability) {
     }
 }
 
-/// 5 s while the main window is shown, 15 s while it is hidden in the tray or minimised.
+/// 5 s while the main window is shown, 15 s while it is hidden in the tray or minimised,
+/// 60 s in lightweight mode.
 fn poll_interval(app: &AppHandle) -> Duration {
     let background = app.get_webview_window("main").is_none_or(|window| {
         !window.is_visible().unwrap_or(true) || window.is_minimized().unwrap_or(false)
     });
-    if background {
+    pass_interval(background, crate::workload::is_restricted())
+}
+
+fn pass_interval(background: bool, restricted: bool) -> Duration {
+    if restricted {
+        POLL_RESTRICTED
+    } else if background {
         POLL_HIDDEN
     } else {
         POLL
@@ -2305,6 +2314,27 @@ pub(crate) async fn exchange_set_token(token: Option<String>) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lightweight_mode_slows_the_receiver_to_about_a_minute() {
+        assert_eq!(pass_interval(false, false), Duration::from_secs(5));
+        assert_eq!(pass_interval(true, false), Duration::from_secs(15));
+        assert_eq!(pass_interval(false, true), Duration::from_secs(60));
+        assert_eq!(pass_interval(true, true), Duration::from_secs(60));
+        // Status reads in a quarter hour against a server without long-poll: one per pass.
+        let quarter = Duration::from_secs(15 * 60);
+        let reads = |restricted| {
+            let mut clock = Duration::ZERO;
+            let mut count = 0;
+            while clock < quarter {
+                count += 1;
+                clock += pass_interval(false, restricted);
+            }
+            count
+        };
+        assert_eq!(reads(false), 180);
+        assert_eq!(reads(true), 15);
+    }
 
     #[test]
     fn review_regression_exchange_revalidates_context_after_hold() {

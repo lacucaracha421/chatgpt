@@ -7,9 +7,69 @@ pub(super) struct CharacterScope {
     pub series_classification_ids: Vec<String>,
 }
 
+/// The broad-folder rule (2026-09-12): an image filed directly in a folder without a
+/// registered series ancestor is compared with every registered series below that folder.
+/// A library setting, off by default since 2026-09-27.
+pub(super) fn broad_folder_scope_enabled(
+    connection: &Connection,
+) -> std::result::Result<bool, LibraryError> {
+    Ok(connection
+        .query_row(
+            "SELECT broad_folder_scope FROM character_autotag_control WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// SQL condition on a `character_autotag_jobs` row aliased `j`: the job may run now, because
+/// the broad-folder rule is on or its folder has a registered series ancestor (or is one).
+/// Broad-folder jobs kept while the rule is off wait, unclaimed, until it is turned back on.
+pub(super) const JOB_SCOPE_ALLOWED_SQL: &str = "(EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND broad_folder_scope=1)
+    OR EXISTS(SELECT 1 FROM json_each(j.classification_ids) k WHERE k.value IN (
+        WITH RECURSIVE covered(id) AS (
+            SELECT classification_id FROM character_series
+            UNION SELECT c.id FROM classification_entries c JOIN covered p ON c.parent_id=p.id
+        ) SELECT id FROM covered)))";
+
+/// Registered-series folders and everything below them. An image whose folder is outside
+/// this set is a broad-folder image.
+pub(super) fn series_covered_folders(
+    connection: &Connection,
+) -> std::result::Result<std::collections::HashSet<String>, LibraryError> {
+    Ok(connection
+        .prepare(
+            "WITH RECURSIVE covered(id) AS (
+                SELECT classification_id FROM character_series
+                UNION SELECT c.id FROM classification_entries c JOIN covered p ON c.parent_id=p.id
+             ) SELECT id FROM covered",
+        )?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<_, _>>()?)
+}
+
 pub(super) fn resolve_character_scope(
     connection: &Connection,
     asset_id: &str,
+) -> std::result::Result<Option<CharacterScope>, LibraryError> {
+    let broad = broad_folder_scope_enabled(connection)?;
+    resolve_character_scope_with(connection, asset_id, broad)
+}
+
+/// True when only the switched-off broad-folder rule keeps the image out of scope.
+pub(super) fn broad_scope_switched_off(
+    connection: &Connection,
+    asset_id: &str,
+) -> std::result::Result<bool, LibraryError> {
+    Ok(!broad_folder_scope_enabled(connection)?
+        && resolve_character_scope_with(connection, asset_id, true)?.is_some())
+}
+
+fn resolve_character_scope_with(
+    connection: &Connection,
+    asset_id: &str,
+    broad: bool,
 ) -> std::result::Result<Option<CharacterScope>, LibraryError> {
     let classification_ids = connection
         .prepare(
@@ -68,6 +128,7 @@ pub(super) fn resolve_character_scope(
     let candidates = match series {
         Some((id, true)) => vec![id],
         Some((_, false)) => return Ok(None),
+        None if !broad => return Ok(None),
         None => connection
             .prepare(
                 "WITH RECURSIVE descendants(id) AS (

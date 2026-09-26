@@ -20,6 +20,7 @@ fn queue(f: &Fixture, id: &str) -> Job {
 #[test]
 fn broad_category_asset_compares_descendants_and_fences_roster_changes() {
     let f = Fixture::new();
+    f.library.set_character_broad_folder_scope(true).unwrap();
     let a = f.ready("A");
     let broad: String = f
         .library
@@ -65,6 +66,7 @@ fn context(f: &Fixture, job: &Job) -> Context {
 fn parent_inference_respects_candidate_opt_outs_and_originals() {
     for restriction in ["disabled_series", "excluded_asset", "manual_target", "disabled_target", "originals_target", "originals_source"] {
         let f = Fixture::new();
+        f.library.set_character_broad_folder_scope(true).unwrap();
         f.ready("A");
         let nested = f.ready_in_series("Nested", &f.child);
         let c = f.library.connection().unwrap();
@@ -778,6 +780,7 @@ fn failed_jobs_can_be_reconsidered_and_explicitly_retried() {
 #[test]
 fn broad_category_assets_enter_failed_count_and_retry() {
     let f = Fixture::new();
+    f.library.set_character_broad_folder_scope(true).unwrap();
     let _target = f.ready("A");
     let root: String = f.library.connection().unwrap().query_row(
         "SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |r| r.get(0),
