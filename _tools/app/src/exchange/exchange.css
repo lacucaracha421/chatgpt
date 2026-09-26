@@ -78,7 +78,6 @@ button.exchange-strip-tile { cursor: pointer; }
 .exchange-device { min-height: 52px; gap: 10px; }
 .exchange-device svg { width: 20px; height: 20px; flex: none; color: var(--color-muted); }
 .exchange-device[aria-current="page"] svg, .exchange-device[aria-current="page"] small { color: var(--color-on-accent); }
-.exchange-device[aria-current="page"]::before { content: ""; position: absolute; left: var(--selection-cursor-offset, -7px); top: calc(50% - 2.5px); width: var(--selection-cursor-size, 5px); height: var(--selection-cursor-size, 5px); background: var(--color-accent); }
 .exchange-device-text { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
 .exchange-device-text small { font-size: var(--text-xs); color: var(--color-muted); }
 .exchange-device-count { font-size: var(--text-sm); }

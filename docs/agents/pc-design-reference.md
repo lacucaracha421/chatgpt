@@ -322,3 +322,5 @@ Before accepting a PC UI change, ask:
 - Are domain boundaries from `CONTEXT.md` still intact?
 
 If a change cannot answer these cleanly, fix hierarchy/state clarity before adding decoration.
+
+- **Selected rows (2026-09-26, user):** a selected index/list row is the ivory slab with its own small dark mark on the right; do not add a separate small ivory square cursor to the left of the selected row — it duplicates that mark.
