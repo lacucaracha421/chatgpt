@@ -413,6 +413,23 @@ class CaptureApiTests(unittest.TestCase):
         tail = self.client.get("/v1/captures/pending", headers=self.auth, params={"limit": 2, "after_id": ids[1]}).json()["captures"]
         self.assertEqual([row["id"] for row in tail], ids[2:])
 
+    def test_status_head_moves_on_capture_and_import(self):
+        """`/v1/sync/status` publisherLogs.captures: pending count plus the newest row."""
+        def head():
+            with api_app.get_db() as db:
+                return api_app.captures_status_head(db)
+        self.assertEqual(head(), {"pending": 0, "latest": None})
+        first = self.create_capture().json()["capture"]
+        one = head()
+        self.assertEqual(one["pending"], 1)
+        self.assertIsNotNone(one["latest"])
+        self.client.post(f"/v1/captures/{first['id']}/imported", headers=self.auth)
+        self.assertEqual(head(), {"pending": 0, "latest": one["latest"]})
+        self.create_capture(source_url="https://x.com/artist/status/124/photo/1")
+        two = head()
+        self.assertEqual(two["pending"], 1)
+        self.assertGreater(two["latest"], one["latest"])
+
     def test_old_image_request_defaults_to_image(self):
         response = self.create_capture()
 

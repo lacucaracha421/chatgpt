@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+import character_review
 from tests import test_character_exclusions as base
 from tests import test_mobile_characters as fixtures
 
@@ -296,6 +297,19 @@ class CharacterReviewTests(unittest.TestCase):
         self.assertEqual(self.log(limit=101).status_code, 422)
         self.assertEqual(self.client.get(REVIEW + '/decisions', headers=self.publisher,
                                          params={'libraryId': 'f' * 32}).json()['detail']['code'], 'libraryMismatch')
+
+    def test_status_head_moves_with_the_log(self):
+        """`/v1/sync/status` publisherLogs.characterReviewDecisions is the log's last sequence."""
+        def head():
+            with api_app.get_db() as db:
+                return character_review.status_head(db)
+        self.assertEqual(head(), 0)
+        self.adopt()
+        self.assertEqual(head(), 0)
+        self.assertEqual(self.decide(self.command()).status_code, 200)
+        self.assertEqual(self.decide(self.command(target='d', asset='cand-2', decision='rejected')).status_code, 200)
+        self.assertEqual(head(), 2)
+        self.assertEqual(self.log(after=0).json()['nextCursor'], head())
 
     def test_navigation_cursor_before_adoption(self):
         self.assertEqual(self.publish(self.snapshot(0)).status_code, 200)

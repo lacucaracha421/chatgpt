@@ -255,6 +255,17 @@ def _bump(db):
     db.execute("UPDATE collection_release_state SET revision=revision+1 WHERE singleton=1")
 
 
+def status_head(db):
+    """Read-log head for ``/v1/sync/status`` ``publisherLogs.releaseReads`` (as ``/reads`` reports it)."""
+    current = _state(db)
+    return {"last": current["read_sequence"], "prunedThrough": current["pruned_through"]}
+
+
+def status_signal(db):
+    """The list ``revision`` clients compare, for ``/v1/sync/status`` ``signals.releases``."""
+    return _state(db)["revision"]
+
+
 def _receipt(db, operation_id, digest, what):
     row = db.execute("SELECT payload_digest,result_json FROM collection_release_receipts WHERE operation_id=?",
                      (operation_id,)).fetchone()

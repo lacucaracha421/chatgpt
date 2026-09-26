@@ -142,6 +142,12 @@ def state(db):
     return db.execute("SELECT * FROM mobile_similarity_review_state WHERE singleton=1").fetchone()
 
 
+def status_head(db):
+    """Log head for ``/v1/sync/status`` ``publisherLogs.similarityDecisions``."""
+    current = state(db)
+    return current["last_sequence"] if current else 0
+
+
 def trash_target(decision, a_asset_id, b_asset_id):
     """The image a decision sends to Library Trash once the PC applies it (historical pairs)."""
     return {"keep_existing": b_asset_id, "replace_existing": a_asset_id}.get(decision)

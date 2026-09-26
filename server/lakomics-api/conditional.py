@@ -45,8 +45,13 @@ def matches(if_none_match: str | None, etag: str) -> bool:
 def json_response(payload, if_none_match: str | None = None) -> Response:
     """``payload`` as JSON with an ``ETag``, or ``304`` when the caller already has it."""
     body = encode(payload)
-    etag = etag_for(body)
-    headers = {"ETag": etag, "Cache-Control": CACHE_CONTROL}
+    return encoded_response(body, etag_for(body), if_none_match)
+
+
+def encoded_response(body: bytes, etag: str, if_none_match: str | None = None,
+                     headers: dict | None = None) -> Response:
+    """:func:`json_response` for a body already encoded (and tagged) with :func:`encode`."""
+    headers = {"ETag": etag, "Cache-Control": CACHE_CONTROL, **(headers or {})}
     if matches(if_none_match, etag):
         return Response(status_code=304, headers=headers)
     return Response(content=body, media_type="application/json", headers=headers)

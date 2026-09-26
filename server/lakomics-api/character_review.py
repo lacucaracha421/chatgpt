@@ -135,6 +135,12 @@ def state(db):
     return db.execute("SELECT * FROM mobile_character_review_state WHERE singleton=1").fetchone()
 
 
+def status_head(db):
+    """Log head for ``/v1/sync/status`` ``publisherLogs.characterReviewDecisions``."""
+    current = state(db)
+    return current["last_sequence"] if current else 0
+
+
 def pending_floor(current):
     """Decisions above this sequence are not yet reflected in both PC publications."""
     return min(current["applied_cursor"], current["feed_cursor"])

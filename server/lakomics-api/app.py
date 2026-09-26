@@ -29,6 +29,7 @@ import asset_authority
 import asset_filters
 import asset_visibility
 import authority
+import change_signal
 import classification_authority
 import classification_snapshot
 import head_cache
@@ -47,6 +48,11 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+#: Bumped whenever a control-database connection changed a row; wakes `/v1/sync/status`
+#: long-polls. A hint only: writers that bypass `get_db` are caught by the waiters' recheck.
+write_signal = change_signal.WriteSignal()
+
+
 @contextmanager
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=DB_BUSY_TIMEOUT_SECONDS)
@@ -55,7 +61,10 @@ def get_db():
     try:
         yield conn
     finally:
+        changed = conn.total_changes > 0
         conn.close()
+        if changed:
+            write_signal.bump()
 
 
 @app.exception_handler(ClientDisconnect)
@@ -247,24 +256,28 @@ def startup():
         db.commit()
 
 
+def list_generation(db):
+    """The Asset list generation digest (``/v1/library/list-generation`` and ``signals.listGeneration``)."""
+    generation = db.execute("SELECT generation FROM asset_list_generation WHERE singleton=1").fetchone()[0]
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    domains = db.execute("SELECT library_id,domain,epoch,change_cursor FROM authority_domains "
+                         "WHERE domain IN ('assets','classifications','albums') ORDER BY domain").fetchall() if 'authority_domains' in tables else []
+    characters = db.execute("SELECT revision FROM mobile_character_state WHERE singleton=1").fetchone() if 'mobile_character_state' in tables else None
+    snapshot = db.execute("SELECT revision FROM classification_snapshots WHERE singleton=1").fetchone() if 'classification_snapshots' in tables else None
+    value = [generation,[list(row) for row in domains],list(characters) if characters else None,list(snapshot) if snapshot else None]
+    return hashlib.sha256(json.dumps(value,separators=(',',':')).encode()).hexdigest()
+
+
 @app.get("/v1/library/list-generation")
 def asset_list_generation(authorization: str | None = Header(default=None)):
     require_auth(authorization)
     with get_db() as db:
         db.execute("BEGIN")
-        generation = db.execute("SELECT generation FROM asset_list_generation WHERE singleton=1").fetchone()[0]
-        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        domains = db.execute("SELECT library_id,domain,epoch,change_cursor FROM authority_domains "
-                             "WHERE domain IN ('assets','classifications','albums') ORDER BY domain").fetchall() if 'authority_domains' in tables else []
-        characters = db.execute("SELECT revision FROM mobile_character_state WHERE singleton=1").fetchone() if 'mobile_character_state' in tables else None
-        snapshot = db.execute("SELECT revision FROM classification_snapshots WHERE singleton=1").fetchone() if 'classification_snapshots' in tables else None
-        value = [generation,[list(row) for row in domains],list(characters) if characters else None,list(snapshot) if snapshot else None]
-    import hashlib
+        generation = list_generation(db)
     # `filterVersion` is the same "does this server know about X" probe, carried on the
     # call every gallery already makes before a page fetch: an older server omits the
     # field, and the client then refuses to present an unfiltered list as a filtered one.
-    return {"generation":hashlib.sha256(json.dumps(value,separators=(',',':')).encode()).hexdigest(),
-            "filterVersion": asset_filters.FILTER_VERSION}
+    return {"generation": generation, "filterVersion": asset_filters.FILTER_VERSION}
 
 
 lifecycle(app).on_startup(startup_replication)
@@ -1345,6 +1358,17 @@ def list_pending_captures(
         ).fetchall()
 
     return {"captures": [pending_capture_payload(row) for row in rows]}
+
+
+def captures_status_head(db):
+    """Capture inbox head for ``/v1/sync/status`` ``publisherLogs.captures``.
+
+    Capture ids are random, so ``latest`` is the newest row's ``rowid``: it moves on every
+    new capture even when an import leaves the pending count unchanged.
+    """
+    pending = db.execute("SELECT COUNT(*) FROM captures WHERE status='pending'").fetchone()[0]
+    latest = db.execute("SELECT MAX(rowid) FROM captures").fetchone()[0]
+    return {"pending": pending, "latest": latest}
 
 
 @app.get("/v1/extension/captures/confirm")
@@ -3226,9 +3250,45 @@ if EXCHANGE_ENABLED:
     lifecycle(app).on_startup(_exchange_sweeper.start)
     lifecycle(app).on_shutdown(_exchange_sweeper.stop)
 
+import character_exclusions
+import character_review
+import collection_bindings
+import collection_personal_edits
+import collection_releases
+import mobile_catalog
+import mobile_characters
+import mobile_collections
+import notes
+import similarity_review
+
+
+def publisher_log_heads(db):
+    """``publisherLogs``: the head of every log the PC publisher polls (publisher role only)."""
+    return {"characterExclusions": character_exclusions.status_head(db),
+            "characterReviewDecisions": character_review.status_head(db),
+            "similarityDecisions": similarity_review.status_head(db),
+            "catalogDuplicateDecisions": catalog_duplicates.status_head(db),
+            "releaseReads": collection_releases.status_head(db),
+            "bindings": collection_bindings.status_head(db),
+            "personalEdits": collection_personal_edits.status_head(db),
+            "captures": captures_status_head(db)}
+
+
+def status_signals(db):
+    """``signals`` (opt-in ``?signals=1``): what the tablet's own status polls compare."""
+    return {"listGeneration": list_generation(db),
+            "characters": mobile_characters.status_signal(db),
+            "collections": mobile_collections.status_signal(db),
+            "releases": collection_releases.status_signal(db),
+            "catalog": mobile_catalog.status_signal(db),
+            "bindingRequests": collection_bindings.status_signal(db),
+            "notes": notes.status_signal(db)}
+
+
 startup_sync_status = register_sync_status(
     app, get_db, require_client,
-    exchange_status=file_exchange.status if EXCHANGE_ENABLED else None)
+    exchange_status=file_exchange.status if EXCHANGE_ENABLED else None,
+    publisher_logs=publisher_log_heads, signals=status_signals, write_signal=write_signal)
 
 # Album authority. Startup only creates empty tables: the domain stays PC-owned
 # until a publisher activates its epoch through the activation route, which no

@@ -252,6 +252,12 @@ def endpoints(client_token, publisher_token):
         ("GET /v1/sync/status", "GET", "/v1/sync/status", device, None, None),
         ("GET /v1/sync/status (304)", "GET", "/v1/sync/status", device, None, None),
         ("GET /v1/sync/status (shared token)", "GET", "/v1/sync/status", shared, None, None),
+        # PERF-ALL-001 S1: the publisher view adds every log head the PC polls, and the
+        # opt-in signals replace the tablet's separate status reads.
+        ("GET /v1/sync/status (publisher, publisherLogs)", "GET", "/v1/sync/status", publisher, None, None),
+        ("GET /v1/sync/status (publisher, publisherLogs, 304)", "GET", "/v1/sync/status", publisher, None, None),
+        ("GET /v1/sync/status?signals=1", "GET", "/v1/sync/status", device, {"signals": "1"}, None),
+        ("GET /v1/sync/status?signals=1 (304)", "GET", "/v1/sync/status", device, {"signals": "1"}, None),
         ("GET /v1/mobile-catalog/status", "GET", "/v1/mobile-catalog/status", device, None, None),
         ("GET /v1/mobile-catalog/status (304)", "GET", "/v1/mobile-catalog/status", device, None, None),
         ("GET /v1/albums/changes (caught up)", "GET", "/v1/albums/changes", device, {**feed, "after": n}, None),

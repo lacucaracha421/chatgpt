@@ -25,6 +25,12 @@ class WriteNote(BaseModel):
     payload: Envelope
 
 
+def status_signal(db):
+    """The global note write sequence, for ``/v1/sync/status`` ``signals.notes``."""
+    row = db.execute("SELECT value FROM notes_sequence WHERE singleton=1").fetchone()
+    return row[0] if row else 0
+
+
 def register_notes(app, get_db, require_auth):
     def startup_notes():
         with get_db() as db:

@@ -103,6 +103,21 @@ def client_guard(get_db, shared_token):
     return require_client
 
 
+def principal_role(db, principal):
+    """The role of a principal ``client_guard`` accepted: ``"publisher"`` or ``"client"``.
+
+    The legacy shared credential is client-compatible only, so it is ``"client"``. A row
+    that vanished or was revoked since authentication gets no elevated view either.
+    A row's role never changes (a new role is a new credential), so the answer is a
+    function of the principal id.
+    """
+    if principal == LEGACY_CLIENT:
+        return "client"
+    row = db.execute("SELECT role FROM api_clients WHERE id=? AND revoked_at IS NULL",
+                     [principal]).fetchone()
+    return "publisher" if row is not None and row[0] == "publisher" else "client"
+
+
 def publisher_guard(get_db):
     """Accept unrevoked ``publisher`` rows only.
 

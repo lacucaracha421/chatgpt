@@ -288,6 +288,24 @@ def public_item(item: dict, detail: bool = False) -> dict:
     return result
 
 
+def status_signal(db):
+    """What ``/v1/collections/status`` reports for polling, for ``signals.collections``.
+
+    The served revision (authority projection or PC replica, like ``state``) plus the
+    personal-edit cursors a tablet watches to see its edits accepted and applied.
+    """
+    active = collection_authority.served_state(db)
+    if active is not None:
+        revision = active["revision"]
+    else:
+        row = db.execute("SELECT revision FROM mobile_collection_replica WHERE singleton=1").fetchone()
+        revision = row[0] if row else None
+    edits = personal_edits.state(db)
+    return {"revision": revision,
+            "personalEditCursor": edits["last_sequence"] if edits else None,
+            "appliedPersonalEditCursor": edits["applied_cursor"] if edits else None}
+
+
 def register_collections(app, get_db, require_auth, storage, bucket, presign_get, presign_put,
                          require_client=None, require_publisher=None):
     reader = require_client or require_auth

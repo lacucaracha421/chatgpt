@@ -295,6 +295,10 @@ def last_sequence(db):
     return current["last_sequence"] if current else 0
 
 
+#: Log head for ``/v1/sync/status`` ``publisherLogs.personalEdits``.
+status_head = last_sequence
+
+
 def advertisement(db):
     current = state(db)
     if current is None:

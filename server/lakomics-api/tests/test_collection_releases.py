@@ -299,6 +299,26 @@ class ReleaseRoutes(unittest.TestCase):
         self.assertEqual(self.ids(state="all"), ["e3"])
 
 
+    def test_status_head_and_signal_move_with_reads_prunes_and_uploads(self):
+        """publisherLogs.releaseReads mirrors `/reads`; signals.releases is the list revision."""
+        def head():
+            with self.get_db() as db:
+                return releases.status_head(db), releases.status_signal(db)
+        (reads, revision) = head()
+        self.assertEqual(reads, {"last": 0, "prunedThrough": 0})
+        self.ok(self.upload([event("e1"), event("e2"), event("e3")]))
+        after_upload = head()
+        self.assertEqual(after_upload[0], reads)
+        self.assertNotEqual(after_upload[1], revision)
+        self.ok(self.ack(eventIds=["e1", "e2"]))
+        self.assertEqual(head()[0], {"last": 2, "prunedThrough": 0})
+        later = datetime.now(timezone.utc) + timedelta(days=releases.READ_EVENT_DAYS + 1)
+        with mock.patch.object(releases, "now_utc", return_value=later):
+            self.ok(self.ack(eventIds=["e3"]))
+        page = self.ok(self.reads(after=2))
+        self.assertEqual(head()[0], {"last": page["lastSequence"], "prunedThrough": page["prunedThrough"]})
+        self.assertEqual(head()[0], {"last": 3, "prunedThrough": 2})
+
 class ReleaseRouteOrder(unittest.TestCase):
     """The real application: the static path must win over `/v1/collections/{id}`."""
 

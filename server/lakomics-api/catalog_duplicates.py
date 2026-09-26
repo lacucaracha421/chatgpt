@@ -255,6 +255,11 @@ def _state(db):
     return db.execute("SELECT * FROM catalog_duplicate_state WHERE singleton=1").fetchone()
 
 
+def status_head(db):
+    """Decision-log head for ``/v1/sync/status`` ``publisherLogs.catalogDuplicateDecisions``."""
+    return _state(db)["decision_sequence"]
+
+
 def _bump(db):
     db.execute("UPDATE catalog_duplicate_state SET revision=revision+1 WHERE singleton=1")
     return db.execute("SELECT revision FROM catalog_duplicate_state WHERE singleton=1").fetchone()[0]

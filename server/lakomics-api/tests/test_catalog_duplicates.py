@@ -304,6 +304,21 @@ class ApiTests(Fixture):
         self.publish([], generation="gen-2")
         self.assertEqual(self.code(self.decide(target, "keepBoth", expected=3)), "duplicateCandidateMissing")
 
+    def test_status_head_moves_with_the_decision_log(self):
+        """`/v1/sync/status` publisherLogs.catalogDuplicateDecisions is the log's last sequence."""
+        def head():
+            with self.get_db() as db:
+                return dup.status_head(db)
+        self.assertEqual(head(), 0)
+        a, b = work(1, "Original Long Title"), work(2, "Original Long Title")
+        self.publish([self.item(a, b)])
+        self.assertEqual(head(), 0)
+        target = self.listing()["items"][0]["candidateId"]
+        self.assertEqual(self.decide(target, "keepBoth").status_code, 200)
+        self.assertEqual(head(), 1)
+        feed = self.client.get(PREFIX + "/decisions", headers=self.publisher).json()
+        self.assertEqual(feed["lastSequence"], head())
+
     def test_change_feed_and_list_paging(self):
         works = [work(i, "Original Long Title") for i in range(1, 6)]
         self.publish([self.item(works[0], w) for w in works[1:]])

@@ -37,6 +37,12 @@ LIBRARY_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 HEX_DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 READER_PATTERN = re.compile(r"(?is)const\s+gallery\s*=\s*(\{.*?\});\s*</script>")
 
+def status_signal(db):
+    """The ``publicationRevision`` ``/status`` reports, for ``/v1/sync/status`` ``signals.catalog``."""
+    current = replica.current(db)
+    return current["revision"] if current else None
+
+
 def parse_reader_pages(html):
     if not isinstance(html, str) or len(html.encode("utf-8")) > 5 * 1024 * 1024:
         replica.fail(502, "Catalog pages are unavailable")

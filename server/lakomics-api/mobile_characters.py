@@ -120,6 +120,12 @@ def validate(snapshot):
     return nodes
 
 
+def status_signal(db):
+    """The revision ``/status`` reports, for ``/v1/sync/status`` ``signals.characters``."""
+    row = db.execute("SELECT revision FROM mobile_character_state WHERE singleton=1").fetchone()
+    return row[0] if row else None
+
+
 def register_characters(app, get_db, require_auth, asset_item, asset_memberships,
                         require_client=None, require_publisher=None):
     reader = require_client or require_auth

@@ -8,6 +8,7 @@ import uuid
 from tests import test_mobile_characters as fixtures
 import api_auth
 import authority
+import character_exclusions
 import classification_authority
 
 api_app, fixture, PREFIX, AUTH = fixtures.api_app, fixtures.fixture, fixtures.PREFIX, fixtures.AUTH
@@ -189,6 +190,19 @@ class CharacterExclusionTests(unittest.TestCase):
             self.assertGreaterEqual(self.client.get(ROUTE,headers=self.publisher,params={'libraryId':LIBRARY,'after':after}).status_code,400)
         body=self.snapshot();body.update(baseRevision=self.index()['revision'],exclusionCursor=3)
         self.assertEqual(self.publish(body).status_code,409)
+
+    def test_status_head_moves_with_the_log(self):
+        """`/v1/sync/status` publisherLogs.characterExclusions is the log's last sequence."""
+        def head():
+            with api_app.get_db() as db:
+                return character_exclusions.status_head(db)
+        self.assertEqual(head(), 0)
+        self.ready()
+        self.assertEqual(head(), 0)
+        self.assertEqual(self.exclude(self.command()).status_code, 200)
+        self.assertEqual(head(), 1)
+        page = self.client.get(ROUTE, headers=self.publisher, params={'libraryId': LIBRARY, 'after': 0}).json()
+        self.assertEqual(page['nextCursor'], head())
 
     def test_exclusion_and_retirement_do_not_double_subtract(self):
         self.ready()

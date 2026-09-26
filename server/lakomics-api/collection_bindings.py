@@ -801,6 +801,20 @@ def _state(db):
     return db.execute("SELECT * FROM collection_binding_state WHERE singleton=1").fetchone()
 
 
+def status_head(db):
+    """Request-log head for ``/v1/sync/status`` ``publisherLogs.bindings`` (as ``/log`` reports it)."""
+    current = _state(db)
+    oldest = db.execute("SELECT MIN(sequence) FROM collection_binding_requests WHERE state='pending'").fetchone()[0]
+    return {"logEpoch": current["log_epoch"], "last": current["sequence"], "oldestPending": oldest}
+
+
+def status_signal(db):
+    """Moves when a request is filed and when its state changes (``signals.bindingRequests``)."""
+    last = _state(db)["sequence"]
+    updated = db.execute("SELECT MAX(updated_at) FROM collection_binding_requests").fetchone()[0]
+    return {"last": last, "updatedAt": updated}
+
+
 def _request(row):
     return {"requestId": row["sequence"], "operationId": row["operation_id"], "collectionId": row["collection_id"],
             "provider": row["provider"], "choice": json.loads(row["choice_json"]),

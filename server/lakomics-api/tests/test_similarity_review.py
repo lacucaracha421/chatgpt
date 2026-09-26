@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+import similarity_review
 from tests import test_character_exclusions as base
 from tests import test_mobile_characters as fixtures
 
@@ -289,6 +290,18 @@ class SimilarityReviewTests(unittest.TestCase):
         self.assertEqual(self.code(self.client.get(REVIEW + '/decisions', headers=self.publisher,
                                                    params={'libraryId': 'f' * 32})), 'libraryMismatch')
 
+
+    def test_status_head_moves_with_the_log(self):
+        """`/v1/sync/status` publisherLogs.similarityDecisions is the log's last sequence."""
+        def head():
+            with api_app.get_db() as db:
+                return similarity_review.status_head(db)
+        self.assertEqual(head(), 0)
+        self.adopt()
+        self.assertEqual(head(), 0)
+        self.assertEqual(self.decide(self.command('r1', 'keep_existing')).status_code, 200)
+        self.assertEqual(head(), 1)
+        self.assertEqual(self.log(after=0).json()['nextCursor'], head())
 
 if __name__ == '__main__':
     unittest.main()

@@ -597,6 +597,29 @@ class BindRequests(Base):
         # A new request after resolution is independent.
         self.assertIsNone(self.ok(self.mangadex())["request"]["replaces"])
 
+    def test_status_head_and_signal_follow_requests_and_results(self):
+        """publisherLogs.bindings mirrors `/log`; signals.bindingRequests moves on file and resolve."""
+        def heads():
+            with self.get_db() as db:
+                return bindings.status_head(db), bindings.status_signal(db)
+        head, signal = heads()
+        self.assertEqual((head["last"], head["oldestPending"]), (0, None))
+        self.assertRegex(head["logEpoch"], r"^[0-9a-f]{32}$")
+        self.assertEqual(signal, {"last": 0, "updatedAt": None})
+        first = self.ok(self.mangadex())["request"]["requestId"]
+        second = self.ok(self.kakao())["request"]["requestId"]
+        head, filed = heads()
+        page = self.ok(self.log())
+        self.assertEqual(head, {"logEpoch": page["logEpoch"], "last": page["lastSequence"],
+                                "oldestPending": page["oldestPendingSequence"]})
+        self.assertEqual((head["last"], head["oldestPending"]), (second, first))
+        self.assertEqual(filed["last"], second)
+        self.ok(self.result(first, "applied"))
+        head, resolved = heads()
+        self.assertEqual((head["last"], head["oldestPending"]), (second, second))
+        self.assertEqual(resolved["last"], second)
+        self.assertNotEqual(resolved, filed)
+
     def test_log_epoch(self):
         first = self.ok(self.log())
         self.assertRegex(first["logEpoch"], r"^[0-9a-f]{32}$")

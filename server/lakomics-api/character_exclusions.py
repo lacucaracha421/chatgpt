@@ -52,6 +52,12 @@ def state(db):
     return db.execute("SELECT * FROM mobile_character_exclusion_state WHERE singleton=1").fetchone()
 
 
+def status_head(db):
+    """Log head for ``/v1/sync/status`` ``publisherLogs.characterExclusions``."""
+    current = state(db)
+    return current["last_sequence"] if current else 0
+
+
 def check_library(db, library_id):
     # Bind corrections to the already configured server library, never to a device path.
     owners = [authority.active_domain(db, domain) for domain in ("assets", "classifications")]

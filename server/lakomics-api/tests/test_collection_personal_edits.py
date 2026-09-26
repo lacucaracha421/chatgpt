@@ -9,6 +9,7 @@ from unittest import mock
 from tests import test_mobile_collections as fixtures
 import api_auth
 import authority
+import collection_personal_edits as personal_edits
 import mobile_collections
 
 api_app, AUTH, work = fixtures.api_app, fixtures.AUTH, fixtures.work
@@ -266,6 +267,28 @@ class CollectionPersonalEditTests(unittest.TestCase):
         for after in (-1, 3, 10 ** 30):
             self.assertGreaterEqual(self.feed(after=after).status_code, 400)
         self.assertEqual(self.feed(limit=101).status_code, 422)
+
+    def test_status_head_and_signal_follow_edits_and_publications(self):
+        """publisherLogs.personalEdits is the feed head; signals.collections mirrors `/status`."""
+        def heads():
+            with api_app.get_db() as db:
+                return personal_edits.status_head(db), mobile_collections.status_signal(db)
+
+        def mirrored(status):
+            return {'revision': status['revision'], 'personalEditCursor': status.get('personalEditCursor'),
+                    'appliedPersonalEditCursor': status.get('appliedPersonalEditCursor')}
+        self.assertEqual(heads(), (0, mirrored(self.status())))
+        self.ready()
+        self.assertEqual(heads(), (0, mirrored(self.status())))
+        self.assertEqual(self.edit(self.command()).status_code, 200)
+        head, signal = heads()
+        self.assertEqual(head, 1)
+        self.assertEqual(self.feed(after=0).json()['nextCursor'], head)
+        self.assertEqual(signal, mirrored(self.status()))
+        self.assertEqual(signal['personalEditCursor'], 1)
+        self.ready(cursor=1)
+        self.assertEqual(heads(), (1, mirrored(self.status())))
+        self.assertEqual(heads()[1]['appliedPersonalEditCursor'], 1)
 
     def test_overlay_survives_stale_publication_then_cursor_fences(self):
         self.ready()
