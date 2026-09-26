@@ -468,8 +468,12 @@ class SweepTests(ExchangeFixture):
 class PresignTests(unittest.TestCase):
     def test_upload_url_signs_the_declared_content_length(self):
         env = {"R2_ENDPOINT": "https://r2.example.test", "R2_ACCESS_KEY_ID": "id", "R2_SECRET_ACCESS_KEY": "secret"}
+        # Load the real module by path: other suites replace `sys.modules["r2"]` with stubs.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("r2_presign_under_test", Path(__file__).resolve().parents[1] / "r2.py")
+        r2 = importlib.util.module_from_spec(spec)
         with mock.patch.dict("os.environ", env):
-            import r2
+            spec.loader.exec_module(r2)
         with mock.patch.object(r2.head_cache.ticket_heads, "invalidate"):
             bound = r2.presign_put("exchange/a/b", "application/octet-stream", 900, content_length=1234)
             plain = r2.presign_put("exchange/a/b", "application/octet-stream", 900)
