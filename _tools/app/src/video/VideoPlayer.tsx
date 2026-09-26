@@ -207,7 +207,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
       }}
     >
       <div className="video-player__timeline-wrap">
-        {timelineAvailable && hoverRatio !== null && !vault && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
+        {timelineAvailable && hoverRatio !== null && !vault && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame, asset.thumbnailRevision)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
         <input
           type="range"
           className="video-player__timeline"

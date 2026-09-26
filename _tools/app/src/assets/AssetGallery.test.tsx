@@ -435,6 +435,32 @@ describe("AssetGallery", () => {
     expect(onMoveFocus).toHaveBeenLastCalledWith(5, false);
   });
 
+  it("gives re-mounted tiles the same cacheable thumbnail URL until the content revision changes", () => {
+    const items = [{ ...asset(0), thumbnailRevision: "11" }, { ...asset(1), thumbnailRevision: null }];
+    const sources = () => [...document.querySelectorAll(".asset-gallery__image img")].map((image) => image.getAttribute("src"));
+    const first = render(<AssetGallery layout="masonry" items={items} />);
+    const mounted = sources();
+    expect(mounted).toEqual(["http://lakomics.localhost/thumbnail/asset-0/v11", "http://lakomics.localhost/thumbnail/asset-1"]);
+    first.unmount();
+    // Leaving and returning (scroll-back, view switch, closing the viewer) re-mounts the tiles.
+    const second = render(<AssetGallery layout="masonry" items={items} />);
+    expect(sources()).toEqual(mounted);
+    second.rerender(<AssetGallery layout="masonry" items={[{ ...items[0], thumbnailRevision: "12" }, items[1]]} />);
+    expect(sources()[0]).toBe("http://lakomics.localhost/thumbnail/asset-0/v12");
+    second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={items} />);
+    expect(sources()[0]).toBe("http://lakomics.localhost/vault-thumbnail/asset-0");
+  });
+
+  it("versions video posters and hover scrub frames with the content revision", () => {
+    vi.useFakeTimers();
+    render(<AssetGallery items={[{ ...videoAsset(0), thumbnailRevision: "42" }]} />);
+    const tile = screen.getByRole("option", { name: "video-0.webm" }).querySelector(".video-tile")!;
+    expect(tile.querySelector("img")).toHaveAttribute("src", "http://lakomics.localhost/thumbnail/video-0/v42");
+    fireEvent.pointerEnter(tile);
+    act(() => vi.advanceTimersByTime(200));
+    expect(tile.querySelector("img")?.getAttribute("src")).toMatch(/^http:\/\/lakomics\.localhost\/scrub-frame\/video-0\/\d+\/v42$/);
+  });
+
   it("keeps only one video hover preview active", async () => {
     vi.useFakeTimers();
     render(<AssetGallery items={[videoAsset(0), videoAsset(1)]} />);

@@ -1,5 +1,5 @@
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
-import type { RemoteProvider } from "../library/types";
+import type { AssetSummary, RemoteProvider } from "../library/types";
 
 // Tauri uses HTTP origins on Windows and native URI schemes on Linux.
 // Keep the browser fixture origin when no native runtime is present.
@@ -16,6 +16,15 @@ export function nativeMediaUrl(url: string): string {
 export function thumbnailUrl(assetId: string, revision?: string | number): string {
   const base = `${mediaOrigin()}/thumbnail/${encodeURIComponent(assetId)}`;
   return revision === undefined ? base : `${base}/v${encodeURIComponent(String(revision))}`;
+}
+
+/**
+ * A library Asset's thumbnail under its content revision. The backend serves it as immutable
+ * while the revision is current, so re-mounted tiles load from the WebView cache instead of
+ * the media protocol; an Asset without a revision gets the uncached URL.
+ */
+export function assetThumbnailUrl(asset: Pick<AssetSummary, "id" | "thumbnailRevision">): string {
+  return thumbnailUrl(asset.id, asset.thumbnailRevision ?? undefined);
 }
 
 export function trashThumbnailUrl(assetId: string): string {
@@ -44,8 +53,10 @@ export function vaultPlaybackUrl(itemId: string): string {
   return `${mediaOrigin()}/vault-playback/${encodeURIComponent(itemId)}`;
 }
 
-export function scrubFrameUrl(assetId: string, frameIndex: number): string {
-  return `${mediaOrigin()}/scrub-frame/${encodeURIComponent(assetId)}/${frameIndex}`;
+/** `revision`: the Asset's `thumbnailRevision`, which also versions its scrub frames. */
+export function scrubFrameUrl(assetId: string, frameIndex: number, revision?: string | null): string {
+  const base = `${mediaOrigin()}/scrub-frame/${encodeURIComponent(assetId)}/${frameIndex}`;
+  return revision ? `${base}/v${encodeURIComponent(revision)}` : base;
 }
 
 export function mangaCoverUrl(seriesId: string): string {

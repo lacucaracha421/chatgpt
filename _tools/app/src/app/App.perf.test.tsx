@@ -7,7 +7,7 @@
 // Method: the whole App sits under one React <Profiler>; `commits` counts its onRender
 // callbacks (one per React commit that touched the tree). Selected components are wrapped
 // through vi.mock so their render-function calls are counted, and `tiles` counts gallery
-// tile renders via `thumbnailUrl`. Status reads return fresh objects, like real IPC.
+// tile renders via `thumbnailUrl`/`assetThumbnailUrl`. Status reads return fresh objects, like real IPC.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Profiler, type ProfilerOnRenderCallback } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,7 +62,11 @@ vi.mock("../collections/CollectionBrowser", async (original) => wrapExports(awai
 vi.mock("../notes/NotesView", async (original) => wrapExports(await original(), ["NotesView"]));
 vi.mock("../assets/mediaUrl", async (original) => {
   const m = await original<typeof import("../assets/mediaUrl")>();
-  return { ...m, thumbnailUrl: (...args: Parameters<typeof m.thumbnailUrl>) => { probe.count("tile(thumbnailUrl)"); return m.thumbnailUrl(...args); } };
+  return {
+    ...m,
+    thumbnailUrl: (...args: Parameters<typeof m.thumbnailUrl>) => { probe.count("tile(thumbnailUrl)"); return m.thumbnailUrl(...args); },
+    assetThumbnailUrl: (...args: Parameters<typeof m.assetThumbnailUrl>) => { probe.count("tile(thumbnailUrl)"); return m.assetThumbnailUrl(...args); },
+  };
 });
 vi.mock("../assets/masonryLayout", async (original) => {
   const m = await original<typeof import("../assets/masonryLayout")>();
@@ -410,5 +414,43 @@ describe("desktop idle re-render gate (PERF-ALL-001)", () => {
     expect(idle.renders["tile(thumbnailUrl)"] ?? 0).toBeLessThanOrEqual(IDLE_GATE.tileRenders);
     expect(Object.keys(idle.renders).filter(name => name !== "StatusCenter")).toEqual([]);
     expect(idle.commits).toBeLessThanOrEqual(IDLE_GATE.commitsPerMinute);
+  });
+});
+
+// Tighten-only gate (PERF-ALL-001 item 4): every Library tile thumbnail mounted while scrolling
+// down and back carries its content revision, so the backend serves it as immutable and a
+// re-mounted tile is answered from the WebView cache instead of the media protocol and its DB
+// lock. jsdom has no image cache: `mounts` models today's protocol requests (no-store), while
+// `distinct` is the most a caching WebView requests. Native request counts need a real window.
+const THUMBNAIL_CACHE_GATE = { unversionedMounts: 0 };
+
+describe("desktop thumbnail cacheability gate (PERF-ALL-001)", () => {
+  it("scrolling the Library grid down five screens and back mounts only revisioned thumbnails", async () => {
+    const gateway = perfGateway({});
+    await startWorkspace(gateway);
+    await advance(30_000);
+    const scroller = document.querySelector<HTMLElement>(".asset-gallery__scroll")!;
+    const mounted: string[] = [];
+    const record = (node: Node) => {
+      if (!(node instanceof Element)) return;
+      for (const image of [node, ...node.querySelectorAll("img")]) {
+        const src = image instanceof HTMLImageElement ? image.getAttribute("src") : null;
+        if (src?.includes("/thumbnail/")) mounted.push(src);
+      }
+    };
+    const observer = new MutationObserver((records) => records.forEach((change) => {
+      if (change.type === "attributes") record(change.target);
+      else change.addedNodes.forEach(record);
+    }));
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] });
+    for (const top of [900, 1_800, 2_700, 3_600, 4_500, 3_600, 2_700, 1_800, 900, 0]) {
+      await act(async () => { scroller.scrollTop = top; fireEvent.scroll(scroller); });
+      await advance(500);
+    }
+    observer.disconnect();
+    const unversioned = mounted.filter((src) => !/\/thumbnail\/[^/]+\/v\d+$/.test(src));
+    console.log(`PERF thumbnail-scroll-back ${JSON.stringify({ mounts: mounted.length, distinct: new Set(mounted).size, unversioned: unversioned.length })}`);
+    expect(mounted.length).toBeGreaterThan(new Set(mounted).size); // tiles really re-mounted
+    expect(unversioned.length).toBeLessThanOrEqual(THUMBNAIL_CACHE_GATE.unversionedMounts);
   });
 });

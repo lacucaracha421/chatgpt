@@ -27,6 +27,7 @@ export function perfAsset(index: number): AssetSummary {
     importBatchId: null,
     originalModifiedAt: null,
     media: { kind: "image" },
+    thumbnailRevision: String(1_000_000 + index),
   };
 }
 

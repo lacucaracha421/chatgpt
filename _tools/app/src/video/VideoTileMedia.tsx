@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AssetSummary } from "../library/types";
-import { playbackUrl, scrubFrameUrl, thumbnailUrl } from "../assets/mediaUrl";
+import { assetThumbnailUrl, playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
 
@@ -123,7 +123,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   }
   const alt = asset.title || asset.originalName;
   const previewFrame = previewRatio === null ? hoverFrame : Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1));
-  const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? (thumbnailSrc ?? thumbnailUrl(asset.id)) : scrubFrameUrl(asset.id, previewFrame);
+  const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? (thumbnailSrc ?? assetThumbnailUrl(asset)) : scrubFrameUrl(asset.id, previewFrame, asset.thumbnailRevision);
   return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 160); }} onPointerLeave={leave}>
     {/* 재생 프리뷰가 위에 깔리므로, 정지 타일에서는 scrub 미리보기 프레임을 img로 보여준다. */}
     <img src={stillUrl} alt={alt} decoding="async" draggable={false} />

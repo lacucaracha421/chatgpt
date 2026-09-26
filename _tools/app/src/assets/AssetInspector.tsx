@@ -26,7 +26,7 @@ import {
   localDateTime,
   sourceLabel,
 } from "./assetMetadata";
-import { thumbnailUrl } from "./mediaUrl";
+import { assetThumbnailUrl } from "./mediaUrl";
 
 type Props = {
   assets: AssetSummary[];
@@ -198,7 +198,7 @@ export function AssetInspector({
             aria-label={`${asset.title || asset.originalName} 감상 화면으로 열기`}
             onClick={() => onOpenAsset?.(asset)}
           >
-            <img src={thumbnailUrl(asset.id)} alt="" loading="lazy" decoding="async" draggable={false} />
+            <img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" draggable={false} />
           </button>
           {sourceGroup.length > 1 && (
             <section className="asset-inspector__section asset-inspector__source-group" aria-label="같은 게시물">
@@ -216,7 +216,7 @@ export function AssetInspector({
                     aria-current={sibling.id === asset.id ? "true" : undefined}
                     onClick={() => onOpenAsset?.(sibling)}
                   >
-                    <img src={thumbnailUrl(sibling.id)} alt="" loading="lazy" decoding="async" draggable={false} />
+                    <img src={assetThumbnailUrl(sibling)} alt="" loading="lazy" decoding="async" draggable={false} />
                   </button>
                 ))}
               </div>

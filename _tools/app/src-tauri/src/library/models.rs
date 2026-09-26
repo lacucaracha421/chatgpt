@@ -466,7 +466,13 @@ pub struct AssetSummary {
     pub original_name: String,
     #[serde(skip_serializing)]
     pub relative_path: String,
-    #[serde(skip_serializing)]
+    /// Sent to the frontend only as `thumbnailRevision` (see [`thumbnail_revision`]), never
+    /// as a path.
+    #[serde(
+        rename = "thumbnailRevision",
+        serialize_with = "serialize_thumbnail_revision",
+        skip_deserializing
+    )]
     pub thumbnail_relative_path: Option<String>,
     pub byte_size: u64,
     pub width: u32,
@@ -482,6 +488,41 @@ pub struct AssetSummary {
     pub import_batch_id: Option<String>,
     pub original_modified_at: Option<String>,
     pub media: MediaSummary,
+}
+
+/// Bump when thumbnails or scrub frames are ever regenerated in place with visibly
+/// different content, so every cached `/thumbnail/<id>/v<revision>` URL changes.
+const THUMBNAIL_REVISION_GENERATION: &str = "1";
+
+/// The content revision the media protocol puts in thumbnail and scrub-frame URLs, which
+/// it serves as immutable only while the revision still matches the Asset's thumbnail.
+///
+/// Derived from the recorded thumbnail path: image thumbnails are content-addressed
+/// (`thumbnails/<hash>.webp` of the immutable original), and a video's poster and scrub
+/// frames are regenerated only from the same immutable original at fixed timestamps. A
+/// new thumbnail file therefore means a new path and a new revision. Decimal FNV-1a 64 so
+/// it is stable across builds and fits the protocol's `v<digits>` segment.
+pub(crate) fn thumbnail_revision(thumbnail_relative_path: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in THUMBNAIL_REVISION_GENERATION
+        .bytes()
+        .chain([0])
+        .chain(thumbnail_relative_path.bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash.to_string()
+}
+
+fn serialize_thumbnail_revision<S: serde::Serializer>(
+    thumbnail_relative_path: &Option<String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    thumbnail_relative_path
+        .as_deref()
+        .map(thumbnail_revision)
+        .serialize(serializer)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1618,6 +1659,7 @@ mod tests {
         CollectionType, MangaDexApplyRequest, MangaDexApplyTarget, MediaSummary, MetadataBackup,
         SimilarityReviewAsset, SimilarityReviewSummary, VideoPreparationState,
     };
+    use super::thumbnail_revision;
 
     #[test]
     fn serializes_mangadex_apply_targets_for_the_typescript_gateway() {
@@ -1703,10 +1745,29 @@ mod tests {
             media: MediaSummary::Image,
         };
 
-        let value = serde_json::to_value(asset).unwrap();
+        let value = serde_json::to_value(&asset).unwrap();
 
         assert!(value.get("relativePath").is_none());
         assert!(value.get("thumbnailRelativePath").is_none());
+        assert!(!value.to_string().contains("thumbnails/aa"));
+        // The thumbnail is identified only by an opaque, stable, path-derived revision.
+        assert_eq!(
+            value["thumbnailRevision"],
+            thumbnail_revision("thumbnails/aa/asset.webp")
+        );
+        assert_eq!(
+            thumbnail_revision("thumbnails/aa/asset.webp"),
+            "6343793473580718685"
+        );
+        assert_ne!(
+            thumbnail_revision("thumbnails/aa/asset.webp"),
+            thumbnail_revision("thumbnails/aa/other.webp")
+        );
+        let without = AssetSummary {
+            thumbnail_relative_path: None,
+            ..asset
+        };
+        assert!(serde_json::to_value(without).unwrap()["thumbnailRevision"].is_null());
     }
 
     #[test]

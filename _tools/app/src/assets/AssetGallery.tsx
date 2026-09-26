@@ -8,7 +8,7 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import type { SelectionGesture } from "./selection";
 import { buildJustifiedRows } from "./justifiedRows";
 import { buildMasonryLayout, collectedDate, masonryMove, CAPTION_HEIGHT, type GalleryLayout } from "./masonryLayout";
-import { assetUrl, thumbnailUrl, vaultAssetUrl, vaultPlaybackUrl, vaultThumbnailUrl } from "./mediaUrl";
+import { assetThumbnailUrl, assetUrl, thumbnailUrl, vaultAssetUrl, vaultPlaybackUrl, vaultThumbnailUrl } from "./mediaUrl";
 import { AssetGalleryScrollbar } from "./AssetGalleryScrollbar";
 import { VideoTileMedia } from "../video/VideoTileMedia";
 import "../styles/tokens.css";
@@ -332,7 +332,7 @@ function AssetTile({ asset, height, captionBelow = false, selected, selectedAsse
   const metadataLabel = captionLabel ?? (asset.creatorName?.trim() || asset.creatorHandle?.trim() || "");
   return <div role="option" data-asset-id={asset.id} className={`asset-gallery__asset${captionBelow ? " asset-gallery__asset--caption" : ""}`} style={{ width: asset.width, height: height + (captionBelow && metadataVisible ? CAPTION_HEIGHT : 0) }} aria-label={alt} aria-description={metadataVisible ? [metadataLabel, collectedDate(asset.collectedAt).full].filter(Boolean).join(" · ") : undefined} aria-selected={selected} tabIndex={focused ? 0 : -1} onClick={(event) => onSelectionGesture?.(asset, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey })} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.({ kind: "assets", assetIds: assetDragIds(asset.id, selectedAssetIds) }, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
     <div className="asset-gallery__image" style={{ height }}>
-    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <VideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={thumbnailWithCacheKey(asset.id, thumbnailCacheKey, mediaSource)} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={onRequestPreview} onReleaseActive={onReleasePreview} onRetry={() => onRetryVideo?.(asset)} /> : <img src={thumbnailWithCacheKey(asset.id, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
+    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <VideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={onRequestPreview} onReleaseActive={onReleasePreview} onRetry={() => onRetryVideo?.(asset)} /> : <img src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
     {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
     </div>
     {selected && <span className="asset-gallery__selection-indicator" aria-hidden="true" />}
@@ -342,8 +342,9 @@ function AssetTile({ asset, height, captionBelow = false, selected, selectedAsse
 }
 
 
-function thumbnailWithCacheKey(assetId: string, cacheKey?: string | number, mediaSource: "library" | "vault" = "library") {
-  return mediaSource === "vault" ? vaultThumbnailUrl(assetId, cacheKey) : thumbnailUrl(assetId, cacheKey);
+function tileThumbnailUrl(asset: AssetSummary, cacheKey?: string | number, mediaSource: "library" | "vault" = "library") {
+  if (mediaSource === "vault") return vaultThumbnailUrl(asset.id, cacheKey);
+  return asset.thumbnailRevision ? assetThumbnailUrl(asset) : thumbnailUrl(asset.id, cacheKey);
 }
 
 const METRICS_QUANTIZE = 16;

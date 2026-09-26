@@ -637,15 +637,32 @@ impl Library {
         asset_id: &str,
         variant: MediaVariant,
     ) -> Result<MediaResponse, LibraryError> {
+        self.resolve_media_with_revision(asset_id, variant)
+            .map(|(media, _)| media)
+    }
+
+    /// [`Self::resolve_media`] plus the Asset's current [`models::thumbnail_revision`] for
+    /// the thumbnail and scrub-frame variants (`None` for other variants), read in the same
+    /// query, so the media protocol can tell whether a revisioned URL is still current.
+    pub fn resolve_media_with_revision(
+        &self,
+        asset_id: &str,
+        variant: MediaVariant,
+    ) -> Result<(MediaResponse, Option<String>), LibraryError> {
+        let unrevisioned =
+            |media: Result<MediaResponse, LibraryError>| media.map(|media| (media, None));
         match variant {
-            MediaVariant::MangaCover => return self.manga_cover(asset_id),
-            MediaVariant::MangaPage(page_index) => return self.manga_page(asset_id, page_index),
-            MediaVariant::WorkArtwork => return self.resolve_work_artwork(asset_id),
+            MediaVariant::MangaCover => return unrevisioned(self.manga_cover(asset_id)),
+            MediaVariant::MangaPage(page_index) => {
+                return unrevisioned(self.manga_page(asset_id, page_index))
+            }
+            MediaVariant::WorkArtwork => return unrevisioned(self.resolve_work_artwork(asset_id)),
             MediaVariant::WorkArtworkThumbnail => {
-                return self.resolve_work_artwork_thumbnail(asset_id)
+                return unrevisioned(self.resolve_work_artwork_thumbnail(asset_id))
             }
             _ => {}
         }
+        let mut thumbnail_path = None;
         let relative_path = match variant {
             MediaVariant::Asset => self
                 .connection()?
@@ -666,16 +683,19 @@ impl Library {
                 )
                 .optional()?
                 .flatten(),
-            MediaVariant::Thumbnail => self
-                .connection()?
-                .query_row(
-                    "SELECT thumbnail_relative_path FROM assets
-                     WHERE id = ?1 AND status IN ('normal', 'review')",
-                    [asset_id],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .optional()?
-                .flatten(),
+            MediaVariant::Thumbnail => {
+                thumbnail_path = self
+                    .connection()?
+                    .query_row(
+                        "SELECT thumbnail_relative_path FROM assets
+                         WHERE id = ?1 AND status IN ('normal', 'review')",
+                        [asset_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten();
+                thumbnail_path.clone()
+            }
             MediaVariant::Playback => self
                 .connection()?
                 .query_row(
@@ -695,16 +715,24 @@ impl Library {
             MediaVariant::ScrubFrame(frame_index) => self
                 .connection()?
                 .query_row(
-                    "SELECT video.scrub_relative_dir, video.scrub_frame_count
+                    "SELECT video.scrub_relative_dir, video.scrub_frame_count,
+                            asset.thumbnail_relative_path
                      FROM assets AS asset
                      JOIN video_assets AS video ON video.asset_id = asset.id
                      WHERE asset.id = ?1 AND asset.status = 'normal'
                        AND video.preparation_state = 'ready'",
                     [asset_id],
-                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
                 )
                 .optional()?
-                .and_then(|(directory, count)| {
+                .and_then(|(directory, count, thumbnail)| {
+                    thumbnail_path = thumbnail;
                     let count = u32::try_from(count).ok()?;
                     (frame_index < count)
                         .then(|| directory.map(|path| format!("{path}/{frame_index:03}.webp")))
@@ -727,7 +755,10 @@ impl Library {
             }
         };
         match relative_path {
-            Some(relative_path) => self.open_library_media(&relative_path),
+            Some(relative_path) => Ok((
+                self.open_library_media(&relative_path)?,
+                thumbnail_path.as_deref().map(models::thumbnail_revision),
+            )),
             None => Err(LibraryError::AssetNotFound),
         }
     }

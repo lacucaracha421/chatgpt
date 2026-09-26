@@ -218,11 +218,11 @@ pub(crate) fn media_response_with_range(
 
     // Encrypted Private Vault items are served only by the `/vault-*` routes above; the
     // shared routes never resolve them.
-    match library.resolve_media(&asset_id, variant) {
-        Ok(media) if matches!(variant, MediaVariant::Playback) => {
+    match library.resolve_media_with_revision(&asset_id, variant) {
+        Ok((media, _)) if matches!(variant, MediaVariant::Playback) => {
             playback_response(media, range_header)
         }
-        Ok(mut media) => {
+        Ok((mut media, current_revision)) => {
             let mut bytes = Vec::new();
             if media.file.read_to_end(&mut bytes).is_err() {
                 return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
@@ -231,8 +231,13 @@ pub(crate) fn media_response_with_range(
                 .status(StatusCode::OK)
                 .header(CONTENT_TYPE, media.mime)
                 .header(CONTENT_LENGTH, media.length.to_string());
-            if matches!(variant, MediaVariant::Thumbnail) {
-                response = response.header(CACHE_CONTROL, "no-store");
+            if let Some(cache_control) = library_media_cache_control(
+                variant,
+                requested_revision(path),
+                current_revision.as_deref(),
+                bytes.len() as u64,
+            ) {
+                response = response.header(CACHE_CONTROL, cache_control);
             }
             response.body(bytes).expect("static media response is valid")
         }
@@ -604,9 +609,9 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
         "asset" if segments.next().is_none() => (MediaVariant::Asset, None),
         "trash-thumbnail" if segments.next().is_none() => (MediaVariant::TrashThumbnail, None),
         "thumbnail" => {
-            if let Some(revision) = segments.next() {
-                let Some(number) = revision.strip_prefix('v') else { return None; };
-                if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) || segments.next().is_some() {
+            if let Some(segment) = segments.next() {
+                url_revision_number(segment)?;
+                if segments.next().is_some() {
                     return None;
                 }
             }
@@ -656,8 +661,11 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
         }
         "scrub-frame" => {
             let frame_index = segments.next()?.parse::<u32>().ok()?;
-            if segments.next().is_some() {
-                return None;
+            if let Some(segment) = segments.next() {
+                url_revision_number(segment)?;
+                if segments.next().is_some() {
+                    return None;
+                }
             }
             (MediaVariant::ScrubFrame(frame_index), None)
         }
@@ -665,6 +673,46 @@ fn parse_path(path: &str) -> Option<(MediaVariant, String, Option<String>)> {
     };
     Some((variant, asset_id, file_name))
 }
+
+/// The digits of a `v<digits>` revision segment.
+fn url_revision_number(segment: &str) -> Option<&str> {
+    let number = segment.strip_prefix('v')?;
+    (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())).then_some(number)
+}
+
+/// The revision a `/thumbnail/<id>/v<n>` or `/scrub-frame/<id>/<frame>/v<n>` URL carries.
+/// Only call after `parse_path` accepted the path: an Asset id (a UUID) or a frame index
+/// never starts with `v`, so a final `v<digits>` segment can only be the revision.
+fn requested_revision(path: &str) -> Option<&str> {
+    url_revision_number(path.rsplit('/').next()?)
+}
+
+/// Thumbnails and scrub frames are cached by the WebView only under a URL whose revision
+/// still names the file being served (see `models::thumbnail_revision`); then repeats never
+/// reach this handler or the database. Anything else keeps its previous policy: no-store
+/// for thumbnails (regenerated in place under an unrevisioned URL), none for scrub frames.
+fn library_media_cache_control(
+    variant: MediaVariant,
+    requested_revision: Option<&str>,
+    current_revision: Option<&str>,
+    length: u64,
+) -> Option<&'static str> {
+    match (variant, requested_revision) {
+        (MediaVariant::Thumbnail | MediaVariant::ScrubFrame(_), Some(requested)) => {
+            // An empty body is never frozen: install_thumbnail can still replace an
+            // empty leftover file under the same content-addressed path.
+            if Some(requested) == current_revision && length > 0 {
+                Some(IMMUTABLE_CACHE_CONTROL)
+            } else {
+                Some("no-store")
+            }
+        }
+        (MediaVariant::Thumbnail, None) => Some("no-store"),
+        _ => None,
+    }
+}
+
+const IMMUTABLE_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
 
 fn is_single_file_name(value: &str) -> bool {
     !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\'])
@@ -720,11 +768,11 @@ mod tests {
     use image::{DynamicImage, ImageFormat};
     use rusqlite::params;
     use tauri::http::{
-        header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
-        Method, StatusCode,
+        header::{ACCEPT_RANGES, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
+        Method, Response, StatusCode,
     };
 
-    use crate::library::{error::LibraryError, Library, MediaVariant};
+    use crate::library::{error::LibraryError, models::thumbnail_revision, Library, MediaVariant};
 
     use super::{
         media_response, media_response_with_range, parse_catalog_thumbnail_path,
@@ -988,23 +1036,161 @@ mod tests {
         assert!(parse_media_path("/tmdb-image-preview/backdrop/..%2Fsecret.jpg").is_err());
     }
 
+    fn cache_control(response: &Response<Vec<u8>>) -> Option<&str> {
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok())
+    }
+
+    const IMMUTABLE: &str = "private, max-age=31536000, immutable";
+
     #[test]
-    fn thumbnail_revision_path_bypasses_cached_thumbnail_response() {
+    fn only_a_current_thumbnail_revision_is_served_as_immutable() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path().join("library")).unwrap();
-        insert_asset(&library, ASSET_ID, "assets/image.png", "thumbnails/image.webp");
-        std::fs::write(library.root().join("assets/image.png"), b"asset bytes").unwrap();
-        std::fs::write(library.root().join("thumbnails/image.webp"), b"fresh thumbnail").unwrap();
+        insert_asset(
+            &library,
+            ASSET_ID,
+            "assets/image.png",
+            "thumbnails/aa/old.webp",
+        );
+        std::fs::create_dir_all(library.root().join("thumbnails/aa")).unwrap();
+        std::fs::write(
+            library.root().join("thumbnails/aa/old.webp"),
+            b"old thumbnail",
+        )
+        .unwrap();
+        let old_revision = thumbnail_revision("thumbnails/aa/old.webp");
+        let get = |path: String| media_response(Some(&library), &Method::GET, &path);
 
-        let response = media_response(
-            Some(&library),
-            &Method::GET,
-            &format!("/thumbnail/{ASSET_ID}/v7"),
+        let current = get(format!("/thumbnail/{ASSET_ID}/v{old_revision}"));
+        assert_eq!(current.status(), StatusCode::OK);
+        assert_eq!(current.body(), b"old thumbnail");
+        assert_eq!(cache_control(&current), Some(IMMUTABLE));
+        // Unrevisioned and foreign-revision URLs keep the regenerate-in-place policy.
+        assert_eq!(
+            cache_control(&get(format!("/thumbnail/{ASSET_ID}"))),
+            Some("no-store")
+        );
+        assert_eq!(
+            cache_control(&get(format!("/thumbnail/{ASSET_ID}/v7"))),
+            Some("no-store")
         );
 
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.body(), b"fresh thumbnail");
-        assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+        // A regenerated thumbnail is a new file: the old URL no longer freezes anything and
+        // the new revision names the new bytes.
+        std::fs::write(
+            library.root().join("thumbnails/aa/new.webp"),
+            b"new thumbnail",
+        )
+        .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET thumbnail_relative_path = 'thumbnails/aa/new.webp' WHERE id = ?1",
+                [ASSET_ID],
+            )
+            .unwrap();
+        let stale = get(format!("/thumbnail/{ASSET_ID}/v{old_revision}"));
+        assert_eq!(stale.body(), b"new thumbnail");
+        assert_eq!(cache_control(&stale), Some("no-store"));
+        let new_revision = thumbnail_revision("thumbnails/aa/new.webp");
+        assert_ne!(new_revision, old_revision);
+        let fresh = get(format!("/thumbnail/{ASSET_ID}/v{new_revision}"));
+        assert_eq!(fresh.body(), b"new thumbnail");
+        assert_eq!(cache_control(&fresh), Some(IMMUTABLE));
+    }
+
+    #[test]
+    fn revisioned_thumbnails_of_trash_or_empty_files_are_never_cached() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        std::fs::create_dir_all(library.root().join("thumbnails")).unwrap();
+        insert_asset_with_status(
+            &library,
+            TRASH_ID,
+            "assets/t.png",
+            "thumbnails/t.webp",
+            "trash",
+        );
+        std::fs::write(library.root().join("thumbnails/t.webp"), b"trashed").unwrap();
+        insert_asset(&library, ASSET_ID, "assets/e.png", "thumbnails/e.webp");
+        std::fs::write(library.root().join("thumbnails/e.webp"), b"").unwrap();
+
+        let trashed = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!(
+                "/thumbnail/{TRASH_ID}/v{}",
+                thumbnail_revision("thumbnails/t.webp")
+            ),
+        );
+        assert_eq!(trashed.status(), StatusCode::NOT_FOUND);
+        assert_eq!(cache_control(&trashed), None);
+        let empty = media_response(
+            Some(&library),
+            &Method::GET,
+            &format!(
+                "/thumbnail/{ASSET_ID}/v{}",
+                thumbnail_revision("thumbnails/e.webp")
+            ),
+        );
+        assert_eq!(empty.status(), StatusCode::OK);
+        assert_eq!(cache_control(&empty), Some("no-store"));
+    }
+
+    #[test]
+    fn scrub_frames_are_immutable_only_under_the_current_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_prepared_video(&library, ASSET_ID, "normal");
+        let revision = thumbnail_revision(&format!("video-media/{ASSET_ID}/poster.webp"));
+        let get = |path: String| media_response(Some(&library), &Method::GET, &path);
+
+        let frame = get(format!("/scrub-frame/{ASSET_ID}/0/v{revision}"));
+        assert_eq!(frame.status(), StatusCode::OK);
+        assert_eq!(frame.body(), b"scrub-frame");
+        assert_eq!(cache_control(&frame), Some(IMMUTABLE));
+        assert_eq!(
+            cache_control(&get(format!("/scrub-frame/{ASSET_ID}/0/v1"))),
+            Some("no-store")
+        );
+        assert_eq!(
+            cache_control(&get(format!("/scrub-frame/{ASSET_ID}/0"))),
+            None
+        );
+        let poster = get(format!("/thumbnail/{ASSET_ID}/v{revision}"));
+        assert_eq!(poster.body(), b"poster");
+        assert_eq!(cache_control(&poster), Some(IMMUTABLE));
+        for path in [
+            format!("/scrub-frame/{ASSET_ID}/0/7"),
+            format!("/scrub-frame/{ASSET_ID}/0/v"),
+            format!("/scrub-frame/{ASSET_ID}/0/v1/more"),
+        ] {
+            assert_eq!(
+                get(path.clone()).status(),
+                StatusCode::BAD_REQUEST,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn originals_and_other_library_media_keep_their_cache_policy() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        insert_asset(
+            &library,
+            ASSET_ID,
+            "assets/image.png",
+            "thumbnails/image.webp",
+        );
+        std::fs::write(library.root().join("assets/image.png"), b"asset bytes").unwrap();
+        let original = media_response(Some(&library), &Method::GET, &format!("/asset/{ASSET_ID}"));
+        assert_eq!(original.status(), StatusCode::OK);
+        assert_eq!(cache_control(&original), None);
     }
 
     #[test]

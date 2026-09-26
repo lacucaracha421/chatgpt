@@ -858,6 +858,8 @@ export type AssetSummary = {
   importBatchId: string | null;
   originalModifiedAt: string | null;
   media: MediaSummary;
+  /** Content revision of the Asset's thumbnail (and a video's scrub frames); `null` while it has none. Put it in thumbnail URLs so the WebView may cache them. */
+  thumbnailRevision?: string | null;
 };
 
 export type AssetMetadataPatch = {

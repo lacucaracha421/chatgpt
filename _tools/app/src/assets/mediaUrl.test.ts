@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assetThumbnailUrl,
   assetUrl,
   nativeMediaUrl,
   collectionCoverThumbnailUrl,
@@ -15,6 +16,16 @@ import {
 describe("media URLs", () => {
   it("puts thumbnail cache revisions in the path", () => {
     expect(thumbnailUrl("asset-1", 7)).toBe("http://lakomics.localhost/thumbnail/asset-1/v7");
+  });
+
+  it("versions Asset thumbnails and scrub frames by content revision only when one exists", () => {
+    expect(assetThumbnailUrl({ id: "asset-1", thumbnailRevision: "6343793473580718685" })).toBe(
+      "http://lakomics.localhost/thumbnail/asset-1/v6343793473580718685",
+    );
+    expect(assetThumbnailUrl({ id: "asset-1", thumbnailRevision: null })).toBe("http://lakomics.localhost/thumbnail/asset-1");
+    expect(assetThumbnailUrl({ id: "asset-1" })).toBe("http://lakomics.localhost/thumbnail/asset-1");
+    expect(scrubFrameUrl("video-1", 3, "42")).toBe("http://lakomics.localhost/scrub-frame/video-1/3/v42");
+    expect(scrubFrameUrl("video-1", 3, null)).toBe("http://lakomics.localhost/scrub-frame/video-1/3");
   });
 
   it("uses the Windows custom-protocol origin and ID-only paths", () => {
