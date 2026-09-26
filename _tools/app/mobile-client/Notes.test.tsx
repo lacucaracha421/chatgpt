@@ -1,5 +1,6 @@
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,it,expect,vi} from 'vitest';
+import {useState} from 'react';
 import {Notes,type MobileNote} from './Notes';
 const mock=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mock.native,errorText:(e:Error)=>e.message}));
@@ -251,6 +252,37 @@ it('shows sticky-note cards: pin, checklist progress with done items struck, mas
  expect(document.querySelectorAll('.notes-grid')).toHaveLength(2);
  fireEvent.click(card);
  expect(await screen.findByRole('button',{name:'메모 목록'})).toBeTruthy();
+});
+// Mirrors App: the Home origin lives above Notes and is dropped by `onHomeEntryGone`.
+function HomeHost({backRef,id,home}:{backRef:{current:(()=>boolean)|null};id:string;home:()=>void}){
+ const [fromHome,setFromHome]=useState(true);
+ return <Notes active backRef={backRef} request={{id,key:1}} onReturnHome={fromHome?()=>{setFromHome(false);home();}:undefined} onHomeEntryGone={fromHome?()=>setFromHome(false):undefined}/>;
+}
+it('forgets the Home origin after the note opened from Home is trashed, so another note closes to the list',async()=>{
+ const other={...note,id:'b'.repeat(32),title:'다른 메모',body:'다른 내용'};
+ mock.native.mockImplementation(state([note,other]));
+ const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
+ render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
+ expect(await rendered('내용')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'메모 휴지통으로'}));
+ await openNote('다른 메모');
+ expect(await rendered('다른 내용')).toBeTruthy();
+ act(()=>{expect(backRef.current!()).toBe(true);});
+ expect(home).not.toHaveBeenCalled();
+ expect(await screen.findByText('다른 메모')).toBeTruthy();
+ expect(screen.queryByRole('textbox',{name:'메모 제목'})).toBeNull();
+});
+it('leaves the list to App after the note opened from Home is trashed from its sheet',async()=>{
+ mock.native.mockImplementation(state([note]));
+ const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
+ render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
+ expect(await rendered('내용')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'휴지통으로 보내기'}));
+ await waitFor(()=>expect(saves().some(s=>s.deleted===true)).toBe(true));
+ // On the list, Back is no longer a Notes step: App's tab fallback handles it, without the Home return.
+ act(()=>{expect(backRef.current!()).toBe(false);});
+ expect(home).not.toHaveBeenCalled();
 });
 it('opens the note Home asks for, once per request',async()=>{
  const other={...note,id:'b'.repeat(32),title:'다른 메모',body:'다른 내용'};

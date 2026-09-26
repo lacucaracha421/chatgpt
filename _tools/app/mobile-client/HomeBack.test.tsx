@@ -21,10 +21,12 @@ vi.mock('./Home', () => ({Home:(props:HomeProps) => <div className="home-scroll"
 </div>}));
 vi.mock('./Gallery', () => ({Gallery:({intro,items}:{intro?:ReactNode;items:Asset[]}) => <div aria-label="자산 목록">{intro}{items.map(a => <span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
 vi.mock('./Viewer', () => ({Viewer:() => null}));
-type AreaProps = {active:boolean; backRef:MutableRefObject<(() => boolean)|null>; onReturnHome?:() => void};
-const {area} = vi.hoisted(() => ({area:(name:string) => ({active,backRef,onReturnHome}:AreaProps) => {
+type AreaProps = {active:boolean; backRef:MutableRefObject<(() => boolean)|null>; onReturnHome?:() => void; onHomeEntryGone?:() => void};
+const {area} = vi.hoisted(() => ({area:(name:string) => ({active,backRef,onReturnHome,onHomeEntryGone}:AreaProps) => {
   backRef.current = () => {if (!onReturnHome) return false; onReturnHome(); return true;};
-  return active ? <section aria-label={name} data-from-home={String(!!onReturnHome)}/> : null;
+  return active ? <section aria-label={name} data-from-home={String(!!onReturnHome)}>
+    {onHomeEntryGone && <button onClick={onHomeEntryGone}>{`${name} entry gone`}</button>}
+  </section> : null;
 }}));
 vi.mock('./Collections', () => ({Collections:area('collections-screen')}));
 vi.mock('./Notes', () => ({Notes:area('notes-screen')}));
@@ -136,4 +138,18 @@ it('keeps Back unchanged for screens reached without Home',async() => {
   await waitFor(() => expect(screen.queryByRole('region',{name:'collections-screen'})).toBeNull());
   expect(nav('Library').getAttribute('aria-current')).toBe('page');
   expect(onHome()).toBe(false);
+});
+
+it('forgets the Notes Home origin once the note opened from Home is trashed (Back then leaves like a tab visit)',async() => {
+  await startHome();
+  fireEvent.click(screen.getByRole('button',{name:'home 메모'}));
+  const notes = await screen.findByRole('region',{name:'notes-screen'});
+  expect(notes.getAttribute('data-from-home')).toBe('true');
+  fireEvent.click(screen.getByRole('button',{name:'notes-screen entry gone'}));
+  await waitFor(() => expect(screen.getByRole('region',{name:'notes-screen'}).getAttribute('data-from-home')).toBe('false'));
+  expect(screen.queryByRole('button',{name:'notes-screen entry gone'})).toBeNull();
+  // The list root falls back to the assets area it was opened over, which is Home here.
+  back();
+  await waitFor(() => expect(onHome()).toBe(true));
+  expect(finished()).toBe(false);
 });

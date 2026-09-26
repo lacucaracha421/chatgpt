@@ -123,8 +123,10 @@ function RecoveryKey({store}:{store:NotesStore}) {
   </div>;
 }
 
-/** `onReturnHome`: set while a note was opened from Home; leaving that note returns there. */
-export function Notes({active,backRef,request,onReturnHome}:{active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void}) {
+/** `onReturnHome`: set while a note was opened from Home; leaving that note returns there.
+ *  `onHomeEntryGone`: called when that note is trashed or the list is used instead, so App forgets
+ *  the Home origin and Notes behaves like a normal tab visit from then on. */
+export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void;onHomeEntryGone?:()=>void}) {
   const [store]=useState(()=>new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');
@@ -181,6 +183,9 @@ export function Notes({active,backRef,request,onReturnHome}:{active:boolean;back
   const leave=()=>{select(null);void store.flush();};
   // Back and the list arrow: a note opened from Home goes back to Home, not to the list.
   const close=()=>{leave();onReturnHome?.();};
+  // Trashing leaves the user on the list; a note opened from there later closes back to it.
+  const trashNote=()=>{edit({deleted:true});leave();onHomeEntryGone?.();};
+  const openFromList=(id:string)=>{onHomeEntryGone?.();select(id);};
   const kind=note?noteKind(note):'text';
   const editable=!!note&&!note.deleted&&!note.readOnly&&!note.redacted;
   const stopBodyEdit=()=>{setEditingBody(false);bodyRef.current?.blur();};
@@ -195,14 +200,14 @@ export function Notes({active,backRef,request,onReturnHome}:{active:boolean;back
     return false;
   };return()=>{backRef.current=null;};});
   function newNote(kind:NoteKind){
-    setSheet(null);setScope('all');setLabel(null);setQuery('');
+    setSheet(null);setScope('all');setLabel(null);setQuery('');onHomeEntryGone?.();
     if(kind==='secret'&&!revealed){setSelected(null);setCreatingSecret(true);return;}
     select(store.create(kind),kind==='text');
     requestAnimationFrame(()=>(kind==='text'?bodyRef.current:titleRef.current)?.focus());
   }
   /** One 가계부: opens the existing ledger, restores it from the trash, or creates it (pinned). */
   function openLedger(){
-    setSheet(null);setScope('all');setLabel(null);setQuery('');
+    setSheet(null);setScope('all');setLabel(null);setQuery('');onHomeEntryGone?.();
     const ledgers=state.notes.filter(n=>n.type===LEDGER&&!n.readOnly).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
     const existing=ledgers.find(n=>!n.deleted),trashed=ledgers.find(n=>n.deleted);
     if(!existing&&trashed)store.edit({...trashed,deleted:false});
@@ -258,7 +263,7 @@ export function Notes({active,backRef,request,onReturnHome}:{active:boolean;back
   const pull=usePullToRefresh(list,()=>void store.sync(),state.syncing,!active||!state.unlocked||editing);
   // A dot marks a note still waiting to sync; the words are there for screen readers.
   const meta=(n:Note)=><>{n.pending&&<i className="note-card__pending" aria-hidden="true"/>}{n.conflictCopy&&<><b>사본</b> · </>}{relativeTime(n.updatedAt)}{n.pending&&<span className="sr-only"> · 동기화 대기</span>}</>;
-  const card=(n:Note)=>n.type===LEDGER&&!n.readOnly&&!n.deleted?<LedgerCard key={n.id} ledger={n} notes={state.notes} onOpen={()=>select(n.id)} meta={meta(n)}/>:<NoteCard key={n.id} note={n} meta={meta(n)} onOpen={()=>select(n.id)}/>;
+  const card=(n:Note)=>n.type===LEDGER&&!n.readOnly&&!n.deleted?<LedgerCard key={n.id} ledger={n} notes={state.notes} onOpen={()=>openFromList(n.id)} meta={meta(n)}/>:<NoteCard key={n.id} note={n} meta={meta(n)} onOpen={()=>openFromList(n.id)}/>;
   const syncButton=<Button type="button" size="icon" variant="ghost" className={`notes-sync${state.syncing?' is-syncing':''}${state.error?' is-error':''}`} aria-label="동기화" aria-busy={state.syncing} disabled={state.syncing} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button>;
   // ---- Editor body
   const colorValue=note?noteColorValue(note.color):null;
@@ -290,7 +295,7 @@ export function Notes({active,backRef,request,onReturnHome}:{active:boolean;back
         {!note.deleted&&<><IconButton label={note.pinned?'고정 해제':'고정'} icon={PinIcon} active={note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>
           <Button type="button" size="icon" variant="ghost" aria-label="메모 색상" onClick={()=>setSheet('color')}><span className={`notes-color-dot${colorValue?'':' is-empty'}`} style={colorValue?{background:colorValue}:undefined} aria-hidden="true"/></Button>
           <IconButton label="메모 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('more')}/>
-          <IconButton label="메모 휴지통으로" icon={TrashIcon} onClick={()=>{edit({deleted:true});leave();}}/></>}
+          <IconButton label="메모 휴지통으로" icon={TrashIcon} onClick={trashNote}/></>}
       </header>
       <div ref={pane} className={`notes-editor${colorValue?' has-tint':''}`} style={tint(note.color)} onClick={event=>{if(editingBody&&event.target===event.currentTarget)stopBodyEdit();}}><div className="notes-editor__inner">
         {note.deleted&&<div className="notes-restore"><span>휴지통에 있는 메모입니다.</span><Button variant="ghost" onClick={()=>edit({deleted:false})}>복원</Button></div>}
@@ -336,7 +341,7 @@ export function Notes({active,backRef,request,onReturnHome}:{active:boolean;back
     {sheet==='more'&&note&&<BottomSheet title="메모 더보기" onClose={()=>setSheet(null)}>
       {/* Archive sits here next to 휴지통, away from the everyday actions. */}
       <button className="sheet-option" onClick={()=>{edit({archived:!note.archived});setSheet(null);}}><ArchiveBoxIcon aria-hidden="true"/>{note.archived?'보관 해제':'보관함으로 보내기'}</button>
-      <button className="sheet-option" onClick={()=>{setSheet(null);edit({deleted:true});leave();}}><TrashIcon aria-hidden="true"/>휴지통으로 보내기</button>
+      <button className="sheet-option" onClick={()=>{setSheet(null);trashNote();}}><TrashIcon aria-hidden="true"/>휴지통으로 보내기</button>
     </BottomSheet>}
     {/* Rarely used places sit behind the top bar's ⋯, out of the way of the notes. */}
     {sheet==='list'&&<BottomSheet title="메모 더보기" onClose={()=>setSheet(null)}>
