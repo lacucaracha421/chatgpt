@@ -821,6 +821,8 @@ Before enabling the main-character rule, measure how many existing manual accept
 
 Status: `HOLD`
 
+2026-09-26: Chinese Whispers over S36 implemented as a shadow-only report (`character-runtime/candidate_groups.py`, `be4c5e1`). Unfiltered "expand known" groups were style clusters (5–10 % correct); with distance checks 9 groups / 73 images at ~70 % visual precision, largely overlapping the existing S36 recommendation threshold. The user identifies new characters instantly, so new-candidate groups are low value. User decision: **stop here** — no PC review screen; keep the tool for later (e.g. `CHAR-AUTO-008` multi-form work).
+
 Idea 2026-09-26 (user): julyx10/lap (GPL-3.0 photo manager) groups faces by building a top-K nearest-neighbour graph over embeddings and running Chinese Whispers with one distance threshold (no cluster count needed; memory bounded at N×K). Its InsightFace `buffalo_s` models are real-photo only and do not fit illustrated characters, but the same graph + Chinese Whispers over our CCIP person-crop embeddings could propose "these unassigned images look like one character" as new-character candidates. Reimplement from the algorithm (do not copy GPL code); evaluate against existing labels before exposing it.
 
 Keep clustering/re-identification research deferred while explicit-reference classification remains usable. Reopen only if real-world accuracy evidence shows it solves a recurring gap better than reference/arbitration tuning.
