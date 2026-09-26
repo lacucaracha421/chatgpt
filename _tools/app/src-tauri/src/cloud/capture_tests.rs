@@ -1112,6 +1112,10 @@ fn review_pending_capture_is_not_acknowledged() {
         .unwrap();
     assert_eq!(import_record, None);
     let client = CloudClient::new(&base_url).unwrap();
+    // The end of the inbox only resets the cursor (one request, no second full read); the
+    // next poll reads the inbox from the start again.
+    let end = library.sync_next_cloud_capture_with(&client, "test-token").unwrap();
+    assert_eq!(end.attempted, 0);
     let second = library.sync_next_cloud_capture_with(&client, "test-token").unwrap();
     assert_eq!(second.review_pending, 1);
     assert_eq!(second.acknowledged, 0);
@@ -1119,10 +1123,14 @@ fn review_pending_capture_is_not_acknowledged() {
     library.decide_similarity_review(crate::library::models::SimilarityDecisionRequest {
         review_id, decision: crate::library::models::SimilarityDecision::KeepExisting,
     }).unwrap();
+    // Again past the end first, then from the start: the resolved capture is acknowledged.
+    assert_eq!(library.sync_next_cloud_capture_with(&client, "test-token").unwrap().attempted, 0);
     let third = library.sync_next_cloud_capture_with(&client, "test-token").unwrap();
     assert_eq!(third.acknowledged, 1);
     assert_eq!(third.review_pending, 0);
     let seen = handle.join().unwrap();
+    // Every poll is a single list request.
+    assert_eq!(seen.iter().filter(|url| url.contains("/captures/pending")).count(), 5);
     assert_eq!(seen.iter().filter(|url| url.ends_with("/download")).count(), 1);
     assert_eq!(seen.iter().filter(|url| url.ends_with("/acknowledge")).count(), 1);
 }

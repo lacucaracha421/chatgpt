@@ -471,6 +471,8 @@ fn start_timers(app: tauri::AppHandle) {
         // Shared-authority lane: one conditional status read per pass for every domain,
         // with idle backoff (see `library::authority_pass`).
         let authority = std::sync::Arc::new(Mutex::new(AuthoritySchedule::new(Instant::now())));
+        // The `/v1/sync/status` long-poll watcher for the open library's endpoint.
+        let mut watcher = crate::cloud::status_watch::Supervisor::default();
         let mut was_focused = false;
         let mut authority_root: Option<PathBuf> = None;
         loop {
@@ -483,7 +485,9 @@ fn start_timers(app: tauri::AppHandle) {
             // Returning to the window or queueing a local write wants fresh state now.
             let gained_focus = focused && !was_focused;
             was_focused = focused;
-            if take_local_work() || gained_focus {
+            // Every flag is consumed each tick (no short-circuit), so none lingers.
+            let watched = crate::cloud::status_watch::take_authority_wake();
+            if take_local_work() | gained_focus | watched {
                 authority
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -521,18 +525,28 @@ fn start_timers(app: tauri::AppHandle) {
                 broadcast(&app);
                 last_profile = profile.clone();
             }
-            let Some(library) = app.state::<crate::commands::AppState>().current_library() else {
+            if crate::cloud::status_watch::take_captures_signal() {
+                let _ = app.emit("cloud://captures-pending", ());
+            }
+            let current = app.state::<crate::commands::AppState>().current_library();
+            watcher.tick(current.as_ref(), Instant::now());
+            let Some(library) = current else {
                 continue;
             };
-            if publications.elapsed() >= Duration::from_secs(10)
-                && !PUBLICATIONS_BUSY.swap(true, Ordering::AcqRel)
-            {
-                publications = Instant::now();
-                let lib = library.clone();
-                std::thread::spawn(move || {
-                    let _reset = Reset(&PUBLICATIONS_BUSY);
-                    let _ = lib.run_saved_mobile_publications();
-                });
+            // A moved publisher log head (seen by the watcher or a pass) runs the lanes now.
+            let publication_wake = crate::cloud::status_watch::take_publication_wake();
+            if publication_wake || publications.elapsed() >= Duration::from_secs(10) {
+                if !PUBLICATIONS_BUSY.swap(true, Ordering::AcqRel) {
+                    publications = Instant::now();
+                    let lib = library.clone();
+                    std::thread::spawn(move || {
+                        let _reset = Reset(&PUBLICATIONS_BUSY);
+                        let _ = lib.run_saved_mobile_publications();
+                    });
+                } else if publication_wake {
+                    // Still dispatching the previous tick: try again next second.
+                    crate::cloud::status_watch::wake_publications();
+                }
             }
             let start_authority = {
                 let mut schedule = authority
@@ -560,6 +574,7 @@ fn start_timers(app: tauri::AppHandle) {
                         schedule: schedule.clone(),
                         restricted,
                         changed: false,
+                        live: false,
                     };
                     let (outcome, status) = lib.run_authority_pass().unwrap_or_else(|error| {
                         let failure = Some(CloudFailureReason::from_error(&error).code());
@@ -571,6 +586,7 @@ fn start_timers(app: tauri::AppHandle) {
                     });
                     record_lane(&handle, lib.root(), false, outcome.failure, false);
                     finish.changed = outcome.changed();
+                    finish.live = outcome.live && outcome.failure.is_none();
                     for (changed, event) in [
                         (outcome.albums, "library://album-authority-changed"),
                         (
@@ -628,13 +644,14 @@ struct FinishPass {
     schedule: std::sync::Arc<Mutex<AuthoritySchedule>>,
     restricted: bool,
     changed: bool,
+    live: bool,
 }
 impl Drop for FinishPass {
     fn drop(&mut self) {
         self.schedule
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .finished(self.changed, self.restricted, Instant::now());
+            .finished(self.changed, self.restricted, self.live, Instant::now());
     }
 }
 struct Reset(&'static AtomicBool);

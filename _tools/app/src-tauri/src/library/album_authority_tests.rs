@@ -1300,6 +1300,7 @@ mod waiting_for_asset_upload {
                 contract_version: 1,
                 cursor: 0,
             }],
+            publisher_logs: None,
         };
         let received = library
             .reconcile_album_authority_with_status(client, "token", &|| Ok(status.clone()), true)

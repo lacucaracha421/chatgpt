@@ -302,6 +302,14 @@ export const libraryGateway: LibraryGateway = {
     channel.onmessage = value => onProgress?.(value);
     return invoke<CloudCaptureSyncResult>("run_due_cloud_capture_sync", { onProgress: channel });
   },
+  subscribeCloudCapturesPending: (handler) => {
+    let stopped = false;
+    let unlisten: (() => void) | undefined;
+    void listen("cloud://captures-pending", () => handler())
+      .then((stop) => { if (stopped) stop(); else unlisten = stop; })
+      .catch(() => {});
+    return () => { stopped = true; unlisten?.(); };
+  },
   cloudBackfillPreflight: () =>
     invoke<CloudBackfillPreflightReport>("cloud_backfill_preflight"),
   cloudBackfillSeed: () =>

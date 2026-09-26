@@ -158,6 +158,7 @@ struct Devices {
     devices: Vec<Device>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ExchangeClient {
     agent: ureq::Agent,
     base: url::Url,
@@ -412,24 +413,39 @@ impl ExchangeClient {
     /// The `exchange.revision` counter from `/v1/sync/status`, read conditionally.
     ///
     /// `cache` holds the last ETag and value, so an unchanged server costs one `304`.
-    /// `None` means the server reports no exchange for this credential.
+    /// `None` means the server reports no exchange for this credential. With `wait` (and a
+    /// cached ETag) a long-poll capable server holds the request until the document changes
+    /// or the wait ends. The second value is the server's advertised `Lakomics-Status-Wait`
+    /// (absent on a server without long-poll).
     pub(crate) fn revision(
         &self,
         cache: &mut Option<(String, Option<i64>)>,
-    ) -> Result<Option<i64>> {
+        wait: Option<u64>,
+    ) -> Result<(Option<i64>, Option<u64>)> {
+        let mut url = url::Url::parse(&self.url("/v1/sync/status")?).map_err(|_| ApiError::Invalid)?;
+        if let (Some(wait), Some(_)) = (wait, cache.as_ref()) {
+            url.query_pairs_mut().append_pair("wait", &wait.to_string());
+        }
         let mut request = self
             .agent
-            .get(self.url("/v1/sync/status")?)
+            .get(url.as_str())
             .header("Authorization", &self.authorization);
         if let Some((etag, _)) = cache {
             request = request.header("If-None-Match", etag.as_str());
         }
         let mut response = request.call().map_err(network)?;
         let status = response.status().as_u16();
+        let advertised = response
+            .headers()
+            .get(crate::cloud::client::STATUS_WAIT_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 1.0)
+            .map(|value| value as u64);
         if status == 304 {
             return cache
                 .as_ref()
-                .map(|(_, value)| *value)
+                .map(|(_, value)| (*value, advertised))
                 .ok_or(ApiError::Invalid);
         }
         let etag = response
@@ -450,7 +466,7 @@ impl ExchangeClient {
         *cache = etag
             .filter(|etag| etag.len() <= 256)
             .map(|etag| (etag, revision));
-        Ok(revision)
+        Ok((revision, advertised))
     }
 
     pub(crate) fn inbox(&self) -> Result<Vec<InboxItem>> {
@@ -663,6 +679,59 @@ mod tests {
         let plain = status_error(404, br#"{"detail":"Not Found"}"#);
         assert_eq!(plain.code(), None);
         assert!(status_error(503, b"").transient());
+    }
+
+    #[test]
+    fn the_status_read_asks_to_be_held_only_with_a_tag_and_reads_the_wait_header() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", server.server_addr());
+        let handle = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for status in [200, 304, 304] {
+                let request = server.recv().unwrap();
+                let tag = request
+                    .headers()
+                    .iter()
+                    .find(|header| header.field.equiv("If-None-Match"))
+                    .map(|header| header.value.as_str().to_owned());
+                seen.push((request.url().to_owned(), tag));
+                let body = if status == 200 {
+                    r#"{"exchange":{"revision":4}}"#
+                } else {
+                    ""
+                };
+                let mut response = tiny_http::Response::from_string(body)
+                    .with_status_code(status)
+                    .with_header(tiny_http::Header::from_bytes("ETag", "\"t1\"").unwrap());
+                if seen.len() < 3 {
+                    response.add_header(
+                        tiny_http::Header::from_bytes("Lakomics-Status-Wait", "50").unwrap(),
+                    );
+                }
+                request.respond(response).unwrap();
+            }
+            seen
+        });
+        let client = ExchangeClient::new(&base, "device-token", "device-1").unwrap();
+        let mut cache = None;
+        // No tag yet: a hold could not be honoured, so none is asked for.
+        assert_eq!(client.revision(&mut cache, Some(50)).unwrap(), (Some(4), Some(50)));
+        assert_eq!(client.revision(&mut cache, Some(50)).unwrap(), (Some(4), Some(50)));
+        // An older server answers without the header: the receiver stops asking.
+        assert_eq!(client.revision(&mut cache, None).unwrap(), (Some(4), None));
+        let seen = handle.join().unwrap();
+        assert_eq!(
+            seen,
+            vec![
+                ("/v1/sync/status".to_owned(), None),
+                ("/v1/sync/status?wait=50".to_owned(), Some("\"t1\"".to_owned())),
+                ("/v1/sync/status".to_owned(), Some("\"t1\"".to_owned())),
+            ]
+        );
+        // Idle against a long-poll server: well inside the 19-per-quarter-hour budget.
+        let quarter = std::time::Duration::from_secs(15 * 60);
+        assert_eq!(super::super::idle_status_requests(quarter, false), 17);
+        assert_eq!(super::super::idle_status_requests(quarter, true), 14);
     }
 
     #[test]

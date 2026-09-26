@@ -2768,18 +2768,46 @@ pub async fn cloud_backfill_reconcile(
         .map_err(CommandError::from)
 }
 
+/// One capture poll's result plus whether the poll may now rest.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CloudCaptureSyncReply {
+    #[serde(flatten)]
+    result: crate::cloud::captures::CloudCaptureSyncResult,
+    /// The server's capture inbox is empty and a live status watcher will announce the next
+    /// capture (`cloud://captures-pending`), so the poll may wait for that event.
+    signals_quiet: bool,
+}
+
 #[tauri::command]
 pub async fn run_due_cloud_capture_sync(
     on_progress: tauri::ipc::Channel<IngestOutcome>,
     state: State<'_, AppState>,
-) -> Result<crate::cloud::captures::CloudCaptureSyncResult, CommandError> {
+) -> Result<CloudCaptureSyncReply, CommandError> {
     // 수집 파일 해시·썸네일 작업이 포함되므로 블로킹 스레드에서 실행한다.
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.sync_next_cloud_capture(&|outcome| {
-        // The client always supplies a channel, even without a progress listener.
-        // A closed window does not fail or repeat an already committed import.
-        let _ = on_progress.send(outcome.clone());
-    }))
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = library.sync_next_cloud_capture(&|outcome| {
+            // The client always supplies a channel, even without a progress listener.
+            // A closed window does not fail or repeat an already committed import.
+            let _ = on_progress.send(outcome.clone());
+        })?;
+        let signals_quiet = library
+            .cloud_sync_config()
+            .ok()
+            .filter(|config| config.enabled)
+            .and_then(|config| config.api_base_url)
+            .is_some_and(|endpoint| {
+                crate::cloud::status_watch::captures_quiet(
+                    &endpoint,
+                    crate::cloud::status_watch::unix_now(),
+                )
+            });
+        Ok::<_, LibraryError>(CloudCaptureSyncReply {
+            result,
+            signals_quiet,
+        })
+    })
         .await
         .map_err(|_| background_task_error())?
         .map_err(CommandError::from)

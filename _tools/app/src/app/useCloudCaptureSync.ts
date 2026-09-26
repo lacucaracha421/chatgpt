@@ -4,6 +4,9 @@ import type { IngestOutcome, LibraryGateway } from "../library/types";
 
 const ACTIVE_POLL_INTERVAL_MS = 15_000;
 const BACKGROUND_POLL_INTERVAL_MS = 60_000;
+/** Safety poll while the native status watcher announces every capture. */
+export const QUIET_FALLBACK_MS = 15 * 60_000;
+const RESTRICTED_SPACING_MS = 60_000;
 
 export function useCloudCaptureSync(
   gateway: LibraryGateway,
@@ -31,11 +34,19 @@ export function useCloudCaptureSync(
     let lastRun = -Infinity;
     let timerId: number | undefined;
     let windowFocused = document.hasFocus();
+    // The last poll said the inbox is empty and a live watcher will signal the next capture:
+    // poll on `cloud://captures-pending` only, with a long safety interval.
+    let quiet = false;
+    let signalledWhileRunning = false;
 
     const pollIntervalMs = () =>
-      document.visibilityState === "hidden" || !windowFocused
-        ? BACKGROUND_POLL_INTERVAL_MS
-        : workloadPollDelay(ACTIVE_POLL_INTERVAL_MS);
+      quiet
+        ? QUIET_FALLBACK_MS
+        : document.visibilityState === "hidden" || !windowFocused
+          ? BACKGROUND_POLL_INTERVAL_MS
+          : workloadPollDelay(ACTIVE_POLL_INTERVAL_MS);
+    const throttleRemaining = () =>
+      getWorkloadProfile().restricted ? Math.max(0, lastRun + RESTRICTED_SPACING_MS - Date.now()) : 0;
 
     const clearTimer = () => {
       if (timerId === undefined) return;
@@ -44,7 +55,7 @@ export function useCloudCaptureSync(
     };
 
     const run = async () => {
-      if (!active || running || (getWorkloadProfile().restricted && Date.now() - lastRun < 60_000)) return;
+      if (!active || running || throttleRemaining() > 0) return;
       lastRun = Date.now();
       running = true;
       let request = inFlight.current;
@@ -59,9 +70,11 @@ export function useCloudCaptureSync(
           inFlight.current = request;
         }
         const result = await request.promise;
+        quiet = result.signalsQuiet === true;
         if (active) onResult(result);
       } catch {
         // Network/configuration failures are retried by the next scheduled poll.
+        quiet = false;
       } finally {
         if (inFlight.current === request) inFlight.current = null;
         running = false;
@@ -78,6 +91,12 @@ export function useCloudCaptureSync(
 
     const runAndReschedule = async () => {
       await run();
+      if (signalledWhileRunning) {
+        // The finished poll may have read the inbox before the signalled capture.
+        signalledWhileRunning = false;
+        handleSignal();
+        return;
+      }
       scheduleNext();
     };
 
@@ -86,8 +105,26 @@ export function useCloudCaptureSync(
       void runAndReschedule();
     };
 
-    const handleVisibilityChange = () => {
+    const handleSignal = () => {
       if (!active) return;
+      if (running) {
+        signalledWhileRunning = true;
+        return;
+      }
+      const wait = throttleRemaining();
+      if (wait === 0) {
+        triggerNow();
+        return;
+      }
+      clearTimer();
+      timerId = window.setTimeout(() => {
+        void runAndReschedule();
+      }, wait);
+    };
+
+    // While quiet the watcher announces captures, so focus and visibility need no poll.
+    const handleVisibilityChange = () => {
+      if (!active || quiet) return;
       if (document.visibilityState === "hidden" || !windowFocused) {
         scheduleNext();
         return;
@@ -97,15 +134,16 @@ export function useCloudCaptureSync(
 
     const handleFocus = () => {
       windowFocused = true;
-      if (document.visibilityState !== "hidden") triggerNow();
+      if (!quiet && document.visibilityState !== "hidden") triggerNow();
     };
 
     const handleBlur = () => {
       windowFocused = false;
-      scheduleNext();
+      if (!quiet) scheduleNext();
     };
 
     triggerNow();
+    const unsubscribe = gateway.subscribeCloudCapturesPending?.(handleSignal);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handleFocus);
     window.addEventListener("blur", handleBlur);
@@ -114,6 +152,7 @@ export function useCloudCaptureSync(
       active = false;
       currentSubscriber.active = false;
       clearTimer();
+      unsubscribe?.();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("blur", handleBlur);

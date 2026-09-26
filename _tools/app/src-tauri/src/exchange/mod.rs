@@ -771,19 +771,100 @@ struct Receiver {
     status: Option<(String, Option<i64>)>,
     handled: Option<Option<i64>>,
     last_full: Option<Instant>,
+    /// The server's advertised long-poll wait (`Lakomics-Status-Wait`), capped.
+    wait: Option<u64>,
+}
+
+/// The longest status hold the receiver asks for (the server's own maximum is 50 s).
+const STATUS_WAIT: u64 = 50;
+
+/// Status reads the receiver makes in `window` while idle against a long-poll server: each
+/// held read lasts the full wait and is followed by the pass interval (design gate: at most
+/// 19 per 15 minutes).
+#[cfg(test)]
+pub(crate) fn idle_status_requests(window: Duration, hidden: bool) -> usize {
+    let cycle = Duration::from_secs(STATUS_WAIT) + if hidden { POLL_HIDDEN } else { POLL };
+    (window.as_secs_f64() / cycle.as_secs_f64()).ceil() as usize
+}
+
+/// One held status read, answered on a helper thread.
+struct Held {
+    result: Result<(Option<i64>, Option<u64>), ApiError>,
+    cache: Option<(String, Option<i64>)>,
+    key: String,
 }
 
 impl Receiver {
-    fn pass(&mut self, app: &AppHandle, context: &Context, forced: bool) -> Result<(), ApiError> {
+    /// Hold one long-poll of the exchange status (when the server offers it) while still
+    /// honouring a refresh request at once. Returns whether a refresh came first, and the
+    /// held answer otherwise. An abandoned hold finishes on its own thread and is dropped.
+    fn hold(&self, context: &Context) -> (bool, Option<Held>) {
+        let (Some(wait), Some(cache)) = (self.wait, self.status.clone()) else {
+            return (false, None);
+        };
+        if self.registered.as_deref() != Some(context.key.as_str()) {
+            return (false, None);
+        }
+        let (sender, answers) = std::sync::mpsc::channel();
+        let client = context.client.clone();
+        let key = context.key.clone();
+        let spawned = std::thread::Builder::new()
+            .name("exchange-status".into())
+            .spawn(move || {
+                let mut cache = Some(cache);
+                let result = client.revision(&mut cache, Some(wait));
+                let _ = sender.send(Held { result, cache, key });
+                // Under the state lock, so the waiting loop cannot miss this notification.
+                let _state = lock();
+                runtime().receiver.notify_all();
+            });
+        if spawned.is_err() {
+            return (false, None);
+        }
+        let mut state = lock();
+        loop {
+            if state.refresh {
+                state.refresh = false;
+                return (true, None);
+            }
+            match answers.try_recv() {
+                Ok(held) => return (false, Some(held)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return (false, None),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+            state = runtime()
+                .receiver
+                .wait_timeout(state, Duration::from_secs(1))
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+    }
+
+    fn pass(
+        &mut self,
+        app: &AppHandle,
+        context: &Context,
+        forced: bool,
+        held: Option<Held>,
+    ) -> Result<(), ApiError> {
         let mut forced = forced;
+        let mut held = held.filter(|held| held.key == context.key);
         if self.registered.as_deref() != Some(context.key.as_str()) {
             let me = context.client.register(&device_name())?;
             lock().self_name = Some(me.name);
             self.registered = Some(context.key.clone());
             self.status = None;
+            held = None;
             forced = true;
         }
-        let revision = context.client.revision(&mut self.status)?;
+        let (revision, advertised) = match held {
+            Some(held) => {
+                self.status = held.cache;
+                held.result?
+            }
+            None => context.client.revision(&mut self.status, None)?,
+        };
+        self.wait = advertised.map(|wait| wait.clamp(1, STATUS_WAIT));
         let fallback_due = revision.is_none()
             && self
                 .last_full
@@ -876,6 +957,7 @@ fn receiver_loop(app: AppHandle) {
         status: None,
         handled: None,
         last_full: None,
+        wait: None,
     };
     let mut failures = 0usize;
     let mut delay = Duration::ZERO;
@@ -895,7 +977,14 @@ fn receiver_loop(app: AppHandle) {
                 continue;
             }
         };
-        match receiver.pass(&app, &context, forced) {
+        // Between passes, hold the status (when the server offers it) instead of polling:
+        // an arrival answers the held request at once, a refresh still runs at once.
+        let (forced, held) = if forced || failures > 0 {
+            (forced, None)
+        } else {
+            receiver.hold(&context)
+        };
+        match receiver.pass(&app, &context, forced, held) {
             Ok(()) => {
                 failures = 0;
                 set_availability(Availability {

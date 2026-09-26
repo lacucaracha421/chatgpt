@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudCaptureSyncResult, LibraryGateway } from "../library/types";
-import { useCloudCaptureSync } from "./useCloudCaptureSync";
+import { QUIET_FALLBACK_MS, useCloudCaptureSync } from "./useCloudCaptureSync";
 
 const result: CloudCaptureSyncResult = {
   attempted: 2,
@@ -207,6 +207,103 @@ describe("useCloudCaptureSync", () => {
   });
 });
 
+
+describe("useCloudCaptureSync with native capture signals", () => {
+  const quietResult: CloudCaptureSyncResult = {
+    attempted: 0, acknowledged: 0, failed: 0, reviewPending: 0, added: 0, videoAdded: 0,
+    classificationChanged: 0, signalsQuiet: true,
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    visibilityState = "visible";
+    visibilitySpy = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => visibilityState);
+    focusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    visibilitySpy.mockRestore();
+    focusSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  function signalled(results: CloudCaptureSyncResult[]) {
+    let signal: (() => void) | undefined;
+    const unsubscribe = vi.fn();
+    const run = vi.fn();
+    for (const value of results) run.mockResolvedValueOnce(value);
+    run.mockResolvedValue(results[results.length - 1]);
+    const gateway = {
+      runDueCloudCaptureSync: run,
+      subscribeCloudCapturesPending: vi.fn((handler: () => void) => { signal = handler; return unsubscribe; }),
+    } as unknown as LibraryGateway;
+    return { gateway, run, unsubscribe, signal: () => signal?.() };
+  }
+
+  it("makes no poll in 15 idle minutes while the signals are quiet, then one safety poll", async () => {
+    const { gateway, run } = signalled([quietResult]);
+    renderHook(() => useCloudCaptureSync(gateway, "C:\\Library", vi.fn()));
+    await act(async () => Promise.resolve());
+    expect(run).toHaveBeenCalledTimes(1);
+    // Focus, blur and visibility changes need no poll either: the watcher announces captures.
+    act(() => window.dispatchEvent(new Event("blur")));
+    await act(async () => { window.dispatchEvent(new Event("focus")); await Promise.resolve(); });
+    visibilityState = "hidden";
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    visibilityState = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); await Promise.resolve(); });
+    await act(async () => vi.advanceTimersByTimeAsync(QUIET_FALLBACK_MS - 1));
+    expect(run).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("polls at once on a captures-pending signal", async () => {
+    const { gateway, run, signal } = signalled([quietResult]);
+    renderHook(() => useCloudCaptureSync(gateway, "C:\\Library", vi.fn()));
+    await act(async () => Promise.resolve());
+    await act(async () => { signal(); await Promise.resolve(); });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs one follow-up poll for a signal that arrives during a poll", async () => {
+    let finish!: (value: CloudCaptureSyncResult) => void;
+    const { gateway, run, signal } = signalled([quietResult]);
+    run.mockReset();
+    run.mockReturnValueOnce(new Promise<CloudCaptureSyncResult>((resolve) => { finish = resolve; }))
+      .mockResolvedValue(quietResult);
+    renderHook(() => useCloudCaptureSync(gateway, "C:\\Library", vi.fn()));
+    signal();
+    signal();
+    expect(run).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(quietResult); });
+    await act(async () => Promise.resolve());
+    expect(run).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(QUIET_FALLBACK_MS - 1));
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns to the ordinary interval when a poll is not quiet", async () => {
+    const { gateway, run, signal } = signalled([quietResult, result]);
+    renderHook(() => useCloudCaptureSync(gateway, "C:\\Library", vi.fn()));
+    await act(async () => Promise.resolve());
+    // The watcher went down (or a capture arrived): the signal's poll is not quiet.
+    await act(async () => { signal(); await Promise.resolve(); });
+    expect(run).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(15_000));
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops listening on unmount", async () => {
+    const { gateway, unsubscribe } = signalled([quietResult]);
+    const { unmount } = renderHook(() => useCloudCaptureSync(gateway, "C:\\Library", vi.fn()));
+    await act(async () => Promise.resolve());
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("cloud capture publication before remote acknowledgement", () => {
   const added = { status: "added", asset: { id: "new-image", media: { kind: "image" } } } as import("../library/types").IngestOutcome;

@@ -239,22 +239,28 @@ impl Library {
         }
     }
 
-    /// Claim the idle receive poll for this endpoint: true at most once a minute, durably.
+    /// Claim the receive poll for this endpoint, durably: when the log head in the shared
+    /// status moved past the received cursor, every 30 minutes otherwise, and once a minute
+    /// without a trusted head (`cloud::status_watch::log_due`).
     pub(crate) fn claim_character_review_poll(&self, endpoint: &str) -> Result<bool, LibraryError> {
+        use crate::cloud::status_watch::{log_due, unix_now, LogKind, LogPosition};
+        let cursor = self.character_review_adoption(endpoint)?.map(|(_, cursor)| cursor);
         let db = self.connection()?;
-        let due: bool = db
+        let now = unix_now();
+        let last: Option<i64> = db
             .query_row(
-                "SELECT last_checked <= unixepoch() - 60 FROM mobile_character_review_poll WHERE endpoint = ?1",
+                "SELECT last_checked FROM mobile_character_review_poll WHERE endpoint = ?1",
                 [endpoint],
                 |row| row.get(0),
             )
-            .optional()?
-            .unwrap_or(true);
+            .optional()?;
+        let position = LogPosition::cursor(cursor);
+        let due = log_due(endpoint, LogKind::CharacterReviewDecisions, position, last, now);
         if due {
             db.execute(
-                "INSERT INTO mobile_character_review_poll(endpoint, last_checked) VALUES (?1, unixepoch())
+                "INSERT INTO mobile_character_review_poll(endpoint, last_checked) VALUES (?1, ?2)
                  ON CONFLICT(endpoint) DO UPDATE SET last_checked = excluded.last_checked",
-                [endpoint],
+                rusqlite::params![endpoint, now],
             )?;
         }
         Ok(due)

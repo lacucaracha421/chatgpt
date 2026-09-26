@@ -47,8 +47,6 @@ use crate::cloud::collection_bindings::{
 use crate::library::credential;
 
 const STATE_PREFIX: &str = "collectionBindingSync:";
-/// Seconds between log polls when nothing is left over.
-const POLL_SECONDS: i64 = 60;
 /// Log pages one pass may read.
 const MAX_PAGES: usize = 5;
 /// Pending requests one pass may apply (a Kakao apply can read up to 50 search pages).
@@ -365,8 +363,11 @@ impl Library {
         self.sync_collection_bindings_with(&client, publisher.expose(), endpoint, &LiveApplier)
     }
 
-    /// One pass with an injected transport and applier: at most once a minute (sooner
-    /// while work is left over), outside any failure backoff.
+    /// One pass with an injected transport and applier, outside any failure backoff: when
+    /// the request log's head in the shared status moved past the cursor (a tablet request
+    /// is picked up within about a second of the watcher seeing it), every 30 minutes
+    /// otherwise, and at most once a minute without a trusted head (sooner while work is
+    /// left over). See `cloud::status_watch::log_due`.
     pub(crate) fn sync_collection_bindings_with(
         &self,
         client: &CloudClient,
@@ -374,9 +375,24 @@ impl Library {
         endpoint: &str,
         applier: &dyn BindingApplier,
     ) -> Result<(), LibraryError> {
+        use crate::cloud::status_watch::{log_due, LogKind, LogPosition};
         let now = unix_now();
         let state = self.collection_binding_sync_state(endpoint)?;
-        if state.retry_after > now || state.last_polled > now - POLL_SECONDS {
+        if state.retry_after > now {
+            return Ok(());
+        }
+        // The stored epoch is the log page's JSON text (`"…"` for the server's string);
+        // the shared status carries the string itself.
+        let epoch = state.epoch.as_deref().map(|text| {
+            serde_json::from_str::<String>(text).unwrap_or_else(|_| text.to_owned())
+        });
+        let position = LogPosition {
+            cursor: Some(state.cursor),
+            epoch: epoch.as_deref(),
+        };
+        // Left-over work clears `last_polled` to 0, which is always due: the next tick
+        // continues it.
+        if !log_due(endpoint, LogKind::Bindings, position, Some(state.last_polled), now) {
             return Ok(());
         }
         self.update_binding_sync_state(endpoint, |s| s.last_polled = now)?;

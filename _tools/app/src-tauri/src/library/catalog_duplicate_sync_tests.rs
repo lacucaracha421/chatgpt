@@ -890,3 +890,52 @@ fn catalog_duplicate_own_echo_does_not_change_the_fingerprint() {
     record_page(&c, ENDPOINT, 1, &[entry(2, "5", "6", "notDuplicate")], 2).unwrap();
     assert_ne!(fingerprint(&c).unwrap(), before);
 }
+
+/// Design gate G1 for this lane: the pass keeps its minute for the local steps, but reads the
+/// decision log only when the shared head moved past the cursor (once after start).
+#[test]
+fn the_decision_log_is_read_only_when_its_shared_head_moved() {
+    use crate::cloud::status_watch::{
+        log_due, observe,
+        tests::{logs, status_with},
+        unix_now, LogKind, LogPosition, Source,
+    };
+    let (_temp, library) = library_fixture();
+    // Unreachable: any request fails the pass.
+    let endpoint = "http://127.0.0.1:9/gate-duplicates/";
+    library.ensure_catalog_duplicate_sync(endpoint).unwrap();
+    let fingerprint = library.catalog_duplicate_fingerprint().unwrap();
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE catalog_duplicate_sync SET uploaded_input=?2,decision_cursor=6 WHERE endpoint=?1",
+            params![endpoint, fingerprint],
+        )
+        .unwrap();
+    let now = unix_now();
+    observe(endpoint, &status_with(Some(logs(5, 0))), now, Source::Pass);
+    // The first check after start reads once (this lane keeps no durable check time).
+    assert!(log_due(
+        endpoint,
+        LogKind::CatalogDuplicateDecisions,
+        LogPosition::cursor(Some(6)),
+        None,
+        now
+    ));
+    let dead = CloudClient::new(endpoint).unwrap();
+    library
+        .sync_catalog_duplicates_with(&dead, "publisher", Some("client"), endpoint)
+        .unwrap();
+    let mut moved = logs(5, 0);
+    moved.catalog_duplicate_decisions = Some(7);
+    observe(endpoint, &status_with(Some(moved)), unix_now(), Source::Watcher);
+    library
+        .connection()
+        .unwrap()
+        .execute("UPDATE catalog_duplicate_sync SET last_polled=0 WHERE endpoint=?1", [endpoint])
+        .unwrap();
+    assert!(library
+        .sync_catalog_duplicates_with(&dead, "publisher", Some("client"), endpoint)
+        .is_err());
+}

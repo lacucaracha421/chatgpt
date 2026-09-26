@@ -2888,6 +2888,7 @@ mod integration {
                 contract_version: 1,
                 cursor: 0,
             }],
+            publisher_logs: None,
         };
         let received = library
             .reconcile_classification_authority_with_status(

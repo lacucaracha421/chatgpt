@@ -5,13 +5,19 @@
 //! had moved. A pass now reads the aggregate status once (conditionally, so an
 //! unchanged server answers `304`), shares it with the Asset, Album and Classification
 //! lanes, and fetches a domain's change feed only when that domain's cursor moved or
-//! this pass just wrote to it. Catalog bookmarks live behind
-//! `/v1/mobile-catalog/status`, read the same conditional way. Explicit
-//! reconciliation (the Tauri commands) keeps reading and validating every feed.
+//! this pass just wrote to it. Catalog bookmarks take their authority from the same
+//! document's `catalog-bookmarks` row (an older server without the aggregate route
+//! falls back to `/v1/mobile-catalog/status`). Explicit reconciliation (the Tauri
+//! commands) keeps reading and validating every feed.
+//!
+//! The status is read with the publisher credential when one is configured, so it
+//! carries `publisherLogs` for the publication lanes (`cloud::status_watch`). While the
+//! status watcher is live the pass reads nothing itself: it uses the watcher's document.
 //!
 //! [`AuthoritySchedule`] decides when the next pass is due: five seconds after a pass
-//! that changed something, then 15, 30 and 60 seconds while nothing changes, and
-//! immediately after a local write, window focus, or a wake that arrived mid-pass.
+//! that changed something, then 15, 30 and 60 seconds while nothing changes (300 s while
+//! a live watcher would wake it on any change), and immediately after a local write,
+//! window focus, a watched change, or a wake that arrived mid-pass.
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -20,6 +26,7 @@ use super::error::LibraryError;
 use super::Library;
 use crate::cloud::client::{CloudClient, SyncStatus};
 use crate::cloud::failure::CloudFailureReason;
+use crate::cloud::status_watch;
 
 static LOCAL_WORK: AtomicBool = AtomicBool::new(false);
 
@@ -42,6 +49,9 @@ pub(crate) const DELAYS: [Duration; 4] = [
 ];
 /// The lightweight mode's minimum spacing between passes (the old Asset lane's value).
 pub(crate) const RESTRICTED_FLOOR: Duration = Duration::from_secs(20);
+/// Idle delay while the status watcher is live: every visible change wakes the pass, so
+/// this is only a safety net.
+pub(crate) const LIVE_IDLE: Duration = Duration::from_secs(300);
 
 /// When the next coordinated pass is due. Pure state, so the backoff is testable.
 #[derive(Debug)]
@@ -92,8 +102,16 @@ impl AuthoritySchedule {
         self.woken_while_running = false;
     }
 
-    /// Record a finished pass and return the delay until the next one.
-    pub(crate) fn finished(&mut self, changed: bool, restricted: bool, now: Instant) -> Duration {
+    /// Record a finished pass and return the delay until the next one. `live`: the status
+    /// watcher is live and this pass failed nowhere, so an unchanged pass may rest for
+    /// [`LIVE_IDLE`]; a failing pass keeps the ordinary backoff.
+    pub(crate) fn finished(
+        &mut self,
+        changed: bool,
+        restricted: bool,
+        live: bool,
+        now: Instant,
+    ) -> Duration {
         self.running = false;
         if self.woken_while_running {
             self.woken_while_running = false;
@@ -107,6 +125,9 @@ impl AuthoritySchedule {
             (self.idle + 1).min(DELAYS.len() - 1)
         };
         let mut delay = DELAYS[self.idle];
+        if live && !changed {
+            delay = LIVE_IDLE;
+        }
         if restricted {
             delay = delay.max(RESTRICTED_FLOOR);
         }
@@ -131,6 +152,8 @@ pub(crate) struct AuthorityPassOutcome {
     /// Why the first failing lane failed, as a closed [`CloudFailureReason`] code. Lanes
     /// still fail independently; this only keeps the failure observable.
     pub failure: Option<&'static str>,
+    /// A live status watcher vouched for the status this pass used.
+    pub live: bool,
 }
 
 impl AuthorityPassOutcome {
@@ -244,19 +267,31 @@ impl Library {
         credentials: &dyn CredentialSource,
     ) -> (AuthorityPassOutcome, Option<SyncStatus>) {
         let mut outcome = AuthorityPassOutcome::default();
-        // One status read per pass, shared by every lane (and handed to the Asset
-        // lane afterwards). The error is not `Clone`, so lanes after a failed read see a
-        // transport failure (or the credential failure itself).
-        let status: std::cell::OnceCell<Result<SyncStatus, bool>> = std::cell::OnceCell::new();
+        // One status per pass, shared by every lane (and handed to the Asset lane
+        // afterwards): the live watcher's document when there is one, otherwise one
+        // conditional read. The error is not `Clone`, so lanes after a failed read see its
+        // kind: a credential failure, an unknown authority state, or a transport failure.
+        let status: std::cell::OnceCell<Result<SyncStatus, StatusFailure>> =
+            std::cell::OnceCell::new();
         let read_status = || -> Result<SyncStatus, LibraryError> {
             match status.get_or_init(|| {
-                client
-                    .sync_status_conditional(token)
-                    .map_err(|error| matches!(error, LibraryError::CloudUnauthorized))
+                if let Some(status) =
+                    status_watch::live_status(client.base(), status_watch::unix_now())
+                {
+                    return Ok(status);
+                }
+                let publisher = credentials.publisher().ok();
+                status_watch::read_status(client, token, publisher.as_deref())
+                    .map_err(|error| match error {
+                        LibraryError::CloudUnauthorized => StatusFailure::Unauthorized,
+                        LibraryError::RestoreAuthorityUnknown => StatusFailure::Unknown,
+                        _ => StatusFailure::Unavailable,
+                    })
             }) {
                 Ok(value) => Ok(value.clone()),
-                Err(true) => Err(LibraryError::CloudUnauthorized),
-                Err(false) => Err(LibraryError::CloudRequestUnavailable),
+                Err(StatusFailure::Unauthorized) => Err(LibraryError::CloudUnauthorized),
+                Err(StatusFailure::Unknown) => Err(LibraryError::RestoreAuthorityUnknown),
+                Err(StatusFailure::Unavailable) => Err(LibraryError::CloudRequestUnavailable),
             }
         };
 
@@ -309,10 +344,17 @@ impl Library {
         }
 
         // Bookmarks: receive, then deliver queued intents, then receive again after a
-        // delivery (the order the bookmark loop always used). The status read and the
-        // send pass are skipped entirely when there is nothing to send.
+        // delivery (the order the bookmark loop always used). The send pass is skipped
+        // entirely when there is nothing to send.
         let bookmarks = (|| -> Result<(bool, bool), LibraryError> {
-            let authority = client.mobile_catalog_authority_conditional(token)?;
+            let authority = match read_status() {
+                Ok(status) => status.bookmark_authority(),
+                // A server without the aggregate route still reports bookmarks on its own.
+                Err(LibraryError::RestoreAuthorityUnknown) => {
+                    client.mobile_catalog_authority_conditional(token)?
+                }
+                Err(error) => return Err(error),
+            };
             let received = self.reconcile_catalog_bookmarks_from(client, token, authority, true)?;
             let mut changed = received.applied_changes > 0 || received.adopted_baseline;
             let mut sent = false;
@@ -343,8 +385,17 @@ impl Library {
                 None
             }
         };
+        outcome.live = status_watch::is_live(client.base());
         (outcome, status)
     }
+}
+
+/// Why the shared status read failed, kept so every lane sees the same kind.
+#[derive(Debug, Clone, Copy)]
+enum StatusFailure {
+    Unauthorized,
+    Unknown,
+    Unavailable,
 }
 
 /// One Album or Classification domain's delivery health, read from the local database.
@@ -487,6 +538,10 @@ mod tests {
     struct Fake {
         base: String,
         seen: Arc<Mutex<Vec<Seen>>>,
+        /// The credential of each `/v1/sync/status` request.
+        status_auth: Arc<Mutex<Vec<String>>>,
+        /// Answer `/v1/sync/status` with 401 for the publisher credential.
+        refuse_publisher: Arc<std::sync::atomic::AtomicBool>,
         cursors: Arc<Mutex<Cursors>>,
         stop: Arc<std::sync::atomic::AtomicBool>,
         worker: Option<std::thread::JoinHandle<()>>,
@@ -504,7 +559,10 @@ mod tests {
                 bookmarks: 9,
             }));
             let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let status_auth = Arc::new(Mutex::new(Vec::new()));
+            let refuse_publisher = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let (log, state, halt) = (seen.clone(), cursors.clone(), stop.clone());
+            let (auths, refuse) = (status_auth.clone(), refuse_publisher.clone());
             let worker = std::thread::spawn(move || {
                 while !halt.load(Ordering::Acquire) {
                     let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(20)) else {
@@ -521,12 +579,30 @@ mod tests {
                         path: path.clone(),
                         if_none_match: tag.is_some(),
                     });
+                    if path == "/v1/sync/status" {
+                        let auth = request
+                            .headers()
+                            .iter()
+                            .find(|h| h.field.equiv("Authorization"))
+                            .map(|h| h.value.as_str().to_owned())
+                            .unwrap_or_default();
+                        let refused = refuse.load(Ordering::Acquire)
+                            && auth == "Bearer publisher-token";
+                        auths.lock().unwrap().push(auth);
+                        if refused {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string("{}").with_status_code(401),
+                            );
+                            continue;
+                        }
+                    }
                     let c = state.lock().unwrap();
                     let domain = |name: &str, cursor: i64| json!({"domain":name,"libraryId":LIB,"epoch":1,"contractVersion":1,"cursor":cursor});
                     let body: Value = match path.as_str() {
                         "/v1/sync/status" => {
                             json!({"protocolVersion":1,"active":true,"libraryId":LIB,"domains":[
-                            domain("assets", c.assets), domain("albums", c.albums), domain("classifications", c.classifications)]})
+                            domain("albums", c.albums), domain("assets", c.assets),
+                            domain("catalog-bookmarks", c.bookmarks), domain("classifications", c.classifications)]})
                         }
                         "/v1/mobile-catalog/status" => {
                             json!({"ready":true,"authorityLibraryId":LIB,"authorityEpoch":1,
@@ -580,6 +656,8 @@ mod tests {
             Self {
                 base,
                 seen,
+                status_auth,
+                refuse_publisher,
                 cursors,
                 stop,
                 worker: Some(worker),
@@ -656,17 +734,12 @@ mod tests {
             .collect()
     }
 
+    /// One status read per pass: bookmarks take their authority from the same document.
     fn status_reads(conditional: bool) -> Vec<Seen> {
-        vec![
-            Seen {
-                path: "/v1/sync/status".into(),
-                if_none_match: conditional,
-            },
-            Seen {
-                path: "/v1/mobile-catalog/status".into(),
-                if_none_match: conditional,
-            },
-        ]
+        vec![Seen {
+            path: "/v1/sync/status".into(),
+            if_none_match: conditional,
+        }]
     }
 
     #[test]
@@ -679,10 +752,76 @@ mod tests {
         assert_eq!(fake.take(), status_reads(false));
         for _ in 0..3 {
             assert_eq!(pass(&library, &client), AuthorityPassOutcome::default());
-            // One conditional /v1/sync/status shared by the Asset, Album and
-            // Classification lanes, one conditional bookmark status, and no feed.
+            // One conditional /v1/sync/status shared by the Asset, Album,
+            // Classification and bookmark lanes, and no feed.
             assert_eq!(fake.take(), status_reads(true));
         }
+    }
+
+    #[test]
+    fn the_status_is_read_with_the_publisher_credential_and_falls_back_on_refusal() {
+        let fake = Fake::start(true);
+        let (_temp, library) = adopted();
+        let client = fake.client();
+        assert!(!pass(&library, &client).changed());
+        assert_eq!(
+            std::mem::take(&mut *fake.status_auth.lock().unwrap()),
+            vec!["Bearer publisher-token"]
+        );
+        fake.refuse_publisher.store(true, Ordering::Release);
+        // Refused: the same pass reads with the client credential and nothing is marked
+        // unauthorized (the client credential is fine and must not be dropped).
+        let outcome = pass(&library, &client);
+        assert!(!outcome.unauthorized, "{outcome:?}");
+        assert_eq!(outcome.failure, None);
+        // Later passes do not present the refused credential again.
+        pass(&library, &client);
+        assert_eq!(
+            std::mem::take(&mut *fake.status_auth.lock().unwrap()),
+            vec!["Bearer publisher-token", "Bearer client-token", "Bearer client-token"]
+        );
+        assert!(feeds(&fake.take()).is_empty());
+    }
+
+    #[test]
+    fn a_live_watcher_document_replaces_the_status_read() {
+        let fake = Fake::start(true);
+        let (_temp, library) = adopted();
+        let client = fake.client();
+        pass(&library, &client);
+        fake.take();
+        // A live watcher for this endpoint holds the same (current) document.
+        let status = client.sync_status("client-token").unwrap();
+        fake.take();
+        let endpoint = client.base().to_owned();
+        crate::cloud::status_watch::observe(
+            &endpoint,
+            &status,
+            crate::cloud::status_watch::unix_now(),
+            crate::cloud::status_watch::Source::Watcher,
+        );
+        crate::cloud::status_watch::set_live(&endpoint, 9001, true);
+        for _ in 0..3 {
+            let outcome = pass(&library, &client);
+            assert!(outcome.live && !outcome.changed(), "{outcome:?}");
+            // No request at all: the idle pass costs nothing while the watcher is live.
+            assert_eq!(fake.take(), Vec::new());
+        }
+        // A watched change is picked up from the document, reading only the moved feed.
+        fake.cursors.lock().unwrap().albums = 6;
+        let moved = client.sync_status("client-token").unwrap();
+        fake.take();
+        crate::cloud::status_watch::observe(
+            &endpoint,
+            &moved,
+            crate::cloud::status_watch::unix_now(),
+            crate::cloud::status_watch::Source::Watcher,
+        );
+        pass(&library, &client);
+        assert_eq!(feeds(&fake.take()), vec!["/v1/albums/changes"]);
+        crate::cloud::status_watch::set_live(&endpoint, 9001, false);
+        pass(&library, &client);
+        assert_eq!(fake.take()[0].path, "/v1/sync/status");
     }
 
     #[test]
@@ -867,34 +1006,40 @@ mod tests {
         let mut delays = Vec::new();
         for _ in 0..5 {
             schedule.begin();
-            delays.push(schedule.finished(false, false, t0).as_secs());
+            delays.push(schedule.finished(false, false, false, t0).as_secs());
         }
         assert_eq!(delays, vec![15, 30, 60, 60, 60]);
         assert!(!schedule.due(t0 + Duration::from_secs(59)));
         assert!(schedule.due(t0 + Duration::from_secs(60)));
         schedule.begin();
-        assert_eq!(schedule.finished(true, false, t0), Duration::from_secs(5));
+        assert_eq!(schedule.finished(true, false, false, t0), Duration::from_secs(5));
         schedule.begin();
-        assert_eq!(schedule.finished(false, false, t0), Duration::from_secs(15));
+        assert_eq!(schedule.finished(false, false, false, t0), Duration::from_secs(15));
         // A local write or focus runs now and resets the backoff.
         schedule.wake(t0);
         assert!(schedule.due(t0));
         schedule.begin();
         assert!(!schedule.due(t0), "single flight");
-        assert_eq!(schedule.finished(false, false, t0), Duration::from_secs(15));
+        assert_eq!(schedule.finished(false, false, false, t0), Duration::from_secs(15));
         // A wake that lands mid-pass is owed, not lost.
         schedule.begin();
         schedule.wake(t0);
-        assert_eq!(schedule.finished(false, false, t0), Duration::ZERO);
+        assert_eq!(schedule.finished(false, false, false, t0), Duration::ZERO);
         assert!(schedule.due(t0));
         // An Asset-lane change outside a pass returns to the fast interval.
         schedule.begin();
-        assert_eq!(schedule.finished(false, false, t0), Duration::from_secs(15));
+        assert_eq!(schedule.finished(false, false, false, t0), Duration::from_secs(15));
         schedule.changed_elsewhere(t0);
         assert!(!schedule.due(t0 + Duration::from_secs(4)));
         assert!(schedule.due(t0 + Duration::from_secs(5)));
         // Lightweight mode keeps at least the old 20 s Asset spacing.
         schedule.begin();
-        assert_eq!(schedule.finished(true, true, t0), RESTRICTED_FLOOR);
+        assert_eq!(schedule.finished(true, true, false, t0), RESTRICTED_FLOOR);
+        // A live watcher wakes the pass on any change: an unchanged pass rests five
+        // minutes, a changed one still follows up after five seconds.
+        schedule.begin();
+        assert_eq!(schedule.finished(false, false, true, t0), LIVE_IDLE);
+        schedule.begin();
+        assert_eq!(schedule.finished(true, false, true, t0), Duration::from_secs(5));
     }
 }

@@ -121,6 +121,9 @@ export type CloudCaptureSyncResult = {
   added: number;
   videoAdded: number;
   classificationChanged: number;
+  /** The server inbox is empty and a live status watcher will announce the next capture
+   * (`subscribeCloudCapturesPending`), so the poll may rest. Absent on older builds. */
+  signalsQuiet?: boolean;
 };
 
 export type CloudCaptureSettings = {
@@ -1226,6 +1229,8 @@ export interface LibraryGateway {
   pushCloudCharacters?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<{revision: string; nodes: number}>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
   runDueCloudCaptureSync(onProgress?: (outcome: IngestOutcome) => void): Promise<CloudCaptureSyncResult>;
+  /** Native signal that the server's capture inbox moved or its watcher went live/down. */
+  subscribeCloudCapturesPending?(handler: () => void): () => void;
   cloudBackfillPreflight(): Promise<CloudBackfillPreflightReport>;
   cloudBackfillSeed(): Promise<CloudBackfillSeedReport>;
   cloudBackfillRunCycle(): Promise<CloudBackfillRunSummary>;

@@ -148,8 +148,48 @@ impl Library {
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
         let result = if self.cloud_capture_enabled()? { self.sync_next_cloud_capture_with_progress(client, token, on_ingested)? } else { CloudCaptureSyncResult::default() };
         if !self.cloud_sync_config()?.enabled { return Ok(result); }
+        self.publish_due_cloud_metadata_with(client, token, true)?;
+        Ok(result)
+    }
+
+    /// The native publication tick's metadata lane: the same snapshots the capture poll
+    /// publishes, so they no longer wait for a capture poll that now rests while the
+    /// capture inbox is quiet. A cheap local check comes first; the credential and the
+    /// network are touched only when a snapshot is due. Claims are atomic, so running
+    /// beside the capture poll never publishes one generation twice.
+    pub(crate) fn publish_due_cloud_metadata(&self, endpoint: &str) -> Result<(), LibraryError> {
+        let config = self.cloud_sync_config()?;
+        if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
+            return Ok(());
+        }
+        let client = CloudClient::new(endpoint)?;
+        let due: bool = self.connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cloud_metadata_publication_state
+             WHERE (generation<>published_generation OR endpoint<>?1) AND retry_after<=?2)",
+            rusqlite::params![client.capture_endpoint(), chrono::Utc::now().timestamp()],
+            |row| row.get(0),
+        )?;
+        if !due {
+            return Ok(());
+        }
+        let token = crate::library::credential_broker::broker()
+            .credential(credential::CredentialTarget::CloudApi)?;
+        self.publish_due_cloud_metadata_with(&client, token.expose(), false)
+            .map(|_| ())
+    }
+
+    /// Publish every changed mobile read snapshot. The generation lives in the database, so
+    /// a restart never repeats a snapshot already published. Returns whether any was due;
+    /// the activity record is written when one was, or always with `record_idle`.
+    fn publish_due_cloud_metadata_with(
+        &self,
+        client: &CloudClient,
+        token: &str,
+        record_idle: bool,
+    ) -> Result<bool, LibraryError> {
         // 수집 폴과 같은 주기로 변경된 모바일 읽기 스냅샷만 게시한다. 세대는
         // DB에 남으므로 재시작 후에도 이미 게시한 전체 스냅샷을 반복하지 않는다.
+        let mut attempted = false;
         let mut publish_failed = false;
         // The first publication failure's reason, so the durable record names a cause
         // rather than reporting only that something failed.
@@ -165,6 +205,7 @@ impl Library {
             )? else {
                 continue;
             };
+            attempted = true;
             let publish = match kind {
                 // After Classification authority adoption the legacy snapshot lane is
                 // fenced server-side (`PUT /v1/classifications` calls the shared
@@ -223,11 +264,13 @@ impl Library {
                 }
             }
         }
-        self.record_cloud_metadata_activity_with(
-            publish_failed.then_some("모바일 분류·수집 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."),
-            publish_failed.then_some(metadata_failure).flatten(),
-        )?;
-        Ok(result)
+        if attempted || record_idle {
+            self.record_cloud_metadata_activity_with(
+                publish_failed.then_some("모바일 분류·수집 기록을 전송하지 못했습니다. 서버 연결을 확인해 주세요."),
+                publish_failed.then_some(metadata_failure).flatten(),
+            )?;
+        }
+        Ok(attempted)
     }
 
     fn claim_cloud_metadata_publication(
@@ -370,10 +413,12 @@ impl Library {
         let endpoint = client.capture_endpoint();
         let cursor: Option<String> = self.connection()?.query_row(
             "SELECT after_id FROM cloud_capture_poll_cursor WHERE endpoint=?1", [endpoint], |r| r.get(0)).optional()?;
-        let mut captures = client.list_pending_captures_after(token, cursor.as_deref())?;
-        if captures.is_empty() {
+        let captures = client.list_pending_captures_after(token, cursor.as_deref())?;
+        if captures.is_empty() && cursor.is_some() {
+            // The end of the inbox. Deferred captures behind the cursor are read from the start
+            // by the next poll (they wait at least a minute anyway), not by a second full read
+            // now: most polls of an idle inbox would otherwise cost two requests.
             self.connection()?.execute("DELETE FROM cloud_capture_poll_cursor WHERE endpoint=?1", [endpoint])?;
-            if cursor.is_some() { captures = client.list_pending_captures(token)?; }
         }
         let mut result = CloudCaptureSyncResult::default();
         for payload in captures {

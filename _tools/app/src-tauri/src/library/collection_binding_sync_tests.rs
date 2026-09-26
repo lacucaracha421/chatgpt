@@ -939,3 +939,67 @@ fn a_requested_multi_group_apply_resolves_each_group_and_merges() {
     let target_now = target(&item).unwrap();
     assert!(library.binding_precheck(&item, &target_now).unwrap().is_none());
 }
+
+/// Design gate G2 (desktop): with the status watcher live, a tablet bind request reaches this
+/// lane's log read within two seconds, and an idle lane reads nothing.
+#[test]
+fn gate_g2_a_bind_request_is_picked_up_within_two_seconds_with_long_poll() {
+    use crate::cloud::status_watch::{
+        self,
+        tests::{eventually, LongPollServer, RunningWatcher, Serve},
+    };
+    use std::time::{Duration, Instant};
+    let server = LongPollServer::start(Serve::LongPoll, 50);
+    let endpoint = server.base.clone();
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    configure(&library, &endpoint);
+    let client = CloudClient::new(&endpoint).unwrap();
+    let fake = Fake::default();
+    // Caught up with the fake's log (request 5, its epoch), checked just now.
+    library
+        .update_binding_sync_state(&endpoint, |s| {
+            s.cursor = 5;
+            s.epoch = Some("\"epoch-1\"".into());
+            s.last_polled = unix_now();
+        })
+        .unwrap();
+    let _watcher = RunningWatcher::start(&endpoint, 201);
+    assert!(eventually(Duration::from_secs(5), || status_watch::is_live(
+        &endpoint
+    )));
+    let log_reads = || {
+        server
+            .seen()
+            .iter()
+            .filter(|s| s.path == "/v1/collections/bindings/log")
+            .count()
+    };
+    // Idle: heads match, so the lane reads nothing even though the watcher is live.
+    library
+        .sync_collection_bindings_with(&client, "publisher", &endpoint, &fake)
+        .unwrap();
+    assert_eq!(log_reads(), 0);
+    let filed = Instant::now();
+    server.change(|doc| doc.bindings_last = 6);
+    // The native owner loop: a publication wake runs the lanes at once, else its 1 s tick.
+    let mut next_tick = Instant::now() + Duration::from_secs(1);
+    while log_reads() == 0 {
+        assert!(filed.elapsed() < Duration::from_secs(5), "not picked up");
+        if status_watch::take_publication_wake() || Instant::now() >= next_tick {
+            library
+                .sync_collection_bindings_with(&client, "publisher", &endpoint, &fake)
+                .unwrap();
+            next_tick = Instant::now() + Duration::from_secs(1);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let pickup = filed.elapsed();
+    assert!(pickup <= Duration::from_secs(2), "{pickup:?}");
+    assert_eq!(library.collection_binding_sync_state(&endpoint).unwrap().cursor, 6);
+    // Caught up again: the next ticks read nothing.
+    library
+        .sync_collection_bindings_with(&client, "publisher", &endpoint, &fake)
+        .unwrap();
+    assert_eq!(log_reads(), 1);
+}

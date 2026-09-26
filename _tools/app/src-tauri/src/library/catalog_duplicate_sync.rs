@@ -842,15 +842,30 @@ impl Library {
         api_token: Option<&str>,
         endpoint: &str,
     ) -> Result<(), LibraryError> {
+        use crate::cloud::status_watch::{log_due, unix_now, LogKind, LogPosition};
         self.ensure_catalog_duplicate_sync(endpoint)?;
         if !self.claim_catalog_duplicate_pass(endpoint)? {
             return Ok(());
         }
-        let received =
+        // The pass keeps its minute for the local steps; the decision log itself is read
+        // only when its head moved (or the safety interval passed). This lane keeps no
+        // durable log-check time, so the hub's own record serves.
+        let cursor = self.catalog_duplicate_cursor(endpoint)?;
+        let receive = log_due(
+            endpoint,
+            LogKind::CatalogDuplicateDecisions,
+            LogPosition::cursor(Some(cursor)),
+            None,
+            unix_now(),
+        );
+        let received = if !receive {
+            Ok(())
+        } else {
             match self.receive_catalog_duplicate_decisions(client, publisher_token, endpoint) {
                 Ok(()) | Err(LibraryError::CatalogDuplicateUnsupported) => Ok(()),
                 Err(error) => Err(error),
-            };
+            }
+        };
         let mut changed = self.apply_catalog_duplicate_decisions()?;
         let uploaded = self.upload_due_catalog_duplicates(client, publisher_token, endpoint);
         match &uploaded {

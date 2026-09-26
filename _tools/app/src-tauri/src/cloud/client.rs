@@ -177,9 +177,127 @@ pub(crate) struct SyncStatus {
     pub active: bool,
     pub library_id: Option<String>,
     pub domains: Vec<SyncAuthorityDomain>,
+    /// `publisherLogs`, present only when the document was read with a publisher
+    /// credential. A wake-up hint for the publication lanes, never a correctness cursor:
+    /// it takes no part in [`Self::is_consistent`] or the restore guard, and a missing or
+    /// malformed block (or head) only means "no trusted head" (see `cloud::status_watch`).
+    pub publisher_logs: Option<PublisherLogs>,
 }
 
+/// `publisherLogs.releaseReads`: the read log's `lastSequence` and `prunedThrough`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReleaseReadsHead {
+    pub last: i64,
+    pub pruned_through: i64,
+}
+
+/// `publisherLogs.bindings`: the request log's `logEpoch`, `lastSequence` and
+/// `oldestPendingSequence`, exactly as `GET …/bindings/log` reports them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BindingsHead {
+    pub log_epoch: Option<String>,
+    pub last: i64,
+    pub oldest_pending: Option<i64>,
+}
+
+/// `publisherLogs.captures`: the pending count and the newest capture's row number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CapturesHead {
+    pub pending: i64,
+    pub latest: Option<i64>,
+}
+
+/// The head of every log the publication lanes poll. Each head is parsed on its own:
+/// one a future server renames or reshapes is `None` while the others stay usable.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PublisherLogs {
+    pub character_exclusions: Option<i64>,
+    pub character_review_decisions: Option<i64>,
+    pub similarity_decisions: Option<i64>,
+    pub catalog_duplicate_decisions: Option<i64>,
+    pub release_reads: Option<ReleaseReadsHead>,
+    pub bindings: Option<BindingsHead>,
+    pub personal_edits: Option<i64>,
+    pub captures: Option<CapturesHead>,
+}
+
+impl PublisherLogs {
+    /// Lenient parse of the `publisherLogs` value: never an error, only absent heads.
+    pub(crate) fn parse(value: &serde_json::Value) -> Option<Self> {
+        let block = value.as_object()?;
+        let sequence = |value: Option<&serde_json::Value>| {
+            value.and_then(serde_json::Value::as_i64).filter(|value| *value >= 0)
+        };
+        let head = |key: &str| sequence(block.get(key));
+        let release_reads = block.get("releaseReads").and_then(|value| {
+            Some(ReleaseReadsHead {
+                last: sequence(value.get("last"))?,
+                pruned_through: sequence(value.get("prunedThrough"))?,
+            })
+        });
+        let bindings = block.get("bindings").and_then(|value| {
+            let log_epoch = match value.get("logEpoch") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(serde_json::Value::String(epoch)) => Some(epoch.clone()),
+                Some(_) => return None,
+            };
+            let oldest_pending = match value.get("oldestPending") {
+                None | Some(serde_json::Value::Null) => None,
+                other => Some(sequence(other)?),
+            };
+            Some(BindingsHead {
+                log_epoch,
+                last: sequence(value.get("last"))?,
+                oldest_pending,
+            })
+        });
+        let captures = block.get("captures").and_then(|value| {
+            let latest = match value.get("latest") {
+                None | Some(serde_json::Value::Null) => None,
+                other => Some(sequence(other)?),
+            };
+            Some(CapturesHead {
+                pending: sequence(value.get("pending"))?,
+                latest,
+            })
+        });
+        Some(Self {
+            character_exclusions: head("characterExclusions"),
+            character_review_decisions: head("characterReviewDecisions"),
+            similarity_decisions: head("similarityDecisions"),
+            catalog_duplicate_decisions: head("catalogDuplicateDecisions"),
+            release_reads,
+            bindings,
+            personal_edits: head("personalEdits"),
+            captures,
+        })
+    }
+}
+
+/// The server's domain name for catalog bookmarks (`catalog_bookmarks.DOMAIN`).
+pub(crate) const CATALOG_BOOKMARKS_DOMAIN: &str = "catalog-bookmarks";
+
 impl SyncStatus {
+    /// The bookmark authority as `/v1/mobile-catalog/status` reports it, from this
+    /// document's `catalog-bookmarks` row: both read the same `authority_domains` row, and
+    /// the server advertises `bookmarkWrite` exactly when that row exists.
+    pub(crate) fn bookmark_authority(&self) -> MobileCatalogAuthority {
+        match self
+            .domains
+            .iter()
+            .find(|domain| domain.domain == CATALOG_BOOKMARKS_DOMAIN)
+        {
+            Some(domain) => MobileCatalogAuthority {
+                library_id: Some(domain.library_id.clone()),
+                epoch: Some(domain.epoch),
+                contract_version: Some(domain.contract_version),
+                cursor: Some(domain.cursor),
+                bookmark_write: true,
+            },
+            None => MobileCatalogAuthority::default(),
+        }
+    }
+
     /// The domain names this server reports as server-authoritative, in order.
     pub(crate) fn active_domain_names(&self) -> Vec<&str> {
         self.domains.iter().map(|domain| domain.domain.as_str()).collect()
@@ -231,6 +349,23 @@ impl SyncStatus {
         }
         true
     }
+}
+
+/// The header a long-poll capable server sends on every `/v1/sync/status` answer.
+pub(crate) const STATUS_WAIT_HEADER: &str = "lakomics-status-wait";
+
+/// One answer to [`CloudClient::watch_sync_status`]. `advertised` is the server's
+/// `Lakomics-Status-Wait` (seconds), absent on a server without long-poll.
+#[derive(Debug)]
+pub(crate) enum StatusWatchReply {
+    Changed {
+        status: SyncStatus,
+        etag: Option<String>,
+        advertised: Option<u64>,
+    },
+    NotModified {
+        advertised: Option<u64>,
+    },
 }
 
 /// The aggregate contract version this build understands.
@@ -887,6 +1022,81 @@ impl CloudClient {
     pub(crate) fn sync_status_conditional(&self, token: &str) -> Result<SyncStatus, LibraryError> {
         let bytes = self.conditional_get("/v1/sync/status", token, map_sync_status_error)?;
         parse_sync_status(&bytes)
+    }
+
+    /// A client for the status watcher's held requests: the response may take up to the
+    /// requested wait, so it is allowed `recv_response` instead of the usual 30 s.
+    pub(crate) fn for_status_watch(base_url: &str, recv_response: Duration) -> Result<Self, LibraryError> {
+        let mut client = Self::new(base_url)?;
+        client.agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
+            .timeout_recv_response(Some(recv_response))
+            .timeout_recv_body(Some(SHORT_NETWORK_TIMEOUT))
+            .build()
+            .into();
+        Ok(client)
+    }
+
+    /// The endpoint this client talks to, normalized (the key `cloud::status_watch` uses).
+    pub(crate) fn base(&self) -> &str {
+        self.base_url.as_str()
+    }
+
+    /// `GET /v1/sync/status?wait=<wait>` with the watcher's own ETag.
+    ///
+    /// The server holds the request only when `etag` still matches, until the caller's
+    /// document changes (`Changed`) or the wait ends (`NotModified`). An older server
+    /// ignores `wait` and answers at once; either way the advertised
+    /// `Lakomics-Status-Wait` header is returned so the caller can tell the two apart.
+    pub(crate) fn watch_sync_status(
+        &self,
+        token: &str,
+        etag: Option<&str>,
+        wait: u64,
+    ) -> Result<StatusWatchReply, LibraryError> {
+        let mut url = url::Url::parse(&self.endpoint("/v1/sync/status")?)
+            .map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
+        url.query_pairs_mut().append_pair("wait", &wait.to_string());
+        let mut request = self
+            .agent
+            .get(url.as_str())
+            .header("Authorization", bearer(token)?);
+        if let Some(etag) = etag {
+            request = request.header("If-None-Match", etag);
+        }
+        let mut response = request.call().map_err(map_sync_status_error)?;
+        let advertised = response
+            .headers()
+            .get(STATUS_WAIT_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 1.0)
+            .map(|value| value as u64);
+        if response.status().as_u16() == 304 {
+            // Only meaningful against the tag this watcher sent.
+            return match etag {
+                Some(_) => Ok(StatusWatchReply::NotModified { advertised }),
+                None => Err(LibraryError::InvalidCloudResponse),
+            };
+        }
+        if !response.status().is_success() {
+            return Err(map_sync_status_error(ureq::Error::StatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| value.len() <= 256)
+            .map(str::to_owned);
+        let body = read_body_bounded(&mut response, MAX_RESPONSE_BYTES)?;
+        Ok(StatusWatchReply::Changed {
+            status: parse_sync_status(&body)?,
+            etag,
+            advertised,
+        })
     }
 
     /// A small JSON GET with a process-wide ETag cache (see [`ConditionalCache`]).
@@ -2818,6 +3028,9 @@ fn parse_sync_status(bytes: &[u8]) -> Result<SyncStatus, LibraryError> {
         active: bool,
         library_id: Option<String>,
         domains: Vec<Domain>,
+        // Any JSON value: a malformed block must not make the document unreadable.
+        #[serde(default)]
+        publisher_logs: Option<serde_json::Value>,
     }
     // A body this client cannot parse at all is an unreadable authority state.
     let status: Status =
@@ -2844,6 +3057,7 @@ fn parse_sync_status(bytes: &[u8]) -> Result<SyncStatus, LibraryError> {
         active: status.active,
         library_id: status.library_id,
         domains,
+        publisher_logs: status.publisher_logs.as_ref().and_then(PublisherLogs::parse),
     };
     if !status.is_consistent() {
         return Err(LibraryError::RestoreAuthorityUnknown);

@@ -182,18 +182,27 @@ impl Library {
         self.sync_collection_releases_with(&client, publisher.expose(), endpoint)
     }
 
-    /// One pass with an injected transport: the read log (at most once a minute), then the
-    /// upload when the unread set changed. A read-log failure does not stop the upload; the
-    /// first error is returned.
+    /// One pass with an injected transport: the read log (when its head in the shared status
+    /// moved, every 30 minutes otherwise, once a minute without a trusted head — see
+    /// `cloud::status_watch::log_due`), then the upload when the unread set changed. A
+    /// read-log failure does not stop the upload; the first error is returned.
     pub(crate) fn sync_collection_releases_with(
         &self,
         client: &CloudClient,
         publisher_token: &str,
         endpoint: &str,
     ) -> Result<(), LibraryError> {
+        use crate::cloud::status_watch::{log_due, LogKind, LogPosition};
         let now = unix_now();
         let state = self.collection_release_sync_state(endpoint)?;
-        let received = if state.last_polled <= now - 60 {
+        let due = log_due(
+            endpoint,
+            LogKind::ReleaseReads,
+            LogPosition::cursor(Some(state.read_cursor)),
+            Some(state.last_polled),
+            now,
+        );
+        let received = if due {
             self.update_release_sync_state(endpoint, |s| s.last_polled = now)?;
             match self.receive_collection_release_reads(client, publisher_token, endpoint) {
                 Ok(true) => Ok(()),
