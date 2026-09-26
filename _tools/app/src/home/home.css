@@ -54,15 +54,6 @@ button.home-section__head:hover { background: var(--color-surface-hover); }
 .home-row__t small { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; font-weight: 400; color: var(--color-muted); }
 .home-todo { display: grid; }
 .home-todo > * + * { border-left: 1px solid var(--color-border); }
-/* 캐릭터 검토 split: one line of series › character counts under the 확인할 것 cells. */
-.home-split { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; padding: 6px 8px; font-size: 13px; color: var(--color-muted); }
-.home-split__series { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
-.home-split__name { padding: 2px 4px; border-radius: 2px; color: var(--color-text); font-weight: 500; }
-.home-split__sep { padding: 0 2px; }
-.home-split__character { padding: 2px 6px; border-radius: 2px; color: var(--color-text); white-space: nowrap; }
-button.home-split__name:hover, .home-split__character:hover { background: var(--color-surface-hover); }
-.home-split__character .numeric { margin-left: 2px; font-size: 14px; color: var(--color-accent); }
-.home-split__more .numeric { font-size: 14px; }
 .home-progress { display: block; height: 3px; margin-top: 5px; overflow: hidden; border-radius: 2px; background: var(--color-border); }
 .home-progress i { display: block; height: 100%; background: var(--color-accent); }
 

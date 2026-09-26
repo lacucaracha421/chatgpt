@@ -147,8 +147,8 @@ describe("HomeView", () => {
     await user.click(within(todo).getByRole("button", { name: /미분류/ }));
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: "unsorted" });
     await user.click(within(todo).getByRole("button", { name: /캐릭터 검토/ }));
-    await user.click(within(await screen.findByRole("dialog", { name: "S36 확인" })).getByRole("button", { name: "닫기" }));
-    await user.click(within(todo).getByRole("button", { name: /중복 판본/ }));
+    await user.click(await screen.findByRole("button", { name: "홈으로 돌아가기" }));
+    await user.click(within(section("확인할 것")).getByRole("button", { name: /중복 판본/ }));
     expect(await screen.findByRole("dialog", { name: "중복 후보 검토" })).toBeInTheDocument();
 
     // 신간: the manga with an unread notice, then the wishlist events.
@@ -227,54 +227,121 @@ describe("HomeView", () => {
 
 describe("HomeView 캐릭터 검토", () => {
   const targets = [
-    { id: "lala", seriesClassificationId: "lily", displayName: "라라" },
-    { id: "mari", seriesClassificationId: "lily", displayName: "마리" },
-    { id: "geum", seriesClassificationId: "wuwa", displayName: "금희" },
+    { id: "lala", seriesClassificationId: "lily", displayName: "라라", thumbnailAssetId: "portrait-lala", references: [] },
+    { id: "mari", seriesClassificationId: "lily", displayName: "마리", references: [{ assetId: "ref-mari", status: "ready" }] },
+    { id: "geum", seriesClassificationId: "wuwa", displayName: "금희", references: [] },
   ] as never;
-  const classifications = [{ id: "lily", name: "백합" }, { id: "wuwa", name: "명조" }] as never;
-  const repeat = (targetId: string, targetName: string, count: number) => Array.from({ length: count }, () => ({ targetId, targetName }));
+  const classifications = [{ id: "lily", name: "백합" }, { id: "wuwa", name: "명조" }, { id: "etc", name: "기타 시리즈" }] as never;
+  const repeat = (targetId: string, targetName: string, count: number, verdict = "automatic") =>
+    Array.from({ length: count }, (_, index) => ({ assetId: `${targetId}-${verdict}-${index}`, targetId, targetName, verdict }));
+  /** Serves `items` in pages of the requested size, like the native list. */
+  function pagedApi(items: ReturnType<typeof repeat>) {
+    const summary = () => ({ automatic: { pending: items.filter((item) => item.verdict === "automatic").length, accepted: 0, rejected: 0 },
+      recommended: { pending: items.filter((item) => item.verdict === "recommended").length, accepted: 0, rejected: 0 }, byOrigin: {} });
+    return { page: vi.fn(async ({ offset, limit }: { offset: number; limit: number }) => ({ items: items.slice(offset, offset + limit) as never[],
+      nextOffset: offset + limit < items.length ? offset + limit : null, policyVersion: null, summary: summary() as never })) };
+  }
+  const flat = (element: HTMLElement) => element.textContent?.replace(/\s+/g, "");
 
-  it("splits the count by series and character, each opening that scope", async () => {
-    renderHome({ props: { characters: targets, classifications },
-      candidates: [...repeat("mari", "마리", 2), ...repeat("geum", "금희", 3), ...repeat("lala", "라라", 5)] });
-    const todo = section("확인할 것");
-    await waitFor(() => expect(within(todo).getByRole("button", { name: /자동 분류 후보/ })).toHaveTextContent("10건"));
-    const split = within(todo).getByRole("group", { name: "캐릭터 검토 나누어 보기" });
-    expect(split.textContent?.replace(/\s+/g, "")).toBe("백합›라라5마리2명조›금희3");
-    await user().click(within(split).getByRole("button", { name: "백합 › 마리 캐릭터 검토 2건" }));
-    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 lily/mari");
-    await user().click(screen.getByRole("button", { name: "닫기" }));
-    await user().click(within(split).getByRole("button", { name: "명조 캐릭터 검토 3건" }));
-    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 wuwa/-");
-    await user().click(screen.getByRole("button", { name: "닫기" }));
-    await user().click(within(todo).getByRole("button", { name: /자동 분류 후보/ }));
-    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 -/-");
-  });
-
-  it("collapses one waiting character into the cell", async () => {
-    renderHome({ props: { characters: targets, classifications }, candidates: repeat("lala", "라라", 3) });
+  it("shows the exact total on Home and opens an overview read in full", async () => {
+    const items = [...repeat("mari", "마리", 150), ...repeat("geum", "금희", 120, "recommended"), ...repeat("lala", "라라", 180), ...repeat("lala", "라라", 20, "recommended")];
+    const shadowApi = pagedApi(items);
+    const { onNavigate } = renderHome({ props: { characters: targets, classifications, shadowApi } });
     const todo = section("확인할 것");
     const cell = await within(todo).findByRole("button", { name: /캐릭터 검토/ });
-    await waitFor(() => expect(cell.textContent?.replace(/\s+/g, "")).toBe("3건캐릭터검토백합›라라"));
-    expect(within(todo).queryByRole("group", { name: "캐릭터 검토 나누어 보기" })).not.toBeInTheDocument();
+    // One page on Home: the total from the summary, the series seen so far as a hint.
+    await waitFor(() => expect(flat(cell)).toBe("470건캐릭터검토백합·명조"));
+    expect(shadowApi.page).toHaveBeenCalledTimes(1);
+    expect(within(todo).queryByRole("group")).not.toBeInTheDocument();
+
     await user().click(cell);
-    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 lily/lala");
+    const lily = await screen.findByRole("region", { name: "백합" });
+    // The overview read every page (200 at a time), so every count is exact.
+    expect(shadowApi.page.mock.calls.slice(1).map(([query]) => query)).toEqual([
+      { offset: 0, limit: 200 }, { offset: 200, limit: 200 }, { offset: 400, limit: 200 }]);
+    expect(within(lily).getAllByRole("button").map(flat)).toEqual([
+      "시리즈전체검토", "라라자동180·추천20200건", "마리자동150150건"]);
+    expect(flat(screen.getByRole("region", { name: "명조" }))).toContain("금희추천120120건");
+    expect(within(lily).getByRole("button", { name: "백합 › 라라 검토 200건" }).querySelector("img")?.getAttribute("src")).toContain("portrait-lala");
+    expect(within(lily).getByRole("button", { name: "백합 › 마리 검토 150건" }).querySelector("img")?.getAttribute("src")).toContain("ref-mari");
+
+    // The index: 전체 is current (slab); picking a series narrows the page to it.
+    const index = screen.getByRole("navigation", { name: "캐릭터 검토 시리즈" });
+    expect(within(index).getAllByRole("button").map(flat)).toEqual(["전체470", "백합350", "명조120"]);
+    expect(within(index).getByRole("button", { name: /전체/ })).toHaveAttribute("aria-current", "page");
+    await user().click(within(index).getByRole("button", { name: /명조/ }));
+    expect(screen.queryByRole("region", { name: "백합" })).not.toBeInTheDocument();
+    await user().click(within(index).getByRole("button", { name: /전체/ }));
+
+    // A character opens its scoped review; closing it reads the counts again.
+    await user().click(within(screen.getByRole("region", { name: "백합" })).getByRole("button", { name: "백합 › 마리 검토 150건" }));
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 lily/mari");
+    items.splice(0, 150);
+    await user().click(screen.getByRole("button", { name: "닫기" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /마리 검토/ })).not.toBeInTheDocument());
+    expect(within(index).getAllByRole("button").map(flat)).toEqual(["전체320", "백합200", "명조120"]);
+    await user().click(screen.getByRole("button", { name: "명조 전체 검토 120건" }));
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 wuwa/-");
+    await user().click(screen.getByRole("button", { name: "닫기" }));
+    await user().click(screen.getByRole("button", { name: "전체 검토" }));
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 -/-");
+    await user().click(screen.getByRole("button", { name: "닫기" }));
+
+    // Back returns to Home, which reads its total again.
+    const calls = shadowApi.page.mock.calls.length;
+    await user().click(screen.getByRole("button", { name: "홈으로 돌아가기" }));
+    await waitFor(() => expect(flat(within(section("확인할 것")).getByRole("button", { name: /캐릭터 검토/ }))).toBe("320건캐릭터검토명조·백합"));
+    expect(shadowApi.page.mock.calls.length).toBe(calls + 1);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it("skips the candidate read in lightweight mode and reads it when the mode ends", async () => {
+  it("names the one waiting character on Home", async () => {
+    renderHome({ props: { characters: targets, classifications, shadowApi: pagedApi(repeat("lala", "라라", 3)) } });
+    const cell = await within(section("확인할 것")).findByRole("button", { name: /캐릭터 검토/ });
+    await waitFor(() => expect(flat(cell)).toBe("3건캐릭터검토백합›라라"));
+  });
+
+  it("shows a reading state until the whole list is counted", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const characterSource = vi.fn(async (onProgress: (progress: { read: number; total: number | null }) => void) => {
+      onProgress({ read: 200, total: 470 });
+      await gate;
+      return [{ targetId: "lala", targetName: "라라", automatic: 2, recommended: 0, other: 0 }];
+    });
+    renderHome({ props: { characters: targets, classifications, characterSource, shadowApi: pagedApi(repeat("lala", "라라", 2)) } });
+    await user().click(await within(section("확인할 것")).findByRole("button", { name: /캐릭터 검토/ }));
+    expect(await screen.findByRole("status")).toHaveTextContent("후보 목록 읽는 중 · 200 / 470건");
+    expect(screen.queryByRole("region", { name: "백합" })).not.toBeInTheDocument();
+    release();
+    expect(await screen.findByRole("region", { name: "백합" })).toHaveTextContent("라라");
+  });
+
+  it("skips the candidate reads in lightweight mode", async () => {
     workload.restricted = true;
-    const { shadowApi, view } = renderHome({ props: { characters: targets, classifications }, candidates: repeat("lala", "라라", 3) });
+    const shadowApi = pagedApi(repeat("lala", "라라", 3));
+    const { view } = renderHome({ props: { characters: targets, classifications, shadowApi } });
     await waitFor(() => expect(within(section("자산 현황")).getByText(/이번 주/)).toBeInTheDocument());
     expect(shadowApi.page).not.toHaveBeenCalled();
     expect(within(section("확인할 것")).queryByRole("button", { name: /캐릭터 검토/ })).not.toBeInTheDocument();
 
-    workload.restricted = false;
-    view.rerender(<WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
+    const rerender = () => view.rerender(<WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
       <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={vi.fn()} shadowApi={shadowApi} now={() => NOW}
         characters={targets} classifications={classifications} />
     </WorkspaceChromeProvider>);
+    workload.restricted = false;
+    rerender();
     await waitFor(() => expect(shadowApi.page).toHaveBeenCalledOnce());
-    expect(await within(section("확인할 것")).findByRole("button", { name: /캐릭터 검토/ })).toHaveTextContent("3건");
+    await user().click(await within(section("확인할 것")).findByRole("button", { name: /캐릭터 검토/ }));
+    expect(await screen.findByRole("region", { name: "백합" })).toBeInTheDocument();
+
+    // Turned on while the overview is open: a notice, no further reads.
+    workload.restricted = true;
+    rerender();
+    expect(await screen.findByText("가벼운 모드")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "백합" })).not.toBeInTheDocument();
+    await user().click(screen.getByRole("button", { name: "전체 후보 검토" }));
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 -/-");
   });
 });
 
