@@ -31,7 +31,9 @@ export interface PageWire { items: Asset[]; has_more: boolean; next_cursor: stri
  * promise the contract cannot have applied the parameters, so a filtered request must be
  * refused instead of presented as filtered.
  */
-export interface Page { items: Asset[]; has_more: boolean; next_cursor: string | null; filter_version?: number }
+export interface Page { items: Asset[]; has_more: boolean; next_cursor: string | null; filter_version?: number;
+  /** The list generation the server read these rows under; absent from servers that predate it. */
+  list_generation?: string }
 /**
  * Asset filters, mirroring the PC's media/aspect vocabulary. `all` is the client-side
  * spelling of "no filter" and is never sent on the wire.

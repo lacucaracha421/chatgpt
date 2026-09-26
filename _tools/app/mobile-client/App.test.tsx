@@ -521,3 +521,74 @@ it('shows a failed load over the bottom of the content instead of inserting it a
   const alert=await screen.findByRole('alert');
   expect(alert.parentElement?.className).toBe('floating-notices');
 });
+
+describe('pages that carry their own list generation',()=>{
+  const G=(n:number)=>n.toString(16).padStart(64,'0');
+  // `carries` switches between a server that puts `listGeneration` on each page and one
+  // that predates the field (the endpoint alone is available there).
+  function fixture(carries:boolean){
+    let revision=0;
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path==='/v1/library/list-generation')return {generation:G(revision),filterVersion:1};
+      if(path.startsWith('/v1/library/assets')){
+        const page=path.includes('cursor=c1')?{items:b,has_more:false,next_cursor:null}
+          :{items:path.includes('classification_id=b')?b:a,has_more:!path.includes('classification_id=b'),next_cursor:path.includes('classification_id=b')?null:'c1'};
+        return carries?{...page,listGeneration:G(revision)}:page;
+      }
+      return original(path);
+    });
+    return {bump(){revision++;}};
+  }
+  const pageReads=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets?')).length;
+  const generationReads=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/library/list-generation').length;
+  async function settle(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});}
+
+  it('loads a Library page in one request once the server carries the generation',async()=>{
+    fixture(true);render(<App/>);
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));await screen.findByRole('heading',{name:'라이브러리'});await settle();
+    const [pages,generations]=[pageReads(),generationReads()];
+    fireEvent.click(await screen.findByRole('button',{name:'분류 B, 2개'}));await screen.findByText('tile-b1');await settle();
+    expect(pageReads()-pages).toBe(1);
+    expect(generationReads()-generations).toBe(0);
+  });
+  it('appends the next page without a generation read and reloads when the page moved',async()=>{
+    const server=fixture(true);render(<App/>);
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    // Learn the capability on one navigation, then commit a fresh page that is bound by it.
+    await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
+    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
+    fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByText('tile-a1');await settle();
+    const generations=generationReads();
+    fireEvent.scroll(screen.getAllByLabelText('자산 목록').find(element=>!element.closest('[style="display: none;"]'))!);
+    await screen.findByText('tile-b1');await settle();
+    expect(generationReads()).toBe(generations);
+  });
+  it('reloads instead of splicing a continuation read under another generation',async()=>{
+    fixture(true);const served=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string)=>{
+      const reply=await served(path);
+      return path.includes('cursor=c1')?{...reply,listGeneration:G(9)}:reply;
+    });
+    render(<App/>);
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
+    fireEvent.click(screen.getByRole('button',{name:'Home',exact:true}));await screen.findByRole('button',{name:'전체 보기'});
+    fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));await screen.findByText('tile-a1');await settle();
+    const firstPages=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/library/assets?limit=40').length;
+    const before=firstPages();
+    fireEvent.scroll(screen.getAllByLabelText('자산 목록').find(element=>!element.closest('[style="display: none;"]'))!);
+    await waitFor(()=>expect(firstPages()).toBe(before+1));await settle();
+    expect(screen.queryByText('tile-b1')).toBeNull();
+  });
+  it('keeps the bracketed generation reads against a server whose pages lack the field',async()=>{
+    fixture(false);render(<App/>);
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    fireEvent.click(screen.getByRole('button',{name:'Library',exact:true}));await screen.findByRole('heading',{name:'라이브러리'});await settle();
+    const [pages,generations]=[pageReads(),generationReads()];
+    fireEvent.click(await screen.findByRole('button',{name:'분류 B, 2개'}));await screen.findByText('tile-b1');await settle();
+    expect(pageReads()-pages).toBe(1);
+    expect(generationReads()-generations).toBe(2);
+  });
+});

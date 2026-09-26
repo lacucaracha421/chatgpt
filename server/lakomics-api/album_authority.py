@@ -1271,7 +1271,8 @@ def parse_baseline_request(params, epoch):
     return snapshot, section, after, limit
 
 
-def register_album_authority(app, get_db, require_client, require_publisher, asset_item=None):
+def register_album_authority(app, get_db, require_client, require_publisher, asset_item=None,
+                             list_generation=None):
     # The mobile Asset projection is injected so this module never grows a second
     # definition of the display shape the app already publishes.
     asset_item = asset_item or default_asset_item
@@ -1405,6 +1406,10 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
 
         def run():
             with get_db() as db:
+                # The Asset list generation (injected by the app, which owns it) is read in
+                # the same snapshot as the rows, so the page can carry its own binding.
+                db.execute("BEGIN")
+                generation = list_generation(db) if list_generation else None
                 row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
                 album = db.execute(
                     "SELECT deleted FROM album_authority_state"
@@ -1464,10 +1469,13 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                         # a client would page forever, so it must be an error, not a loop.
                         fail(503, "albumAssetsCursorStalled",
                              "앨범 자산 페이지 커서가 진행하지 않았습니다.", albumId=albumId)
-                return {"libraryId": row["libraryId"], "epoch": row["epoch"],
+                page = {"libraryId": row["libraryId"], "epoch": row["epoch"],
                         "contractVersion": row["contractVersion"], "albumId": albumId,
                         "filterVersion": asset_filters.FILTER_VERSION,
                         "items": items, "nextCursor": next_cursor, "hasMore": has_more}
+                if generation is not None:
+                    page["listGeneration"] = generation
+                return page
 
         return await run_in_threadpool(run)
 

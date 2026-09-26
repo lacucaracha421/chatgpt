@@ -1,6 +1,6 @@
 import {PrivateVault} from './PrivateVault';
 import {onVisible} from './useVisibleInterval';
-import {fetchAssetFilterVersion, fetchListGeneration, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
+import {fetchAssetFilterVersion, fetchListGeneration, pageGenerationOf, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
@@ -56,7 +56,10 @@ const HOME: View = {tab:'home', title:'최근 저장'};
 const LIBRARY = LIBRARY_ROOT;
 async function readPage(view:View,cursor:string|null,filters:AssetFiltersValue,signal:AbortSignal):Promise<Page> {
   const path=pagePath(view,cursor,filters);
-  return view.album ? albumPage(await api<AlbumAssetPage>(path,signal)) : normalizePage(await api<Page>(path,signal));
+  const reply=await api<AlbumAssetPage&Page>(path,signal);
+  const page=view.album ? albumPage(reply) : normalizePage(reply);
+  const generation=pageGenerationOf(reply);
+  return generation ? {...page,list_generation:generation} : page;
 }
 function store(key: string, value: unknown) { try {localStorage.setItem(key, JSON.stringify(value));} catch { /* Optional device preference. */ } }
 type Committed = Page & {generation:string|null; view: View; cursor: string | null; previous: (string | null)[]; version: number; restoreScroll: number; filters: AssetFiltersValue};
@@ -135,6 +138,10 @@ export function App() {
   // Committed classification or root to restore after leaving character browsing.
   const beforeCharacter = useRef<SavedPosition | undefined>(undefined);
   const observedGeneration = useRef<string|null>(null);
+  // Whether this server's pages carry their own list generation: `null` until a page
+  // answers, so an older server keeps the generation-bracketed fetch it always had.
+  const pageGenerations = useRef<boolean|null>(null);
+  useEffect(() => {pageGenerations.current = null;}, [status.endpoint]);
   const viewCache = useRef(new Map<string, Committed>());
   const moreGate = useRef(new RequestGate());
   const [loadingMore, setLoadingMore] = useState(false), [moreError, setMoreError] = useState('');
@@ -166,13 +173,6 @@ export function App() {
     // placeholder page, so it is not part of this route's filter contract.
     const filtered = hasActiveFilters(nextFilters) && view.tab === 'library' && !view.root && !view.revisit && !view.characters;
     try {
-      // `null` means this server predates the generation endpoint, so degrade to
-      // always-fresh reads instead of failing the load that carries the actual list.
-      let generation = await fetchListGeneration(request.signal);
-      if (!gate.current.current(request.id)) return;
-      if (generation !== null && generation !== observedGeneration.current) {viewCache.current.clear(); observedGeneration.current = generation;}
-      const candidate = fresh ? undefined : viewCache.current.get(`${viewKey(view, nextFilters)}:${cursor}`);
-      const cached = generation && candidate?.generation === generation ? candidate : undefined;
       // A server that cannot promise the filter contract must not be asked to pretend.
       // The refusal happens before the page fetch so an unfiltered list can never be
       // committed under a filtered identity. Albums declare support on their own page
@@ -182,19 +182,52 @@ export function App() {
       // synthetic empty page is a placeholder that carries no contract. It is therefore
       // never validated against the filter version below.
       const synthetic = !!view.characters;
-      let response:Page = synthetic ? {items:[],has_more:false,next_cursor:null} : cached ?? await readPage(view,cursor,nextFilters,request.signal);
-      // A page that asked for filters but came back without the contract was answered by a
-      // server that ignored the parameters, so it is refused rather than shown as filtered.
-      if (filtered && !synthetic && !cached && response.filter_version !== ASSET_FILTER_VERSION) throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
-      if (!cached && !view.characters && generation) {
-        // Bind a fetched page to a stable generation; a mutation crossing the fetch must
-        // not bless stale rows as current. Retry within the same navigation request.
-        for (let attempt=0; attempt<3; attempt++) {
-          const after = await fetchListGeneration(request.signal);
-          if (after === null || after === generation) break;
-          if (attempt === 2) throw new Error('목록이 변경되었습니다. 다시 시도해 주세요.');
-          generation = after; viewCache.current.clear();
-          response = await readPage(view,cursor,nextFilters,request.signal);
+      const key = `${viewKey(view, nextFilters)}:${cursor}`;
+      let generation: string|null = null;
+      let cached: Committed|undefined;
+      let response: Page|undefined;
+      // One round trip: a server whose pages carry their own generation needs no
+      // bracketing reads. A cached candidate still asks the cheap endpoint first, since
+      // only that can tell whether the cache is current without refetching the page.
+      if (!synthetic && pageGenerations.current && (fresh || !viewCache.current.has(key))) {
+        const reply = await readPage(view,cursor,nextFilters,request.signal);
+        if (!gate.current.current(request.id)) return;
+        // A page without the field means the server went back to an older build: forget
+        // the capability and redo this load the bracketed way below.
+        if (reply.list_generation) {
+          response = reply; generation = reply.list_generation;
+          if (generation !== observedGeneration.current) viewCache.current.clear();
+        } else pageGenerations.current = false;
+      }
+      if (!response) {
+        // `null` means this server predates the generation endpoint, so degrade to
+        // always-fresh reads instead of failing the load that carries the actual list.
+        generation = await fetchListGeneration(request.signal);
+        if (!gate.current.current(request.id)) return;
+        if (generation !== null && generation !== observedGeneration.current) {viewCache.current.clear(); observedGeneration.current = generation;}
+        const candidate = fresh ? undefined : viewCache.current.get(key);
+        cached = generation && candidate?.generation === generation ? candidate : undefined;
+        response = synthetic ? {items:[],has_more:false,next_cursor:null} : cached ?? await readPage(view,cursor,nextFilters,request.signal);
+        // A page that asked for filters but came back without the contract was answered by a
+        // server that ignored the parameters, so it is refused rather than shown as filtered.
+        if (filtered && !synthetic && !cached && response.filter_version !== ASSET_FILTER_VERSION) throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
+        if (!cached && !synthetic && response.list_generation) {
+          // The page names the generation of its own snapshot, which binds it exactly, and
+          // later loads on this server skip the bracketing reads.
+          pageGenerations.current = true;
+          if (response.list_generation !== generation) viewCache.current.clear();
+          generation = response.list_generation;
+        } else if (!cached && !synthetic && generation) {
+          pageGenerations.current = false;
+          // Bind a fetched page to a stable generation; a mutation crossing the fetch must
+          // not bless stale rows as current. Retry within the same navigation request.
+          for (let attempt=0; attempt<3; attempt++) {
+            const after = await fetchListGeneration(request.signal);
+            if (after === null || after === generation) break;
+            if (attempt === 2) throw new Error('목록이 변경되었습니다. 다시 시도해 주세요.');
+            generation = after; viewCache.current.clear();
+            response = await readPage(view,cursor,nextFilters,request.signal);
+          }
         }
       }
       if (filtered && !synthetic && response.filter_version !== ASSET_FILTER_VERSION)
@@ -264,14 +297,25 @@ export function App() {
     morePending.current = true; setLoadingMore(true); setMoreError('');
     const request = moreGate.current.begin();
     try {
-      const generation=await fetchListGeneration(request.signal);
-      // A server without the endpoint keeps the pre-existing append behavior: pages are
-      // appended without a generation guard rather than blocking the load.
-      if (generation !== null && generation !== current.generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true,current.filters);return;}
-      const response = await nextPage(current.view,current.next_cursor,current.filters);
-      if (generation !== null) {
-        const after=await fetchListGeneration(request.signal);
-        if (after !== null && after !== generation) {viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true,current.filters);return;}
+      const reload=async()=>{viewCache.current.clear(); await load(current.view,current.cursor,current.previous,scroll.current,true,current.filters);};
+      let response: Page;
+      // A page that carries its own generation is appended only when it was read under the
+      // committed page's generation: one round trip, or none for a finished prefetch.
+      const own = pageGenerations.current ? await nextPage(current.view,current.next_cursor,current.filters) : undefined;
+      if (own && !own.list_generation) pageGenerations.current = false;
+      if (own?.list_generation) {
+        if (own.list_generation !== current.generation) {await reload();return;}
+        response = own;
+      } else {
+        const generation=await fetchListGeneration(request.signal);
+        // A server without the endpoint keeps the pre-existing append behavior: pages are
+        // appended without a generation guard rather than blocking the load.
+        if (generation !== null && generation !== current.generation) {await reload();return;}
+        response = await nextPage(current.view,current.next_cursor,current.filters);
+        if (generation !== null) {
+          const after=await fetchListGeneration(request.signal);
+          if (after !== null && after !== generation) {await reload();return;}
+        }
       }
       if (!moreGate.current.current(request.id) || latest.current.page.version !== current.version) return;
       // Every appended page is validated, not only the first: a server that dropped the

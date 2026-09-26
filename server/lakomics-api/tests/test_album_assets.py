@@ -297,6 +297,15 @@ class AlbumAssetsProjectionTests(unittest.TestCase):
         self.assertFalse(body["hasMore"])
         self.assertIsNone(body["nextCursor"])
 
+    def test_a_page_carries_the_asset_list_generation(self):
+        # Additive to the envelope: the same digest `/v1/library/list-generation` reports,
+        # read in the page's own snapshot, so a client binds the page in one round trip.
+        self.activate()
+        body = self.read(ALBUM, limit="50").json()
+        expected = self.client.get("/v1/library/list-generation",
+                                   headers={"Authorization": "Bearer test-token"}).json()["generation"]
+        self.assertEqual(body["listGeneration"], expected)
+
     def test_unknown_query_parameters_are_refused_rather_than_ignored(self):
         self.activate()
         self.assertEqual(self.read(section="albums").status_code, 422)

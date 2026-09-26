@@ -2036,6 +2036,10 @@ def list_mobile_classification_assets(
     filter_clause, filter_params = asset_filters.filter_clause(filters)
 
     with get_db() as db:
+        # One read snapshot for the generation, the filter authority and the rows, so the
+        # page's `listGeneration` names exactly the state its rows were read from.
+        db.execute("BEGIN")
+        generation = list_generation(db)
         # One authority read for both the filter and the projection, so a page cannot be
         # selected from one state and projected from another.
         active = authority.active_domain(db, classification_authority.DOMAIN)
@@ -2144,8 +2148,10 @@ def list_mobile_classification_assets(
         next_cursor = asset_filters.encode_cursor(
             "library-assets", filters,
             [sort, classification_id, last["mobile_sort_at"], last["id"]])
+    # `listGeneration` is additive: a client binds the page to it in one round trip instead
+    # of bracketing the fetch with two `/v1/library/list-generation` reads.
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more,
-            "filterVersion": asset_filters.FILTER_VERSION}
+            "filterVersion": asset_filters.FILTER_VERSION, "listGeneration": generation}
 
 
 def _revisit_creator_exclusion_sql(alias: str = "asset") -> str:
@@ -2479,6 +2485,8 @@ def list_mobile_revisit_date(
         params.extend([cursor_rank, cursor_rank, cursor_sort_at, cursor_sort_at, cursor_asset_id])
     params.append(limit + 1)
     with get_db() as db:
+        db.execute("BEGIN")  # the generation and the rows share one read snapshot
+        generation = list_generation(db)
         rows = db.execute(
             f"""
             WITH ranked AS (
@@ -2503,7 +2511,8 @@ def list_mobile_revisit_date(
     if has_more and page_rows:
         last = page_rows[-1]
         next_cursor = encode_revisit_date_cursor(last["revisit_rank"], last["mobile_sort_at"], last["id"])
-    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more,
+            "listGeneration": generation}
 
 
 @app.get("/v1/library/revisit/creator/{creator_key}/assets")
@@ -2536,6 +2545,8 @@ def list_mobile_revisit_creator_assets(
         params.extend([cursor_sort_at, cursor_sort_at, cursor_asset_id])
     params.append(limit + 1)
     with get_db() as db:
+        db.execute("BEGIN")  # the generation and the rows share one read snapshot
+        generation = list_generation(db)
         rows = db.execute(
             f"""
             SELECT asset.*, COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
@@ -2556,7 +2567,8 @@ def list_mobile_revisit_creator_assets(
     if has_more and page_rows:
         last = page_rows[-1]
         next_cursor = encode_mobile_cursor(sort, last["mobile_sort_at"], last["id"])
-    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more,
+            "listGeneration": generation}
 
 
 def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=False,
@@ -3378,7 +3390,8 @@ startup_sync_status = register_sync_status(
 from album_authority import register_album_authority
 
 startup_album_authority = register_album_authority(
-    app, get_db, require_client, require_publisher, asset_item=mobile_asset_item)
+    app, get_db, require_client, require_publisher, asset_item=mobile_asset_item,
+    list_generation=list_generation)
 
 # Classification authority substrate (2A). Startup only creates empty tables, and
 # the module deliberately ships no activation route: the domain stays PC-owned until

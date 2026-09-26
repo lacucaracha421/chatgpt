@@ -26,6 +26,17 @@ export async function fetchListGeneration(signal?: AbortSignal): Promise<string 
   return typeof generation === 'string' && GENERATION_PATTERN.test(generation) ? generation : null;
 }
 
+/**
+ * The list generation a page response carries about its own rows, or `null` when the
+ * server predates that field (the caller then brackets the fetch with the endpoint).
+ * The server reads it in the same snapshot as the rows, so it binds the page exactly.
+ */
+export function pageGenerationOf(reply: unknown): string | null {
+  if (typeof reply !== 'object' || reply === null || !('listGeneration' in reply)) return null;
+  const {listGeneration} = reply;
+  return typeof listGeneration === 'string' && GENERATION_PATTERN.test(listGeneration) ? listGeneration : null;
+}
+
 /** Local signal that a mutation changed Asset visibility, so an open view must refetch. */
 export const ASSET_LIST_CHANGED_EVENT = 'lakomics-asset-list-changed';
 

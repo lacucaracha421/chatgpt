@@ -296,6 +296,26 @@ class MobileLibraryApiTests(unittest.TestCase):
         self.assertEqual(seen, expected)
         self.assertEqual(len(seen), len(set(seen)))
 
+    def list_generation(self) -> str:
+        return self.client.get("/v1/library/list-generation", headers=self.auth).json()["generation"]
+
+    def test_asset_page_carries_the_list_generation_of_its_rows(self):
+        # The page names the same generation the dedicated endpoint reports, so a client
+        # can bind it in one round trip, and the value moves when the list does.
+        self.seed_pagination_assets()
+        before = self.client.get("/v1/library/assets", headers=self.auth,
+                                 params={"classification_id": CLASSIFICATION_ID, "limit": 2}).json()
+        self.assertRegex(before["listGeneration"], "^[a-f0-9]{64}$")
+        self.assertEqual(before["listGeneration"], self.list_generation())
+        continued = self.client.get("/v1/library/assets", headers=self.auth,
+                                    params={"classification_id": CLASSIFICATION_ID, "limit": 2,
+                                            "cursor": before["next_cursor"]}).json()
+        self.assertEqual(continued["listGeneration"], before["listGeneration"])
+        self.commit_asset("30000000-0000-4000-8000-000000000077")
+        after = self.client.get("/v1/library/assets", headers=self.auth, params={"limit": 2}).json()
+        self.assertNotEqual(after["listGeneration"], before["listGeneration"])
+        self.assertEqual(after["listGeneration"], self.list_generation())
+
     def test_oldest_sort_matches_pc_collected_order_across_cursor_pages(self):
         expected = self.seed_pagination_assets()
         seen: list[str] = []
@@ -739,6 +759,13 @@ class MobileRevisitDetailTests(MobileLibraryApiTests):
         self.assertEqual(second.status_code, 200)
         second_ids = [item["id"] for item in second.json()["items"]]
         self.assertFalse(set(second_ids) & {item["id"] for item in body["items"]})
+
+    def test_revisit_detail_pages_carry_the_list_generation(self):
+        self._seed_team()
+        generation = self.list_generation()
+        for route in ("/v1/library/revisit/creator/detail-team/assets", "/v1/library/revisit/date"):
+            body = self.client.get(route, headers=self.auth, params={"limit": 2}).json()
+            self.assertEqual(body["listGeneration"], generation, route)
 
     def test_creator_detail_rejects_cross_sort_cursor(self):
         self._seed_team()
