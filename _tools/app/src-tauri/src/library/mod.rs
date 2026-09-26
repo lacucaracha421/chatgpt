@@ -131,6 +131,9 @@ mod provider_requests;
 mod query;
 mod release_watch;
 pub(crate) mod release_calendar;
+pub(crate) mod artists;
+#[cfg(test)]
+mod artists_tests;
 pub(crate) mod release_wishlist;
 pub(crate) use release_watch::release_status_at;
 pub(crate) mod remote_gallery;

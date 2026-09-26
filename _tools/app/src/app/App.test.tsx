@@ -619,7 +619,7 @@ describe("App", () => {
     expect(within(await screen.findByRole("dialog", { name: "더보기" })).queryByRole("button", { name: "메모" })).not.toBeInTheDocument();
   });
 
-  it("opens 다시보기 from the asset index and returns to the folder with back", async () => {
+  it("opens 작가 from the asset index and returns to the folder with back", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
     const user = userEvent.setup();
@@ -627,9 +627,11 @@ describe("App", () => {
     const all = await screen.findByRole("button", { name: "전체" });
     expect(all).toHaveAttribute("aria-current", "page");
 
-    const revisit = screen.getByRole("button", { name: "다시보기" });
-    await user.click(revisit);
-    expect(revisit).toHaveAttribute("aria-current", "page");
+    const artists = screen.getByRole("button", { name: "작가" });
+    await user.click(artists);
+    expect(artists).toHaveAttribute("aria-current", "page");
+    // The 작가 index replaces the folder index while the hub is open.
+    expect(await screen.findByRole("navigation", { name: "작가 목록" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page");
     fireEvent.mouseUp(window, { button: 3 });
     await waitFor(() => expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page"));
@@ -659,9 +661,9 @@ describe("App", () => {
       importBatchId: expect.any(String),
     }));
 
-    await user.click(screen.getByRole("button", { name: "다시보기" }));
+    await user.click(screen.getByRole("button", { name: "작가" }));
     act(() => drop?.(["C:\\images\\recent.png"]));
-    await user.click(screen.getByRole("button", { name: "전체" }));
+    await user.click(screen.getByRole("button", { name: "에셋" }));
     act(() => drop?.(["C:\\images\\all-assets.png"]));
 
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledTimes(3));

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 99;
+pub(crate) const SCHEMA_VERSION: i64 = 100;
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -572,6 +572,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0099_character_exclusion_skip_reason.sql"
             ))?;
         }
+        if version <= 99 {
+            transaction.execute_batch(include_str!("../../migrations/0100_artists.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -671,6 +674,86 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn v100_adds_artist_link_tables_and_the_scope_view_without_touching_assets() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 99);
+        connection
+            .execute_batch(
+                "INSERT INTO assets (id, content_hash, media_kind, original_name, relative_path,
+                    thumbnail_relative_path, byte_size, width, height, collected_at,
+                    creator_name, creator_handle, source_url)
+                 VALUES ('a', 'ha', 'image', 'a.png', 'assets/a.png', 'thumbnails/a.webp', 1, 1, 1,
+                    '2026-01-01T00:00:00Z', 'Kiri', 'kiri_draws', 'https://x.com/kiri_draws/status/1'),
+                        ('b', 'hb', 'image', 'b.png', 'assets/b.png', 'thumbnails/b.webp', 1, 1, 1,
+                    '2026-01-01T00:00:00Z', NULL, NULL, NULL);",
+            )
+            .unwrap();
+        migrate_to_latest(&mut connection, 99).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        let settings: (i64, i64, i64) = connection
+            .query_row(
+                "SELECT main_min_count, recent_min_count, recent_days FROM artist_settings",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(settings, (5, 2, 30));
+        // No artist rows are created for existing creators; they stay implicit.
+        let artists: i64 = connection
+            .query_row("SELECT COUNT(*) FROM artists", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(artists, 0);
+        let scopes: Vec<(String, String)> = connection
+            .prepare("SELECT asset_id, scope_ref FROM asset_artist_scope ORDER BY asset_id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            scopes,
+            vec![("a".into(), "kiri_draws".into()), ("b".into(), "unknown:none".into())]
+        );
+        // A dismissal is an ordered pair, and a source-URL assignment names its handle.
+        assert!(connection
+            .execute(
+                "INSERT INTO artist_merge_dismissals VALUES ('b', 'a', '2026-01-01T00:00:00Z')",
+                []
+            )
+            .is_err());
+        connection
+            .execute_batch(
+                "INSERT INTO artists (id, created_at, updated_at) VALUES ('x', 't', 't');",
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO asset_artist_assignments VALUES ('b', 'x', 'source_url', NULL, 't')",
+                []
+            )
+            .is_err());
+        connection
+            .execute(
+                "INSERT INTO asset_artist_assignments VALUES ('b', 'x', 'manual', NULL, 't')",
+                [],
+            )
+            .unwrap();
+        let scope: String = connection
+            .query_row(
+                "SELECT scope_ref FROM asset_artist_scope WHERE asset_id = 'b'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(scope, "artist:x");
     }
 
     #[test]

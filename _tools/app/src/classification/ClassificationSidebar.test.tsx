@@ -419,28 +419,28 @@ describe("ClassificationSidebar", () => {
     expect(within(quickViews).getAllByRole("button").map((button) => button.textContent)).toEqual([
       "전체",
       "미분류",
-      "다시보기",
+      "작가",
       "망가",
       "컬렉션",
     ]);
 
     await user.click(screen.getByRole("button", { name: "미분류" }));
-    await user.click(screen.getByRole("button", { name: "다시보기" }));
+    await user.click(screen.getByRole("button", { name: "작가" }));
     await user.click(screen.getByRole("button", { name: "전체" }));
 
     expect(onViewChange).toHaveBeenNthCalledWith(1, { kind: "unsorted" });
-    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "revisit" });
+    expect(onViewChange).toHaveBeenNthCalledWith(2, { kind: "artists" });
     expect(onViewChange).toHaveBeenNthCalledWith(3, { kind: "classification", classificationId: null });
   });
 
-  it("offers 다시보기 as an asset index quick view next to 전체 in the embedded index", async () => {
+  it("offers 작가 as an asset index quick view next to 전체 in the embedded index", async () => {
     const user = userEvent.setup();
     const { onViewChange } = renderSidebar(gateway(), { embedded: true });
     expect(screen.queryByRole("navigation", { name: "빠른 보기" })).not.toBeInTheDocument();
-    const revisit = screen.getByRole("button", { name: "다시보기" });
+    const revisit = screen.getByRole("button", { name: "작가" });
     expect(screen.getByRole("button", { name: "전체" }).nextElementSibling).toBe(revisit);
     await user.click(revisit);
-    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "revisit" });
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "artists" });
     expect(revisit).toHaveAttribute("aria-current", "page");
   });
 

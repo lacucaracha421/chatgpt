@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { nativeWorkload, updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/types";
 import { useExchangeSnapshot } from "../exchange/exchangeStore";
-import { ActivityIcon, BookmarkIcon, CalendarIcon, Cog6ToothIcon, ExchangeIcon, FolderIcon, InboxIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { ActivityIcon, BookmarkIcon, Cog6ToothIcon, ExchangeIcon, FolderIcon, InboxIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 
 /** search: the current view's own search (palette only); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
 export type NavigationEntryGroup = "search" | "place" | "queue" | "go" | "action" | "settings";
@@ -38,7 +38,7 @@ const SETTINGS_SECTIONS = [
   ["external_services", "연결"], ["data", "데이터 관리"], ["about", "정보·도움말"], ["advanced", "고급"],
 ] as const satisfies readonly (readonly [SettingsSection, string])[];
 
-const REVISIT_KINDS: AssetView["kind"][] = ["revisit", "creators", "creator", "calendar", "revisited-bundle"];
+const ARTIST_KINDS: AssetView["kind"][] = ["artists", "creator"];
 
 export type NavigationEntryOptions = {
   view: AssetView;
@@ -68,7 +68,7 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
     // Utility outside the Library: listed as a queue only while received files are unseen.
     { id: "exchange", group: queued(received) ? "queue" : "go", label: "전송", keywords: ["보내기/받기", "파일 보내기", "파일 받기", "받은 파일", "태블릿"], icon: <ExchangeIcon />, count: queued(received) ? received : undefined, selected: view.kind === "exchange", run: go({ kind: "exchange" }) },
     ...(privateVaultAvailable ? [{ id: "private_vault", group: "go" as const, label: "비밀", keywords: ["비밀 보관함"], icon: <BookmarkIcon />, activity: privateVaultActivity, selected: view.kind === "private_vault", run: go({ kind: "private_vault" }) }] : []),
-    { id: "revisit", group: "go", label: "다시보기", icon: <CalendarIcon />, selected: REVISIT_KINDS.includes(view.kind), run: go({ kind: "revisit" }) },
+    { id: "artists", group: "go", label: "작가", keywords: ["다시보기", "작가 미상", "artist"], icon: <PersonIcon />, selected: ARTIST_KINDS.includes(view.kind), run: go({ kind: "artists" }) },
     { id: "statistics", group: "go", label: "통계", icon: <ActivityIcon />, selected: view.kind === "statistics", run: go({ kind: "statistics" }) },
     { id: "trash", group: "go", label: "휴지통", icon: <TrashIcon />, count: trashCount > 0 ? trashCount : undefined, selected: view.kind === "trash", run: go({ kind: "trash" }) },
     { id: "settings", group: "go", label: "설정", icon: <Cog6ToothIcon />, selected: view.kind === "settings", run: go({ kind: "settings" }) },

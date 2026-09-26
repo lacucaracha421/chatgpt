@@ -81,3 +81,8 @@ export function useLibrary(): LibraryContextValue {
   }
   return context;
 }
+
+/** The library context when a provider exists; chrome that also renders in isolation uses this. */
+export function useOptionalLibrary(): LibraryContextValue | null {
+  return useContext(LibraryContext);
+}

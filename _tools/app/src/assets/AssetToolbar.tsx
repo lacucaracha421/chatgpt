@@ -31,30 +31,33 @@ type AssetToolbarProps = {
   onReshuffle: () => void;
   /** View-level play entry shown beside the title. */
   playAction?: ReactNode;
+  /** Replaces the location title (an artist page names its artist). */
+  title?: string;
+  /** Extra header content after the title, e.g. artist actions. */
+  titleAccessory?: ReactNode;
 };
 
 // 상단바는 선택 상태와 무관하게 제목·보기 설정·창 제어 슬롯을 고정한다.
 // 선택 작업은 SelectionBar(갤러리 위 고정 바)에서 수행한다.
 export function AssetToolbar({
   galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, directOnly, metadataVisible, privacyMode, thumbnailRowHeight,
-  onSortChange, onMediaFilterChange, onAspectFilterChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, playAction,
+  onSortChange, onMediaFilterChange, onAspectFilterChange, onDirectOnlyChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, playAction, title, titleAccessory,
 }: AssetToolbarProps) {
   const registration = useContext(FolderRegistrationContext);
-  const view = rawView.kind === "notes" || rawView.kind === "exchange" || rawView.kind === "private_vault" || rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "statistics" || rawView.kind === "manga" || rawView.kind === "calendar" || rawView.kind === "creators" || rawView.kind === "revisited-bundle"
+  const view = rawView.kind === "notes" || rawView.kind === "exchange" || rawView.kind === "private_vault" || rawView.kind === "similarity_review" || rawView.kind === "settings" || rawView.kind === "statistics" || rawView.kind === "manga" || rawView.kind === "artists"
     ? ({ kind: "classification", classificationId: null } as const)
     : rawView;
-  const recent = view.kind === "revisit";
   const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
   // Folder counts are unfiltered, so they are hidden while a media or aspect filter narrows the view.
   const countSummary = mediaFilter === "all" && aspectFilter === "all" ? folderCountSummary(rawView, classifications, directOnly) : null;
-  const location = view.kind === "revisit" ? "다시보기" : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체";
+  const location = title ?? (view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체");
 
   return (
-    <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={playAction ? <>{registration}{playAction}</> : registration} chrome={{
-      summary: [!recent ? ({ newest: "최신순", oldest: "오래된순", favorites: "좋아요순", random: "랜덤" })[sort] : "다시보기", galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all" || directOnly) ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all") + Number(directOnly)}` : "", privacyMode ? "비공개" : ""].filter(Boolean).join(" · "),
+    <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={<>{registration}{playAction}{titleAccessory}</>} chrome={{
+      summary: [({ newest: "최신순", oldest: "오래된순", favorites: "좋아요순", random: "랜덤" })[sort], galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all" || directOnly) ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all") + Number(directOnly)}` : "", privacyMode ? "비공개" : ""].filter(Boolean).join(" · "),
       status: countSummary || privacyMode ? <>{countSummary && <span className="asset-toolbar__count">{countSummary}</span>}{privacyMode && <span>비공개 모드</span>}</> : undefined,
       settings: <>
-        {!recent && <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
+        {<fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
           <Select label="정렬" value={sort} onChange={(event) => onSortChange(event.target.value as AssetSort)}><option value="newest">최신순</option><option value="oldest">오래된순</option><option value="favorites">좋아요순</option><option value="random">랜덤</option></Select>
           {filterable && <>
             <Select label="미디어" value={mediaFilter} onChange={(event) => onMediaFilterChange(event.target.value as AssetMediaFilter)}><option value="all">전체</option><option value="images">이미지</option><option value="videos">영상</option></Select>

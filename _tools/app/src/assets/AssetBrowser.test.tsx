@@ -666,36 +666,6 @@ describe("AssetBrowser", () => {
     expect(vi.mocked(gateway.listAssets).mock.calls).not.toContainEqual([expect.objectContaining({ sort: "oldest", after: { token: "old-cursor" } })]);
   });
 
-  it.each(["justified", "masonry"] as const)("loads only the selected local day from 다시보기 in %s layout", async (layout) => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(2026, 7, 15, 12));
-    const user = userEvent.setup();
-    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
-    vi.mocked(gateway.listAssetDateBuckets).mockResolvedValue([{ date: "2026-08-06", count: 1 }]);
-    const { container } = render(
-      <LibraryProvider gateway={gateway}>
-        {withWorkspaceChrome(<AssetBrowser galleryLayout={layout} view={{ kind: "revisit" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />)}
-      </LibraryProvider>,
-    );
-
-    expect(screen.getAllByRole("toolbar", { name: "다시보기 도구" })).toHaveLength(1);
-    await user.click(screen.getByRole("tab", { name: "둘러보기" }));
-    await user.click(await screen.findByRole("button", { name: "2026-08-06 수집 1개" }));
-
-    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({
-      collectedRange: {
-        localDate: "2026-08-06",
-        startUtc: "2026-08-05T15:00:00.000Z",
-        endUtc: "2026-08-06T15:00:00.000Z",
-      },
-      sort: "newest",
-      after: null,
-    })));
-    if (layout === "masonry") {
-      await waitFor(() => expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^2026\.\d{2}\.\d{2}$/));
-    }
-  });
-
   it("preserves selection and detail through refresh when the asset remains", async () => {
     const user = userEvent.setup();
     const gateway = createGateway();

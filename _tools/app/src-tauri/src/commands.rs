@@ -57,6 +57,7 @@ pub(crate) mod characters;
 pub(crate) mod av;
 pub(crate) mod video_similarity;
 pub(crate) mod release_calendar;
+pub(crate) mod artists;
 
 #[tauri::command]
 pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {
@@ -445,6 +446,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::CollectionSourceRootNotSet => "collection_source_root_not_set",
             LibraryError::CollectionSourcePathNotSet => "collection_source_path_not_set",
             LibraryError::MangaSeriesNotFound => "manga_series_not_found",
+            LibraryError::ArtistNotFound => "artist_not_found",
+            LibraryError::InvalidArtist(_) => "invalid_artist",
         };
         Self { code, message }
     }

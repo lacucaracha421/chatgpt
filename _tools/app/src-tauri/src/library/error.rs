@@ -631,6 +631,10 @@ pub enum LibraryError {
     CollectionSourcePathNotSet,
     #[error("망가 시리즈를 찾을 수 없습니다")]
     MangaSeriesNotFound,
+    #[error("작가를 찾을 수 없습니다")]
+    ArtistNotFound,
+    #[error("{0}")]
+    InvalidArtist(String),
 }
 
 impl From<super::catalog_query::CatalogQueryError> for LibraryError {

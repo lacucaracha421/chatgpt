@@ -73,7 +73,7 @@ import { FaultGameProvider } from "../games/FaultGame";
 
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
-const RevisitedBundleView = lazy(() => import("../revisit/RevisitedBundleView").then((module) => ({ default: module.RevisitedBundleView })));
+const ArtistHub = lazy(() => import("../artists/ArtistHub").then((module) => ({ default: module.ArtistHub })));
 const ExchangeView = lazy(() => import("../exchange/ExchangeView").then((module) => ({ default: module.ExchangeView })));
 const NotesView = lazy(() => import("../notes/NotesView").then((module) => ({default:module.NotesView})));
 const SettingsView = lazy(() => import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })));
@@ -99,9 +99,9 @@ type AppProps = {
 
 function backNavigationTab(view: AssetView): string {
   switch (view.kind) {
-    // Revisit is an asset quick view: back from it returns to the folder it was opened from.
+    // The 작가 hub is an asset quick view: back from it returns to the folder it was opened from.
     case "classification": case "album":
-    case "revisit": case "creators": case "creator": case "calendar": case "revisited-bundle": return "assets";
+    case "artists": case "creator": return "assets";
     case "collection": case "collections": return "collections";
     default: return view.kind;
   }
@@ -892,14 +892,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onViewChange={navigateView}
                     onChanged={refreshCollections}
                   />
-                ) : view.kind === "revisited-bundle" ? (
-                  <RevisitedBundleView
-                    bundleId={view.bundleId}
-                    title={view.title}
-                    assetIds={view.assetIds}
-                    privacyMode={preferences.privacyMode}
-                    onBack={() => { navigateBack({ kind: "revisit" }); }}
-                  />
+                ) : view.kind === "artists" ? (
+                  <ArtistHub view={view} onNavigate={navigateView} privacyMode={preferences.privacyMode} />
                 ) : (
                   <CharacterFolderContent albums={albums} requestedAsset={requestedAsset} onRequestedAssetHandled={() => setRequestedAsset(null)} view={view} hub={{ ...characterHub, refresh: refreshCharacterViews }} clearSelectionRequest={clearAssetSelectionRequest} galleryDrag={{ onPointerDragStart: startPointerDrag, onPointerDragMove: movePointerDrag, onPointerDragEnd: finishPointerDrag, onPointerDragCancel: cancelPointerDrag }} classifications={entries} galleryLayout={preferences.galleryLayout} onGalleryLayoutChange={(galleryLayout) => updatePreferences({ galleryLayout })} privacyMode={preferences.privacyMode} onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })} metadataVisible={preferences.metadataVisible} onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })} thumbnailRowHeight={preferences.thumbnailRowHeight} onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })} refreshVersion={assetRefresh} onNavigate={navigateView} onAssetsChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}>
                   <AssetBrowser
@@ -918,14 +912,14 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     metadataVisible={preferences.metadataVisible}
                     privacyMode={preferences.privacyMode}
                     onPrivacyModeChange={(privacyMode) => updatePreferences({ privacyMode })}
-                    thumbnailRowHeight={view.kind === "creators" ? preferences.creatorCardSize : preferences.thumbnailRowHeight}
+                    thumbnailRowHeight={preferences.thumbnailRowHeight}
                     refreshVersion={assetRefresh}
                     clearSelectionRequest={clearAssetSelectionRequest}
                     requestedAsset={requestedAsset}
                     onRequestedAssetHandled={() => setRequestedAsset(null)}
                     onSortChange={(assetSort: AssetSort) => updatePreferences({ assetSort })}
                     onMetadataVisibleChange={(metadataVisible) => updatePreferences({ metadataVisible })}
-                    onThumbnailRowHeightChange={(thumbnailRowHeight) => view.kind === "creators" ? updatePreferences({ creatorCardSize: thumbnailRowHeight }) : updatePreferences({ thumbnailRowHeight })}
+                    onThumbnailRowHeightChange={(thumbnailRowHeight) => updatePreferences({ thumbnailRowHeight })}
                     onStatusChange={setBrowserStatus}
                     onPointerDragStart={startPointerDrag}
                     onPointerDragMove={movePointerDrag}

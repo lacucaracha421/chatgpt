@@ -252,6 +252,11 @@ fn bundle_meta(kind: &str) -> BundleMeta {
 struct RecommendationContext {
     assets: Vec<AssetSummary>,
     activity: HashMap<String, ActivityRow>,
+    /// Asset id -> artist scope (`asset_artist_scope`), so creator groups follow merges and
+    /// source-URL/manual assignments. Assets without an artist are absent.
+    artist_refs: HashMap<String, String>,
+    /// Artist scope -> user-defined display name.
+    artist_names: HashMap<String, String>,
 }
 
 struct ActivityRow {
@@ -280,12 +285,25 @@ impl RecommendationContext {
                 ))
             })?
             .collect::<Result<HashMap<String, ActivityRow>, _>>()?;
-        Ok(Self { assets, activity })
+        let (artist_refs, artist_names) = load_artist_scopes(connection)?;
+        Ok(Self { assets, activity, artist_refs, artist_names })
     }
 
     fn activity(&self, asset_id: &str) -> Option<&ActivityRow> {
         self.activity.get(asset_id)
     }
+}
+
+fn load_artist_scopes(connection: &Connection) -> Result<(HashMap<String, String>, HashMap<String, String>), LibraryError> {
+    let refs = connection
+        .prepare("SELECT asset_id, scope_ref FROM asset_artist_scope WHERE scope_ref NOT LIKE 'unknown:%' AND scope_ref <> ''")?
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    let names = connection
+        .prepare("SELECT 'artist:' || id, display_name FROM artists WHERE display_name IS NOT NULL")?
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    Ok((refs, names))
 }
 
 fn load_assets_for_recommendation(connection: &Connection) -> Result<Vec<AssetSummary>, LibraryError> {
@@ -511,16 +529,17 @@ fn rediscovery_candidates(context: &RecommendationContext, now: &DateTime<chrono
     }).collect()
 }
 
-fn creator_spotlight(
+/// Artist groups (three or more assets) ranked by how much their least-recently-seen
+/// assets deserve a revisit; each group's candidates are sorted best first.
+fn rank_creator_groups(
     context: &RecommendationContext,
     preferences: &PreferenceWeights,
     now: &DateTime<chrono::Utc>,
-    seed: u64,
-) -> (Vec<Candidate>, Option<String>) {
+) -> Vec<(i64, String, Vec<Candidate>)> {
     let mut groups: BTreeMap<String, Vec<&AssetSummary>> = BTreeMap::new();
     for asset in &context.assets {
-        if let Some(key) = creator_key(asset) {
-            groups.entry(key).or_default().push(asset);
+        if let Some(key) = context.artist_refs.get(&asset.id) {
+            groups.entry(key.clone()).or_default().push(asset);
         }
     }
     let mut ranked = Vec::new();
@@ -533,21 +552,47 @@ fn creator_spotlight(
         }).collect();
         candidates.sort_by(|left, right| right.score.cmp(&left.score));
         let group_score = candidates.iter().take(6).map(|candidate| candidate.score).sum::<i64>() + creator_penalty;
-        let tie = seed_from(&format!("{seed}-{key}"));
-        let label = group[0].creator_name.clone()
-            .or_else(|| group[0].creator_handle.clone())
-            .or_else(|| group[0].creator_url.clone())
-            .unwrap_or_else(|| "한 작가".to_string());
-        ranked.push((group_score, tie, candidates, label));
+        ranked.push((group_score, key, candidates));
     }
+    ranked
+}
+
+fn creator_spotlight(
+    context: &RecommendationContext,
+    preferences: &PreferenceWeights,
+    now: &DateTime<chrono::Utc>,
+    seed: u64,
+) -> (Vec<Candidate>, Option<String>) {
+    let mut ranked: Vec<_> = rank_creator_groups(context, preferences, now).into_iter().map(|(score, key, candidates)| {
+        let tie = seed_from(&format!("{seed}-{key}"));
+        let first = &candidates[0].asset;
+        let label = context.artist_names.get(&key).cloned()
+            .or_else(|| first.creator_name.clone())
+            .or_else(|| first.creator_handle.clone())
+            .or_else(|| first.creator_url.clone())
+            .unwrap_or_else(|| "한 작가".to_string());
+        (score, tie, candidates, label)
+    }).collect();
     ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
     ranked.into_iter().next().map(|(_, _, candidates, label)| {
         (candidates, Some(format!("{label} · 한동안 덜 본 자산")))
     }).unwrap_or_default()
 }
 
-fn creator_key(asset: &AssetSummary) -> Option<String> {
-    asset.creator_handle.clone().or_else(|| asset.creator_url.clone())
+/// The 작가 spotlight ranking shared with the artist hub's 오늘 strip: artist scopes, best
+/// first, each with its asset ids ordered by revisit score.
+pub(super) fn artist_spotlight_ranking(
+    connection: &Connection,
+    now_utc: &str,
+) -> Result<Vec<(String, Vec<String>)>, LibraryError> {
+    let now = parse_utc_timestamp(now_utc)?;
+    let context = RecommendationContext::load(connection)?;
+    let preferences = load_preference_weights(connection)?;
+    let mut ranked = rank_creator_groups(&context, &preferences, &now);
+    ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    Ok(ranked.into_iter().map(|(_, key, candidates)| {
+        (key, candidates.into_iter().map(|candidate| candidate.asset.id).collect())
+    }).collect())
 }
 
 fn date_capsule(context: &RecommendationContext, local_date: &str, now: &DateTime<chrono::Utc>) -> Vec<Candidate> {
@@ -601,7 +646,7 @@ impl RecommendationContext {
                 last_opened_at: row.get(0)?, open_count: row.get(1)?, last_exposed_at: row.get(2)?, exposure_count: row.get(3)?,
             })).optional()? { activity.insert(id.clone(), row); }
         }
-        Ok(Self { assets, activity })
+        Ok(Self { assets, activity, artist_refs: HashMap::new(), artist_names: HashMap::new() })
     }
 }
 

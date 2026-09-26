@@ -37,7 +37,7 @@ it("keeps 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 while
   expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
     .toEqual(["에셋", "컬렉션", "망가", "메모", "전송", "비밀", "찾기", "더보기"]);
   expect(within(rail).getByRole("button", { name: "찾기" })).toHaveAttribute("aria-keyshortcuts", "Control+K Control+F");
-  expect(screen.queryByRole("button", { name: "다시보기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "작가" })).not.toBeInTheDocument();
   await userEvent.click(within(rail).getByRole("button", { name: "메모" }));
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes" });
   await userEvent.click(within(rail).getByRole("button", { name: "전송" }));
@@ -58,8 +58,8 @@ it("shows the 더보기 count only for 유사 검토, never for 미분류", () =
   expect(counted.querySelector(".workspace-rail__icon svg")).not.toBeNull();
 });
 
-it("marks 에셋 current in the revisit quick view, 메모 on notes and 더보기 on its destinations", () => {
-  const { rerender } = render(<WorkspaceNavigation {...baseProps} view={{ kind: "revisit" }} onNavigate={vi.fn()} />);
+it("marks 에셋 current in the 작가 quick view, 메모 on notes and 더보기 on its destinations", () => {
+  const { rerender } = render(<WorkspaceNavigation {...baseProps} view={{ kind: "artists" }} onNavigate={vi.fn()} />);
   expect(screen.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("button", { name: "더보기" })).not.toHaveAttribute("aria-current");
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "notes" }} onNavigate={vi.fn()} />);
@@ -96,10 +96,10 @@ it("reaches every former rail and 관리 destination from 더보기 with focus r
   expect(within(queues).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["유사 검토 2개"]);
   const destinations = within(panel).getByRole("navigation", { name: "이동" });
   expect(within(destinations).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
-    .toEqual(["미분류", "다시보기", "통계", "휴지통 3개", "설정"]);
+    .toEqual(["미분류", "작가", "통계", "휴지통 3개", "설정"]);
 
   const expected: [string, unknown][] = [["미분류", { kind: "unsorted" }],
-    ["다시보기", { kind: "revisit" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 검토 2개", { kind: "similarity_review" }]];
+    ["작가", { kind: "artists" }], ["통계", { kind: "statistics" }], ["휴지통 3개", { kind: "trash" }], ["설정", { kind: "settings" }], ["유사 검토 2개", { kind: "similarity_review" }]];
   for (const [name, view] of expected) {
     if (!screen.queryByRole("dialog", { name: "더보기" })) await user.click(trigger);
     await user.click(within(screen.getByRole("dialog", { name: "더보기" })).getByRole("button", { name }));

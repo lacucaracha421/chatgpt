@@ -618,6 +618,8 @@ pub struct AssetQuery {
     pub classification_id: Option<String>,
     pub album_id: Option<String>,
     pub collection_id: Option<String>,
+    /// Artist scope (`artists.rs`): a creator key (resolved through its artist when merged),
+    /// `artist:<id>`, or `unknown:none` / `unknown:source` for assets without an artist.
     pub creator_key: Option<String>,
     pub direct_only: bool,
     pub favorite_only: bool,

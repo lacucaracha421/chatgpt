@@ -4,6 +4,7 @@ import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
 import { useVaultExportJob, vaultExportProgressText } from "../external-vault/vaultExportJob";
 import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
+import { ArtistIndex, ArtistIndexCount, isArtistView } from "../artists/ArtistIndex";
 import { CommandPalette } from "./CommandPalette";
 import { MoreEntryList, MorePanel } from "./MorePanel";
 import { placeEntries, useNavigationEntries, type PlaceSources } from "./navigationEntries";
@@ -63,11 +64,12 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
   const collectionList = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   if (view.kind === "collections") collectionList.current = view;
-  const quickAssetView = view.kind === "revisit" || view.kind === "creators" || view.kind === "creator" || view.kind === "calendar" || view.kind === "revisited-bundle" || view.kind === "unsorted";
+  const quickAssetView = isArtistView(view) || view.kind === "unsorted";
   if (!quickAssetView) history.current[area] = view;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
   const areaName = { assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", exchange: "전송", private_vault: "비밀", manage: "더보기" }[area];
-  const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : areaName;
+  const artistView = isArtistView(view);
+  const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : artistView ? "작가" : areaName;
   const enterArea = (next: RailArea) => {
     if (next === "collections" && view.kind === "collection") {
       onNavigate(collectionList.current ?? { kind: "collections", typeFilter: collectionType, showcase: false });
@@ -123,7 +125,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
     </nav>
     <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
-        <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
+        <span className="workspace-index__title" aria-hidden="true">{areaTitle}{artistView && <ArtistIndexCount />}</span>
         <div className="workspace-index__head-actions">
           <ChromeTarget name="search" />
           <ChromeTarget name="actions" />
@@ -131,7 +133,8 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         </div>
       </header>
       <div className="workspace-index__scroll">
-        <div hidden={area !== "assets"} className="workspace-index__assets">{assetNavigation}</div>
+        <div hidden={area !== "assets" || artistView} className="workspace-index__assets">{assetNavigation}</div>
+        {artistView && <ArtistIndex view={view} onNavigate={onNavigate} />}
         <ChromeTarget name="navigation" className="workspace-index__view-navigation" />
         {view.kind === "collections" && !chrome?.meta?.navigation && <div className="workspace-index__fallback"><span className="workspace-section-label">작품 유형</span>{(["game", "manga", "movie", "av"] as const).map((type) => <button key={type} type="button" className="workspace-index-link" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>{({ game: "게임", manga: "만화", movie: "영화", av: "AV" })[type]}</button>)}</div>}
         {area === "manage" && view.kind !== "settings" && <div className="workspace-index__fallback"><MoreEntryList entries={moreEntries.filter((entry) => entry.group === "queue" || entry.group === "go")} heading="더보기" /></div>}

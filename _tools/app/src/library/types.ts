@@ -337,10 +337,10 @@ export type AssetView =
   | { kind: "classification"; classificationId: string | null; characterId?: string; characterGroupId?: string }
   | { kind: "album"; albumId: string }
   | { kind: "unsorted" }
-  | { kind: "revisit" }
-  | { kind: "creators" }
-  | { kind: "creator"; creatorKey: string }
-  | { kind: "calendar" }
+  /** The 작가 hub; `section` defaults to 주요 작가 with the 오늘 strip. */
+  | { kind: "artists"; section?: ArtistHubSection }
+  /** One artist's page (`creatorKey` is an artist id, see `artists/types.ts`), or 작가 미상 for `unknown:*`. `edit` opens 작가 편집. */
+  | { kind: "creator"; creatorKey: string; edit?: boolean }
   | { kind: "similarity_review" }
   | { kind: "trash" }
   | { kind: "statistics" }
@@ -350,8 +350,9 @@ export type AssetView =
   | { kind: "settings"; section?: "general" | "library" | "cloud" | "catalog" | "external_services" | "data" | "about" | "advanced" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean }
-  | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
-  | { kind: "revisited-bundle"; bundleId: string; title: string; assetIds: string[] };
+  | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } };
+
+export type ArtistHubSection = "main" | "others" | "singles" | "hidden" | "merge" | "source-fill";
 
 export type ClassificationEntry = {
   id: string;
@@ -1245,6 +1246,8 @@ export interface ReleaseCalendarGateway {
 export interface LibraryGateway {
   /** Game/movie release calendar and wishlist (desktop only). */
   releaseCalendar?: ReleaseCalendarGateway;
+  /** 작가 hub (desktop only; PC-authoritative). */
+  artists?: import("../artists/types").ArtistGateway;
   getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
   measureLibraryDerivativeStorage?(): Promise<import("../statistics/types").DerivativeStorage>;
   recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;

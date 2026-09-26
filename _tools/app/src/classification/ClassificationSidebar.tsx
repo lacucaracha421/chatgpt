@@ -1,6 +1,6 @@
 import { StarIcon } from "@heroicons/react/20/solid";
 import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
-import { BookOpenIcon, CalendarIcon, EllipsisHorizontalIcon, FolderIcon, PhotoIcon, InboxIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
+import { BookOpenIcon, EllipsisHorizontalIcon, FolderIcon, PhotoIcon, InboxIcon, PersonIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { useLibrary } from "../library/LibraryContext";
@@ -501,13 +501,13 @@ export function ClassificationSidebar({
       {!embedded && <nav className="classification-sidebar__quick-views" aria-label="빠른 보기">
         <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="전체" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
         <QuickViewButton icon={<InboxIcon aria-hidden="true" />} label="미분류" selected={view.kind === "unsorted"} onClick={() => onViewChange({ kind: "unsorted" })} />
-        <QuickViewButton icon={<CalendarIcon aria-hidden="true" />} label="다시보기" selected={view.kind === "revisit" || view.kind === "creator"} onClick={() => onViewChange({ kind: "revisit" })} />
+        <QuickViewButton icon={<PersonIcon aria-hidden="true" />} label="작가" selected={view.kind === "artists" || view.kind === "creator"} onClick={() => onViewChange({ kind: "artists" })} />
         {!embedded && <><QuickViewButton icon={<BookOpenIcon aria-hidden="true" />} label="망가" selected={view.kind === "manga"} onClick={() => onViewChange({ kind: "manga" })} />
         <QuickViewButton icon={<RectangleStackIcon aria-hidden="true" />} label="컬렉션" selected={view.kind === "collections" || view.kind === "collection"} onClick={() => onViewChange({ kind: "collections", typeFilter: collectionType, showcase: false })} /></>}
       </nav>}
       {embedded && <div className="classification-sidebar__all">
         <QuickViewButton icon={<FolderIcon aria-hidden="true" />} label="전체" selected={view.kind === "classification" && view.classificationId === null} onClick={() => onViewChange({ kind: "classification", classificationId: null })} />
-        <QuickViewButton icon={<CalendarIcon aria-hidden="true" />} label="다시보기" selected={["revisit", "creators", "creator", "calendar", "revisited-bundle"].includes(view.kind)} onClick={() => onViewChange({ kind: "revisit" })} />
+        <QuickViewButton icon={<PersonIcon aria-hidden="true" />} label="작가" selected={view.kind === "artists" || view.kind === "creator"} onClick={() => onViewChange({ kind: "artists" })} />
       </div>}
       {tree.hasOrphans && <p className="classification-sidebar__warning" role="alert">연결되지 않은 분류는 숨겨집니다.</p>}
       {pinnedIds.some((id) => entries.some((entry) => entry.id === id)) && <nav className="classification-sidebar__pins" aria-label="즐겨찾기 폴더">

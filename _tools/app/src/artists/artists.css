@@ -1,0 +1,197 @@
+/* 작가 hub (ARTIST-001). Media first: rows are thumbnails with a quiet name column. */
+
+.artist-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.artist-muted { color: var(--color-muted); font-size: var(--text-sm); }
+.artist-error { color: var(--color-danger); font-size: var(--text-sm); }
+.artist-name { font-family: var(--font-ui); }
+
+/* Index */
+.artist-index__total { margin-left: var(--space-2); color: var(--color-muted); font-family: var(--font-numeric); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.artist-index { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-2); }
+.artist-index__group { display: flex; flex-direction: column; gap: 2px; }
+.artist-index__link { min-height: 32px; padding: var(--space-1) var(--space-2); font-size: var(--text-md); }
+.artist-index__link .more-panel__count { font-family: var(--font-numeric); }
+.artist-index__icon { display: grid; place-items: center; width: 18px; flex: none; color: var(--color-muted); }
+.artist-index__icon svg { width: 16px; height: 16px; }
+.workspace-index-link[aria-current=page] .artist-index__icon { color: inherit; }
+.artist-index__thumb { width: 22px; height: 22px; flex: none; overflow: hidden; border-radius: var(--radius-tile); background: var(--color-surface-raised); }
+.artist-index__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Hub frame */
+.artist-hub { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.artist-hub__scroll { flex: 1; min-height: 0; overflow: auto; padding: var(--space-3) var(--space-5) var(--space-6); }
+.artist-hub__count { color: var(--color-muted); font-size: var(--text-sm); margin-left: var(--space-2); font-variant-numeric: tabular-nums; }
+.artist-hub__skeleton { height: 240px; }
+.artist-hub__lead { margin: 0 0 var(--space-3); }
+.artist-rule { display: inline-flex; align-items: center; gap: var(--space-1); border: 0; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-xs); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); }
+.artist-rule:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.artist-rule svg { width: 14px; height: 14px; }
+.artist-rule-form { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-2) 0; }
+.artist-rule-form label { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-md); }
+.artist-rule-form input { width: 64px; height: var(--control-height-sm); padding: 0 var(--space-2); color: var(--color-text); background: var(--color-bg); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); font: inherit; font-variant-numeric: tabular-nums; }
+.artist-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin: var(--space-4) 0 var(--space-2); }
+.artist-section-head:first-child { margin-top: 0; }
+.artist-section-head .workspace-section-label { flex: 1; }
+.artist-more { display: flex; justify-content: center; padding: var(--space-3) 0; }
+
+/* Thumbnails */
+.artist-thumb { width: 44px; height: 44px; flex: none; overflow: hidden; border-radius: var(--radius-tile); background: var(--color-surface-raised); }
+.artist-thumb--small { width: 32px; height: 32px; }
+.artist-thumb--new { display: grid; place-items: center; border: 1px dashed var(--color-border-strong); background: transparent; color: var(--color-muted); }
+.artist-thumb--new svg { width: 16px; height: 16px; }
+.artist-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.artist-strip { display: flex; gap: 4px; min-width: 0; height: 72px; overflow: hidden; }
+.artist-strip__item { flex: none; height: 100%; padding: 0; border: 0; background: var(--color-surface-raised); border-radius: var(--radius-tile); overflow: hidden; min-width: 40px; }
+.artist-strip__item img { height: 100%; width: auto; display: block; }
+button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+
+/* 오늘 */
+.artist-today__rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-3); }
+.artist-today__row { min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.artist-today__row header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.artist-today__row .artist-strip { height: 112px; }
+.artist-today__who { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-today__who > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.artist-today__who .artist-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-today__reason { color: var(--color-muted); font-size: var(--text-xs); }
+.artist-today__reason::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; vertical-align: 1px; background: var(--color-section-mark); }
+.artist-today__reason--unseen::before { background: transparent; box-shadow: inset 0 0 0 1px var(--color-section-mark); }
+
+/* 주요 작가 rows */
+.artist-rows { list-style: none; margin: 0; padding: 0; }
+.artist-rows > li + li { border-top: 1px solid var(--color-border); }
+.artist-row { width: 100%; display: grid; grid-template-columns: 44px minmax(160px, 220px) minmax(0, 1fr); align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border: 0; background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-row:hover { background: var(--color-surface-hover); }
+.artist-row:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.artist-row__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.artist-row__name { font-size: var(--text-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-row__handle, .artist-row__meta { color: var(--color-muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-row__meta { font-variant-numeric: tabular-nums; }
+
+/* 그 외 작가 list */
+.artist-others__controls { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-2); }
+.artist-others__filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.artist-others__hint { margin: 0 0 var(--space-2); }
+.artist-search { display: flex; align-items: center; gap: var(--space-2); height: var(--control-height-md); padding: 0 var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); max-width: 560px; }
+.artist-search:focus-within { border-color: var(--color-focus); }
+.artist-search svg { width: 16px; height: 16px; flex: none; color: var(--color-muted); }
+.artist-search input, .artist-search input:focus, .artist-search input:focus-visible { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: none; box-shadow: none; background: transparent; color: var(--color-text); font: inherit; font-size: var(--text-md); }
+.artist-filter { display: inline-flex; align-items: center; gap: var(--space-2); height: var(--control-height-sm); padding: 0 var(--space-3); color: var(--color-text); background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font: inherit; font-size: var(--text-sm); }
+.artist-filter span { color: var(--color-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.artist-filter:hover { background: var(--color-filter-hover); border-color: var(--color-filter-hover-border); }
+.artist-filter[aria-pressed=true] { color: var(--color-filter-text); background: var(--color-filter-selected); border-color: var(--color-filter-border); }
+.artist-sort { height: var(--control-height-sm); padding: 0 var(--space-2); color: var(--color-text); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-sm); font: inherit; font-size: var(--text-sm); }
+.artist-list { list-style: none; margin: 0; padding: 0; max-width: 900px; }
+.artist-list > li + li { border-top: 1px solid var(--color-border); }
+.artist-list__row { width: 100%; display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(0, 180px) 56px 96px; align-items: center; gap: var(--space-3); min-height: 44px; padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-list__row:hover { background: var(--color-surface-hover); }
+.artist-list__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.artist-list__handle { color: var(--color-muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-list__count, .artist-list__date { color: var(--color-muted); font-family: var(--font-numeric); font-size: var(--text-sm); font-variant-numeric: tabular-nums; text-align: right; }
+
+/* 한 장뿐인 작가들 */
+.artist-mosaic { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-2); }
+.artist-mosaic__tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; flex: none; height: 188px; min-width: 80px; max-width: 320px; padding: 0; border: 0; background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-mosaic__tile img { height: 160px; width: auto; max-width: 320px; object-fit: cover; display: block; border-radius: var(--radius-tile); background: var(--color-surface-raised); }
+/* The name never widens the tile beyond its image. */
+.artist-mosaic__tile .artist-name { width: 0; min-width: 100%; font-size: var(--text-xs); color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-mosaic__tile:hover .artist-name { color: var(--color-text); }
+.artist-mosaic__tile:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* 합치기 제안 */
+.artist-merge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); gap: var(--space-3); }
+.artist-merge { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); min-width: 0; }
+.artist-merge__reason { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-sm); flex-wrap: wrap; }
+.artist-merge__mark { width: 6px; height: 6px; margin-right: 4px; background: var(--color-section-mark); }
+.artist-merge__mark--weak { background: transparent; box-shadow: inset 0 0 0 1px var(--color-section-mark); }
+.artist-merge__pair { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); align-items: start; gap: var(--space-3); }
+.artist-merge__join { width: 16px; height: 16px; margin-top: 10px; color: var(--color-muted); }
+.artist-merge__side { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.artist-merge__side .artist-strip { height: 64px; }
+.artist-merge__who { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-merge__who > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.artist-merge__who .artist-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-merge__who small { color: var(--color-muted); font-size: var(--text-xs); }
+.artist-merge__names { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: 0; padding: var(--space-2) 0 0; border: 0; border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
+.artist-merge__names legend { float: left; margin-right: var(--space-2); padding: 0; color: var(--color-muted); }
+.artist-merge__names label { display: inline-flex; align-items: center; gap: 6px; }
+.artist-merge__names input[type=radio] { accent-color: var(--color-accent); }
+.artist-merge__actions { display: flex; align-items: center; gap: var(--space-2); }
+.artist-merge__actions .artist-muted { margin-left: auto; font-size: var(--text-xs); }
+.artist-badge { display: inline-flex; align-items: center; height: 18px; margin-left: 6px; padding: 0 5px; color: var(--color-muted); border: 1px solid var(--color-border-strong); border-radius: var(--radius-tile); font-size: var(--text-xs); line-height: 1; white-space: nowrap; }
+.artist-badge--warn { color: var(--color-text); border-color: var(--color-section-mark); }
+.artist-badge--auto { color: var(--color-text); background: var(--color-surface-raised); }
+.artist-input { flex: 1; min-width: 0; height: var(--control-height-md); padding: 0 var(--space-3); color: var(--color-text); background: var(--color-bg); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); font: inherit; font-size: var(--text-md); }
+.artist-input:focus { outline: none; border-color: var(--color-focus); }
+
+/* 출처에서 작가 채우기 */
+.artist-fill { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.artist-fill--open { grid-template-columns: minmax(0, 1fr) minmax(360px, 460px); }
+.artist-fill-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.artist-fill-table th, .artist-fill-table td { padding: var(--space-2) var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; font-weight: normal; }
+.artist-fill-table thead th { color: var(--color-muted); font-size: var(--text-xs); }
+.artist-fill-table tbody th { font-weight: 600; }
+.artist-fill-table td:nth-child(2), .artist-fill-table td:nth-child(4) { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
+.artist-fill-table tr[aria-current=true] { box-shadow: inset 2px 0 0 var(--color-accent); background: var(--color-surface); }
+.artist-fill-table__total th, .artist-fill-table__total td { color: var(--color-muted); border-bottom: 0; }
+.artist-fill__note { margin: var(--space-3) 0 0; line-height: 1.6; }
+.artist-fill__preview { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); min-width: 0; }
+.artist-fill__preview > header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); }
+.artist-fill__preview > header .ui-button { margin-left: auto; }
+.artist-fill__groups { list-style: none; margin: 0; padding: 0; }
+.artist-fill__groups li { display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr) 40px; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); font-size: var(--text-sm); }
+.artist-fill__groups .artist-strip { height: 32px; }
+.artist-fill__handle, .artist-fill__target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Artist page */
+.artist-page__subtitle { color: var(--color-muted); font-size: var(--text-sm); margin: 0 var(--space-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.artist-intro { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) 0 var(--space-4); }
+.artist-intro--unknown { gap: var(--space-2); }
+.artist-intro--unknown .artist-muted { margin: 0; }
+.artist-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 880px; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.artist-stat { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); min-width: 0; }
+.artist-stat + .artist-stat { border-left: 1px solid var(--color-border); }
+.artist-stat span { color: var(--color-muted); font-size: var(--text-xs); }
+.artist-stat strong { font-family: var(--font-numeric); font-size: var(--text-lg); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artist-origins { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.artist-origins > .artist-badge { margin-left: 0; }
+.artist-origin { display: inline-flex; align-items: center; }
+.artist-rediscovery { display: flex; flex-direction: column; gap: var(--space-2); }
+.artist-rediscovery__row p { margin: 0 0 var(--space-1); font-size: var(--text-sm); }
+.artist-rediscovery__row .artist-strip { height: 96px; }
+
+/* 작가 편집: floats over the gallery's right edge so opening it never reflows images. */
+.artist-edit { position: absolute; z-index: 35; top: 0; right: 0; bottom: 0; width: min(380px, 100%); display: flex; flex-direction: column; background: var(--color-surface-elevated); border-left: 1px solid var(--color-border-strong); box-shadow: var(--shadow-floating); }
+.artist-edit__head { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.artist-edit__head h3 { margin: 0; font-size: var(--text-md); font-weight: 600; }
+.artist-edit__body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); }
+.artist-edit__body > .workspace-section-label { margin-top: var(--space-2); }
+.artist-edit__body > p { margin: 0; font-size: var(--text-xs); }
+.artist-edit__label { color: var(--color-muted); font-size: var(--text-xs); }
+.artist-edit__name { display: flex; align-items: center; gap: var(--space-1); }
+.artist-edit__list { list-style: none; margin: 0; padding: 0; }
+.artist-edit__row { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); }
+.artist-edit__copy { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: var(--text-sm); }
+.artist-edit__copy small { color: var(--color-muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-edit__flags { display: flex; gap: var(--space-4); margin-top: var(--space-2); }
+.artist-edit__foot { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--color-border); }
+
+/* 작가 지정 */
+.artist-assign { display: flex; flex-direction: column; gap: var(--space-2); }
+.artist-assign .artist-search { max-width: none; }
+.artist-assign__list { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow: auto; }
+.artist-assign__list > li + li { border-top: 1px solid var(--color-border); }
+.artist-assign__row { width: 100%; display: flex; align-items: center; gap: var(--space-2); min-height: 48px; padding: var(--space-1) var(--space-2); border: 0; background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-assign__row:hover, .artist-assign__list [aria-selected=true] > .artist-assign__row { background: var(--color-surface-hover); }
+.artist-assign__check { width: 18px; height: 18px; flex: none; color: var(--color-accent); }
+.artist-assign > .artist-muted { margin: 0; font-size: var(--text-xs); line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .artist-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .artist-row .artist-strip { grid-column: 1 / -1; }
+  .artist-list__row { grid-template-columns: 32px minmax(0, 1fr) 56px; }
+  .artist-list__handle, .artist-list__date { display: none; }
+  .artist-merge-grid { grid-template-columns: minmax(0, 1fr); }
+  .artist-fill--open { grid-template-columns: minmax(0, 1fr); }
+  .artist-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

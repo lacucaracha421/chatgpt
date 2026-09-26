@@ -76,7 +76,7 @@ asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creat
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?13 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?13)
+AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -112,7 +112,7 @@ asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creat
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?13 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?13)
+AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -151,7 +151,7 @@ const ASSET_COUNT_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT COUNT(*) FROM assets AS asset
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?4 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?4)
+AND (?4 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?4, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?4))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?5 AND link.classification_id = ?1) OR (NOT ?5 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?6 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -908,7 +908,7 @@ asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creat
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?13 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?13)
+AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
@@ -942,7 +942,7 @@ asset.import_source, asset.import_batch_id, asset.original_modified_at,
 asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
-AND (?14 IS NULL OR COALESCE(asset.creator_handle, asset.creator_url) = ?14)
+AND (?14 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?14, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?14))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))

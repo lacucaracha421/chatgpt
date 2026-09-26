@@ -40,6 +40,10 @@ _Avoid_: 파일 폴더, 운영체제 폴더, 저장 위치
 사용자가 만들고 원하는 자산을 직접 담는 계층형 목록이다. 한 자산은 여러 앨범에 속할 수 있지만 파일이나 자산 레코드는 복제하지 않는다. 자동 조건이나 일반 폴더 연동은 없다.
 _Avoid_: 스마트 폴더, 분류 폴더, 컬렉션
 
+**작가 (Artist)**:
+The person behind assets, grouped from each asset's creator key (`creator_handle`, else `creator_url`). An untouched key is an implicit artist; renaming (user-defined name), pinning, hiding, merging several keys, or linking assets creates an artist record on the PC, which is authoritative. Links from 작가 지정 and 출처에서 작가 채우기 are separate link records; they never rewrite an asset's creator fields and can be detached. Assets without an artist are 작가 미상.
+_Avoid_: 제작자 필드 수정, 태그로 된 작가, 컬렉션 메타데이터의 작가
+
 **상위 분류 (Root Category)**:
 분류 트리의 맨 위에서 작품과 태그를 묶는 사용자 정의 항목이다. 이름은 앱의 기능이나 감상 방식을 결정하지 않는다.
 _Avoid_: 고정 콘텐츠 종류, 미디어 타입

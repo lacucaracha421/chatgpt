@@ -187,6 +187,26 @@ export const libraryGateway: LibraryGateway = {
   getLibraryStatistics: () => invoke("get_library_statistics"),
   measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
   recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
+  artists: {
+    overview: () => invoke("get_artist_overview"),
+    list: (query) => invoke("list_artists", { query }),
+    detail: (artistId, localDate, offsetMinutes) => invoke("get_artist", { artistId, localDate, offsetMinutes }),
+    today: (localDate, offsetMinutes, seed, excluded) => invoke("get_artist_today", { localDate, offsetMinutes, seed, excluded }),
+    mergeSuggestions: () => invoke("list_artist_merge_suggestions"),
+    sourceFillPreview: () => invoke("preview_artist_source_fill"),
+    applySourceFill: () => invoke("apply_artist_source_fill"),
+    captionLabels: () => invoke("get_artist_caption_labels"),
+    setDisplayName: (artistId, displayName) => invoke("set_artist_display_name", { artistId, displayName }),
+    setFlags: (artistId, flags) => invoke("set_artist_flags", { artistId, pinned: flags.pinned ?? null, hidden: flags.hidden ?? null }),
+    merge: (targetId, sourceIds, displayName) => invoke("merge_artists", { targetId, sourceIds, displayName }),
+    detachMember: (artistId, creatorKey) => invoke("detach_artist_member", { artistId, creatorKey }),
+    detachAssignments: (artistId, source) => invoke("detach_artist_assignments", { artistId, source }),
+    dismissSuggestion: (keyA, keyB) => invoke("dismiss_artist_merge_suggestion", { keyA, keyB }),
+    assignAssets: (assetIds, target) => invoke("assign_assets_to_artist", "artistId" in target
+      ? { assetIds, artistId: target.artistId, newName: null }
+      : { assetIds, artistId: null, newName: target.newName }),
+    setSettings: (settings) => invoke("set_artist_settings", { settings }),
+  },
   releaseCalendar: {
     calendar: () => invoke("get_release_calendar"),
     refresh: (force) => invoke("refresh_release_calendar", { force }),
