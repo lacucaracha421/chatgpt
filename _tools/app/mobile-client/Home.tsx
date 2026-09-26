@@ -194,7 +194,7 @@ export function Home(props:HomeProps) {
       <Row stat value={addedText} unit="장" title="오늘 추가" note={summary ? '오늘 0시부터' : '최근 저장에서 셈'} onOpen={props.onRecent} label={`오늘 추가 ${addedText}장`}/>
       {summary && <>
         <Row stat value={summary.addedThisWeek.toLocaleString('ko-KR')} unit="장" title="이번 주 추가" note="월요일부터" onOpen={props.onRecent} label={`이번 주 추가 ${summary.addedThisWeek}장`}/>
-        <Row stat value={summary.total.toLocaleString('ko-KR')} unit="장" title="전체" note="라이브러리의 모든 자산" onOpen={props.onRecent} label={`전체 ${summary.total}장`}/>
+        <Row stat value={summary.total.toLocaleString('ko-KR')} unit="장" title="전체" note="모든 에셋" onOpen={props.onRecent} label={`전체 ${summary.total}장`}/>
         {/* The tablet has no 미분류 view yet: Library is the closest place. */}
         <Row stat value={summary.unclassified.toLocaleString('ko-KR')} unit="장" title="분류 안 됨" note="분류가 하나도 없는 자산" onOpen={props.onLibrary} label={`분류 안 됨 ${summary.unclassified}장`}/>
       </>}
