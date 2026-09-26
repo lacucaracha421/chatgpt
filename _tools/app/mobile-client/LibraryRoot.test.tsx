@@ -22,7 +22,7 @@ beforeEach(()=>{vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}dis
 afterEach(()=>{cleanup();vi.clearAllMocks();vi.unstubAllGlobals();});
 it('shows root cards and All without recent folders, then searches every character level from the bar',async()=>{
  render(<LibraryRoot {...props}/>);
- expect(screen.getByRole('heading',{name:'라이브러리'})).toBeTruthy();
+ expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();
  expect(document.querySelector('.library-recents')).toBeNull();expect(screen.queryByText('최근 연 폴더')).toBeNull();
  // Search is a magnifier in the shared bar until opened.
  expect(screen.queryByRole('searchbox')).toBeNull();
@@ -104,9 +104,9 @@ it('closes the search bar and clears its query on an empty-space tap or Back, bu
  fireEvent.pointerDown(screen.getByRole('button',{name:/학생회/}));
  expect(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'})).toBeTruthy();
  // Empty space outside the bar closes it and drops the query.
- fireEvent.pointerDown(screen.getByLabelText('라이브러리 탐색'));
+ fireEvent.pointerDown(screen.getByLabelText('에셋 탐색'));
  expect(screen.queryByRole('searchbox')).toBeNull();expect(document.querySelector('mark')).toBeNull();
- expect(screen.getByRole('heading',{name:'라이브러리'})).toBeTruthy();
+ expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();
  // Back (App's handler) closes the visible search first, then has nothing more to close.
  open('유우');
  let closed=false;act(()=>{closed=closeVisibleSearch();});expect(closed).toBe(true);

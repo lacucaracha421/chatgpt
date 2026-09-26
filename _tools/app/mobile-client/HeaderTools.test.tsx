@@ -14,6 +14,6 @@ it('moves one interactive toolbar between portrait content and landscape header'
 });
 it('identifies All independently of the root and character scopes',()=>{
   expect(isAll(ALL_ASSETS)).toBe(true);
-  expect(isAll({tab:'library',root:true,title:'라이브러리'})).toBe(false);
+  expect(isAll({tab:'library',root:true,title:'에셋'})).toBe(false);
   expect(isAll({tab:'library',characters:true,title:'시리즈'})).toBe(false);
 });

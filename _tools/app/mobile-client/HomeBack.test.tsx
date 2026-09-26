@@ -1,5 +1,5 @@
 import type {MutableRefObject, ReactNode} from 'react';
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import type {HomeProps} from './Home';
@@ -35,11 +35,11 @@ import {App} from './App';
 
 const a = [{id:'a1',kind:'image'},{id:'a2',kind:'image'}], b = [{id:'b1',kind:'image'}];
 const back = () => act(() => {window.dispatchEvent(new Event('lakomics-back'));});
-const nav = (name:string) => screen.getByRole('button',{name,exact:true});
+const nav = (name:string) => within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name,exact:true});
 const onHome = () => nav('홈').getAttribute('aria-current') === 'page';
 async function startHome(scroll = 300) {
   render(<App/>);
-  await screen.findByRole('heading',{name:'라이브러리'});
+  await screen.findByRole('heading',{name:'에셋'});
   fireEvent.click(nav('홈'));
   const home = await screen.findByLabelText('홈 대시보드');
   home.scrollTop = scroll;
@@ -95,7 +95,7 @@ it('forgets the Home origin when the bottom navigation switches tabs',async() =>
   fireEvent.click(screen.getByRole('button',{name:'home 최근'}));
   await screen.findByText('tile-a1');
   fireEvent.click(nav('에셋'));
-  await screen.findByRole('heading',{name:'라이브러리'});
+  await screen.findByRole('heading',{name:'에셋'});
   back();
   await waitFor(() => expect(finished()).toBe(true));
   expect(onHome()).toBe(false);
@@ -120,7 +120,7 @@ it('steps back inside Library before returning Home when the Library was opened 
   await screen.findByText('tile-b1');
   back();
   // The folder was a deeper level: Back goes to the Library entry first.
-  await screen.findByRole('heading',{name:'라이브러리'});
+  await screen.findByRole('heading',{name:'에셋'});
   expect(onHome()).toBe(false);
   back();
   expect((await screen.findByLabelText('홈 대시보드')).scrollTop).toBe(300);

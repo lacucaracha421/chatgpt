@@ -55,7 +55,7 @@ const chipLabels=async()=>{
   return labels;
 };
 const openFolder=async(name:string)=>{
-  fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
+  fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋',exact:true}));
   fireEvent.click(await screen.findByRole('button',{name}));
 };
 
@@ -177,7 +177,7 @@ describe('asset filters',()=>{
     // from the view cache, so the committed heading and the gallery identity are what prove
     // the scope and its filters, not the request log.
     act(()=>window.dispatchEvent(new Event('lakomics-back')));
-    await waitFor(()=>expect(screen.getByRole('heading',{name:'라이브러리'})).toBeTruthy());
+    await waitFor(()=>expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy());
     fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
     await screen.findByText('tile-a1');
     await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).not.toContain('media_kind'));
@@ -239,10 +239,10 @@ describe('asset filters',()=>{
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(signal).toBeTruthy());
     expect(screen.getByText('필터 적용 대기')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));
+    fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋',exact:true}));
     expect(signal.aborted).toBe(true);
     await waitFor(()=>expect(screen.queryByText('필터 적용 대기')).toBeNull());
-    await screen.findByRole('heading',{name:'라이브러리'});
+    await screen.findByRole('heading',{name:'에셋'});
     fireEvent.click(screen.getByRole('button',{name:/모든 자산/}));
     await screen.findByText('tile-a1');
     await act(async()=>pending.resolve(page(['stale'])));
@@ -364,7 +364,7 @@ describe('asset filters',()=>{
   it('treats a filter change as a new view rather than reusing the cached unfiltered page',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     // Re-select All: the cached unfiltered page is allowed to serve that identical query.
-    fireEvent.click(screen.getByRole('button',{name:'에셋'}));
+    fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋'}));
     fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
     await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
@@ -372,7 +372,7 @@ describe('asset filters',()=>{
     // Returning to All must not hand back the filtered page under an unfiltered identity.
     fireEvent.click(screen.getByRole('button',{name:'홈'}));
     await screen.findByText('tile-a1');
-    fireEvent.click(screen.getByRole('button',{name:'에셋'}));
+    fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋'}));
     await waitFor(()=>expect(lastPagePath()).not.toContain('media_kind=videos'));
   });
 

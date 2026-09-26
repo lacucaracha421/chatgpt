@@ -1,7 +1,7 @@
 import type {Classification,View} from './types';
 import type {CharacterIndex,CharacterNode} from './characterModel';
 export type Entry=Classification&{characterNode?:string;characterKind?:Exclude<CharacterNode['kind'],'series'>};
-export const LIBRARY_ROOT:View={tab:'library',root:true,title:'라이브러리'};
+export const LIBRARY_ROOT:View={tab:'library',root:true,title:'에셋'};
 export const ALL_ASSETS:View={tab:'library',title:'모든 자산'};
 export function mergeLibraryEntries(items:Classification[],characters?:CharacterIndex):Entry[]{
     const nodes=characters?.ready?characters.nodes:[];

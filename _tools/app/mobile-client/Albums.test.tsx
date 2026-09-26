@@ -44,7 +44,7 @@ describe('album Library scopes',()=>{
  });
  it('opens the shared header, gallery, child strip, view options and filter chips without an album dialog',async()=>{
   await openRootAlbum();expect(screen.queryByRole('dialog')).toBeNull();
-  expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('라이브러리›앨범');
+  expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('에셋›앨범');
   expect(document.querySelector('.gallery-scroll .library-children .library-folder')?.textContent).toContain('임시');
   // The filters left the content: the gallery starts under the bar, and 보기 옵션 holds them.
   expect(screen.queryByRole('group',{name:'자산 필터'})).toBeNull();
@@ -54,11 +54,11 @@ describe('album Library scopes',()=>{
  });
  it('walks inner sheet, filters, parent album, then root with Albums selected',async()=>{
   await openRootAlbum();fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
-  expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('라이브러리›앨범›업로드용');
+  expect(screen.getByRole('navigation',{name:'현재 위치'}).textContent).toBe('에셋›앨범›업로드용');
   await choose();await chipShown('영상');fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));fireEvent.click(await screen.findByRole('button',{name:'비율'}));
   back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());await chipShown('영상');
   back();await chipShown('종류');expect(screen.getByRole('heading',{name:'임시'})).toBeTruthy();
-  back();await screen.findByRole('heading',{name:'업로드용'});back();await screen.findByRole('heading',{name:'라이브러리'});
+  back();await screen.findByRole('heading',{name:'업로드용'});back();await screen.findByRole('heading',{name:'에셋'});
   expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true');expect(screen.getByRole('button',{name:'검색'})).toBeTruthy();
  });
  it('jumps through breadcrumbs and restores the parent gallery scroll',async()=>{
@@ -66,7 +66,7 @@ describe('album Library scopes',()=>{
   fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
   fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'업로드용'}));await screen.findByRole('heading',{name:'업로드용'});
   expect(document.querySelector('.gallery-scroll')?.getAttribute('data-restore')).toBe('420');
-  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'앨범'}));await waitFor(()=>expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true'));await screen.findByRole('heading',{name:'라이브러리'});
+  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'앨범'}));await waitFor(()=>expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true'));await screen.findByRole('heading',{name:'에셋'});
  });
  it('uses the album envelope, identity, filter parameters and cursor on the normal append path',async()=>{
   mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/albums/assets')?page(path.includes('cursor=')?'a2':'a1',!path.includes('cursor=')):baseApi(path));
@@ -107,7 +107,7 @@ describe('album Library scopes',()=>{
  });
  it('starts a sibling album unfiltered and separates album cache identities',async()=>{
   await openRootAlbum();await choose();await chipShown('영상');
-  fireEvent.click(screen.getByRole('button',{name:'에셋',exact:true}));fireEvent.click(await screen.findByRole('button',{name:'Other'}));await screen.findByText('other-asset');
+  fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋',exact:true}));fireEvent.click(await screen.findByRole('button',{name:'Other'}));await screen.findByText('other-asset');
   await chipShown('종류');expect(albumReads().at(-1)?.[0]).not.toContain('media_kind');
   expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView(tree,albums[2])));
   expect(viewKey(albumView(tree,albums[0]))).not.toBe(viewKey(albumView({...tree,epoch:2},albums[0])));
@@ -121,7 +121,7 @@ describe('album Library scopes',()=>{
  it('keeps the root on an authority error and retries the actual album intent',async()=>{
   let fail=true;mocks.api.mockImplementation(async(path:string)=>{if(path.includes('/v1/albums/assets')&&fail)throw new Error('authority unavailable');return baseApi(path);});
   render(<App/>);fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByText(/authority unavailable/);
-  expect(screen.getByRole('heading',{name:'라이브러리'})).toBeTruthy();fail=false;fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));await screen.findByRole('heading',{name:'업로드용'});
+  expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();fail=false;fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));await screen.findByRole('heading',{name:'업로드용'});
  });
  it('bounds malformed hierarchy paths and normalizes only the agreed envelope',()=>{
   const cyclic=[{...albums[0],id:'x',name:'X',parentId:'y'},{...albums[0],id:'y',name:'Y',parentId:'x'}];expect(albumPath(cyclic,'x')).toBe('Y / X');
