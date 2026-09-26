@@ -32,6 +32,33 @@ fn enqueue_structural(
     Library::enqueue_album_intent(transaction, command_type, album_id, fields)
 }
 
+/// Album rows with their normal-asset counts. The count subquery uses `CROSS JOIN`, which
+/// SQLite documents as a fixed join order: the Album's `asset_albums` rows drive (through
+/// `asset_albums_by_album`) and each asset is probed by id. With a plain `JOIN` and no
+/// `sqlite_stat1`, the planner walks every normal asset through `assets_by_trash_age` and
+/// probes the membership primary key once per asset, for every Album (measured on the real
+/// library: 3 Albums x 9,147 assets, 137 k VM steps). The gate is
+/// `album_lists_vm_steps_stay_proportional_to_memberships`.
+const LIST_ALBUMS_SQL: &str = "SELECT id, name, parent_id, icon_key, color_key,
+        (SELECT COUNT(*) FROM asset_albums AS count_link
+         CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+         WHERE count_link.album_id = albums.id
+           AND count_asset.status = 'normal') AS asset_count
+     FROM albums
+     ORDER BY parent_id, name COLLATE NOCASE, id";
+
+/// The Albums one asset belongs to, with the same count subquery as [`LIST_ALBUMS_SQL`].
+const ASSET_ALBUMS_SQL: &str =
+    "SELECT album.id, album.name, album.parent_id, album.icon_key, album.color_key,
+        (SELECT COUNT(*) FROM asset_albums AS count_link
+         CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+         WHERE count_link.album_id = album.id
+           AND count_asset.status = 'normal') AS asset_count
+     FROM albums AS album
+     JOIN asset_albums AS link ON link.album_id = album.id
+     WHERE link.asset_id = ?1
+     ORDER BY album.name COLLATE NOCASE, album.id";
+
 impl Library {
     pub fn create_album(&self, request: CreateAlbum) -> Result<AlbumEntry, LibraryError> {
         let name = normalized_name(request.name)?;
@@ -78,15 +105,7 @@ impl Library {
 
     pub fn list_albums(&self) -> Result<Vec<AlbumEntry>, LibraryError> {
         let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT id, name, parent_id, icon_key, color_key,
-                (SELECT COUNT(*) FROM asset_albums AS count_link
-                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
-                 WHERE count_link.album_id = albums.id
-                   AND count_asset.status = 'normal') AS asset_count
-             FROM albums
-             ORDER BY parent_id, name COLLATE NOCASE, id",
-        )?;
+        let mut statement = connection.prepare(LIST_ALBUMS_SQL)?;
         let entries = statement
             .query_map([], album_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -266,17 +285,7 @@ impl Library {
     pub fn get_asset_albums(&self, asset_id: &str) -> Result<Vec<AlbumEntry>, LibraryError> {
         let connection = self.connection()?;
         validated_asset_ids(&connection, &[asset_id.to_owned()])?;
-        let mut statement = connection.prepare(
-            "SELECT album.id, album.name, album.parent_id, album.icon_key, album.color_key,
-                (SELECT COUNT(*) FROM asset_albums AS count_link
-                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
-                 WHERE count_link.album_id = album.id
-                   AND count_asset.status = 'normal') AS asset_count
-             FROM albums AS album
-             JOIN asset_albums AS link ON link.album_id = album.id
-             WHERE link.asset_id = ?1
-             ORDER BY album.name COLLATE NOCASE, album.id",
-        )?;
+        let mut statement = connection.prepare(ASSET_ALBUMS_SQL)?;
         let entries = statement
             .query_map([asset_id], album_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -548,6 +557,237 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    /// PERF-ALL-001 tighten-only gate. The Album list (and one asset's Albums) must cost VM
+    /// steps in proportion to memberships, not Albums x assets. The planner-chosen plain-`JOIN`
+    /// form (the queries before the fix) runs on the same fixture to prove identical rows and
+    /// that the thresholds catch the regression. Lower a `MAX_*` after a verified
+    /// improvement; raise it only with a justified, measured reason.
+    #[test]
+    fn album_lists_vm_steps_stay_proportional_to_memberships() {
+        const ASSETS: usize = 2_000;
+        const ALBUMS: usize = 16;
+        const LINKS_PER_ALBUM: usize = 25;
+        const SHARED_ASSET: &str = "asset-00001";
+        // Measured on this fixture (bundled SQLite of rusqlite 0.40): list fixed 2,813,
+        // plain-`JOIN` plan 137,733; one asset's Albums fixed 2,899, plain-`JOIN` plan 103,543.
+        const MAX_LIST_VM_STEPS: i32 = 3_200;
+        const MAX_ASSET_VM_STEPS: i32 = 3_200;
+
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        // Four roots with three children each: nesting, NOCASE name order and NULL parents.
+        let mut albums = Vec::new();
+        for root in 0..ALBUMS / 4 {
+            let parent = library
+                .create_album(CreateAlbum {
+                    name: format!("{} root {root}", if root % 2 == 0 { "a" } else { "B" }),
+                    parent_id: None,
+                })
+                .unwrap();
+            for child in 0..3 {
+                albums.push(
+                    library
+                        .create_album(CreateAlbum {
+                            name: format!("Child {}", 3 - child),
+                            parent_id: Some(parent.id.clone()),
+                        })
+                        .unwrap(),
+                );
+            }
+            albums.push(parent);
+        }
+        {
+            let mut connection = library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            {
+                let mut asset = transaction
+                    .prepare(
+                        "INSERT INTO assets (
+                            id, content_hash, media_kind, original_name, relative_path,
+                            thumbnail_relative_path, byte_size, width, height, collected_at,
+                            status
+                         ) VALUES (?1, 'hash-' || ?1, 'image', ?1 || '.png',
+                            'assets/' || ?1 || '.png', 'thumbnails/' || ?1 || '.webp',
+                            1, 1, 1, '2026-08-16T00:00:00Z', ?2)",
+                    )
+                    .unwrap();
+                for index in 0..ASSETS {
+                    let status = if index % 7 == 3 { "trash" } else { "normal" };
+                    asset
+                        .execute(rusqlite::params![format!("asset-{index:05}"), status])
+                        .unwrap();
+                }
+                let mut link = transaction
+                    .prepare(
+                        "INSERT OR IGNORE INTO asset_albums (asset_id, album_id)
+                         VALUES (?1, ?2)",
+                    )
+                    .unwrap();
+                for (position, album) in albums.iter().enumerate() {
+                    // Every fourth Album stays empty; the others share some assets (including
+                    // trashed ones, which must not be counted).
+                    if position % 4 == 0 {
+                        continue;
+                    }
+                    link.execute(rusqlite::params![SHARED_ASSET, album.id])
+                        .unwrap();
+                    for slot in 0..LINKS_PER_ALBUM {
+                        let asset = (position * 31 + slot * 53) % ASSETS;
+                        link.execute(rusqlite::params![format!("asset-{asset:05}"), album.id])
+                            .unwrap();
+                    }
+                }
+            }
+            transaction.commit().unwrap();
+        }
+
+        let (list, asset) = {
+            let connection = library.connection().unwrap();
+            (
+                fixed_and_plain_join(&connection, super::LIST_ALBUMS_SQL, None),
+                fixed_and_plain_join(&connection, super::ASSET_ALBUMS_SQL, Some(SHARED_ASSET)),
+            )
+        };
+        eprintln!(
+            "list_albums VM steps: fixed {}, plain JOIN {}; get_asset_albums VM steps: fixed {}, plain JOIN {}",
+            list.fixed_steps, list.plain_steps, asset.fixed_steps, asset.plain_steps
+        );
+
+        assert_eq!(list.fixed_rows.len(), ALBUMS);
+        assert_eq!(list.fixed_rows, list.plain_rows);
+        assert_eq!(asset.fixed_rows.len(), ALBUMS - ALBUMS / 4);
+        assert_eq!(asset.fixed_rows, asset.plain_rows);
+        let counted = list
+            .fixed_rows
+            .iter()
+            .filter(|row| row[5] != rusqlite::types::Value::Integer(0))
+            .count();
+        assert_eq!(counted, ALBUMS - ALBUMS / 4);
+        // The product calls return the same rows as the gated statements.
+        let product = library
+            .list_albums()
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.id, entry.asset_count as i64))
+            .collect::<Vec<_>>();
+        let gated = list
+            .fixed_rows
+            .iter()
+            .map(|row| match (&row[0], &row[5]) {
+                (rusqlite::types::Value::Text(id), rusqlite::types::Value::Integer(count)) => {
+                    (id.clone(), *count)
+                }
+                other => panic!("unexpected row shape {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(product, gated);
+
+        assert!(
+            list.fixed_steps <= MAX_LIST_VM_STEPS,
+            "list_albums VM steps {} exceed the gate {MAX_LIST_VM_STEPS}",
+            list.fixed_steps
+        );
+        assert!(
+            list.plain_steps > MAX_LIST_VM_STEPS,
+            "the pre-fix list plan ({} VM steps) no longer exceeds the gate",
+            list.plain_steps
+        );
+        assert!(
+            asset.fixed_steps <= MAX_ASSET_VM_STEPS,
+            "get_asset_albums VM steps {} exceed the gate {MAX_ASSET_VM_STEPS}",
+            asset.fixed_steps
+        );
+        assert!(
+            asset.plain_steps > MAX_ASSET_VM_STEPS,
+            "the pre-fix asset-albums plan ({} VM steps) no longer exceeds the gate",
+            asset.plain_steps
+        );
+    }
+
+    /// Real-data equality check for the Album count rewrite. Point `LAKOMICS_ALBUMS_SNAPSHOT_DB`
+    /// at the `library.sqlite` of a snapshot copy (for example one kept by
+    /// `perf_probe --keep-snapshot`), never at the live library; it is opened read-only.
+    #[test]
+    #[ignore = "needs LAKOMICS_ALBUMS_SNAPSHOT_DB"]
+    fn album_lists_match_plain_join_plan_on_snapshot() {
+        let path =
+            std::env::var_os("LAKOMICS_ALBUMS_SNAPSHOT_DB").expect("LAKOMICS_ALBUMS_SNAPSHOT_DB");
+        let connection =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let list = fixed_and_plain_join(&connection, super::LIST_ALBUMS_SQL, None);
+        eprintln!(
+            "list_albums rows {}; VM steps: fixed {}, plain JOIN {}",
+            list.fixed_rows.len(),
+            list.fixed_steps,
+            list.plain_steps
+        );
+        assert_eq!(list.fixed_rows, list.plain_rows);
+
+        let members = connection
+            .prepare("SELECT DISTINCT asset_id FROM asset_albums ORDER BY asset_id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let (mut fixed_steps, mut plain_steps) = (0_i64, 0_i64);
+        for asset_id in &members {
+            let asset = fixed_and_plain_join(&connection, super::ASSET_ALBUMS_SQL, Some(asset_id));
+            assert!(!asset.fixed_rows.is_empty());
+            assert_eq!(asset.fixed_rows, asset.plain_rows, "asset {asset_id}");
+            fixed_steps += i64::from(asset.fixed_steps);
+            plain_steps += i64::from(asset.plain_steps);
+        }
+        eprintln!(
+            "get_asset_albums over {} member assets; VM steps: fixed {fixed_steps}, plain JOIN {plain_steps}",
+            members.len()
+        );
+    }
+
+    type Rows = Vec<Vec<rusqlite::types::Value>>;
+
+    struct Compared {
+        fixed_rows: Rows,
+        fixed_steps: i32,
+        plain_rows: Rows,
+        plain_steps: i32,
+    }
+
+    /// Runs a product Album query and its plain-`JOIN` form (the query before the fix) and
+    /// returns every column of every row with each statement's VM steps.
+    fn fixed_and_plain_join(
+        connection: &rusqlite::Connection,
+        fixed_sql: &str,
+        asset_id: Option<&str>,
+    ) -> Compared {
+        assert_eq!(fixed_sql.matches("CROSS JOIN").count(), 1);
+        let run = |sql: &str| {
+            let mut statement = connection.prepare(sql).unwrap();
+            let columns = statement.column_count();
+            let params = asset_id.map_or_else(Vec::new, |id| vec![id]);
+            let rows = statement
+                .query_map(rusqlite::params_from_iter(params), |row| {
+                    (0..columns)
+                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+            (rows, steps)
+        };
+        let (fixed_rows, fixed_steps) = run(fixed_sql);
+        let (plain_rows, plain_steps) = run(&fixed_sql.replace("CROSS JOIN", "JOIN"));
+        Compared {
+            fixed_rows,
+            fixed_steps,
+            plain_rows,
+            plain_steps,
+        }
     }
 
     fn insert_asset(library: &Library, id: &str) {
