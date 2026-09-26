@@ -11,7 +11,7 @@ source/document consistency, not new native acceptance or production verificatio
 - [Desktop setup and behavior](../_tools/app/README.md): Windows and Linux Tauri application.
 - [Linux platform setup and acceptance limits](operations/linux-desktop.md).
 - [Android build, current source version and acceptance](../android/README.md).
-- [Browser collector (active, `extension-list/`)](../extension-list/README.md). The older [collector overview](../extension/README.md) and [operation guide](edge-extension.md) describe the frozen legacy `extension/`.
+- [Browser collector (active, `extension-list/`)](../extension-list/README.md). The legacy `extension/` collector was removed on 2026-09-26 (see Git history); [edge-extension.md](edge-extension.md) remains as its historical operation guide.
 
 Package-path reconciliation: 2026-09-12. The active desktop package and shared
 mobile frontend are under `_tools/app/`, relative to the repository root.
@@ -50,7 +50,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `research/server-authority-v2-pc-audit-20260915.md` — PC publication/recovery audit: stale-snapshot risks, local-vs-shared state, and safe retirement order.
 - `adr/0037-server-authority-v2-replica-and-command-contract.md` — proposed common per-domain authority, client-replica/outbox, recovery and fence contract for the next CLOUD-POST-001 batches.
 - `agents/mobile-consumption-ux.md` — approved Mobile Home/Library/viewer behavior.
-- `edge-extension.md` — legacy `extension/` collector routing and Cloud Library behavior (frozen); the active collector is documented in `../extension-list/README.md`, with source rules in `../extension-list/AGENTS.md`.
+- `edge-extension.md` — legacy `extension/` collector routing and Cloud Library behavior (historical; the code was removed 2026-09-26); the active collector is documented in `../extension-list/README.md`, with source rules in `../extension-list/AGENTS.md`.
 - `agents/catalog-troubleshooting.md` — catalog transport/checkpoint behavior and rollout safeguards.
 - `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.
 - `operations/pc-migration.md` — backup, recovery, credential portability, and PC migration.

@@ -25,7 +25,7 @@
   | Cloud API | `server/lakomics-api/` |
   | Active collector (has its own `AGENTS.md`) | `extension-list/` |
 
-- Run npm and Cargo from the owning package/crate so pinned tools and configuration apply. Root `app/` and `mobile/` are not active packages. `extension/` is frozen legacy code; modify it only on an explicit legacy-extension request.
+- Run npm and Cargo from the owning package/crate so pinned tools and configuration apply. Root `app/` and `mobile/` are not active packages. The legacy `extension/` collector was removed on 2026-09-26; `extension-list/` is the only collector.
 - Before editing, inspect the branch, staged/unstaged changes, and relevant untracked files. `main` is the integration baseline, not a substitute for current worktree state.
 - Support Windows and Linux: preserve portable paths, media protocols, filesystem behavior, and credential backends; report unavailable native verification explicitly.
 - Preserve the current framework, custom UI, and package manager. Ordinary work does not authorize Next.js, shadcn, Vercel hosting, AI SDK, new persistence, or another browser runtime; the existing Vercel AI Gateway integration is not approval to adopt that stack.
