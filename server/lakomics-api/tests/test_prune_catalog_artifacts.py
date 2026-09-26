@@ -100,8 +100,22 @@ class PruneCatalogTests(unittest.TestCase):
 
     def test_recent_publications_are_kept_independently_of_current(self):
         self.publication("current", hours=100, current=True)
-        _, _, paths = self.publication("recent", hours=47)
-        self.assert_kept(paths, "publication within 48h")
+        _, _, paths = self.publication("recent", hours=2.5)
+        self.assert_kept(paths, "publication within 3h")
+
+    def test_default_prunes_after_three_hours_and_direct_calls_respect_floor(self):
+        expired = self.publication("expired", hours=3.1)[2]
+        _, fresh = self.artifact("token-window", age=prune.TTL + 1)
+        self.assertGreater(prune.MIN_RETENTION_SECONDS, prune.TTL)
+        fd = prune.open_directory(self.root)
+        try:
+            with self.get_db() as db:
+                entries = {e.name: e for e in prune.plan(
+                    db, fd, self.db_path.stat(), self.now, retention=0)}
+        finally:
+            os.close(fd)
+        self.assertFalse(entries[fresh.name].delete)
+        self.assertTrue(all(entries[path.name].delete for path in expired))
 
     def test_previous_two_before_current_not_latest_two(self):
         ancient = self.publication("ancient", hours=110)[2]
@@ -126,12 +140,12 @@ class PruneCatalogTests(unittest.TestCase):
         _, content = self.artifact("fresh", age=prune.RETENTION_SECONDS)
         users = [self.file(replica.digest("fresh-user") + suffix, age=10)
                  for suffix in ("-users.sqlite", "-users-v2.sqlite")]
-        self.assert_kept([content, *users], "mtime within 48h")
+        self.assert_kept([content, *users], "mtime within 3h")
 
     def test_recent_users_keep_their_content_source(self):
         _, _, paths = self.publication("fresh-users")
         os.utime(paths[1], (self.now, self.now))
-        self.assert_kept(paths, "mtime within 48h")
+        self.assert_kept(paths, "mtime within 3h")
 
     def test_queued_and_running_jobs_keep_uncertain_sources_even_expired(self):
         _, _, paths = self.publication("old")
@@ -342,12 +356,12 @@ class PruneCatalogTests(unittest.TestCase):
 
     def test_retention_setting_parsing_and_window(self):
         env = prune.RETENTION_ENV
-        self.assertEqual(prune.retention_seconds({}), 48 * 3600)
+        self.assertEqual(prune.retention_seconds({}), 3 * 3600)
         self.assertEqual(prune.retention_seconds({env: "72"}), 72 * 3600)
-        self.assertEqual(prune.retention_seconds({env: "1"}), 24 * 3600)
+        self.assertEqual(prune.retention_seconds({env: "1"}), prune.MIN_RETENTION_SECONDS)
         for bad in ("soon", "nan", "inf"):
             with self.assertLogs(prune.LOG, "WARNING"):
-                self.assertEqual(prune.retention_seconds({env: bad}), 48 * 3600)
+                self.assertEqual(prune.retention_seconds({env: bad}), 3 * 3600)
         self.assertTrue(prune.auto_prune_enabled({}))
         for off in ("0", "false", "OFF", "no"):
             self.assertFalse(prune.auto_prune_enabled({prune.AUTO_PRUNE_ENV: off}))

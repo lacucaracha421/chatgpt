@@ -10,7 +10,10 @@ while it creates, links and registers files; the pruner holds it exclusively,
 non-blocking, for plan + delete. The API prunes by itself (AutoPruner: about a
 minute after startup, hourly, and after each publish or refresh); set
 LAKOMICS_CATALOG_AUTO_PRUNE=0 to disable it and LAKOMICS_CATALOG_RETENTION_HOURS
-(default 48, minimum 24 = the token TTL) to change the retention window.
+(default 3, minimum = the 2-hour token TTL plus a 1-hour safety margin) to
+change the retention window. When upgrading from 24-hour tokens, temporarily
+keep LAKOMICS_CATALOG_RETENTION_HOURS=48 until 24 hours after the last old API
+process stops issuing tokens; then unset it to use the new default.
 
 The CLI's --apply takes the same lock, so it is safe while an API that takes the
 lock is running (an older API build without the lock must still be stopped).
@@ -44,10 +47,11 @@ import time
 
 import api_auth
 import mobile_catalog_replica as replica
+from mobile_catalog import TTL
 
-RETENTION_SECONDS = 48 * 60 * 60
-# Search/count tokens stay valid for 24 h (mobile_catalog.TTL); never retain less.
-MIN_RETENTION_SECONDS = 24 * 60 * 60
+RETENTION_SAFETY_SECONDS = 60 * 60
+MIN_RETENTION_SECONDS = TTL + RETENTION_SAFETY_SECONDS
+RETENTION_SECONDS = max(3 * 60 * 60, MIN_RETENTION_SECONDS)
 TEMP_SECONDS = 60 * 60
 AUTO_PRUNE_ENV = "LAKOMICS_CATALOG_AUTO_PRUNE"
 RETENTION_ENV = "LAKOMICS_CATALOG_RETENTION_HOURS"
@@ -147,6 +151,7 @@ def control_backup(root_fd, entry):
 
 def plan(db, root_fd, control_info, now, retention=RETENTION_SECONDS):
     """Read one DB snapshot; applying additionally requires the exclusive catalog lock."""
+    retention = max(MIN_RETENTION_SECONDS, retention)
     window = hours_label(retention)
     publications = list(db.execute("SELECT rowid AS ordinal,* FROM mobile_catalog_publications ORDER BY rowid"))
     artifacts = list(db.execute("SELECT * FROM mobile_catalog_artifacts"))
@@ -471,7 +476,8 @@ def main(argv=None):
     parser.add_argument("--api-stopped", action="store_true",
                         help="accepted for compatibility; no longer required")
     parser.add_argument("--retention-hours", type=float,
-                        help=f"retention window (default: {RETENTION_ENV} or 48; minimum 24)")
+                        help=f"retention window (default: {RETENTION_ENV} or "
+                             f"{RETENTION_SECONDS / 3600:g}; minimum {MIN_RETENTION_SECONDS / 3600:g})")
     args = parser.parse_args(argv)
     retention = retention_seconds() if args.retention_hours is None else retention_seconds(
         {RETENTION_ENV: str(args.retention_hours)})

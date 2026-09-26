@@ -1,4 +1,5 @@
 """The same cases run through the PC Rust grouped query and this read API."""
+import base64
 import copy
 import hashlib
 import json
@@ -6,11 +7,13 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import contextmanager
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+import mobile_catalog
 import mobile_catalog_replica as replica
 from mobile_catalog import register_mobile_catalog
 from mobile_catalog_query import parse_query, QueryError, freeze_query, search_groups, count_groups
@@ -160,6 +163,46 @@ class MobileCatalogApiTests(unittest.TestCase):
         self.assertEqual(self.search(provider="heliotrope").status_code, 400)
         self.assertEqual(self.search(text="alpha OR").status_code, 422)
         self.assertEqual(self.search(limit=101).status_code, 400)
+    def test_tokens_expire_after_two_hours_before_opening_pruned_artifacts(self):
+        self.assertEqual(self.publish().status_code, 200)
+        issued = 1_800_000_000
+        with mock.patch.object(mobile_catalog.time, "time", return_value=issued), \
+                mock.patch.object(replica, "prepared_count", return_value=None), \
+                mock.patch.object(replica, "prepared_items", return_value=None):
+            page = self.search(limit=1).json()
+            editions = self.client.get("/v1/mobile-catalog/groups/kHentai/alias2/editions",
+                                       headers=AUTH, params={"context": page["context"]})
+            self.assertEqual(editions.status_code, 200, editions.text)
+            edition_cursor = editions.json()["nextCursor"]
+        for token in (page["nextCursor"], page["countToken"], page["context"], edition_cursor):
+            self.assertIsNotNone(token)
+            encoded = token.split(".")[0]
+            payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            self.assertEqual(payload["expires"], issued + 2 * 3600)
+        requests = [
+            ("/search", {"cursor": page["nextCursor"]}),
+            ("/count", {"token": page["countToken"]}),
+            ("/works/kHentai/1", {"context": page["context"]}),
+            ("/works/kHentai/1/reader", {"context": page["context"]}),
+            ("/groups/kHentai/alias2/editions", {"context": page["context"], "cursor": edition_cursor}),
+        ]
+        with mock.patch.object(mobile_catalog.time, "time", return_value=issued + mobile_catalog.TTL - 1):
+            for path, params in requests:
+                with self.subTest(path=path, expired=False):
+                    reply = self.client.get("/v1/mobile-catalog" + path, headers=AUTH, params=params)
+                    self.assertEqual(reply.status_code, 200, reply.text)
+        with mock.patch.object(mobile_catalog.time, "time", return_value=issued + mobile_catalog.TTL + 1):
+            # A fresh context also lets us test expiry of the editions cursor itself.
+            requests.append(("/groups/kHentai/alias2/editions", {
+                "context": self.search(limit=1).json()["context"], "cursor": edition_cursor}))
+            with mock.patch.object(replica, "open_publication", side_effect=AssertionError("expired snapshot opened")):
+                for path, params in requests:
+                    with self.subTest(path=path, expired=True):
+                        reply = self.client.get("/v1/mobile-catalog" + path, headers=AUTH, params=params)
+                        self.assertEqual(reply.status_code, 409, reply.text)
+                        self.assertEqual(reply.json()["detail"], "Catalog snapshot expired; refresh")
+            self.assertEqual(self.search().status_code, 200)
+
     def test_old_cursor_count_and_context_stay_pinned_after_new_user_publication(self):
         old = self.publish().json()["publicationRevision"]
         page = self.search(limit=1).json()

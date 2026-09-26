@@ -279,6 +279,16 @@ class CharacterReviewTests(unittest.TestCase):
         self.assertEqual((reply.status_code, self.code(reply)), (409, 'characterReviewChanged'))
         self.assertEqual(len(self.log().json()['items']), 1)
 
+    def test_published_feed_candidate_is_allowed_outside_series(self):
+        revision = self.adopt()
+        self.assertEqual(self.read(asset='other')['targets'], [])
+        feed = feed_fixture()
+        feed.update(baseRevision=revision, items=[{**feed['items'][0], 'assetId': 'other'}])
+        self.assertEqual(self.put_feed(feed).status_code, 200)
+        reply = self.decide(self.command(asset='other'))
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(self.log().json()['items'][0]['assetId'], 'other')
+
     def test_publisher_only_ordered_log(self):
         self.adopt()
         one = self.decide(self.command()).json()

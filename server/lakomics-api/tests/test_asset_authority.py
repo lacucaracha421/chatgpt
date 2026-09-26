@@ -1676,7 +1676,7 @@ class ReplicationPublicationTests(LegacyFenceTests):
 
 
 class LifecycleTimestampMigrationTests(unittest.TestCase):
-    def test_old_rows_are_backfilled_without_lifecycle_or_revision_changes(self):
+    def test_backfill_prefers_latest_trash_command_with_updated_at_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "old.sqlite3"
 
@@ -1688,22 +1688,29 @@ class LifecycleTimestampMigrationTests(unittest.TestCase):
             with connect() as db:
                 db.executescript(asset_authority.DDL.replace(
                     " lifecycle_changed_at TEXT NOT NULL DEFAULT '',\n", ""))
-                for index, lifecycle in enumerate(("normal", "trash", "tombstoned")):
+                for index, lifecycle in enumerate(("normal", "trash", "tombstoned", "trash")):
                     db.execute("INSERT INTO asset_authority_state "
                                "(library_id,asset_id,lifecycle,entity_revision,created_at,updated_at) "
                                "VALUES(?,?,?,?,?,?)", [LIBRARY, str(index), lifecycle, index + 3,
                                                       "created", f"2026-09-2{index}T00:00:00Z"])
+                # Replication after a trash command must not become the trash date.
+                for sequence, command in enumerate(("trashAsset", "restoreAsset", "trashAsset", "replicateAsset"), 1):
+                    db.execute("INSERT INTO asset_authority_changes VALUES(?,?,?,?,?,?,?,?,?)",
+                               [LIBRARY, 1, sequence, command, "1", sequence + 1,
+                                f"operation-{sequence}", "{}", f"2026-09-1{sequence}T00:00:00Z"])
                 before = db.execute("SELECT * FROM asset_authority_state ORDER BY asset_id").fetchall()
             asset_authority.startup(connect)
             with connect() as db:
                 rows = db.execute("SELECT * FROM asset_authority_state ORDER BY asset_id").fetchall()
                 self.assertEqual([row[:-1] for row in rows], before)
-                self.assertEqual([row[-1] for row in rows], [row[-1] for row in before])
+                expected = [row[-1] for row in before]
+                expected[1] = "2026-09-13T00:00:00Z"
+                self.assertEqual([row[-1] for row in rows], expected)
                 self.assertEqual([row[2] for row in db.execute("PRAGMA index_info(asset_authority_trash_order)")],
                                  ["library_id", "lifecycle", "lifecycle_changed_at", "asset_id"])
                 db.execute("UPDATE asset_authority_state SET updated_at='later' WHERE asset_id='1'")
             asset_authority.startup(connect)
             with connect() as db:
                 self.assertEqual(db.execute("SELECT lifecycle_changed_at FROM asset_authority_state "
-                                            "WHERE asset_id='1'").fetchone()[0], "2026-09-21T00:00:00Z")
+                                            "WHERE asset_id='1'").fetchone()[0], "2026-09-13T00:00:00Z")
                 self.assertEqual(db.execute("PRAGMA quick_check").fetchone()[0], "ok")

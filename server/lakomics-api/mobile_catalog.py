@@ -18,14 +18,13 @@ import api_auth
 import catalog_bookmarks
 import catalog_duplicates
 import conditional
-import prune_catalog_artifacts as pruning
 import mobile_catalog_replica as replica
 import mobile_catalog_suggestions as suggestions
 from mobile_catalog_query import (QueryError, mobile_query_text, freeze_query, count_groups, search_groups, detail,
                                   editions, SEARCH_MODES, NAMESPACE_MAX_BYTES, EXCLUDED_TAG_MAX, TAG_VALUE_MAX_BYTES)
 
 PREFIX = "/v1/mobile-catalog"
-TTL = 24 * 60 * 60
+TTL = 2 * 60 * 60
 MAX_READER_PAGES = 2000
 # Leave room for text and for both context + editions cursor in Android's 16 KiB path.
 MAX_FILTER_BYTES = 2048
@@ -182,6 +181,9 @@ def provider_work_id(value):
 
 def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, gallery_fetcher=None,
                             refresh_fetcher=None, require_client=None, require_publisher=None):
+    # The pruner derives its retention floor from this module's token TTL.
+    import prune_catalog_artifacts as pruning
+
     # Backward-compatible default: existing isolated fixtures keep working with the
     # legacy guard until they pass the role-aware callbacks explicitly.
     require_client = require_client or require_auth

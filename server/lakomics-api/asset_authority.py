@@ -188,13 +188,21 @@ CREATE TABLE IF NOT EXISTS asset_authority_baseline(
 def startup(get_db):
     with get_db() as db:
         db.executescript(DDL)
-        # Additive migration: preserve the last known timestamp for existing Assets.
+        # Prefer the accepted trash transition over metadata replication timestamps.
+        # Retained history may be absent (activation baseline or pruned log), so
+        # fall back to updated_at. Never rewrite an already initialized timestamp.
         columns = {row[1] for row in db.execute("PRAGMA table_info(asset_authority_state)")}
         if "lifecycle_changed_at" not in columns:
             db.execute("ALTER TABLE asset_authority_state ADD COLUMN "
                        "lifecycle_changed_at TEXT NOT NULL DEFAULT ''")
-        db.execute("UPDATE asset_authority_state SET lifecycle_changed_at=updated_at "
-                   "WHERE lifecycle_changed_at=''")
+        db.execute("""UPDATE asset_authority_state SET lifecycle_changed_at=COALESCE(
+            (SELECT changed_at FROM asset_authority_changes changes
+             WHERE asset_authority_state.lifecycle='trash'
+               AND changes.library_id=asset_authority_state.library_id
+               AND changes.asset_id=asset_authority_state.asset_id
+               AND changes.command_type='trashAsset'
+             ORDER BY changes.epoch DESC,changes.sequence DESC LIMIT 1), updated_at)
+            WHERE lifecycle_changed_at=''""")
         db.execute("CREATE INDEX IF NOT EXISTS asset_authority_trash_order ON "
                    "asset_authority_state(library_id,lifecycle,lifecycle_changed_at DESC,asset_id DESC)")
         db.commit()
