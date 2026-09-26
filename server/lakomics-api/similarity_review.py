@@ -165,6 +165,27 @@ def pending_trash_assets(db):
     return {row["trash_asset_id"] for row in pending_decisions(db) if row["trash_asset_id"]}
 
 
+def pending_kept_review(db, library_id, asset_id):
+    """The review whose pending decision keeps ``asset_id`` and trashes its partner, if any.
+
+    Library Trash refuses a client trash of such an Asset (``asset_authority``): once the
+    PC applied both, the pair the user meant to deduplicate would lose both images, and
+    if the trash lands first the PC skips the decision as stale, dropping the other half
+    of the user's intent silently. ``keep_both`` trashes nothing and keeps no claim.
+    """
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                  " AND name='mobile_similarity_review_state'").fetchone() is None:
+        return None
+    current = state(db)
+    if current is None or current["library_id"] != library_id:
+        return None
+    for row in pending_decisions(db, current):
+        trash = row["trash_asset_id"]
+        if trash and trash != asset_id and asset_id in (row["a_asset_id"], row["b_asset_id"]):
+            return row["review_id"]
+    return None
+
+
 def check_library(db, library_id):
     owners = [authority.active_domain(db, domain) for domain in ("assets", "classifications")]
     ids = {owner["libraryId"] for owner in owners if owner is not None}

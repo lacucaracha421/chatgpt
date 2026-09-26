@@ -436,6 +436,9 @@ final class AssetLifecycleOutbox {
         switch (code) {
             case "assetNotFound":
             case "lifecycleTransitionRefused":
+            // A pending similarity decision keeps this Asset: the user resolves it (or the
+            // PC applies it) and trashes again, so retrying must not hold the whole pass.
+            case "similarityDecisionKeepsAsset":
             case "operationConflict":
             case "invalidAssetCommand":
             case "authorityContractUnsupported":

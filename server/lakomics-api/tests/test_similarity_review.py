@@ -257,6 +257,91 @@ class SimilarityReviewTests(unittest.TestCase):
         body.update(baseRevision=self.read()['revision'], generatedAt='later')
         self.assertEqual(self.put_feed(body).json()['items'], 1)
 
+    def with_asset_authority(self):
+        """Per-Asset hashes (authority needs distinct content), the feed, and an active Asset authority."""
+        import authority, asset_authority
+        digest = lambda id: hashlib.sha256(id.encode()).hexdigest()
+        with api_app.get_db() as db:
+            for (id,) in db.execute("SELECT id FROM assets").fetchall():
+                db.execute("UPDATE assets SET sha256=? WHERE id=?", (digest(id), id))
+            db.commit()
+        body = feed_fixture()
+        for item in body['items']:
+            for side in (item['a'], item['b']):
+                if side['sha256'] == SHA:
+                    side['sha256'] = digest(side['assetId'])
+        self.assertEqual(self.put_feed(body).status_code, 200)
+        authority.startup(api_app.get_db); asset_authority.startup(api_app.get_db)
+        with api_app.get_db() as db:
+            identity, inventory = asset_authority.current_inventory(db)
+            staged = asset_authority.stage_baseline(
+                db, library_id=LIBRARY, expected_inventory=inventory,
+                rows=[{'assetId': asset_id, 'lifecycle': asset_authority.NORMAL, 'sha256': sha} for asset_id, sha in identity],
+                now='2026')
+            asset_authority.activate(db, library_id=LIBRARY, expected_snapshot=staged['snapshotDigest'], now='2026')
+            db.commit()
+        return body, digest
+
+    def lifecycle(self, command_type, asset_id, headers=None, operation_id=None):
+        with api_app.get_db() as db:
+            revision = db.execute("SELECT entity_revision FROM asset_authority_state WHERE asset_id=?",
+                                  (asset_id,)).fetchone()[0]
+        return self.client.put('/v1/assets/authority/commands', headers=headers or self.auth, json={
+            'libraryId': LIBRARY, 'epoch': 1, 'contractVersion': 1,
+            'operationId': operation_id or str(uuid.uuid4()), 'commandType': command_type,
+            'assetId': asset_id, 'expectedEntityRevision': revision})
+
+    def state_of(self, asset_id):
+        with api_app.get_db() as db:
+            return db.execute("SELECT lifecycle FROM asset_authority_state WHERE asset_id=?", (asset_id,)).fetchone()[0]
+
+    def test_client_trash_of_an_asset_a_pending_decision_keeps_is_refused(self):
+        body, digest = self.with_asset_authority()
+        # r1 keep_existing keeps `a` and will trash s1 once the PC applies it.
+        decided = self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        self.assertEqual(decided.json()['trashAssetId'], 's1', decided.text)
+        operation = str(uuid.uuid4())
+        refused = self.lifecycle('trashAsset', 'a', operation_id=operation)
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(refused.json()['detail'] | {'message': None}, {
+            'code': 'similarityDecisionKeepsAsset', 'message': None, 'assetId': 'a',
+            'reviewId': 'r1', 'lifecycle': 'normal'})
+        self.assertEqual(self.state_of('a'), 'normal')
+        # The decision is untouched, and the refusal left no receipt: the same operation is
+        # accepted once the PC applied the decision (its cursor passed it).
+        self.assertEqual(self.read()['counts']['pendingPc'], 1)
+        body.update(baseRevision=self.read()['revision'], decisionCursor=1, generatedAt='later')
+        body['items'] = [i for i in body['items'] if i['reviewId'] not in ('r1', 'r2')]
+        self.assertEqual(self.put_feed(body).status_code, 200)
+        accepted = self.lifecycle('trashAsset', 'a', operation_id=operation)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        self.assertEqual(self.state_of('a'), 'trash')
+
+    def test_trash_outside_a_kept_asset_and_restore_are_unchanged(self):
+        _, digest = self.with_asset_authority()
+        self.decide(self.command('r1', 'keep_existing', a_sha=digest('a'), b_sha=digest('s1')))
+        self.decide(self.command('r3', 'keep_both', a_sha=digest('s2'), b_sha=digest('s3')))
+        # The image the decision trashes, an image a keep_both decision holds, and an
+        # unrelated image all go to the trash as before.
+        for asset_id in ('s1', 's3', 'other'):
+            reply = self.lifecycle('trashAsset', asset_id)
+            self.assertEqual(reply.status_code, 200, reply.text)
+        # The PC (publisher) may trash the kept image; it then skips the decision as stale.
+        self.assertEqual(self.lifecycle('trashAsset', 'a', headers=self.publisher).status_code, 200)
+        # Restore is never refused, even while the decision still names the image.
+        self.assertEqual(self.read()['counts']['pendingPc'], 2)
+        restored = self.lifecycle('restoreAsset', 'a')
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(self.state_of('a'), 'normal')
+
+    def test_withdrawing_the_decision_releases_the_kept_asset(self):
+        _, digest = self.with_asset_authority()
+        self.decide(self.command('r3', 'replace_existing', a_sha=digest('s2'), b_sha=digest('s3')))
+        self.assertEqual(self.code(self.lifecycle('trashAsset', 's3')), 'similarityDecisionKeepsAsset')
+        undo = self.decide(self.command('r3', 'withdrawn', a_sha=digest('s2'), b_sha=digest('s3')))
+        self.assertEqual(undo.status_code, 200, undo.text)
+        self.assertEqual(self.lifecycle('trashAsset', 's3').status_code, 200)
+
     def test_idempotency_and_validation(self):
         self.adopt()
         request = self.command('r1', 'keep_existing')

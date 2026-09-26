@@ -45,9 +45,11 @@ from datetime import datetime, timedelta, timezone
 from app_lifecycle import lifecycle
 from fastapi import HTTPException
 
+import api_auth
 import authority
 import conditional
 import classification_authority
+import similarity_review
 
 DOMAIN = "assets"
 CONTRACT_VERSION = 1
@@ -72,6 +74,8 @@ TOMBSTONE_ASSET = "tombstoneAsset"
 LIFECYCLE_COMMAND_TYPES = (TRASH_ASSET, RESTORE_ASSET, TOMBSTONE_ASSET)
 #: Reversible commands an ordinary client credential may send (mobile Library Trash).
 CLIENT_COMMAND_TYPES = (TRASH_ASSET, RESTORE_ASSET)
+#: A client trash of an Asset that a pending similarity decision keeps (see apply_command).
+CODE_SIMILARITY_KEEPS_ASSET = "similarityDecisionKeepsAsset"
 
 ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
 COMMAND_KEYS = ENVELOPE_KEYS | {"assetId", "expectedEntityRevision"}
@@ -620,7 +624,7 @@ _TRANSITIONS = {
 
 
 def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
-                  entity, now):
+                  entity, now, publisher=True):
     """Execute one lifecycle command inside the caller's `BEGIN IMMEDIATE`.
 
     Receipts, canonical state, the ordered change and the domain cursor commit together
@@ -675,6 +679,15 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
                   "authorityCursor": row["cursor"], "asset": None, "updatedAt": now}
         _save_receipt(db, library_id, epoch, operation_id, digest, command_type, asset_id, result, now)
         return result
+
+    if command_type == TRASH_ASSET and not publisher:
+        # A client may not trash the image a pending similarity decision keeps; the PC,
+        # which applies those decisions, may (it then skips the decision as stale).
+        review_id = similarity_review.pending_kept_review(db, library_id, asset_id)
+        if review_id is not None:
+            fail(409, CODE_SIMILARITY_KEEPS_ASSET,
+                 "유사 이미지 검토에서 남기기로 한 이미지입니다. PC가 반영한 뒤 다시 시도해 주세요.",
+                 assetId=asset_id, reviewId=review_id, lifecycle=lifecycle)
 
     next_revision = revision + 1
     db.execute(
@@ -1273,7 +1286,7 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
         # Trash and restore are reversible user intents any signed-in client may send;
         # tombstone (and any unrecognized command) stays publisher-only, which keeps
         # emptying the trash PC-only by construction.
-        require_client(authorization)
+        principal = require_client(authorization)
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > 16 * 1024:
@@ -1296,7 +1309,8 @@ def register_asset_authority(app, get_db, require_client, require_publisher):
                     result = apply_command(
                         db, library_id=library_id, epoch=epoch,
                         contract_version=contract_version, command_type=command_type,
-                        operation_id=operation_id, entity=entity, now=now)
+                        operation_id=operation_id, entity=entity, now=now,
+                        publisher=api_auth.principal_role(db, principal) == "publisher")
                     db.commit()
                     return result
                 except BaseException:

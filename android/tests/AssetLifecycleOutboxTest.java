@@ -240,6 +240,20 @@ public final class AssetLifecycleOutboxTest {
         server.script.add(new AssetLifecycleOutbox.HttpFailure(409,
                 "{\"detail\":{\"code\":\"lifecycleTransitionRefused\",\"assetId\":\"asset-c\",\"lifecycle\":\"tombstoned\",\"requested\":\"normal\"}}"));
         equal(1, outbox.flush("account").dropped, "restore of a tombstone drops");
+
+        // A trash of the image a pending similarity decision keeps is blocked, coded, and
+        // does not hold another Asset's intent behind it.
+        db.rows.clear();
+        db.replica("asset-d", "normal", "1", "asset-e", "normal", "1");
+        outbox.queue("account", "asset-d", AssetLifecycleOutbox.TRASH, 0, op(), NOW);
+        String e = op();
+        outbox.queue("account", "asset-e", AssetLifecycleOutbox.TRASH, 0, e, NOW);
+        server.reject(409, "similarityDecisionKeepsAsset");
+        server.accept("trashAsset", "asset-e", "trash", 2, e);
+        AssetLifecycleOutbox.Flush kept = outbox.flush("account");
+        equal(1, kept.blocked, "a kept similarity image blocks");
+        equal(1, kept.sent, "the next Asset is still sent");
+        equal("similarityDecisionKeepsAsset", db.only().conflictCode, "coded for the trash browser");
     }
 
     static void rebaseOnceThenBlock() throws Exception {

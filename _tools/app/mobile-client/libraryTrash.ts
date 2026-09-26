@@ -46,6 +46,20 @@ export async function dismissLifecycle(assetId: string): Promise<LifecycleState>
   return result;
 }
 
+/** Why a blocked intent was refused, for the codes the user can act on. */
+const CONFLICT_NOTICE: Record<string, string> = {
+  similarityDecisionKeepsAsset: '유사 이미지 검토에서 남기기로 한 이미지는 PC가 검토를 반영한 뒤 휴지통으로 옮길 수 있습니다.',
+};
+
+/** The explanation for the first blocked intent with a known code, or ''. */
+export function conflictNotice(state: LifecycleState): string {
+  for (const row of state.items) {
+    const text = row.state === 'blocked' && row.conflictCode ? CONFLICT_NOTICE[row.conflictCode] : undefined;
+    if (text) return text;
+  }
+  return '';
+}
+
 /** Assets the library must hide now: trash intents the server has not accepted yet. */
 export function pendingTrashIds(state: LifecycleState): string[] {
   return state.items.filter(row => row.command === 'trash' && (row.state === 'pending' || row.state === 'sending')).map(row => row.assetId);

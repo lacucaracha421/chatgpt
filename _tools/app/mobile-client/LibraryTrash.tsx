@@ -6,7 +6,7 @@ import {errorText} from './transport';
 import {mediaTicket} from './media';
 import type {Asset} from './types';
 import {
-  ASSET_LIFECYCLE_EVENT, TILE_LABEL, dismissLifecycle, formatBytes, readLifecycle, readTrash, setLifecycle,
+  ASSET_LIFECYCLE_EVENT, TILE_LABEL, conflictNotice, dismissLifecycle, formatBytes, readLifecycle, readTrash, setLifecycle,
   trashDate, trashThumbnails, trashTiles, type LifecycleState, type TrashItem, type TrashTile,
 } from './libraryTrash';
 import './libraryTrash.css';
@@ -138,7 +138,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
 
   const moving = tiles.filter(tile => tile.status === 'moving').length;
   const chosen = tiles.filter(tile => selected.has(tile.id));
-  const deferred = lifecycle.code === 'unauthorized' ? '서버를 업데이트하면 대기 중인 항목이 전송됩니다.' : '';
+  const deferred = lifecycle.code === 'unauthorized' ? '서버를 업데이트하면 대기 중인 항목이 전송됩니다.' : conflictNotice(lifecycle);
   return <div className="trash-overlay" role="dialog" aria-modal="true" aria-label="휴지통">
     <header className="trash-bar">
       <IconButton label="휴지통 닫기" icon={ArrowLeftIcon} onClick={onClose}/>

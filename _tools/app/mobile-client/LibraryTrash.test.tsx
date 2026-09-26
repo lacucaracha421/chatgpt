@@ -6,7 +6,7 @@ vi.mock('./transport',()=>({native:mocks.native,api:mocks.api,errorText:(e:unkno
 vi.mock('./media',()=>({mediaTicket:vi.fn(()=>Promise.resolve({url:'https://thumb.example/pending'}))}));
 import {LibraryTrash} from './LibraryTrash';
 import {useLibraryTrash} from './useLibraryTrash';
-import {formatBytes,pendingTrashIds,trashTiles,type LifecycleState,type TrashItem} from './libraryTrash';
+import {conflictNotice,formatBytes,pendingTrashIds,trashTiles,type LifecycleState,type TrashItem} from './libraryTrash';
 import type {Asset} from './types';
 
 const LIB='e'.repeat(32);
@@ -62,6 +62,15 @@ describe('Library Trash browser',()=>{
     await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('assetLifecycleSet',{assetId:'a',command:'restore',seenRevision:4}));
     await waitFor(()=>expect(restored).toHaveBeenCalledWith(['a']));
     expect(await screen.findByRole('button',{name:/복원 대기/})).toBeTruthy();
+  });
+
+  it('explains a trash refused because a pending similarity decision keeps the image',async()=>{
+    const kept={...row('p','trash','blocked'),conflictCode:'similarityDecisionKeepsAsset'};
+    expect(conflictNotice(state([row('a','restore','blocked')]))).toBe('');
+    mocks.native.mockImplementation(()=>Promise.resolve(state([kept])));
+    mount();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/유사 이미지 검토에서 남기기로 한 이미지는 PC가 검토를 반영한 뒤/);
+    expect(screen.getByRole('button',{name:/충돌/})).toBeTruthy();
   });
 
   it('selects everything with 전체 선택',async()=>{
