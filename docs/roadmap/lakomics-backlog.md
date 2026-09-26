@@ -912,7 +912,7 @@ Inventory and recorded-era activity statistics are implemented. Remaining work i
 
 ## ARTIST-001 — Replace Revisit tab with an Artist hub
 
-Status: `TODO` — low priority / product direction.
+Status: `TODO` — low priority / product direction. Mockups 2026-09-26: [three directions](../prototypes/artist-hub-20260926/index.html) (A artist index → artist page, B daily rediscovery feed grouped by artist, C artist wall + continuous viewing); recommended A with B's "오늘" rows on top; awaiting the user's choice. Tablet needs a creator-list route, pin storage, and a substitute for PC-only view history.
 
 The current Revisit tab is rarely used. Prefer replacing that top-level destination with an `작가` hub rather than adding another navigation item. Preserve useful rediscovery behavior by folding it into the artist experience instead of keeping Revisit as a separate destination.
 
