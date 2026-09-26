@@ -368,13 +368,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     collection_bindings.register(app, get_db, reader, publisher)
     collection_authority.register(app, get_db, reader, publisher)
 
-    def head(blob: ArtworkUpload, *, ticket=False):
+    def head(blob: ArtworkUpload, *, ticket=False, fresh=False):
         key, storage_bucket = artwork_key(blob.sha256), bucket()
         try:
             client = storage()
             metadata = head_cache.ticket_heads.head(
                 client, storage_bucket, key,
-                identity=(blob.sizeBytes, blob.contentType) if ticket else None)
+                identity=(blob.sizeBytes, blob.contentType) if ticket else None, fresh=fresh)
         except ClientError as exc:
             if str(exc.response.get("Error", {}).get("Code", "")) in ("404", "NoSuchKey", "NotFound"):
                 return False
@@ -613,17 +613,28 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         return {"revision": revision, "item": public_item(payload, True)}
 
     @app.post("/v1/collections/{collection_id}/artworks/{artwork_id}/media-ticket")
-    def artwork_ticket(collection_id: ID, artwork_id: ID, body: TicketRequest, authorization: str | None = Header(default=None)):
+    def artwork_ticket(collection_id: ID, artwork_id: ID, body: TicketRequest,
+                       authorization: str | None = Header(default=None), fresh_head: bool = Query(default=False)):
         require_auth(authorization)
         with get_db() as db:
+            db.execute("BEGIN")
             row = db.execute(f"SELECT payload FROM {table(served(db))} WHERE id=?", (collection_id,)).fetchone()
-        if row is None:
-            raise HTTPException(404, "Collection is not published")
-        art = next((art for art in json.loads(row["payload"])["artworks"] if art["id"] == artwork_id), None)
-        if art is None or art[body.variant] is None:
-            raise HTTPException(404, "Artwork variant unavailable")
-        blob = ArtworkBlob.model_validate(art[body.variant])
-        if not head(blob, ticket=True):
+            if row is None:
+                raise HTTPException(404, "Collection is not published")
+            art = next((art for art in json.loads(row["payload"])["artworks"] if art["id"] == artwork_id), None)
+            if art is None or art[body.variant] is None:
+                raise HTTPException(404, "Artwork variant unavailable")
+            blob = ArtworkBlob.model_validate(art[body.variant])
+            receipt = db.execute("SELECT size_bytes,content_type FROM mobile_collection_artwork WHERE sha256=?",
+                                 [blob.sha256]).fetchone()
+        # Artwork tickets already carry the byte digest clients verify. Only a
+        # confirmed receipt matching the current publication can avoid HEAD;
+        # prepare/confirm and unconfirmed publications still verify storage.
+        committed = (not fresh_head and blob.objectKey == artwork_key(blob.sha256)
+                     and receipt is not None and receipt["size_bytes"] == blob.sizeBytes
+                     and receipt["content_type"] == blob.contentType
+                     and head_cache.immutable_metadata(blob.objectKey, blob.sizeBytes, blob.contentType) is not None)
+        if not committed and not head(blob, ticket=True, fresh=fresh_head):
             with get_db() as db:
                 db.execute("DELETE FROM mobile_collection_artwork WHERE sha256=?", [blob.sha256])
                 db.commit()

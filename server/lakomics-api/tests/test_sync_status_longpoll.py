@@ -599,6 +599,21 @@ class LongPollTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.database.signal.waiter_count, 0)
         # Every one of the (cap + 1) held requests was admitted, so each left its slot.
 
+    async def test_cancelled_routes_deregister_waiters_and_free_admission(self):
+        etag = await self.etag(self.client_auth)
+        counts = []
+        # More sequential cancellations than the admission cap reproduced leaked
+        # signal waiters even though the route admission slots were released.
+        for _ in range(sync_status.MAX_WAITERS_PER_PRINCIPAL + 2):
+            before = self.database.signal.waiter_count
+            task = self.hold(self.client_auth, etag)
+            await self.parked(before + 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            counts.append(self.database.signal.waiter_count)
+        self.assertEqual(counts, [0] * 6)
+
     async def test_recheck_catches_a_write_that_bypassed_get_db(self):
         app = build(self.database, max_wait=5, recheck=0.2)
         http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")

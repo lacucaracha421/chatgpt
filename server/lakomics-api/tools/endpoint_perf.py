@@ -169,9 +169,15 @@ def collections_fixture():
 
 
 def immutable_media_keys(count=400):
-    """Content-addressed thumbnail keys (what production uses) so the HEAD cache applies."""
+    """Model newly derived thumbnails with metadata committed by their writer.
+
+    Historical rows without these nullable fields still take the HEAD path.
+    Library originals deliberately remain mutable, even with a committed digest.
+    """
     with api.get_db() as db:
         db.execute("UPDATE assets SET thumbnail_key='derived/image-thumbnails/v2/'||sha256||'.webp'")
+        db.execute("UPDATE assets SET thumbnail_metadata_key=thumbnail_key,"
+                   "thumbnail_size_bytes=64,thumbnail_content_type='image/webp'")
         rows = db.execute("SELECT id,object_key,thumbnail_key,content_type,size_bytes FROM assets "
                           "ORDER BY id LIMIT ?", [count]).fetchall()
         db.commit()

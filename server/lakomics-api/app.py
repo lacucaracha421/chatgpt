@@ -184,6 +184,11 @@ def startup_replication():
             "width": "INTEGER",
             "height": "INTEGER",
             "duration_ms": "INTEGER",
+            # Bound to the exact derived key: a later thumbnail replacement must
+            # never inherit the previous object's metadata. No historical backfill.
+            "thumbnail_metadata_key": "TEXT",
+            "thumbnail_size_bytes": "INTEGER",
+            "thumbnail_content_type": "TEXT",
         }
         for column, definition in additions.items():
             if column not in columns:
@@ -2529,7 +2534,8 @@ def list_mobile_revisit_creator_assets(
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
-def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=False):
+def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=False,
+                 thumbnail_metadata_fills=None):
     # Replication commit updates all of these fields, but presigned PUT can overwrite
     # a mutable key before that transaction (or without committing at all). Identity
     # alone is insufficient. Only digest-verifying clients may reuse original HEADs;
@@ -2539,11 +2545,54 @@ def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=
     verified_original = (variant == "original" and verify_digest
                          and isinstance(digest, str) and len(digest) == 64
                          and all(char in "0123456789abcdef" for char in digest))
+    fields = dict(asset)
+    if fields.get("committed") == 1 and not fresh_head:
+        metadata = None
+        if (variant == "thumbnail" and object_key.startswith("derived/")
+                and object_key == fields.get("thumbnail_metadata_key")):
+            metadata = head_cache.immutable_metadata(
+                object_key, fields.get("thumbnail_size_bytes"), fields.get("thumbnail_content_type"))
+        elif verified_original and object_key == f"work-artwork/mobile/{digest}":
+            # This is the existing byte-addressed original namespace. Neither
+            # library/{id}/original nor inbox keys become immutable from a DB SHA.
+            metadata = head_cache.immutable_metadata(
+                object_key, asset["size_bytes"], asset["content_type"])
+        if metadata is not None:
+            return metadata
     identity = tuple(asset[field] for field in (
         "object_key", "sha256", "content_type", "size_bytes", "metadata_revision", "updated_at"))
-    return head_cache.ticket_heads.head(
+    metadata = head_cache.ticket_heads.head(
         _s3, R2_BUCKET, object_key, identity=identity,
         verified_original=verified_original, fresh=fresh_head)
+    if (thumbnail_metadata_fills is not None and fields.get("committed") == 1
+            and variant == "thumbnail" and object_key.startswith("derived/")):
+        # Only successful server HEAD metadata (possibly in the HEAD cache),
+        # validated with the same immutable-key rule as the cold-ticket shortcut.
+        receipt = head_cache.immutable_metadata(
+            object_key, metadata.get("ContentLength"), metadata.get("ContentType"))
+        if receipt is not None:
+            bound = (object_key, receipt["ContentLength"], receipt["ContentType"])
+            existing = tuple(fields.get(field) for field in (
+                "thumbnail_metadata_key", "thumbnail_size_bytes", "thumbnail_content_type"))
+            if bound != existing:
+                thumbnail_metadata_fills.append((*bound, asset["id"], object_key))
+    return metadata
+
+
+def _persist_thumbnail_metadata(fills):
+    if not fills:
+        return
+    try:
+        with get_db() as db:
+            # One transaction after all HEADs finish; a replacement during HEAD
+            # cannot receive the old key's receipt. This is optional ticket metadata.
+            with db:
+                db.executemany(
+                    "UPDATE assets SET thumbnail_metadata_key=?, thumbnail_size_bytes=?, "
+                    "thumbnail_content_type=? WHERE id=? AND committed=1 AND thumbnail_key=?",
+                    fills)
+    except Exception:
+        logging.getLogger(__name__).warning("Could not persist thumbnail ticket metadata")
 
 
 def _ticket_digest(asset, variant):
@@ -2579,14 +2628,17 @@ def create_mobile_media_ticket(
     object_key = asset["object_key"] if request.variant == "original" else asset["thumbnail_key"]
     if not object_key:
         raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
+    thumbnail_metadata_fills = []
     try:
-        metadata = _ticket_head(asset, request.variant, object_key, fresh_head=fresh_head, verify_digest=verify_digest)
+        metadata = _ticket_head(asset, request.variant, object_key, fresh_head=fresh_head,
+                                verify_digest=verify_digest, thumbnail_metadata_fills=thumbnail_metadata_fills)
     except ClientError as exc:
         code = str(exc.response.get("Error", {}).get("Code", ""))
         if code in ("404", "NoSuchKey", "NotFound"):
             raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
         raise HTTPException(status_code=502, detail="Media storage is unavailable")
 
+    _persist_thumbnail_metadata(thumbnail_metadata_fills)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=MEDIA_TICKET_TTL_SECONDS)
     return {
         "url": presign_get(object_key, MEDIA_TICKET_TTL_SECONDS),
@@ -2651,6 +2703,8 @@ def create_mobile_media_tickets(
                 ).fetchall()
             }
 
+    thumbnail_metadata_fills = []
+
     def resolve_ticket(pair: tuple[str, str]) -> dict:
         asset_id, variant = pair
         asset = assets_by_id.get(asset_id)
@@ -2660,7 +2714,8 @@ def create_mobile_media_tickets(
         if not object_key:
             return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "unavailable"}
         try:
-            metadata = _ticket_head(asset, variant, object_key, fresh_head=fresh_head, verify_digest=verify_digest)
+            metadata = _ticket_head(asset, variant, object_key, fresh_head=fresh_head,
+                                    verify_digest=verify_digest, thumbnail_metadata_fills=thumbnail_metadata_fills)
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             if code in ("404", "NoSuchKey", "NotFound"):
@@ -2683,6 +2738,7 @@ def create_mobile_media_tickets(
     workers = min(8, len(pairs))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(resolve_ticket, pairs))
+    _persist_thumbnail_metadata(thumbnail_metadata_fills)
     return {"items": results}
 
 

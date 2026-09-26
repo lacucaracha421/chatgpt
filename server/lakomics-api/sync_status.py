@@ -197,6 +197,7 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
         loop = asyncio.get_running_loop()
         deadline = loop.time() + seconds
         gone = asyncio.ensure_future(_disconnected(request.receive))
+        waiting = None
         try:
             while True:
                 remaining = deadline - loop.time()
@@ -206,8 +207,6 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
                     write_signal.wait_beyond(generation, min(remaining, recheck)))
                 await asyncio.wait({waiting, gone}, return_when=asyncio.FIRST_COMPLETED)
                 if gone.done():
-                    waiting.cancel()
-                    await asyncio.gather(waiting, return_exceptions=True)
                     break  # nobody is left to answer
                 if waiting.result() != generation:
                     await asyncio.sleep(debounce)
@@ -222,9 +221,10 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
                     await run_in_threadpool(require_client, authorization)
                     break
         finally:
-            gone.cancel()
-            if gone.done() and not gone.cancelled():
-                gone.exception()  # retrieved, so a failed receive is not logged as unhandled
+            children = [gone] if waiting is None else [gone, waiting]
+            for task in children:
+                task.cancel()
+            await asyncio.gather(*children, return_exceptions=True)
         return conditional.encoded_response(body, etag, if_none_match, extra_headers)
 
     @app.get(PREFIX + "/status")

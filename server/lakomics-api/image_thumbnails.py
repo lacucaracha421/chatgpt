@@ -798,11 +798,12 @@ class ImageThumbnailWorker:
             width = metadata["width"] if dimensions_agree else None
             height = metadata["height"] if dimensions_agree else None
             updated = connection.execute(
-                "UPDATE assets SET thumbnail_key=?, updated_at=?, "
+                "UPDATE assets SET thumbnail_key=?, thumbnail_metadata_key=?, "
+                "thumbnail_size_bytes=?, thumbnail_content_type=?, updated_at=?, "
                 "width=COALESCE(width,?), height=COALESCE(height,?), "
                 "duration_ms=COALESCE(duration_ms,?) "
                 "WHERE id=? AND sha256=? AND thumbnail_key IS NULL AND committed=1 AND kind=?",
-                [key, _now_iso(), width, height, metadata["duration_ms"],
+                [key, key, len(payload), DERIVED_CONTENT_TYPE, _now_iso(), width, height, metadata["duration_ms"],
                  asset_id, sha256, source_row["kind"]]).rowcount
             if not updated:
                 connection.execute("ROLLBACK")

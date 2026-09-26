@@ -207,6 +207,7 @@ class Fixture(unittest.TestCase):
                 CREATE TABLE assets(
                  id TEXT PRIMARY KEY, kind TEXT NOT NULL, object_key TEXT NOT NULL UNIQUE,
                  thumbnail_key TEXT, content_type TEXT, size_bytes INTEGER, sha256 TEXT,
+                 thumbnail_metadata_key TEXT, thumbnail_size_bytes INTEGER, thumbnail_content_type TEXT,
                  width INTEGER, height INTEGER, duration_ms INTEGER,
                  committed INTEGER NOT NULL DEFAULT 0, import_source TEXT,
                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -633,6 +634,10 @@ class WorkerRunTests(Fixture):
         self.assertEqual(key, f"derived/image-thumbnails/v2/{digest}.webp")
         self.assertIn(key, self.s3.puts)
         self.assertEqual(self.s3.objects[key]["content_type"], "image/webp")
+        receipt = self.db.execute(
+            "SELECT thumbnail_metadata_key,thumbnail_size_bytes,thumbnail_content_type FROM assets WHERE id=?",
+            [ASSET_IMAGE]).fetchone()
+        self.assertEqual(tuple(receipt), (key, len(self.s3.objects[key]["body"]), "image/webp"))
         assert Image is not None
         with Image.open(io.BytesIO(self.s3.objects[key]["body"])) as encoded:
             self.assertEqual(encoded.format, "WEBP")

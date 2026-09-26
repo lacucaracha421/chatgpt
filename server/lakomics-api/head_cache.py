@@ -17,6 +17,18 @@ _IMMUTABLE_KEY = re.compile(
 )
 
 
+def immutable_metadata(key, size_bytes, content_type):
+    """Use only with a committed, key-bound receipt, never upload input alone.
+
+    Missing/legacy metadata falls back to HEAD. Fresh recovery requests must
+    bypass this helper; it does not establish object existence in storage.
+    """
+    if (_IMMUTABLE_KEY.fullmatch(key) and type(size_bytes) is int and size_bytes > 0
+            and isinstance(content_type, str) and content_type.strip()):
+        return {"ContentLength": size_bytes, "ContentType": content_type}
+    return None
+
+
 def _storage_namespace(storage):
     # R2 endpoints include the account. Both interactive and worker boto clients
     # expose the configured endpoint via ClientMeta; object identity is not stable
