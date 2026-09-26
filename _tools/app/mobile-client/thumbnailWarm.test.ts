@@ -233,3 +233,31 @@ it('probes the native cache with each thumbnail revision, the same key the tiles
   expect(probes[0]).toEqual({assetIds:['a','b'], revisions:['r2','']});
   expect(mocks.native.mock.calls.filter(([op]) => op === 'thumbnail').map(([, payload]) => payload)).toEqual([{assetId:'a',revision:'r2'},{assetId:'b'}]);
 });
+
+it('starts on the native power event instead of re-checking the battery every minute',async()=>{
+  const original=mocks.native.getMockImplementation()!;let charging=false;
+  mocks.native.mockImplementation((op,payload)=>op==='status'?Promise.resolve({battery:{charging,level:20,powerSave:false}}):original(op,payload));
+  stop=startThumbnailWarm('https://server.invalid');
+  await vi.advanceTimersByTimeAsync(5_500);
+  expect(warmState().status).toBe('waiting');
+  await vi.advanceTimersByTimeAsync(10*60_000);
+  expect(mocks.native.mock.calls.filter(([op])=>op==='status')).toHaveLength(1);
+  charging=true;window.dispatchEvent(new CustomEvent('lakomics-power',{detail:{charging:true,level:20,powerSave:false}}));
+  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+  expect(cursors()).toEqual(['first','c2']);
+});
+it('retries a failed page as soon as native reports the network is back',async()=>{
+  let fail=1;
+  mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw new Error('network');return pages[cursor];});
+  stop=startThumbnailWarm('https://server.invalid');
+  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('error'));
+  // A network event that is not a restore (going offline) changes nothing.
+  window.dispatchEvent(new CustomEvent('lakomics-network',{detail:{online:false,restored:false}}));
+  await vi.advanceTimersByTimeAsync(5_500);expect(cursors()).toEqual(['first','c2']);
+  window.dispatchEvent(new CustomEvent('lakomics-network',{detail:{online:true,restored:true}}));
+  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+  expect(cursors()).toEqual(['first','c2','c2']);
+});

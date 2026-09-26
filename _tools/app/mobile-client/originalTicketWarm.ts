@@ -1,5 +1,6 @@
 import {onVisible} from './useVisibleInterval';
 import {native} from './transport';
+import {onPowerChange} from './deviceSignals';
 import {meteredConnection,warmConnection as connection} from './warmNetwork';
 import type {Asset} from './types';
 
@@ -7,6 +8,12 @@ import type {Asset} from './types';
 // this bounded mirror only suppresses redundant bridge requests while they are valid.
 const visible=new Map<string,Set<symbol>>();
 const ready=new Map<string,number>();
+// Ids native declined because the battery does not allow warming. They wait for native
+// `lakomics-power` (charger connected); the long delay only covers a missed event.
+const powerWait=new Set<string>();
+const POWER_FALLBACK=30*60_000;
+let removePower:(()=>void)|undefined;
+const powerChanged=()=>{for(const id of powerWait)ready.delete(id);powerWait.clear();schedule();};
 let timer:ReturnType<typeof setTimeout>|undefined;
 let active:AbortController|undefined;
 let generation=0;
@@ -28,7 +35,8 @@ async function flush(){
   // A failed batch backs off; visibility churn must not create a request loop.
   for(const id of ids)ready.set(id,Date.now()+30_000);
   try{
-    const result=await native<{items:{assetId:string;expires_at:string}[]}>('mediaTickets',{assetIds:ids},controller.signal);
+    const result=await native<{items:{assetId:string;expires_at:string}[];waiting?:string}>('mediaTickets',{assetIds:ids},controller.signal);
+    if(epoch===generation&&!controller.signal.aborted&&result.waiting==='power')for(const id of ids){ready.set(id,Date.now()+POWER_FALLBACK);powerWait.add(id);}
     if(epoch===generation&&!controller.signal.aborted)for(const item of result.items){
       const until=Date.parse(item.expires_at)-15_000;
       if(ids.includes(item.assetId)&&Number.isFinite(until)&&until>Date.now())ready.set(item.assetId,until);
@@ -37,11 +45,11 @@ async function flush(){
   finally{
     if(controller.signal.aborted&&epoch===generation)for(const id of ids)ready.delete(id);
     if(active===controller)active=undefined;
-    while(ready.size>240)ready.delete(ready.keys().next().value!);
+    while(ready.size>240){const oldest=ready.keys().next().value!;ready.delete(oldest);powerWait.delete(oldest);}
     schedule();
   }
 }
-export function clearOriginalTicketWarm(){generation++;active?.abort();ready.clear();schedule();}
+export function clearOriginalTicketWarm(){generation++;active?.abort();ready.clear();powerWait.clear();schedule();}
 
 /** Call only for intersecting gallery items; release when no longer visible. */
 export function warmOriginalTickets(items:Asset[],signal:AbortSignal){
@@ -55,10 +63,10 @@ export function warmOriginalTickets(items:Asset[],signal:AbortSignal){
   }
   const wasEmpty=!visible.size;
   for(const id of ids){let watchers=visible.get(id);if(!watchers){watchers=new Set();visible.set(id,watchers);}watchers.add(token);}
-  if(wasEmpty&&visible.size){document.addEventListener('visibilitychange',hide);connection()?.addEventListener?.('change',schedule);removeVisible=onVisible(schedule);}
+  if(wasEmpty&&visible.size){document.addEventListener('visibilitychange',hide);connection()?.addEventListener?.('change',schedule);removeVisible=onVisible(schedule);removePower=onPowerChange(powerChanged);}
   const release=()=>{
     for(const id of ids){const watchers=visible.get(id);watchers?.delete(token);if(!watchers?.size)visible.delete(id);}
-    if(!visible.size){document.removeEventListener('visibilitychange',hide);connection()?.removeEventListener?.('change',schedule);removeVisible?.();removeVisible=undefined;}
+    if(!visible.size){document.removeEventListener('visibilitychange',hide);connection()?.removeEventListener?.('change',schedule);removeVisible?.();removeVisible=undefined;removePower?.();removePower=undefined;}
     schedule();
   };
   signal.addEventListener('abort',release,{once:true});schedule();

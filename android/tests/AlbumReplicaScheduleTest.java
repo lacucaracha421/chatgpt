@@ -128,6 +128,7 @@ public final class AlbumReplicaScheduleTest {
         connectionReplacementFromTheBackgroundDoesNotStartPolling();
         disconnectThenReconnectResumesPolling();
         exchangeRevisionIsNotALibraryChange();
+        offlineSuspendsPollingAndReconnectReconciles();
 
         System.out.println("AlbumReplicaScheduleTest passed: " + checks
                 + " checks (generations, start, pause, connection replacement, pending reconcile)");
@@ -599,5 +600,30 @@ public final class AlbumReplicaScheduleTest {
         equal(2, fixture.immediate, "A later resume reconciles against the current configuration");
         fixture.timer.fire(fixture.timer.tasks.size() - 1);
         equal(1, fixture.repeating, "and the loop runs again from there");
+    }
+
+    /** PERF-ALL-001 §8: no network means no failing passes; the reconnect runs the next one. */
+    private static void offlineSuspendsPollingAndReconnectReconciles() {
+        Fixture f = new Fixture();
+        f.schedule.start();
+        f.schedule.passFinished(false); f.schedule.passFinished(false);
+        check(f.schedule.setOnline(false), "Losing the network is a change");
+        equal(0, f.timer.pending(), "Offline cancels the repeating pass");
+        f.schedule.wake();
+        equal(0, f.timer.pending(), "A local write does not arm polling while offline");
+        f.schedule.passFinished(false);
+        equal(0, f.timer.pending(), "A failing pass does not re-arm or climb the back-off offline");
+        f.schedule.stop(); f.schedule.start();
+        equal(1, f.immediate, "Resuming while offline waits for the network");
+        equal(0, f.timer.pending(), "Resuming while offline schedules nothing");
+        check(!f.schedule.setOnline(false), "Offline twice is not a change");
+        check(f.schedule.setOnline(true), "Reconnecting is a change");
+        equal(2, f.immediate, "Reconnecting reconciles immediately");
+        equal(1, f.timer.pending(), "Reconnecting arms exactly one repeating pass");
+        equal(ForegroundSchedule.INTERVAL_MILLIS, f.timer.intervals.get(f.timer.intervals.size() - 1),
+                "Reconnecting starts at the convergence target, not the back-off");
+        f.schedule.stop(); f.schedule.setOnline(false); f.schedule.setOnline(true);
+        equal(0, f.timer.pending(), "A reconnect in the background does not start polling");
+        equal(2, f.immediate, "A reconnect in the background runs no pass");
     }
 }

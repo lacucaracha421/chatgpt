@@ -78,6 +78,7 @@ final class ForegroundSchedule {
     private static final long[] DELAYS = {5_000,15_000,30_000,60_000,300_000};
     private static final int IDLE_CAP = 3, LIVE_IDLE_CAP = 4;
     private boolean live;
+    private boolean online = true;
 
     /** Whether the status long-poll is live. Losing it returns a relaxed timer to one minute. */
     void setLive(boolean value) {
@@ -87,6 +88,21 @@ final class ForegroundSchedule {
                 idle=IDLE_CAP;
                 if(armed)rearmTimer();
             }
+        }
+    }
+
+    /**
+     * Whether the device has a default network. Offline, nothing is armed: the repeating
+     * pass would only fail and climb the back-off, and the reconnect (not a timer) is what
+     * should run the next pass. Returns whether the state changed; coming back online while
+     * foregrounded arms with an immediate pass, like a resume.
+     */
+    boolean setOnline(boolean value) {
+        synchronized (gate) {
+            if (online == value) return false;
+            online = value;
+            if (value) arm(); else disarm();
+            return true;
         }
     }
 
@@ -182,7 +198,7 @@ final class ForegroundSchedule {
 
     /** Arm the repeating pass once. Caller holds {@link #gate}. */
     private void arm() {
-        if (!foreground || armed) return;
+        if (!foreground || !online || armed) return;
         armed = true;
         idle=0;
         rearmTimer();

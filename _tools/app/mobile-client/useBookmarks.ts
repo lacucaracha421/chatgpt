@@ -1,4 +1,5 @@
 import {useVisibleInterval} from './useVisibleInterval';
+import {onNetworkRestored} from './deviceSignals';
 /**
  * Mobile bookmark state for the catalog UI: the user's action, its durable
  * intent, and its delivery.
@@ -114,4 +115,6 @@ export function useBookmarks({active, authority}: {active: boolean; authority: B
  */
 export function usePendingRetry(active: boolean, pending: boolean, flush: () => Promise<void>) {
   useVisibleInterval(()=>void flush(),active&&pending?30_000:null);
+  // A reconnect delivers queued work at once instead of on the next 30 s tick.
+  useEffect(()=>active&&pending?onNetworkRestored(()=>void flush()):undefined,[active,pending,flush]);
 }

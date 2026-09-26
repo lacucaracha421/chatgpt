@@ -1,6 +1,7 @@
 import {meteredConnection,warmConnection as connection} from './warmNetwork';
 export {meteredConnection} from './warmNetwork';
 import {api,native} from './transport';
+import {onNetworkRestored,onPowerChange} from './deviceSignals';
 import {normalizePage, pagePath} from './model';
 import {EMPTY_FILTERS} from './assetFilters';
 import {ALL_ASSETS} from './libraryModel';
@@ -26,6 +27,8 @@ type Saved = {scope:string; cursor:string|null; warmed:number; completedAt:numbe
 type Cached = {generation:string; cachedIds:string[]};
 const PROGRESS_KEY = 'lakomics.mobile.thumbnailWarm', OFF_KEY = 'lakomics.mobile.thumbnailWarmOff';
 const WARM_PAGE = 100, REPEAT_AFTER = 24 * 60 * 60 * 1000, RETRY_AFTER = 60_000, MAX_PAGE_FAILURES = 3;
+// Waiting for a charger is ended by native `lakomics-power`; this only covers a missed event.
+const POWER_FALLBACK = 30 * 60 * 1000;
 // Let the first screen load before background work starts after launch or return.
 const START_DELAY = 5_000, FULL_REPEAT_AFTER = 30 * REPEAT_AFTER;
 const EVENT = 'lakomics-thumbnail-warm';
@@ -151,11 +154,15 @@ async function pass(scope:string, signal:AbortSignal) {
 
 /**
  * Run the warm-up for one configured endpoint until the returned stop function is called.
- * It pauses while hidden, off or metered and resumes from the saved cursor.
+ * It pauses while hidden, off or metered and resumes from the saved cursor. On battery it
+ * waits for native `lakomics-power` (charger connected), and after a failure for either the
+ * one-minute retry or `lakomics-network` (reconnected), whichever comes first.
  */
 export function startThumbnailWarm(scope:string) {
   let controller:AbortController|null = null, timer = 0, stopped = false;
-  const halt = () => { controller?.abort(); controller = null; clearTimeout(timer); timer = 0; };
+  /** What the pending retry timer waits for; the matching native event ends the wait early. */
+  let waiting:'power'|'network'|null = null;
+  const halt = () => { controller?.abort(); controller = null; clearTimeout(timer); timer = 0; waiting = null; };
   const evaluate = () => {
     if (stopped) return;
     const progress = saved(scope);
@@ -163,6 +170,7 @@ export function startThumbnailWarm(scope:string) {
     if (meteredConnection()) { halt(); publish({status:'metered', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
     if (document.visibilityState === 'hidden') { halt(); publish({status:'waiting', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
     if (controller || timer) return;
+    waiting = null;
     timer = window.setTimeout(() => { timer = 0; begin(); }, START_DELAY);
   };
   const begin = () => {
@@ -172,21 +180,28 @@ export function startThumbnailWarm(scope:string) {
       if (controller !== current) return;
       controller = null;
       // A finished pass checks again after the repeat interval while the app stays open.
-      timer = window.setTimeout(() => { timer = 0; evaluate(); }, allowed===false?RETRY_AFTER:REPEAT_AFTER);
+      waiting = allowed === false ? 'power' : null;
+      timer = window.setTimeout(() => { timer = 0; waiting = null; evaluate(); }, allowed===false?POWER_FALLBACK:REPEAT_AFTER);
     }, () => {
       if (controller !== current || current.signal.aborted) return;
       controller = null; const progress = saved(scope);
       publish({status:'error', warmed:progress.warmed, completedAt:progress.completedAt});
-      timer = window.setTimeout(() => { timer = 0; evaluate(); }, RETRY_AFTER);
+      waiting = 'network';
+      timer = window.setTimeout(() => { timer = 0; waiting = null; evaluate(); }, RETRY_AFTER);
     });
   };
   const toggle = () => { halt(); evaluate(); };
+  const wake = (kind:'power'|'network') => () => {
+    if (stopped || waiting !== kind) return;
+    clearTimeout(timer); timer = 0; waiting = null; evaluate();
+  };
+  const removePower = onPowerChange(wake('power')), removeNetwork = onNetworkRestored(wake('network'));
   document.addEventListener('visibilitychange', evaluate);
   window.addEventListener(`${EVENT}-toggle`, toggle);
   connection()?.addEventListener?.('change', evaluate);
   evaluate();
   return () => {
-    stopped = true; halt();
+    stopped = true; halt(); removePower(); removeNetwork();
     document.removeEventListener('visibilitychange', evaluate);
     window.removeEventListener(`${EVENT}-toggle`, toggle);
     connection()?.removeEventListener?.('change', evaluate);

@@ -164,13 +164,46 @@ final class AlbumReplicaService {
         java.util.function.Consumer<String> listener=generationListener;
         if(listener!=null&&assetListGeneration!=null&&!assetListGeneration.isEmpty())listener.accept(assetListGeneration);
         schedule.start();
-        watcher.start();
+        synchronized (network) {
+            resumed = true;
+            if (online) watcher.start();
+        }
     }
 
     /** Stop polling. The replica, its cursor and its rows stay durable across this. */
     void stop() {
         schedule.stop();
-        watcher.stop();
+        synchronized (network) {
+            resumed = false;
+            watcher.stop();
+        }
+    }
+
+    /** Guards {@link #resumed} and {@link #online}. Never taken while holding the schedule's gate (order: this, then watcher, then schedule). */
+    private final Object network = new Object();
+    private boolean resumed, online = true;
+
+    /**
+     * The default network changed (foreground only; see {@link DeviceSignals}).
+     *
+     * Offline, the pass and the status long-poll are suspended instead of failing and backing
+     * off. Back online they run at once. `restored` means a validated network appeared that
+     * was not the last one seen validated (reconnect or a switch, e.g. Wi-Fi to another
+     * network): the held long-poll may sit on a dead socket, so it is reopened, and queued
+     * outbox intents are delivered by an immediate pass.
+     */
+    void networkChanged(boolean isOnline, boolean restored) {
+        boolean armedNow = schedule.setOnline(isOnline);
+        synchronized (network) {
+            online = isOnline;
+            if (!isOnline) { watcher.stop(); return; }
+            if (!resumed) return;
+            if (restored) watcher.stop();
+            watcher.start();
+        }
+        // Coming back online already armed with an immediate pass; a switch between two
+        // live networks still owes one for anything queued while the old link was dying.
+        if (restored && !armedNow) schedule.wake();
     }
 
     /**

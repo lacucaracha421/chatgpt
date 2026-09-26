@@ -1,7 +1,7 @@
 import {afterEach, expect, it, vi} from 'vitest';
 const mocks = vi.hoisted(() => ({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport', () => ({api:mocks.api,native:mocks.native}));
-import {warmOriginalTickets} from './originalTicketWarm';
+import {clearOriginalTicketWarm, warmOriginalTickets} from './originalTicketWarm';
 import {clearMediaCache, loadThumbnail, prefetchThumbnails, mediaTicket} from './media';
 import type {MediaTiming} from './perf';
 
@@ -160,4 +160,24 @@ it('treats a new thumbnail revision of the same asset as a different ticket and 
   await mediaTicket({id:'b',kind:'image'},'thumbnail');
   await mediaTicket({id:'c',kind:'image',thumbnail_revision:'../x'},'thumbnail');
   expect(mocks.native.mock.calls.slice(2).map(([,payload])=>payload)).toEqual([{assetId:'b'},{assetId:'c'}]);
+});
+
+it('waits for the native power event instead of retrying tickets native declined on battery',async()=>{
+  vi.useFakeTimers();clearOriginalTicketWarm();
+  const controller=new AbortController();let charging=false;
+  mocks.native.mockImplementation(async(_op:string,payload:{assetIds:string[]})=>charging
+    ?{items:payload.assetIds.map(assetId=>({assetId,expires_at:new Date(Date.now()+300_000).toISOString()}))}
+    :{items:[],waiting:'power'});
+  try{
+    warmOriginalTickets([{id:'power-a',kind:'image'}],controller.signal);
+    await vi.advanceTimersByTimeAsync(0);expect(mocks.native).toHaveBeenCalledTimes(1);
+    // The old 30 s failure back-off no longer re-asks while the battery rule is unchanged.
+    await vi.advanceTimersByTimeAsync(10*60_000);expect(mocks.native).toHaveBeenCalledTimes(1);
+    charging=true;window.dispatchEvent(new CustomEvent('lakomics-power',{detail:{charging:true,level:40,powerSave:false}}));
+    await vi.advanceTimersByTimeAsync(0);expect(mocks.native).toHaveBeenCalledTimes(2);
+    expect(mocks.native.mock.calls[1][1]).toEqual({assetIds:['power-a']});
+    // Warmed now: a later power event does not re-ask a valid ticket.
+    window.dispatchEvent(new CustomEvent('lakomics-power',{detail:null}));
+    await vi.advanceTimersByTimeAsync(0);expect(mocks.native).toHaveBeenCalledTimes(2);
+  }finally{controller.abort();vi.useRealTimers();}
 });

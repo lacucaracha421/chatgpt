@@ -25,6 +25,14 @@ public final class MainActivity extends Activity {
  private static final int EXCHANGE_PICK=0x4c58,EXCHANGE_TREE=0x4c59;
  private volatile String exchangeTarget;
  private final ExchangeService.Listener exchangeListener=this::emit;
+ /** Foreground-only connectivity/power changes: wake the Library pass and tell the page. */
+ private final DeviceSignals deviceSignals=new DeviceSignals(this,new DeviceSignals.Listener(){
+  @Override public void network(boolean online,boolean restored,boolean initial){
+   AlbumReplicaService.get(MainActivity.this).networkChanged(online,restored);
+   if(!initial)try{emit("lakomics-network",new JSONObject().put("online",online).put("restored",restored));}catch(JSONException ignored){}
+  }
+  @Override public void power(){try{emit("lakomics-power",batteryState());}catch(JSONException ignored){}}
+ });
  private ExchangeService exchange(){return ExchangeService.get(this);}
  /** 보내기: the system document picker, multi-select, no storage permission. */
  private JSONObject pickForExchange(String target)throws Exception{
@@ -276,7 +284,7 @@ public final class MainActivity extends Activity {
      case "thumbnailsCached":if(media==null)throw new IOException("Cache unavailable");data=media.thumbnailsCached(p.getJSONArray("assetIds"),p.optJSONArray("revisions"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
-     case "mediaTickets":data=media==null?new JSONObject().put("items",new JSONArray()):media.prewarmTickets(p.getJSONArray("assetIds"),signal,MainActivity.this::ticketWarmAllowed);break;
+     case "mediaTickets":data=media==null?new JSONObject().put("items",new JSONArray()):!ticketWarmAllowed()?new JSONObject().put("items",new JSONArray()).put("waiting","power"):media.prewarmTickets(p.getJSONArray("assetIds"),signal,MainActivity.this::ticketWarmAllowed);break;
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
      case "pickerStatus":data=pickerStatus();break;
      case "albumStatus":data=albumStatus();break;
@@ -376,10 +384,12 @@ public final class MainActivity extends Activity {
   AlbumReplicaService.get(this).setSignalsListener(detail->emit("lakomics-sync-signals",detail));
   // File exchange works only while an activity is resumed; its arrival signal comes from the pass started next.
   ExchangeService.get(this).setForeground(true);
+  // Before start(): the pass and the long-poll stay suspended while there is no network.
+  deviceSignals.register();
   AlbumReplicaService.get(this).start();}
- @Override protected void onPause(){foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();AlbumReplicaService.get(this).stop();ExchangeService.get(this).setForeground(false);super.onPause();}
+ @Override protected void onPause(){foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();deviceSignals.unregister();AlbumReplicaService.get(this).stop();ExchangeService.get(this).setForeground(false);super.onPause();}
  @Override protected void onStop(){if(vault!=null)vault.stopped();
   // Secret notes lock when the app goes to the background; the WebView drops their content.
   if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }
