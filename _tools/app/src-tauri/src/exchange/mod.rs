@@ -20,6 +20,7 @@
 //! `exchange://changed`.
 mod client;
 mod files;
+mod thumbnail;
 mod zip;
 
 use client::{ApiError, CreateRequest, Device, ExchangeClient, InboxItem, Transfer};
@@ -83,6 +84,11 @@ struct Received {
     sha256: String,
     #[serde(default)]
     from_name: Option<String>,
+    /// The sender's batch and device id, for the timeline (absent in older ledgers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    batch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from_device: Option<String>,
     received_at: String,
     #[serde(default)]
     acked: bool,
@@ -293,6 +299,8 @@ struct State {
     /// Where downloads are assembled before verification (app data, never Downloads).
     parts: Option<PathBuf>,
     zips: Option<PathBuf>,
+    /// Cached JPEG thumbnails of sent and received images (app data), for the timeline.
+    thumbs: Option<PathBuf>,
     /// Notes of finished sends, shown on their server outbox rows (this session).
     notes: std::collections::HashMap<String, String>,
     last_progress: Instant,
@@ -328,6 +336,7 @@ fn runtime() -> &'static Runtime {
             endpoint: None,
             parts: None,
             zips: None,
+            thumbs: None,
             notes: std::collections::HashMap::new(),
             last_progress: Instant::now(),
         }),
@@ -378,6 +387,10 @@ pub(crate) struct DeviceView {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OutgoingRow {
     transfer_id: String,
+    /// Files sent together share it (server rows of older servers may lack it).
+    batch_id: Option<String>,
+    /// The receiving device.
+    to_device: Option<String>,
     file_name: String,
     size_bytes: u64,
     to_name: Option<String>,
@@ -397,6 +410,9 @@ pub(crate) struct OutgoingRow {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct IncomingRow {
     transfer_id: String,
+    batch_id: Option<String>,
+    from_device: Option<String>,
+    created_at: Option<String>,
     file_name: String,
     size_bytes: u64,
     from_name: Option<String>,
@@ -410,6 +426,8 @@ pub(crate) struct IncomingRow {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReceivedRow {
     transfer_id: String,
+    batch_id: Option<String>,
+    from_device: Option<String>,
     file_name: String,
     size_bytes: u64,
     from_name: Option<String>,
@@ -457,6 +475,8 @@ fn outbox_row(transfer: &Transfer, note: Option<&String>) -> OutgoingRow {
     };
     OutgoingRow {
         transfer_id: transfer.transfer_id.clone(),
+        batch_id: transfer.batch_id.clone(),
+        to_device: transfer.to_device.clone(),
         file_name: transfer.file_name.clone(),
         size_bytes: transfer.size_bytes,
         to_name: transfer.to_name.clone(),
@@ -473,6 +493,8 @@ fn outbox_row(transfer: &Transfer, note: Option<&String>) -> OutgoingRow {
 fn job_row(job: &SendJob) -> OutgoingRow {
     OutgoingRow {
         transfer_id: job.stored.transfer_id.clone(),
+        batch_id: Some(job.stored.batch_id.clone()),
+        to_device: Some(job.stored.to_device.clone()),
         file_name: job.stored.file_name.clone(),
         size_bytes: job.stored.size_bytes,
         to_name: job.stored.to_name.clone(),
@@ -527,6 +549,9 @@ fn snapshot(state: &State, folder: Option<String>) -> Snapshot {
             .iter()
             .map(|row| IncomingRow {
                 transfer_id: row.item.transfer_id.clone(),
+                batch_id: row.item.batch_id.clone(),
+                from_device: row.item.from_device.clone(),
+                created_at: row.item.created_at.clone(),
                 file_name: row.item.file_name.clone(),
                 size_bytes: row.item.size_bytes,
                 from_name: row.item.from_name.clone(),
@@ -544,6 +569,8 @@ fn snapshot(state: &State, folder: Option<String>) -> Snapshot {
             .receipts()
             .map(|row| ReceivedRow {
                 transfer_id: row.transfer_id.clone(),
+                batch_id: row.batch_id.clone(),
+                from_device: row.from_device.clone(),
                 file_name: row.file_name.clone(),
                 size_bytes: row.size_bytes,
                 from_name: row.from_name.clone(),
@@ -1205,6 +1232,8 @@ fn journal_destination(
                 size_bytes: item.size_bytes,
                 sha256: item.sha256.clone(),
                 from_name: item.from_name.clone(),
+                batch_id: item.batch_id.clone(),
+                from_device: item.from_device.clone(),
                 received_at: now_rfc3339(),
                 acked: false,
                 seen: false,
@@ -1766,6 +1795,9 @@ fn finish(transfer_id: &str) -> Result<(), ApiError> {
             .find(|job| job.stored.transfer_id == transfer_id)
         {
             discard_zip(&job.stored, state.zips.as_deref());
+            if job.stored.folder.is_none() {
+                thumbnail::cache_later(state.thumbs.clone(), transfer_id, job.stored.path.clone());
+            }
             if let Some(note) = job.stored.note.clone() {
                 state.notes.insert(transfer_id.to_owned(), note);
             }
@@ -1935,6 +1967,11 @@ pub(crate) fn start(app: AppHandle) {
         state.path = path;
         state.parts = parts;
         state.zips = zips;
+        state.thumbs = app
+            .path()
+            .app_local_data_dir()
+            .ok()
+            .map(|dir| dir.join(thumbnail::FOLDER));
         // Unfinished sends from the last run wait for 재시도: their files may have moved.
         let restored: Vec<SendJob> = state
             .stored
@@ -2211,6 +2248,12 @@ pub(crate) async fn exchange_reveal(app: AppHandle, transfer_id: String) -> Resu
         .map_err(|_| "폴더를 열지 못했습니다.".to_owned())
 }
 
+/// A small JPEG of a sent or received image for the timeline (empty when there is none).
+#[tauri::command]
+pub(crate) async fn exchange_thumbnail(transfer_id: String) -> tauri::ipc::Response {
+    thumbnail::response(transfer_id).await
+}
+
 #[tauri::command]
 pub(crate) async fn exchange_open_folder(app: AppHandle) -> Result<(), String> {
     open_folder(&app)
@@ -2322,6 +2365,8 @@ mod tests {
             size_bytes: 1,
             sha256: "0".repeat(64),
             from_name: None,
+            batch_id: None,
+            from_device: None,
             received_at: (chrono::Utc::now() - chrono::Duration::days(days_ago))
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             acked,
@@ -2381,6 +2426,8 @@ mod tests {
     fn server_outbox_states_map_to_row_states() {
         let transfer = |state: &str, failure: Option<&str>| Transfer {
             transfer_id: "t".into(),
+            batch_id: None,
+            to_device: None,
             to_name: Some("Tab".into()),
             file_name: "a".into(),
             size_bytes: 1,
@@ -2478,6 +2525,9 @@ mod tests {
         fs::write(&part, bytes).unwrap();
         let item = InboxItem {
             transfer_id: id.hyphenated().to_string(),
+            batch_id: None,
+            from_device: None,
+            created_at: None,
             from_name: Some("Tablet".into()),
             file_name: "photo.jpg".into(),
             size_bytes: bytes.len() as u64,

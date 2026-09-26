@@ -89,6 +89,10 @@ pub(crate) struct Device {
 pub(crate) struct Transfer {
     pub transfer_id: String,
     #[serde(default)]
+    pub batch_id: Option<String>,
+    #[serde(default)]
+    pub to_device: Option<String>,
+    #[serde(default)]
     pub to_name: Option<String>,
     pub file_name: String,
     pub size_bytes: u64,
@@ -103,6 +107,12 @@ pub(crate) struct Transfer {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InboxItem {
     pub transfer_id: String,
+    #[serde(default)]
+    pub batch_id: Option<String>,
+    #[serde(default)]
+    pub from_device: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
     #[serde(default)]
     pub from_name: Option<String>,
     pub file_name: String,

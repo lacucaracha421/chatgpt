@@ -181,6 +181,7 @@ pub fn run() {
             exchange::exchange_reveal,
             exchange::exchange_open_folder,
             exchange::exchange_set_token,
+            exchange::exchange_thumbnail,
             commands::open_library,
             commands::get_extension_connection,
             commands::get_internal_playback_url,

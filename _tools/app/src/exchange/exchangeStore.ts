@@ -9,9 +9,17 @@ export type OutgoingState = "queued" | "zipping" | "hashing" | "uploading" | "wa
 export type ExchangeOutgoing = {
   transferId: string; fileName: string; sizeBytes: number; toName: string | null; state: OutgoingState;
   done: number; message: string | null; note: string | null; retryable: boolean; cancellable: boolean; createdAt: string | null;
+  /** Files sent together share it; the receiving device. */
+  batchId?: string | null; toDevice?: string | null;
 };
-export type ExchangeIncoming = { transferId: string; fileName: string; sizeBytes: number; fromName: string | null; state: "downloading" | "failed"; done: number; message: string | null };
-export type ExchangeReceived = { transferId: string; fileName: string; sizeBytes: number; fromName: string | null; receivedAt: string; exists: boolean };
+export type ExchangeIncoming = {
+  transferId: string; fileName: string; sizeBytes: number; fromName: string | null; state: "downloading" | "failed"; done: number; message: string | null;
+  batchId?: string | null; fromDevice?: string | null; createdAt?: string | null;
+};
+export type ExchangeReceived = {
+  transferId: string; fileName: string; sizeBytes: number; fromName: string | null; receivedAt: string; exists: boolean;
+  batchId?: string | null; fromDevice?: string | null;
+};
 export type ExchangeSnapshot = {
   availability: ExchangeAvailability;
   selfName: string | null;
@@ -59,6 +67,8 @@ export class ExchangeStore {
   markSeen() { return this.request<void>("exchange_mark_seen"); }
   refresh() { return this.request<void>("exchange_refresh"); }
   setToken(token: string | null) { return this.request<void>("exchange_set_token", { token }); }
+  /** JPEG bytes of a sent or saved image's local thumbnail (empty when there is none). */
+  thumbnail(transferId: string) { return this.request<ArrayBuffer | number[]>("exchange_thumbnail", { transferId }); }
 }
 
 const nativeExchange = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
