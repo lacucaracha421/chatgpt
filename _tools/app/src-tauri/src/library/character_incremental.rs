@@ -563,13 +563,24 @@ impl Library {
             wake.wait(seen, deadline, interrupted(restricted));
         }
     }
-    /// When the earliest delayed (`retry_at`) pending job becomes claimable, if any.
+    /// When the earliest eligible pending job becomes claimable, including already-due work.
     fn next_character_retry(&self) -> Result<Option<Instant>> {
-        let now_ms = chrono::Utc::now().timestamp_millis();
+        self.next_character_retry_at(
+            crate::workload::is_restricted(),
+            chrono::Utc::now().timestamp_millis(),
+        )
+    }
+    fn next_character_retry_at(&self, restricted: bool, now_ms: i64) -> Result<Option<Instant>> {
         let next: Option<i64> = self.connection()?.query_row(
             "SELECT MIN(retry_at) FROM character_autotag_jobs
-             WHERE state='pending' AND retry_at*1000>?1",
-            [now_ms],
+             WHERE state='pending'
+               AND NOT EXISTS(SELECT 1 FROM character_autotag_control WHERE singleton=1 AND paused=1)
+               AND (?1 = 0 OR cause NOT IN ('reconsideration', 'manual_scan'))
+               AND (cause<>'reconsideration' OR NOT EXISTS(
+                   SELECT 1 FROM character_autotag_control
+                   WHERE singleton=1 AND reference_refresh_paused=1
+               ))",
+            [restricted],
             |row| row.get(0),
         )?;
         Ok(next.map(|at| {

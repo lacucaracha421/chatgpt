@@ -231,6 +231,7 @@ pub(crate) enum Source {
 struct Entry {
     status: Option<SyncStatus>,
     confirmed_at: i64,
+    revision: u64,
     /// The watcher currently holding long-polls for this endpoint, if any.
     live_owner: Option<u64>,
     /// Per log: the head at, and the time of, the last "due" answer.
@@ -257,10 +258,29 @@ fn hub() -> std::sync::MutexGuard<'static, HashMap<String, Entry>> {
 
 /// Record a document read from `endpoint` and raise the wakes its changes call for.
 pub(crate) fn observe(endpoint: &str, status: &SyncStatus, now: i64, source: Source) -> Changes {
+    observe_if_current(endpoint, status, now, source, None).0
+}
+
+fn observe_if_current(
+    endpoint: &str,
+    status: &SyncStatus,
+    now: i64,
+    source: Source,
+    revision: Option<u64>,
+) -> (Changes, SyncStatus) {
     let changes = {
         let mut hub = hub();
         let entry = hub.entry(endpoint_key(endpoint)).or_default();
+        // A response from a pass started before a newer observation must not roll the hub
+        // back, even if that response finished later. Compare and publish under one lock.
+        if revision.is_some_and(|revision| revision != entry.revision) {
+            return (
+                Changes::default(),
+                entry.status.clone().unwrap_or_else(|| status.clone()),
+            );
+        }
         let changes = diff(entry.status.as_ref(), status);
+        entry.revision += 1;
         entry.status = Some(status.clone());
         entry.confirmed_at = now;
         changes
@@ -274,15 +294,29 @@ pub(crate) fn observe(endpoint: &str, status: &SyncStatus, now: i64, source: Sou
     if changes.captures {
         CAPTURES_SIGNAL.store(true, Ordering::Release);
     }
-    changes
+    (changes, status.clone())
 }
 
-/// A watcher `304`: the stored document is still the server's current one.
-fn confirm(endpoint: &str, now: i64) {
-    if let Some(entry) = hub().get_mut(&endpoint_key(endpoint)) {
-        if entry.status.is_some() {
-            entry.confirmed_at = now;
-        }
+/// Revision before a pass starts its status request.
+fn status_revision(endpoint: &str) -> u64 {
+    hub().entry(endpoint_key(endpoint)).or_default().revision
+}
+
+fn observe_pass(endpoint: &str, status: &SyncStatus, now: i64, revision: u64) -> SyncStatus {
+    observe_if_current(endpoint, status, now, Source::Pass, Some(revision)).1
+}
+
+/// The validator and document belong to the same credential variant.
+struct WatchDocument {
+    scope: String,
+    etag: String,
+    status: SyncStatus,
+}
+
+impl WatchDocument {
+    fn confirm(&self, endpoint: &str, now: i64) {
+        // A 304 confirms this ETag's document, never whichever document a pass left in the hub.
+        observe(endpoint, &self.status, now, Source::Watcher);
     }
 }
 
@@ -410,6 +444,7 @@ pub(crate) fn read_status(
     publisher: Option<&str>,
 ) -> Result<SyncStatus, LibraryError> {
     let endpoint = client.base();
+    let revision = status_revision(endpoint);
     let mut result = None;
     if let Some(publisher) = publisher.filter(|token| publisher_usable(endpoint, token)) {
         match client.sync_status_conditional(publisher) {
@@ -421,8 +456,7 @@ pub(crate) fn read_status(
         Some(result) => result?,
         None => client.sync_status_conditional(client_token)?,
     };
-    observe(endpoint, &status, unix_now(), Source::Pass);
-    Ok(status)
+    Ok(observe_pass(endpoint, &status, unix_now(), revision))
 }
 
 // --- The watcher ------------------------------------------------------------------------
@@ -595,7 +629,7 @@ pub(crate) fn watch(endpoint: &str, owner: u64, stop: &AtomicBool, tokens: &dyn 
     };
     let mut state = WatchState::new();
     // The ETag belongs to the credential variant that received it.
-    let mut etag: Option<(String, String)> = None;
+    let mut document: Option<WatchDocument> = None;
     while !stop.load(Ordering::Acquire) {
         let Tokens {
             client: api,
@@ -614,10 +648,10 @@ pub(crate) fn watch(endpoint: &str, owner: u64, stop: &AtomicBool, tokens: &dyn 
             }
         };
         let scope = credential_digest(&token);
-        let tag = etag
+        let tag = document
             .as_ref()
-            .filter(|(owner, _)| *owner == scope)
-            .map(|(_, tag)| tag.as_str());
+            .filter(|document| document.scope == scope)
+            .map(|document| document.etag.as_str());
         let started = Instant::now();
         let wall = SystemTime::now();
         let reply = client.watch_sync_status(&token, tag, state.wait());
@@ -632,13 +666,26 @@ pub(crate) fn watch(endpoint: &str, owner: u64, stop: &AtomicBool, tokens: &dyn 
                 etag: tag,
                 advertised,
             }) => {
-                etag = tag.map(|tag| (scope, tag));
+                document = tag.map(|etag| WatchDocument {
+                    scope: scope.clone(),
+                    etag,
+                    status: status.clone(),
+                });
                 observe(endpoint, &status, now, Source::Watcher);
                 Outcome::Changed { advertised }
             }
             Ok(StatusWatchReply::NotModified { advertised }) => {
-                confirm(endpoint, now);
-                Outcome::NotModified { advertised, held }
+                if let Some(document) = document
+                    .as_ref()
+                    .filter(|document| document.scope == scope)
+                {
+                    document.confirm(endpoint, now);
+                    Outcome::NotModified { advertised, held }
+                } else {
+                    // An unsolicited 304 cannot vouch for a document we never received.
+                    document = None;
+                    Outcome::Failed { slept: false }
+                }
             }
             Err(LibraryError::CloudUnauthorized) if is_publisher => {
                 // Fall back to the client credential at once; this one is not tried again.

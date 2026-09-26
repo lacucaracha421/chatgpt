@@ -951,6 +951,27 @@ fn poll_interval(app: &AppHandle) -> Duration {
     }
 }
 
+/// Resolve the receiver context around a potentially long status hold.
+fn prepare_receiver_pass(
+    forced: bool,
+    failures: usize,
+    mut resolve: impl FnMut() -> Result<Context, Availability>,
+    hold: impl FnOnce(&Context) -> (bool, Option<Held>),
+) -> Result<(Context, bool, Option<Held>), Availability> {
+    let context = resolve()?;
+    if forced || failures > 0 {
+        return Ok((context, forced, None));
+    }
+    let (forced, held) = hold(&context);
+    // The user may have cleared/replaced the token or switched libraries during the hold.
+    // Resolve again before any registration, inbox read, or download. A held response from
+    // the old context is discarded, even when the hold completed just before the refresh.
+    let current = resolve()?;
+    let changed = current.key != context.key;
+    let held = held.filter(|held| held.key == current.key);
+    Ok((current, forced || changed, held))
+}
+
 fn receiver_loop(app: AppHandle) {
     let mut receiver = Receiver {
         registered: None,
@@ -963,8 +984,13 @@ fn receiver_loop(app: AppHandle) {
     let mut delay = Duration::ZERO;
     loop {
         let forced = wait_receiver(delay);
-        let context = match context(&app) {
-            Ok(context) => context,
+        let (context, forced, held) = match prepare_receiver_pass(
+            forced,
+            failures,
+            || context(&app),
+            |context| receiver.hold(context),
+        ) {
+            Ok(prepared) => prepared,
             Err(availability) => {
                 // Without this PC's own token nothing is polled until one is saved.
                 delay = if availability.needs_token {
@@ -976,13 +1002,6 @@ fn receiver_loop(app: AppHandle) {
                 receiver.registered = None;
                 continue;
             }
-        };
-        // Between passes, hold the status (when the server offers it) instead of polling:
-        // an arrival answers the held request at once, a refresh still runs at once.
-        let (forced, held) = if forced || failures > 0 {
-            (forced, None)
-        } else {
-            receiver.hold(&context)
         };
         match receiver.pass(&app, &context, forced, held) {
             Ok(()) => {
@@ -2027,6 +2046,60 @@ pub(crate) async fn exchange_set_token(token: Option<String>) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_regression_exchange_revalidates_context_after_hold() {
+        use std::cell::RefCell;
+        for replacement in [None, Some("new-token")] {
+            let current = RefCell::new(Some("old-token"));
+            let prepared = prepare_receiver_pass(
+                false,
+                0,
+                || {
+                    let token = (*current.borrow()).ok_or_else(token_missing)?;
+                    Ok(Context {
+                        client: ExchangeClient::new("http://127.0.0.1:9", token, "device").unwrap(),
+                        key: token.to_owned(),
+                    })
+                },
+                |context| {
+                    assert_eq!(context.key, "old-token");
+                    *current.borrow_mut() = replacement;
+                    (true, None)
+                },
+            );
+            match replacement {
+                None => assert!(prepared.is_err(), "cleared token must prevent the pass"),
+                Some(token) => assert_eq!(prepared.unwrap().0.key, token),
+            }
+        }
+    }
+
+    #[test]
+    fn changed_context_discards_a_completed_hold_and_forces_refresh() {
+        let mut reads = 0;
+        let (context, forced, held) = prepare_receiver_pass(
+            false,
+            0,
+            || {
+                reads += 1;
+                let token = if reads == 1 { "old-token" } else { "new-token" };
+                Ok(Context {
+                    client: ExchangeClient::new("http://127.0.0.1:9", token, "device").unwrap(),
+                    key: token.to_owned(),
+                })
+            },
+            |context| (false, Some(Held {
+                result: Ok((Some(1), Some(50))),
+                cache: Some(("old-etag".into(), Some(1))),
+                key: context.key.clone(),
+            })),
+        ).unwrap();
+        assert_eq!(context.key, "new-token");
+        assert!(forced);
+        assert!(held.is_none());
+        assert_eq!(reads, 2);
+    }
 
     fn received(id: &str, days_ago: i64, acked: bool) -> Received {
         Received {

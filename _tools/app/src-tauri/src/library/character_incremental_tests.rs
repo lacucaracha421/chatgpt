@@ -2351,3 +2351,44 @@ fn idle_owner_wakes_for_new_work_unpause_retry_time_and_stop() {
     });
     assert!(stopped.elapsed() < Duration::from_millis(400), "stop took {:?}", stopped.elapsed());
 }
+
+#[test]
+fn review_regression_retry_due_between_claim_and_deadline_runs_immediately() {
+    let f = Fixture::new();
+    f.target("A");
+    let retry_at = chrono::Utc::now().timestamp() + 60;
+    {
+        let c = f.library.connection().unwrap();
+        assert!(character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+        c.execute("UPDATE character_autotag_jobs SET retry_at=?1", [retry_at]).unwrap();
+    }
+    assert!(f.library.claim_character_autotag_with_profile(false).unwrap().is_none());
+    // Advance only the deadline query's clock across the retry boundary, without a write/wake.
+    let due = f.library.next_character_retry_at(false, retry_at * 1000).unwrap();
+    assert!(due.is_some(), "already-due work must not fall back to the 60-second safety sleep");
+    assert!(due.unwrap() <= Instant::now());
+}
+
+#[test]
+fn review_regression_ineligible_retries_do_not_spin() {
+    let f = Fixture::new();
+    f.target("A");
+    let now = chrono::Utc::now().timestamp_millis();
+    let c = f.library.connection().unwrap();
+    assert!(character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+    drop(c);
+    let execute = |sql: &str| f.library.connection().unwrap().execute(sql, []).unwrap();
+    for retry in [0, now / 1000 + 60] {
+        f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET retry_at=?1", [retry]).unwrap();
+        execute("UPDATE character_autotag_control SET paused=1");
+        assert!(f.library.next_character_retry_at(false, now).unwrap().is_none());
+        execute("UPDATE character_autotag_control SET paused=0, reference_refresh_paused=1");
+        execute("UPDATE character_autotag_jobs SET cause='reconsideration'");
+        assert!(f.library.next_character_retry_at(false, now).unwrap().is_none());
+        execute("UPDATE character_autotag_control SET reference_refresh_paused=0");
+        assert!(f.library.next_character_retry_at(true, now).unwrap().is_none());
+        execute("UPDATE character_autotag_jobs SET cause='manual_scan'");
+        assert!(f.library.next_character_retry_at(true, now).unwrap().is_none());
+        execute("UPDATE character_autotag_jobs SET cause='ingestion'");
+    }
+}

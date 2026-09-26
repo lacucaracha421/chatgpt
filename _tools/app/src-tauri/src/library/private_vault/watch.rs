@@ -3,7 +3,8 @@
 //!
 //! - Linux: `poll()` on `/proc/self/mountinfo` for `POLLPRI`/`POLLERR`, which the kernel raises
 //!   whenever the mount table changes. The file is read only after such a signal.
-//! - Windows: the `GetLogicalDrives()` bitmask, compared every couple of seconds (no disk I/O).
+//! - Windows: the `GetLogicalDrives()` bitmask, compared every couple of seconds (no disk I/O),
+//!   plus a once-per-minute reconciliation for media swapped inside a persistent drive letter.
 //!
 //! When the cheap wait fails the watcher falls back to re-reading the mount set every
 //! [`FALLBACK_INTERVAL`]; it never goes back to probing vault files on a short timer.
@@ -50,7 +51,7 @@ pub(crate) fn start_mount_watcher(notify: impl FnMut() + Send + 'static) {
             #[cfg(target_os = "linux")]
             run(&mut linux::MountInfo::open(), &STOP, &mut notify);
             #[cfg(windows)]
-            run(&mut windows::LogicalDrives, &STOP, &mut notify);
+            run(&mut windows::LogicalDrives::new(), &STOP, &mut notify);
             #[cfg(not(any(target_os = "linux", windows)))]
             let _ = &mut notify;
         });
@@ -128,7 +129,7 @@ impl<T: PartialEq> ChangeDetector<T> {
 
 /// The watcher loop, shared by every platform. It reads the mount set only after a signal,
 /// a due periodic check, or (degraded) every [`FALLBACK_INTERVAL`], and calls `notify` only
-/// when the set differs from the previous reading.
+/// when the signature differs (a mount change, or Windows' slow reconciliation tick).
 fn run<P: MountProbe>(probe: &mut P, stop: &AtomicBool, notify: &mut dyn FnMut()) {
     let mut detector = ChangeDetector::new();
     let mut degraded = false;
@@ -183,6 +184,14 @@ fn mountinfo_signature(text: &str) -> Vec<(String, String)> {
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
 fn drive_mask(raw: u32) -> Option<u32> {
     (raw != 0).then_some(raw)
+}
+
+/// Include a slow reconciliation tick so a persistent reader letter cannot hide a swap.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn drive_signature(raw: u32, elapsed: Duration) -> Option<(u32, u64)> {
+    // GetLogicalDrives does not report media changes inside an existing reader. Avoid volume
+    // queries on empty readers here; let the normal vault discovery reconcile at a slow rate.
+    drive_mask(raw).map(|mask| (mask, elapsed.as_secs() / 60))
 }
 
 #[cfg(target_os = "linux")]
@@ -268,20 +277,33 @@ mod linux {
 
 #[cfg(windows)]
 mod windows {
-    use std::{sync::atomic::AtomicBool, time::Duration};
+    use std::{
+        sync::atomic::AtomicBool,
+        time::{Duration, Instant},
+    };
 
     use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
 
-    use super::{drive_mask, park_for, MountProbe, Wake, DRIVE_CHECK_INTERVAL};
+    use super::{drive_signature, park_for, MountProbe, Wake, DRIVE_CHECK_INTERVAL};
 
-    pub(super) struct LogicalDrives;
+    pub(super) struct LogicalDrives {
+        started: Instant,
+    }
+
+    impl LogicalDrives {
+        pub(super) fn new() -> Self {
+            Self {
+                started: Instant::now(),
+            }
+        }
+    }
 
     impl MountProbe for LogicalDrives {
-        type Signature = u32;
+        type Signature = (u32, u64);
 
-        fn signature(&mut self) -> Option<u32> {
+        fn signature(&mut self) -> Option<Self::Signature> {
             // SAFETY: GetLogicalDrives takes no arguments and only returns a bitmask.
-            drive_mask(unsafe { GetLogicalDrives() })
+            drive_signature(unsafe { GetLogicalDrives() }, self.started.elapsed())
         }
 
         fn wait(&mut self, stop: &AtomicBool) -> Wake {
@@ -356,6 +378,31 @@ mod private_vault_watch_tests {
         let mut notified = 0;
         run(probe, &stop, &mut || notified += 1);
         notified
+    }
+
+    #[test]
+    fn review_regression_same_letter_media_gets_bounded_reconciliation() {
+        let mut detector = ChangeDetector::new();
+        let signature = |seconds| super::drive_signature(0b10100, Duration::from_secs(seconds)).unwrap();
+        assert!(!detector.observe(signature(0)));
+        for second in 1..60 {
+            assert!(!detector.observe(signature(second)), "no fast idle vault scans");
+        }
+        assert!(detector.observe(signature(60)), "insertion at an existing drive letter must refresh");
+        assert!(!detector.observe(signature(61)));
+        assert!(detector.observe(signature(120)), "replacement at the same letter must refresh too");
+        assert_eq!(super::drive_signature(0, Duration::from_secs(120)), None);
+    }
+
+    #[test]
+    fn windows_reconciliation_is_limited_to_one_refresh_per_idle_minute() {
+        let mut detector = ChangeDetector::new();
+        let mut refreshes = 0;
+        for check in 0..=600 {
+            let elapsed = Duration::from_millis(check * 1_500);
+            refreshes += usize::from(detector.observe(super::drive_signature(0b10100, elapsed)));
+        }
+        assert_eq!(refreshes, 15, "15 idle minutes allow exactly 15 safety refreshes");
     }
 
     #[test]

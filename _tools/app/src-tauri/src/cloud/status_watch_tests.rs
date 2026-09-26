@@ -1078,3 +1078,48 @@ fn gate_g1_idle_lanes_read_no_log_while_the_heads_match() {
         .sync_collection_releases_with(&dead, "publisher", endpoint)
         .is_err());
 }
+
+#[test]
+fn review_regression_slow_pass_cannot_replace_newer_watcher_document() {
+    let endpoint = "http://slow-pass.review.test/";
+    let now = unix_now();
+    let older = status_with(Some(logs(5, 0)));
+    let newer = status_with(Some(logs(6, 1)));
+    let revision = status_revision(endpoint);
+    // Pass A is in flight when the watcher receives B.
+    observe(endpoint, &newer, now, Source::Watcher);
+    set_live(endpoint, 99, true);
+    assert_eq!(observe_pass(endpoint, &older, now + 1, revision), newer);
+    assert_eq!(live_status(endpoint, now + 1), Some(newer));
+}
+
+#[test]
+fn review_regression_304_confirms_only_its_own_document() {
+    let endpoint = "http://confirm.review.test/";
+    let now = unix_now();
+    let newer = status_with(Some(logs(6, 1)));
+    let document = WatchDocument {
+        scope: "publisher".into(), etag: "B".into(), status: newer.clone(),
+    };
+    observe(endpoint, &newer, now, Source::Watcher);
+    set_live(endpoint, 100, true);
+    // Even if another producer changed the hub, a 304 for B never confirms A.
+    observe(endpoint, &status_with(Some(logs(5, 0))), now + 1, Source::Pass);
+    for elapsed in (50..=350).step_by(50) {
+        document.confirm(endpoint, now + elapsed);
+    }
+    assert_eq!(live_status(endpoint, now + 350), Some(newer));
+    assert!(!captures_quiet(endpoint, now + 350));
+}
+
+#[test]
+fn an_uncontested_pass_still_updates_the_hub() {
+    let endpoint = "http://uncontested-pass.review.test/";
+    let now = unix_now();
+    let older = status_with(Some(logs(5, 0)));
+    let newer = status_with(Some(logs(6, 1)));
+    observe_pass(endpoint, &older, now, status_revision(endpoint));
+    let revision = status_revision(endpoint);
+    assert_eq!(observe_pass(endpoint, &newer, now + 1, revision), newer);
+    assert_eq!(hub().get(&endpoint_key(endpoint)).unwrap().status, Some(newer));
+}
