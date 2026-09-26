@@ -123,7 +123,8 @@ function RecoveryKey({store}:{store:NotesStore}) {
   </div>;
 }
 
-export function Notes({active,backRef,request}:{active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null}) {
+/** `onReturnHome`: set while a note was opened from Home; leaving that note returns there. */
+export function Notes({active,backRef,request,onReturnHome}:{active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void}) {
   const [store]=useState(()=>new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');
@@ -178,6 +179,8 @@ export function Notes({active,backRef,request}:{active:boolean;backRef:MutableRe
   // Home opens a note by id (its pinned rows); each request opens once.
   useEffect(()=>{if(request){setSheet(null);setScope('all');setLabel(null);setQuery('');select(request.id);}},[request?.key]);
   const leave=()=>{select(null);void store.flush();};
+  // Back and the list arrow: a note opened from Home goes back to Home, not to the list.
+  const close=()=>{leave();onReturnHome?.();};
   const kind=note?noteKind(note):'text';
   const editable=!!note&&!note.deleted&&!note.readOnly&&!note.redacted;
   const stopBodyEdit=()=>{setEditingBody(false);bodyRef.current?.blur();};
@@ -186,7 +189,7 @@ export function Notes({active,backRef,request}:{active:boolean;backRef:MutableRe
     if(ledgerOpen&&ledgerBack.current?.())return true;
     if(editingBody&&note&&!note.deleted){stopBodyEdit();return true;}
     if(creatingSecret){setCreatingSecret(false);return true;}
-    if(selected){leave();return true;}
+    if(selected){close();return true;}
     if(scope!=='all'){setScope('all');return true;}
     if(label){setLabel(null);return true;}
     return false;
@@ -277,10 +280,10 @@ export function Notes({active,backRef,request}:{active:boolean;backRef:MutableRe
       <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={()=>setCreatingSecret(false)}/></header>
       <div className="notes-editor"><SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create('secret'));requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={()=>setCreatingSecret(false)}/></div>
     </>}
-    {state.ready&&state.unlocked&&note&&ledgerOpen&&<NoteLedger store={store} ledger={note} notes={state.notes} backRef={ledgerBack} onLeave={leave} onMore={()=>setSheet('more')}
+    {state.ready&&state.unlocked&&note&&ledgerOpen&&<NoteLedger store={store} ledger={note} notes={state.notes} backRef={ledgerBack} onLeave={close} onMore={()=>setSheet('more')}
       saveState={state.saving?'저장 중':state.notes.some(n=>n.pending&&(n.id===note.id||n.ledger===note.id))?'저장됨':'동기화됨'}/>}
     {state.ready&&state.unlocked&&note&&!ledgerOpen&&<>
-      <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={leave}/><span className="notes-save-state" role="status">{state.saving?'저장 중':note.pending?'저장됨':'동기화됨'}</span><span className="notes-top__space"/>
+      <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={close}/><span className="notes-save-state" role="status">{state.saving?'저장 중':note.pending?'저장됨':'동기화됨'}</span><span className="notes-top__space"/>
         {canConvert&&<IconButton label={kind==='checklist'?'메모로 바꾸기':'체크리스트로 바꾸기'} icon={kind==='checklist'?DocumentTextIcon:ListBulletIcon} onClick={convert}/>}
         {!note.deleted&&kind==='text'&&!note.readOnly&&<MarkdownHelpButton/>}
         {!note.deleted&&isSecret(note)&&!note.redacted&&<IconButton label="지금 잠그기" icon={LockClosedIcon} onClick={lockSecrets}/>}

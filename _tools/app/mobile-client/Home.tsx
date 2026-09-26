@@ -48,11 +48,11 @@ function Ok({children}:{children:ReactNode}) {
  * One dashboard card: a header row that opens the card's screen, then its rows. A card with
  * nothing to act on is calm: only the header, with a one-line summary.
  */
-function Card({icon:IconType,title,sum,calm,at,onOpen,label,className = '',children}:{icon:Icon;title:string;sum?:ReactNode;calm?:ReactNode;at?:number|null;onOpen():void;label?:string;className?:string;children?:ReactNode}) {
+function Card({icon:IconType,title,hint,sum,calm,at,onOpen,label,className = '',children}:{icon:Icon;title:string;hint?:string;sum?:ReactNode;calm?:ReactNode;at?:number|null;onOpen():void;label?:string;className?:string;children?:ReactNode}) {
   const quiet = !children;
   return <section className={`home-card${quiet ? ' is-calm' : ''} ${className}`} aria-label={title}>
     <button className="home-card-head" onClick={onOpen} aria-label={label}>
-      <IconType className="home-card-icon" aria-hidden="true"/><h3>{title}</h3>{sum}
+      <IconType className="home-card-icon" aria-hidden="true"/><h3>{title}</h3>{hint && <span className="home-card-hint">· {hint}</span>}{sum}
       {calm && <span className="home-calm">{calm}</span>}
       <span className="home-space"/>
       <Stale at={at}/>
@@ -124,7 +124,7 @@ export function Home(props:HomeProps) {
     return work ? <Artwork item={work} id={collectionCover(work)} revision={shelf?.revision ?? ''} active={!paused} label={name}/> : <span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>;
   };
   const unread = d.unreadWorks ?? 0;
-  const news = <Card icon={BookOpenIcon} title="신간" className="is-full" at={stale ? d.releasesAt : null} onOpen={props.onReleases}
+  const news = <Card icon={BookOpenIcon} title="신간" hint="나온 권" className="is-full" at={stale ? d.releasesAt : null} onOpen={props.onReleases}
     sum={unread > 0 && releases.length > 0 ? <Sum value={unread} unit="편 안 읽음"/> : undefined}
     calm={unread > 0 && releases.length > 0 ? undefined : d.unreadWorks === null ? <span>{stale ? '마지막 값 없음' : '확인하는 중…'}</span>
       : <Ok>새 신간 없음{d.watched ? <> · 만화 <span className="numeric">{d.watched}</span>편 지켜보는 중</> : null}</Ok>}>
@@ -139,7 +139,7 @@ export function Home(props:HomeProps) {
   const allUpcoming = d.upcoming ?? [];
   const soon = allUpcoming.filter(row => {const days = daysAfter(row.date,today); return days >= 0 && days <= UPCOMING_DAYS;});
   const later = allUpcoming.find(row => daysAfter(row.date,today) > UPCOMING_DAYS);
-  const upcomingCard = <Card icon={CalendarDaysIcon} title="발매 예정" at={stale ? d.upcomingAt : null} onOpen={props.onReleases}
+  const upcomingCard = <Card icon={CalendarDaysIcon} title="발매 예정" hint="나올 권" at={stale ? d.upcomingAt : null} onOpen={props.onReleases}
     sum={soon.length ? <Sum value={soon.length} unit={`권 · ${UPCOMING_DAYS}일 안`} plain/> : undefined}
     calm={soon.length ? undefined : d.upcoming === null ? <span>{stale ? '마지막 값 없음' : '불러오는 중…'}</span>
       : d.watched === 0 ? <span>신간 알림을 켠 만화 없음</span>

@@ -456,7 +456,8 @@ function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(v
 /** A place another tab asks Collections to show (Home's 신간 and 발매 예정); `key` makes a repeat ask count. */
 export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
-export function Collections({active,paused,backRef,request}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null}) {
+/** `onReturnHome`: set while the screen was opened from Home; closing that entry level (신간 or the work opened) returns there. */
+export function Collections({active,paused,backRef,request,onReturnHome}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void}) {
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
   const [searchOpen,setSearchOpen]=useState(false);
   const type:CollectionKind=tab==='av'?'game':tab;
@@ -531,16 +532,19 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
   // A remembered query (a type switched back to) commits without passing through loading.
   useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,main.committed,main.key,active]);
 
+  // A work opened over 신간 closes back to 신간; the entry level opened from Home closes back to Home.
+  const closeWork=useCallback(()=>{setSelected(null);if(!inboxOpen)onReturnHome?.();},[inboxOpen,onReturnHome]);
+  const closeInbox=useCallback(()=>{setInboxOpen(false);onReturnHome?.();},[onReturnHome]);
   const back=useCallback(()=>{
     if(coverIndex!==null){setCoverIndex(null);return true;}
     if(sheet){setSheet(null);return true;}
     if(personalSheet){setPersonalSheet(null);return true;}
     if(bindSheet){setBindSheet(null);return true;}
-    if(selected){setSelected(null);return true;}
-    if(inboxOpen){setInboxOpen(false);return true;}
+    if(selected){closeWork();return true;}
+    if(inboxOpen){closeInbox();return true;}
     if(showcaseAll){setShowcaseAll(false);return true;}
     return false;
-  },[coverIndex,sheet,personalSheet,bindSheet,selected,inboxOpen,showcaseAll]);
+  },[coverIndex,sheet,personalSheet,bindSheet,selected,inboxOpen,showcaseAll,closeWork,closeInbox]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
   useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
@@ -588,9 +592,9 @@ export function Collections({active,paused,backRef,request}:{active:boolean;paus
   // Each label reserves its bold width, so selecting never nudges the centred group.
   const typeSwitch=<TypeTabs tab={tab} onChoose={chooseTab}/>;
   const header=selected
-    ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
+    ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
     :inboxOpen
-      ?<TopBar back={{label:'뒤로',onClick:()=>setInboxOpen(false)}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title="신간"/>
+      ?<TopBar back={{label:'뒤로',onClick:closeInbox}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title="신간"/>
     :showcaseAll
       ?<TopBar loading={showcase.busy&&'쇼케이스 불러오는 중'} back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</>}/>
       :searching&&tab!=='av'

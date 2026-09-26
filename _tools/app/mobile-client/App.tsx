@@ -63,6 +63,7 @@ async function readPage(view:View,cursor:string|null,filters:AssetFiltersValue,s
   return generation ? {...page,list_generation:generation} : page;
 }
 function store(key: string, value: unknown) { try {localStorage.setItem(key, JSON.stringify(value));} catch { /* Optional device preference. */ } }
+type HomeOrigin = {area:'collections'|'notes'|'catalog'} | {area:'library';entry:string;scroll:number};
 type Committed = Page & {generation:string|null; view: View; cursor: string | null; previous: (string | null)[]; version: number; restoreScroll: number; filters: AssetFiltersValue};
 export function App() {
   const [area,setArea] = useState<'assets'|'collections'|'catalog'|'notes'>('assets');
@@ -126,6 +127,12 @@ export function App() {
   const [collectionRequest,setCollectionRequest]=useState<CollectionsRequest|null>(null),[duplicateRequest,setDuplicateRequest]=useState(0);
   // A note Home asks the Notes tab to open.
   const [noteRequest,setNoteRequest]=useState<{id:string;key:number}|null>(null);
+  // Where Back returns when a screen was opened from Home: the destination's entry level goes
+  // straight back to Home instead of its own tab root. Any bottom-nav tap forgets it. The Library
+  // destination replaces Home's page, so it also keeps the entry view and Home's scroll offset.
+  const [homeOrigin,setHomeOrigin]=useState<HomeOrigin|null>(null);
+  const homeOriginRef=useRef(homeOrigin); homeOriginRef.current=homeOrigin;
+  const homeRestore=useRef<number|null>(null);
   const [secondaryError, setSecondaryError] = useState('');
   const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'; character?:ViewerCharacterContext|null} | null>(null);
   // Library Trash: local hiding, the undo snackbar and the trash browser.
@@ -416,6 +423,19 @@ export function App() {
     }
     void load(parent?entryView(parent):LIBRARY,null,[],0,false,EMPTY_FILTERS);
   },[load]);
+  // Leaves Collections, Notes or Catalog for the assets area (Home when that is where it was opened
+  // from), forgetting the Home origin.
+  const returnHome=useCallback(()=>{setHomeOrigin(null);setArea('assets');},[]);
+  // Back at the Library entry opened from Home (or at the Library root) goes back to Home with
+  // Home's scroll offset instead of stepping up the hierarchy or leaving the app.
+  const libraryHome=useCallback(()=>{
+    const origin=homeOriginRef.current, view=latest.current.page.view;
+    if(origin?.area!=='library'||(viewKey(view)!==origin.entry&&!view.root))return false;
+    homeRestore.current=origin.scroll; setHomeOrigin(null); setArea('assets');
+    void load(HOME, null, [], 0, false, EMPTY_FILTERS);
+    return true;
+  },[load]);
+  const exitCharacters=useCallback(()=>{if(!libraryHome())restoreBeforeCharacter();},[libraryHome,restoreBeforeCharacter]);
   useEffect(() => {
     const visible = () => {if (document.visibilityState === 'visible' && latest.current.status.configured && latest.current.page.view.tab === 'home') void refreshSecondary();};
     const back = () => {
@@ -436,19 +456,20 @@ export function App() {
       else if (state.viewer) setViewer(null);
       // An open top-bar search closes (and clears) before Back navigates anywhere.
       else if (closeVisibleSearch()) { /* The search bar consumed back. */ }
-      else if (state.area === 'collections') {if (!collectionBack.current?.()) setArea('assets');}
-      else if (state.area === 'notes') {if (!notesBack.current?.()) setArea('assets');}
-      else if (state.area === 'catalog') {if (!catalogBack.current?.()) setArea('assets');}
+      else if (state.area === 'collections') {if (!collectionBack.current?.()) returnHome();}
+      else if (state.area === 'notes') {if (!notesBack.current?.()) returnHome();}
+      else if (state.area === 'catalog') {if (!catalogBack.current?.()) returnHome();}
       else if (state.page.view.characters && characterBack.current?.()) {  }
-      else if (state.page.view.characters) {restoreBeforeCharacter();}
+      else if (state.page.view.characters) {if (!libraryHome()) restoreBeforeCharacter();}
       // Clear a committed or failed narrowing before stepping up the hierarchy.
       else if (hasActiveFilters(state.page.filters)||hasActiveFilters(lastIntent.current.filters)) void load(state.page.view, null, [], 0, true, EMPTY_FILTERS);
+      else if (libraryHome()) { /* The Library entry opened from Home returned there. */ }
       else if (!state.page.view.root) goParent();
       else void native('finish').catch(() => {});
     };
     const removeVisible=onVisible(visible); window.addEventListener('lakomics-back', back);
     return () => {removeVisible(); window.removeEventListener('lakomics-back', back);};
-  }, [refreshSecondary, load, restoreBeforeCharacter,goParent]);
+  }, [refreshSecondary, load, restoreBeforeCharacter,goParent,returnHome,libraryHome]);
   useEffect(() => {
     const folderId=page.view.classification??(page.view.characterNode?entries.find(entry=>entry.characterNode===page.view.characterNode)?.id:undefined);
     if (!page.version || !folderId) return;
@@ -519,9 +540,15 @@ export function App() {
     setCollectionRequest(current => ({...place,key:(current?.key ?? 0)+1}));
   };
   const openHome = () => {
+    setHomeOrigin(null); homeRestore.current = null;
     setArea('assets');
     if (latest.current.page.view.tab === 'home') retainAssets();
     else select(HOME);
+  };
+  // Records a Library entry opened from Home, with Home's scroll offset (Home unmounts there).
+  const fromHome = (entry:View) => {
+    const top = appRef.current?.querySelector<HTMLElement>('.home-scroll')?.scrollTop ?? 0;
+    homeRestore.current = null; setHomeOrigin({area:'library',entry:viewKey(entry),scroll:top});
   };
   const openCurrent = (index: number) => {
     // Opening the still-visible gallery cancels its uncommitted replacement.
@@ -536,6 +563,7 @@ export function App() {
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
     setPage({generation:null,items:[],has_more:false,next_cursor:null,view:LIBRARY,cursor:null,previous:[],version:0,restoreScroll:0,filters:{...EMPTY_FILTERS}});
+    setHomeOrigin(null); homeRestore.current = null;
     setArea('assets'); setNotesVisited(false); setCollectionsVisited(false); setCatalogVisited(false); setCharactersVisited(false);
     setStatus(adoptConnection(next));
   };
@@ -574,6 +602,16 @@ export function App() {
   useLevelMotion(mainRef,libraryLevel?viewKey(page.view):null,libraryLevel?levelDepth(page.view):0);
   // A committed tab switch settles the new tab's content under its still bar.
   useTabMotion(bodyRef,area==='assets'?page.view.tab:area);
+  // Back from a Library entry opened from Home puts Home's scroll offset back once it is shown.
+  // Home's cards render from their kept snapshot first, so a second try covers late growth.
+  useLayoutEffect(()=>{
+    const top=homeRestore.current;
+    if(top===null||area!=='assets'||page.view.tab!=='home')return;
+    homeRestore.current=null;
+    const apply=()=>{const element=appRef.current?.querySelector<HTMLElement>('.home-scroll');if(element&&element.scrollTop<top)element.scrollTop=top;};
+    apply();const frame=requestAnimationFrame(apply);
+    return()=>cancelAnimationFrame(frame);
+  },[area,page.view.tab,page.version]);
   // Retained tabs lose their scrollers' offsets while hidden; put them back on return.
   useScrollMemory(appRef,`${area}:${page.view.root?'root':page.view.characters?'characters':page.view.tab}`);
   const rootShown=area==='assets'&&!!page.view.root&&!page.view.characters;
@@ -593,16 +631,16 @@ export function App() {
         <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:()=>setReview({target:null})}:undefined} similarity={{enabled:true,refreshKey:similarityClosed,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
           review={{enabled:!!reviewLibrary,refreshKey:`${characterIndex?.revision}:${reviewClosed}`}} similarityKey={similarityClosed}
-          onRecent={() => select({tab:'library',title:'최근 저장'})} onLibrary={openLibrary} onRefresh={refresh}
-          onNotes={id => {setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
+          onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
+          onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
           onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
           onReview={() => setReview({target:null})} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
-          onDuplicates={() => {setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
-          onReleases={() => openCollections({kind:'releases'})} onWork={id => openCollections({kind:'work',id})}/> : <>
+          onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
+          onReleases={() => {setHomeOrigin({area:'collections'});openCollections({kind:'releases'});}} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
         <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused}/>
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
-        {charactersVisited && <CharacterBrowser hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault||!!review} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={restoreBeforeCharacter} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:target=>setReview({target})}:undefined}/>}
+        {charactersVisited && <CharacterBrowser hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault||!!review} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:target=>setReview({target})}:undefined}/>}
         <div className="floating-notices">
           {indexError&&rootShown&&<p className="error-message">{indexError}</p>}
           {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 해제</Button></div>}
@@ -610,11 +648,11 @@ export function App() {
           {moreError && !page.view.root && !page.view.characters && page.view.tab!=='home' && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </div>
       </main>
-      {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest}/>}
-      {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest}/>}
-      {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest}/>}
+      {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
+      {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined}/>}
+      {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
-    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={openHome}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={openLibrary}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}
+    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={openHome}><HomeIcon/><span>Home</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{setHomeOrigin(null);openLibrary();}}><PhotoIcon aria-hidden="true"/><span>Library</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>Collections</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>Catalog</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>Notes</span></button></nav>}
     {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}>{/* Filters first: a chip closes this sheet and opens its own choice sheet (never nested). */}{filterable&&!page.view.characters&&<><p className="view-options-label">필터</p><FilterChips sheet={false} value={filters} applied={page.filters} onChange={applyFilters} open={null} onOpen={group=>{setViewSettings(false);setFiltersOpen(group);}}/></>}<div className="view-options-host" ref={setOptionsHost}/><StepSlider className="view-options-density" label="썸네일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/>{faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
     {filterable&&<FilterChips row={false} value={filters} applied={page.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}

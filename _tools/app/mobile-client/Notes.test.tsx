@@ -261,3 +261,23 @@ it('opens the note Home asks for, once per request',async()=>{
  view.rerender(<Notes active backRef={{current:null}} request={{id:note.id,key:2}}/>);
  expect(await rendered('내용')).toBeTruthy();
 });
+it('returns a note opened from Home to Home, closing a deeper sheet first',async()=>{
+ mock.native.mockImplementation(state([note]));
+ const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
+ const view=render(<Notes active backRef={backRef} request={{id:note.id,key:1}} onReturnHome={home}/>);
+ expect(await rendered('내용')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
+ act(()=>{expect(backRef.current!()).toBe(true);});
+ expect(home).not.toHaveBeenCalled();
+ act(()=>{expect(backRef.current!()).toBe(true);});
+ expect(home).toHaveBeenCalledTimes(1);
+ // The on-screen arrow of a note opened from Home returns Home too.
+ view.rerender(<Notes active backRef={backRef} request={{id:note.id,key:2}} onReturnHome={home}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'메모 목록'}));
+ expect(home).toHaveBeenCalledTimes(2);
+ // Without a Home origin, leaving the note shows the list as before.
+ view.rerender(<Notes active backRef={backRef} request={{id:note.id,key:3}}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'메모 목록'}));
+ expect(home).toHaveBeenCalledTimes(2);
+ act(()=>{expect(backRef.current!()).toBe(false);});
+});

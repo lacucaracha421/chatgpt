@@ -28,14 +28,17 @@ function lruSet<K,V>(map:Map<K,V>,key:K,value:V,limit:number){map.delete(key);ma
 type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
 function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string,filterKey:string){return `${revision}:${filterKey}:${item.provider}:${item.providerWorkId}`;}
 
-export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
+export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onReturnHome}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
   /** Bumped by Home's 중복 판본 tile: opens the duplicate-edition review. */
-  openDuplicates?:number}){
+  openDuplicates?:number;
+  /** Set while 중복 검토 was opened from Home: closing it returns there. */
+  onReturnHome?:()=>void}){
   const [preferences,setPreferences]=useState<CatalogPreferences>(()=>readCatalogPreferences(endpoint));
   const [query,setQuery]=useState<CatalogQuery>(()=>({...DEFAULT_CATALOG_QUERY,...preferences})),[draft,setDraft]=useState('');
   const [settings,setSettings]=useState(false);
   const [duplicates,setDuplicates]=useState(false);
   useEffect(()=>{if(openDuplicates)setDuplicates(true);},[openDuplicates]);
+  const closeDuplicates=useCallback(()=>{setDuplicates(false);onReturnHome?.();},[onReturnHome]);
   const duplicateCount=useDuplicateCount(settings);
   const [preferenceCheck,setPreferenceCheck]=useState(0);
   // The list is the first page plus the pages appended while scrolling.
@@ -172,8 +175,8 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0}:{ac
   useEffect(()=>{
     // Settings is a modal over the catalog, so Back closes it first and leaves the
     // list, its scroll position and the open detail exactly as they were.
-    backRef.current=()=>{if(duplicates){setDuplicates(false);return true;}if(sheet){setSheet(null);return true;}if(settings){setSettings(false);return true;}if(reader){closeReader();return true;}if(selected){setSelected(null);return true;}return false;};return()=>{backRef.current=null;};
-  },[duplicates,sheet,settings,reader,selected,backRef]);
+    backRef.current=()=>{if(duplicates){closeDuplicates();return true;}if(sheet){setSheet(null);return true;}if(settings){setSettings(false);return true;}if(reader){closeReader();return true;}if(selected){setSelected(null);return true;}return false;};return()=>{backRef.current=null;};
+  },[duplicates,sheet,settings,reader,selected,backRef,closeDuplicates]);
   // Back from a work shows the list where it was, before the first paint.
   useLayoutEffect(()=>{if(!selected&&list.current)list.current.scrollTop=scroll.current;},[selected]);
   useEffect(()=>{
@@ -424,6 +427,6 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0}:{ac
     {sheet==='language'&&<BottomSheet title="언어" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 언어">{(Object.keys(LANGUAGES) as CatalogQuery['language'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.language===value} onClick={()=>{setSheet(null);if(query.language!==value)change({language:value});}}>{LANGUAGES[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 정렬">{(Object.keys(SORTS) as CatalogQuery['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.sort===value} onClick={()=>{setSheet(null);if(query.sort!==value)change({sort:value});}}>{SORTS[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences} tools={<DuplicateReviewEntry count={duplicateCount} onOpen={()=>{setSettings(false);setDuplicates(true);}}/>}/>
-    {duplicates&&<CatalogDuplicates context={page?.context??null} active={active&&!paused} onClose={()=>setDuplicates(false)}/>}
+    {duplicates&&<CatalogDuplicates context={page?.context??null} active={active&&!paused} onClose={closeDuplicates}/>}
   </section>;
 }

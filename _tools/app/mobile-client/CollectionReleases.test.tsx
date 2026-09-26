@@ -336,3 +336,30 @@ it('uses a shelf Home already read for this publication, reading only the unread
   view.rerender(<Collections active paused={false} backRef={{current:null}} request={{kind:'work',id:'sea',key:2}}/>);
   await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path==='/v1/collections/sea')).toBe(true));
 });
+
+it('returns to Home from the entry level Home opened, after closing deeper levels first',async()=>{
+  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
+  const view=render(<Collections active paused={false} backRef={backRef} request={{kind:'releases',key:1}} onReturnHome={home}/>);
+  // 신간 → a work: Back closes the work back to 신간 and stays inside.
+  fireEvent.click((await screen.findByRole('region',{name:'밤의 도서관'})).querySelector('.collection-release-group__open')!);
+  await screen.findByRole('heading',{level:1,name:'밤의 도서관'});
+  expect(backRef.current!()).toBe(true);
+  await screen.findByRole('region',{name:'밤의 도서관'});
+  expect(home).not.toHaveBeenCalled();
+  // 신간 itself was the entry: its on-screen back arrow returns Home.
+  fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
+  expect(home).toHaveBeenCalledTimes(1);
+  // A work opened directly from Home returns Home from the detail (Android Back).
+  view.rerender(<Collections active paused={false} backRef={backRef} request={{kind:'work',id:'sea',key:2}} onReturnHome={home}/>);
+  await screen.findByRole('heading',{level:1,name:'바다의 시간'});
+  expect(backRef.current!()).toBe(true);
+  expect(home).toHaveBeenCalledTimes(2);
+});
+
+it('keeps Collections Back inside the tab when the screen was not opened from Home',async()=>{
+  const backRef:{current:(()=>boolean)|null}={current:null};
+  await openReleases(backRef);
+  expect(backRef.current!()).toBe(true);
+  await entry();
+  expect(backRef.current!()).toBe(false);
+});

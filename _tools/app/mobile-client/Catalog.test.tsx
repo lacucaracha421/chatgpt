@@ -675,3 +675,24 @@ describe('mobile catalog tag autocomplete',()=>{
     await waitFor(()=>expect(searchParams(lastSearch()).get('text')).toBe('artist:asanagi'));
   });
 });
+describe('duplicate review opened from Home',()=>{
+  it('returns Home when the review opened from Home closes, and stays in Catalog otherwise',async()=>{
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string,...args:unknown[])=>path.includes('/duplicates')?{version:1,revision:1,pcGeneration:'g',counts:{undecided:0,decided:0},items:[],nextCursor:null,hasMore:false}:original(path,...args));
+    const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
+    const view=render(<Catalog active paused={false} backRef={backRef} openDuplicates={1} onReturnHome={home}/>);
+    await screen.findByRole('button',{name:'검토 닫기'});
+    act(()=>{expect(backRef.current!()).toBe(true);});
+    expect(home).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button',{name:'검토 닫기'})).toBeNull();
+    view.rerender(<Catalog active paused={false} backRef={backRef} openDuplicates={2} onReturnHome={home}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'검토 닫기'}));
+    expect(home).toHaveBeenCalledTimes(2);
+    // Opened without a Home origin (Catalog's own settings entry): Back closes to Catalog only.
+    view.rerender(<Catalog active paused={false} backRef={backRef} openDuplicates={3}/>);
+    await screen.findByRole('button',{name:'검토 닫기'});
+    act(()=>{expect(backRef.current!()).toBe(true);});
+    expect(home).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button',{name:'검토 닫기'})).toBeNull();
+  });
+});

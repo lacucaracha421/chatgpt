@@ -33,6 +33,8 @@
 .home-card-head:active, .home-row:active, .home-release:active, .home-upcoming:active, .home-memo:active { background:var(--color-surface-pressed, var(--color-control-pressed)); }
 .home-card-icon { width:18px; height:18px; flex:none; color:var(--color-muted); }
 .home-space { flex:1; min-width:4px; }
+/* A short meaning after the title (신간 · 나온 권); it gives way first when the header is tight. */
+.home-card-hint { flex:0 1 auto; min-width:0; overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
 .home-chev { width:16px; height:16px; flex:none; color:var(--color-muted); }
 .home-sum { font-size:22px; font-weight:500; line-height:1; color:var(--color-accent); white-space:nowrap; }
 .home-sum.is-plain { color:var(--color-text); }
