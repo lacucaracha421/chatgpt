@@ -3384,6 +3384,24 @@ import catalog_duplicates
 
 startup_catalog_duplicates = catalog_duplicates.register(app, get_db, require_client, require_publisher)
 
+# HOME-DASH-001 / ARTIST-001: PC-published Home documents (발매 예정 + wishlist intents,
+# 오늘의 AV 배우) and the artist list, plus the ticket for the Home covers they reference.
+# Startup only creates empty tables.
+import home_av_pick
+import home_publications
+import home_upcoming
+import library_artists
+
+# Late-bound like the Collection routes, so the shared token is read per request.
+def _home_client(authorization):
+    return client_guard(get_db, API_TOKEN)(authorization)
+
+
+lifecycle(app).on_startup(home_upcoming.register(app, get_db, _home_client, require_publisher))
+lifecycle(app).on_startup(home_av_pick.register(app, get_db, _home_client, require_publisher))
+lifecycle(app).on_startup(library_artists.register(app, get_db, _home_client, require_publisher))
+home_publications.register_cover_tickets(app, get_db, _home_client, presign_get)
+
 from r2 import presign_put as _collection_presign_put
 
 startup_mobile_collections = register_collections(
@@ -3441,7 +3459,8 @@ def publisher_log_heads(db):
             "releaseReads": collection_releases.status_head(db),
             "bindings": collection_bindings.status_head(db),
             "personalEdits": collection_personal_edits.status_head(db),
-            "captures": captures_status_head(db)}
+            "captures": captures_status_head(db),
+            "upcomingIntents": home_upcoming.status_head(db)}
 
 
 def status_signals(db):
@@ -3452,7 +3471,10 @@ def status_signals(db):
             "releases": collection_releases.status_signal(db),
             "catalog": mobile_catalog.status_signal(db),
             "bindingRequests": collection_bindings.status_signal(db),
-            "notes": notes.status_signal(db)}
+            "notes": notes.status_signal(db),
+            "upcoming": home_upcoming.status_signal(db),
+            "avPick": home_av_pick.status_signal(db),
+            "artists": library_artists.status_signal(db)}
 
 
 startup_sync_status = register_sync_status(

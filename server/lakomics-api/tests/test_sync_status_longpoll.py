@@ -391,7 +391,8 @@ class RealAppStatusTests(unittest.TestCase):
         logs = body["publisherLogs"]
         self.assertEqual(set(logs), {"characterExclusions", "characterReviewDecisions", "similarityDecisions",
                                      "catalogDuplicateDecisions", "releaseReads", "bindings", "personalEdits",
-                                     "captures"})
+                                     "captures", "upcomingIntents"})
+        self.assertEqual(logs["upcomingIntents"], {"last": 0, "acknowledgedThrough": 0, "prunedThrough": 0})
         for name in ("characterExclusions", "characterReviewDecisions", "similarityDecisions",
                      "catalogDuplicateDecisions", "personalEdits"):
             self.assertEqual(logs[name], 0, name)
@@ -402,7 +403,8 @@ class RealAppStatusTests(unittest.TestCase):
         self.assertEqual(logs["captures"], {"pending": 0, "latest": None})
         signals = body["signals"]
         self.assertEqual(set(signals), {"listGeneration", "characters", "collections", "releases", "catalog",
-                                        "bindingRequests", "notes"})
+                                        "bindingRequests", "notes", "upcoming", "avPick", "artists"})
+        self.assertEqual((signals["upcoming"], signals["avPick"], signals["artists"]), (0, 0, 0))
         self.assertEqual(signals["collections"],
                          {"revision": None, "personalEditCursor": None, "appliedPersonalEditCursor": None})
         self.assertEqual(signals["bindingRequests"], {"last": 0, "updatedAt": None})

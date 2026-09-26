@@ -28,6 +28,13 @@ final class NetworkPolicy {
   get=get || p.equals("/v1/library/characters") || p.equals("/v1/library/characters/assets") || p.equals("/v1/library/characters/status");
   // HOME-DASH-001: read-only Home library counts.
   get=get || p.equals("/v1/library/summary");
+  // HOME-DASH-001 Home documents the PC publishes: 발매 예정 (+ the wishlist intent command) and
+  // 오늘의 AV 배우, plus the ticket for a Home cover blob. The snapshot PUTs, the AV-pick DELETE and
+  // the intent log GET (`/wishlist/intents`) are publisher-only and stay unreachable.
+  get=get || p.equals("/v1/home/upcoming") || p.equals("/v1/home/av-pick");
+  // ARTIST-001: the read-only artist list and one artist by its id as a single encoded segment
+  // (`/` as %2F); a segment of dots only is refused. The snapshot PUT is publisher-only.
+  get=get || p.equals("/v1/library/artists") || (p.matches("/v1/library/artists/[A-Za-z0-9_%.~:-]{1,3072}") && !p.matches("/v1/library/artists/\\.+"));
   get=get || p.equals("/v1/assets/authority/status") || p.equals("/v1/assets/authority/baseline") || p.equals("/v1/assets/authority/changes");
   // Album authority reads remain narrowly allowlisted. The one write route is added
   // separately below with its first durable-outbox consumer.
@@ -43,6 +50,8 @@ final class NetworkPolicy {
   // structural mutation through this path. Activate stays absent from every allowlist.
   boolean classificationPut=p.equals("/v1/classifications/authority/commands");
   boolean post=p.equals("/v1/library/media-tickets") || p.matches("/v1/library/assets/[A-Za-z0-9_-]+/media-ticket");
+  // HOME-DASH-001: the wishlist intent command and the Home cover ticket (see the Home GETs above).
+  post=post || p.equals("/v1/home/upcoming/wishlist") || p.matches("/v1/home/covers/[a-f0-9]{64}/media-ticket");
   get=get || p.equals("/v1/collections") || (p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}") && !p.equals("/v1/collections/personal-edits"));
   get=get || p.equals("/v1/mobile-catalog/status") || p.equals("/v1/mobile-catalog/search") || p.equals("/v1/mobile-catalog/suggestions") || p.equals("/v1/mobile-catalog/count") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}") || p.matches("/v1/mobile-catalog/works/kHentai/[1-9][0-9]{0,18}/reader") || p.matches("/v1/mobile-catalog/groups/kHentai/[A-Za-z0-9_-]{1,128}/editions");
   post=post || p.matches("/v1/collections/[A-Za-z0-9_-]{1,128}/artworks/[A-Za-z0-9_-]{1,128}/media-ticket");

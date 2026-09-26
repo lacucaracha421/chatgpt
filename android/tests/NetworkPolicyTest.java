@@ -179,6 +179,23 @@ public final class NetworkPolicyTest {
  pass(()->NetworkPolicy.api("/v1/library/summary?tzOffsetMinutes=540","GET"));
  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/summary",method));
  for(String path:new String[]{"/v1/library/summary/","/v1/library/summaryx","/v1/library/summary/extra","/v1/library/summary%2f.."})reject(()->NetworkPolicy.api(path,"GET"));
+ // HOME-DASH-001: 발매 예정 and 오늘의 AV 배우 reads, the wishlist intent command and the Home cover ticket.
+ for(String path:new String[]{"/v1/home/upcoming","/v1/home/av-pick"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
+ pass(()->NetworkPolicy.api("/v1/home/upcoming/wishlist","POST"));
+ for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/home/upcoming/wishlist",method));
+ String homeCover="/v1/home/covers/"+"a".repeat(64)+"/media-ticket";
+ pass(()->NetworkPolicy.api(homeCover,"POST"));
+ for(String method:new String[]{"GET","PUT","DELETE"})reject(()->NetworkPolicy.api(homeCover,method));
+ for(String path:new String[]{"/v1/home/covers/"+"A".repeat(64)+"/media-ticket","/v1/home/covers/"+"a".repeat(63)+"/media-ticket","/v1/home/covers/../media-ticket","/v1/home/covers","/v1/home/upcoming/wishlist/intents","/v1/home/upcoming/wishlist/"})reject(()->NetworkPolicy.api(path,"POST"));
+ // Publisher-only Home routes stay unreachable: the intent log, the snapshot PUTs and the AV-pick DELETE.
+ for(String path:new String[]{"/v1/home/upcoming/wishlist/intents","/v1/home/upcoming/wishlist/intents?after=0","/v1/home/upcoming/","/v1/home/upcomingx","/v1/home/av-pick/","/v1/home","/v1/home/covers/"+"a".repeat(64)})reject(()->NetworkPolicy.api(path,"GET"));
+ reject(()->NetworkPolicy.api("/v1/home/upcoming","PUT"));
+ reject(()->NetworkPolicy.api("/v1/home/av-pick","PUT"));
+ reject(()->NetworkPolicy.api("/v1/home/av-pick","DELETE"));
+ // ARTIST-001: the artist list and one artist by its encoded id, read-only.
+ for(String path:new String[]{"/v1/library/artists","/v1/library/artists/artist:a1","/v1/library/artists/https%3A%2F%2Fx.com%2Fbob","/v1/library/artists/alice_1.x~y"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
+ for(String path:new String[]{"/v1/library/artists/","/v1/library/artists/..","/v1/library/artists/.","/v1/library/artists/a/b","/v1/library/artists/../summary","/v1/library/artistsx","/v1/library/artists/a b"})reject(()->NetworkPolicy.api(path,"GET"));
+ reject(()->NetworkPolicy.api("/v1/library/artists/"+"a".repeat(3073),"GET"));
  // Mobile Library Trash: the trash list is a GET, the lifecycle command route a PUT, and
  // trash-scoped tickets reuse the existing ticket POSTs with a query that widens nothing.
  pass(()->NetworkPolicy.api("/v1/library/trash","GET"));
