@@ -174,6 +174,57 @@ ORDER BY a.id
 LIMIT ?5
 "#;
 
+/// One batch of review candidates in a series (asset-ID order, after a cursor). Parent-folder
+/// candidates must belong to the series' ancestors, just as in candidate_image_mode; ordinary
+/// assets remain in the recursive series scope.
+///
+/// PERF-ALL-001: the library has no `sqlite_stat1`, so the planner guessed and walked every
+/// normal asset through `assets_by_trash_age` then sorted, and probed the evidence subquery by
+/// scanning every prediction of the series per ancestor-folder asset (~950 k VM steps, 175 ms
+/// per batch). The unary `+` keeps the status/kind indexes out so the primary key serves the
+/// cursor and `ORDER BY` (stopping at `LIMIT`), and `CROSS JOIN` fixes the job -> evidence ->
+/// prediction order a stat1-informed planner picks. Gate:
+/// `review_page_vm_steps_stay_bounded_by_the_batch`.
+const REVIEW_INPUT_SQL: &str = "WITH RECURSIVE scope(id) AS (
+    SELECT id FROM classification_entries WHERE id=?1 UNION
+    SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
+    ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL
+    SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
+    SELECT a.id,a.content_hash,a.relative_path FROM assets a
+    WHERE +a.status='normal' AND +a.media_kind='image' AND a.id > COALESCE(?2, '')
+    AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND (
+        ac.classification_id IN (SELECT id FROM scope) OR (
+        ac.classification_id IN (SELECT id FROM ancestors) AND (
+            a.id IN (SELECT value FROM json_each(?3)) OR
+            EXISTS(SELECT 1 FROM character_autotag_jobs j
+                CROSS JOIN character_autotag_evidence e ON e.asset_id=j.asset_id AND e.source_generation=j.source_generation
+                CROSS JOIN character_autotag_predictions p ON p.evidence_id=e.id
+                WHERE j.asset_id=a.id AND p.series_id=?1 AND j.state<>'superseded') OR
+            EXISTS(SELECT 1 FROM character_autotag_jobs j WHERE j.asset_id=a.id AND j.state='failed')))))
+    ORDER BY a.id LIMIT ?4";
+
+/// Saved predictions of one candidate batch (`?2`, a JSON array of asset IDs), newest usable
+/// evidence per (asset, target) only: the caller keeps the first row per pair in this order,
+/// and generations are unique per asset, so `NOT EXISTS` drops exactly the rows it skipped
+/// (about half of the rows and their `result_json` on the real library).
+///
+/// PERF-ALL-001: without `sqlite_stat1` the planner drove this from every prediction of the
+/// series (~800 k VM steps for a series-wide page); `CROSS JOIN` makes the batch's jobs drive
+/// it, the order a stat1-informed planner picks. Gate:
+/// `review_page_vm_steps_stay_bounded_by_the_batch`.
+const REVIEW_BATCH_DURABLE_SQL: &str = "SELECT e.id,e.asset_id,p.target_id,p.result_json,p.target_fingerprint,e.runtime_fingerprint
+    FROM character_autotag_jobs j
+    CROSS JOIN assets a ON a.id=j.asset_id AND a.status='normal'
+    CROSS JOIN character_autotag_evidence e ON e.asset_id=j.asset_id AND e.source_generation=j.source_generation AND e.content_hash=a.content_hash
+    CROSS JOIN character_autotag_predictions p ON p.evidence_id=e.id
+    WHERE j.asset_id IN (SELECT value FROM json_each(?2)) AND p.series_id=?1 AND j.state<>'superseded'
+    AND (?3 IS NULL OR p.target_id=?3)
+    AND NOT EXISTS(SELECT 1 FROM character_autotag_evidence n
+        CROSS JOIN character_autotag_predictions np ON np.evidence_id=n.id AND np.target_id=p.target_id
+        WHERE n.asset_id=j.asset_id AND n.generation>e.generation AND n.source_generation=j.source_generation
+        AND n.content_hash=a.content_hash AND np.series_id=?1)
+    ORDER BY e.asset_id,p.target_id,e.generation DESC,e.id DESC";
+
 /// The durable "recommended" rows of one target without paging: the saved-prediction part
 /// of [`REVIEW_RECOMMENDED_DURABLE_SQL`], used to export B36 recommendations of every target.
 const B36_RECOMMENDED_TARGET_SQL: &str = r#"
@@ -688,25 +739,7 @@ impl Library {
             let (inputs, decisions, durable_predictions, failed_jobs) = {
                 let connection = self.connection()?;
                 // Bound both candidate materialization and related evidence/decision queries.
-                // Parent-folder candidates must belong to this series' ancestors, just as in
-                // candidate_image_mode; ordinary assets remain in the recursive series scope.
-                let mut statement = connection.prepare("WITH RECURSIVE scope(id) AS (
-                    SELECT id FROM classification_entries WHERE id=?1 UNION
-                    SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
-                    ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL
-                    SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
-                    SELECT a.id,a.content_hash,a.relative_path FROM assets a
-                    WHERE a.status='normal' AND a.media_kind='image' AND a.id > COALESCE(?2, '')
-                    AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND (
-                        ac.classification_id IN (SELECT id FROM scope) OR (
-                        ac.classification_id IN (SELECT id FROM ancestors) AND (
-                            a.id IN (SELECT value FROM json_each(?3)) OR
-                            EXISTS(SELECT 1 FROM character_autotag_evidence e
-                                JOIN character_autotag_predictions p ON p.evidence_id=e.id
-                                JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
-                                WHERE e.asset_id=a.id AND p.series_id=?1 AND j.state<>'superseded') OR
-                            EXISTS(SELECT 1 FROM character_autotag_jobs j WHERE j.asset_id=a.id AND j.state='failed')))))
-                    ORDER BY a.id LIMIT ?4")?;
+                let mut statement = connection.prepare(REVIEW_INPUT_SQL)?;
                 let inputs = statement
                     .query_map(
                         params![query.series_id, after, root_candidates, INPUT_BATCH as i64],
@@ -720,19 +753,19 @@ impl Library {
                     )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 let ids = serde_json::to_string(&inputs.iter().map(|i| &i.id).collect::<Vec<_>>())?;
-                let durable_rows = connection.prepare("SELECT e.id,e.asset_id,p.target_id,p.result_json,p.target_fingerprint,e.runtime_fingerprint
-                    FROM character_autotag_evidence e
-                    JOIN character_autotag_predictions p ON p.evidence_id=e.id
-                    JOIN character_autotag_jobs j ON j.asset_id=e.asset_id AND j.source_generation=e.source_generation
-                    JOIN assets a ON a.id=e.asset_id AND a.content_hash=e.content_hash AND a.status='normal'
-                    WHERE e.asset_id IN (SELECT value FROM json_each(?2)) AND p.series_id=?1 AND j.state<>'superseded'
-                    AND (?3 IS NULL OR p.target_id=?3)
-                    ORDER BY e.asset_id,p.target_id,e.generation DESC,e.id DESC")?
-                    .query_map(params![query.series_id,ids,query.target_id],|r|Ok((
-                        r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,
-                        r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?
-                    )))?
-                    .collect::<std::result::Result<Vec<_>,_>>()?;
+                let durable_rows = connection
+                    .prepare(REVIEW_BATCH_DURABLE_SQL)?
+                    .query_map(params![query.series_id, ids, query.target_id], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                            r.get::<_, String>(3)?,
+                            r.get::<_, String>(4)?,
+                            r.get::<_, String>(5)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 let mut durable = BTreeMap::new();
                 for (
                     evidence_id,
@@ -962,3 +995,7 @@ fn matches_filter(predictions: &[Prediction], filter: &str) -> bool {
         _ => true,
     }
 }
+
+#[cfg(test)]
+#[path = "character_review_perf_tests.rs"]
+mod perf_tests;
