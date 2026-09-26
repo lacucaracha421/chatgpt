@@ -2,6 +2,90 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-26 evening — PERF-ALL batches, user acceptance and closed holds
+
+Archived from the backlog on 2026-09-26 after the user's in-app checks (Windows still pending where noted) and the user's decision to close deferred items that are already covered or not needed.
+
+### CLOUD-WORK-001 — Server-owned durable jobs with PC workers
+
+Status: `CLOSED` 2026-09-26 (user) — not needed now; the current server/PC split covers the use cases.
+
+The server should own what work is pending and what result is current, while heavy compute can stay on the PC. Generalize the durable lease/restart pattern already used by `mobile_catalog_refresh_jobs` instead of making the VPS perform every expensive task.
+
+- Server owns job identity/state (`queued/running/completed/failed`), lease owner/expiry, retry state and accepted result revision.
+- PC startup order for worker-backed domains: reconcile server changes -> preserve/flush local intents -> only then claim new work. A worker must not blindly calculate from a stale local snapshot.
+- A job/result carries enough identity to prove what was analyzed: `asset_id`, content hash, input/entity revision, model version, reference-set version and relevant classifier/config version.
+- Result commit is compare-and-set/fenced: if the canonical asset or relevant classification state changed after the job input was captured, reject the stale automatic result or retain it only as a non-authoritative suggestion.
+- Manual/user-confirmed classification outranks automatic classification. A late model result must never silently overwrite a user decision made from mobile or another PC.
+- Job/result submission is idempotent by stable job/operation ID. If a PC dies mid-job, the lease expires and another worker may retry; duplicate late completions must not apply twice.
+- Multiple PCs may participate later, but only the current lease holder may commit ordinary work; recovery from an expired lease remains deterministic.
+- Keep light network/provider jobs on the server where convenient, while CLIP/embedding, FFmpeg/video and other expensive processing can be leased to a capable PC.
+
+Acceptance includes: PC-off queueing; mobile/manual edit while PC is off; stale result rejection after that edit; worker crash and lease recovery; lost response/idempotent resubmit; and two-PC contention without a double commit or manual-state overwrite.
+
+### MOBILE-WRITE-002 — 서버 원천화 이후 모바일 편집 확대
+
+Status: `CLOSED` 2026-09-26 (user) — mobile edits already cover the needed domains (bookmarks, albums, classification, personal edits, reviews, exclusions, bindings).
+
+Once bookmark convergence is boring and reliable, expand mobile writes only where the interaction benefits from a tablet/phone. Reuse the same stable identity, expected-revision, durable intent, receipt and conflict model rather than adding ad-hoc endpoints.
+
+Preferred early domains:
+- ratings/favorites/showcase state;
+- album membership and lightweight organization;
+- character-classification confirm/correct actions;
+- tags and small metadata edits where bulk desktop tooling is unnecessary;
+- Collection/read-state style personal metadata where cross-device continuity matters.
+
+Keep destructive global media deletion under `MOBILE-003`; do not use this item to bypass tombstone/grace/recovery requirements. Bulk filesystem reorganization, GPU work and large maintenance operations remain PC-oriented even though their committed shared results converge through the server.
+
+Acceptance: a supported edit can be made with PC off, survives offline retry/response loss, becomes authoritative exactly once, and appears later on PC without a manual publish/sync step.
+
+### MOBILE-003 — Safe global deletion / tombstone protocol
+
+Status: `CLOSED` 2026-09-26 (user) — covered by Library Trash and the asset lifecycle authority; no separate tombstone protocol needed.
+Risk: HIGH.
+
+Global cross-device deletion remains intentionally deferred. Require tombstones, grace period, acknowledgement/reconciliation, explicit purge, conflict handling, and recovery before activation.
+
+### DEPS-001 — Vitest 5
+
+Status: `CLOSED` 2026-09-26 (user) — not needed.
+
+Vitest 5 changes assertion types to `Assertion<R, T>`; jest-dom 7.0.1 still augments the old shape, so its matchers lose their types and the desktop `tsc` build (which type-checks tests) would fail. Runtime behaviour is unaffected. Our tests use none of the removed APIs; set `clearMocks: false` if call history across tests turns out to matter. Other dependencies were updated in range on 2026-09-23.
+
+### CHAR-REVIEW-001 — Per-series S36 candidate review
+
+Status: `DONE` — accepted in the app by the user 2026-09-26 (PC per-series scope). Mobile stays global.
+
+The S36 candidate queue (자동 후보 + 추천 awaiting a judgment) is one list across all series. After stage C, the series header shows `후보 확인 · N`, but N is the global pending count (`character_shadow_review_page` summary), and the review opens the global list. Once S36 is enabled for more than one series, candidates from other series mix in.
+- Native: let the shadow review page query accept an optional series scope, and return that series' pending counts (filter by the target character's series).
+- PC: the series header count and the review opened from it use the series scope. A global entry (e.g. the status panel's 확인할 것 queue) can keep the all-series list.
+- Mobile review of the same queue: check whether it should get the same filter and whether that touches the server path.
+
+### PC-POLL-002 — Fold the remaining desktop pollers into the coordinated pass
+
+Status: `DONE` — implemented 2026-09-26 (`d84f2a0` server heads + long-poll, `7d80251` desktop fold/watcher, review fixes `17c10b7`); accepted in the app by the user.
+
+With the app idle for 15 minutes, these endpoints are still read about once a minute each, outside the shared status pass: `/v1/captures/pending` 18, `/v1/library/characters/review/decisions` 16, `/v1/library/characters/exclusions` 16, `/v1/library/similarity/review/decisions` 15, `/v1/collections/status` 15, `/v1/collections/personal-edits` 15 (~95 of 151 requests). Read them only when the shared status (or an ETag/cursor) says their domain moved, following `library/authority_pass.rs`; expected idle total under 50 per 15 minutes. Also find what wakes the fast interval every ~3 minutes while idle. Measure the same 15-minute window before/after.
+
+### BIND-POLL-001 — Faster pickup of tablet connection requests
+
+Status: `DONE` — the PC reads the bind log within ~1–2 s through the status long-poll (`7d80251`); accepted by the user 2026-09-26. The end-to-end "연결됨" still includes the collections publication debounce, now 5 s quiet / 60 s cap (`3a7a2eb`).
+
+### WORKS-001 — Film / TV Works polish
+
+Status: `DONE` — in-app check after `TMDB 새로고침` confirmed by the user 2026-09-26.
+
+The Film/TV foundation is already implemented: TMDB Film/Series identity, posters/backdrops, season/episode structure, season posters and cached details exist. Do not restart that foundation.
+
+Current remaining scope is deliberately small and Film-focused:
+- clearer cast/director presentation;
+- useful release-history / release-info presentation;
+- related/connected works rail where provider semantics are trustworthy;
+- keep provider scores visually secondary to personal state.
+
+TV/anime season and episode structure is sufficient for now unless new concrete friction is reported.
+
 ## Closure checkpoint — 2026-09-26 — Catalog editions, Notes ledger, Collections releases and tablet manga tools
 
 Closed at the user's confirmation during the 2026-09-25/26 sessions ("그거빼면 다 만족", "동작은 정상이야"). Source of truth: commits `3c78843`–`a227f2c` on `main`. Production Linux library is at schema v97 (migration 0097, applied 2026-09-25); the Windows PC has not been updated (`WIN-SYNC-001`). Android 0.8.26 is installed on the tablet. This records closure; it is not a Windows or full native audit. `MOBILE-BUG-002`, `MOBILE-PARITY-001` and `PC-POLL-001`, already `DONE` in the backlog, are archived here with their last text.

@@ -12,14 +12,15 @@ Updated 2026-09-26: Manga Catalog duplicate editions, the Notes household ledger
 
 ## Current priority
 
-1. **PERF-ALL-001** — next; run on Codex Astra. Folds in battery reduction, `PC-POLL-002`, `BIND-POLL-001`, lightweight-mode re-verification, slow covers at app start (USER-REQ-20260926), and moving PC sync state kept in `notes_state` into a proper table at the next planned migration.
-2. **USER-REQ-20260926** — Collector translation, Fault game balance, mobile video start delay, top-bar filter, Notes keyboard scrolling.
-3. **CHAR-AUTO-007** — stage 3 implemented 2026-09-24 (machine-local, per series): series switched to S36 get automatic membership only from S36 (knn3 ≤ 0.1085 after the rejection guard); B36/augmentation acceptances stop there; rollback and a "doubtful existing acceptances" review tab exist. Evidence: prospective review 232/241 correct at ≤0.1085 (errors mostly 시시아); ≥427 of 1,527 B36 automatic acceptances were manually rejected. The four series (젠레스 with 시시아 excluded, 명조, 아이돌, 리버스) are switched on the Linux PC. 2026-09-24: new target 엘렌 (젠레스) got 11 automatic S36 acceptances in 15 min (knn3 0.063–0.106); the user checked all 11 as correct. Next: choose further series to widen to; Windows PC switches separately.
-4. **CLOUD-POST-001** — remaining publication/compatibility cleanup only; completed authority domains are archived, and live unmigrated paths must stay intact.
-5. **WORKS-001** — Film cast, release info and related works implemented on desktop 2026-09-24; remaining: in-app check after `TMDB 새로고침`.
-6. **Server review follow-ups (2026-09-24)** — review branch merged (`ae9af4b`); catalog artifact pruning (server disk 83% full, ~3.4 GB/day), then judgment calls 4, 2, 1 and 7 from `docs/research/server-review-2026-09-24.md` §3. Deployment needs approval.
-7. **VAULT-ENC-001** (Windows) and **CHAR-REVIEW-001** — implemented; native acceptance remains.
-8. **PC-REVIEW-001** — the ten high findings are fixed (2026-09-25); remaining are the recorded follow-ups and the medium/low findings.
+Updated 2026-09-26 (evening) with the user: PERF-ALL-001 batches landed (see its entry); the user checked the PC and tablet results (collections list, thumbnails, character engine, vault detection, request volume, bind pickup) except on Windows.
+
+1. **PERF-ALL-001** — remaining: collections 3D cover appearance/persistent render cache (in progress), the Codex review of PC↔server↔tablet transfer paths (in progress), the tablet video endless-loading root cause (WebView requests to the R2 host stall ~2 min while other hosts work), classification/similarity count queries (same CROSS JOIN pattern as albums), `PRAGMA optimize` as its own measured change, tablet connectivity/power callbacks, one-request Library pages, moving PC sync state kept in `notes_state` into a table at the next migration.
+2. **USER-REQ-20260926** — only the tablet video endless-loading bug remains.
+3. **CHAR-AUTO-007** — S36 is enabled for the 백합 series on the user's PC (2026-09-26); watch its automatic results.
+4. **Server review judgment calls** (`docs/research/server-review-2026-09-24.md` §3: 1, 2, 4, 7) — decisions pending with the user. Catalog artifact pruning is running (hourly auto-prune, ~100 catalog files retained, server disk 71% on 2026-09-26).
+5. **WIN-SYNC-001 / VAULT-ENC-001 (Windows) / PC-DECLUTTER-001 (Windows)** — when the Windows PC is available.
+6. **PC-REVIEW-001** — remaining medium/low findings and recorded follow-ups.
+7. **CLOUD-POST-001** — remaining publication/compatibility cleanup only.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
@@ -92,56 +93,15 @@ Current mobile binary caching (`MediaRepository` / `ThumbnailCache`) is useful, 
 
 Acceptance: after one successful sync, relaunching the Android app can show the previous library view without waiting for a full remote page load; later server changes update it incrementally without losing pending local intent.
 
-## CLOUD-WORK-001 — Server-owned durable jobs with PC workers
-
-Status: `HOLD` — post-authority worker architecture.
-
-The server should own what work is pending and what result is current, while heavy compute can stay on the PC. Generalize the durable lease/restart pattern already used by `mobile_catalog_refresh_jobs` instead of making the VPS perform every expensive task.
-
-- Server owns job identity/state (`queued/running/completed/failed`), lease owner/expiry, retry state and accepted result revision.
-- PC startup order for worker-backed domains: reconcile server changes -> preserve/flush local intents -> only then claim new work. A worker must not blindly calculate from a stale local snapshot.
-- A job/result carries enough identity to prove what was analyzed: `asset_id`, content hash, input/entity revision, model version, reference-set version and relevant classifier/config version.
-- Result commit is compare-and-set/fenced: if the canonical asset or relevant classification state changed after the job input was captured, reject the stale automatic result or retain it only as a non-authoritative suggestion.
-- Manual/user-confirmed classification outranks automatic classification. A late model result must never silently overwrite a user decision made from mobile or another PC.
-- Job/result submission is idempotent by stable job/operation ID. If a PC dies mid-job, the lease expires and another worker may retry; duplicate late completions must not apply twice.
-- Multiple PCs may participate later, but only the current lease holder may commit ordinary work; recovery from an expired lease remains deterministic.
-- Keep light network/provider jobs on the server where convenient, while CLIP/embedding, FFmpeg/video and other expensive processing can be leased to a capable PC.
-
-Acceptance includes: PC-off queueing; mobile/manual edit while PC is off; stale result rejection after that edit; worker crash and lease recovery; lost response/idempotent resubmit; and two-PC contention without a double commit or manual-state overwrite.
-
-## MOBILE-WRITE-002 — 서버 원천화 이후 모바일 편집 확대
-
-Status: `HOLD` — the production proof gate was satisfied by the 2026-09-15 bookmark pilot; keep this deferred until the user chooses the next mobile write domain.
-
-Once bookmark convergence is boring and reliable, expand mobile writes only where the interaction benefits from a tablet/phone. Reuse the same stable identity, expected-revision, durable intent, receipt and conflict model rather than adding ad-hoc endpoints.
-
-Preferred early domains:
-- ratings/favorites/showcase state;
-- album membership and lightweight organization;
-- character-classification confirm/correct actions;
-- tags and small metadata edits where bulk desktop tooling is unnecessary;
-- Collection/read-state style personal metadata where cross-device continuity matters.
-
-Keep destructive global media deletion under `MOBILE-003`; do not use this item to bypass tombstone/grace/recovery requirements. Bulk filesystem reorganization, GPU work and large maintenance operations remain PC-oriented even though their committed shared results converge through the server.
-
-Acceptance: a supported edit can be made with PC off, survives offline retry/response loss, becomes authoritative exactly once, and appears later on PC without a manual publish/sync step.
-
 ## MOBILE-008 — Catalog update requests and status
 
 Status: `IN_PROGRESS` — server refresh worker and Android request/status UI already exist.
 
 Remaining is bounded live-source/native acceptance and fuller PC/server grouping reconciliation. This is a server operation lane, not an expansion of normal mobile editing. Keep it behind the authority/reconciliation rules proven by the archived `CLOUD-AUTH-001` contract where domains overlap.
 
-## MOBILE-003 — Safe global deletion / tombstone protocol
-
-Status: `HOLD`
-Risk: HIGH.
-
-Global cross-device deletion remains intentionally deferred. Require tombstones, grace period, acknowledgement/reconciliation, explicit purge, conflict handling, and recovery before activation.
-
 ## VAULT-ENC-001 — Lakomics-encrypted Private Vault (ADR-0039)
 
-Status: `VERIFY` — stages 1–3 implemented (`cc917f6`, `590af74`, `bbf8502`); Linux native acceptance (real USB) confirmed by the user 2026-09-24; Windows acceptance waits for WIN-SYNC-001.
+Status: `VERIFY` — Linux accepted (real USB, 2026-09-24; event-driven detection and the rail entry checked 2026-09-26); Windows acceptance remains (compile + real USB, including same-letter card swaps).
 
 Replace VeraCrypt with Lakomics' own per-file encryption so a USB plugged into another computer shows nothing readable. The user copies the VeraCrypt contents (including `.lakomics/`) to the trusted PC, formats the 64 GB USB as exFAT, then imports.
 
@@ -208,15 +168,6 @@ Status: `IN PROGRESS` — stages C and A implemented 2026-09-24/25 (not yet nati
 3. **B — Task-first Home**: together with the Revisit rebuild (PC and mobile) — 이어 보기 as the hero, 확인할 것 queues that disappear at zero, tools in one row. Needs resume-position data and queue counts first; avoid a dashboard feel (DESIGN.md).
 Ideas to carry to mobile (MOBILE-DESIGN-001): single status indicator, zero-hiding queues, neutral filters, search icon only where searchable, conclusion-first settings, continue-watching.
 
-## CHAR-REVIEW-001 — Per-series S36 candidate review
-
-Status: `VERIFY` — PC implemented 2026-09-25 (series header count and the review it opens are series-scoped; the overflow entry stays all-series); tests only, no native run. Mobile stays global (entries are all-series or per-character); a mobile series filter needs a server `series` parameter on `/v1/library/characters/review` — deferred until mobile gets a series-level review entry.
-
-The S36 candidate queue (자동 후보 + 추천 awaiting a judgment) is one list across all series. After stage C, the series header shows `후보 확인 · N`, but N is the global pending count (`character_shadow_review_page` summary), and the review opens the global list. Once S36 is enabled for more than one series, candidates from other series mix in.
-- Native: let the shadow review page query accept an optional series scope, and return that series' pending counts (filter by the target character's series).
-- PC: the series header count and the review opened from it use the series scope. A global entry (e.g. the status panel's 확인할 것 queue) can keep the all-series list.
-- Mobile review of the same queue: check whether it should get the same filter and whether that touches the server path.
-
 ## MOBILE-DESIGN-001 — Premium mobile layout pass (Galaxy Tab S11 portrait)
 
 Status: `IN PROGRESS` — implemented in Android 0.8.12 (49) on 2026-09-25, not yet accepted on the tablet. Brief given by the user 2026-09-24. Home screen content is out of scope (waits for the Revisit rebuild).
@@ -242,13 +193,6 @@ Goal: a calmer, premium feel ("이제 고급감을 추구할 때").
 Earlier related request (USER-REQ-20260924): logo on all tabs, better use of the top bar, PC-like buttons.
 Process: show browser-rendered mockups at 800×1280 (S11 portrait) for approval before the APK.
 
-## PC-POLL-002 — Fold the remaining desktop pollers into the coordinated pass
-
-Status: `TODO` — found by the 2026-09-25 `PC-POLL-001` re-measurement (archived); folded into `PERF-ALL-001` (2026-09-26).
-
-With the app idle for 15 minutes, these endpoints are still read about once a minute each, outside the shared status pass: `/v1/captures/pending` 18, `/v1/library/characters/review/decisions` 16, `/v1/library/characters/exclusions` 16, `/v1/library/similarity/review/decisions` 15, `/v1/collections/status` 15, `/v1/collections/personal-edits` 15 (~95 of 151 requests). Read them only when the shared status (or an ETag/cursor) says their domain moved, following `library/authority_pass.rs`; expected idle total under 50 per 15 minutes. Also find what wakes the fast interval every ~3 minutes while idle. Measure the same 15-minute window before/after.
-
-
 ## PC-REVIEW-001 — Fix findings of the 2026-09-25 PC app review
 
 Status: `IN PROGRESS` — all ten high items and the sync-state UI fixed 2026-09-25 (tests; native checks pending: real USB vault, Windows, live IGDB). Remaining: the open follow-ups below and the medium/low findings. Review done 2026-09-25 (read-only, 8 Opus reviewers); report with all findings: [`docs/research/pc-app-review-2026-09-25.md`](../research/pc-app-review-2026-09-25.md). 10 high (controller-verified), 31 medium, 49 low (medium/low unverified unless marked). Nothing was blocked in the Linux library at review time.
@@ -272,10 +216,6 @@ Open from the 5–10 fix (2026-09-25): ADR-0039 still says only permanent deleti
 
 Notable medium follow-ups: restore guard lacks an Asset authority probe (two reviewers); library open, trash purge and scan cancel block the UI thread; Linux provider-credential commands can block the GTK thread up to 10 s; every window focus reloads sidebar, galleries and trash; Aladin/Kakao volume renumbering fails refreshes forever; artwork cleanup can delete an in-flight import's files; a locked leftover file (drag-out staging or artwork) can stop the library from opening on Windows; long HEVC/ProRes videos hit the 30-minute ffmpeg cap; S36 rollback stops on a trashed auto-accepted image.
 
-## BIND-POLL-001 — Faster pickup of tablet connection requests
-
-Status: `TODO` — fold into PERF-ALL-001 / PC-POLL-002 (user, 2026-09-26). Tablet MangaDex/Kakao connect requests (`/v1/collections/bindings`) work, but the PC reads the request log at most once a minute, so a pick takes 10–60 s to apply. Put a pending-request signal into the status the PC already polls so it fetches immediately, without adding idle requests.
-
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
 Status: `IN PROGRESS` — phase 1 (measure and rank) done 2026-09-26 on Opus after Codex returned 401 on every request: [`docs/research/perf-all-baseline-20260926.md`](../research/perf-all-baseline-20260926.md) (combined top 10, per-area tables, tablet checks). First fix batch 2026-09-26 (Android 0.8.28 installed; PC not yet rebuilt): `list_collections` 340 → 5.6 ms release (sidebar refresh 349 → 15 ms, identical rows on the real library, VM-step gate); desktop idle whole-tree re-renders 28/min → 0 (gate); tablet cover retry with bounded backoff and cancelled media tasks leave the native queue (`media_busy`); tablet idle replica parses ~360/h → ~0, unchanged-library Picker resume 96 → 1 request (manual 앨범 새로고침 still walks), warm-up resumes at the failed page; dev-profile SQLite built with opt-level 3. Second batch 2026-09-26: event-driven Private Vault detection (Linux mountinfo poll, Windows drive mask; `a1cb720`); revisioned immutable desktop thumbnails (`e37da21`); character engine waits on an update-hook wake instead of polling (idle minute 928 → 9 DB connections, `159b0f4`); `/v1/sync/status` publisher log heads, opt-in signals and long-poll deployed (`d84f2a0`, see [design](../research/perf-all-longpoll-design-20260926.md)); desktop pollers folded into status heads + watcher (`7d80251`, model ~22 idle requests/15 min); tablet foreground long-poll (0.8.29, `81795ca`, real 50 s hold verified through Tailscale+socat); incremental tablet thumbnail warm-up (daily 9,393 → 2 native calls, `0294b94`). Survey of further mechanisms: [smarter mechanisms](../research/perf-all-smarter-mechanisms-20260926.md). An independent Codex review found 8 issues; fixes in progress (desktop hub stale document, exchange token after hold, character due-retry, Windows same-letter media, tablet exchange retry, pre-submit media cancel, server cancelled waiters); the immutable-thumbnail-after-trash note was accepted as is (user, 2026-09-26). Still open: native checks on the PC app (vault USB Linux/Windows, thumbnail cache, idle request count), the video endless-loading root cause (WebView requests to the R2 host hang ~2 min while other hosts work), same CROSS JOIN fix for `list_albums`, `PRAGMA optimize` as its own measured change, tablet connectivity/power callbacks, one-request Library pages. Requested 2026-09-24 ("벤치마크 빡세게"). Decided 2026-09-25: start only after the planned features are built; run it on Codex Astra. Existing tools: `src-tauri/src/bin/perf_probe.rs` (backend probe on a DB snapshot, from PERF-001; extend to current features), catalog/navigation/character benchmark tests (`#[ignore]`d), `android/tools/perf_summary.py`, `server/lakomics-api/tools/poll_benchmark.py`. Missing: frontend render/commit counts and native interaction timings; Astra's sandbox likely cannot drive the native window, so native measurement stays with the controller/user.
@@ -288,7 +228,6 @@ Folded-in scope (2026-09-26):
 - Re-verify lightweight processing mode (`05b18b6`) against everything added since.
 - Covers load slowly right after the app starts (USER-REQ-20260926); see also `MOBILE-PERF-002`.
 - Move PC sync state kept in `notes_state` (Collections release sync, personal-edit v2 receipts, binding sync) into a proper table at the next planned migration (0098).
-
 
 # Future-work notes — 2026-09-21
 
@@ -766,12 +705,6 @@ Status: `HOLD` — the client-side warm-up covers everyday browsing. Reconfirmed
 
 On the tablet an uncached thumbnail takes about 1.5–2.4 s: the Tokyo API answers a ticket in about 0.07–0.1 s and the nearest Cloudflare edge (ICN) is 3 ms away, so the time is R2 storage response latency. 0.7.4 parallelised and prefetched; 0.7.6 warms the whole Library into the native cache (about 200 thumbnails/min). Remaining slow cases are newly captured images and a cleared cache. Options if they matter: serve thumbnails from the Tokyo server's disk (13 GB free on 2026-09-23; ~360 MB for the current library) in batched requests, or move derived thumbnails to an APAC-hinted bucket. Both need server work, a copy of production thumbnails and deployment approval.
 
-## DEPS-001 — Vitest 5
-
-Status: `HOLD` — until `@testing-library/jest-dom` ships Vitest 5 matcher types.
-
-Vitest 5 changes assertion types to `Assertion<R, T>`; jest-dom 7.0.1 still augments the old shape, so its matchers lose their types and the desktop `tsc` build (which type-checks tests) would fail. Runtime behaviour is unaffected. Our tests use none of the removed APIs; set `clearMocks: false` if call history across tests turns out to matter. Other dependencies were updated in range on 2026-09-23.
-
 # Character classification
 
 The character UI/management workflow and current accuracy-improvement pass are accepted and archived. [CHAR-AUTO-001](lakomics-completed.md#char-auto-001--current-accuracy-improvement-pass) retains the implementation evidence, delivery limits and policy for case-driven follow-up. Batch-classification visibility remains a separate verification item below.
@@ -846,20 +779,6 @@ Status: `HOLD`
 Linear PDQ candidate scanning remains the default. Reopen only if historical discovery or representative 100k+/250k+ measurements show it is a material bottleneck.
 
 # Works / Collections
-
-## WORKS-001 — Film / TV Works polish
-
-Status: `PARTIAL`
-
-The Film/TV foundation is already implemented: TMDB Film/Series identity, posters/backdrops, season/episode structure, season posters and cached details exist. Do not restart that foundation.
-
-Current remaining scope is deliberately small and Film-focused:
-- clearer cast/director presentation;
-- useful release-history / release-info presentation;
-- related/connected works rail where provider semantics are trustworthy;
-- keep provider scores visually secondary to personal state.
-
-TV/anime season and episode structure is sufficient for now unless new concrete friction is reported.
 
 ## LONG-001 — AV metadata/cover acquisition and candidate selection
 
