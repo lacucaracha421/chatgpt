@@ -1,6 +1,7 @@
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState,type ReactNode} from 'react';
+import {ARRIVE_RISE_PX, ARRIVE_WAIT_MS, arrive, holdArrival, holdImage} from './motion';
 import {observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PlayIcon, PhotoIcon} from '@heroicons/react/24/outline';
 import type {Asset} from './types';
@@ -13,8 +14,9 @@ import {invalidateTicket, loadThumbnail, mediaTicket, prefetchThumbnails} from '
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, vault}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; vault?:GalleryVaultSource}) {
-  const host=useRef<HTMLButtonElement>(null);
+function Tile({asset, index, width, height, onOpen, onReady, paused, vault, arriving, onArrived}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; vault?:GalleryVaultSource;
+  /** Appended by a page load and not shown yet: the tile waits for its thumbnail, then rises in. */arriving:boolean; onArrived(id:string):void}) {
+  const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
   useEffect(()=>{
     const element=host.current;if(paused||vault||!element||!window.IntersectionObserver)return;
     let visible:AbortController|undefined;
@@ -36,6 +38,26 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, vault}: {as
     }, () => {});
     return () => controller.abort();
   }, [asset.id, asset.preview, asset.thumbnail_available, asset.thumbnail_revision, asset.pending, onReady, paused, vault]);
+  const hasPreview=!!preview;
+  // An appended tile stays transparent in its final box until its thumbnail is decoded (or a
+  // short wait ends), then rises in once. Any other tile whose first image comes late fades it in.
+  const waiting=useRef(false);
+  useLayoutEffect(()=>{
+    if(!arriving||waiting.current)return;
+    waiting.current=holdArrival(host.current);
+    if(!waiting.current)onArrived(asset.id);
+  },[]);// eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(()=>{if(hasPreview&&!waiting.current)holdImage(image.current);},[hasPreview]);
+  const settle=()=>{if(waiting.current){waiting.current=false;onArrived(asset.id);arrive(host.current,ARRIVE_RISE_PX);}else arrive(image.current);};
+  useEffect(()=>{
+    if(!waiting.current)return;
+    const timer=window.setTimeout(()=>{
+      if(!waiting.current)return;
+      // Shown before its thumbnail: the image then fades in by itself when it comes.
+      waiting.current=false;holdImage(image.current);onArrived(asset.id);arrive(host.current,ARRIVE_RISE_PX);
+    },hasPreview||!(vault||asset.thumbnail_available===false)?ARRIVE_WAIT_MS:0);
+    return()=>window.clearTimeout(timer);
+  },[hasPreview]);// eslint-disable-line react-hooks/exhaustive-deps
   const retry = () => {
     if (vault) {setPreview(undefined); return;}
     if (retried || asset.pending || asset.thumbnail_available === false) return;
@@ -44,11 +66,12 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, vault}: {as
   };
   return <button ref={host} className="media-tile" style={{width}} onClick={() => onOpen(index)} aria-label={vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} data-asset-id={asset.id}>
     <span className="tile-picture" style={{height}}>
-      {preview ? <img src={preview} alt="" draggable={false} onError={retry} onLoad={vault && !asset.ratio && !(asset.width && asset.height) ? event => {
+      {preview ? <img ref={image} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
+        const element = event.currentTarget;
         // A vault item without index dimensions takes its shape from the decoded thumbnail.
-        const {naturalWidth: w, naturalHeight: h} = event.currentTarget;
-        if (w > 0 && h > 0) onReady({...asset, ratio: w / h});
-      } : undefined}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
+        if (vault && !asset.ratio && !(asset.width && asset.height) && element.naturalWidth > 0 && element.naturalHeight > 0) onReady({...asset, ratio: element.naturalWidth / element.naturalHeight});
+        void (typeof element.decode === 'function' ? element.decode() : Promise.resolve()).catch(() => {}).then(settle);
+      }}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
       {asset.kind === 'video' && <span className="video-mark" aria-label="영상"><PlayIcon/></span>}
     </span>
   </button>;
@@ -80,21 +103,16 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   const rows = useMemo(() => justifiedRows(items, width, rowHeight(density, width)), [items, width, density]);
   const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, estimateSize: i => rows[i].height + 10, overscan: 2,scrollMargin:introHeight,observeElementRect:observeShownRect});
   const oldRows = useRef(rows);
-  // Rows added by a page append (same gallery, more items) enter with a short CSS fade. Only
-  // those rows are marked, and only briefly, so rows re-mounted while scrolling back never replay.
-  const [entering, setEntering] = useState<number | null>(null);
-  const grown = useRef({identity, items: items.length, rows: rows.length});
-  useLayoutEffect(() => {
-    const before = grown.current;
-    if (before.identity === identity && before.items > 0 && items.length > before.items) setEntering(Math.max(0, before.rows - 1));
-    else if (before.identity !== identity) setEntering(null);
-    grown.current = {identity, items: items.length, rows: rows.length};
-  }, [identity, items.length, rows.length]);
-  useEffect(() => {
-    if (entering === null) return;
-    const timer = window.setTimeout(() => setEntering(null), 900);
-    return () => clearTimeout(timer);
-  }, [entering]);
+  // Assets added by a page append (same gallery, same head, more items) arrive once each; the
+  // first page of a place, a replaced list and tiles re-mounted while scrolling back never do.
+  const arrivals = useRef({identity, head: undefined as string | undefined, known: new Set<string>(), pending: new Set<string>()});
+  {
+    const tracked = arrivals.current, head = items[0]?.id;
+    if (tracked.identity !== identity || !tracked.known.size || tracked.head !== head) {
+      arrivals.current = {identity, head, known: new Set(items.map(asset => asset.id)), pending: new Set()};
+    } else for (const asset of items) if (!tracked.known.has(asset.id)) {tracked.known.add(asset.id); tracked.pending.add(asset.id);}
+  }
+  const arrived = useRef((id: string) => {arrivals.current.pending.delete(id);}).current;
   useLayoutEffect(() => {
     const scroll = parent.current;
     if (!scroll) return;
@@ -136,8 +154,8 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     {pull}
     {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
-      {virtualizer.getVirtualItems().map(virtual => <div className={`gallery-row${entering !== null && virtual.index >= entering ? ' is-entering' : ''}`} key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
-        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} vault={vault}/>) }
+      {virtualizer.getVirtualItems().map(virtual => <div className="gallery-row" key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
+        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} vault={vault} arriving={arrivals.current.pending.has(item.asset.id)} onArrived={arrived}/>) }
       </div>)}
     </div>
   </div>;

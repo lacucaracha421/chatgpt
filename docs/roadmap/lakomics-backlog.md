@@ -195,6 +195,8 @@ Ideas to carry to mobile (MOBILE-DESIGN-001): single status indicator, zero-hidi
 
 Status: `IN PROGRESS` — implemented in Android 0.8.12 (49) on 2026-09-25, not yet accepted on the tablet. Brief given by the user 2026-09-24. Home screen content is out of scope (waits for the Revisit rebuild).
 
+2026-09-26: all listed items are implemented (last: smooth arrival of tiles loaded on scroll, 0.8.43); only Tab S11 device acceptance remains (layout fit, touch feel, tile arrival). Open question: whether appended Collections/Catalog cards should also rise in as whole cards (today only their covers fade in).
+
 Decisions (user, 2026-09-25, from the mockups in [`docs/prototypes/mobile-design-20260925/`](../prototypes/mobile-design-20260925/README.md)):
 1. Top bar brand B: the logo mark plus a larger tab name.
 2. Library root A: three columns whose covers flex so exactly three whole rows fill the first screen (computed from the real viewport at runtime), an end line "아래에 분류 N개 더", and row snapping.

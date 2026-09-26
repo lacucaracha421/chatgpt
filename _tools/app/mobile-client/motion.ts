@@ -154,6 +154,45 @@ export function useTabIndicator(list:RefObject<HTMLElement|null>,indicator:RefOb
   },[list,place]);
 }
 
+/**
+ * Arrival of media that loads after its box is on screen (an appended gallery tile, a cover
+ * whose image comes late). The box keeps its final size the whole time, so nothing shifts: the
+ * element is only held transparent until its image is decoded, then fades in (and rises
+ * ARRIVE_RISE_PX when asked) over ARRIVE_MS. Under reduced motion nothing is held or moved.
+ */
+export const ARRIVE_MS=180;
+export const ARRIVE_RISE_PX=8;
+/** An appended tile whose image is still not decoded after this long is shown anyway. */
+export const ARRIVE_WAIT_MS=600;
+const HELD='0';
+
+/** Holds `element` transparent until `arrive` is called. Returns false (nothing held) under reduced motion. */
+export function holdArrival(element:HTMLElement|null):boolean{
+  if(!element||prefersReducedMotion())return false;
+  element.style.opacity=HELD;
+  return true;
+}
+
+/** Holds an image that is not decoded yet; one already decoded (a cached thumbnail) is left alone. */
+export function holdImage(image:HTMLImageElement|null):boolean{
+  if(!image||(image.complete&&image.naturalWidth>0))return false;
+  return holdArrival(image);
+}
+
+/**
+ * Plays the arrival of an element held by `holdArrival`/`holdImage`, once: an element that is
+ * not held (never held, or already arrived) is left alone and false is returned.
+ */
+export function arrive(element:HTMLElement|null,rise=0):boolean{
+  if(!element||element.style.opacity!==HELD)return false;
+  element.style.opacity='';
+  if(prefersReducedMotion()||typeof element.animate!=='function')return true;
+  element.animate(rise
+    ?[{opacity:0,transform:`translateY(${rise}px)`},{opacity:1,transform:'none'}]
+    :[{opacity:0},{opacity:1}],{duration:ARRIVE_MS,easing:EASE_OUT});
+  return true;
+}
+
 /** A load shorter than this shows nothing. */
 export const PROGRESS_DELAY_MS=350;
 /** Once shown, the line stays at least this long, so it never blinks. */

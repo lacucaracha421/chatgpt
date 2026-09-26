@@ -336,15 +336,6 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .viewer-actions .viewer-action.is-danger svg { color:color-mix(in srgb,var(--color-danger) 80%,var(--color-muted)); }
 .viewer-actions__divider { width:1px; height:20px; margin:0 4px; background:#3a3b3d; flex:none; }
 @media (max-width:600px) { .viewer-action__label { display:none; } .viewer-actions .viewer-action { width:var(--touch); padding:0; } }
-/* Rows appended by scrolling rise into place; their size is final before they appear. */
-@keyframes gallery-row-enter { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
-@media (prefers-reduced-motion:no-preference) {
-  .gallery-row.is-entering>.media-tile { animation:gallery-row-enter 320ms var(--ease-standard) both; }
-  .gallery-row.is-entering>.media-tile:nth-child(2) { animation-delay:45ms; }
-  .gallery-row.is-entering>.media-tile:nth-child(3) { animation-delay:90ms; }
-  .gallery-row.is-entering>.media-tile:nth-child(4) { animation-delay:135ms; }
-  .gallery-row.is-entering>.media-tile:nth-child(n+5) { animation-delay:180ms; }
-}
 /* Endless grids end in a short fade above the navigation instead of a hard cut. */
 .library-main:has(> .gallery-scroll)::after, .mobile-collections:not(.has-detail)::after, .catalog-content::after { content:''; position:absolute; left:0; right:0; bottom:0; height:32px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:2; }
 .mobile-collections, .catalog-content { position:relative; }
