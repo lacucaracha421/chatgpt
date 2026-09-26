@@ -185,12 +185,47 @@ function demoBindings(url:URL,payload:Record<string,unknown>):unknown{
   const pending=(provider:'mangadex'|'kakao')=>items.find(entry=>entry.provider===provider&&entry.state==='pending')??null;
   return {version:1,items,pending:collectionId?{mangadex:pending('mangadex'),kakao:pending('kakao')}:null};
 }
+/**
+ * `?demo&home=busy|calm|offline` stages Home's dashboard: busy has every to-do count and a
+ * send in progress, calm has none (and no unread 신간), offline fails Home's dashboard reads as
+ * unreachable while the already-loaded library keeps working (open busy first so Home has last
+ * values to show).
+ */
+const homeDemo=typeof location==='undefined'?null:new URLSearchParams(location.search).get('home');
+if(homeDemo==='calm')demoReleases=[];
+const homeDemoExchange=()=>({configured:true,tokenConfigured:true,receiveSupported:true,deviceId:'tablet',deviceName:'태블릿',code:'',
+  devices:[{deviceId:'pc',name:'작업실 PC',kind:'pc',lastSeenAt:new Date(Date.now()-3*60_000).toISOString()}],incoming:[],unseen:homeDemo==='calm'?0:3,
+  outgoing:homeDemo==='calm'?[]:[{transferId:'demo-send',batchId:'demo-batch',fileName:'스케치_0926.zip',sizeBytes:100,bytes:62,peer:'pc',peerId:'pc',state:'uploading',code:'',createdAt:new Date().toISOString()}]});
 function demoReleaseList(){
   const counts=new Map<string,number>();for(const event of demoReleases)counts.set(event.collectionId,(counts.get(event.collectionId)??0)+1);
   return {version:1,revision:demoReleases.length,generation:'demo',publishedAt:'2026-09-25T09:00:00Z',counts:{unread:demoReleases.length,collections:[...counts].sort().map(([collectionId,unread])=>({collectionId,unread}))},items:demoReleases,nextCursor:null,hasMore:false};
 }
+// 전송 timeline: yesterday's and today's traffic with the workshop PC.
+const demoExchangeAt=(daysAgo:number,hour:number,minute:number)=>{const at=new Date();at.setDate(at.getDate()-daysAgo);at.setHours(hour,minute,0,0);return at.toISOString();};
+const demoPc='11111111-1111-4111-8111-111111111111';
+const demoExchangeRow=(id:number,values:Record<string,unknown>)=>({transferId:`00000000-0000-4000-8000-${String(id).padStart(12,'0')}`,batchId:'',fileName:'file',sizeBytes:1,bytes:0,peer:'작업실 PC',peerId:demoPc,state:'saved',code:'',createdAt:'',...values});
+const demoExchange={configured:true,tokenConfigured:true,receiveSupported:true,deviceId:'d',deviceName:'Galaxy Tab S11',code:'',unseen:0,
+  devices:[{deviceId:demoPc,name:'작업실 PC',kind:'pc',lastSeenAt:''},{deviceId:'22222222-2222-4222-8222-222222222222',name:'Galaxy S25',kind:'android',lastSeenAt:''}],
+  incoming:[
+    demoExchangeRow(1,{fileName:'표지_시안_v2.psd',sizeBytes:164e6,bytes:164e6,createdAt:demoExchangeAt(1,21,40)}),
+    demoExchangeRow(2,{batchId:'in-2',fileName:'표지_시안_v3.psd',sizeBytes:186e6,bytes:63e6,state:'downloading',createdAt:demoExchangeAt(0,14,2)}),
+    demoExchangeRow(3,{batchId:'in-2',fileName:'레퍼런스_모음.zip',sizeBytes:412e6,state:'waiting',createdAt:demoExchangeAt(0,14,2)}),
+    demoExchangeRow(4,{fileName:'스크린샷 2026-09-26 144011.png',sizeBytes:2.1e6,bytes:2.1e6,createdAt:demoExchangeAt(0,14,40)}),
+  ],
+  outgoing:[
+    ...Array.from({length:3},(_,i)=>demoExchangeRow(10+i,{batchId:'out-1',fileName:`IMG_2025092${i}.jpg`,sizeBytes:6e6,bytes:6e6,state:'delivered',createdAt:demoExchangeAt(1,22,5)})),
+    ...Array.from({length:12},(_,i)=>demoExchangeRow(20+i,{batchId:'out-2',fileName:`IMG_20260926_1432${String(i).padStart(2,'0')}.jpg`,sizeBytes:5.1e6,bytes:i===4?3.2e6:i<4?5.1e6:0,state:i<4?'ready':i===4?'uploading':'preparing',createdAt:demoExchangeAt(0,14,31)})),
+    demoExchangeRow(40,{fileName:'원고_7화.zip',sizeBytes:1000,bytes:410,state:'zipping',createdAt:demoExchangeAt(0,14,33)}),
+    demoExchangeRow(41,{fileName:'녹화_2026-09-25.mp4',sizeBytes:1.38e9,state:'failed',code:'uploadMissing',createdAt:demoExchangeAt(0,14,35)}),
+  ]};
+const demoExchangeThumbs=new Map([...demoExchange.incoming,...demoExchange.outgoing].filter(row=>/\.(jpe?g|png)$/i.test(row.fileName)).map((row,i)=>[row.transferId,art(i+3,256,256)]));
+
 export async function demoTransport(op: string, payload: Record<string, unknown>): Promise<unknown> {
   await new Promise(resolve => setTimeout(resolve, 80));
+  if(homeDemo&&(op==='exchangeState'||op==='exchangeVisible'))return homeDemoExchange();
+  if(op==='exchangeState'||op==='exchangeVisible'||op==='exchangeRetry'||op==='exchangeCancel')return demoExchange;
+  if(op==='exchangeThumbnail')return {url:demoExchangeThumbs.get(String(payload.transferId))??''};
+  if(op==='exchangeSend'||op==='exchangeSendFolder'||op==='exchangeOpen')return {};
   if(op==='notesState'||op==='notesSync'||op==='notesUnlock')return {unlocked:true,notes:demoNotes,lastSyncedAt:new Date().toISOString()};
   if(op==='notesSecretStatus')return {pinSet:true,unlocked:false,biometric:false};
   if(op==='notesSecretLock'||op==='notesCopySecret'||op==='notesDismissConflictCopy')return {};
@@ -248,6 +283,11 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   }
   if (op !== 'api') return {};
   const url = new URL(String(payload.path),'https://preview.invalid');
+  if(homeDemo==='offline'&&/^\/v1\/(captures|collections|library\/(characters\/review|similarity)|mobile-catalog\/duplicates)/.test(url.pathname))throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);
+  if(homeDemo&&url.pathname==='/v1/library/characters/review')return {ready:true,counts:{total:homeDemo==='calm'?0:14},items:[]};
+  if(homeDemo&&url.pathname==='/v1/library/similarity/review')return {ready:true,counts:{open:homeDemo==='calm'?0:6},items:[]};
+  if(homeDemo&&url.pathname==='/v1/mobile-catalog/duplicates')return {counts:{undecided:homeDemo==='calm'?0:2},items:[]};
+  if(homeDemo==='busy'&&url.pathname.includes('/captures'))return {captures:assets.slice(0,23)};
   if(url.pathname.startsWith('/v1/library/characters')) {
     const revision='a'.repeat(64);
     const nodes=[
@@ -257,7 +297,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
       ...Array.from({length:15},(_,i)=>({id:`character:demo-${i}`,kind:'character',sourceId:`demo-${i}`,seriesId:'demo',parentId:i<3?'group:demo':'series:demo',name:['서하','유리','하늘'][i%3]+(i>2?` ${i+1}`:''),description:'보관된 캐릭터 자료',thumbnailAssetId:`demo-${i}`,manualOnly:i%3===0,excluded:false}))
     ];
     const scopes=nodes.flatMap(n=>(n.kind==='series'?['all','unclassified','needs_review']:['all']).map(filter=>({nodeId:n.id,filter,totalCount:filter==='all'?120:0,sourceCount:filter==='all'?120:0})));
-    if(url.pathname.endsWith('/characters'))return {version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,publishedAt:'2026-09-13T00:00:00Z',nodes,scopes};
+    if(url.pathname.endsWith('/characters'))return {version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false,...(homeDemo?{characterReview:true}:{})},...(homeDemo?{libraryId:'a'.repeat(32)}:{}),ready:true,revision,publishedAt:'2026-09-13T00:00:00Z',nodes,scopes};
     const selected=url.searchParams.get('filter')==='all'?assets:[];
     const offset=Number(url.searchParams.get('cursor')??0),limit=40;
     return {revision,items:selected.slice(offset,offset+limit),totalCount:selected.length,sourceCount:selected.length,has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};

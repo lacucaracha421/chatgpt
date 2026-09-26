@@ -4,24 +4,13 @@ import {Button, Dialog, DialogDescription} from './ui';
 import {usePullToRefresh} from './usePullToRefresh';
 import {errorText} from './transport';
 import type {CollectionSummary} from './collectionModel';
+import {commitReleases, invalidateReleases, loadShelf, releaseEpoch, releaseStore, type ReleaseStore} from './releaseStore';
 import {
-  acknowledgeReleases, allMangaWorks, allUnreadReleases, groupReleases, japanReleases, koreanReleases, koreanVolumeLine, localToday, releaseLine,
-  type MangaShelf, type ReleaseCounts, type ReleaseEvent,
+  acknowledgeReleases, allUnreadReleases, groupReleases, japanReleases, koreanReleases, koreanVolumeLine, localToday, releaseLine,
+  type ReleaseCounts,
 } from './collectionReleases';
 
 type Region = 'kr' | 'jp';
-/**
- * What the 신간 screen last read, kept by the parent across closing and reopening (the parent
- * is remounted per endpoint, so this is scoped to it). The shelf is valid for the parent's
- * `refresh` it was read under; the events for that `refresh` and the release list revision
- * they came from. A null key means "read again" (never read, or pulled).
- */
-export type ReleaseStore = {
-  shelf: MangaShelf | null; shelfRefresh: number | null;
-  events: ReleaseEvent[]; eventsRefresh: number | null; eventsRevision: number | null;
-  loaded: boolean;
-};
-export const emptyReleaseStore = (): ReleaseStore => ({shelf: null, shelfRefresh: null, events: [], eventsRefresh: null, eventsRevision: null, loaded: false});
 /** Volumes ahead of the Korean edition shown as chips before the rest fold into "외 N권". */
 const AHEAD_CHIPS = 12;
 export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 정보가 보여요';
@@ -34,12 +23,10 @@ export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 
  * server (the PC follows) and the information stays. Owned counts come from `ownedOf`, which
  * includes queued tracking edits, so a change shows here at once.
  */
-export function CollectionReleases({active, store, counts, refresh, revision: listRevision, onCounts, onRevision, onOpen, cover, ownedOf, watching}: {
+export function CollectionReleases({active, counts, refresh, revision: listRevision, onCounts, onRevision, onOpen, cover, ownedOf, watching}: {
   active: boolean;
-  /** The last read, reused on reopen while `refresh` and `revision` still match it. */
-  store: {current: ReleaseStore};
   counts: ReleaseCounts;
-  /** Bumped by the parent when the publication or a personal edit changed; re-reads on next show. */
+  /** Bumped by the parent after it invalidated the shared release store; re-checks what to read. */
   refresh: number;
   /** The release list revision the parent last saw (it moves when the PC publishes or anything is confirmed). */
   revision: number | null;
@@ -55,7 +42,7 @@ export function CollectionReleases({active, store, counts, refresh, revision: li
   watching(work: CollectionSummary): boolean;
 }) {
   const [region, setRegion] = useState<Region>('kr');
-  const [data, setData] = useState<ReleaseStore>(() => store.current);
+  const [data, setData] = useState<ReleaseStore>(() => releaseStore.current);
   const [status, setStatus] = useState({busy: false, error: ''});
   const [nonce, setNonce] = useState(0);
   const [working, setWorking] = useState<string | null>(null);
@@ -66,23 +53,24 @@ export function CollectionReleases({active, store, counts, refresh, revision: li
   const countsRef = useRef(counts); countsRef.current = counts;
   const report = useRef(onCounts); report.current = onCounts;
   const reportRevision = useRef(onRevision); reportRevision.current = onRevision;
-  const commit = (next: ReleaseStore) => { store.current = next; setData(next); };
+  const commit = (next: ReleaseStore) => { commitReleases(next); setData(next); };
 
-  // Only what is out of date is read: the whole manga shelf when the publication (or a personal
-  // edit) moved, the unread events when that or the release list revision moved.
+  // Only what is out of date is read (the store is shared with Home, which may already have
+  // read the shelf): the whole manga shelf when the publication (or a personal edit) moved,
+  // the unread events when that or the release list revision moved.
   useEffect(() => {
     if (!active) return;
-    const current = store.current;
-    const wantShelf = current.shelfRefresh !== refresh;
-    const wantEvents = current.eventsRefresh !== refresh || current.eventsRevision !== listRevision;
-    if (!wantShelf && !wantEvents) return;
+    const current = releaseStore.current, at = releaseEpoch();
+    const wantShelf = !current.shelf || current.shelfEpoch !== at;
+    const wantEvents = current.eventsEpoch !== at || current.eventsRevision !== listRevision;
+    if (!wantShelf && !wantEvents) { setData(current); return; }
     const controller = new AbortController();
     setStatus({busy: true, error: ''});
-    void Promise.all([wantShelf ? allMangaWorks(controller.signal) : null, wantEvents ? allUnreadReleases(controller.signal) : null]).then(([shelf, releases]) => {
+    void Promise.all([wantShelf ? loadShelf(controller.signal) : null, wantEvents ? allUnreadReleases(controller.signal) : null]).then(([shelf, releases]) => {
       if (controller.signal.aborted) return;
-      const next = {...store.current, loaded: true};
-      if (shelf) Object.assign(next, {shelf, shelfRefresh: refresh});
-      if (releases) Object.assign(next, {events: releases.items, eventsRefresh: refresh, eventsRevision: releases.revision});
+      const next = {...releaseStore.current, loaded: true};
+      if (shelf) Object.assign(next, {shelf, shelfEpoch: at});
+      if (releases) Object.assign(next, {events: releases.items, eventsEpoch: at, eventsRevision: releases.revision});
       commit(next);
       setStatus({busy: false, error: ''});
       if (releases) { report.current(releases.counts); reportRevision.current(releases.revision); }
@@ -94,9 +82,9 @@ export function CollectionReleases({active, store, counts, refresh, revision: li
 
   /** A pull (or 다시 시도) reads everything again. */
   const reload = useCallback(() => {
-    store.current = {...store.current, shelfRefresh: null, eventsRefresh: null};
+    invalidateReleases();
     setNonce(n => n + 1);
-  }, [store]);
+  }, []);
   const pull = usePullToRefresh(scroller, reload, status.busy, !active);
 
   /**
@@ -105,7 +93,7 @@ export function CollectionReleases({active, store, counts, refresh, revision: li
    * copy current; any other step means something else changed too, so the next show re-reads.
    */
   const settle = (collectionId: string, after?: number) => {
-    const current = store.current;
+    const current = releaseStore.current;
     const own = typeof after === 'number' && current.eventsRevision !== null && (after === current.eventsRevision || after === current.eventsRevision + 1);
     commit({...current, events: current.events.filter(event => event.collectionId !== collectionId), eventsRevision: own ? after : current.eventsRevision});
     if (own) reportRevision.current(after);

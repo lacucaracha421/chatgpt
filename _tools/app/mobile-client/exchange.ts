@@ -1,3 +1,5 @@
+import type {BatchPart, TimelineEntry} from '../src/exchange/timeline';
+
 /**
  * File exchange (보내기/받기) view model. Native owns the protocol, the device token and every
  * transfer; the web layer only renders its snapshot and asks for user actions.
@@ -9,6 +11,10 @@ export type ExchangeRow = {
   skipped?: number;
   /** False once a folder send's zip is gone: it has to be sent again from the folder. */
   retryable?: boolean;
+  /** The other device's id (sender of an incoming row, target of an outgoing one); '' when unknown. */
+  peerId?: string;
+  /** Saved rows: when the file reached Download/Lakomics. */
+  savedAt?: string;
 };
 export type ExchangeDevice = {deviceId: string; name: string; kind: string; lastSeenAt: string};
 export type ExchangeSnapshot = {
@@ -126,3 +132,29 @@ export function arrivalText(arrival: ExchangeArrival): string {
 export function defaultTarget(devices: ExchangeDevice[], chosen: string): ExchangeDevice | undefined {
   return devices.find(device => device.deviceId === chosen) ?? devices.find(device => device.kind === 'pc') ?? devices[0];
 }
+
+/** Whether `row` was exchanged with `device`. Rows whose device is gone follow the chosen one. */
+export function withDevice(row: ExchangeRow, device: ExchangeDevice, devices: ExchangeDevice[]): boolean {
+  const matches = (candidate: ExchangeDevice) => row.peerId ? row.peerId === candidate.deviceId : !!row.peer && row.peer === candidate.name;
+  return matches(device) || !devices.some(matches);
+}
+
+/** Entries of the timeline with `device`; `receivedOnly` leaves out what this tablet sent. */
+export function timelineEntries(snapshot: ExchangeSnapshot, device: ExchangeDevice, receivedOnly: boolean): TimelineEntry<ExchangeRow>[] {
+  const entry = (row: ExchangeRow, mine: boolean): TimelineEntry<ExchangeRow> =>
+    ({row, transferId: row.transferId, batchId: row.batchId || row.transferId, mine, at: row.createdAt});
+  const incoming = snapshot.incoming.filter(row => withDevice(row, device, snapshot.devices)).map(row => entry(row, false));
+  if (receivedOnly) return incoming;
+  return [...incoming, ...snapshot.outgoing.filter(row => withDevice(row, device, snapshot.devices)).map(row => entry(row, true))];
+}
+
+const FINISHED = new Set(['saved', 'delivered', 'ready', 'completing', 'saving']);
+const MOVING = new Set(['uploading', 'downloading']);
+/** A row's share of its batch's combined progress. */
+export function batchPart(row: ExchangeRow): BatchPart {
+  const size = Math.max(0, row.sizeBytes);
+  return {size, done: FINISHED.has(row.state) ? size : MOVING.has(row.state) ? row.bytes : 0, finished: FINISHED.has(row.state)};
+}
+
+/** Transfers still moving (or about to), for the device list and the combined bar. */
+export const ACTIVE_STATES = new Set(['waiting', 'downloading', 'saving', 'zipping', 'preparing', 'uploading', 'completing']);

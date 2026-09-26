@@ -1,17 +1,30 @@
 import {ArrowLeftIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline';
 import {useEffect,useRef,type ReactNode} from 'react';
 import {IconButton,Mark} from './ui';
+import {useDelayedPresence} from './motion';
 /**
  * The shared tab bar: the logo mark (or Back on a deeper level), the tab or place name, and the
  * actions that belong to that screen. Every tab uses the same 56px bar, so switching tabs never
  * moves the content.
  */
 /**
+ * A thin progress line that shows only for a load that outlasts PROGRESS_DELAY_MS, stays at
+ * least PROGRESS_MIN_MS and fades out, so quick loads show nothing and it never blinks. While
+ * fading out it is no longer announced. `className` places it (e.g. `is-bottom`).
+ */
+export function LoadingLine({label,className=''}:{label:string|false|undefined;className?:string}) {
+  const presence=useDelayedPresence(!!label);
+  const named=useRef('');if(label)named.current=label;
+  if(presence==='hidden')return null;
+  const classes=`loading-line is-timed${className?` ${className}`:''}${presence==='leaving'?' is-leaving':''}`;
+  return presence==='leaving'?<span className={classes} aria-hidden="true"/>:<span className={classes} role="status" aria-label={named.current}/>;
+}
+/**
  * The one place a page or scope load shows: a thin line on the bar's bottom edge. It is laid
  * over the bar's border, so appearing and disappearing never moves anything.
  */
 export function BarProgress({label}:{label:string|false|undefined}) {
-  return label?<span className="loading-line top-bar__progress" role="status" aria-label={label}/>:null;
+  return <LoadingLine label={label} className="top-bar__progress"/>;
 }
 export function TopBar({title,count,crumbs,back,actions,className='',loading}:{title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false}) {
   return <header className={`top-bar${className?` ${className}`:''}`}>

@@ -8,7 +8,7 @@ import {arrivalText, errorCode, rowView, screenMessage, EXCHANGE_ARRIVED_EVENT, 
 
 const PC = {deviceId: '11111111-1111-4111-8111-111111111111', name: 'DESKTOP', kind: 'pc', lastSeenAt: ''};
 function row(values: Partial<ExchangeRow>): ExchangeRow {
-  return {transferId: '22222222-2222-4222-8222-222222222222', batchId: 'b', fileName: 'movie.mp4', sizeBytes: 2048, bytes: 0, peer: 'DESKTOP', state: 'waiting', code: '', createdAt: '', ...values};
+  return {transferId: '22222222-2222-4222-8222-222222222222', batchId: '', fileName: 'movie.mp4', sizeBytes: 2048, bytes: 0, peer: 'DESKTOP', state: 'waiting', code: '', createdAt: '', ...values};
 }
 function snapshot(values: Partial<ExchangeSnapshot> = {}): ExchangeSnapshot {
   return {configured: true, tokenConfigured: true, receiveSupported: true, deviceId: 'd', deviceName: 'Galaxy Tab S11', code: '', devices: [PC], incoming: [], outgoing: [], unseen: 0, ...values};
@@ -62,7 +62,7 @@ it('shows zipping progress, skipped entries and folder-only failures', () => {
   const skipped = row({transferId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', fileName: '문서.zip', state: 'ready', skipped: 3});
   const tooLarge = row({transferId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', fileName: '영상.zip', state: 'failed', code: 'folderTooLarge', retryable: false});
   show(snapshot({outgoing: [zipping, skipped, tooLarge]}));
-  expect(screen.getByText('압축 중 42%')).toBeTruthy();
+  expect(screen.getByLabelText('압축 중 42%')).toBeTruthy();
   expect(screen.getByText(/읽지 못한 항목 3개 제외/)).toBeTruthy();
   expect(screen.getByText('폴더가 너무 큼 (압축 파일 최대 2GB)')).toBeTruthy();
   // A zip that is gone cannot be retried; zipping can be cancelled.
@@ -82,15 +82,15 @@ it('shows each row state with its action', async () => {
     row({transferId: '99999999-9999-4999-8999-999999999999', fileName: 'g.txt', state: 'delivered'}),
     row({transferId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', fileName: 'h.txt', state: 'expired'}),
     row({transferId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', fileName: 'i.txt', state: 'failed', code: 'network'})]}));
-  expect(screen.getByText('받는 중 25%')).toBeTruthy();
+  expect(screen.getByLabelText('받는 중 25%')).toBeTruthy();
   expect(screen.getByText('저장 공간 부족')).toBeTruthy();
-  expect(screen.getByText('업로드 중 50%')).toBeTruthy();
+  expect(screen.getByLabelText('업로드 중 50%')).toBeTruthy();
   expect(screen.getByText('대기 중 (받으면 삭제됨)')).toBeTruthy();
   expect(screen.getByText('보관 한도 초과')).toBeTruthy();
   expect(screen.getByText('전달됨')).toBeTruthy();
   expect(screen.getByText('만료됨 (받지 않음)')).toBeTruthy();
   expect(screen.getByText('서버에 연결할 수 없음 — 자동 재시도')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', {name: 'a.pdf, 다운로드 폴더에 저장됨, 열기'}));
+  fireEvent.click(screen.getByRole('button', {name: 'a.pdf 열기'}));
   expect(mocks.native).toHaveBeenCalledWith('exchangeOpen', {transferId: saved.transferId});
   // Two failures offer 재시도 (no space, quota); the automatic network retry does not.
   const retries = screen.getAllByRole('button', {name: '재시도'});
@@ -99,9 +99,9 @@ it('shows each row state with its action', async () => {
   expect(mocks.native).toHaveBeenCalledWith('exchangeRetry', {transferId: quota.transferId});
 });
 
-it('hides receiving on Android versions that cannot write Downloads', () => {
+it('explains that Android versions without Downloads access can only send', () => {
   show(snapshot({receiveSupported: false}));
-  expect(screen.queryByRole('region', {name: '받은 파일'})).toBeNull();
+  expect(screen.queryByRole('group', {name: '보기'})).toBeNull();
   expect(screen.getByText(/받기를 지원하지 않습니다/)).toBeTruthy();
   expect(screen.getByRole('button', {name: /파일 보내기/})).toBeTruthy();
 });
@@ -138,4 +138,55 @@ it('keeps the toast away while the screen itself is open', () => {
   render(<Probe open/>);
   act(() => { window.dispatchEvent(new CustomEvent(EXCHANGE_ARRIVED_EVENT, {detail: {count: 1, fromName: 'DESKTOP', fromKind: 'pc'}})); });
   expect(screen.queryByText('PC에서 파일 1개')).toBeNull();
+});
+
+it('stacks both directions by time, mine on the right, with day lines', () => {
+  const received = row({transferId: '11111111-0000-4000-8000-000000000001', fileName: '표지.psd', state: 'saved', createdAt: '2026-09-25T12:40:00Z'});
+  const sent = row({transferId: '11111111-0000-4000-8000-000000000002', fileName: '원고.pdf', state: 'delivered', createdAt: '2026-09-26T05:31:00Z'});
+  show(snapshot({incoming: [received], outgoing: [sent]}));
+  const timeline = screen.getByRole('list', {name: 'DESKTOP와 주고받은 파일'});
+  const blocks = [...timeline.querySelectorAll('.exchange-block')];
+  expect(blocks.map(block => [block.getAttribute('data-mine'), block.querySelector('strong')?.textContent])).toEqual([['false', '표지.psd'], ['true', '원고.pdf']]);
+  expect(timeline.querySelectorAll('.exchange-day')).toHaveLength(2);
+});
+
+it('shows a multi-file send as one block with combined progress and a thumbnail strip', () => {
+  const photos = Array.from({length: 8}, (_, i) => row({transferId: `33333333-0000-4000-8000-00000000000${i}`, batchId: 'batch', fileName: `IMG_${i}.jpg`, sizeBytes: 100,
+    state: i < 4 ? 'ready' : i === 4 ? 'uploading' : 'preparing', bytes: i === 4 ? 50 : 0, createdAt: '2026-09-26T05:31:00Z'}));
+  show(snapshot({outgoing: photos}));
+  const blocks = document.querySelectorAll('.exchange-block');
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0].textContent).toContain('사진 8개');
+  expect(blocks[0].textContent).toContain('4/8');
+  expect(blocks[0].textContent).toContain('56%');
+  expect(blocks[0].querySelectorAll('.exchange-strip-tile')).toHaveLength(6);
+  expect(screen.getByRole('img', {name: /외 2개$/})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', {name: '모두 취소'}));
+  expect(mocks.native.mock.calls.filter(([op]) => op === 'exchangeCancel')).toHaveLength(8);
+  // Thumbnails come from the device, never the server.
+  expect(mocks.native).toHaveBeenCalledWith('exchangeThumbnail', {transferId: photos[0].transferId});
+});
+
+it('keeps each device to its own timeline and filters to received files', () => {
+  const tablet = {deviceId: '44444444-0000-4000-8000-000000000000', name: '노트북', kind: 'android', lastSeenAt: ''};
+  const fromPc = row({transferId: '55555555-0000-4000-8000-000000000001', fileName: 'pc.txt', state: 'saved', peerId: PC.deviceId});
+  const toPc = row({transferId: '55555555-0000-4000-8000-000000000002', fileName: 'sent.txt', state: 'delivered', peerId: PC.deviceId});
+  const fromOther = row({transferId: '55555555-0000-4000-8000-000000000003', fileName: 'other.txt', state: 'saved', peer: '노트북', peerId: tablet.deviceId});
+  show(snapshot({devices: [PC, tablet], incoming: [fromPc, fromOther], outgoing: [toPc]}));
+  expect(screen.getByText('pc.txt')).toBeTruthy();
+  expect(screen.getByText('sent.txt')).toBeTruthy();
+  expect(screen.queryByText('other.txt')).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: '받은 파일'}));
+  expect(screen.queryByText('sent.txt')).toBeNull();
+  expect(screen.getByText('pc.txt')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', {name: /DESKTOP와 주고받은 파일/}));
+  fireEvent.click(screen.getByRole('radio', {name: /노트북/}));
+  expect(screen.getByText('other.txt')).toBeTruthy();
+  expect(screen.queryByText('pc.txt')).toBeNull();
+});
+
+it('explains an empty timeline once, above the send bar', () => {
+  show(snapshot());
+  expect(screen.getByRole('heading', {name: 'DESKTOP와 주고받은 파일이 없습니다'})).toBeTruthy();
+  expect(screen.getByText('DESKTOP(으)로 보내기')).toBeTruthy();
 });

@@ -336,6 +336,7 @@ public final class MainActivity extends Activity {
      case "exchangeRetry":exchange().retry(p.getString("transferId"));data=exchange().snapshot();break;
      case "exchangeCancel":exchange().cancel(p.getString("transferId"));data=exchange().snapshot();break;
      case "exchangeOpen":openExchange(p.getString("transferId"));data=new JSONObject();break;
+     case "exchangeThumbnail":data=exchange().thumbnail(p.getString("transferId"));break;
      case "copyText":copyText(p.getString("text"),signal);data=new JSONObject();break;
      case "finish":runOnUiThread(()->finish());data=new JSONObject();break;
      default:throw new UnsupportedOperationException();

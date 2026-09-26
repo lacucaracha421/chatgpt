@@ -3,7 +3,8 @@ import {CollectionMetadata} from './CollectionMetadata';
 import {CollectionPersonal,PersonalActions,PersonalRecord,type PersonalSheet} from './CollectionPersonal';
 import {koreanGenres} from '../src/collections/genreNames';
 import {useCollectionEdits} from './useCollectionEdits';
-import {CollectionReleases, emptyReleaseStore, type ReleaseStore} from './CollectionReleases';
+import {CollectionReleases} from './CollectionReleases';
+import {invalidateReleases, observePublication} from './releaseStore';
 import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
@@ -92,7 +93,7 @@ type Retries={source:string;failed:number;busy:number};
  * the same ticket, and falls back to the flat image if that renderer cannot draw it; list
  * cards never pass it, so 3D stays inside the work detail.
  */
-function Artwork({item,id,revision,original=false,active=true,label,physical}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string;physical?:'book'|'game'}) {
+export function Artwork({item,id,revision,original=false,active=true,label,physical}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string;physical?:'book'|'game'}) {
   const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [image,setImage]=useState<LoadedArtwork|null>(null), [failed,setFailed]=useState<string|null>(null);
   const [flat,setFlat]=useState<string|null>(null);
   const source=artworkSource(item,id,revision,original),loaded=useRef<string|null>(null),shown=useRef<string|null>(null);
@@ -367,13 +368,18 @@ function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(v
     <p className="hint">고른 별점과 같은 작품만 보여 줍니다.</p>
   </div>;
 }
-export function Collections({active,paused,backRef}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>}) {
+/** A place another tab asks Collections to show (Home's 신간 and 발매 예정); `key` makes a repeat ask count. */
+export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
+export type CollectionsRequest=CollectionsPlace&{key:number};
+export function Collections({active,paused,backRef,request}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null}) {
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
   const [searchOpen,setSearchOpen]=useState(false);
   const type:CollectionKind=tab==='av'?'game':tab;
   const [filtersByType,setFiltersByType]=useState<Record<CollectionKind,Filters>>(()=>({game:defaultCollectionFilters(),manga:defaultCollectionFilters(),movie:defaultCollectionFilters()}));
   const filters=filtersByType[type];
   const [refresh,setRefresh]=useState(0);
+  // What the server serves may have changed: the lists re-read, and so does the shared 신간 read on its next show.
+  const bump=useCallback(()=>{invalidateReleases();setRefresh(n=>n+1);},[]);
   const [showcaseOpen,setShowcaseOpen]=useState(false),[showcaseAll,setShowcaseAll]=useState(false);
   const [sheet,setSheet]=useState<'sort'|'rating'|null>(null);
   const [personalSheet,setPersonalSheet]=useState<PersonalSheet>(null);
@@ -383,9 +389,9 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const [bindHost,setBindHost]=useState<HTMLDivElement|null>(null);
   // 신간: unread counts for the entry badge and manga card badges, and the 신간 screen level (Collections tab only).
   const [releases,setReleases]=useState<ReleaseCounts>(NO_RELEASES),[inboxOpen,setInboxOpen]=useState(false);
-  // The release list revision (moves when the PC publishes events or anything is confirmed), and
-  // the 신간 screen's last read, kept here so reopening it reuses what is still current.
-  const [releaseListRevision,setReleaseListRevision]=useState<number|null>(null),releaseStore=useRef<ReleaseStore>(emptyReleaseStore());
+  // The release list revision (moves when the PC publishes events or anything is confirmed). The
+  // 신간 screen's last read lives in the shared release store (Home reads the same shelf).
+  const [releaseListRevision,setReleaseListRevision]=useState<number|null>(null);
   const takeReleaseCounts=useCallback((reply:unknown)=>{setReleases(releaseCounts(reply));setReleaseListRevision(releaseRevision(reply));},[]);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[volumeLimit,setVolumeLimit]=useState(96),[overview,setOverview]=useState(false);
@@ -402,11 +408,11 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
     result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');});
   const wantShowcase=live&&(showcaseOpen||showcaseAll)&&(!filtered||showcaseAll);
   const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),JSON.stringify([collectionPath(type,'',true,null),refresh]),wantShowcase);
-  const listPull=usePullToRefresh(listRef,()=>setRefresh(n=>n+1),main.busy,!live||!!selected||showcaseAll||inboxOpen);
-  const showcasePull=usePullToRefresh(showcaseRef,()=>setRefresh(n=>n+1),showcase.busy,!live||!showcaseAll||!!selected);
+  const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||showcaseAll||inboxOpen);
+  const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
   // An accepted personal edit changes what the server serves; re-read both views.
-  const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{setRefresh(n=>n+1);setDetailRefresh(n=>n+1);}});
+  const edits=useCollectionEdits({active:active&&!paused,onSettled:()=>{bump();setDetailRefresh(n=>n+1);}});
 
   const detailKey=JSON.stringify([selected,detailRefresh]);
   const committedDetail=useRef('');
@@ -428,7 +434,9 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   // The shared conditional poll (60 s while visible) keeps the chip and badges current; a pull re-reads at once.
   usePublicationCheck(active&&!paused,RELEASE_COUNTS_PATH,undefined,takeReleaseCounts);
   useEffect(()=>{if(!refresh||!active||paused)return;const controller=new AbortController();void api(RELEASE_COUNTS_PATH,controller.signal,undefined,'GET',true).then(reply=>{if(!controller.signal.aborted)takeReleaseCounts(reply);},()=>{});return()=>controller.abort();},[refresh]);
-  usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;setRefresh(n=>n+1);setDetailRefresh(n=>n+1);});
+  usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;bump();setDetailRefresh(n=>n+1);});
+  // A list read under a newer publication than the kept 신간 shelf (read here or by Home) outdates it.
+  useEffect(()=>observePublication(main.page?.revision),[main.page?.revision]);
   // Restore the list position when its committed query is shown again, before it is painted.
   useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,main.committed,active]);
 
@@ -450,6 +458,13 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   const openWork=(id:string)=>{if(listRef.current&&!showcaseAll&&!inboxOpen)listScroll.current=listRef.current.scrollTop;setSheet(null);setSelected(id);};
   const openInbox=()=>{if(listRef.current&&!showcaseAll)listScroll.current=listRef.current.scrollTop;setSheet(null);setInboxOpen(true);};
+  // Home opens the 신간 screen or one work's detail here.
+  useEffect(()=>{
+    if(!request)return;
+    setSheet(null);setCoverIndex(null);setShowcaseAll(false);
+    if(request.kind==='releases'){setSelected(null);setInboxOpen(true);}
+    else {setInboxOpen(false);setSelected(request.id);}
+  },[request]);
   const unreadOf=(work:CollectionSummary)=>releases.byCollection[work.id]??0;
   // The 신간 screen reads owned counts and 신간 알림 through the edit outbox, so a queued change shows at once.
   const ownedOf=(work:CollectionSummary,edition:number)=>edits.visible(work.id,'ownedVolumes',{editionIndex:edition,count:work.ownedVolumes?.find(entry=>entry.editionIndex===edition)?.count??null}).value.count;
@@ -530,7 +545,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
     </>}</div>
-    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} store={releaseStore} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}
+    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>):<>
       {background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}

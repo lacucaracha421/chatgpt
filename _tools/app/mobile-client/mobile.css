@@ -43,16 +43,7 @@ h1,h2,h3,p { margin:0; }
 .header-actions { display:flex; align-items:center; gap:12px; }
 .demo-label { color:var(--color-muted); font-size:11px; }
 .app-body { min-height:0; flex:1; display:flex; }
-/* Home and Library share a retained element: distinct names replay only on a committed tab change. */
-@keyframes mobile-tab-enter { from { opacity:.88; } to { opacity:1; } }
-@keyframes mobile-home-enter { from { opacity:.88; } to { opacity:1; } }
-@media (prefers-reduced-motion:no-preference) {
-  .app-body[data-active-tab="home"] > .library-main { animation:mobile-home-enter 100ms ease-out; }
-  .app-body[data-active-tab="library"] > .library-main,
-  .app-body[data-active-tab="collections"] > .mobile-collections,
-  .app-body[data-active-tab="catalog"] > .mobile-catalog,
-  .app-body[data-active-tab="notes"] > .mobile-notes { animation:mobile-tab-enter 100ms ease-out; }
-}
+/* Tab switches settle through `useTabMotion` (motion.ts): content only, the bar stays still. */
 .library-main { flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; position:relative; }
 .home-context { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:30px var(--mobile-gutter) 22px; }
 .home-title h1 { font-size:30px; font-weight:450; letter-spacing:-1.2px; margin-top:5px; }
@@ -94,12 +85,19 @@ h1,h2,h3,p { margin:0; }
 .bottom-nav button.active { background:var(--color-accent); color:var(--color-on-accent); }
 .bottom-nav button.active::after { content:''; width:5px; height:5px; background:currentColor; align-self:flex-start; margin:6px -10px 0 0; }
 /* A thin progress line that never takes space: its negative margin cancels its own height, so
-   appearing and disappearing cannot move the content below it. It also waits a moment before
-   showing, so a quick (cached) navigation does not flash it. */
-.loading-line { position:relative; z-index:4; height:2px; min-height:2px; margin-bottom:-2px; flex-shrink:0; background:var(--color-accent); opacity:.7; pointer-events:none; animation:loading-line-wait 160ms step-end, breathe 1.5s ease-in-out 160ms infinite; }
+   appearing and disappearing cannot move the content below it. A quiet track carries a soft
+   highlight that sweeps across (transform only). A plain line waits 350 ms before fading in, so a
+   quick (cached) load shows nothing; a timed line (`LoadingLine`) is already delayed in script,
+   fades in at once, is held at least 400 ms and fades out with `is-leaving`. */
+.loading-line { position:relative; z-index:4; height:2px; min-height:2px; margin-bottom:-2px; flex-shrink:0; overflow:hidden; background:color-mix(in srgb,var(--color-accent) 22%,transparent); pointer-events:none; animation:loading-line-in 180ms var(--ease-standard) 350ms both; }
+.loading-line::after { content:''; position:absolute; inset:0 auto 0 0; width:40%; background:linear-gradient(90deg,transparent,var(--color-accent) 50%,transparent); opacity:.85; transform:translateX(-100%); animation:loading-line-sweep 1.2s cubic-bezier(.4,0,.2,1) infinite; will-change:transform; }
+.loading-line.is-timed { animation:loading-line-in 180ms var(--ease-standard) both; transition:opacity 180ms var(--ease-standard); }
+.loading-line.is-leaving { opacity:0; animation:none; }
 .loading-line.is-bottom { margin:-2px 0 0; }
-@keyframes loading-line-wait { from { opacity:0; } }
-@keyframes breathe {50%{opacity:.25}}
+@keyframes loading-line-in { from { opacity:0; } }
+@keyframes loading-line-sweep { to { transform:translateX(250%); } }
+/* Without motion the line is a steady accent line; there is nothing to sweep. */
+@media (prefers-reduced-motion:reduce) { .loading-line { background:var(--color-accent); opacity:.6; } .loading-line::after { display:none; } .loading-line.is-leaving { opacity:0; } }
 .inline-error { display:flex; align-items:center; justify-content:space-between; padding:8px 24px; gap:12px; font-size:13px; background:var(--color-surface); }
 .error-message { color:var(--color-danger); padding:10px 0; font-size:13px; }
 .empty-state { flex:1; min-height:140px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; padding:24px; text-align:center; }

@@ -32,3 +32,30 @@ export function useExchange(configured: boolean, endpoint: string, open: boolean
   }, [toast]);
   return {snapshot, setSnapshot, toast: open ? null : toast, dismissToast: () => setToast(null), unseen: snapshot?.unseen ?? 0};
 }
+
+/** Local thumbnails of sent and saved images, kept for the session ('' = none). */
+const thumbnails = new Map<string, string>();
+const loading = new Map<string, Promise<string>>();
+
+/**
+ * A small local thumbnail for an image row: made on the device from the sent original or the
+ * saved copy (nothing is fetched from the server). `enabled` waits until such a file exists.
+ */
+export function useExchangeThumbnail(transferId: string, enabled: boolean): string {
+  const [url, setUrl] = useState(() => thumbnails.get(transferId) ?? '');
+  useEffect(() => {
+    if (!enabled) return;
+    const known = thumbnails.get(transferId);
+    if (known !== undefined) { setUrl(known); return; }
+    let active = true;
+    let request = loading.get(transferId);
+    if (!request) {
+      request = native<{url?: string}>('exchangeThumbnail', {transferId}).then(value => value?.url ?? '', () => '')
+        .then(value => { if (value) thumbnails.set(transferId, value); loading.delete(transferId); return value; });
+      loading.set(transferId, request);
+    }
+    void request.then(value => { if (active) setUrl(value); });
+    return () => { active = false; };
+  }, [transferId, enabled]);
+  return enabled ? url : '';
+}

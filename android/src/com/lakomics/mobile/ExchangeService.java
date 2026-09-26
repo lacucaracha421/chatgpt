@@ -2,11 +2,14 @@ package com.lakomics.mobile;
 
 import android.content.*;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.util.Base64;
 import android.webkit.MimeTypeMap;
 import org.json.*;
 import java.io.*;
@@ -517,6 +520,7 @@ final class ExchangeService {
             // receipt before the ack), so a later sighting acks instead of saving a second copy.
             ledger.publish(journal, destination, row.id, part, ExchangeTransfer.fileName(row.name), row.hint,
                     row.size, row.sha, row.peer, System.currentTimeMillis());
+            rememberReceived(row);
             saved(row, part, started);
         } catch (Exception e) {
             if (row.cancelled) { part.delete(); return; }
@@ -815,6 +819,8 @@ final class ExchangeService {
                 row.sha = digest.sha256; row.size = digest.size;
                 saveSends();
             }
+            // While the source is still readable: the timeline keeps showing it after the send.
+            thumbnailOf(row.id, row.uri, row.name);
             JSONObject body = new JSONObject().put("transferId", row.id).put("batchId", row.batchId).put("toDevice", row.peerId)
                     .put("fileName", row.name).put("sizeBytes", row.size).put("sha256", row.sha);
             if (row.hint != null && row.hint.matches("[A-Za-z0-9!#$&^_.+-]{1,63}/[A-Za-z0-9!#$&^_.+-]{1,63}")) body.put("contentTypeHint", row.hint);
@@ -1031,7 +1037,8 @@ final class ExchangeService {
         return new JSONObject().put("transferId", row.id).put("batchId", row.batchId).put("fileName", row.name)
                 .put("sizeBytes", row.size).put("bytes", row.bytes).put("peer", row.peer).put("state", row.state)
                 .put("code", row.code).put("createdAt", row.created == null ? "" : row.created)
-                .put("skipped", row.skipped).put("retryable", row.incoming || retryable(row));
+                .put("skipped", row.skipped).put("retryable", row.incoming || retryable(row))
+                .put("peerId", row.peerId == null ? "" : row.peerId);
     }
 
     /** A folder send can only be retried from its zip; once that is gone, the folder must be picked again. */
@@ -1154,10 +1161,15 @@ final class ExchangeService {
             }
             JSONArray in = new JSONArray();
             for (Row row : incoming.values()) if (!ledger.saved(row.id)) in.put(rowView(row));
-            for (ExchangeTransfer.Ledger.Entry entry : ledger.newestFirst())
+            JSONObject meta = receivedMeta();
+            for (ExchangeTransfer.Ledger.Entry entry : ledger.newestFirst()) {
+                JSONArray known = meta.optJSONArray(entry.id);
                 in.put(new JSONObject().put("transferId", entry.id).put("fileName", entry.name).put("sizeBytes", entry.size)
                         .put("bytes", entry.size).put("peer", entry.from).put("state", "saved").put("code", "")
-                        .put("createdAt", iso(entry.savedAt)).put("batchId", entry.id));
+                        .put("createdAt", iso(entry.savedAt)).put("savedAt", iso(entry.savedAt))
+                        .put("batchId", known == null ? entry.id : known.optString(0, entry.id))
+                        .put("peerId", known == null ? "" : known.optString(1, "")));
+            }
             JSONArray out = new JSONArray();
             Set<String> listed = new HashSet<>();
             List<Row> local = new ArrayList<>(outgoing.values());
@@ -1174,12 +1186,106 @@ final class ExchangeService {
                 out.put(new JSONObject().put("transferId", id).put("batchId", item.optString("batchId")).put("fileName", item.optString("fileName"))
                         .put("sizeBytes", item.optLong("sizeBytes")).put("bytes", item.optLong("sizeBytes"))
                         .put("peer", item.isNull("toName") ? "" : item.optString("toName")).put("state", state)
-                        .put("code", item.isNull("failure") ? "" : item.optString("failure")).put("createdAt", item.optString("createdAt")));
+                        .put("code", item.isNull("failure") ? "" : item.optString("failure")).put("createdAt", item.optString("createdAt"))
+                        .put("peerId", item.optString("toDevice", "")));
             }
             return new JSONObject().put("configured", configured).put("tokenConfigured", token)
                     .put("receiveSupported", receiveSupported()).put("deviceId", deviceId()).put("deviceName", deviceName())
                     .put("code", configured ? (token ? code : "tokenMissing") : "notConfigured")
                     .put("devices", others).put("incoming", in).put("outgoing", out).put("unseen", unseen);
+        }
+    }
+
+    // --- timeline extras: batch and sender of saved files, local thumbnails ------------------
+
+    /** transferId → [batchId, fromDevice] of saved files; the ledger itself keeps neither. */
+    private JSONObject receivedMeta;
+
+    private synchronized JSONObject receivedMeta() {
+        if (receivedMeta == null) {
+            try { receivedMeta = new JSONObject(preferences.getString("received-meta", "{}")); }
+            catch (JSONException damaged) { receivedMeta = new JSONObject(); }
+        }
+        return receivedMeta;
+    }
+
+    /** Best effort: without it a saved file only loses its batch grouping. */
+    private synchronized void rememberReceived(Row row) {
+        try {
+            JSONObject meta = receivedMeta();
+            meta.put(row.id, new JSONArray().put(row.batchId == null ? row.id : row.batchId).put(row.peerId == null ? "" : row.peerId));
+            List<String> stale = new ArrayList<>();
+            for (Iterator<String> it = meta.keys(); it.hasNext(); ) { String id = it.next(); if (!ledger.contains(id)) stale.add(id); }
+            for (String id : stale) meta.remove(id);
+            preferences.edit().putString("received-meta", meta.toString()).apply();
+        } catch (JSONException ignored) {}
+    }
+
+    private static final java.util.regex.Pattern IMAGE_NAME =
+            java.util.regex.Pattern.compile("(?i).+\\.(jpe?g|png|webp|gif|bmp|heic|heif|avif)$");
+    private static final int THUMB_EDGE = 256, THUMB_FILES = 400;
+
+    /** A small JPEG of a sent or saved image as a data URL; "" when there is none. Never touches the server. */
+    JSONObject thumbnail(String id) throws Exception {
+        if (!ExchangeTransfer.uuid(id)) return new JSONObject().put("url", "");
+        String uri = null, name = null;
+        synchronized (this) {
+            Row row = outgoing.get(id);
+            if (row != null && row.zip == null) { uri = row.uri; name = row.name; }
+            ExchangeTransfer.Ledger.Entry entry = ledger.get(id);
+            if (uri == null && entry != null && !entry.publishing) { uri = entry.uri; name = entry.name; }
+        }
+        return new JSONObject().put("url", thumbnailOf(id, uri, name));
+    }
+
+    private String thumbnailOf(String id, String uri, String name) {
+        File dir = new File(context.getCacheDir(), "exchange-thumbs");
+        File file = new File(dir, id + ".jpg");
+        byte[] bytes = null;
+        if (file.isFile()) {
+            try (InputStream in = new FileInputStream(file); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[16384];
+                for (int n; (n = in.read(buffer)) > 0; ) out.write(buffer, 0, n);
+                bytes = out.toByteArray();
+            } catch (IOException ignored) {}
+        }
+        if (bytes == null && uri != null && !uri.isEmpty() && name != null && IMAGE_NAME.matcher(name).matches()) {
+            Bitmap bitmap = decodeThumbnail(Uri.parse(uri));
+            if (bitmap != null) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out);
+                bitmap.recycle();
+                bytes = out.toByteArray();
+                if (dir.isDirectory() || dir.mkdirs()) {
+                    try (OutputStream stream = new FileOutputStream(file)) { stream.write(bytes); } catch (IOException ignored) {}
+                    File[] cached = dir.listFiles();
+                    if (cached != null && cached.length > THUMB_FILES) {
+                        Arrays.sort(cached, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+                        for (int i = 0; i < cached.length - THUMB_FILES; i++) cached[i].delete();
+                    }
+                }
+            }
+        }
+        return bytes == null ? "" : "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP);
+    }
+
+    private Bitmap decodeThumbnail(Uri uri) {
+        ContentResolver resolver = context.getContentResolver();
+        if (Build.VERSION.SDK_INT >= 29) {
+            try { return resolver.loadThumbnail(uri, new android.util.Size(THUMB_EDGE, THUMB_EDGE), null); }
+            catch (IOException | RuntimeException fallback) { /* decode it ourselves below */ }
+        }
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try (InputStream in = resolver.openInputStream(uri)) { BitmapFactory.decodeStream(in, null, bounds); }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = 1;
+            while (Math.max(bounds.outWidth, bounds.outHeight) / (options.inSampleSize * 2) >= THUMB_EDGE) options.inSampleSize *= 2;
+            try (InputStream in = resolver.openInputStream(uri)) { return BitmapFactory.decodeStream(in, null, options); }
+        } catch (IOException | RuntimeException unreadable) {
+            return null;
         }
     }
 

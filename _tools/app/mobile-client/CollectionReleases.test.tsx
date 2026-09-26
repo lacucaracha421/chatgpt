@@ -13,6 +13,7 @@ vi.mock('./media',()=>({mediaTicket:vi.fn()}));
 import {ApiError} from './transport';
 import {Collections} from './Collections';
 import {SCHEDULE_ABSENT_NOTE} from './CollectionReleases';
+import {loadShelf, resetReleaseStore} from './releaseStore';
 import {japanReleases, koreanReleases, koreanVolumeLine, releaseCaption, releaseCounts, releaseLine} from './collectionReleases';
 
 const LIBRARY='e'.repeat(32);
@@ -45,7 +46,7 @@ const listReply=()=>{
   return {version:1,revision:1,generation:'g',publishedAt:null,counts:{unread:events.length,collections:Object.entries(counts).sort().map(([collectionId,unread])=>({collectionId,unread}))},items:events,nextCursor:null,hasMore:false};
 };
 
-beforeEach(()=>{setOutboxConnection('https://a.example');
+beforeEach(()=>{setOutboxConnection('https://a.example');resetReleaseStore();
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(2026,8,25,12));
   localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();offline=false;editsOffline=false;publication='r1';works=initialWorks();
   events=[
@@ -320,4 +321,18 @@ it('reopens the 신간 screen from what it read, reading again only after the pu
   } finally {
     window.dispatchEvent(new CustomEvent('lakomics-sync-signals',{detail:{live:false}}));
   }
+});
+
+it('uses a shelf Home already read for this publication, reading only the unread events',async()=>{
+  const shelfReads=()=>mocks.api.mock.calls.map(([path])=>String(path)).filter(path=>path.startsWith('/v1/collections?')&&path.includes('type=manga')).length;
+  await loadShelf(new AbortController().signal);
+  expect(shelfReads()).toBe(1);
+  const view=render(<Collections active paused={false} backRef={{current:null}} request={{kind:'releases',key:1}}/>);
+  // Home's 신간 tile opens the screen directly.
+  expect(lines(await screen.findByRole('region',{name:'밤의 도서관'}))).toEqual(['4권 · 9월 16일 발매됨','5권 · 10월 10일 발매 예정','6권 · 발매일 미정']);
+  expect(shelfReads()).toBe(1);
+  expect(releaseReads().filter(path=>new URLSearchParams(path.split('?')[1]).get('limit')==='100')).toHaveLength(1);
+  // Home's 발매 예정 row opens one work's detail.
+  view.rerender(<Collections active paused={false} backRef={{current:null}} request={{kind:'work',id:'sea',key:2}}/>);
+  await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path==='/v1/collections/sea')).toBe(true));
 });

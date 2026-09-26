@@ -6,7 +6,8 @@ import type {Asset} from './types';
 
 const mocks = vi.hoisted(() => ({loadThumbnail:vi.fn(), measure:vi.fn()}));
 vi.mock('./media', () => ({loadThumbnail:mocks.loadThumbnail, invalidateTicket:vi.fn(), mediaTicket:vi.fn()}));
-vi.mock('./transport', () => ({api:vi.fn()}));
+// Home's dashboard counts read the API; a never-settling reply keeps them out of the way.
+vi.mock('./transport', async importOriginal => ({...await importOriginal<typeof import('./transport')>(), api:vi.fn(() => new Promise(() => {})), native:vi.fn(() => new Promise(() => {}))}));
 vi.mock('@tanstack/react-virtual', () => ({useVirtualizer:() => ({
   measure:mocks.measure, getTotalSize:() => 200,
   getVirtualItems:() => [{key:0,index:0,start:0}],
@@ -15,7 +16,7 @@ vi.mock('@tanstack/react-virtual', () => ({useVirtualizer:() => ({
 const asset:Asset = {id:'new-asset',kind:'image',thumbnail_available:false};
 const preview = 'https://app.lakomics.local/media-cache/test';
 const galleryProps = {density:1,identity:'recent',restoreScroll:0,onScroll:vi.fn(),onOpen:vi.fn(),onReady:vi.fn(),onNearEnd:vi.fn(),paused:false};
-const homeProps:Omit<HomeProps,'items'> = {classifications:[],recentFolders:[],revisit:{bundles:[]},captures:[],busy:false,paused:false,secondaryError:'',revision:1,onSelect:vi.fn(),onOpen:vi.fn(),onPending:vi.fn()};
+const homeProps:Omit<HomeProps,'items'> = {classifications:[],recentFolders:[],captures:[],busy:false,paused:false,secondaryError:'',scope:'https://a.example',exchange:null,review:{enabled:false,refreshKey:0},similarityKey:0,onSelect:vi.fn(),onOpen:vi.fn(),onPending:vi.fn(),onReview:vi.fn(),onSimilarity:vi.fn(),onDuplicates:vi.fn(),onExchange:vi.fn(),onReleases:vi.fn(),onWork:vi.fn(),onSettings:vi.fn()};
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver',class {observe(){} disconnect(){}});
   mocks.loadThumbnail.mockReset();

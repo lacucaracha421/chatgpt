@@ -28,11 +28,14 @@ function lruSet<K,V>(map:Map<K,V>,key:K,value:V,limit:number){map.delete(key);ma
 type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
 function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string,filterKey:string){return `${revision}:${filterKey}:${item.provider}:${item.providerWorkId}`;}
 
-export function Catalog({active,paused,backRef,endpoint=''}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string}){
+export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
+  /** Bumped by Home's 중복 판본 tile: opens the duplicate-edition review. */
+  openDuplicates?:number}){
   const [preferences,setPreferences]=useState<CatalogPreferences>(()=>readCatalogPreferences(endpoint));
   const [query,setQuery]=useState<CatalogQuery>(()=>({...DEFAULT_CATALOG_QUERY,...preferences})),[draft,setDraft]=useState('');
   const [settings,setSettings]=useState(false);
   const [duplicates,setDuplicates]=useState(false);
+  useEffect(()=>{if(openDuplicates)setDuplicates(true);},[openDuplicates]);
   const duplicateCount=useDuplicateCount(settings);
   const [preferenceCheck,setPreferenceCheck]=useState(0);
   // The list is the first page plus the pages appended while scrolling.
