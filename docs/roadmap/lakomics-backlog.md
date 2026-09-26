@@ -175,6 +175,10 @@ PC app:
 
 Mobile designs chosen 2026-09-26 from [the mockups](../prototypes/mobile-requests-20260926b/index.html): release notice C (caption line), type switch B (centered underline tabs), manga connect section as proposed (collapsed row when connected), Notes B (masonry sticky notes).
 
+## HOME-DASH-001 — Information dashboard Home (tablet first)
+
+Status: `IN PROGRESS` — 2026-09-26 the user rejected the image-centred H3 Home on the device and chose an information-only dashboard (no recent-saves images; small covers only in the 신간 list). Cards: 확인할 것, 신간, 발매 예정, 전송, 라이브러리 현황, 메모, 시스템 상태 (round 3 mockups in `docs/prototypes/home-dashboard-20260926/round3.html`). Later cards requested by the user: 게임 신작 예정, 만화 신간 예정, 영화 신작 예정 (needs game/movie release sources), 오늘의 AV 배우 (from AV Collections), 자산 현황, 캐릭터 검토, 서버 등 상태. PC Home to follow once the tablet version is settled.
+
 ## TEST-BASELINE-20260926 — Full-suite baseline
 
 Status: `DONE` 2026-09-26. Rust `cargo test` 0 failed (lib 1818, foundation_flow 18, others); desktop vitest 1446, mobile vitest 673, server unittest 1494, collector 314 all pass. Fixed: stale classification assertions after the subtree totals (`cc620e7`); the character-exclusion bootstrap test's keyring dependency; a real Trash purge bug (an Asset with an unsafe recorded path lost its record and thumbnail while its original stayed — now reported failed and kept, ADR-0011); flaky warm-up assertions (SimilarityReview, CharacterReview), a slow LedgerView query and a `/proc/<pid>/stat` race in the thumbnail-worker test. Still flaky only under heavy concurrent load: two `mobile-client/Catalog.test.tsx` tests (cover retention, tag budget timeout).
