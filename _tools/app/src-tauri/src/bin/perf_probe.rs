@@ -261,6 +261,9 @@ struct Options {
     only: Option<String>,
     skip: Option<String>,
     detail_threshold_ms: f64,
+    /// Seconds to observe the idle character engine (dedicated mode; skips the paths).
+    character_idle: Option<u64>,
+    character_settings: PathBuf,
 }
 
 fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
@@ -275,6 +278,11 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut only = None;
     let mut skip = None;
     let mut detail_threshold_ms = 20.0;
+    let mut character_idle = None;
+    let mut character_settings = env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+        .join(".config/com.lakomics.desktop/character-runtime.json");
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -296,6 +304,15 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
             "--detail-ms" => {
                 detail_threshold_ms = args.next().ok_or("--detail-ms <ms>")?.parse()?
             }
+            "--character-idle" => {
+                character_idle = Some(args.next().ok_or("--character-idle <seconds>")?.parse()?)
+            }
+            "--character-settings" => {
+                character_settings = args
+                    .next()
+                    .map(PathBuf::from)
+                    .ok_or("--character-settings <character-runtime.json>")?
+            }
             _ => return Err(usage().into()),
         }
     }
@@ -315,13 +332,15 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
         only,
         skip,
         detail_threshold_ms,
+        character_idle,
+        character_settings,
     })
 }
 
 fn usage() -> String {
     "usage: cargo run --release --bin perf_probe -- --library <path> [--snapshot-dir <dir>] \
      [--iterations <n>] [--with-catalog] [--no-video-media] [--idle-ticks] [--disk-stats] [--keep-snapshot] [--only <substr>] [--skip <substr>] \
-     [--detail-ms <ms>]"
+     [--detail-ms <ms>] [--character-idle <seconds> [--character-settings <character-runtime.json>]]"
         .to_owned()
 }
 
@@ -404,6 +423,16 @@ fn snapshot(options: &Options) -> Result<PathBuf, Box<dyn std::error::Error>> {
             "snapshot_video_media_copy: files={files} bytes={bytes} ms={:.1}",
             started.elapsed().as_secs_f64() * 1000.0
         );
+    }
+    // The idle character engine reads the S36 score cache on every catch-up check.
+    let s36_cache = library.join(".cache/characters/s36_shadow.sqlite");
+    if options.character_idle.is_some() && s36_cache.is_file() {
+        fs::create_dir_all(snapshot_root.join(".cache/characters"))?;
+        let bytes = copy_database(
+            &s36_cache,
+            &snapshot_root.join(".cache/characters/s36_shadow.sqlite"),
+        )?;
+        println!("snapshot_s36_cache_copy: bytes={bytes}");
     }
     if options.with_catalog && library.join("catalogs/kdata.db").is_file() {
         fs::create_dir_all(snapshot_root.join("catalogs"))?;
@@ -859,6 +888,131 @@ fn isolate_snapshot_network(
         [],
     )?;
     println!("snapshot_cloud_endpoint_redirected: rows={changed}");
+    Ok(())
+}
+
+/// The native character owner loop with the runtime configured (the user's normal state)
+/// and nothing to do: counts what the loop costs per idle turn and per minute.
+///
+/// The saved runtime settings are used as-is except the worker executable, which is
+/// replaced by a path that does not exist, so no model process can start even if the
+/// snapshot unexpectedly has work (that work then fails fast inside the snapshot).
+fn character_idle(
+    library: &Library,
+    snapshot_root: &Path,
+    options: &Options,
+    seconds: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    {
+        let connection = rusqlite::Connection::open_with_flags(
+            snapshot_root.join("library.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        let (pending, delayed, refreshes, paused, refresh_paused): (i64, i64, i64, bool, bool) =
+            connection.query_row(
+                "SELECT (SELECT COUNT(*) FROM character_autotag_jobs WHERE state IN ('pending','processing')),
+                        (SELECT COUNT(*) FROM character_autotag_jobs WHERE state='pending' AND retry_at>strftime('%s','now')),
+                        (SELECT COUNT(*) FROM character_reference_refreshes WHERE state IN ('pending','running')),
+                        paused, reference_refresh_paused
+                 FROM character_autotag_control WHERE singleton=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )?;
+        println!(
+            "character_queue: pending_or_processing={pending} delayed={delayed} history_refreshes={refreshes} paused={paused} history_paused={refresh_paused}"
+        );
+    }
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../character-runtime/scan_worker.py");
+    library.start_character_incremental_for_probe(
+        script,
+        &options.character_settings,
+        snapshot_root.join("no-character-worker"),
+    )?;
+    // The first turns of a run check recent history for S36 once; wait for the first
+    // idle turn, then give the loop time to reach its steady idle state.
+    let warmup = Instant::now();
+    while library.character_incremental_turns().1 == 0 {
+        if warmup.elapsed() > Duration::from_secs(180) {
+            return Err("the character engine never became idle".into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let first_idle_ms = warmup.elapsed().as_secs_f64() * 1000.0;
+    std::thread::sleep(Duration::from_secs(2));
+    let (warm_turns, warm_idle) = library.character_incremental_turns();
+    println!(
+        "character_idle_warmup: first_idle_turn_ms={first_idle_ms:.0} turns={warm_turns} idle_turns={warm_idle} status={}",
+        serde_json::to_string(&library.character_incremental_status()?)?
+    );
+
+    details()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+    TRACE_ON.store(true, Ordering::Relaxed);
+    DETAIL_ON.store(true, Ordering::Relaxed);
+    let before = read_counters();
+    let cpu_before = process_cpu_ms();
+    let (turns_before, idle_before) = library.character_incremental_turns();
+    let started = Instant::now();
+    std::thread::sleep(Duration::from_secs(seconds));
+    let elapsed = started.elapsed().as_secs_f64();
+    let (turns_after, idle_after) = library.character_incremental_turns();
+    let cpu_after = process_cpu_ms();
+    let counters = delta(read_counters(), before);
+    DETAIL_ON.store(false, Ordering::Relaxed);
+    TRACE_ON.store(false, Ordering::Relaxed);
+    let turns = turns_after - turns_before;
+    let idle = idle_after - idle_before;
+    let cpu_ms = cpu_after
+        .zip(cpu_before)
+        .map(|(a, b)| a - b)
+        .unwrap_or(f64::NAN);
+    let per_minute = |value: f64| value * 60.0 / elapsed;
+    let per_turn = |value: f64| {
+        if idle == 0 {
+            f64::NAN
+        } else {
+            value / idle as f64
+        }
+    };
+    println!();
+    println!("## Idle character engine ({elapsed:.1} s window, trace on)");
+    println!();
+    println!("| metric | window | per minute | per idle turn |");
+    println!("|---|---:|---:|---:|");
+    println!(
+        "| loop turns (idle) | {turns} ({idle}) | {:.1} | 1 |",
+        per_minute(idle as f64)
+    );
+    for (name, value) in [
+        ("connections opened", counters.connections),
+        ("SQL statements", counters.statements),
+        ("write statements", counters.write_statements),
+        ("rows changed", counters.rows_changed),
+        ("VM steps", counters.vm_steps),
+        ("page-cache misses", counters.cache_misses),
+    ] {
+        println!(
+            "| {name} | {value} | {:.1} | {:.1} |",
+            per_minute(value as f64),
+            per_turn(value as f64)
+        );
+    }
+    println!(
+        "| traced SQL ms | {:.2} | {:.2} | {:.3} |",
+        counters.sql_nanos as f64 / 1e6,
+        per_minute(counters.sql_nanos as f64 / 1e6),
+        per_turn(counters.sql_nanos as f64 / 1e6)
+    );
+    println!(
+        "| process CPU ms (10 ms ticks, includes tracing) | {cpu_ms:.0} | {:.0} | {:.2} |",
+        per_minute(cpu_ms),
+        per_turn(cpu_ms)
+    );
+    println!();
+    print!("{}", format_details("character_idle", "window"));
     Ok(())
 }
 
@@ -1503,10 +1657,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     bench.detail_sections.push(open_details);
     bench.detail_sections.push(settle_details);
-    run_paths(&mut bench, &library, &snapshot_root);
-    bench.print_table();
+    if let Some(seconds) = options.character_idle {
+        character_idle(&library, &snapshot_root, &options, seconds)?;
+    } else {
+        run_paths(&mut bench, &library, &snapshot_root);
+        bench.print_table();
+    }
 
     drop(library);
+    // The engine thread holds a Library clone until it notices the lease drop.
+    if options.character_idle.is_some() {
+        std::thread::sleep(Duration::from_millis(1500));
+    }
     let after = fingerprint(&options.library)?;
     let unchanged = before == after;
     println!();

@@ -130,6 +130,8 @@ impl Library {
                 state.status.total = candidates.len();
                 state.status.running = !candidates.is_empty();
                 state.pending = candidates;
+                // In-memory work: no queue-table write announces it to the idle owner.
+                self.wake_character_incremental();
             }
             Err(error) => {
                 state.status.running = false;

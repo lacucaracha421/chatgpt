@@ -13,17 +13,111 @@ use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet},
     io::Write,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Condvar, Mutex,
     },
     time::{Duration, Instant},
 };
 
+/// Lightweight mode admits one fresh job per budget.
+const FRESH_JOB_BUDGET: Duration = Duration::from_secs(180);
+/// An idle owner re-checks the queue at least this often, so a change that no wake
+/// reported (for example a write from outside `Library::connection`) is delayed, not lost.
+const IDLE_SAFETY_TIMEOUT: Duration = Duration::from_secs(60);
+/// Cadence of the in-memory checks (stop, library lease, lightweight mode) while waiting,
+/// and of the re-check after a failed turn or a turn that only changed queue rows itself.
+/// No database work happens at this cadence.
+const RECHECK: Duration = Duration::from_millis(500);
+
 fn fresh_job_due(last: Option<Instant>, now: Instant) -> bool {
-    last.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(180))
+    last.is_none_or(|last| now.duration_since(last) >= FRESH_JOB_BUDGET)
+}
+
+/// Tables whose changes can give the native owner something to do: queued, delayed or
+/// completed jobs (S36 catch-up), history refreshes and their items, and the pause flags.
+pub(crate) fn is_queue_table(table: &str) -> bool {
+    matches!(
+        table,
+        "character_autotag_jobs"
+            | "character_autotag_control"
+            | "character_reference_refreshes"
+            | "character_reference_refresh_items"
+    )
+}
+
+thread_local! {
+    /// Set on the owner loop's own thread: its queue writes never wake itself.
+    static OWNER_THREAD: Cell<bool> = const { Cell::new(false) };
+    /// The owner changed queue rows during the current turn.
+    static OWNER_WROTE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Wake signal of the idle native owner. `Library::connection` reports every released
+/// connection that changed a [`is_queue_table`] row (after its commit, while it still
+/// holds the database lock); in-memory work sources (stop, restart, shadow backfill)
+/// notify directly. The generation makes a wake that arrives during a turn count.
+#[derive(Debug, Default)]
+pub(crate) struct Wake {
+    generation: Mutex<u64>,
+    condvar: Condvar,
+    /// Connections the owner loop's thread opened (library and S36 cache).
+    #[cfg(test)]
+    owner_connections: std::sync::atomic::AtomicUsize,
+}
+impl Wake {
+    pub(crate) fn notify(&self) {
+        *self
+            .generation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+        self.condvar.notify_all();
+    }
+    /// A released library connection changed queue rows.
+    pub(crate) fn queue_changed(&self) {
+        if OWNER_THREAD.with(Cell::get) {
+            OWNER_WROTE.with(|wrote| wrote.set(true));
+        } else {
+            self.notify();
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn connection_opened(&self) {
+        if OWNER_THREAD.with(Cell::get) {
+            self.owner_connections.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    fn generation(&self) -> u64 {
+        *self
+            .generation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    /// Blocks until a wake after `seen`, `deadline`, or `interrupted()` (checked in memory
+    /// every [`RECHECK`]).
+    fn wait(&self, seen: u64, deadline: Instant, interrupted: impl Fn() -> bool) {
+        loop {
+            let now = Instant::now();
+            if now >= deadline || interrupted() {
+                return;
+            }
+            let generation = self
+                .generation
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *generation != seen {
+                return;
+            }
+            drop(
+                self.condvar
+                    .wait_timeout(generation, (deadline - now).min(RECHECK))
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+        }
+    }
 }
 #[cfg(test)]
 mod workload_tests {
@@ -109,6 +203,9 @@ pub(super) struct Engine {
     /// Assets already checked by the S36 catch-up in this run.
     s36_checked: BTreeSet<String>,
     last_fresh_attempt: Option<Instant>,
+    /// Loop turns that ran the queue checks, and those that found nothing to do.
+    turns: u64,
+    idle_turns: u64,
 }
 #[cfg(test)]
 impl Engine {
@@ -149,6 +246,7 @@ impl Library {
             if engine.config.as_ref() != Some(&config) {
                 engine.next_config = Some(config);
                 engine.stop.store(true, Ordering::Release);
+                self.character_wake.notify();
             }
             return;
         }
@@ -223,6 +321,12 @@ impl Library {
         engine.stop.store(true, Ordering::Release);
         engine.prepared_references = None;
         engine.training = None;
+        drop(engine);
+        self.character_wake.notify();
+    }
+    /// Wakes the idle native owner for work that no queue-table write announces.
+    pub(crate) fn wake_character_incremental(&self) {
+        self.character_wake.notify();
     }
     pub(super) fn character_shadow_backfill_available(&self) -> Result<()> {
         if crate::workload::is_restricted() { return Err(Error::Invalid("가벼운 모드가 끝난 뒤 과거 이미지 채점을 시작해 주세요.")); }
@@ -284,6 +388,30 @@ impl Library {
             persistent_error,
         })
     }
+    /// Measurement entry for `perf_probe` only: starts the native owner from the saved
+    /// runtime settings with the worker executable replaced by `python`, so a probe
+    /// can observe the idle loop without any model process being able to start.
+    #[doc(hidden)]
+    pub fn start_character_incremental_for_probe(
+        &self,
+        script: std::path::PathBuf,
+        settings: &std::path::Path,
+        python: std::path::PathBuf,
+    ) -> Result<()> {
+        let mut config = RuntimeConfig::configured(script, settings)?;
+        config.python = python;
+        self.start_character_incremental(config);
+        Ok(())
+    }
+    /// (turns, idle turns) of the native owner loop since this Library opened.
+    #[doc(hidden)]
+    pub fn character_incremental_turns(&self) -> (u64, u64) {
+        let engine = self
+            .character_incremental
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (engine.turns, engine.idle_turns)
+    }
     pub fn set_character_incremental_paused(&self, paused: bool) -> Result<()> {
         self.connection()?.execute(
             "UPDATE character_autotag_control SET paused=?1 WHERE singleton=1",
@@ -291,17 +419,36 @@ impl Library {
         )?;
         Ok(())
     }
+    /// Runs queue turns back to back while they make progress; otherwise blocks on
+    /// [`Wake`] until new work is reported, the earliest delayed job is due, or the
+    /// safety timeout passes. Stop, library release and lightweight-mode changes are
+    /// noticed in memory within [`RECHECK`].
     fn incremental_loop(&self, config: RuntimeConfig, stop: Arc<AtomicBool>) {
+        OWNER_THREAD.with(|owner| owner.set(true));
+        let wake = self.character_wake.clone();
+        let interrupted = |restricted: bool| {
+            let stop = stop.clone();
+            move || {
+                stop.load(Ordering::Acquire)
+                    || Arc::strong_count(&self.lease) <= 1
+                    || crate::workload::is_restricted() != restricted
+            }
+        };
         while !stop.load(Ordering::Acquire) && Arc::strong_count(&self.lease) > 1 {
+            let seen = wake.generation();
+            OWNER_WROTE.with(|wrote| wrote.set(false));
             let restricted = crate::workload::is_restricted();
             if restricted {
                 self.character_worker_pool.release();
                 let mut engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 engine.prepared_references = None;
                 engine.training = None;
-                if !fresh_job_due(engine.last_fresh_attempt, Instant::now()) {
+                if let Some(last) = engine
+                    .last_fresh_attempt
+                    .filter(|last| !fresh_job_due(Some(*last), Instant::now()))
+                {
                     drop(engine);
-                    std::thread::sleep(Duration::from_millis(500));
+                    wake.wait(seen, last + FRESH_JOB_BUDGET, interrupted(restricted));
                     continue;
                 }
             }
@@ -384,16 +531,51 @@ impl Library {
                 }
                 Ok(true)
             })();
-            if !matches!(attempt, Ok(true)) {
-                if let Err(error) = attempt {
+            {
+                let mut e = self
+                    .character_incremental
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                e.turns += 1;
+                e.idle_turns += u64::from(!matches!(attempt, Ok(true)));
+            }
+            let deadline = match attempt {
+                Ok(true) => continue,
+                Err(error) => {
                     self.character_incremental
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .error = Some(error.to_string());
+                    Instant::now() + RECHECK
                 }
-                std::thread::sleep(Duration::from_millis(500));
-            }
+                // A turn that changed queue rows without progress (a superseded history
+                // request, for example) may have exposed the next item: re-check soon.
+                Ok(false) if OWNER_WROTE.with(Cell::get) => Instant::now() + RECHECK,
+                Ok(false) => {
+                    let safety = Instant::now() + IDLE_SAFETY_TIMEOUT;
+                    match self.next_character_retry() {
+                        Ok(Some(due)) => due.min(safety),
+                        Ok(None) => safety,
+                        Err(_) => Instant::now() + RECHECK,
+                    }
+                }
+            };
+            wake.wait(seen, deadline, interrupted(restricted));
         }
+    }
+    /// When the earliest delayed (`retry_at`) pending job becomes claimable, if any.
+    fn next_character_retry(&self) -> Result<Option<Instant>> {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let next: Option<i64> = self.connection()?.query_row(
+            "SELECT MIN(retry_at) FROM character_autotag_jobs
+             WHERE state='pending' AND retry_at*1000>?1",
+            [now_ms],
+            |row| row.get(0),
+        )?;
+        Ok(next.map(|at| {
+            let wait_ms = at.saturating_mul(1000).saturating_sub(now_ms).max(0);
+            Instant::now() + Duration::from_millis(wait_ms as u64)
+        }))
     }
     fn compare_incremental_asset(
         &self,
@@ -882,6 +1064,10 @@ impl Library {
             .query_map([&cutoff], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let cache_path = self.root.join(".cache/characters/s36_shadow.sqlite");
+        #[cfg(test)]
+        if cache_path.is_file() {
+            self.character_wake.connection_opened();
+        }
         let cache = cache_path
             .is_file()
             .then(|| {

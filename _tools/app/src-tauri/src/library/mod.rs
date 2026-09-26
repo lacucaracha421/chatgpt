@@ -256,6 +256,7 @@ pub struct Library {
     revisit_color_lock: Arc<Mutex<()>>,
     character_scan: Arc<Mutex<character_scan::ScanState>>,
     character_incremental: Arc<Mutex<character_incremental::Engine>>,
+    character_wake: Arc<character_incremental::Wake>,
     character_worker_pool: Arc<character_worker::Pool>,
     character_shadow_backfill: Arc<Mutex<character_shadow_backfill::State>>,
     video_similarity_scan: Arc<Mutex<video_similarity::ScanState>>,
@@ -286,7 +287,23 @@ pub(crate) fn library_id_on(connection: &Connection) -> Result<String, LibraryEr
 
 pub(crate) struct LockedConnection<'a> {
     connection: Connection,
+    /// Set by the connection's update hook when a character queue row changed.
+    character_queue_changed: Arc<std::sync::atomic::AtomicBool>,
+    character_wake: &'a character_incremental::Wake,
     _guard: MutexGuard<'a, ()>,
+}
+
+impl Drop for LockedConnection<'_> {
+    fn drop(&mut self) {
+        // Any transaction has ended (it borrows the connection), and the database lock is
+        // still held, so the woken owner reads the committed rows.
+        if self
+            .character_queue_changed
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            self.character_wake.queue_changed();
+        }
+    }
 }
 
 impl Deref for LockedConnection<'_> {
@@ -351,6 +368,7 @@ impl Library {
             revisit_color_lock: Arc::default(),
             character_scan: Arc::default(),
             character_incremental: Arc::default(),
+            character_wake: Arc::default(),
             character_shadow_backfill: Arc::default(),
             character_worker_pool: Arc::default(),
             video_similarity_scan: Arc::default(),
@@ -452,8 +470,24 @@ impl Library {
             .database_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let connection = self.unlocked_connection()?;
+        #[cfg(test)]
+        self.character_wake.connection_opened();
+        // Every writer of the character queue goes through here, so the idle native owner
+        // can block until one of them commits instead of polling the queue.
+        let character_queue_changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let changed = character_queue_changed.clone();
+        connection.update_hook(Some(
+            move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
+                if character_incremental::is_queue_table(table) {
+                    changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            },
+        ))?;
         Ok(LockedConnection {
-            connection: self.unlocked_connection()?,
+            connection,
+            character_queue_changed,
+            character_wake: &self.character_wake,
             _guard: guard,
         })
     }

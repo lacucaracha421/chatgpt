@@ -2211,3 +2211,143 @@ fn s36_series_suppresses_native_automatic_membership_only_for_its_targets() {
         assert_eq!(relations.is_empty(), s36_series, "S36 series = {s36_series}");
     }
 }
+
+/// The user's normal state: runtime, augmentation and S36 scoring configured, nothing
+/// queued. The worker executable does not exist, so no model process can start.
+fn idle_config(f: &Fixture) -> RuntimeConfig {
+    let runtime = f.temp.path().join("runtime");
+    std::fs::create_dir_all(&runtime).unwrap();
+    let script = runtime.join("scan_worker.py");
+    std::fs::write(&script, "raise SystemExit(1)\n").unwrap();
+    std::fs::write(runtime.join("s36_policy.json"), r#"{"version":"idle-gate"}"#).unwrap();
+    let mut s36 = crate::library::character_worker::S36Publication::default();
+    s36.s36_series.insert(f.series.clone());
+    RuntimeConfig {
+        python: f.temp.path().join("no-python"),
+        script,
+        models: f.temp.path().into(),
+        augmentation_model: Some(runtime.join("augmentation-model")),
+        s36_shadow_disabled: false,
+        s36,
+        shadow_model: Some(runtime.join("augmentation-model")),
+    }
+}
+
+fn wait_for(limit: Duration, mut done: impl FnMut() -> bool) -> Duration {
+    let started = Instant::now();
+    while !done() {
+        assert!(started.elapsed() < limit, "condition not reached within {limit:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    started.elapsed()
+}
+
+fn job_state(f: &Fixture, id: &str) -> Option<String> {
+    f.library.character_autotag_job(id).unwrap().map(|job| job.state)
+}
+
+/// Tighten-only gate (PERF-ALL-001): library connections the idle owner opens per
+/// minute. Before the wake signal it re-checked the queue every 500 ms: about 120 turns
+/// of 7 connections (840/min in this fixture, 928/min measured on the real library).
+/// Now one turn per safety timeout: 7 queue checks + 1 delayed-job lookup.
+const IDLE_OWNER_CONNECTIONS_PER_MINUTE_GATE: usize = 8;
+
+#[test]
+fn idle_owner_blocks_instead_of_polling_the_queue() {
+    let f = Fixture::new();
+    f.target("A");
+    let wake = f.library.character_wake.clone();
+    let opened = || wake.owner_connections.load(Ordering::Relaxed);
+    f.library.start_character_incremental(idle_config(&f));
+    wait_for(Duration::from_secs(10), || f.library.character_incremental_turns().1 >= 1);
+    // Let the first turn's delayed-job lookup finish so the loop is blocked.
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Real time with the real 60 s safety timeout: no turn and no connection at all.
+    let (connections, turns) = (opened(), f.library.character_incremental_turns().0);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(opened() - connections, 0, "idle owner opened connections while blocked");
+    assert_eq!(f.library.character_incremental_turns().0 - turns, 0);
+
+    // Fast-forward: without new work the owner runs one turn per safety timeout, i.e.
+    // at most one per idle minute. Trigger those turns directly and count each one.
+    assert!(IDLE_SAFETY_TIMEOUT >= Duration::from_secs(60));
+    let minutes = 5;
+    let connections = opened();
+    for _ in 0..minutes {
+        let (turns, idle) = f.library.character_incremental_turns();
+        wake.notify();
+        wait_for(Duration::from_secs(5), || f.library.character_incremental_turns().1 > idle);
+        // The delayed-job lookup follows the turn; then the loop is blocked again.
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(f.library.character_incremental_turns(), (turns + 1, idle + 1), "an idle owner found work");
+    }
+    let connections = opened() - connections;
+    eprintln!(
+        "idle owner: {connections} connections over {minutes} simulated minutes ({:.1}/min)",
+        connections as f64 / minutes as f64
+    );
+    assert!(
+        connections <= minutes * IDLE_OWNER_CONNECTIONS_PER_MINUTE_GATE,
+        "{connections} connections over {minutes} idle minutes exceeds {IDLE_OWNER_CONNECTIONS_PER_MINUTE_GATE}/min"
+    );
+    f.library.stop_character_incremental();
+}
+
+#[test]
+fn idle_owner_wakes_for_new_work_unpause_retry_time_and_stop() {
+    let f = Fixture::new();
+    f.target("A");
+    f.library.start_character_incremental(idle_config(&f));
+    wait_for(Duration::from_secs(10), || f.library.character_incremental_turns().1 >= 1);
+    std::thread::sleep(Duration::from_millis(100));
+    // The safety timeout stays 60 s: anything below that proves a wake.
+    let prompt = Duration::from_secs(2);
+
+    // New work from another thread (an import, a folder move, a synced decision).
+    assert!(character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-5",
+        character_autotag::Cause::Ingestion
+    )
+    .unwrap());
+    let took = wait_for(Duration::from_secs(10), || job_state(&f, "asset-5").as_deref() == Some("completed"));
+    assert!(took < prompt, "queued work waited {took:?}");
+
+    // Paused work stays queued and starts as soon as automation resumes.
+    f.library.set_character_incremental_paused(true).unwrap();
+    // A turn that read the flag just before the pause may still claim; let it finish.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(character_autotag::enqueue(
+        &f.library.connection().unwrap(),
+        "asset-4",
+        character_autotag::Cause::Ingestion
+    )
+    .unwrap());
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(job_state(&f, "asset-4").as_deref(), Some("pending"));
+    f.library.set_character_incremental_paused(false).unwrap();
+    let took = wait_for(Duration::from_secs(10), || job_state(&f, "asset-4").as_deref() == Some("completed"));
+    assert!(took < prompt, "resumed work waited {took:?}");
+
+    // A delayed job is claimed when its retry time arrives, not at the safety timeout.
+    {
+        let c = f.library.connection().unwrap();
+        assert!(character_autotag::enqueue(&c, "asset-3", character_autotag::Cause::Ingestion).unwrap());
+        c.execute(
+            "UPDATE character_autotag_jobs SET retry_at=?1 WHERE asset_id='asset-3'",
+            [chrono::Utc::now().timestamp() + 2],
+        )
+        .unwrap();
+    }
+    let took = wait_for(Duration::from_secs(10), || job_state(&f, "asset-3").as_deref() == Some("completed"));
+    assert!(took >= Duration::from_millis(900) && took < Duration::from_secs(4), "delayed job ran after {took:?}");
+
+    // Stop reaches a blocked owner at once.
+    let stopped = Instant::now();
+    f.library.stop_character_incremental();
+    wait_for(Duration::from_secs(5), || {
+        !f.library.character_incremental.lock().unwrap().running
+    });
+    assert!(stopped.elapsed() < Duration::from_millis(400), "stop took {:?}", stopped.elapsed());
+}
