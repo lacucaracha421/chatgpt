@@ -86,7 +86,7 @@ it('tucks the cache and connection recovery detail behind a disclosure',async()=
 
 it('reports the declared Android source version rather than a stale literal',async()=>{
   render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
-  expect(document.querySelector('.settings-foot')!.textContent).toContain('0.8.35 · Android');
+  expect(document.querySelector('.settings-foot')!.textContent).toContain('0.8.36 · Android');
 });
 
 it('opens the USB private vault even without a cloud connection',async()=>{

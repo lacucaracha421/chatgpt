@@ -10,8 +10,18 @@ import {
 } from './collectionReleases';
 
 type Region = 'kr' | 'jp';
-type Data = {shelf: MangaShelf | null; events: ReleaseEvent[]; loaded: boolean; busy: boolean; error: string};
-const EMPTY: Data = {shelf: null, events: [], loaded: false, busy: false, error: ''};
+/**
+ * What the 신간 screen last read, kept by the parent across closing and reopening (the parent
+ * is remounted per endpoint, so this is scoped to it). The shelf is valid for the parent's
+ * `refresh` it was read under; the events for that `refresh` and the release list revision
+ * they came from. A null key means "read again" (never read, or pulled).
+ */
+export type ReleaseStore = {
+  shelf: MangaShelf | null; shelfRefresh: number | null;
+  events: ReleaseEvent[]; eventsRefresh: number | null; eventsRevision: number | null;
+  loaded: boolean;
+};
+export const emptyReleaseStore = (): ReleaseStore => ({shelf: null, shelfRefresh: null, events: [], eventsRefresh: null, eventsRevision: null, loaded: false});
 /** Volumes ahead of the Korean edition shown as chips before the rest fold into "외 N권". */
 const AHEAD_CHIPS = 12;
 export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 정보가 보여요';
@@ -24,13 +34,19 @@ export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 
  * server (the PC follows) and the information stays. Owned counts come from `ownedOf`, which
  * includes queued tracking edits, so a change shows here at once.
  */
-export function CollectionReleases({active, counts, refresh, onCounts, onOpen, cover, ownedOf, watching}: {
+export function CollectionReleases({active, store, counts, refresh, revision: listRevision, onCounts, onRevision, onOpen, cover, ownedOf, watching}: {
   active: boolean;
+  /** The last read, reused on reopen while `refresh` and `revision` still match it. */
+  store: {current: ReleaseStore};
   counts: ReleaseCounts;
   /** Bumped by the parent when the publication or a personal edit changed; re-reads on next show. */
   refresh: number;
+  /** The release list revision the parent last saw (it moves when the PC publishes or anything is confirmed). */
+  revision: number | null;
   /** The screen learned newer counts (a read, or a confirmed 확인). */
   onCounts(counts: ReleaseCounts): void;
+  /** The screen learned a newer release list revision (a read, or its own 확인). */
+  onRevision(revision: number | null): void;
   onOpen(collectionId: string): void;
   cover(work: CollectionSummary | undefined, revision: string, name: string): ReactNode;
   /** The visible owned count of one edition (a queued edit included), or null when untracked. */
@@ -39,7 +55,8 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
   watching(work: CollectionSummary): boolean;
 }) {
   const [region, setRegion] = useState<Region>('kr');
-  const [data, setData] = useState<Data>(EMPTY);
+  const [data, setData] = useState<ReleaseStore>(() => store.current);
+  const [status, setStatus] = useState({busy: false, error: ''});
   const [nonce, setNonce] = useState(0);
   const [working, setWorking] = useState<string | null>(null);
   const [ackError, setAckError] = useState('');
@@ -48,31 +65,50 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
   const latest = useRef(data); latest.current = data;
   const countsRef = useRef(counts); countsRef.current = counts;
   const report = useRef(onCounts); report.current = onCounts;
-  /** The read whose result is shown; a hidden-then-shown screen keeps it, a pull or refresh re-reads. */
-  const committed = useRef('');
-  const key = `${nonce}|${refresh}`;
+  const reportRevision = useRef(onRevision); reportRevision.current = onRevision;
+  const commit = (next: ReleaseStore) => { store.current = next; setData(next); };
 
+  // Only what is out of date is read: the whole manga shelf when the publication (or a personal
+  // edit) moved, the unread events when that or the release list revision moved.
   useEffect(() => {
-    if (!active || committed.current === key) return;
+    if (!active) return;
+    const current = store.current;
+    const wantShelf = current.shelfRefresh !== refresh;
+    const wantEvents = current.eventsRefresh !== refresh || current.eventsRevision !== listRevision;
+    if (!wantShelf && !wantEvents) return;
     const controller = new AbortController();
-    setData(current => ({...current, busy: true, error: ''}));
-    void Promise.all([allMangaWorks(controller.signal), allUnreadReleases(controller.signal)]).then(([shelf, releases]) => {
+    setStatus({busy: true, error: ''});
+    void Promise.all([wantShelf ? allMangaWorks(controller.signal) : null, wantEvents ? allUnreadReleases(controller.signal) : null]).then(([shelf, releases]) => {
       if (controller.signal.aborted) return;
-      committed.current = key;
-      setData({shelf, events: releases.items, loaded: true, busy: false, error: ''});
-      report.current(releases.counts);
+      const next = {...store.current, loaded: true};
+      if (shelf) Object.assign(next, {shelf, shelfRefresh: refresh});
+      if (releases) Object.assign(next, {events: releases.items, eventsRefresh: refresh, eventsRevision: releases.revision});
+      commit(next);
+      setStatus({busy: false, error: ''});
+      if (releases) { report.current(releases.counts); reportRevision.current(releases.revision); }
     }).catch(reason => {
-      if (!controller.signal.aborted) setData(current => ({...current, busy: false, error: errorText(reason) || '신간 정보를 불러오지 못했습니다.'}));
+      if (!controller.signal.aborted) setStatus({busy: false, error: errorText(reason) || '신간 정보를 불러오지 못했습니다.'});
     });
     return () => controller.abort();
-  }, [active, key]);
+  }, [active, refresh, listRevision, nonce]);
 
-  const reload = useCallback(() => setNonce(n => n + 1), []);
-  const pull = usePullToRefresh(scroller, reload, data.busy, !active);
+  /** A pull (or 다시 시도) reads everything again. */
+  const reload = useCallback(() => {
+    store.current = {...store.current, shelfRefresh: null, eventsRefresh: null};
+    setNonce(n => n + 1);
+  }, [store]);
+  const pull = usePullToRefresh(scroller, reload, status.busy, !active);
 
-  /** Drop confirmed Collections' events here and from the counts; the information stays. */
-  const settle = (collectionId: string) => {
-    setData(value => ({...value, events: value.events.filter(event => event.collectionId !== collectionId)}));
+  /**
+   * Drop confirmed Collections' events here, in the kept copy and from the counts; the
+   * information stays. A 확인 that moved the list revision by exactly its own step keeps the
+   * copy current; any other step means something else changed too, so the next show re-reads.
+   */
+  const settle = (collectionId: string, after?: number) => {
+    const current = store.current;
+    const own = typeof after === 'number' && current.eventsRevision !== null && (after === current.eventsRevision || after === current.eventsRevision + 1);
+    commit({...current, events: current.events.filter(event => event.collectionId !== collectionId), eventsRevision: own ? after : current.eventsRevision});
+    if (own) reportRevision.current(after);
     const byCollection = {...countsRef.current.byCollection};
     delete byCollection[collectionId];
     const next = {unread: Object.values(byCollection).reduce((sum, n) => sum + n, 0), byCollection};
@@ -82,7 +118,7 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
 
   const acknowledgeWork = async (collectionId: string) => {
     setWorking(collectionId); setAckError('');
-    try { await acknowledgeReleases({collectionId}); settle(collectionId); }
+    try { settle(collectionId, (await acknowledgeReleases({collectionId})).revision); }
     catch (reason) { setAckError(errorText(reason) || '확인하지 못했습니다.'); }
     finally { setWorking(null); }
   };
@@ -92,7 +128,7 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
     setConfirmAll(false); setWorking('all'); setAckError('');
     const ids = [...new Set([...Object.keys(countsRef.current.byCollection), ...latest.current.events.map(event => event.collectionId)])];
     try {
-      for (const id of ids) { await acknowledgeReleases({collectionId: id}); settle(id); }
+      for (const id of ids) settle(id, (await acknowledgeReleases({collectionId: id})).revision);
     } catch (reason) {
       setAckError(errorText(reason) || '확인하지 못했습니다.');
     } finally { setWorking(null); }
@@ -132,9 +168,9 @@ export function CollectionReleases({active, counts, refresh, onCounts, onOpen, c
         {value === 'kr' ? '한국 정발' : '일본'}{news[value] > 0 && <span className="collection-release-count numeric" aria-hidden="true">{news[value]}</span>}
       </button>)}
     </div>
-    {data.error && <div className="inline-error" role="alert"><span>{data.error}</span><Button variant="ghost" onClick={reload}>다시 시도</Button></div>}
+    {status.error && <div className="inline-error" role="alert"><span>{status.error}</span><Button variant="ghost" onClick={reload}>다시 시도</Button></div>}
     {ackError && <div className="inline-error" role="alert"><span>{ackError}</span></div>}
-    {data.busy && !data.loaded && <p className="hint collection-more-status" role="status">신간 정보를 불러오는 중…</p>}
+    {status.busy && !data.loaded && <p className="hint collection-more-status" role="status">신간 정보를 불러오는 중…</p>}
     {data.loaded && shelf && !shelf.ready && <div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에 표시됩니다.</p></div>}
     {absent && <p className="collection-tracking-reason collection-release-note" role="note">{SCHEDULE_ABSENT_NOTE}</p>}
     {unread > 0 && data.loaded && <div className="collection-releases-head">

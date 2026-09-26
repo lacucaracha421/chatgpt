@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exchange Redesign Mockups</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css and mobile-client/mobile.css (same values as the 2026-09-26b set). */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-control:#232425; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --color-filter-selected:#383838; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-dialog:0 10px 30px rgba(0,0,0,.45);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo);
+  --radius-tile:2px; --radius-sm:4px;
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p,ul { margin:0; }
+ul { padding:0; list-style:none; }
+button { font:inherit; color:inherit; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.muted { color:var(--color-muted); }
+.danger { color:var(--color-danger); }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:2560px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b { color:var(--color-text); font-weight:600; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.toolbar button { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; cursor:pointer; color:var(--color-text); font-size:13px; }
+.toolbar button[aria-pressed=true] { background:var(--color-filter-selected); border-color:var(--color-filter-border); }
+.today { margin-top:28px; border:1px solid var(--color-border); padding:16px 20px; max-width:1400px; background:#131415; }
+.today h2 { font-size:16px; font-weight:600; margin-bottom:8px; }
+.today ul { display:grid; grid-template-columns:1fr 1fr; gap:4px 32px; color:var(--color-muted); font-size:13.5px; line-height:1.6; list-style:disc; padding-left:18px; }
+.today b { color:var(--color-text); font-weight:500; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; width:28px; height:28px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-numeric); }
+section.topic>p { color:var(--color-muted); max-width:1400px; line-height:1.7; margin-top:8px; }
+section.topic>p b { color:var(--color-text); font-weight:600; }
+.impl { margin-top:10px; max-width:1400px; font-size:13.5px; color:var(--color-muted); line-height:1.65; border-left:2px solid var(--color-border-strong); padding-left:12px; }
+.impl b { color:var(--color-text); font-weight:500; }
+.impl .new { color:#e6c07b; }
+.row.pcs { flex-direction:column; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:14px; color:var(--color-muted); margin-bottom:10px; line-height:1.6; min-height:46px; }
+figcaption b { color:var(--color-text); }
+.tfig figcaption { width:800px; }
+.pfig figcaption { width:1680px; min-height:0; }
+.tag { display:inline-block; font:600 12px var(--font-ui); letter-spacing:1px; padding:1px 7px; margin-right:6px; border-radius:2px; background:var(--color-surface-elevated); color:var(--color-text); vertical-align:1px; }
+.tag.a { background:var(--color-accent); color:var(--color-on-accent); }
+.tag.b { background:#2c3a3a; }
+.tag.c { background:#33304a; }
+.scaled { zoom:.5; }
+.scaled figcaption { font-size:26px; min-height:84px; }
+.scaled .pfig figcaption { min-height:0; }
+body.full .scaled { zoom:1; }
+body.full .scaled figcaption { font-size:14px; min-height:46px; }
+body.shot .doc>header, body.shot .today, body.shot section.topic:not(.shown) { display:none; }
+body.shot .doc { padding:24px; max-width:none; }
+body.shot section.topic { margin:0; border:0; padding:0; }
+body.shot section.topic>p, body.shot .impl { display:none; }
+body.shot .scaled { zoom:1; }
+body.shot .scaled figcaption { font-size:15px; min-height:50px; }
+body.shot .scaled .pfig figcaption { min-height:0; }
+body.shot .row { flex-wrap:nowrap; }
+
+/* ===== Shared controls ===== */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:36px; padding:0 14px; border:1px solid var(--color-border); border-radius:var(--radius-sm); background:var(--color-control); box-shadow:var(--inset-light); font-size:14px; white-space:nowrap; flex-shrink:0; }
+.btn svg.i { width:18px; height:18px; }
+.btn.primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); font-weight:600; }
+.btn.ghost { background:transparent; border-color:transparent; box-shadow:none; color:var(--color-muted); }
+.btn.sm { height:32px; padding:0 10px; font-size:13px; }
+.t .btn { height:44px; font-size:15px; }
+.t .btn.sm { height:40px; padding:0 12px; font-size:14px; }
+.btn.big { height:56px; font-size:16px; padding:0 20px; }
+.ib { width:44px; height:44px; display:inline-grid; place-items:center; border:0; background:transparent; color:var(--color-muted); border-radius:4px; position:relative; flex-shrink:0; }
+.bar-prog { height:3px; background:var(--color-border); overflow:hidden; }
+.bar-prog>b { display:block; height:100%; background:var(--color-accent); }
+.bar-prog.stripe>b { background:repeating-linear-gradient(90deg,var(--color-accent) 0 6px,transparent 6px 9px); }
+.bar-prog.err>b { background:var(--color-danger); }
+.pct { font:500 13px var(--font-numeric); font-variant-numeric:tabular-nums; }
+/* File-type glyph: a square with the extension, or a thumbnail for images. */
+.ft { width:40px; height:40px; flex-shrink:0; display:grid; place-items:center; border:1px solid var(--color-border-strong); border-radius:2px; color:var(--color-muted); font:600 10px/1 var(--font-ui); letter-spacing:.6px; position:relative; overflow:hidden; background:var(--color-surface); }
+.ft.zip { border-style:dashed; }
+.ft img, .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.ft.img { border-color:transparent; }
+.dot { display:inline-block; width:6px; height:6px; background:var(--color-accent); margin-right:6px; vertical-align:2px; }
+.dot.off { background:var(--color-border-strong); }
+.dot.err { background:var(--color-danger); }
+.slabel { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--color-muted); letter-spacing:.3px; }
+.slabel::before { content:''; width:5px; height:5px; background:var(--color-border-strong); flex:none; }
+.slabel::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,var(--color-border),transparent); }
+.slabel .numeric { font-size:13px; }
+
+/* ===== Tablet frame: Galaxy Tab S11 portrait 800 × 1280 ===== */
+.frame { position:relative; width:800px; height:1280px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); display:flex; flex-direction:column; }
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 4px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar h1 { font-size:20px; font-weight:600; line-height:1.2; }
+.bar .stack { display:flex; flex-direction:column; min-width:0; line-height:1.2; margin-left:4px; }
+.bar .sub { font-size:12px; color:var(--color-muted); display:flex; align-items:center; gap:4px; }
+.bar .sub svg.i { width:14px; height:14px; }
+.bar .space { flex:1; }
+.bar .state { font-size:12px; color:var(--color-muted); margin-right:6px; white-space:nowrap; }
+.scroll { flex:1; min-height:0; overflow:hidden; position:relative; }
+.fade-end::after { content:''; position:absolute; left:0; right:0; bottom:0; height:28px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:3; }
+
+/* ===== PC frame: 1680 × 1050, Chrome 03b shell ===== */
+.win { position:relative; width:1680px; height:1050px; display:flex; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); }
+.rail { width:64px; flex:none; display:flex; flex-direction:column; gap:6px; padding:6px 6px 10px; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.rail .mk { height:38px; display:grid; place-items:center; margin-bottom:4px; color:var(--color-accent); }
+.rail .mk svg { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.ri { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:56px; color:var(--color-muted); font-size:12px; line-height:14px; }
+.ri svg.i { width:20px; height:20px; }
+.ri.on { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.ri.on::after { content:''; position:absolute; right:4px; top:4px; width:4px; height:4px; background:currentColor; }
+.ri .cnt { position:absolute; top:4px; right:1px; min-width:14px; height:14px; padding:0 3px; background:var(--color-accent); color:var(--color-on-accent); font:600 11px/15px var(--font-numeric); text-align:center; }
+.rail .tail { margin-top:auto; }
+.index { width:248px; flex:none; display:flex; flex-direction:column; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.index-head { height:44px; flex:none; display:flex; align-items:center; padding:0 8px 0 16px; border-bottom:1px solid var(--color-border); font-size:15px; font-weight:500; }
+.index-body { flex:1; padding:14px 12px 12px 14px; display:flex; flex-direction:column; gap:10px; }
+.index-foot { flex:none; border-top:1px solid var(--color-border); padding:12px 14px; display:grid; gap:6px; font-size:12px; color:var(--color-muted); }
+.index-foot .path { color:var(--color-text); font-size:12.5px; overflow-wrap:anywhere; }
+.index-foot .links { display:flex; gap:14px; margin-top:4px; }
+.index-foot .links span { color:var(--color-text); text-decoration:underline; text-decoration-color:var(--color-border-strong); text-underline-offset:3px; }
+.irow { position:relative; display:flex; align-items:center; gap:10px; min-height:52px; padding:6px 10px; border-radius:0; color:var(--color-text); }
+.irow svg.i { width:20px; height:20px; color:var(--color-muted); }
+.irow .txt { flex:1; min-width:0; display:grid; line-height:1.3; }
+.irow .txt small { font-size:12px; color:var(--color-muted); }
+.irow .n { font:500 13px var(--font-numeric); color:var(--color-muted); }
+.irow.sel { background:var(--color-accent); color:var(--color-on-accent); box-shadow:var(--selection-echo); }
+.irow.sel svg.i, .irow.sel .txt small, .irow.sel .n { color:var(--color-on-accent); }
+.irow.sel::before { content:''; position:absolute; left:-10px; top:calc(50% - 3px); width:5px; height:5px; background:var(--color-accent); }
+.irow.dense { min-height:34px; padding:4px 10px; font-size:14px; }
+.main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
+.titlebar { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding-left:18px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.titlebar h2 { font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; }
+.titlebar h2::before { content:''; width:5px; height:5px; background:var(--color-accent); }
+.titlebar .st { font-size:12px; color:var(--color-muted); }
+.titlebar .space { flex:1; }
+.winctl { display:flex; height:100%; margin-left:8px; }
+.winctl span { width:44px; height:100%; display:grid; place-items:center; color:var(--color-muted); }
+.winctl svg.i { width:14px; height:14px; stroke-width:1.3; }
+.mbody { flex:1; min-height:0; overflow:hidden; position:relative; }
+
+/* ===== A · 대화형 타임라인 ===== */
+.tl { padding:8px 20px 20px; display:flex; flex-direction:column; gap:14px; }
+.day { display:flex; align-items:center; gap:10px; color:var(--color-muted); font-size:12px; margin:8px 0 -2px; }
+.day::before, .day::after { content:''; flex:1; height:1px; background:var(--color-border); }
+.day .numeric { font-size:14px; color:var(--color-text); }
+.msg { width:78%; display:flex; flex-direction:column; gap:6px; }
+.msg.me { align-self:flex-end; align-items:flex-end; }
+.msg .who { font-size:12px; color:var(--color-muted); display:flex; gap:8px; align-items:center; }
+.msg .who .numeric { font-size:13px; }
+.bub { width:100%; min-width:420px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:2px; }
+.msg.me .bub { background:var(--color-surface-elevated); border-color:var(--color-border-strong); }
+.bub.err { border-color:rgba(226,103,103,.55); }
+.bhead { display:flex; align-items:center; gap:10px; padding:10px 12px 8px; font-size:14px; }
+.bhead .t1 { font-weight:600; }
+.bhead .grow { flex:1; }
+.bhead .pct { color:var(--color-text); }
+.brow { display:flex; align-items:center; gap:12px; padding:9px 12px; border-top:1px solid var(--color-border); }
+.brow .txt { flex:1; min-width:0; display:grid; gap:1px; }
+.brow .nm { font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.brow .mt { font-size:12px; color:var(--color-muted); }
+.brow .mt.done { color:var(--color-accent); }
+.brow .mt.err { color:var(--color-danger); }
+.brow .acts { display:flex; gap:4px; }
+.bfoot { display:flex; align-items:center; gap:8px; padding:8px 12px; border-top:1px solid var(--color-border); font-size:12.5px; color:var(--color-muted); }
+.bfoot .grow { flex:1; }
+.strip6 { display:grid; grid-template-columns:repeat(6,1fr); gap:3px; padding:0 12px 10px; }
+.strip6 .thumb { aspect-ratio:1; position:relative; background:var(--color-control); overflow:hidden; border-radius:1px; }
+.strip6 .thumb.wait { opacity:.35; }
+.strip6 .thumb .ck { position:absolute; left:3px; top:3px; width:14px; height:14px; background:var(--color-accent); color:var(--color-on-accent); display:grid; place-items:center; }
+.strip6 .thumb .ck svg.i { width:10px; height:10px; stroke-width:3; }
+.strip6 .thumb .more { position:absolute; inset:0; display:grid; place-items:center; background:rgba(0,0,0,.55); font:600 16px var(--font-numeric); }
+.strip6 .thumb .cur { position:absolute; left:0; right:0; bottom:0; }
+.composer { flex:none; border-top:1px solid var(--color-border); background:var(--color-sidebar); padding:12px 16px 14px; display:flex; align-items:center; gap:10px; }
+.composer .to { flex:1; min-width:0; font-size:13px; color:var(--color-muted); line-height:1.4; }
+.composer .to b { color:var(--color-text); font-weight:500; font-size:14px; display:block; }
+.empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--color-muted); padding:0 60px; }
+.empty .glyph { width:56px; height:56px; display:grid; place-items:center; border:1px solid var(--color-border-strong); color:var(--color-muted); margin-bottom:6px; }
+.empty .glyph svg.i { width:26px; height:26px; }
+.empty h3 { color:var(--color-text); font-size:17px; font-weight:500; }
+.empty p { font-size:13.5px; line-height:1.7; max-width:480px; }
+.limits { display:flex; gap:18px; justify-content:center; font-size:12.5px; color:var(--color-faint); margin-top:6px; }
+.limits span::before { content:''; display:inline-block; width:4px; height:4px; background:var(--color-border-strong); margin-right:6px; vertical-align:3px; }
+.dropveil { position:absolute; left:14px; right:14px; bottom:14px; height:300px; border:1px solid var(--color-accent); background:var(--color-bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:6; }
+.dropveil h3 { font-size:20px; font-weight:600; }
+.dropveil p { color:var(--color-muted); font-size:14px; }
+.dropveil .pile { display:flex; gap:6px; margin-bottom:6px; }
+.dropveil .pile .ft { width:52px; height:52px; font-size:11px; }
+
+/* ===== B · 받은 / 보낸 두 칸 ===== */
+.tabs { flex:none; height:52px; display:flex; justify-content:center; gap:36px; border-bottom:1px solid var(--color-border); background:var(--color-bg); }
+.tabs span { position:relative; display:flex; align-items:center; gap:8px; font-size:16px; color:var(--color-muted); }
+.tabs span.sel { color:var(--color-text); font-weight:600; }
+.tabs span.sel::after { content:''; position:absolute; left:-6px; right:-6px; bottom:-1px; height:2px; background:var(--color-accent); }
+.tabs .c { font:600 12px/1.35 var(--font-numeric); min-width:18px; padding:1px 5px; border-radius:4px; background:var(--color-accent); color:var(--color-on-accent); text-align:center; }
+.tabs .c.q { background:var(--color-surface-elevated); color:var(--color-muted); }
+.live { flex:none; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); padding:10px 16px 12px; display:grid; gap:8px; }
+.live .lrow { display:grid; grid-template-columns:20px minmax(0,1fr) 150px 44px; align-items:center; gap:10px; font-size:13.5px; }
+.live .lrow svg.i { width:18px; height:18px; color:var(--color-muted); }
+.live .lrow .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.live .lrow .nm small { color:var(--color-muted); font-size:12px; margin-left:6px; }
+.live .lrow .pct { text-align:right; }
+.list { padding:6px 16px 16px; }
+.list .slabel { margin:14px 0 4px; }
+.lr { display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:12px; min-height:64px; padding:8px 0; border-bottom:1px solid var(--color-border); }
+.lr .txt { min-width:0; display:grid; gap:2px; }
+.lr .nm { font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lr .mt { font-size:12px; color:var(--color-muted); }
+.lr .st { font-size:12.5px; color:var(--color-muted); }
+.lr .st.done { color:var(--color-accent); }
+.lr .st.err { color:var(--color-danger); }
+.lr .st.act { color:var(--color-text); }
+.lr .acts { display:flex; gap:4px; justify-content:flex-end; }
+.lr.group { cursor:default; }
+.lr.child { min-height:44px; padding-left:28px; grid-template-columns:28px minmax(0,1fr) auto; }
+.lr.child .ft { width:28px; height:28px; font-size:8px; }
+.lr.child .nm { font-size:13.5px; }
+.sendbar { flex:none; border-top:1px solid var(--color-border); background:var(--color-sidebar); padding:10px 16px 14px; display:flex; align-items:center; gap:10px; }
+.picker { display:flex; align-items:center; gap:8px; height:44px; padding:0 12px; border:1px solid var(--color-border); border-radius:4px; font-size:14px; flex:1; min-width:0; }
+.picker svg.i { width:18px; height:18px; color:var(--color-muted); }
+.picker small { color:var(--color-muted); font-size:12px; }
+.picker .grow { flex:1; }
+.cols { display:grid; grid-template-columns:1fr 1fr; height:100%; }
+.col { min-width:0; display:flex; flex-direction:column; border-right:1px solid var(--color-border); }
+.col:last-child { border-right:0; }
+.col-head { flex:none; height:56px; display:flex; align-items:center; gap:10px; padding:0 20px; border-bottom:1px solid var(--color-border); }
+.col-head h3 { font-size:16px; font-weight:600; display:flex; gap:8px; align-items:center; }
+.col-head h3 .numeric { color:var(--color-muted); font-size:14px; font-weight:500; }
+.col-head .grow { flex:1; }
+.col .list { padding:4px 20px 16px; }
+.pc .lr { grid-template-columns:36px minmax(0,1fr) 190px auto; min-height:56px; gap:14px; }
+.pc .lr .ft { width:36px; height:36px; }
+.pc .lr .stc { display:grid; gap:4px; }
+.pc .lr.child { grid-template-columns:24px minmax(0,1fr) 190px auto; min-height:38px; padding-left:24px; }
+.pc .lr.child .ft { width:24px; height:24px; font-size:7px; }
+.pc .lr .acts { min-width:150px; }
+
+/* ===== C · 끌어 놓기 + 대기열 ===== */
+.targets { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.tgt { position:relative; display:flex; align-items:center; gap:14px; min-height:76px; padding:12px 16px; border:1px solid var(--color-border); background:var(--color-control); border-radius:2px; }
+.tgt svg.i { width:30px; height:30px; color:var(--color-muted); stroke-width:1.2; }
+.tgt .txt { display:grid; line-height:1.35; min-width:0; }
+.tgt .txt b { font-size:16px; font-weight:600; }
+.tgt .txt small { font-size:12.5px; color:var(--color-muted); }
+.tgt.sel { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); box-shadow:3px 3px 0 -1px var(--color-bg),3px 3px 0 0 var(--color-selection-echo); }
+.tgt.sel svg.i, .tgt.sel small { color:var(--color-on-accent); }
+.tgt.sel::before { content:''; position:absolute; left:-10px; top:calc(50% - 3px); width:5px; height:5px; background:var(--color-accent); }
+.tgt.off { opacity:.6; }
+.pickers { display:grid; grid-template-columns:2fr 1fr; gap:10px; }
+.pickers .btn { height:60px; font-size:16px; }
+.pickers .btn svg.i { width:22px; height:22px; }
+.qcard { border:1px solid var(--color-border); background:var(--color-surface); border-radius:2px; }
+.qcard.err { border-color:rgba(226,103,103,.55); }
+.qtop { display:flex; align-items:center; gap:12px; padding:12px 14px 10px; }
+.qtop .txt { flex:1; min-width:0; display:grid; gap:2px; }
+.qtop .nm { font-size:15px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qtop .mt { font-size:12.5px; color:var(--color-muted); }
+.qtop .mt.err { color:var(--color-danger); }
+.qtop .pct { font-size:16px; }
+.qdir { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--color-muted); }
+.qdir svg.i { width:14px; height:14px; }
+.qbar { padding:0 14px 12px; display:grid; gap:6px; }
+.qbar .bar-prog { height:4px; }
+.qsteps { display:flex; gap:14px; font-size:12px; color:var(--color-faint); }
+.qsteps span.on { color:var(--color-text); }
+.qsteps span.ok { color:var(--color-muted); }
+.qsteps span.ok::before { content:'✓ '; color:var(--color-accent); }
+.gal { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.gt { display:grid; gap:4px; min-width:0; }
+.gt .thumb { aspect-ratio:1; position:relative; background:var(--color-surface); overflow:hidden; border-radius:2px; }
+.gt .thumb.file { display:grid; place-items:center; border:1px solid var(--color-border); }
+.gt .thumb.file .ext { font:600 14px var(--font-ui); letter-spacing:1px; color:var(--color-muted); }
+.gt .thumb .ov { position:absolute; left:0; right:0; bottom:0; padding:6px 8px; background:linear-gradient(transparent,rgba(0,0,0,.75)); display:grid; gap:4px; font-size:12px; }
+.gt .thumb.pending img { opacity:.35; filter:grayscale(.6); }
+.gt .thumb .newdot { position:absolute; left:6px; top:6px; width:6px; height:6px; background:var(--color-accent); }
+.gt .cap { font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gt .cap2 { font-size:11.5px; color:var(--color-muted); display:flex; justify-content:space-between; }
+.drop { border:1px dashed var(--color-border-strong); display:flex; align-items:center; gap:24px; padding:24px 28px; background:repeating-linear-gradient(135deg,transparent 0 10px,rgba(255,255,255,.012) 10px 20px); }
+.drop.over { border:1px solid var(--color-accent); background:rgba(221,216,202,.06); }
+.drop .glyph { width:64px; height:64px; display:grid; place-items:center; border:1px solid var(--color-border-strong); color:var(--color-muted); flex:none; }
+.drop .glyph svg.i { width:30px; height:30px; }
+.drop.over .glyph { border-color:var(--color-accent); color:var(--color-accent); }
+.drop .txt { flex:1; display:grid; gap:4px; }
+.drop .txt b { font-size:18px; font-weight:600; }
+.drop .txt small { font-size:13px; color:var(--color-muted); }
+.opt { display:flex; align-items:center; gap:10px; font-size:14px; }
+.box { width:18px; height:18px; border:1px solid var(--color-border-strong); display:grid; place-items:center; background:var(--color-control); }
+.box.on { background:var(--color-accent); border-color:var(--color-accent); color:var(--color-on-accent); }
+.box svg.i { width:13px; height:13px; stroke-width:3; }
+.newtag { display:inline-block; font:600 10px var(--font-ui); letter-spacing:.8px; padding:1px 5px; background:#4a3d22; color:#e6c07b; border-radius:2px; vertical-align:2px; margin-left:6px; }
+.toast { position:absolute; left:16px; right:16px; bottom:100px; display:flex; align-items:center; gap:10px; padding:8px 8px 8px 14px; border:1px solid var(--color-border); background:var(--color-sidebar); box-shadow:var(--shadow-dialog); font-size:14px; border-radius:4px; z-index:7; }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>USER-REQ-20260926B · 전송(보내기/받기) 재설계 목업 — 태블릿 800 × 1280 · PC 1680 × 1050</h1>
+  <p class="lead">PC 앱과 태블릿이 같은 디자인 언어를 쓰는 전송 화면 세 가지 방향입니다. 앱의 실제 색·글꼴·반경 토큰을 그대로 썼고, 파일 이름·크기·시각은 모두 가상입니다. 각 방향마다 <b>작업 중 화면</b>(보내는 중 진행률, 받는 중·받기 대기, 저장된 파일 열기, 실패와 재시도, 여러 파일 묶음, 폴더 zip)과 <b>빈 화면</b>을 태블릿과 PC로 보여 줍니다. 노란 <span class="newtag">NEW</span> 표시는 지금 데이터나 동작에 없는 것이라 구현 때 새로 만들어야 하는 부분입니다.</p>
+  <div class="toolbar"><button id="toggle-full" aria-pressed="false">실제 크기 (1:1)</button><span>기본은 절반 크기 · PNG: dir-a-timeline.png, dir-b-two-pane.png, dir-c-drop-queue.png</span></div>
+</header>
+
+<div class="today">
+  <h2>지금 동작 (목업이 지키는 전제)</h2>
+  <ul>
+    <li>전송 한 건 = <b>파일 한 개</b>. 여러 개를 고르면 같은 <b>batchId</b>의 여러 건이 됩니다(한 번에 최대 100개).</li>
+    <li><b>폴더 보내기</b>는 보내는 기기에서 zip 하나로 압축(압축 중 → 업로드). 읽지 못한 항목은 빼고 “N개 제외”로 표시.</li>
+    <li>파일당 <b>최대 2GB</b>, 서버 보관 합계 10GB. 받으면 서버에서 바로 삭제, 안 받으면 <b>24시간 뒤 만료</b>, 보낸 기록은 7일.</li>
+    <li>받기는 <b>자동 저장</b>: PC는 트레이에서도, 태블릿은 앱이 열려 있을 때 다운로드/Lakomics 폴더로. 저장 후 “열기”(PC는 “폴더에서 보기”도).</li>
+    <li>네트워크·서버 오류는 <b>자동 재시도</b>(버튼 없음). 업로드 중단·손상·저장 공간 부족 등은 <b>재시도 / 취소(받지 않기)</b>.</li>
+    <li>PC는 창에 끌어 놓기로도 보냄. 태블릿은 다른 앱의 공유 메뉴 → Lakomics로도 보냄. 기기 전용 토큰이 필요(이 화면들 밖의 설정 흐름은 그대로).</li>
+  </ul>
+</div>
+
+<section class="topic" id="dirA">
+  <h2><span class="k">A</span>대화형 타임라인 — 기기끼리 주고받은 파일이 대화처럼 쌓임</h2>
+  <p>상대 기기 하나를 고르면 그 기기와 주고받은 모든 파일이 시간순으로 한 줄에 쌓입니다. 내가 보낸 것은 오른쪽, 받은 것은 왼쪽. 한 번에 보낸 여러 파일은 한 덩어리(묶음 진행률 + 썸네일 줄)로, 폴더는 zip 한 건으로 보입니다. 보내기는 아래쪽 입력줄(파일 · 폴더)과 PC의 끌어 놓기. <b>지금 무엇이 오갔는지 맥락으로 읽기 좋음</b>, 다만 “받은 파일만 모아 보기”는 약함.</p>
+  <div class="impl"><b>구현:</b> 기존 스냅샷의 incoming/outgoing(태블릿) · outgoing/incoming/received(PC)를 상대 기기별로 합쳐 시간순 정렬 — 데이터는 대부분 있음(peer, createdAt, receivedAt, batchId). <span class="new">NEW</span>: PC 스냅샷의 보낸/받은 행에 <b>batchId와 상대 deviceId</b>(지금은 이름만) · 묶음 단위 진행률 합산(클라이언트 계산) · 이미지 썸네일(보낸 쪽은 원본, 받은 쪽은 저장된 파일에서 로컬 생성, 서버 변경 없음) · 태블릿 받은 행의 저장 시각. 기기 목록의 “받는 중 2” 같은 기기별 개수는 클라이언트 계산.</div>
+  <div class="row scaled" id="a-t"></div>
+  <div class="row scaled pcs" id="a-p"></div>
+</section>
+
+<section class="topic" id="dirB">
+  <h2><span class="k">B</span>받은 파일 / 보낸 파일 두 칸 — 지금 화면의 정돈판</h2>
+  <p>PC는 본문을 <b>받은 파일 | 보낸 파일</b> 두 칸으로 나누고, 태블릿은 같은 두 칸을 가운데 밑줄 탭(컬렉션 유형 탭 B와 같은 모양)으로 바꿉니다. 탭과 상관없이 <b>지금 오가는 것</b>이 위에 고정 줄로 보이고, 목록은 “받기 대기 · 오늘 · 어제”로 나뉩니다. 여러 파일은 접히는 묶음 한 줄. 보내기는 태블릿 아래쪽 막대(받는 기기 + 폴더 + 파일 보내기), PC는 보낸 파일 칸 머리. <b>지금 구조와 가장 가까워 위험이 적음</b>.</p>
+  <div class="impl"><b>구현:</b> 지금 스냅샷 그대로 거의 충분(행 상태·진행률·재시도/취소·열기·폴더에서 보기). 받는 기기 선택을 PC 인덱스의 기기 목록으로, 태블릿은 아래 막대의 선택기로. <span class="new">NEW</span>: 묶음 접기(PC 스냅샷에 batchId 추가 필요, 태블릿은 이미 있음) · 날짜 구분(태블릿 받은 행 저장 시각) · 기기의 마지막 접속 표시(태블릿은 lastSeenAt 있음, PC 스냅샷에는 없음).</div>
+  <div class="row scaled" id="b-t"></div>
+  <div class="row scaled pcs" id="b-p"></div>
+</section>
+
+<section class="topic" id="dirC">
+  <h2><span class="k">C</span>끌어 놓기 + 대기열 카드 + 받은 파일 갤러리 — 보내는 동작이 주인공</h2>
+  <p>맨 위에 <b>보낼 곳</b>(큰 기기 슬랩, 선택은 아이보리 슬랩 + 1px 잔상)과 크게 고르는 버튼(PC는 넓은 끌어 놓기 영역). 가운데는 묶음 단위 <b>대기열 카드</b> — “사진 12개 · 7/12”처럼 합산 진행률과 단계(압축 → 확인 → 업로드 → 상대가 받음)를 보여 줍니다. 아래는 <b>받은 파일 갤러리</b>: 이미지는 썸네일, 그 밖은 확장자 타일. 미디어 아카이브답게 받은 그림이 눈에 먼저 들어옴. 여러 파일을 <b>zip 하나로 묶어 보내기</b> 선택지도 여기서 제안.</p>
+  <div class="impl"><b>구현:</b> 가장 많은 새 작업. <span class="new">NEW</span>: 묶음 합산 카드(batchId, 묶음 전체 크기·완료 수) · 단계 표시(PC는 zipping/hashing/uploading/waiting 상태가 있음, 태블릿은 zipping/preparing/uploading/ready) · 받은 이미지 썸네일(로컬 생성, 서버 변경 없음) · <b>여러 파일을 zip으로 묶기</b> 옵션(지금 zip은 폴더 보내기만; PC/태블릿 zip 코드를 재사용하되 합계 2GB 한도 동일) · 끌어 놓을 때 개수 미리보기(Tauri drop 이벤트의 경로 수로 가능).</div>
+  <div class="row scaled" id="c-t"></div>
+  <div class="row scaled pcs" id="c-p"></div>
+</section>
+</div>
+
+<script>
+const IC={
+ArrowLeft:["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],
+ArrowUpTray:["M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"],
+ArrowDownTray:["M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"],
+ArrowsUpDown:["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],
+ArrowPath:["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],
+Folder:["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],
+FolderOpen:["M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"],
+Document:["M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"],
+ComputerDesktop:["M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"],
+DeviceTablet:["M10.5 19.5h3m-6.75 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-15a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15a2.25 2.25 0 0 0 2.25 2.25Z"],
+DevicePhone:["M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"],
+ExclamationTriangle:["M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"],
+PaperClip:["m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13"],
+Clock:["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+XMark:["M6 18 18 6M6 6l12 12"],
+Check:["m4.5 12.75 6 6 9-13.5"],
+ChevronDown:["m19.5 8.25-7.5 7.5-7.5-7.5"],
+ChevronRight:["m8.25 4.5 7.5 7.5-7.5 7.5"],
+ChevronUp:["m4.5 15.75 7.5-7.5 7.5 7.5"],
+EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+RectangleStack:["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],
+BookOpen:["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],
+Photo:["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],
+PencilSquare:["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],
+Minus:["M5 12h14"],
+Square2Stack:["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],
+ArrowTopRightOnSquare:["M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"],
+CloudArrowUp:["M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],
+};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n].map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const MARK='<svg viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const ib=(n)=>`<span class="ib">${I(n)}</span>`;
+const nt='<span class="newtag">NEW</span>';
+
+/* Placeholder image art (flat shapes, muted palettes). */
+const P=[['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3'],['#c9b6b0','#5a3c3c','#93706a','#efe0cc'],['#a9b9a0','#34443a','#6d8466','#dfe3c8'],['#9fb0c8','#2e3a52','#5f7596','#e0d6c4']];
+const art=i=>{const p=P[i%P.length];const k=i%3;
+  return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="300" height="300" fill="${p[0]}"/><circle cx="${90+k*55}" cy="${95+k*10}" r="${34+k*6}" fill="${p[3]}"/><path d="M0 200L80 120 170 220 240 150 300 190V300H0" fill="${p[2]}"/><path d="M0 250L110 180 210 260 300 220V300H0" fill="${p[1]}"/></svg>`);};
+const img=i=>`<img src="${art(i)}" alt="">`;
+const ft=(ext,i)=>ext==='img'?`<span class="ft img">${img(i)}</span>`:`<span class="ft ${ext==='ZIP'?'zip':''}">${ext}</span>`;
+const prog=(p,cls='')=>`<div class="bar-prog ${cls}"><b style="width:${p}%"></b></div>`;
+
+/* PC shell */
+const RAIL=[['RectangleStack','에셋'],['BookOpen','컬렉션'],['Photo','망가'],['PencilSquare','메모'],['ArrowsUpDown','전송']];
+const rail=(cnt)=>`<nav class="rail"><div class="mk">${MARK}</div>${RAIL.map(([ic,l])=>`<div class="ri ${l==='전송'?'on':''}">${I(ic)}<span>${l}</span>${l==='전송'&&cnt?`<span class="cnt">${cnt}</span>`:''}</div>`).join('')}<div class="tail"><div class="ri">${I('EllipsisHorizontal')}<span>관리</span></div></div></nav>`;
+const winctl=`<span class="winctl"><span>${I('Minus')}</span><span>${I('Square2Stack')}</span><span>${I('XMark')}</span></span>`;
+const titlebar=(title,st,extra='')=>`<header class="titlebar"><h2>${title}</h2><span class="st">${st}</span><span class="space"></span>${extra}${winctl}</header>`;
+const pcwin=(cnt,index,main)=>`<div class="win pc">${rail(cnt)}<aside class="index">${index}</aside><div class="main">${main}</div></div>`;
+const foot=`<div class="index-foot"><span>받은 파일 저장 위치</span><span class="path">~/다운로드/Lakomics</span><div class="links"><span>폴더 열기</span><span>이 PC 전용 토큰</span></div></div>`;
+
+const tfig=(tag,cls,cap,body)=>`<figure class="tfig"><figcaption><span class="tag ${cls}">${tag}</span>${cap}</figcaption>${body}</figure>`;
+const pfig=(tag,cls,cap,body)=>`<figure class="pfig"><figcaption><span class="tag ${cls}">${tag}</span>${cap}</figcaption>${body}</figure>`;
+
+/* ============ A · Timeline ============ */
+function dirA(){
+  const tbar=(sub)=>`<header class="bar">${ib('ArrowLeft')}<span class="stack"><h1>전송</h1><span class="sub">${sub}</span></span><span class="space"></span><span class="state"><span class="dot"></span>연결됨</span>${ib('EllipsisHorizontal')}</header>`;
+  const devSwitch=`${I('ComputerDesktop')}작업실 PC와 주고받은 파일${I('ChevronDown')}`;
+  const composerT=`<div class="composer"><div class="to"><b>작업실 PC(으)로 보내기</b>파일당 최대 2GB · 받지 않으면 24시간 뒤 삭제</div><span class="btn big">${I('Folder')}폴더</span><span class="btn big primary">${I('PaperClip')}파일 보내기</span></div>`;
+  const strip=(n,done,cur,start=0,more=0)=>`<div class="strip6">${Array.from({length:n},(_,i)=>{const d=i<done,c=i===cur;return `<div class="thumb ${!d&&!c?'wait':''}">${img(start+i)}${d?`<span class="ck">${I('Check')}</span>`:''}${c?`<span class="cur">${prog(62)}</span>`:''}${more&&i===n-1?`<span class="more">+${more}</span>`:''}</div>`;}).join('')}</div>`;
+  const tl=(me,peer,compact=false)=>`<div class="tl">${compact?'':`
+    <div class="day"><span class="numeric">9. 25</span>목</div>
+    <div class="msg"><div class="who">${peer} · <span class="numeric">21:40</span></div><div class="bub">
+      <div class="brow">${ft('PSD')}<div class="txt"><span class="nm">표지_시안_v2.psd</span><span class="mt done">저장됨 · <span class="numeric">164 MB</span></span></div><div class="acts"><span class="btn sm">열기</span></div></div></div></div>
+    <div class="msg me"><div class="who">${me} · <span class="numeric">22:05</span> · 전달됨 ${I('Check').replace('class="i ','class="i " style="width:14px;height:14px;color:var(--color-accent)" ')}</div><div class="bub">
+      <div class="bhead"><span class="t1">사진 3개</span><span class="muted numeric" style="font-size:13px">18.2 MB</span><span class="grow"></span></div>${strip(3,3,-1,4)}</div></div>`}
+    <div class="day"><span class="numeric">9. 26</span>오늘</div>
+    <div class="msg"><div class="who">${peer} · <span class="numeric">14:02</span> · 파일 2개</div><div class="bub">
+      <div class="brow">${ft('PSD')}<div class="txt"><span class="nm">표지_시안_v3.psd</span><span class="mt"><span class="numeric">63 MB / 186 MB</span> · 받는 중</span>${prog(34)}</div><span class="pct">34%</span><div class="acts"><span class="btn sm ghost">받지 않기</span></div></div>
+      <div class="brow">${ft('ZIP')}<div class="txt"><span class="nm">레퍼런스_모음.zip</span><span class="mt"><span class="numeric">412 MB</span> · 받기 대기 중 — 앞 파일 다음</span></div><div class="acts"><span class="btn sm ghost">받지 않기</span></div></div></div></div>
+    <div class="msg me"><div class="who">${me} · <span class="numeric">14:31</span></div><div class="bub">
+      <div class="bhead"><span class="t1">사진 12개</span><span class="muted" style="font-size:13px"><span class="numeric">7/12</span> · <span class="numeric">38.4 MB / 61.2 MB</span></span><span class="grow"></span><span class="pct">63%</span></div>
+      <div style="padding:0 12px 10px">${prog(63)}</div>${strip(6,4,4,0,6)}
+      <div class="bfoot">업로드 중 · IMG_20260926_143210.jpg<span class="grow"></span><span class="btn sm ghost">모두 취소</span></div></div></div>
+    <div class="msg me"><div class="who">${me} · <span class="numeric">14:33</span> · 폴더</div><div class="bub">
+      <div class="brow">${ft('ZIP')}<div class="txt"><span class="nm">원고_7화.zip</span><span class="mt">폴더 ‘원고_7화’ · 항목 <span class="numeric">48</span>개 · 압축 중 (보내기 전)</span>${prog(41,'stripe')}</div><span class="pct">41%</span><div class="acts"><span class="btn sm ghost">취소</span></div></div></div></div>
+    <div class="msg me"><div class="who">${me} · <span class="numeric">14:35</span></div><div class="bub err">
+      <div class="brow">${ft('MP4')}<div class="txt"><span class="nm">녹화_2026-09-25.mp4</span><span class="mt err">${I('ExclamationTriangle').replace('class="i ','class="i " style="width:14px;height:14px;vertical-align:-2px" ')} 업로드 중단됨 · 자동 재시도 3번 실패 · <span class="numeric">1.38 GB</span></span></div><div class="acts"><span class="btn sm">재시도</span><span class="btn sm ghost">취소</span></div></div></div></div>
+    <div class="msg"><div class="who">${peer} · <span class="numeric">14:40</span></div><div class="bub">
+      <div class="brow">${ft('img',2)}<div class="txt"><span class="nm">스크린샷 2026-09-26 144011.png</span><span class="mt done">저장됨 · <span class="numeric">2.1 MB</span></span></div><div class="acts"><span class="btn sm">열기</span></div></div></div></div>
+  </div>`;
+  const tBusy=`<div class="frame t">${tbar(devSwitch)}<div class="scroll fade-end">${tl('나','작업실 PC')}</div>${composerT}</div>`;
+  const tEmpty=`<div class="frame t">${tbar(devSwitch)}<div class="empty"><span class="glyph">${I('ArrowsUpDown')}</span><h3>작업실 PC와 주고받은 파일이 없습니다</h3><p>여기서 보낸 파일과 받은 파일이 시간순으로 쌓입니다. 받은 파일은 앱이 열려 있을 때 다운로드/Lakomics 폴더에 저장됩니다. 다른 앱의 공유 메뉴에서 Lakomics를 골라도 보낼 수 있습니다.</p><div class="limits"><span>파일당 최대 2GB</span><span>폴더는 zip 하나로</span><span>안 받으면 24시간 뒤 삭제</span></div></div>
+    <div class="toast"><span style="flex:1">작업실 PC에서 파일 2개</span><span class="btn sm ghost">보기</span></div>${composerT}</div>`;
+  document.getElementById('a-t').innerHTML=
+    tfig('A · 태블릿','a','<b>작업 중</b> — 위쪽 이름을 누르면 상대 기기를 바꿈. 받는 중·받기 대기(왼쪽), 사진 12개 묶음 진행(오른쪽, 썸네일에 완료 표시와 현재 파일 진행), 폴더 zip 압축, 업로드 실패 + 재시도.',tBusy)+
+    tfig('A · 태블릿 빈 화면','a','<b>빈 화면</b> — 설명은 가운데 한 번만, 한도 세 가지를 짧게. 아래 입력줄은 항상 같은 자리. (다른 화면에 있을 때 받은 파일 알림 토스트 예시 포함)',tEmpty);
+
+  const idx=(counts)=>`<div class="index-head">전송</div><div class="index-body"><div class="slabel">기기</div>
+    <div class="irow sel">${I('DeviceTablet')}<span class="txt">Galaxy Tab S11<small>${counts?'받는 중 · 보내는 중':'방금 전 접속'}</small></span>${counts?`<span class="n">3</span>`:''}</div>
+    <div class="irow">${I('DevicePhone')}<span class="txt">Galaxy S25<small>3일 전 접속</small></span></div></div>${foot}`;
+  const pcTl=`<div style="max-width:980px;margin:0 auto">${tl('이 PC','Galaxy Tab S11',true)
+      .replace('표지_시안_v2.psd','IMG_20260925_2140.jpg').replace(/<span class="ft ">PSD<\/span>(<div class="txt"><span class="nm">IMG_20260925_2140)/,`${ft('img',2)}$1`)
+      .replace('164 MB</span></span></div><div class="acts"><span class="btn sm">열기</span>','4.1 MB</span></span></div><div class="acts"><span class="btn sm">열기</span><span class="btn sm ghost">폴더에서 보기</span>')
+    }</div>`;
+  const composerP=`<div class="composer" style="padding:12px 24px"><div class="to"><b>Galaxy Tab S11(으)로 보내기</b>파일이나 폴더를 이 창에 끌어 놓아도 됩니다 · 파일당 최대 2GB · 폴더는 zip 하나로</div><span class="btn">${I('Folder')}폴더 보내기</span><span class="btn primary">${I('PaperClip')}파일 보내기</span></div>`;
+  const pBusy=pcwin(2,idx(true),titlebar('Galaxy Tab S11','이 PC · 작업실 PC')+`<div class="mbody fade-end">${pcTl}</div>${composerP}`);
+  const pEmpty=pcwin(0,idx(false),titlebar('Galaxy Tab S11','이 PC · 작업실 PC')+`<div class="mbody" style="display:flex"><div class="empty" style="padding-bottom:320px"><span class="glyph">${I('ArrowsUpDown')}</span><h3>Galaxy Tab S11과 주고받은 파일이 없습니다</h3><p>보낸 파일과 받은 파일이 여기에 시간순으로 쌓입니다. 받은 파일은 창을 닫아 트레이에 있어도 다운로드/Lakomics에 저장됩니다.</p><div class="limits"><span>파일당 최대 2GB</span><span>한 번에 100개까지</span><span>안 받으면 24시간 뒤 삭제</span></div></div>
+    <div class="dropveil"><div class="pile">${ft('img',1)}${ft('img',3)}${ft('PDF')}</div><h3>놓으면 Galaxy Tab S11(으)로 보냅니다</h3><p>파일 <span class="numeric">3</span>개 · <span class="numeric">24.6 MB</span> ${nt}</p></div></div>${composerP}`);
+  document.getElementById('a-p').innerHTML=
+    pfig('A · PC','a','<b>작업 중</b> — 인덱스는 상대 기기 목록(선택은 아이보리 슬랩), 본문은 같은 타임라인(최대 폭 980), 받은 파일에는 열기 · 폴더에서 보기. 저장 위치와 토큰은 인덱스 아래쪽으로.',pBusy)+
+    pfig('A · PC 빈 화면 + 끌어 놓는 중','a','<b>빈 화면</b> 위에 파일을 끌어 온 상태 — 창 어디에 놓아도 되고, 본문 아래쪽에 받는 기기와 개수를 미리 보여 줌.',pEmpty);
+}
+
+/* ============ B · Two pane ============ */
+function dirB(){
+  const tbar=`<header class="bar">${ib('ArrowLeft')}<span class="stack"><h1>전송</h1><span class="sub">이 기기 · Galaxy Tab S11</span></span><span class="space"></span><span class="state"><span class="dot"></span>연결됨</span>${ib('EllipsisHorizontal')}</header>`;
+  const tabs=(sel,rc=3,sc=4)=>`<div class="tabs"><span class="${sel===0?'sel':''}">받은 파일${rc?`<span class="c">${rc}</span>`:''}</span><span class="${sel===1?'sel':''}">보낸 파일${sc?`<span class="c q">${sc}</span>`:''}</span></div>`;
+  const live=`<div class="live"><div class="slabel">지금 오가는 중 <span class="numeric">3</span></div>
+    <div class="lrow">${I('ArrowDownTray')}<span class="nm">표지_시안_v3.psd<small>작업실 PC에서</small></span>${prog(34)}<span class="pct">34%</span></div>
+    <div class="lrow">${I('ArrowUpTray')}<span class="nm">사진 12개<small>작업실 PC(으)로 · 7/12</small></span>${prog(63)}<span class="pct">63%</span></div>
+    <div class="lrow">${I('ArrowUpTray')}<span class="nm">원고_7화.zip<small>압축 중</small></span>${prog(41,'stripe')}<span class="pct">41%</span></div></div>`;
+  const sendbar=`<div class="sendbar"><span class="picker">${I('ComputerDesktop')}<span>작업실 PC<small> · 받는 기기</small></span><span class="grow"></span>${I('ChevronDown')}</span><span class="btn big">${I('Folder')}폴더</span><span class="btn big primary">${I('ArrowUpTray')}파일 보내기</span></div>`;
+  const R=(glyph,nm,mt,st,stc,acts,cls='')=>`<div class="lr ${cls}">${glyph}<div class="txt"><span class="nm">${nm}</span><span class="mt">${mt}</span><span class="st ${stc}">${st}</span></div><div class="acts">${acts}</div></div>`;
+  const recvList=`<div class="list">
+    <div class="slabel">받기 대기 <span class="numeric">2</span></div>
+    ${R(ft('PSD'),'표지_시안_v3.psd','<span class="numeric">186 MB</span> · 작업실 PC에서 · <span class="numeric">14:02</span>','받는 중 <span class="numeric">34%</span>','act','<span class="btn sm ghost">받지 않기</span>')}
+    ${R(ft('ZIP'),'레퍼런스_모음.zip','<span class="numeric">412 MB</span> · 작업실 PC에서 · <span class="numeric">14:02</span>','받기 대기 중 — 앞 파일 다음','','<span class="btn sm ghost">받지 않기</span>')}
+    ${R(ft('MOV'),'촬영_원본_0925.mov','<span class="numeric">1.92 GB</span> · 작업실 PC에서 · <span class="numeric">13:40</span>','저장 공간 부족 — 공간을 비운 뒤 다시 받기','err','<span class="btn sm">재시도</span><span class="btn sm ghost">받지 않기</span>')}
+    <div class="slabel">오늘</div>
+    ${R(ft('img',2),'스크린샷 2026-09-26 141502.png','<span class="numeric">2.1 MB</span> · 작업실 PC에서 · <span class="numeric">14:15</span>','다운로드 폴더에 저장됨','done','<span class="btn sm">열기</span>')}
+    ${R(ft('img',5),'배경_02.jpg','<span class="numeric">6.8 MB</span> · 작업실 PC에서 · <span class="numeric">11:20</span>','다운로드 폴더에 저장됨','done','<span class="btn sm">열기</span>')}
+    <div class="slabel">어제</div>
+    ${R(ft('PSD'),'표지_시안_v2.psd','<span class="numeric">164 MB</span> · 작업실 PC에서 · <span class="numeric">21:40</span>','다운로드 폴더에 저장됨','done','<span class="btn sm">열기</span>')}
+    ${R(ft('PDF'),'설정자료_최종.pdf','<span class="numeric">12.4 MB</span> · Galaxy S25에서 · <span class="numeric">18:02</span>','다운로드 폴더에 저장됨','done','<span class="btn sm">열기</span>')}
+    ${R(ft('ZIP'),'캐릭터_러프.zip','<span class="numeric">88 MB</span> · 작업실 PC에서 · <span class="numeric">09:12</span>','만료됨 (받지 않음)','','')}
+  </div>`;
+  const sentList=`<div class="list">
+    <div class="slabel">진행 중 <span class="numeric">2</span></div>
+    ${R(`<span class="ft">${I('Square2Stack').replace('class="i ','class="i " style="width:20px;height:20px" ')}</span>`,'사진 12개 <span class="muted" style="font-size:13px">· IMG_20260926_1428.jpg 외 11개</span>','<span class="numeric">61.2 MB</span> · 작업실 PC(으)로 · <span class="numeric">14:31</span>','업로드 중 <span class="numeric">7/12</span> · <span class="numeric">63%</span>','act','<span class="btn sm ghost">모두 취소</span>'+`<span class="ib" style="width:40px;height:40px">${I('ChevronUp')}</span>`,'group')}
+    ${R(ft('img',0),'IMG_20260926_1428.jpg','<span class="numeric">5.2 MB</span>','전달 대기 (받으면 삭제됨)','','','child')}
+    ${R(ft('img',4),'IMG_20260926_143210.jpg','<span class="numeric">5.6 MB</span>','업로드 중 <span class="numeric">62%</span>','act','','child')}
+    ${R(ft('img',5),'IMG_20260926_143255.jpg 외 4개','','보낼 차례를 기다리는 중','','','child')}
+    ${R(ft('ZIP'),'원고_7화.zip','폴더 ‘원고_7화’ · 항목 <span class="numeric">48</span>개 · <span class="numeric">14:33</span>','압축 중 <span class="numeric">41%</span>','act','<span class="btn sm ghost">취소</span>')}
+    <div class="slabel">확인 필요 <span class="numeric">1</span></div>
+    ${R(ft('MP4'),'녹화_2026-09-25.mp4','<span class="numeric">1.38 GB</span> · 작업실 PC(으)로 · <span class="numeric">14:35</span>','업로드 중단됨 · 자동 재시도 3번 실패','err','<span class="btn sm">재시도</span><span class="btn sm ghost">취소</span>')}
+    <div class="slabel">오늘</div>
+    ${R(ft('ZIP'),'원고_6화.zip','<span class="numeric">640 MB</span> · 작업실 PC(으)로 · 읽지 못한 항목 1개 제외','전달됨','done','')}
+    ${R(ft('img',3),'사진 3개','<span class="numeric">18.2 MB</span> · 작업실 PC(으)로 · <span class="numeric">09:05</span>','전달됨','done',`<span class="ib" style="width:40px;height:40px">${I('ChevronDown')}</span>`)}
+  </div>`;
+  const tRecv=`<div class="frame t">${tbar}${tabs(0)}${live}<div class="scroll fade-end">${recvList}</div>${sendbar}</div>`;
+  const tSent=`<div class="frame t">${tbar}${tabs(1)}${live}<div class="scroll fade-end">${sentList}</div>${sendbar}</div>`;
+  const tEmpty=`<div class="frame t">${tbar}${tabs(0,0,0)}<div class="empty"><span class="glyph">${I('ArrowDownTray')}</span><h3>받은 파일이 없습니다</h3><p>다른 기기에서 보낸 파일은 앱이 열려 있을 때 다운로드/Lakomics 폴더에 저장되고 여기에 나타납니다.</p><div class="limits"><span>파일당 최대 2GB</span><span>안 받으면 24시간 뒤 삭제</span></div></div>${sendbar}</div>`;
+  document.getElementById('b-t').innerHTML=
+    tfig('B · 태블릿 받은 파일','b','<b>받은 파일 탭</b> — 탭과 상관없이 위쪽에 “지금 오가는 중” 고정. 받기 대기(진행·대기·저장 공간 부족 실패) → 오늘 → 어제. 저장된 파일은 열기.',tRecv)+
+    tfig('B · 태블릿 보낸 파일','b','<b>보낸 파일 탭</b> — 사진 12개 묶음을 펼친 상태(파일별 상태), 폴더 zip 압축 중, 확인 필요(실패 + 재시도), 전달된 묶음은 접힘.',tSent)+
+    tfig('B · 태블릿 빈 화면','b','<b>빈 화면</b> — 탭의 숫자와 고정 줄이 사라지고, 아래 보내기 막대만 남음.',tEmpty);
+
+  const idx=(busy)=>`<div class="index-head">전송</div><div class="index-body"><div class="slabel">받는 기기</div>
+    <div class="irow sel">${I('DeviceTablet')}<span class="txt">Galaxy Tab S11<small>방금 전 접속</small></span></div>
+    <div class="irow">${I('DevicePhone')}<span class="txt">Galaxy S25<small>3일 전 접속</small></span></div>
+    <div class="slabel" style="margin-top:10px">보기</div>
+    <div class="irow dense" style="background:var(--color-selection-context)"><span class="txt">전체</span></div>
+    <div class="irow dense"><span class="txt">확인 필요</span>${busy?'<span class="n danger">1</span>':''}</div></div>${foot}`;
+  const P=(glyph,nm,mt,st,stc,bar,acts,cls='')=>`<div class="lr ${cls}">${glyph}<div class="txt"><span class="nm">${nm}</span><span class="mt">${mt}</span></div><div class="stc"><span class="st ${stc}">${st}</span>${bar}</div><div class="acts">${acts}</div></div>`;
+  const recvP=`<div class="list">
+    <div class="slabel">받는 중 <span class="numeric">1</span></div>
+    ${P(ft('img',1),'IMG_20260926_143210.jpg 외 11개','<span class="numeric">61.2 MB</span> · Galaxy Tab S11에서 · <span class="numeric">14:31</span>','받는 중 <span class="numeric">6/12</span> · <span class="numeric">58%</span>','act',prog(58),'<span class="btn sm ghost">받지 않기</span>')}
+    <div class="slabel">오늘</div>
+    ${P(ft('img',4),'IMG_20260926_1428.jpg','<span class="numeric">5.2 MB</span> · Galaxy Tab S11에서 · <span class="numeric">14:32</span>','다운로드 폴더에 저장됨','done','','<span class="btn sm">열기</span><span class="btn sm ghost">폴더에서 보기</span>')}
+    ${P(ft('PDF'),'계약서_스캔.pdf','<span class="numeric">3.4 MB</span> · Galaxy S25에서 · <span class="numeric">10:12</span>','다운로드 폴더에 저장됨','done','','<span class="btn sm">열기</span><span class="btn sm ghost">폴더에서 보기</span>')}
+    ${P(ft('img',6),'필기_0926.png','<span class="numeric">1.2 MB</span> · Galaxy Tab S11에서 · <span class="numeric">09:48</span>','옮겨졌거나 삭제됨','','','<span class="btn sm" style="opacity:.4">열기</span><span class="btn sm ghost" style="opacity:.4">폴더에서 보기</span>')}
+    <div class="slabel">어제</div>
+    ${P(ft('img',2),'사진 3개','<span class="numeric">18.2 MB</span> · Galaxy Tab S11에서 · <span class="numeric">22:05</span>','다운로드 폴더에 저장됨','done','',`<span class="btn sm ghost">폴더에서 보기</span><span class="ib" style="width:32px;height:32px">${I('ChevronDown')}</span>`)}
+  </div>`;
+  const sentP=`<div class="list">
+    <div class="slabel">진행 중 <span class="numeric">2</span></div>
+    ${P(ft('PSD'),'표지_시안_v3.psd','<span class="numeric">186 MB</span> · Galaxy Tab S11(으)로 · <span class="numeric">14:02</span>','업로드 중 <span class="numeric">100%</span> → 상대가 받는 중','act',prog(100),'<span class="btn sm ghost">취소</span>')}
+    ${P(ft('ZIP'),'레퍼런스_모음.zip','<span class="numeric">412 MB</span> · 폴더 ‘레퍼런스_모음’ · 항목 <span class="numeric">230</span>개','파일 확인 중 <span class="numeric">72%</span>','act',prog(72,'stripe'),'<span class="btn sm ghost">취소</span>')}
+    <div class="slabel">확인 필요 <span class="numeric">1</span></div>
+    ${P(ft('MOV'),'촬영_원본_0925.mov','<span class="numeric">1.92 GB</span> · Galaxy Tab S11(으)로','받는 기기의 저장 공간 부족','err','','<span class="btn sm">재시도</span><span class="btn sm ghost">지우기</span>')}
+    ${P(ft('MKV'),'라이브_풀버전.mkv','<span class="numeric">3.1 GB</span>','파일이 너무 큼 (최대 2GB)','err','','<span class="btn sm ghost">지우기</span>')}
+    <div class="slabel">오늘</div>
+    ${P(ft('img',5),'스크린샷 2026-09-26 141502.png','<span class="numeric">2.1 MB</span> · Galaxy Tab S11(으)로 · <span class="numeric">14:15</span>','전달됨','done','','')}
+    ${P(ft('img',3),'배경_02.jpg','<span class="numeric">6.8 MB</span> · Galaxy Tab S11(으)로 · <span class="numeric">11:20</span>','전달됨','done','','')}
+    ${P(ft('ZIP'),'캐릭터_러프.zip','<span class="numeric">88 MB</span> · Galaxy Tab S11(으)로','만료됨 (받지 않음)','','','')}
+  </div>`;
+  const cols=(r,s,empty)=>`<div class="mbody"><div class="cols">
+    <div class="col"><div class="col-head">${I('ArrowDownTray')}<h3>받은 파일 ${empty?'':'<span class="numeric">5</span>'}</h3><span class="grow"></span><span class="btn sm ghost">${I('FolderOpen')}폴더 열기</span></div>${r}</div>
+    <div class="col"><div class="col-head">${I('ArrowUpTray')}<h3>보낸 파일 ${empty?'':'<span class="numeric">7</span>'}</h3><span class="grow"></span><span class="btn sm">${I('Folder')}폴더 보내기</span><span class="btn sm primary">${I('ArrowUpTray')}파일 보내기</span></div>${s}</div></div></div>`;
+  const pBusy=pcwin(1,idx(true),titlebar('전송','이 PC · 작업실 PC · 연결됨')+cols(recvP,sentP));
+  const E=(g,h,p)=>`<div class="empty" style="padding:0 40px"><span class="glyph">${I(g)}</span><h3>${h}</h3><p>${p}</p></div>`;
+  const pEmpty=pcwin(0,idx(false),titlebar('전송','이 PC · 작업실 PC · 연결됨')+cols(E('ArrowDownTray','받은 파일이 없습니다','다른 기기에서 보낸 파일은 창을 닫아 트레이에 있어도 다운로드/Lakomics에 저장됩니다.'),E('ArrowUpTray','보낸 파일이 없습니다','파일이나 폴더를 이 칸에 끌어 놓으면 Galaxy Tab S11(으)로 보냅니다.<br>파일당 최대 2GB · 폴더는 zip 하나로 · 안 받으면 24시간 뒤 삭제'),true).replace('<div class="col"><div class="col-head">'+I('ArrowUpTray'),'<div class="col" style="outline:1px solid var(--color-accent);outline-offset:-10px"><div class="col-head">'+I('ArrowUpTray')));
+  document.getElementById('b-p').innerHTML=
+    pfig('B · PC','b','<b>작업 중</b> — 인덱스에 받는 기기(슬랩)와 “확인 필요” 보기. 두 칸 모두 진행 중 → 확인 필요 → 날짜순. 사진 묶음은 한 줄로 합쳐 받는 중 6/12. 폴더 zip은 “파일 확인 중”. 너무 큰 파일은 재시도 없이 지우기만.',pBusy)+
+    pfig('B · PC 빈 화면 + 끌어 놓는 중','b','<b>빈 화면</b> — 파일을 끌어 오면 보낸 파일 칸에 아이보리 테두리(지금 앱의 방식과 같음).',pEmpty);
+}
+
+/* ============ C · Drop zone + queue ============ */
+function dirC(){
+  const tbar=`<header class="bar">${ib('ArrowLeft')}<span class="stack"><h1>전송</h1><span class="sub">이 기기 · Galaxy Tab S11</span></span><span class="space"></span><span class="state"><span class="dot"></span>연결됨</span>${ib('EllipsisHorizontal')}</header>`;
+  const targets=(a='작업실 PC',b='Galaxy S25')=>`<div class="targets"><div class="tgt sel">${I('ComputerDesktop')}<span class="txt"><b>${a}</b><small>방금 전 접속</small></span></div><div class="tgt off">${I('DevicePhone')}<span class="txt"><b>${b}</b><small>3일 전 접속</small></span></div></div>`;
+  const pickers=`<div class="pickers"><span class="btn primary">${I('PaperClip')}파일 고르기</span><span class="btn">${I('Folder')}폴더 (zip)</span></div>`;
+  const steps=(on,list=['압축','확인','업로드','상대가 받음'])=>`<div class="qsteps">${list.map((s,i)=>`<span class="${i<on?'ok':i===on?'on':''}">${s}</span>`).join('')}</div>`;
+  const Q=(glyph,nm,mt,pct,bar,stp,acts,cls='',dir='')=>`<div class="qcard ${cls}"><div class="qtop">${glyph}<div class="txt"><span class="nm">${nm}</span><span class="mt ${cls}">${mt}</span></div>${pct?`<span class="pct">${pct}</span>`:''}${acts}</div>${bar||stp?`<div class="qbar">${bar}${stp}</div>`:''}</div>`;
+  const out=(n)=>`<span class="qdir">${I('ArrowUpTray')}${n}(으)로</span>`, inn=(n)=>`<span class="qdir">${I('ArrowDownTray')}${n}에서</span>`;
+  const queueT=`<div style="display:grid;gap:10px">
+    ${Q(`<span class="ft">${I('Square2Stack').replace('class="i ','class="i " style="width:20px;height:20px" ')}</span>`,'사진 12개',`${out('작업실 PC')} · <span class="numeric">7/12</span> · <span class="numeric">38.4 / 61.2 MB</span>`,'63%',prog(63),steps(2,['확인','업로드','상대가 받음']),'<span class="btn sm ghost">취소</span>')}
+    ${Q(ft('ZIP'),'원고_7화.zip',`${out('작업실 PC')} · 폴더 · 항목 <span class="numeric">48</span>개`,'41%',prog(41,'stripe'),steps(0),'<span class="btn sm ghost">취소</span>')}
+    ${Q(ft('PSD'),'표지_시안_v3.psd',`${inn('작업실 PC')} · <span class="numeric">63 / 186 MB</span>`,'34%',prog(34),'','<span class="btn sm ghost">받지 않기</span>')}
+    ${Q(ft('MP4'),'녹화_2026-09-25.mp4','업로드 중단됨 · 자동 재시도 3번 실패 · <span class="numeric">1.38 GB</span>','','','','<span class="btn sm">재시도</span><span class="btn sm ghost">취소</span>','err')}
+  </div>`;
+  const G=(i,nm,cap,state='')=>{const file=typeof i==='string';
+    return `<div class="gt"><div class="thumb ${file?'file':''} ${state==='pending'?'pending':''}">${file?`<span class="ext">${i}</span>`:img(i)}${state==='new'?'<span class="newdot"></span>':''}${state==='pending'?`<span class="ov"><span>받기 대기 중</span></span>`:''}${state==='dl'?`<span class="ov"><span class="numeric">받는 중 34%</span>${prog(34)}</span>`:''}</div><span class="cap">${nm}</span><span class="cap2"><span>${cap}</span></span></div>`;};
+  const galT=`<div class="gal">
+    ${G('PSD','표지_시안_v3.psd','186 MB','dl')}${G('ZIP','레퍼런스_모음.zip','412 MB','pending')}${G(2,'스크린샷 2026-09-26 1415…','2.1 MB · 14:15','new')}${G(5,'배경_02.jpg','6.8 MB · 11:20','new')}
+    ${G(1,'IMG_20260925_2140.jpg','4.1 MB · 어제')}${G('PDF','설정자료_최종.pdf','12.4 MB · 어제')}${G(3,'캐릭터_시트_A.png','3.3 MB · 어제')}${G(6,'필기_0925.png','1.2 MB · 어제')}
+  </div>`;
+  const tBusy=`<div class="frame t">${tbar}<div class="scroll fade-end"><div style="padding:16px;display:grid;gap:16px">
+    <div class="slabel">보낼 곳</div>${targets()}${pickers}
+    <div class="slabel">진행 <span class="numeric">4</span></div>${queueT}
+    <div class="slabel">받은 파일 <span class="numeric">8</span><span style="margin-left:auto;order:3;color:var(--color-text);text-decoration:underline;text-underline-offset:3px">다운로드/Lakomics</span></div>${galT}
+  </div></div></div>`;
+  const tEmpty=`<div class="frame t">${tbar}<div class="scroll"><div style="padding:16px;display:grid;gap:16px">
+    <div class="slabel">보낼 곳</div>${targets()}${pickers}
+    <p class="muted" style="font-size:13px;line-height:1.7">파일당 최대 2GB · 폴더는 zip 하나로 압축 · 받으면 서버에서 바로 삭제, 안 받으면 24시간 뒤 삭제. 다른 앱의 공유 메뉴에서 Lakomics를 골라도 됩니다.</p>
+    <div class="slabel">진행</div><p class="muted" style="font-size:14px;padding:4px 0 8px">보내거나 받는 중인 파일이 없습니다.</p>
+    <div class="slabel">받은 파일</div><p class="muted" style="font-size:14px;padding:4px 0">아직 받은 파일이 없습니다. 앱이 열려 있으면 자동으로 다운로드/Lakomics에 저장됩니다.</p>
+  </div></div></div>`;
+  document.getElementById('c-t').innerHTML=
+    tfig('C · 태블릿','c','<b>작업 중</b> — 큰 기기 슬랩과 고르기 버튼, 묶음 단위 대기열 카드(합산 진행률 + 단계), 아래 받은 파일 갤러리(새로 받은 것은 작은 사각 표식, 받는 중·대기는 타일 위에).',tBusy)+
+    tfig('C · 태블릿 빈 화면','c','<b>빈 화면</b> — 위쪽 보내기 부분은 그대로, 아래 두 칸은 한 줄 안내만.',tEmpty);
+
+  const idx=(busy)=>`<div class="index-head">전송</div><div class="index-body"><div class="slabel">기록</div>
+    <div class="irow dense sel"><span class="txt">전체</span><span class="n">${busy?'14':'0'}</span></div>
+    <div class="irow dense"><span class="txt">진행 중</span><span class="n">${busy?'4':''}</span></div>
+    <div class="irow dense"><span class="txt">받은 파일</span><span class="n">${busy?'8':''}</span></div>
+    <div class="irow dense"><span class="txt">보낸 파일</span><span class="n">${busy?'6':''}</span></div>
+    ${busy?'<div class="irow dense"><span class="txt">확인 필요</span><span class="n danger">1</span></div>':''}</div>${foot}`;
+  const drop=(over)=>`<div style="display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:20px">
+    <div class="drop ${over?'over':''}"><span class="glyph">${I(over?'ArrowDownTray':'CloudArrowUp')}</span><div class="txt">${over?`<b>놓으면 Galaxy Tab S11(으)로 보냅니다</b><small>파일 <span class="numeric">24</span>개 · <span class="numeric">312 MB</span></small><div class="opt" style="margin-top:8px"><span class="box on">${I('Check')}</span>zip 하나로 묶어 보내기 ${nt}<span class="muted" style="font-size:12.5px">— 24개 이상이면 기본으로 켜짐</span></div>`:`<b>파일이나 폴더를 여기에 끌어 놓기</b><small>파일당 최대 2GB · 한 번에 100개까지 · 폴더는 zip 하나로</small>`}</div>${over?'':`<span class="btn">${I('Folder')}폴더</span><span class="btn primary">${I('PaperClip')}파일 고르기</span>`}</div>
+    <div style="display:grid;gap:10px;align-content:start"><div class="slabel">보낼 곳</div><div class="targets" style="grid-template-columns:1fr;gap:8px">
+      <div class="tgt sel" style="min-height:60px">${I('DeviceTablet')}<span class="txt"><b>Galaxy Tab S11</b><small>방금 전 접속</small></span></div>
+      <div class="tgt off" style="min-height:60px">${I('DevicePhone')}<span class="txt"><b>Galaxy S25</b><small>3일 전 접속</small></span></div></div></div></div>`;
+  const queueP=`<div style="display:grid;gap:10px">
+    ${Q(ft('PSD'),'표지_시안_v3.psd',`${out('Galaxy Tab S11')} · <span class="numeric">186 MB</span>`,'',prog(100),steps(3,['확인','업로드','상대가 받음']).replace('<span class="on">상대가 받음</span>','<span class="on">상대가 받는 중</span>'),'<span class="btn sm ghost">취소</span>')}
+    ${Q(ft('ZIP'),'레퍼런스_모음.zip',`${out('Galaxy Tab S11')} · 폴더 · 항목 <span class="numeric">230</span>개 · 읽지 못한 항목 1개 제외`,'72%',prog(72,'stripe'),steps(1),'<span class="btn sm ghost">취소</span>')}
+    ${Q(`<span class="ft">${I('Square2Stack').replace('class="i ','class="i " style="width:20px;height:20px" ')}</span>`,'사진 12개',`${inn('Galaxy Tab S11')} · <span class="numeric">6/12</span> · <span class="numeric">35.5 / 61.2 MB</span>`,'58%',prog(58),'','<span class="btn sm ghost">받지 않기</span>')}
+    ${Q(ft('MOV'),'촬영_원본_0925.mov','받는 기기의 저장 공간 부족 · <span class="numeric">1.92 GB</span>','','','','<span class="btn sm">재시도</span><span class="btn sm ghost">지우기</span>','err')}
+  </div>`;
+  const galP=`<div class="gal" style="grid-template-columns:repeat(5,1fr)">
+    ${G(4,'IMG_20260926_1428.jpg','5.2 MB · 14:32','new')}${G(0,'IMG_20260926_1429.jpg','4.8 MB · 14:32','new')}${G(5,'IMG_20260926_1430.jpg','5.0 MB · 14:32','new')}${G(1,'IMG_20260926_1431.jpg','5.4 MB · 14:32','new')}${G('PDF','계약서_스캔.pdf','3.4 MB · 10:12')}
+    ${G(6,'필기_0926.png','1.2 MB · 09:48')}${G(2,'IMG_20260925_2205.jpg','6.1 MB · 어제')}${G(3,'IMG_20260925_2206.jpg','5.9 MB · 어제')}${G('ZIP','손글씨_스캔.zip','120 MB · 어제')}${G('MP4','화면녹화_0925.mp4','84 MB · 어제')}
+  </div>`;
+  const pmain=(busy)=>`<div class="mbody ${busy?'fade-end':''}"><div style="padding:20px 28px;display:grid;gap:18px">${drop(!busy)}
+    ${busy?`<div style="display:grid;grid-template-columns:520px minmax(0,1fr);gap:28px;align-items:start"><div style="display:grid;gap:10px"><div class="slabel">진행 <span class="numeric">4</span></div>${queueP}</div><div style="display:grid;gap:10px"><div class="slabel">받은 파일 <span class="numeric">8</span></div>${galP}</div></div>`
+      :`<div style="display:grid;grid-template-columns:520px minmax(0,1fr);gap:28px"><div style="display:grid;gap:8px"><div class="slabel">진행</div><p class="muted" style="font-size:14px">보내거나 받는 중인 파일이 없습니다.</p></div><div style="display:grid;gap:8px"><div class="slabel">받은 파일</div><p class="muted" style="font-size:14px">아직 받은 파일이 없습니다. 창을 닫아 트레이에 있어도 다운로드/Lakomics에 저장됩니다.</p></div></div>`}</div></div>`;
+  document.getElementById('c-p').innerHTML=
+    pfig('C · PC','c','<b>작업 중</b> — 위쪽 넓은 끌어 놓기 영역 + 오른쪽 보낼 곳 슬랩. 왼쪽 대기열 카드(보내는 PSD는 “상대가 받는 중” 단계, 폴더 zip은 확인 단계, 받는 사진 묶음 6/12, 저장 공간 부족 실패), 오른쪽 받은 파일 갤러리. 인덱스는 기록 필터.',pcwin(2,idx(true),titlebar('전송','이 PC · 작업실 PC · 연결됨')+pmain(true)))+
+    pfig('C · PC 빈 화면 + 끌어 놓는 중','c','<b>빈 화면</b>에 사진 24개를 끌어 온 상태 — 끌어 놓기 영역이 아이보리로 바뀌고 “zip 하나로 묶어 보내기” 선택지가 뜸(새 기능).',pcwin(0,idx(false),titlebar('전송','이 PC · 작업실 PC · 연결됨')+pmain(false)));
+}
+
+dirA();dirB();dirC();
+const params=new URLSearchParams(location.search);
+if(params.get('shot')){document.body.classList.add('shot');document.getElementById(params.get('shot')).classList.add('shown');}
+const toggle=document.getElementById('toggle-full');
+toggle.addEventListener('click',()=>{const on=document.body.classList.toggle('full');toggle.setAttribute('aria-pressed',String(on));});
+</script>
+</body>
+</html>

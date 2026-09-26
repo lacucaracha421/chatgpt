@@ -36,7 +36,7 @@ const initialWorks=():CollectionSummary[]=>[
 let works:CollectionSummary[];
 const event=(eventId:string,collectionId:string,provider:ReleaseEvent['provider'],kind:ReleaseEvent['kind'],volumeNumber:number,previousValue:string|null,currentValue:string|null):ReleaseEvent=>
   ({eventId,collectionId,collectionName:initialWorks().find(work=>work.id===collectionId)!.name,provider,kind,volumeNumber,previousValue,currentValue,detectedAt:'2026-09-25T10:00:00Z',read:false,readAt:null});
-let events:ReleaseEvent[], offline:boolean, editsOffline:boolean;
+let events:ReleaseEvent[], offline:boolean, editsOffline:boolean, publication:string;
 const acks=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/releases/acknowledge').map(([, ,body])=>body as Record<string,unknown>);
 const releaseReads=()=>mocks.api.mock.calls.map(([path])=>String(path)).filter(path=>path.startsWith('/v1/collections/releases?'));
 const listReply=()=>{
@@ -47,7 +47,7 @@ const listReply=()=>{
 
 beforeEach(()=>{setOutboxConnection('https://a.example');
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(2026,8,25,12));
-  localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();offline=false;editsOffline=false;works=initialWorks();
+  localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();offline=false;editsOffline=false;publication='r1';works=initialWorks();
   events=[
     event('e1','night','kakao','new_volume',5,null,'2026-10-10'),
     event('e2','sea','kakao','release_status_changed',2,'upcoming','released'),
@@ -55,7 +55,7 @@ beforeEach(()=>{setOutboxConnection('https://a.example');
     event('e4','quiet','kakao','new_volume',2,null,'2026-10-01'),
   ];
   mocks.api.mockImplementation(async(path:string,_signal:unknown,body?:Record<string,unknown>)=>{
-    if(path==='/v1/collections/status')return {revision:'r1',capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true},libraryId:LIBRARY};
+    if(path==='/v1/collections/status')return {revision:publication,capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true},libraryId:LIBRARY};
     if(path==='/v1/collections/personal-edits'){if(editsOffline)throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);return {version:1,operationId:body!.operationId,changed:true};}
     if(path.startsWith('/v1/collections/releases?')){if(offline)throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);return listReply();}
     if(path==='/v1/collections/releases/acknowledge'){
@@ -64,7 +64,7 @@ beforeEach(()=>{setOutboxConnection('https://a.example');
       events=events.filter(item=>!hit.includes(item));
       return {version:1,operationId:body!.operationId,acknowledged:hit.map(item=>item.eventId),alreadyRead:[],missing:[],revision:2,lastSequence:hit.length};
     }
-    if(path.startsWith('/v1/collections?')){const type=new URLSearchParams(path.split('?')[1]).get('type');return {ready:true,filterVersion:1,revision:'r1',publishedAt:null,items:works.filter(work=>work.type===type),nextCursor:null} satisfies CollectionPage;}
+    if(path.startsWith('/v1/collections?')){const type=new URLSearchParams(path.split('?')[1]).get('type');return {ready:true,filterVersion:1,revision:publication,publishedAt:null,items:works.filter(work=>work.type===type),nextCursor:null} satisfies CollectionPage;}
     const id=path.split('/')[3];
     return {revision:'r1',item:{...works.find(work=>work.id===id)!,volumes:[],artworks:[]} satisfies CollectionDetail};
   });
@@ -287,4 +287,37 @@ it('shows the 신간 marker after the year and stars in the manga grid, with not
   expect(tile('가득 찬 서가').querySelector('.collection-release-line')).toBeNull();
   expect(tile('조용한 숲').querySelector('.collection-release-line')).toBeNull();
   expect(tile('조용한 숲').querySelector('.collection-card-meta')!.textContent).toBe('2020');
+});
+
+it('reopens the 신간 screen from what it read, reading again only after the publication moved',async()=>{
+  const shelfReads=()=>mocks.api.mock.calls.map(([path])=>String(path)).filter(path=>path.startsWith('/v1/collections?')&&path.includes('type=manga')).length;
+  const eventReads=()=>releaseReads().filter(path=>new URLSearchParams(path.split('?')[1]).get('limit')==='100').length;
+  const backRef:{current:(()=>boolean)|null}={current:null};
+  await openReleases(backRef);
+  await waitFor(()=>expect([shelfReads(),eventReads()]).toEqual([1,1]));
+  const reopen=async()=>{
+    expect(backRef.current!()).toBe(true);
+    await waitFor(()=>expect(screen.queryByRole('region',{name:'밤의 도서관'})).toBeNull());
+    fireEvent.click(await entry());
+    return screen.findByRole('region',{name:'밤의 도서관'});
+  };
+  const calls=mocks.api.mock.calls.length;
+  // Shown at once from the kept copy, without a single request.
+  expect(lines(await reopen())).toEqual(['4권 · 9월 16일 발매됨','5권 · 10월 10일 발매 예정','6권 · 발매일 미정']);
+  expect(mocks.api.mock.calls.length).toBe(calls);
+  // The PC publishes: the status check sees a new revision, and the next show reads once.
+  expect(backRef.current!()).toBe(true);
+  const gridReads=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/collections?')&&String(path).includes('type=game')).length,grid=gridReads();
+  publication='r2';
+  try {
+    window.dispatchEvent(new CustomEvent('lakomics-sync-signals',{detail:{live:true,signals:{collections:'moved'}}}));
+    // The grid re-reads for the new publication; the closed 신간 screen reads nothing yet.
+    await waitFor(()=>expect(gridReads()).toBeGreaterThan(grid));
+    expect([shelfReads(),eventReads()]).toEqual([1,1]);
+    fireEvent.click(await entry());
+    await screen.findByRole('region',{name:'밤의 도서관'});
+    await waitFor(()=>expect([shelfReads(),eventReads()]).toEqual([2,2]));
+  } finally {
+    window.dispatchEvent(new CustomEvent('lakomics-sync-signals',{detail:{live:false}}));
+  }
 });

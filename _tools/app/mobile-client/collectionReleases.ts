@@ -46,7 +46,8 @@ export type ReleaseList = {
   nextCursor: string | null;
   hasMore: boolean;
 };
-export type AcknowledgeReply = {acknowledged: string[]; alreadyRead: string[]; missing: string[]};
+/** `revision` is the list revision after this command (one past the previous when it marked anything). */
+export type AcknowledgeReply = {acknowledged: string[]; alreadyRead: string[]; missing: string[]; revision?: number};
 
 export const NO_RELEASES: ReleaseCounts = {unread: 0, byCollection: {}};
 
@@ -68,19 +69,28 @@ export function releasesPage(cursor: string | null, signal?: AbortSignal): Promi
   return api<ReleaseList>(`${RELEASES_PATH}?${params}`, signal);
 }
 
-/** Every unread event (all three kinds), page after page; bounded so a runaway list cannot loop. */
-export async function allUnreadReleases(signal?: AbortSignal): Promise<{items: ReleaseEvent[]; counts: ReleaseCounts}> {
+/** The list `revision` of a reply, or null when missing (an older server, a fixture). */
+export function releaseRevision(reply: unknown): number | null {
+  const value = (reply as {revision?: unknown} | null)?.revision;
+  return typeof value === 'number' && Number.isInteger(value) ? value : null;
+}
+
+/**
+ * Every unread event (all three kinds), page after page; bounded so a runaway list cannot loop.
+ * `revision` is the first page's list revision.
+ */
+export async function allUnreadReleases(signal?: AbortSignal): Promise<{items: ReleaseEvent[]; counts: ReleaseCounts; revision: number | null}> {
   const items: ReleaseEvent[] = [];
   const seen = new Set<string>();
-  let cursor: string | null = null, counts = NO_RELEASES;
+  let cursor: string | null = null, counts = NO_RELEASES, revision: number | null = null;
   for (let page = 0; page < 20; page++) {
     const reply: ReleaseList = await releasesPage(cursor, signal);
-    if (page === 0) counts = releaseCounts(reply);
+    if (page === 0) { counts = releaseCounts(reply); revision = releaseRevision(reply); }
     for (const event of reply.items ?? []) if (!seen.has(event.eventId)) { seen.add(event.eventId); items.push(event); }
     if (!reply.hasMore || !reply.nextCursor) break;
     cursor = reply.nextCursor;
   }
-  return {items, counts};
+  return {items, counts, revision};
 }
 
 export type MangaShelf = {works: CollectionSummary[]; revision: string; ready: boolean};

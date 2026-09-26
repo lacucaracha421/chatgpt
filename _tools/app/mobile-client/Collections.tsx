@@ -3,8 +3,8 @@ import {CollectionMetadata} from './CollectionMetadata';
 import {CollectionPersonal,PersonalActions,PersonalRecord,type PersonalSheet} from './CollectionPersonal';
 import {koreanGenres} from '../src/collections/genreNames';
 import {useCollectionEdits} from './useCollectionEdits';
-import {CollectionReleases} from './CollectionReleases';
-import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
+import {CollectionReleases, emptyReleaseStore, type ReleaseStore} from './CollectionReleases';
+import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
@@ -383,6 +383,10 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const [bindHost,setBindHost]=useState<HTMLDivElement|null>(null);
   // 신간: unread counts for the entry badge and manga card badges, and the 신간 screen level (Collections tab only).
   const [releases,setReleases]=useState<ReleaseCounts>(NO_RELEASES),[inboxOpen,setInboxOpen]=useState(false);
+  // The release list revision (moves when the PC publishes events or anything is confirmed), and
+  // the 신간 screen's last read, kept here so reopening it reuses what is still current.
+  const [releaseListRevision,setReleaseListRevision]=useState<number|null>(null),releaseStore=useRef<ReleaseStore>(emptyReleaseStore());
+  const takeReleaseCounts=useCallback((reply:unknown)=>{setReleases(releaseCounts(reply));setReleaseListRevision(releaseRevision(reply));},[]);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[volumeLimit,setVolumeLimit]=useState(96),[overview,setOverview]=useState(false);
   // The viewer opens covers in their physical form; the choice holds while browsing.
@@ -422,8 +426,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
     return()=>controller.abort();
   },[active,paused,selected,detailKey]);
   // The shared conditional poll (60 s while visible) keeps the chip and badges current; a pull re-reads at once.
-  usePublicationCheck(active&&!paused,RELEASE_COUNTS_PATH,undefined,reply=>setReleases(releaseCounts(reply)));
-  useEffect(()=>{if(!refresh||!active||paused)return;const controller=new AbortController();void api(RELEASE_COUNTS_PATH,controller.signal,undefined,'GET',true).then(reply=>{if(!controller.signal.aborted)setReleases(releaseCounts(reply));},()=>{});return()=>controller.abort();},[refresh]);
+  usePublicationCheck(active&&!paused,RELEASE_COUNTS_PATH,undefined,takeReleaseCounts);
+  useEffect(()=>{if(!refresh||!active||paused)return;const controller=new AbortController();void api(RELEASE_COUNTS_PATH,controller.signal,undefined,'GET',true).then(reply=>{if(!controller.signal.aborted)takeReleaseCounts(reply);},()=>{});return()=>controller.abort();},[refresh]);
   usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;setRefresh(n=>n+1);setDetailRefresh(n=>n+1);});
   // Restore the list position when its committed query is shown again, before it is painted.
   useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,main.committed,active]);
@@ -526,7 +530,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
     </>}</div>
-    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} onCounts={setReleases} onOpen={openWork} ownedOf={ownedOf} watching={watching}
+    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} store={releaseStore} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>):<>
       {background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}
