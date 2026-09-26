@@ -84,16 +84,26 @@ pub(crate) const SERIES_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELE
                     AND NOT EXISTS(SELECT 1 FROM character_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)
                     AND NOT EXISTS(SELECT 1 FROM character_learned_references r JOIN character_targets t ON t.id=r.target_id WHERE r.asset_id=a.id AND t.series_classification_id=?1)))))";
 
+/// Normal assets of one character group (?2) inside its series (?1). The group's member
+/// assets (relations, references and learned references of its targets, deduplicated by
+/// `UNION`) drive the join through `CROSS JOIN`, which SQLite keeps in the written order;
+/// without `sqlite_stat1` the planner otherwise walks every normal asset and probes the
+/// membership per asset (PERF-ALL-001: ~420 k VM steps per group on the real library).
+/// Gate: `sidebar_count_vm_steps_stay_proportional_to_memberships`.
 pub(crate) const GROUP_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
               ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
-              SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
+              SELECT a.id,a.collected_at FROM (
+                SELECT r.asset_id FROM character_group_members gm CROSS JOIN character_relations r ON r.target_id=gm.target_id WHERE gm.group_id=?2
+                UNION SELECT r.asset_id FROM character_group_members gm CROSS JOIN character_references r ON r.target_id=gm.target_id WHERE gm.group_id=?2
+                UNION SELECT r.asset_id FROM character_group_members gm CROSS JOIN character_learned_references r ON r.target_id=gm.target_id WHERE gm.group_id=?2
+              ) AS member CROSS JOIN assets a ON a.id=member.asset_id WHERE a.status='normal'
               AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
                 OR (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors))
-                  AND EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)))
-              AND (EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)
-                OR EXISTS(SELECT 1 FROM character_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)
-                OR EXISTS(SELECT 1 FROM character_learned_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2))";
+                  AND EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)))";
 
+/// One character's gallery page. `dedup CROSS JOIN assets` keeps the character's own
+/// assets as the driver (see [`GROUP_GALLERY_SCOPE`]); a plain `JOIN` walks every normal
+/// asset per character without `sqlite_stat1`.
 pub(crate) const TARGET_GALLERY_SQL: &str = r#"
 WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
@@ -118,7 +128,7 @@ WITH RECURSIVE scope(id) AS (
     SELECT asset_id,MAX(accepted) FROM target_assets GROUP BY asset_id
 ), eligible(id,collected_at) AS (
     SELECT a.id,a.collected_at
-    FROM dedup d JOIN assets a ON a.id=d.asset_id
+    FROM dedup d CROSS JOIN assets a ON a.id=d.asset_id
     WHERE a.status='normal' AND (
         EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
         OR (d.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors)))
@@ -131,6 +141,7 @@ WHERE (?3 IS NULL OR (collected_at,id)<(?3,?4))
 ORDER BY collected_at DESC,id DESC LIMIT ?5
 "#;
 
+/// [`TARGET_GALLERY_SQL`]'s total alone, with the same `CROSS JOIN` driver.
 const TARGET_GALLERY_COUNT_SQL: &str = r#"
 WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id=?1
@@ -149,7 +160,7 @@ WITH RECURSIVE scope(id) AS (
 ), dedup(asset_id,accepted) AS (
     SELECT asset_id,MAX(accepted) FROM target_assets GROUP BY asset_id
 )
-SELECT COUNT(*) FROM dedup d JOIN assets a ON a.id=d.asset_id
+SELECT COUNT(*) FROM dedup d CROSS JOIN assets a ON a.id=d.asset_id
 WHERE a.status='normal' AND (
     EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
     OR (d.accepted=1 AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors)))
@@ -1279,6 +1290,276 @@ mod tests {
             .items
             .iter()
             .all(|i| own.items.iter().all(|o| o.id != i.id)));
+    }
+
+    /// PERF-ALL-001 tighten-only gate. Character and group sidebar counts (and the galleries
+    /// sharing their SQL) must cost VM steps in proportion to the character's or group's own
+    /// assets, not to every normal asset. The pre-fix statements run on the same fixture to
+    /// prove identical rows and that the thresholds catch the regression. Lower a `MAX_*`
+    /// after a verified improvement; raise it only with a justified, measured reason.
+    #[test]
+    fn sidebar_count_vm_steps_stay_proportional_to_memberships() {
+        const FILLER: usize = 2_000;
+        // Measured on this fixture (bundled SQLite of rusqlite 0.40): target count fixed
+        // 514, plain-`JOIN` plan 9,132; group count fixed 624, pre-fix scope 111,065.
+        const MAX_TARGET_VM_STEPS: i32 = 650;
+        const MAX_GROUP_VM_STEPS: i32 = 780;
+
+        let f = Fixture::new();
+        let a = f.ready("A");
+        let b = f.ready("B");
+        f.library
+            .record_character_decisions(DecisionRequest {
+                target_id: a.id.clone(),
+                expected_fingerprint: a.fingerprint.clone(),
+                asset_ids: vec!["asset-5".into()],
+                decision: DecisionKind::Accepted,
+                baseline_fingerprint: None,
+                scan_id: None,
+            })
+            .unwrap();
+        let group_id = super::super::character_groups::save_character_group_in(
+            &f.library.connection().unwrap(),
+            super::super::character_groups::GroupDraft {
+                id: None,
+                series_id: f.series.clone(),
+                expected_revision: None,
+                name: "Duo".into(),
+                target_ids: vec![a.id.clone(), b.id.clone()],
+                delete: false,
+            },
+        )
+        .unwrap();
+        {
+            let mut connection = f.library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            {
+                let mut asset = transaction
+                    .prepare(
+                        "INSERT INTO assets (
+                            id, content_hash, media_kind, original_name, relative_path,
+                            thumbnail_relative_path, byte_size, width, height, collected_at,
+                            status
+                         ) VALUES (?1, 'hash-' || ?1, 'image', ?1 || '.png',
+                            'assets/' || ?1 || '.png', 'thumbnails/' || ?1 || '.webp',
+                            1, 1, 1, '2026-08-16T00:00:00Z', ?2)",
+                    )
+                    .unwrap();
+                let mut link = transaction
+                    .prepare("INSERT INTO asset_classifications VALUES (?1, ?2)")
+                    .unwrap();
+                for index in 0..FILLER {
+                    let id = format!("filler-{index:05}");
+                    let status = if index % 7 == 3 { "trash" } else { "normal" };
+                    asset.execute(params![id, status]).unwrap();
+                    let folder = if index % 2 == 0 { &f.child } else { &f.outside };
+                    link.execute(params![id, folder]).unwrap();
+                }
+            }
+            transaction.commit().unwrap();
+        }
+
+        let connection = f.library.connection().unwrap();
+        let no_cursor: Option<String> = None;
+        let mut target_counts = std::collections::HashMap::new();
+        let (mut target_fixed, mut target_plain) = (0, 0);
+        for target in [&a, &b] {
+            let count = compare(
+                &connection,
+                TARGET_GALLERY_COUNT_SQL,
+                &TARGET_GALLERY_COUNT_SQL.replace("CROSS JOIN", "JOIN"),
+                params![f.series, target.id],
+            );
+            assert_eq!(count.fixed_rows, count.plain_rows);
+            target_fixed = target_fixed.max(count.fixed_steps);
+            target_plain = target_plain.max(count.plain_steps);
+            let page = compare(
+                &connection,
+                TARGET_GALLERY_SQL,
+                &TARGET_GALLERY_SQL.replace("CROSS JOIN", "JOIN"),
+                params![f.series, target.id, no_cursor, no_cursor, 100],
+            );
+            assert_eq!(page.fixed_rows, page.plain_rows);
+            let total = match &count.fixed_rows[0][0] {
+                rusqlite::types::Value::Integer(total) => *total,
+                other => panic!("unexpected count {other:?}"),
+            };
+            assert_eq!(page.fixed_rows.len() as i64, total);
+            target_counts.insert(target.id.clone(), total as u64);
+        }
+        let group_count_sql = format!("SELECT COUNT(*) FROM ({GROUP_GALLERY_SCOPE})");
+        let group = compare(
+            &connection,
+            &group_count_sql,
+            &format!("SELECT COUNT(*) FROM ({PRE_FIX_GROUP_GALLERY_SCOPE})"),
+            params![f.series, group_id],
+        );
+        assert_eq!(group.fixed_rows, group.plain_rows);
+        let group_rows = compare(
+            &connection,
+            &format!("{GROUP_GALLERY_SCOPE} ORDER BY a.collected_at DESC,a.id DESC"),
+            &format!("{PRE_FIX_GROUP_GALLERY_SCOPE} ORDER BY a.collected_at DESC,a.id DESC"),
+            params![f.series, group_id],
+        );
+        assert_eq!(group_rows.fixed_rows, group_rows.plain_rows);
+        drop(connection);
+        eprintln!(
+            "target count VM steps: fixed {target_fixed}, plain JOIN {target_plain}; group count VM steps: fixed {}, pre-fix {}",
+            group.fixed_steps, group.plain_steps
+        );
+        // Five references plus the accepted asset-5 for A; five references for B.
+        assert_eq!(target_counts[&a.id], 6);
+        assert_eq!(target_counts[&b.id], 5);
+        assert_eq!(group_rows.fixed_rows.len(), 6);
+        let counts = f.library.character_sidebar_counts().unwrap();
+        assert_eq!(counts.targets, target_counts);
+        assert_eq!(counts.groups[&group_id], 6);
+
+        assert!(
+            target_fixed <= MAX_TARGET_VM_STEPS,
+            "target count VM steps {target_fixed} exceed the gate {MAX_TARGET_VM_STEPS}"
+        );
+        assert!(
+            target_plain > MAX_TARGET_VM_STEPS,
+            "the pre-fix target count plan ({target_plain} VM steps) no longer exceeds the gate"
+        );
+        assert!(
+            group.fixed_steps <= MAX_GROUP_VM_STEPS,
+            "group count VM steps {} exceed the gate {MAX_GROUP_VM_STEPS}",
+            group.fixed_steps
+        );
+        assert!(
+            group.plain_steps > MAX_GROUP_VM_STEPS,
+            "the pre-fix group count plan ({} VM steps) no longer exceeds the gate",
+            group.plain_steps
+        );
+    }
+
+    /// Real-data equality check for the character count rewrites: every target's count and
+    /// gallery rows and every group's rows, old statements against new. Point
+    /// `LAKOMICS_CHARACTERS_SNAPSHOT_DB` at the `library.sqlite` of a snapshot copy, never at
+    /// the live library; it is opened read-only.
+    #[test]
+    #[ignore = "needs LAKOMICS_CHARACTERS_SNAPSHOT_DB"]
+    fn sidebar_counts_match_pre_fix_plan_on_snapshot() {
+        let path = std::env::var_os("LAKOMICS_CHARACTERS_SNAPSHOT_DB")
+            .expect("LAKOMICS_CHARACTERS_SNAPSHOT_DB");
+        let connection =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let pairs = |sql: &str| {
+            connection
+                .prepare(sql)
+                .unwrap()
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let no_cursor: Option<String> = None;
+        let (mut fixed, mut plain, mut rows) = (0_i64, 0_i64, 0_usize);
+        let targets = pairs("SELECT id,series_classification_id FROM character_targets WHERE series_classification_id IS NOT NULL ORDER BY id");
+        for (target_id, series_id) in &targets {
+            let count = compare(
+                &connection,
+                TARGET_GALLERY_COUNT_SQL,
+                &TARGET_GALLERY_COUNT_SQL.replace("CROSS JOIN", "JOIN"),
+                params![series_id, target_id],
+            );
+            assert_eq!(count.fixed_rows, count.plain_rows, "target {target_id}");
+            let page = compare(
+                &connection,
+                TARGET_GALLERY_SQL,
+                &TARGET_GALLERY_SQL.replace("CROSS JOIN", "JOIN"),
+                params![series_id, target_id, no_cursor, no_cursor, 100_000],
+            );
+            assert_eq!(page.fixed_rows, page.plain_rows, "target {target_id}");
+            rows += page.fixed_rows.len();
+            fixed += i64::from(count.fixed_steps);
+            plain += i64::from(count.plain_steps);
+        }
+        eprintln!(
+            "{} targets, {rows} gallery rows; count VM steps: fixed {fixed}, plain JOIN {plain}",
+            targets.len()
+        );
+        let (mut fixed, mut plain, mut rows) = (0_i64, 0_i64, 0_usize);
+        let groups = pairs("SELECT id,series_id FROM character_groups ORDER BY id");
+        for (group_id, series_id) in &groups {
+            let count = compare(
+                &connection,
+                &format!("SELECT COUNT(*) FROM ({GROUP_GALLERY_SCOPE})"),
+                &format!("SELECT COUNT(*) FROM ({PRE_FIX_GROUP_GALLERY_SCOPE})"),
+                params![series_id, group_id],
+            );
+            assert_eq!(count.fixed_rows, count.plain_rows, "group {group_id}");
+            let page = compare(
+                &connection,
+                &format!("{GROUP_GALLERY_SCOPE} ORDER BY a.collected_at DESC,a.id DESC"),
+                &format!("{PRE_FIX_GROUP_GALLERY_SCOPE} ORDER BY a.collected_at DESC,a.id DESC"),
+                params![series_id, group_id],
+            );
+            assert_eq!(page.fixed_rows, page.plain_rows, "group {group_id}");
+            rows += page.fixed_rows.len();
+            fixed += i64::from(count.fixed_steps);
+            plain += i64::from(count.plain_steps);
+        }
+        eprintln!(
+            "{} groups, {rows} gallery rows; count VM steps: fixed {fixed}, pre-fix {plain}",
+            groups.len()
+        );
+    }
+
+    /// [`GROUP_GALLERY_SCOPE`] before PERF-ALL-001 (every normal asset drives the join).
+    const PRE_FIX_GROUP_GALLERY_SCOPE: &str = "WITH RECURSIVE scope(id) AS (SELECT id FROM classification_entries WHERE id=?1 UNION SELECT c.id FROM classification_entries c JOIN scope s ON c.parent_id=s.id),
+              ancestors(id,parent_id) AS (SELECT id,parent_id FROM classification_entries WHERE id=?1 UNION ALL SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
+              SELECT a.id,a.collected_at FROM assets a WHERE a.status='normal'
+              AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM scope))
+                OR (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND ac.classification_id IN (SELECT id FROM ancestors))
+                  AND EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)))
+              AND (EXISTS(SELECT 1 FROM character_relations r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)
+                OR EXISTS(SELECT 1 FROM character_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2)
+                OR EXISTS(SELECT 1 FROM character_learned_references r JOIN character_group_members gm ON gm.target_id=r.target_id WHERE r.asset_id=a.id AND gm.group_id=?2))";
+
+    struct Compared {
+        fixed_rows: Vec<Vec<rusqlite::types::Value>>,
+        fixed_steps: i32,
+        plain_rows: Vec<Vec<rusqlite::types::Value>>,
+        plain_steps: i32,
+    }
+
+    /// Runs a product statement and its pre-fix form with the same parameters; returns every
+    /// column of every row (in statement order) with each statement's VM steps.
+    fn compare(
+        connection: &Connection,
+        fixed_sql: &str,
+        plain_sql: &str,
+        values: &[&dyn rusqlite::ToSql],
+    ) -> Compared {
+        let run = |sql: &str| {
+            let mut statement = connection.prepare(sql).unwrap();
+            let columns = statement.column_count();
+            let rows = statement
+                .query_map(values, |row| {
+                    (0..columns)
+                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (
+                rows,
+                statement.get_status(rusqlite::StatementStatus::VmStep),
+            )
+        };
+        let (fixed_rows, fixed_steps) = run(fixed_sql);
+        let (plain_rows, plain_steps) = run(plain_sql);
+        Compared {
+            fixed_rows,
+            fixed_steps,
+            plain_rows,
+            plain_steps,
+        }
     }
 }
 

@@ -502,21 +502,45 @@ impl Library {
     }
 }
 
+/// One asset's Classifications with each entry's direct normal-asset count. The count
+/// subquery starts from the entry's links (`asset_classifications_by_classification`) and
+/// probes each asset by id: `CROSS JOIN` fixes that order. With a plain `JOIN` and no
+/// `sqlite_stat1` the planner walks every normal asset per entry (PERF-ALL-001: 46 k VM
+/// steps for one asset on the real library). `find_classification` and the similarity
+/// review's `classifications_for_assets` use the same subquery.
+/// Gate: `classification_counts_vm_steps_stay_proportional_to_links`.
+const ASSET_CLASSIFICATIONS_SQL: &str =
+    "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
+        (SELECT COUNT(*) FROM asset_classifications AS count_link
+         CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+         WHERE count_link.classification_id = entry.id
+           AND count_asset.status = 'normal') AS asset_count
+     FROM classification_entries AS entry
+     JOIN asset_classifications AS link ON link.classification_id = entry.id
+     WHERE link.asset_id = ?1
+     ORDER BY entry.name COLLATE NOCASE, entry.id";
+
+/// Links of normal assets that have more than one Classification, grouped by asset (the
+/// subtree-total correction). The multi-linked assets (grouped on the link primary key)
+/// drive the rest through `CROSS JOIN`; the earlier `IN (...)` form also walked every
+/// normal asset (real library: 250 k -> 177 k VM steps, `list_classifications` ~7.6 ->
+/// ~7.1 ms release). A self-join instead of `GROUP BY` costs fewer VM steps but scans the
+/// link table b-tree cold and was slower. Row order within one asset is not significant.
+const MULTI_LINKED_ASSETS_SQL: &str = "SELECT link.asset_id, link.classification_id
+     FROM (
+         SELECT asset_id FROM asset_classifications
+         GROUP BY asset_id HAVING COUNT(*) > 1
+     ) AS multi
+     CROSS JOIN asset_classifications AS link ON link.asset_id = multi.asset_id
+     CROSS JOIN assets AS asset ON asset.id = link.asset_id
+     WHERE asset.status = 'normal'
+     ORDER BY link.asset_id";
+
 pub(crate) fn classifications_for_asset(
     connection: &Connection,
     asset_id: &str,
 ) -> Result<Vec<ClassificationEntry>, LibraryError> {
-    let mut statement = connection.prepare(
-        "SELECT entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
-            (SELECT COUNT(*) FROM asset_classifications AS count_link
-             JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
-             WHERE count_link.classification_id = entry.id
-               AND count_asset.status = 'normal') AS asset_count
-         FROM classification_entries AS entry
-         JOIN asset_classifications AS link ON link.classification_id = entry.id
-         WHERE link.asset_id = ?1
-         ORDER BY entry.name COLLATE NOCASE, entry.id",
-    )?;
+    let mut statement = connection.prepare(ASSET_CLASSIFICATIONS_SQL)?;
     read_entries(&mut statement, [asset_id])
 }
 
@@ -645,17 +669,7 @@ fn apply_subtree_asset_counts(
             }
         }
     }
-    let mut statement = connection.prepare(
-        "SELECT link.asset_id, link.classification_id
-         FROM asset_classifications AS link
-         JOIN assets AS asset ON asset.id = link.asset_id
-         WHERE asset.status = 'normal'
-           AND link.asset_id IN (
-               SELECT asset_id FROM asset_classifications
-               GROUP BY asset_id HAVING COUNT(*) > 1
-           )
-         ORDER BY link.asset_id",
-    )?;
+    let mut statement = connection.prepare(MULTI_LINKED_ASSETS_SQL)?;
     let mut rows = statement.query([])?;
     let mut current_asset: Option<String> = None;
     let mut hits: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
@@ -694,7 +708,7 @@ fn find_classification(
         .query_row(
             "SELECT id, kind, name, parent_id, icon_key, color_key,
                 (SELECT COUNT(*) FROM asset_classifications AS count_link
-                 JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+                 CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
                  WHERE count_link.classification_id = classification_entries.id
                    AND count_asset.status = 'normal') AS asset_count
              FROM classification_entries WHERE id = ?1",
@@ -1696,6 +1710,244 @@ mod tests {
             .get_asset_classifications("asset-a")
             .unwrap()
             .is_empty());
+    }
+
+    /// PERF-ALL-001 tighten-only gate. One asset's Classifications (with per-entry counts)
+    /// must cost VM steps in proportion to the entries' links, not entries x assets, and the
+    /// multi-link correction of `list_classifications` must not walk every normal asset. The
+    /// pre-fix statements run on the same fixture to prove identical rows and that the
+    /// thresholds catch the regression. Lower a `MAX_*` after a verified improvement; raise
+    /// it only with a justified, measured reason.
+    #[test]
+    fn classification_counts_vm_steps_stay_proportional_to_links() {
+        const ASSETS: usize = 2_000;
+        const PROBE: &str = "asset-00001";
+        // Measured on this fixture (bundled SQLite of rusqlite 0.40): one asset's
+        // Classifications fixed 1,346, plain-`JOIN` plan 17,364; multi-link correction fixed
+        // 40,083, pre-fix statement 54,711.
+        const MAX_ASSET_VM_STEPS: i32 = 1_500;
+        const MAX_MULTI_VM_STEPS: i32 = 44_000;
+
+        let fixture = ClassificationFixture::new();
+        let sibling = fixture
+            .library
+            .create_classification(CreateClassification {
+                kind: ClassificationKind::Tag,
+                name: "sibling".into(),
+                parent_id: Some(fixture.parent_tag.id.clone()),
+            })
+            .unwrap();
+        {
+            let mut connection = fixture.library.connection().unwrap();
+            let transaction = connection.transaction().unwrap();
+            {
+                let mut asset = transaction
+                    .prepare(
+                        "INSERT INTO assets (
+                            id, content_hash, media_kind, original_name, relative_path,
+                            thumbnail_relative_path, byte_size, width, height, collected_at,
+                            status
+                         ) VALUES (?1, 'hash-' || ?1, 'image', ?1 || '.png',
+                            'assets/' || ?1 || '.png', 'thumbnails/' || ?1 || '.webp',
+                            1, 1, 1, '2026-08-16T00:00:00Z', ?2)",
+                    )
+                    .unwrap();
+                let mut link = transaction
+                    .prepare(
+                        "INSERT INTO asset_classifications (asset_id, classification_id)
+                         VALUES (?1, ?2)",
+                    )
+                    .unwrap();
+                for index in 0..ASSETS {
+                    let id = format!("asset-{index:05}");
+                    let status = if index % 7 == 3 { "trash" } else { "normal" };
+                    asset.execute(rusqlite::params![id, status]).unwrap();
+                    // Most assets sit in the large child tag; a few small entries (and a few
+                    // multi-linked assets, some trashed) hold the probe asset's Classifications.
+                    let ids: &[&str] = match index % 50 {
+                        1 => &[&fixture.parent_tag.id, &sibling.id],
+                        2 => &[&sibling.id],
+                        3 => &[&fixture.parent_tag.id],
+                        _ => &[&fixture.child_tag.id],
+                    };
+                    for classification_id in ids {
+                        link.execute(rusqlite::params![id, classification_id])
+                            .unwrap();
+                    }
+                }
+            }
+            transaction.commit().unwrap();
+        }
+
+        let connection = fixture.library.connection().unwrap();
+        let asset = compare_rows(
+            &connection,
+            super::ASSET_CLASSIFICATIONS_SQL,
+            &super::ASSET_CLASSIFICATIONS_SQL.replace("CROSS JOIN", "JOIN"),
+            Some(PROBE),
+        );
+        let multi = compare_rows(
+            &connection,
+            super::MULTI_LINKED_ASSETS_SQL,
+            PRE_FIX_MULTI_LINKED_ASSETS_SQL,
+            None,
+        );
+        eprintln!(
+            "get_asset_classifications VM steps: fixed {}, plain JOIN {}; multi-link VM steps: fixed {}, pre-fix {}",
+            asset.fixed_steps, asset.plain_steps, multi.fixed_steps, multi.plain_steps
+        );
+        assert_eq!(asset.fixed_rows.len(), 2);
+        assert_eq!(asset.fixed_rows, asset.plain_rows);
+        // Two links for each of the 40 multi-linked assets, of which the normal ones remain.
+        let normal_multi = (0..ASSETS).filter(|i| i % 50 == 1 && i % 7 != 3).count();
+        assert_eq!(multi.fixed_rows.len(), normal_multi * 2);
+        assert_eq!(multi.fixed_rows, multi.plain_rows);
+        drop(connection);
+        // The product call returns the gated rows' counts (gated rows are sorted).
+        let mut product = fixture
+            .library
+            .get_asset_classifications(PROBE)
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.id, entry.asset_count as i64))
+            .collect::<Vec<_>>();
+        let gated = asset
+            .fixed_rows
+            .iter()
+            .map(|row| match (&row[0], &row[6]) {
+                (rusqlite::types::Value::Text(id), rusqlite::types::Value::Integer(count)) => {
+                    (id.clone(), *count)
+                }
+                other => panic!("unexpected row shape {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        product.sort();
+        let mut gated = gated;
+        gated.sort();
+        assert_eq!(product, gated);
+
+        for (name, compared, max) in [
+            ("get_asset_classifications", &asset, MAX_ASSET_VM_STEPS),
+            ("multi-link correction", &multi, MAX_MULTI_VM_STEPS),
+        ] {
+            assert!(
+                compared.fixed_steps <= max,
+                "{name} VM steps {} exceed the gate {max}",
+                compared.fixed_steps
+            );
+            assert!(
+                compared.plain_steps > max,
+                "the pre-fix {name} plan ({} VM steps) no longer exceeds the gate",
+                compared.plain_steps
+            );
+        }
+    }
+
+    /// Real-data equality check for the Classification count rewrites. Point
+    /// `LAKOMICS_CLASSIFICATIONS_SNAPSHOT_DB` at the `library.sqlite` of a snapshot copy, never
+    /// at the live library; it is opened read-only.
+    #[test]
+    #[ignore = "needs LAKOMICS_CLASSIFICATIONS_SNAPSHOT_DB"]
+    fn classification_counts_match_pre_fix_plan_on_snapshot() {
+        let path = std::env::var_os("LAKOMICS_CLASSIFICATIONS_SNAPSHOT_DB")
+            .expect("LAKOMICS_CLASSIFICATIONS_SNAPSHOT_DB");
+        let connection =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .unwrap();
+        let multi = compare_rows(
+            &connection,
+            super::MULTI_LINKED_ASSETS_SQL,
+            PRE_FIX_MULTI_LINKED_ASSETS_SQL,
+            None,
+        );
+        eprintln!(
+            "multi-link rows {}; VM steps: fixed {}, pre-fix {}",
+            multi.fixed_rows.len(),
+            multi.fixed_steps,
+            multi.plain_steps
+        );
+        assert_eq!(multi.fixed_rows, multi.plain_rows);
+        let linked = connection
+            .prepare("SELECT DISTINCT asset_id FROM asset_classifications ORDER BY asset_id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let plain = super::ASSET_CLASSIFICATIONS_SQL.replace("CROSS JOIN", "JOIN");
+        let (mut fixed_steps, mut plain_steps) = (0_i64, 0_i64);
+        for asset_id in &linked {
+            let asset = compare_rows(
+                &connection,
+                super::ASSET_CLASSIFICATIONS_SQL,
+                &plain,
+                Some(asset_id),
+            );
+            assert!(!asset.fixed_rows.is_empty());
+            assert_eq!(asset.fixed_rows, asset.plain_rows, "asset {asset_id}");
+            fixed_steps += i64::from(asset.fixed_steps);
+            plain_steps += i64::from(asset.plain_steps);
+        }
+        eprintln!(
+            "get_asset_classifications over {} linked assets; VM steps: fixed {fixed_steps}, plain JOIN {plain_steps}",
+            linked.len()
+        );
+    }
+
+    /// The multi-link statement before PERF-ALL-001.
+    const PRE_FIX_MULTI_LINKED_ASSETS_SQL: &str = "SELECT link.asset_id, link.classification_id
+         FROM asset_classifications AS link
+         JOIN assets AS asset ON asset.id = link.asset_id
+         WHERE asset.status = 'normal'
+           AND link.asset_id IN (
+               SELECT asset_id FROM asset_classifications
+               GROUP BY asset_id HAVING COUNT(*) > 1
+           )
+         ORDER BY link.asset_id";
+
+    type Rows = Vec<Vec<rusqlite::types::Value>>;
+
+    struct Compared {
+        fixed_rows: Rows,
+        fixed_steps: i32,
+        plain_rows: Rows,
+        plain_steps: i32,
+    }
+
+    /// Runs a product statement and its pre-fix form; returns every column of every row
+    /// (sorted, since the multi-link order within one asset is not significant) with each
+    /// statement's VM steps.
+    fn compare_rows(
+        connection: &rusqlite::Connection,
+        fixed_sql: &str,
+        plain_sql: &str,
+        asset_id: Option<&str>,
+    ) -> Compared {
+        let run = |sql: &str| {
+            let mut statement = connection.prepare(sql).unwrap();
+            let columns = statement.column_count();
+            let params = asset_id.map_or_else(Vec::new, |id| vec![id]);
+            let mut rows = statement
+                .query_map(rusqlite::params_from_iter(params), |row| {
+                    (0..columns)
+                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+            rows.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+            (rows, steps)
+        };
+        let (fixed_rows, fixed_steps) = run(fixed_sql);
+        let (plain_rows, plain_steps) = run(plain_sql);
+        Compared {
+            fixed_rows,
+            fixed_steps,
+            plain_rows,
+            plain_steps,
+        }
     }
 
     fn insert_asset(library: &Library, id: &str) {

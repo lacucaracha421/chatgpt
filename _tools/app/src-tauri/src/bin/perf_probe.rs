@@ -264,6 +264,8 @@ struct Options {
     /// Seconds to observe the idle character engine (dedicated mode; skips the paths).
     character_idle: Option<u64>,
     character_settings: PathBuf,
+    /// What-if: collect planner statistics on the snapshot before `Library::open`.
+    statistics: Option<String>,
 }
 
 fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
@@ -279,6 +281,7 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut skip = None;
     let mut detail_threshold_ms = 20.0;
     let mut character_idle = None;
+    let mut statistics = None;
     let mut character_settings = env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default()
@@ -300,6 +303,15 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
             "--disk-stats" => disk_stats = true,
             "--keep-snapshot" => keep_snapshot = true,
             "--only" => only = args.next(),
+            "--statistics" => {
+                let mode = args
+                    .next()
+                    .ok_or("--statistics <optimize|optimize-stat1|analyze>")?;
+                if !matches!(mode.as_str(), "optimize" | "optimize-stat1" | "analyze") {
+                    return Err("--statistics <optimize|optimize-stat1|analyze>".into());
+                }
+                statistics = Some(mode);
+            }
             "--skip" => skip = args.next(),
             "--detail-ms" => {
                 detail_threshold_ms = args.next().ok_or("--detail-ms <ms>")?.parse()?
@@ -334,13 +346,14 @@ fn parse_options() -> Result<Options, Box<dyn std::error::Error>> {
         detail_threshold_ms,
         character_idle,
         character_settings,
+        statistics,
     })
 }
 
 fn usage() -> String {
     "usage: cargo run --release --bin perf_probe -- --library <path> [--snapshot-dir <dir>] \
      [--iterations <n>] [--with-catalog] [--no-video-media] [--idle-ticks] [--disk-stats] [--keep-snapshot] [--only <substr>] [--skip <substr>] \
-     [--detail-ms <ms>] [--character-idle <seconds> [--character-settings <character-runtime.json>]]"
+     [--detail-ms <ms>] [--statistics <optimize|optimize-stat1|analyze>] [--character-idle <seconds> [--character-settings <character-runtime.json>]]"
         .to_owned()
 }
 
@@ -888,6 +901,44 @@ fn isolate_snapshot_network(
         [],
     )?;
     println!("snapshot_cloud_endpoint_redirected: rows={changed}");
+    Ok(())
+}
+
+/// What-if for planner statistics (the library has no `sqlite_stat1`): `optimize` runs the
+/// SQLite-recommended `PRAGMA optimize=0x10002` (bounded analysis of every table that
+/// needs it), `optimize-stat1` the same then drops the `sqlite_stat4` samples (the bundled
+/// SQLite is built with STAT4, whose samples every new connection loads), `analyze` a full
+/// `ANALYZE`. Only ever called on the snapshot copy.
+fn collect_snapshot_statistics(
+    snapshot_root: &Path,
+    library: &Path,
+    mode: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let database = snapshot_root.join("library.sqlite");
+    if fs::canonicalize(&database)?.starts_with(fs::canonicalize(library)?) {
+        return Err("refusing to modify a database inside the library".into());
+    }
+    let connection = rusqlite::Connection::open(&database)?;
+    let started = Instant::now();
+    connection.execute_batch(if mode == "analyze" {
+        "ANALYZE"
+    } else {
+        "PRAGMA optimize=0x10002"
+    })?;
+    if mode == "optimize-stat1" {
+        connection.execute_batch("DELETE FROM sqlite_stat4")?;
+    }
+    let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+    let rows: i64 = connection
+        .query_row("SELECT COUNT(*) FROM sqlite_stat1", [], |row| row.get(0))
+        .unwrap_or(0);
+    // A second run shows the steady-state cost once statistics exist.
+    let started = Instant::now();
+    connection.execute_batch("PRAGMA optimize=0x10002")?;
+    let again = started.elapsed().as_secs_f64() * 1000.0;
+    println!(
+        "snapshot_statistics: mode={mode} ms={elapsed:.1} stat1_rows={rows} optimize_again_ms={again:.2}"
+    );
     Ok(())
 }
 
@@ -1611,6 +1662,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let snapshot_root = snapshot(&options)?;
     isolate_snapshot_network(&snapshot_root, &options.library)?;
+    if let Some(mode) = options.statistics.as_deref() {
+        collect_snapshot_statistics(&snapshot_root, &options.library, mode)?;
+    }
     // Startup is traced: Library::open plus the background work it spawns.
     TRACE_ON.store(true, Ordering::Relaxed);
     DETAIL_ON.store(true, Ordering::Relaxed);

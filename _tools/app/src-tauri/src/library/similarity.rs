@@ -754,6 +754,7 @@ fn load_asset_statuses(
 }
 
 /// 여러 자산의 분류를 한 번의 IN 쿼리로 로드한다(단건 쿼리 반복 제거).
+/// Same count subquery (and `CROSS JOIN` driver) as `classification::ASSET_CLASSIFICATIONS_SQL`.
 pub(super) fn classifications_for_assets(
     connection: &Connection,
     asset_ids: &[String],
@@ -764,7 +765,7 @@ pub(super) fn classifications_for_assets(
     let mut sql = String::from(
         "SELECT link.asset_id, entry.id, entry.kind, entry.name, entry.parent_id, entry.icon_key, entry.color_key,
             (SELECT COUNT(*) FROM asset_classifications AS count_link
-             JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
+             CROSS JOIN assets AS count_asset ON count_asset.id = count_link.asset_id
              WHERE count_link.classification_id = entry.id
                AND count_asset.status = 'normal') AS asset_count
          FROM classification_entries AS entry
