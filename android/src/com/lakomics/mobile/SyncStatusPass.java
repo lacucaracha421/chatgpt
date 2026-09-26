@@ -18,7 +18,10 @@ final class SyncStatusPass implements AlbumReplica.Transport {
      *
      * A status read with this device's exchange token also carries `exchange.revision`,
      * which moves on every file transfer. Transfers are not Library changes, so they must not
-     * mark the pass changed (picker refresh, metadata invalidation). An unreadable body is
+     * mark the pass changed (picker refresh, metadata invalidation). The same holds for the
+     * additive `signals` block (the status long-poll's `?signals=1`; notes, releases, catalog
+     * and binding revisions move constantly) and `publisherLogs`: treating either as a Library
+     * change would walk the whole Photo Picker on every note save. An unreadable body is
      * compared as-is.
      */
     static String libraryStatus(String status) {
@@ -27,6 +30,8 @@ final class SyncStatusPass implements AlbumReplica.Transport {
             if(!(parsed instanceof java.util.Map))return status;
             java.util.Map<?,?> copy=new java.util.LinkedHashMap<>((java.util.Map<?,?>)parsed);
             copy.remove("exchange");
+            copy.remove("signals");
+            copy.remove("publisherLogs");
             return String.valueOf(copy);
         } catch(RuntimeException unreadable) { return status; }
     }

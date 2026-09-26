@@ -1,4 +1,5 @@
 import {useVisibleInterval} from './useVisibleInterval';
+import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject} from 'react';
 import {ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
@@ -112,11 +113,13 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   // Month notes live inside their ledger: out of the list, 보관함, labels and counts.
   const ledgerIds=useMemo(()=>new Set(state.notes.filter(n=>n.type===LEDGER).map(n=>n.id)),[state.notes]);
   const listed=useMemo(()=>state.notes.filter(n=>!(n.type===LEDGER_MONTH&&!!n.ledger&&ledgerIds.has(n.ledger))),[state.notes,ledgerIds]);
-  // ---- Sync: at once when Notes opens, every minute, and backing off while writes wait.
+  // ---- Sync: at once when Notes opens, every minute (or when `signals.notes` moves while the
+  // status long-poll is live, with a 10 min fallback), and backing off while writes wait.
   const pending=state.notes.some(n=>n.pending);
   const [retryDelay,setRetryDelay]=useState(2000);
   useEffect(()=>{setRetryDelay(2000);},[pending]);
-  useVisibleInterval(()=>void store.sync(),active&&state.unlocked&&!pending?60_000:null,true);
+  const notesSignalled=useSyncSignal('notes',()=>void store.sync(),active&&state.unlocked&&!pending);
+  useVisibleInterval(()=>void store.sync(),active&&state.unlocked&&!pending?(notesSignalled?SIGNAL_FALLBACK_MS:60_000):null,true);
   useVisibleInterval(()=>{void store.sync().finally(()=>setRetryDelay(delay=>Math.min(60_000,delay*2)));},active&&state.unlocked&&pending?retryDelay:null);
   useEffect(()=>{const leave=()=>{if(document.visibilityState==='hidden')void store.flush();};document.addEventListener('visibilitychange',leave);return()=>document.removeEventListener('visibilitychange',leave);},[store]);
   // ---- Secret notes lock after 5 idle minutes, when the app goes to the background (native

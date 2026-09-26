@@ -100,6 +100,11 @@ public final class NetworkPolicyTest {
  // Album authority replication keeps its read paths. 2C-3 adds exactly the domain's
  // one typed mutation route, PUT /v1/albums/commands, and no other Album write.
  for(String path:new String[]{"/v1/sync/status","/v1/albums/baseline?libraryId=0123456789abcdef0123456789abcdef&epoch=1&limit=1000","/v1/albums/changes?libraryId=0123456789abcdef0123456789abcdef&epoch=1&after=0&limit=100"})pass(()->NetworkPolicy.api(path,"GET"));
+ // PERF-ALL-001 T1: the status long-poll is the same GET with a query; still GET-only.
+ for(String path:new String[]{"/v1/sync/status?wait=50&signals=1","/v1/sync/status?wait=0&signals=1"})pass(()->NetworkPolicy.api(path,"GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/sync/status?wait=50&signals=1",method));
+ // The logs whose heads `publisherLogs` reports stay publisher reads, unreachable from here.
+ for(String path:new String[]{"/v1/library/characters/exclusions?after=0","/v1/library/characters/review/decisions?after=0","/v1/library/similarity/review/decisions?after=0","/v1/mobile-catalog/duplicates/decisions?after=0","/v1/collections/releases/reads?after=0","/v1/collections/bindings/log?after=0","/v1/collections/personal-edits?after=0","/v1/captures"})reject(()->NetworkPolicy.api(path,"GET"));
  // The authority-backed Album contents projection, allowed only for GET.
  pass(()->NetworkPolicy.api("/v1/albums/assets?libraryId=0123456789abcdef0123456789abcdef&epoch=1&albumId=root&limit=40","GET"));
  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/albums/assets",method));

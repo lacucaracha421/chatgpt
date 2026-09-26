@@ -103,3 +103,41 @@ it('idle Collections tab: conditional polls per hour', async()=>{
   console.info(`[perf] collections idle hour: ${[...counts].map(([path,n])=>`${path}=${n}`).join(' ')} total=${mocks.api.mock.calls.length}`);
   expect(mocks.api.mock.calls.length).toBeGreaterThan(0);
 });
+
+it('idle Collections tab with the native status long-poll live: checks only what moved', async()=>{
+  // PERF-ALL-001 T1 gate: 120 conditional polls per idle hour -> <= 12 (10 min fallbacks),
+  // list-generation 0, and a moved signal is checked at once.
+  const report=(signals:Record<string,unknown>)=>act(()=>{window.dispatchEvent(new CustomEvent('lakomics-sync-signals',{detail:{live:true,signals}}));});
+  const signals={listGeneration:'g1',characters:'c1',collections:{revision:'r1',personalEditCursor:3,appliedPersonalEditCursor:3},releases:7,catalog:'p1',bindingRequests:{last:2,updatedAt:null},notes:5};
+  try{
+    report(signals);
+    mocks.native.mockResolvedValue({url:'https://app.lakomics.local/media-cache/0/x',expires_in:240});
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+    mocks.api.mockClear();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(60*60_000);});
+    const counts=new Map<string,number>();
+    for(const [path] of mocks.api.mock.calls as [string][]){const key=path.split('?')[0];counts.set(key,(counts.get(key)??0)+1);}
+    console.info(`[perf] collections idle hour (signals live): ${[...counts].map(([path,n])=>`${path}=${n}`).join(' ')} total=${mocks.api.mock.calls.length}`);
+    expect(mocks.api.mock.calls.length).toBeLessThanOrEqual(12);
+    expect(counts.get('/v1/library/list-generation')??0).toBe(0);
+    mocks.api.mockClear();
+    report({...signals,notes:6,bindingRequests:{last:3,updatedAt:'t'}});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+    expect(mocks.api).not.toHaveBeenCalled();
+    report({...signals,notes:6,collections:{...signals.collections,appliedPersonalEditCursor:4}});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+    expect(mocks.api.mock.calls.map(([path])=>path)).toEqual(['/v1/collections/status']);
+    mocks.api.mockClear();
+    report({...signals,notes:6,collections:{...signals.collections,appliedPersonalEditCursor:4},releases:8});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+    expect(mocks.api.mock.calls.map(([path])=>(path as string).split('?')[0])).toEqual(['/v1/collections/releases']);
+    // The watcher failing restores the one-minute polls.
+    mocks.api.mockClear();
+    act(()=>{window.dispatchEvent(new CustomEvent('lakomics-sync-signals',{detail:{live:false,signals:null}}));});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(60_000);});
+    expect(mocks.api.mock.calls.length).toBe(2);
+  }finally{
+    act(()=>{window.dispatchEvent(new CustomEvent('lakomics-sync-signals',{detail:{live:false,signals:null}}));});
+  }
+});

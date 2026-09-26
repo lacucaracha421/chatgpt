@@ -3,6 +3,7 @@ import {MagnifyingGlassIcon, RectangleStackIcon} from '@heroicons/react/24/outli
 import {Button, Dialog, DialogDescription} from './ui';
 import {ApiError, api, errorText} from './transport';
 import {visibleInterval} from './useVisibleInterval';
+import {SIGNAL_FALLBACK_MS, useSyncSignal} from './syncSignals';
 import type {CollectionDetail} from './collectionModel';
 import {
   BINDINGS_STATUS_PATH, MAX_KAKAO_GROUPS, PROVIDER_NAMES, chosenSummary, connectionOf, fileBindRequest, kakaoCommand, kakaoVolumes, latestRequest,
@@ -57,8 +58,10 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet}: {
     return mine && !requests?.items.some(entry => entry.requestId >= mine.requestId) ? mine : latestRequest(requests, provider);
   };
   const waiting = PROVIDERS.some(provider => latest(provider)?.state === 'pending');
-  // While a request waits for the PC, look again every minute the screen is visible.
-  useEffect(() => { if (!active || !waiting) return; return visibleInterval(() => setNonce(n => n + 1), 60_000); }, [active, waiting]);
+  // A filed request or its result moves `signals.bindingRequests`: read again at once. Without
+  // the live status long-poll, look again every minute while a request waits for the PC.
+  const signalled = useSyncSignal('bindingRequests', () => setNonce(n => n + 1), active && item.type === 'manga');
+  useEffect(() => { if (!active || !waiting) return; return visibleInterval(() => setNonce(n => n + 1), signalled ? SIGNAL_FALLBACK_MS : 60_000); }, [active, waiting, signalled]);
   if (item.type !== 'manga') return null;
   return <section className="collection-bindings" aria-label="연결">
     <h2 className="collection-bindings-title">연결</h2>

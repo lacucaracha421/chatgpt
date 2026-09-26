@@ -51,6 +51,26 @@ final class CloudClient {
    reusable=true;return reply;
   } finally {if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}
  }
+ /**
+  * One `/v1/sync/status?wait=N&signals=1` long-poll (StatusWatcher). Its ETag is the caller's
+  * own, never the conditional cache's; the read timeout covers the server's hold plus 20 s.
+  */
+ StatusWatcher.Reply longPollStatus(JSONObject s,String etag,int wait,CancellationSignal cancel)throws Exception{
+  String path="/v1/sync/status?wait="+wait+"&signals=1";
+  NetworkPolicy.api(path,"GET");if(!s.has("token"))throw new IllegalStateException("Not configured");
+  HttpURLConnection c=(HttpURLConnection)new URL(s.getString("endpoint")+path).openConnection();boolean reusable=false;
+  try {
+   prepare(c,cancel);c.setReadTimeout((wait+20)*1000);c.setRequestProperty("Authorization","Bearer "+s.getString("token"));c.setRequestProperty("Accept","application/json");
+   if(etag!=null)c.setRequestProperty("If-None-Match",etag);
+   int code=c.getResponseCode();boolean capable=c.getHeaderField(StatusWatcher.WAIT_HEADER)!=null;
+   ConditionalRead.Reply reply=ConditionalRead.response(code,c.getHeaderField("ETag"),()->{
+    ByteArrayOutputStream out=new ByteArrayOutputStream();
+    try(InputStream in=c.getInputStream()){copy(in,out,4*1024*1024,cancel);}
+    return new JSONObject(out.toString("UTF-8")).toString();
+   },status->new HttpFailure(status,errorBody(c)));
+   reusable=true;return new StatusWatcher.Reply(reply.status,reply.etag,capable,reply.body);
+  } finally {if(cancel!=null)cancel.setOnCancelListener(null);if(!reusable)c.disconnect();}
+ }
  static String errorBody(HttpURLConnection c){
   // A rejected response body is bounded and read before disconnect, so the
   // client can still tell a revision conflict from an identity mismatch.

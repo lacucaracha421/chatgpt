@@ -18,8 +18,9 @@ import java.util.concurrent.*;
  * receive into `Download/Lakomics/` and sending picked or shared files.
  *
  * Everything is foreground-only. Arrivals are noticed through the `exchange.revision` field
- * of the `/v1/sync/status` read the Library pass already makes ({@link #observeStatus}); the
- * open 보내기/받기 screen adds a 5 s inbox/outbox refresh. Nothing is polled, retried or
+ * of the `/v1/sync/status` read the Library pass already makes ({@link #observeStatus}) and of
+ * the foreground status long-poll; the open 보내기/받기 screen adds a 5 s inbox/outbox refresh
+ * only while that long-poll is not live ({@link #setStatusLive}). Nothing is polled, retried or
  * started while the activity is paused; a transfer already moving is allowed to finish.
  *
  * The exchange refuses the shared Library token, so this device keeps a second, device-only
@@ -82,7 +83,7 @@ final class ExchangeService {
     private int unseen;
     /** Resumed Lakomics activities (the main app and the share sheet). */
     private int resumed;
-    private boolean foreground, visible, refreshing, refreshAgain, refreshDevices, emitScheduled;
+    private boolean foreground, visible, refreshing, refreshAgain, refreshDevices, emitScheduled, statusLive;
     private long lastEmit;
     private ScheduledFuture<?> poll;
     /** Advances on every reset so work started for a replaced connection records nothing. */
@@ -226,8 +227,22 @@ final class ExchangeService {
         changed();
     }
 
+    /**
+     * The status long-poll is live and carries this device's `exchange.revision`: every
+     * inbox/outbox change then arrives through {@link #observeStatus} within about a second, so
+     * the open screen's 5 s refresh stops. Losing it restores the refresh.
+     */
+    void setStatusLive(boolean value) {
+        synchronized (this) {
+            if (statusLive == value) return;
+            statusLive = value;
+            if (value) stopPoll();
+            else if (foreground && visible) startPoll();
+        }
+    }
+
     private void startPoll() {
-        if (poll != null) return;
+        if (poll != null || statusLive) return;
         poll = net.scheduleWithFixedDelay(() -> {
             synchronized (this) { if (!foreground || !visible) return; }
             refresh(false);

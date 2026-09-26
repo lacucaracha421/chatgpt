@@ -70,7 +70,25 @@ final class ForegroundSchedule {
     private boolean owed;
     private ScheduledFuture<?> handle;
     private int idle;
-    private static final long[] DELAYS = {5_000,15_000,30_000,60_000};
+    /**
+     * Idle back-off after unchanged passes. The last rung is used only while the status
+     * long-poll is live ({@link #setLive}): it wakes a pass on any Library change, so the
+     * repeating pass is only a safety net then. Without it the ladder stops at one minute.
+     */
+    private static final long[] DELAYS = {5_000,15_000,30_000,60_000,300_000};
+    private static final int IDLE_CAP = 3, LIVE_IDLE_CAP = 4;
+    private boolean live;
+
+    /** Whether the status long-poll is live. Losing it returns a relaxed timer to one minute. */
+    void setLive(boolean value) {
+        synchronized(gate) {
+            live=value;
+            if(!value && idle>IDLE_CAP) {
+                idle=IDLE_CAP;
+                if(armed)rearmTimer();
+            }
+        }
+    }
 
     /** Local work returns to the convergence target and cannot be lost to single-flight. */
     void wake() {
@@ -85,7 +103,7 @@ final class ForegroundSchedule {
     void passFinished(boolean changed) {
         synchronized(gate) {
             if(armed) {
-                idle=changed?0:Math.min(idle+1,DELAYS.length-1);
+                idle=changed?0:Math.min(idle+1,live?LIVE_IDLE_CAP:IDLE_CAP);
                 rearmTimer();
             }
             passFinished();

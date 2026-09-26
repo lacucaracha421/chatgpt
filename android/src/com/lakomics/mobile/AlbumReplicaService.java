@@ -77,6 +77,43 @@ final class AlbumReplicaService {
     private long lastGenerationCheck;
     private volatile java.util.function.Consumer<String> generationListener;
     void setListGenerationListener(java.util.function.Consumer<String> listener){generationListener=listener;}
+    /** Receives `lakomics-sync-signals` details ({live, signals}) for the WebView. */
+    private volatile java.util.function.Consumer<JSONObject> signalsListener;
+    void setSignalsListener(java.util.function.Consumer<JSONObject> listener){signalsListener=listener;}
+    private final ScheduledExecutorService watchThread = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "lakomics-status-watch");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final java.util.concurrent.ExecutorService watchCancel = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "lakomics-status-cancel");
+        thread.setDaemon(true);
+        return thread;
+    });
+    /**
+     * The foreground status long-poll (PERF-ALL-001 T1): wakes a pass on a Library change,
+     * forwards the exchange revision, and reports the signals the WebView checks. Started and
+     * stopped with {@link #schedule}, so it never runs while the app is paused.
+     */
+    private final StatusWatcher watcher = new StatusWatcher(this::watchStatus,
+            (delay, task) -> watchThread.schedule(task, delay, TimeUnit.MILLISECONDS),
+            SystemClock::elapsedRealtime, new StatusWatcher.Listener() {
+                @Override public void library() { schedule.wake(); }
+                @Override public void status(String body) {
+                    ExchangeService exchange = ExchangeService.get(context);
+                    exchange.observeStatus(body);
+                    exchange.setStatusLive(watcher.exchangeLive());
+                }
+                @Override public void live(boolean live) {
+                    schedule.setLive(live);
+                    ExchangeService.get(context).setStatusLive(live && watcher.exchangeLive());
+                }
+                @Override public void signals(boolean live, String body) {
+                    JSONObject detail = signalsDetail(live, body);
+                    java.util.function.Consumer<JSONObject> listener = signalsListener;
+                    if (detail != null && listener != null) listener.accept(detail);
+                }
+            });
     private void localWork(){
         // A user write may finish entering the outbox just after onPause. Deliver that
         // intent once even when the repeating foreground schedule is disarmed.
@@ -127,11 +164,13 @@ final class AlbumReplicaService {
         java.util.function.Consumer<String> listener=generationListener;
         if(listener!=null&&assetListGeneration!=null&&!assetListGeneration.isEmpty())listener.accept(assetListGeneration);
         schedule.start();
+        watcher.start();
     }
 
     /** Stop polling. The replica, its cursor and its rows stay durable across this. */
     void stop() {
         schedule.stop();
+        watcher.stop();
     }
 
     /**
@@ -148,6 +187,9 @@ final class AlbumReplicaService {
         // exists. Clearing the replica is a different question from whether to poll.
         schedule.stop();
         clearReplica();
+        // Forget what the removed connection reported; while resumed it probes (and, with no
+        // connection, stays dormant) so a later configure is watched again.
+        watcher.reset();
     }
 
     /**
@@ -203,6 +245,7 @@ final class AlbumReplicaService {
      */
     void replaceConnection() {
         schedule.restartAfter(this::clearReplica);
+        watcher.reset();
     }
 
     /**
@@ -346,10 +389,56 @@ final class AlbumReplicaService {
         return client.conditionalApiFor(connection,"/v1/sync/status",null).toString();
     }
 
+    /**
+     * One long-poll read for {@link #watcher}, with the credential {@link #readStatus} uses: the
+     * device exchange token when stored and not refused (so `exchange.revision` rides along),
+     * else the Library token. Null when no connection is configured.
+     */
+    private StatusWatcher.Reply watchStatus(String etag,int wait,StatusWatcher.Cancel cancel) throws Exception {
+        JSONObject connection=settings.read();
+        if(!connection.has("token"))return null;
+        android.os.CancellationSignal signal=new android.os.CancellationSignal();
+        // A pause cancels from the main thread; closing the held socket there could count as
+        // network work on the main thread, so the disconnect runs on its own thread.
+        cancel.onCancel(()->watchCancel.execute(signal::cancel));
+        JSONObject device=null;
+        try{device=ExchangeService.get(context).statusConnection(connection);}catch(Exception unreadable){/* Library token below. */}
+        String key=device==null?"":ThumbnailCache.key(device.optString("endpoint")+"\n"+device.optString("token"));
+        if(device!=null&&!key.equals(refusedStatusToken)){
+            try{return client.longPollStatus(device,etag,wait,signal);}
+            catch(CloudClient.HttpFailure refused){
+                if(refused.status!=401&&refused.status!=403)throw refused;
+                refusedStatusToken=key;
+            }
+        }
+        return client.longPollStatus(connection,etag,wait,signal);
+    }
+
+    /** The `lakomics-sync-signals` detail: `{live, signals}`; signals is null when not live. */
+    private static JSONObject signalsDetail(boolean live,String body) {
+        try {
+            JSONObject signals=live&&body!=null?new JSONObject(body).optJSONObject("signals"):null;
+            return new JSONObject().put("live",signals!=null).put("signals",signals==null?JSONObject.NULL:signals);
+        } catch(Exception unreadable) { return null; }
+    }
+
+    /** The current signals state, for a page that loaded after the last report. */
+    JSONObject syncSignals() {
+        JSONObject detail=signalsDetail(true,watcher.announcedBody());
+        if(detail==null)throw new IllegalStateException("Sync signals unavailable");
+        return detail;
+    }
+
     private void refreshListGeneration(int startedUnder) {
         String generation=assetListGeneration;
         long now=SystemClock.elapsedRealtime();
-        if(passChanged || lastGenerationCheck==0 || now-lastGenerationCheck>=60_000) {
+        // While the status long-poll is live its `signals.listGeneration` is current (a move
+        // wakes this pass), so the minute read of `/v1/library/list-generation` is not needed.
+        String watched=watcher.listGeneration();
+        if(watched!=null) {
+            generation=watched;
+            synchronized(gate){if(startedUnder==attempt)lastGenerationCheck=now;}
+        } else if(passChanged || lastGenerationCheck==0 || now-lastGenerationCheck>=60_000) {
             try {
                 generation=CloudClient.listGeneration(client,null,null);
                 synchronized(gate){if(startedUnder==attempt)lastGenerationCheck=now;}

@@ -101,6 +101,26 @@ it('shows a pending request waiting for the PC and a failed one with its reason'
   expect(within(row('카카오')).getByRole('button', {name: '카카오 다시 연결'})).toBeTruthy();
 });
 
+it('reads the requests again when the status long-poll reports a bind request moved', async () => {
+  const signals = (detail: unknown) => act(() => { window.dispatchEvent(new CustomEvent('lakomics-sync-signals', {detail})); });
+  const pending = request({requestId: 4, provider: 'mangadex', choice: {mangaId: 'm', title: 'The Night Library'}});
+  routes.requests = {version: 1, items: [pending], pending: {mangadex: pending, kakao: null}};
+  signals({live: true, signals: {bindingRequests: {last: 4, updatedAt: 'a'}, notes: 1}});
+  try {
+    await renderArea();
+    await waitFor(() => expect(row('MangaDex').textContent).toContain('연결 대기'));
+    const before = calls('/bindings/requests?').length;
+    signals({live: true, signals: {bindingRequests: {last: 4, updatedAt: 'a'}, notes: 2}});
+    expect(calls('/bindings/requests?')).toHaveLength(before);
+    routes.requests = {version: 1, items: [request({requestId: 4, provider: 'mangadex', state: 'applied', choice: {mangaId: 'm', title: 'The Night Library'}})], pending: {mangadex: null, kakao: null}};
+    signals({live: true, signals: {bindingRequests: {last: 4, updatedAt: 'b'}, notes: 2}});
+    await waitFor(() => expect(calls('/bindings/requests?')).toHaveLength(before + 1));
+    await waitFor(() => expect(row('MangaDex').textContent).not.toContain('연결 대기'));
+  } finally {
+    signals({live: false, signals: null});
+  }
+});
+
 it('hides the buttons on a server without bindings', async () => {
   routes.status = new ApiError('요청한 정보를 찾을 수 없습니다.', 404, {detail: 'Not Found'});
   routes.requests = new ApiError('요청한 정보를 찾을 수 없습니다.', 404, {detail: 'Not Found'});

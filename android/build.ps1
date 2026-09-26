@@ -55,7 +55,7 @@ $taskReplicaSources=Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src/com
   $taskImports=Get-Content -LiteralPath $_.FullName | Where-Object { $_ -match '^import ' }
   if (-not ($taskImports | Where-Object { $_ -match '^import (android\.|androidx\.|org\.json)' })) { $_.FullName }
  }
-& "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests @taskReplicaSources (Join-Path $PSScriptRoot 'tests/AlbumReplicaTest.java') (Join-Path $PSScriptRoot 'tests/AlbumReplicaScheduleTest.java') (Join-Path $PSScriptRoot 'tests/ClassificationReplicaTest.java') (Join-Path $PSScriptRoot 'tests/ClassificationAssignmentTest.java')
+& "$env:JAVA_HOME/bin/javac.exe" -encoding UTF-8 -d $taskTests @taskReplicaSources (Join-Path $PSScriptRoot 'tests/AlbumReplicaTest.java') (Join-Path $PSScriptRoot 'tests/AlbumReplicaScheduleTest.java') (Join-Path $PSScriptRoot 'tests/ClassificationReplicaTest.java') (Join-Path $PSScriptRoot 'tests/ClassificationAssignmentTest.java') (Join-Path $PSScriptRoot 'tests/StatusWatcherTest.java')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.AlbumReplicaTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -68,6 +68,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # The Classification write checks drive the v4->v5 upgrade, the durable assignment outbox
 # and the revision-conflict rebase over a real database and a real HTTP fixture.
 & "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.ClassificationAssignmentTest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# PERF-ALL-001 T1: the foreground status long-poll and the status trap fix.
+& "$env:JAVA_HOME/bin/java.exe" -cp $taskTests com.lakomics.mobile.StatusWatcherTest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($CompileOnly) { Write-Output 'Native compile and network policy tests passed.'; exit 0 }
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'assets/index.html'))) { throw 'Build the app/mobile-client Vite bundle first; android/assets/index.html is required.' }

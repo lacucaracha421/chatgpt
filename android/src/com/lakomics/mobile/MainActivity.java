@@ -256,6 +256,7 @@ public final class MainActivity extends Activity {
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
      case "pickerStatus":data=pickerStatus();break;
      case "albumStatus":data=albumStatus();break;
+     case "syncSignals":data=AlbumReplicaService.get(MainActivity.this).syncSignals();break;
      case "albumTree":data=albumStatus().put("albums",AlbumReplicaService.get(MainActivity.this).albumList());break;
      case "albumMemberships":data=AlbumReplicaService.get(MainActivity.this).membershipState(p.getString("assetId"));break;
      case "albumMembershipSet":data=AlbumReplicaService.get(MainActivity.this).setMembership(p.getString("assetId"),p.getString("albumId"),p.getBoolean("desiredState"));break;
@@ -346,6 +347,8 @@ public final class MainActivity extends Activity {
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
   AlbumReplicaService.get(this).setListGenerationListener(generation->{try{emit("lakomics-list-generation",new JSONObject().put("generation",generation));}catch(JSONException ignored){}});
+  // The status long-poll's signals: the page re-checks only what moved while it is live.
+  AlbumReplicaService.get(this).setSignalsListener(detail->emit("lakomics-sync-signals",detail));
   // File exchange works only while an activity is resumed; its arrival signal comes from the pass started next.
   ExchangeService.get(this).setForeground(true);
   AlbumReplicaService.get(this).start();}
@@ -353,5 +356,5 @@ public final class MainActivity extends Activity {
  @Override protected void onStop(){if(vault!=null)vault.stopped();
   // Secret notes lock when the app goes to the background; the WebView drops their content.
   if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

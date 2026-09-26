@@ -14,6 +14,14 @@ Collections and Catalog deployment evidence is recorded in the version history a
 
 This independent APK bundles the React client from `_tools/app/mobile-client`. It requires no desktop/browser extension runtime. The old `_tools/lakomics-cloudmedia-poc` and its installed Android Photo Picker configuration are separate and unchanged. Package: `com.lakomics.mobile`; document authority: `com.lakomics.mobile.documents`.
 
+## Unreleased — foreground status long-poll (PERF-ALL-001 T1, not built)
+
+- While an activity is resumed, `StatusWatcher` (owned by `AlbumReplicaService`) holds `/v1/sync/status?wait=50&signals=1` with the same credential as the Library pass (device exchange token, else Library token), its own ETag and a 70 s read timeout. `onPause` disconnects it; nothing runs in the background.
+- A Library change (domain cursors or `signals.listGeneration`) wakes the Library pass at once; `exchange.revision` goes to the exchange service; any signal move is sent to the page as `lakomics-sync-signals` `{live, signals}` (a page loaded later asks with the `syncSignals` bridge call).
+- While live: the Library pass relaxes to 5 min after unchanged passes (still 5 s after a change), reads the list generation from the signals instead of `/v1/library/list-generation`, the 보내기/받기 screen's 5 s refresh stops, and the page's status checks (characters, Collections, 신간, Catalog), bind requests and Notes run when their signal moves with a 10 min fallback.
+- Fallbacks: a server without `Lakomics-Status-Wait` leaves the watcher dormant (every existing timer unchanged, probe again after 30 min or on resume); failures back off 5/15/60 s; a held request answered instantly with 304 (server waiter cap) backs off the same way. `SyncStatusPass.libraryStatus` ignores `signals` and `publisherLogs`, so a note save no longer counts as a Library change.
+- Checks: `StatusWatcherTest` (foreground-only, routing, dormant, backoff, hot loop, idle hour = 73 status requests and 0 list-generation reads) and `NetworkPolicyTest` in `build.py`; `Collections.perf.test.tsx` idle hour 120 → 12 with signals. Not verified on a device.
+
 ## 0.8.27 — installed and accepted on the tablet (2026-09-26)
 
 - Collections: the 게임 / 만화 / 영화 / AV switch moved into the top bar (before 신간 and search), so it stays reachable after scrolling.
