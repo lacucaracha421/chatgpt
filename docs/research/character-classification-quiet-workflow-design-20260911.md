@@ -317,6 +317,57 @@ inbox or ask the user to understand scheduler internals.
 - place `캐릭터로 만들기` under a concise conversion or management action rather
   than making migration controls permanently prominent.
 
+### Implemented PC surface rules (2026-09-09 to 09-25)
+
+Moved from `docs/agents/pc-design-reference.md` on 2026-09-26. PC-DECLUTTER-001 later
+compacted the series view (one header line, compact character tiles); current code wins
+where the layout details differ.
+
+- Folder registration/conversion are one-time setup actions in the subfolder
+  `폴더 더보기` menu, never persistent buttons or on ordinary root folders. Registered
+  series keep their series view. Series headers show the labeled `캐릭터 만들기` and keep
+  cover setup in `시리즈 더보기`. Character headers keep only selection actions and the
+  `캐릭터 더보기` panel trigger (a character glyph). That panel leads with 레퍼런스
+  (add/recommend, a crop-thumbnail strip with one-tap crop check and remove), then one
+  automation line, and folds rename, description, portrait, history refresh, conversion,
+  S36 exclusion and FAULT under `관리` (user request 2026-09-25).
+- Character sidebar rows offer `다른 시리즈로 이동…`: select an already registered series
+  and review affected asset counts before applying. Character identity, references,
+  decisions and original files are kept; the old group and ordinary-folder link are
+  detached. Compatible existing folders are retained; other connected assets move into the
+  destination, or its nearest common ancestor when ordinary shared images must stay visible
+  in every connected character/group. The preview lists shared locations and separate
+  relocation counts. References must stay within their owning series; a move without a
+  location preserving all memberships and references is rejected. A move never enrolls
+  analysis, ends the character's old historical refresh, fences relocated asset jobs and
+  cancels its obsolete explicit scan. Destination automation settings, explicit exclusions
+  and unrelated pending work are unchanged.
+- A character group dissolves automatically when its last member leaves (series moves,
+  group edits, character removal). New groups need at least one character. Schema 72
+  removed pre-existing empty groups; this changes grouping only and never schedules
+  analysis or changes assets.
+- Series overview grids show ordinary direct child folders beside character cards, with a
+  folder icon and an available descendant thumbnail; linked character folders appear as
+  their character card. At most two rows per page with small page numbers below; capacity
+  follows the available columns, all card types share the pagination, and page changes keep
+  the grid height stable. The folder menu offers `캐릭터 분류에서 제외` /
+  `캐릭터 분류에 다시 포함`; inherited exclusions name their owning ancestor. Excluded
+  folder assets stay in the series whole gallery but leave the unclassified pool and
+  automatic recognition. Browser fixture and focused Rust tests covered this; Windows/Linux
+  native UI acceptance was not recorded.
+- Explicit historical refresh snapshots all eligible unclassified image IDs inside the
+  requested character's registered series and its ordinary descendants, including images
+  without automatic job history, and reports the request's total. Parent/sibling folders and
+  separately registered descendant series are outside it; ordinary-parent inference applies
+  to fresh ingestion only. Reference edits, registration and series moves do not start it.
+  Analysis stays batched and below new arrivals; references, manual judgments, exclusions
+  and series scope stay protected.
+- Work-center detail (user request 2026-09-13): show the actual current series/character,
+  each refresh request's processed/total/remaining counts and failures, and new-image work
+  separately. Use durable request totals, never the current image's comparison count or the
+  32-job supply as the whole workload; legacy undiscovered totals show as unknown. Pause,
+  resume and error recovery are preserved.
+
 ## Data preservation and compatibility
 
 - Preserve CharacterTarget identities, character relations, manual decisions,

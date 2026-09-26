@@ -53,4 +53,4 @@ Ivory (`--color-accent`: navigation selection and checked toggles), teal (Asset 
 
 ## Documentation follow-up
 
-Independently of these decisions: move feature/domain rules (character series moves, manga ownership counts, release notifications, statistics telemetry) and verification logs out of `docs/agents/pc-design-reference.md`, and reference token names instead of raw color values.
+Done 2026-09-26 (see `PC-UI-001`). Original note: move feature/domain rules (character series moves, manga ownership counts, release notifications, statistics telemetry) and verification logs out of `docs/agents/pc-design-reference.md`, and reference token names instead of raw color values.

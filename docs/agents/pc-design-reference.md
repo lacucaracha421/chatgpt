@@ -1,36 +1,23 @@
 # Lakomics PC design reference
 
 > Status: current PC visual/interaction reference.
-> Baseline: Lab 06 content direction + Chrome 03b B left-centric shell + subsequent UX corrections, integrated into the real app by commit `2d7bac2`.
-> `DESIGN.md` is the short constitution; this file holds implementation-level design contracts. Product/domain rules still come from `CONTEXT.md`, Accepted ADRs, and current code.
+> Baseline: Lab 06 content direction + Chrome 03b B left-centric shell, integrated by commit `2d7bac2`, then refined by PC-UI-001 and PC-DECLUTTER-001.
+> `DESIGN.md` is the short constitution; this file holds implementation-level design contracts. Product terms come from `CONTEXT.md`; feature behavior lives in its subsystem reference (Works: `lakomics-works-handoff-v2.md` and `works-viewer-design.md`; characters: `docs/research/character-classification-quiet-workflow-design-20260911.md`). Verification history lives in `docs/roadmap/lakomics-completed.md`.
+> Colors are named by their `_tools/app/src/styles/tokens.css` custom properties; read values there rather than copying hex literals.
 
-## 1. What this document replaces
+## 1. Scope and superseded records
 
-This reference consolidates the former `approved-design-direction.md` and `approved-chrome-direction.md` decision logs. Those files now serve only as superseded pointers/historical breadcrumbs.
+This reference replaces the former `approved-design-direction.md` and `approved-chrome-direction.md` decision logs (now pointers only) and the visual assumptions of a permanent horizontal toolbar, a fixed old sidebar/topbar, justified rows as the only Asset layout, and flat game/manga collection objects.
 
-It also supersedes visual assumptions that depended on:
-
-- a permanent horizontal toolbar;
-- a fixed old sidebar/topbar placement;
-- justified rows as the only normal Asset layout;
-- completely flat game/manga collection objects.
-
-Do not restart the 1–6 reference comparison or Chrome A/B/C vote unless the user explicitly asks to reopen the design direction.
+Do not restart the 1–6 reference comparison or the Chrome A/B/C vote unless the user explicitly reopens the design direction.
 
 ## 2. Product character
 
-Typography approved after user trial on 2026-09-06: SUIT for Korean UI, Barlow for Latin UI and creator names, and Rajdhani Medium for date headings, caption times and sidebar counts. Preserve Barlow digits within creator names and the existing Japanese fallback. Numeric roles use tabular figures; caption times use the small-text size rather than extra-small. Bundle font files and OFL notices locally for offline use. Implementation: `_tools/app/src/styles/fonts.css` and the `--font-ui` / `--font-numeric` tokens.
-
-Lakomics is a **media-first personal archive**, not a dashboard, launcher, streaming service, or room simulator.
-
-The screen should feel:
-
-- calm enough for long sessions;
-- dense enough to browse thousands of assets;
-- personal because collected artwork dominates the color field;
-- deliberate rather than generic because navigation, selection, physicality, and empty states follow consistent rules.
+Lakomics is a **media-first personal archive**, not a dashboard, launcher, streaming service, or room simulator. The screen should feel calm enough for long sessions, dense enough to browse thousands of assets, personal because collected artwork dominates the color field, and deliberate because navigation, selection, physicality, and empty states follow consistent rules.
 
 The visual system is dark-neutral, square/rectilinear, low-radius, line-icon heavy, and border-led rather than card-led.
+
+Typography (user-approved 2026-09-06): SUIT for Korean UI, Barlow for Latin UI and creator names, Rajdhani Medium for date headings, caption times and sidebar counts. Keep Barlow digits inside creator names and the Japanese fallback. Numeric roles use tabular figures; caption times use the small-text size. Fonts and OFL notices are bundled for offline use (`styles/fonts.css`, `--font-ui`, `--font-numeric`).
 
 ## 3. Chrome 03b shell
 
@@ -41,7 +28,6 @@ The visual system is dark-neutral, square/rectilinear, low-radius, line-icon hea
 │      │ current-area nav     │ current location / transient     │
 │      │ folders / albums     │ state, then media content        │
 │      │ types / source       │                                  │
-│      │                      │                                  │
 │      ├──────────────────────┤                                  │
 │      │ contextual controls  │                                  │
 └──────┴──────────────────────┴──────────────────────────────────┘
@@ -49,278 +35,195 @@ The visual system is dark-neutral, square/rectilinear, low-radius, line-icon hea
 
 ### Area rail
 
-- Primary areas are Assets, Collections, and Manga. A single management entry at the bottom opens work status, the unsorted inbox, trash, statistics, similarity review, and settings. Work/error indicators remain on this entry; do not duplicate work, unsorted, or trash as separate rail buttons.
-- The rail is narrow and visually weaker than the contextual index.
-- Selection uses the ivory single-selection language; unrelated icons remain neutral.
-- Switching areas preserves the owning screen state where the current code supports it rather than resetting state for visual neatness.
+- Areas: 에셋, 컬렉션, 망가, 메모, 전송 (plus 비밀 when the private vault is available). The tail holds `찾기` (the command/search palette, `Ctrl+K` / `Ctrl+F`) and `더보기`, a panel listing pending queues (유사 검토, 미분류, 전송 when they have items) and destinations (다시보기, 통계, 휴지통, 설정). The `더보기` badge counts only pending similarity review; 전송 shows its own received-file count.
+- Work, sync and error status live in the titlebar status center beside the window controls, not as rail buttons.
+- The rail is narrow and visually weaker than the contextual index; its current area uses the parent-context tint (§7).
+- Switching areas preserves the owning screen state where the code supports it rather than resetting for visual neatness.
 
 ### Contextual index
 
-- **Assets**: broad scopes, Classification tree, Album tree, current folder counts and user appearance.
-- **Collections**: the PC uses its sidebar (2026-09-26, replacing the earlier header tabs). The index holds the new-collection menu, then a vertical 작품 유형 list (게임/만화/영화/AV) and a 신간 N row as selected-slab links (mark on the right, no outside cursor; the 신간 row is current while the 신간 view is open), then 정렬 and 내 별점 (slider, 미평가, 초기화) for the library grid. There is no Library/Showcase mode: the Showcase is the collapsible 쇼케이스 row above 전체 N in the content, and its 전체 보기 drills into the paged exhibition with a back button. The header holds only the title (plus back in the 신간 and Showcase drill-downs). An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index. These controls move out of the detail body; long descriptions and artwork remain in the body. The detail owns state and callbacks through the shared chrome portal.
+- **Assets**: broad scopes, Classification tree, Album tree, folder counts and user appearance.
+- **Collections** (sidebar since 2026-09-26, replacing the earlier header tabs): the new-collection menu, then a vertical `작품 유형` list (게임/만화/영화/AV) followed by the `신간 N` and `발매 캘린더` rows, all as selected-slab links (§7); a row is current while its view is open. Below them, for the library grid only, `정렬 · 필터` holds 정렬 and 내 별점 (slider, 미평가, 초기화). There is no Library/Showcase mode: the Showcase is the collapsible `쇼케이스` row above `전체 N` in the content, and its `전체 보기` drills into the paged exhibition with a back button. The header holds only the title (plus back in the 신간, 발매 캘린더 and Showcase drill-downs). An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index; long descriptions and artwork stay in the body. The detail owns state and callbacks through the shared chrome portal.
 - **Manga**: local/online/catalog context and controls owned by the corresponding browser.
-- Do not merge a user Classification named “만화”, Collection type `manga`, local Manga Root, and Online Catalog into one product concept.
+- Do not merge a user Classification named “만화”, Collection type `manga`, local Manga Root, and Online Catalog into one concept (`CONTEXT.md`).
 
 ### Main content header
 
-- Keep the native window controls in one thin, stable place.
+- Keep the native window controls and status center in one thin, stable place.
 - Show current location and only meaningful transient state; do not repeat brand subtitles, “내 라이브러리”, or explanatory prose on every screen.
-- Do not recreate the old full toolbar above the content merely because individual controls used to live there.
-- Selection-only commands remain in selection/context surfaces, not inserted into the persistent header.
-- Exception (2026-09-09, user-approved CHAR-UI-002~006, native verification pending): the series/character review screen may expose selection accessories (count, clear, exclude, review entry) in the titlebar as `titleAccessory`. Converging this with the Asset SelectionBar pattern is a separate backlog decision, not a license to spread selection commands to other headers.
-- Folder registration/conversion are one-time setup actions: expose them in the subfolder `폴더 더보기` menu, not as persistent buttons or on ordinary root folders. Existing registered series retain their series view. Series headers show the labeled `캐릭터 만들기` action and keep cover setup in `시리즈 더보기`; character headers keep only selection actions and the `캐릭터 더보기` panel trigger (a character glyph). That panel leads with 레퍼런스 (add/recommend, a crop-thumbnail strip with one-tap crop check and remove), then one automation line, and folds rename, description, portrait, history refresh, conversion, S36 exclusion and FAULT under `관리` (user request 2026-09-25). Do not add persistent refresh buttons: ingestion/classification updates refresh the view automatically, with error retry and gallery context-menu refresh retained for recovery.
-- Character sidebar rows offer `다른 시리즈로 이동…`. Select an already registered series and review affected asset counts before applying. Keep character identity, references, decisions and original files; detach the old group and ordinary-folder link. Retain compatible existing folders; move other connected assets into the destination, or its nearest common ancestor when ordinary shared images need that location to remain visible in every connected character/group. The preview lists shared locations and separate relocation counts. References must remain within their owning series; reject moves without a location preserving all memberships and references. A move never enrolls analysis, ends the character's old historical refresh, fences relocated asset jobs and cancels its obsolete explicit scan. Destination automation settings, explicit exclusions and unrelated pending work remain unchanged.
-- A character group is automatically dissolved when its last member leaves, including series moves, group edits and character removal. New groups require at least one character. Schema 72 removes pre-existing empty groups; this only changes grouping and never schedules analysis or changes assets.
-- Series overview grids also show ordinary direct child folders beside character cards, with a folder icon and an available descendant thumbnail. The grid shows at most two rows per page, with small page numbers below it. Page capacity follows the available columns, all card types share the same pagination, and page changes keep the grid height stable. Linked character folders are represented by their character card. The folder menu offers `캐릭터 분류에서 제외` / `캐릭터 분류에 다시 포함`; inherited exclusions name their owning ancestor. Excluded folder assets stay in the series whole gallery, but leave the unclassified pool and automatic recognition. Browser fixture and focused Rust tests cover this behavior; Windows/Linux native UI acceptance remains unverified.
-- Explicit historical character refresh snapshots all currently eligible unclassified image IDs inside the requested character's registered series and its ordinary descendants, including images without automatic job history, and reports the request's total. Parent/sibling folders and separately registered descendant series are outside this refresh; ordinary-parent inference applies to fresh ingestion only. Reference edits, registration and series moves do not start it. Analysis remains batched and lower priority than new arrivals; references, manual judgments, exclusions and series scope stay protected.
-- User-requested work-center detail (2026-09-13): show the actual current series/character, each refresh request's processed/total/remaining counts and failures, and separate new-image work. Use durable request totals, never the current image's character-comparison count or the 32-job supply as the whole workload. Mark legacy undiscovered totals as unknown. Preserve pause/resume and error recovery; native Windows/Linux interaction remains unverified.
+- Do not recreate the old full toolbar above the content.
+- Selection-only commands stay in selection/context surfaces. Exception (CHAR-UI-002~006, 2026-09-09): the series/character review screen may expose selection accessories (count, clear, exclude, review entry) as `titleAccessory`; this is not a license to spread selection commands to other headers.
+- One-time setup and rare management actions live in the owning `… 더보기` menu or panel (e.g. `폴더 더보기`, `시리즈 더보기`, `캐릭터 더보기`), not as persistent header buttons. Frequent actions may keep a labeled button (e.g. `캐릭터 만들기`).
+- Do not add persistent refresh buttons: background updates refresh the view automatically; error retry and a context-menu refresh remain for recovery.
 
 ## 4. View settings
 
-The floating View Settings pattern is primarily the Asset browser contract. Other areas may place their smaller context controls directly in the index when that is clearer.
+The floating View Settings panel is primarily the Asset browser contract; other areas may place smaller controls directly in the index.
 
-For Assets:
-
-- default closed;
-- trigger stays at the lower end of the contextual index;
-- panel opens to the **right of the index**, above the content;
-- it is non-modal and internally scrollable when viewport height is limited;
-- opening/closing alone must not resize/reflow the gallery, reset scroll, collapse trees, clear selection, or refetch data;
-- actual setting changes apply immediately and remain owned by the existing state/preference layer;
-- closing is never “cancel settings”.
-
-Current Asset settings include the supported subset of sort, media/aspect filters, layout, preview size, metadata visibility, privacy mode, and direct/current-classification-only state. Keep view-conditional availability truthful.
-
-Do not show a dead View Settings trigger on a screen whose controls have intentionally moved into the index.
+- Default closed; the trigger stays at the lower end of the contextual index; the panel opens to the **right of the index**, above the content.
+- Non-modal and internally scrollable when height is limited.
+- Opening/closing must not resize the gallery, reset scroll, collapse trees, clear selection, or refetch data.
+- Setting changes apply immediately and stay owned by the existing state/preference layer; closing is never “cancel”.
+- Asset settings cover the supported subset of sort, media/aspect filters, layout, preview size, metadata visibility, privacy mode, and direct/current-classification-only state. Keep view-conditional availability truthful. Screens without View Settings hide the trigger; do not show a dead one.
 
 ### Panel dismissal and focus
 
 - Same trigger, explicit close, or outside interaction closes the panel.
-- `Esc` closes the innermost open menu/popover first, then the settings panel. One key press must not cascade into clearing an Asset selection or closing a viewer behind it.
-- Nested portal menus/selects count as panel-owned interaction; opening one must not dismiss the parent panel.
-- Closing returns focus to a sensible opener when possible.
-- Narrow windows clamp panel position and size rather than hiding Classification or shrinking the gallery just to make room.
+- `Esc` closes the innermost menu/popover first, then the panel; one key press never cascades into clearing a selection or closing a viewer behind it.
+- Nested portal menus/selects count as panel-owned interaction.
+- Closing returns focus to a sensible opener.
+- Narrow windows clamp panel position and size instead of hiding Classification or shrinking the gallery.
 
 ## 5. Search
 
-Search is deliberately **icon-first**, because it is not the dominant daily action.
+Search is not the dominant daily action, so it has no persistent input.
 
-- Collections, local Manga, and Online Catalog use a magnifier entry in the contextual index.
-- Opening search shows an input surface with the actual search scope.
-- Closing the input draft is different from clearing an already-applied query.
-- Applied search must remain visible as state and provide a direct clear action.
-- Reopening lets the user edit the current query.
-- Online Catalog retains its existing suggestions/autocomplete and language/scope semantics; only the entry surface changes.
-- Assets currently have no general text-search query contract. Do not fake one or silently add a new index/search engine to satisfy symmetry.
-- `Ctrl+F` may open the supported current-area search when it does not conflict with text input/viewer behavior.
+- The rail `찾기` palette (`Ctrl+K`; `Ctrl+F` also works from a field) jumps to names (folders, albums, characters) and runs commands. On a view with a text-search contract it names that scope and applies the typed text to it.
+- An applied query stays visible as a query badge in the view header with a direct `검색 해제` (the palette offers it too). Dismissing the palette never clears an applied query.
+- Online Catalog keeps its own search surface with suggestions/autocomplete and language/scope semantics.
+- Assets have no general text-search query contract. Do not fake one or add a new index/search engine for symmetry.
 
 ## 6. Asset browser
 
 ### Layout
 
-Default PC Asset layout is **date-grouped masonry/waterfall**. Justified rows remain an explicit alternative view, not a rejected feature.
+Default PC Asset layout is **date-grouped masonry/waterfall**; justified rows remain an explicit alternative view.
 
 - Preserve intrinsic aspect ratio.
 - Group by `collectedAt` local date using the same timestamp/timezone as sort and caption time.
-- The date heading carries the date; each asset caption uses artist/creator on the left and `HH:mm` on the right.
-- Approved on 2026-09-06 after user trial: sparse date groups share a horizontal row, each using only the columns its assets need. Keep each date heading and rule within its group's width. Wrap whole groups when remaining columns are insufficient, placing the next row below the tallest preceding group. Larger groups retain full-width masonry; narrow viewports naturally stack groups. Preserve chronological order, intrinsic image ratios, and artist/time captions.
-- Do not repeat the date per image.
-- Missing creator/time data stays honest; do not synthesize current values.
+- The date heading carries the date (§8); each caption shows artist/creator on the left and `HH:mm` on the right. Do not repeat the date per image.
+- Sparse date groups (user-approved 2026-09-06) share a horizontal row, each using only the columns it needs, with heading and rule within the group's width. Whole groups wrap when columns run out, placing the next row below the tallest preceding group; larger groups keep full-width masonry.
+- Missing data stays honest: an unknown creator leaves the caption's left side empty while the time and its accessible description remain; never synthesize current values.
 
 ### Asset selection
 
 Asset selection is intentionally quieter than navigation selection.
 
-- Keep the small top-left square marker.
-- Apply the approved teal selection tint (`--asset-selection-tint`) to the image area only. The 2026-09-06 user-approved value replaced the original neutral gray wash, which was too faint to notice during real use.
-- Do not add a strong outer selection outline around the whole tile.
-- Do not recolor or reflow the artist/time caption merely because the asset is selected.
-- Keyboard focus remains independently visible.
-- Multi-selection actions use the existing selection bar/context flow; do not shift the rail/index/header when selection count changes.
+- Keep the small top-left square marker and apply `--asset-selection-tint` (teal, user-approved 2026-09-06) to the image area only.
+- No strong outer outline around the tile; do not recolor or reflow the caption because the asset is selected.
+- Keyboard focus stays independently visible.
+- Multi-selection actions use the existing selection bar/context flow without shifting the rail, index or header.
 
-### Metadata visibility
+## 7. Selection and control states
 
-Metadata is normally visible by default. The control should describe the action/state truthfully; do not invert the stored `metadataVisible` meaning when changing wording.
+### Navigation selection (N4)
 
-The current UX may phrase the toggle as “정보 숨기기” when metadata is visible. Preserve stored preference compatibility.
+- **Slab — most specific current location.** Background `--color-sidebar-selection` / `--color-accent`, text `--color-on-accent`, radius 0, box shadow `--selection-echo` (`--selection-echo-surface` on the standalone Settings surface). Applies to classification rows, quick views, pins, index links (Collection types, 신간, 발매 캘린더, 더보기 lists), update-provider destinations and Settings sections. Slab hover stays ivory (`--color-accent-hover`).
+- **Selected-row mark.** A selected index/list row is the ivory slab with its own small dark square (`--selection-mark-size`, `currentColor`) at the right end. Never add a separate small ivory square cursor to the left of or outside the row; it duplicates that mark (user, 2026-09-26). `--selection-cursor-offset` has no consumer; `--selection-cursor-size` survives only as the section-label mark size. Classification tree rows keep their folder icon and inner treatment.
+- **Echo.** A hard 1px `--color-selection-echo` line offset 3px right/down; the double shadow masks the interior with the panel background so only the right/bottom outline shows. Blurred or decorative selection shadows remain banned.
+- **Tint — parent context (N4 parent-tint rule).** When a parent level and a more specific child are both current, only the most specific keeps the slab; the parent uses `--color-selection-context` with `--color-selection-context-text`, hover `--color-selection-context-hover`, and no echo or mark. Current users: the area rail, Notes scopes and the ledger segments. Never show two slabs for different levels of the same hierarchy.
+- **Cards.** A selected card (e.g. a Notes card) keeps its layout and uses a 1px `--color-accent` outline with the echo instead of a slab fill.
+- **Index section labels.** `.workspace-section-label` and index `.chrome-settings-group > legend` show a small square (`--color-section-mark`) before the text and a 1px fading hairline (`--section-label-rule`) filling the width, keeping the existing font size/color.
 
-## 7. Selection colors and control states
-
-### Primary/current single selection
-
-Use the N4 hierarchy for navigation selection:
-
-- **Slab / most specific current location**: `--color-sidebar-selection` / `--color-accent` with `--color-on-accent`, radius 0, and `--selection-echo`. This applies to classification rows, quick views, pins, Collection types, update-provider inbox destinations, management/index links, Settings sections, and Notes list items. Update providers replace the type selection and identify the current inbox, so they remain slabs.
-- **Echo**: a hard 1px ivory line (`--color-selection-echo`) offset 3px right/down. The double shadow masks the interior with `--color-sidebar`; standalone Settings uses `--selection-echo-surface` to match `--color-surface`. Only the right/bottom outline is visible. Blurred/decorative selection shadows remain banned.
-- **Cursor**: use `--selection-cursor-size` (5px) and `--selection-cursor-offset` (-7px) for an ivory square centered just outside the slab's left edge, only with a free pseudo-element and enough unclipped gutter. Preserve existing inner markers. Classification tree rows keep their folder/inner square treatment without an outside cursor. Narrow horizontal Settings navigation also omits the cursor to avoid neighboring buttons. Collection index rows (types, 신간) omit the outside cursor.
-- **Tint / parent context**: area rail and Notes scopes use `--color-selection-context` (16% ivory) and `--color-selection-context-text`. Keep existing small markers; omit echo and cursor. Hover uses `--color-selection-context-hover` (22%). Slab hover retains ivory.
-- **Index section labels**: `.workspace-section-label` and index `.chrome-settings-group > legend` use a 5px square (`--color-section-mark`, 60% ivory) before the text and a 1px fading hairline (`--section-label-rule`, 30% to 6% ivory) filling the remaining width. Preserve the existing font size/color.
-
-Keep keyboard `:focus-visible` outlines separate and visible on both slab and tint selections. Do not spread slabs across parent/context levels.
+Keyboard `:focus-visible` outlines (`--color-focus`) stay separate and visible on slab, tint and card selections.
 
 ### Multi-select filters
 
-Use neutral gray, marker-free selection treatment. Current dark reference roles are approximately:
+Neutral gray, marker-free: `--color-filter-selected` surface, `--color-filter-text`, `--color-filter-border`, hover `--color-filter-hover` / `--color-filter-hover-border`. Multi-select filters stay gray even when only one value is active; never use the ivory slab for them.
 
-- selected surface `#383838`;
-- selected text `#E7E7E7`;
-- selected border `#808080`;
-- hover surface `#444444`;
-- hover border `#A0A0A0`.
+### Toggles and checkbox labels
 
-Treat these as semantic token inputs rather than repeated raw colors. Multi-select filters stay gray even when only one value happens to be active.
+- An unchecked box must be visible on dark surfaces: 1px `--color-border-strong` on `--color-bg`. Checked fills `--color-accent` with a `--color-on-accent` check; focus uses the `--color-focus` ring; disabled dims.
+- A checkbox/toggle label names the setting (`자동 갱신`, `가벼운 모드`) or, when the row heading already names it, the current state (`켜짐` / `꺼짐`). Never use action wording (`켜기`) on a checkbox; the box already shows state.
+- Action wording (`가벼운 모드 켜기` / `끄기`) belongs to one-shot commands in menus or the palette and must follow the current state.
+- A label may read inverted when that is natural (`정보 숨기기` checked = metadata hidden), but the stored preference keeps its meaning (`metadataVisible`); metadata is visible by default.
 
-## 8. Floating surfaces and icon hints
+## 8. Dates
 
-- Menus, context menus, anchored panels, and search surfaces use thin borders, small radii, shallow contrast, and only the shadow needed to read as floating.
-- Dialogs are reserved for modal confirmation or genuinely blocking flows.
-- Do not display tooltips on hover or keyboard focus, including shared tooltip overlays and native HTML `title` bubbles.
-- Preserve `aria-label` and keyboard-accessible naming; supplementary descriptions may use `aria-description` without a visual popup. Keep actual headings and dialog titles intact.
-- Focus, selected, disabled, open, destructive, and hover states must remain distinguishable without color alone.
+User-facing dates go through `shared/displayDate.ts` (`displayDate`, `displayDateRange`):
 
-The user removed hover/focus tooltips on 2026-09-12, superseding the tooltip allowance in ADR-0034; its remaining shell and browsing decisions still apply.
+- a full date in the viewer's current local calendar year shows `MM.DD`; any other year shows `YYYY.MM.DD` (relative to the viewer's clock, so the display changes at New Year);
+- year-only values show `YYYY`; month-only values always keep the year, `YYYY.MM`;
+- timestamps use the viewer-local date; calendar strings keep their own precision;
+- ranges join both ends with `–`, each formatted independently; equal ends collapse to one value;
+- invalid input passes through unchanged.
 
-## 9. Collection / Works presentation
+This covers Collection cards/info/details, TV seasons/episodes and Asset date headings. Stored values, grouping/sorting, caption times (`HH:mm`), Revisit date headings and machine-facing values (paths, IDs, diagnostic timestamps) are unchanged.
 
-Manga ownership uses one numeric input per edition: N means volumes 1 through N are owned, without distinguishing physical and digital copies. The sidebar shows the latest known domestic released volume, missing count (latest released number minus owned count, floored at zero), and the next known release date. Upcoming volumes are not counted as missing. Covers alone do not establish publication or ownership. Existing format records remain readable; saving a count atomically replaces that edition's holdings, including when the count decreases to zero.
+## 9. Floating surfaces and icon hints
 
-Release notifications remain unread when opening a work. The collection toolbar opens a persistent unread inbox; users explicitly acknowledge an event, independently of editing the owned count. Acknowledgement uses exact event IDs so later events are retained. The work sidebar exposes the last check and the next eligible time. Checks run while the desktop app is open, with an hourly scheduler and a 24-hour per-work eligibility interval; this is not an OS push service. Schema 41 adds ownership storage without inferring holdings or rewriting past notification states. Native migration/application acceptance remains separate from implementation tests.
+- Menus, context menus, anchored panels and search surfaces use thin borders, small radii, shallow contrast and only `--shadow-floating`; dialogs (`--shadow-dialog`) are reserved for modal confirmation or genuinely blocking flows.
+- No tooltips on hover or keyboard focus, including shared tooltip overlays and native `title` bubbles (user, 2026-09-12; supersedes the tooltip allowance in ADR-0034, whose other decisions still apply).
+- Keep `aria-label` and keyboard-accessible naming; supplementary text may use `aria-description`. Keep real headings and dialog titles.
+- Focus, selected, disabled, open, destructive and hover states must remain distinguishable without color alone.
 
-### Game browser object
+## 10. Collection / Works presentation
 
-A game is represented by a **closed, seam-side case**, inspired by a closed steelbook/package but not claiming a real edition.
+`works-viewer-design.md` owns the type-specific browsing/detail grammar and renderer budgets; `lakomics-works-handoff-v2.md` owns Works product behavior (ownership counts, release notifications, providers).
 
-- front artwork remains dominant;
-- seam/opening edge and restrained top/bottom shell geometry make the object read as closed;
-- no invented platform stripe, console logo, illustrated spine, or fake back cover;
-- loading/fallback should preserve the same case silhouette rather than flashing a flat poster first;
-- physical depth stays subtle enough for dense browsing.
+### Game
 
-The case renderer may use unified 2D projection/high-DPR sampling to avoid jagged top edges. The approved reference found the defect at 154×231 CSS px and DPR 1.125; improvement was visually confirmed at DPR 1.25. Do not claim universal anti-aliasing success without real runtime evidence.
+A game is a **closed, seam-side case**, inspired by a closed steelbook/package but not claiming a real edition.
+
+- Front artwork dominates; the seam/opening edge and restrained top/bottom shell geometry make it read as closed.
+- No invented platform stripe, console logo, illustrated spine or fake back cover.
+- Loading/fallback keeps the case silhouette rather than flashing a flat poster.
+- Physical depth stays subtle enough for dense browsing. Thin edges must hold at non-integer DPR (the original jagged-edge defect was at DPR 1.125); do not claim universal anti-aliasing success without runtime evidence.
 
 ### Manga
 
-Manga uses the approved **Paperback FINAL** model and volume-centered shelf grammar: separate thin covers, a recessed page block, satin print and unprinted spine/back. The supplied final artifact is the visual baseline, including depth `.12`, right binding, live pose `.13/.34/.005` and the reference static paper-side angle `.40`; these are local renderer parameters, not a claim about a real edition. A shelf is a contact cue, not furniture.
+Manga uses the approved **Paperback FINAL** model and volume-centered shelf grammar: separate thin covers, a recessed page block, satin print and unprinted spine/back. The supplied final artifact is the visual baseline (depth `.12`, right binding, live pose `.13/.34/.005`, static paper-side angle `.40`); these are local renderer parameters, not a claim about a real edition. A shelf is a contact cue, not furniture.
 
-- Library and volume lists display nearby cached static renders; row virtualization bounds large-list DOM work.
-- Appreciation uses one live book with on-demand cursor tilt. A separate footer owns same-edition thumbnails, position and original-image mode, so it never overlays the large cover.
-- Showcase keeps manual membership/order within each media type. Cover-only pages use 3×3 for up to 9 works, 4×4 from 10, and pagination beyond 16. The wall is packed around the objects rather than spread across the viewport.
-- A shared serialized raster cache is capped at 256 entries / 64 MiB of encoded snapshots (128 pending, on-screen covers first); book GPU textures at 4 / estimated 12 MiB. Drawing stops at idle and when hidden. Current-view callbacks and image URLs are released on scope/source changes.
-- Source keys include library scope, artwork URL, revision, render preset and pixel bucket. No DB or provider-state ownership moves into the renderer. Finished renders persist in the WebView's IndexedDB (`physical/snapshotStore.ts`, keyed by the same source key, LRU at 64 MiB, versioned); while a render is pending the cover shows a neutral placeholder in the final shape and fades in, never the flat source (the flat image is only the failure fallback).
-- Game cases share cached 2D snapshots while `drawGameCase.ts` geometry/lighting remains unchanged. Existing neutral loading silhouettes are cached too.
-- Native cover responses allow anonymous canvas use only for exact app origins and cover-image routes. CSP permits local blob images, not remote script execution. Failure falls back to the original cover.
-
-Implementation: `_tools/app/src/collections/physical/`, `CollectionCard.tsx`, `CollectionVolumeGrid.tsx`, `MangaCoverViewer.tsx`, `GameCase.tsx`, and the response-only `collectible_cors.rs` helper.
+- Library and volume lists show cached static renders; only the appreciation view has one live book with on-demand cursor tilt. Its footer owns same-edition thumbnails, position and original-image mode and never overlays the large cover.
+- While a render is pending the cover shows a neutral placeholder in the final shape and fades in, never the flat source; the flat image is only the failure fallback.
+- Showcase keeps manual membership/order per media type. Cover-only pages use 3×3 for up to 9 works, 4×4 from 10, and pagination beyond 16, packed around the objects rather than spread across the viewport.
 
 ### Film/video
 
-Normal film/video library tiles are flat posters. Physical-media cases are a separate intentional future mode, not a default cross-type effect.
+Normal film/video library tiles are flat posters. Physical-media cases are a separate future mode, not a default cross-type effect.
 
 ### Detail hero
 
-For game/film-style details with a backdrop:
+For details with a backdrop: use the chosen original backdrop as the wide background, overlap the foreground cover/package, fade only the background layer broadly into the body, and never blur/darken the whole artwork to manufacture contrast. Preserve user/provider artwork roles. Without a background, collapse the hero into a compact cover + title/info arrangement; never fabricate a blurred cover background. A back chevron left of the detail title exits the detail (Escape/back behave the same).
 
-- use the chosen original backdrop/hero as the wide background;
-- overlap the foreground cover/package over it;
-- use a broad lower fade only on the background layer to transition into body content;
-- do not blur/darken the whole artwork merely to manufacture contrast;
-- preserve user/provider artwork roles instead of deriving every role from one image.
+## 11. Status, progress, and empty space
 
-When no background exists, collapse the empty hero space and use a compact cover + title/info arrangement. Do not fabricate a large blurred cover background.
+- Do not fill the bottom bar with asset counts or generic “drag files here” text just because space exists.
+- Show real ingestion/progress/error state when it matters (status center).
+- Empty states explain the next useful action concisely.
+- Avoid repeating area names, subtitles and counts already evident from the rail/index/content.
 
-`docs/agents/works-viewer-design.md` owns the deeper type-specific browsing/detail grammar and future Video Works direction.
+## 12. Responsive and desktop constraints
 
-## 10. Status, progress, and empty space
+Lakomics supports Windows and Linux; windows may be narrow or use non-integer DPR.
 
-- Do not permanently fill the bottom bar with asset count or generic “drag files here” instructions just because space exists.
-- Show real ingestion/progress/error state when it matters.
-- Empty states explain the next useful action concisely; they are not marketing pages.
-- Avoid repeated area names, subtitles, and counts when the same context is already evident from the rail/index/content.
+- Check practical narrow sizes such as ~800×640 besides the normal desktop viewport.
+- Avoid horizontal overflow from title/window controls; clamp floating panels and allow internal scroll.
+- Do not hide the whole navigation model as the first response to a narrow window.
+- Account for DPR 1.125/1.25 in thin lines and collectible rendering.
+- Preserve keyboard tree navigation, resize semantics, drag/drop targets and native window controls.
 
-## 11. Responsive and desktop constraints
+## 13. Implementation ownership
 
-Lakomics is Windows-first, but the window may be narrow or use non-integer DPR.
+Keep state with the feature that owns it; the shell relocates controls and presentation.
 
-- test practical narrow sizes such as ~800×640 in addition to the normal desktop viewport;
-- avoid horizontal overflow from title/window controls;
-- clamp floating panels to the viewport and allow internal scroll;
-- do not hide the entire navigation model as the first response to a narrow window;
-- account for DPR 1.125/1.25 in thin lines and collectible rendering;
-- preserve keyboard tree navigation, resize semantics, drag/drop targets, and native window controls.
-
-## 12. Implementation ownership
-
-Keep state with the feature that owns it; the shell should mostly relocate controls and presentation.
-
-| Responsibility | Current entry points |
+| Responsibility | Current entry points (`_tools/app/src/`) |
 | --- | --- |
-| Shell / area rail / contextual index | `_tools/app/src/layout/WorkspaceChrome.tsx`, `WorkspaceNavigation.tsx`, `ViewToolbar.tsx`, `WindowControls.tsx` |
-| Search surfaces | `_tools/app/src/layout/ChromeSearch.tsx`, `SearchSurface.tsx`, owning browser query state |
-| Anchored settings / floating UI | `_tools/app/src/shared/ui/AnchoredPanel.tsx`, `Menu.tsx`, `ContextMenu.tsx` |
-| Classification / Albums | `_tools/app/src/classification/ClassificationSidebar.tsx` |
-| Asset controls / gallery / selection | `_tools/app/src/assets/AssetToolbar.tsx`, `AssetBrowser.tsx`, `AssetGallery.tsx`, `SelectionBar.tsx` |
-| Collection browser / details | `_tools/app/src/collections/CollectionBrowser.tsx`, `CollectionCard.tsx`, type detail components |
-| Manga local / online catalog | `_tools/app/src/manga/MangaBrowser.tsx`, `OnlineCatalogBrowser.tsx` |
-| Tokens and layout CSS | `_tools/app/src/styles/tokens.css`, `global.css`, `chrome.css` |
+| Shell / area rail / contextual index | `layout/WorkspaceChrome.tsx`, `WorkspaceNavigation.tsx`, `MorePanel.tsx`, `navigationEntries.tsx`, `ViewToolbar.tsx`, `WindowControls.tsx` |
+| Status center | `layout/StatusCenter.tsx` |
+| Search | `layout/CommandPalette.tsx`, `ChromeSearch.tsx`, `SearchSurface.tsx` (Online Catalog), owning browser query state |
+| Anchored settings / floating UI | `shared/ui/AnchoredPanel.tsx`, `Menu.tsx`, `ContextMenu.tsx` |
+| Date display | `shared/displayDate.ts` |
+| Classification / Albums | `classification/ClassificationSidebar.tsx` |
+| Asset controls / gallery / selection | `assets/AssetToolbar.tsx`, `AssetBrowser.tsx`, `AssetGallery.tsx`, `GalleryDisplaySettings.tsx`, `SelectionBar.tsx` |
+| Collection browser / details | `collections/CollectionBrowser.tsx`, `CollectionCard.tsx`, `physical/`, type detail components |
+| Manga local / online catalog | `manga/MangaBrowser.tsx`, `OnlineCatalogBrowser.tsx` |
+| Tokens and layout CSS | `styles/tokens.css`, `global.css`, `chrome.css` |
 
 Do not paste comparison HTML into React, duplicate feature state in the shell, or create a second settings/search persistence model.
 
-## 13. Current implementation checkpoint
-
-Commit `2d7bac2` introduced the actual desktop archive UI/navigation chrome. Subsequent same-day UX corrections refined duplicated labels, shell hints, selection treatment, catalog controls, icon geometry, and search placement.
-
-Evidence recorded during the redesign included:
-
-- TypeScript success and focused React/Vitest coverage for shell, App, Asset toolbar, file ingestion, Manga/Online Catalog and shared menu behavior;
-- isolated Edge/Chromium fixture rendering at normal and narrow desktop sizes;
-- View Settings panel staying inside the viewport and preserving gallery width during open/close;
-- real Collection fixture search reducing visible results while the input surface closed.
-
-This is not native production-library acceptance. Browser fixtures do not prove Tauri file dialog, OS window, real media protocol, active-library performance, or every DPR/GPU path.
-
-### Paperback FINAL / case optimization verification (2026-09-06)
-
-The final prototype was approved for application, not retained as another open design vote. The renderer, virtual grids, appreciation strip and cover-only paged exhibition are integrated in React; no prototype artwork or fixture gateway is shipped.
-
-Verification: TypeScript passed. The Collection suite passed 393 tests during integration; after the final behavior changes the affected 249-test subset passed again. The native response helper passed 3 Rust tests. Existing unrelated warnings were not rewritten.
-
-An isolated Edge 152 frontend fixture rendered the actual components with synthetic, separately keyed artwork URLs. Observed 1,000-item library/volume lists kept 28–42 card DOM nodes depending on viewport/range; the snapshot cache stayed at or below 64 entries and estimated decoded 24 MiB. One reusable book mesh/WebGL context was used; grids had no live canvas per tile. Settled list and live-viewer observations each added zero renders over two idle seconds. Game snapshot generation also stopped at idle. Source checks confirmed `drawGameCase.ts` itself unchanged.
-
-The fixture exercised 9/10/16/20-item exhibition boundaries, page two, 800×640 and 1536×960 layouts, DPR 1.125/1.25/2, original-image fallback, context loss/restoration, privacy unmount, previous/next volumes, Esc-to-opener focus and virtual-grid scroll/focus restoration. Cover and thumbnail-strip bounds remained separate; an unnecessary 8px exhibition overflow and legacy frame/label overlap were corrected.
-
-These are isolated browser observations, not a benchmark of 1,000 distinct high-resolution originals or native production-library acceptance. Native CORS/CSP integration was compiled/tested but not verified by opening the active library. Rebuild/restart through the normal Tauri development command for native acceptance; do not directly launch the debug executable. Caches are bounded in memory, not persistent on disk, and first-time raster generation still has a cost.
-
 ## 14. Review checklist
-
-2026-09-06 status/statistics additions:
-
-- The rail shows `동기화 문제 N` only while failed queue items or direction-specific
-  transport/metadata errors remain. It opens Cloud Settings directly and reuses the
-  existing supervisor updates. Queue details expose public fixed messages, not paths
-  or raw transport errors.
-- Management contains `통계`, using the existing toolbar and dense tables. Inventory
-  aggregates include normal Assets only; Collection totals include all works. Metrics
-  state their scope, local-time basis and recorded-era limits.
-- Collection opens are recorded once per work in an uninterrupted detail session;
-  returning to another view ends the session. Recording failure never blocks viewing.
-  v42 starts Collection/daily telemetry without backfilling old counts; legacy Asset
-  lifetime start is explicitly unknown. Daily rows are bounded to 90 days, with the
-  latest 30 days displayed.
-- Storage inspection is opt-in and capped at 10,000 registered derivative paths.
-  File measurements occur outside the SQLite lock. Partial/missing-file counts are
-  visible; original sizes are labeled as recorded sizes rather than current disk use.
 
 Before accepting a PC UI change, ask:
 
 - Does media still dominate the first glance?
 - Did the change add a second route to an existing command without a real UX reason?
-- Does selection remain distinct from focus?
+- Does selection remain distinct from focus, and is only the most specific level a slab?
 - Does opening a temporary surface leave content layout and scroll stable?
 - Does the screen still work with long Korean/Japanese names and narrow windows?
 - Did a flat Asset or poster accidentally inherit collectible shadow/3D?
+- Are colors token names from `tokens.css` rather than new literals?
 - Did a prototype number, fake label, or provider-specific assumption become product logic?
 - Are domain boundaries from `CONTEXT.md` still intact?
 
 If a change cannot answer these cleanly, fix hierarchy/state clarity before adding decoration.
-
-- **Selected rows (2026-09-26, user):** a selected index/list row is the ivory slab with its own small dark mark on the right; do not add a separate small ivory square cursor to the left of the selected row — it duplicates that mark.

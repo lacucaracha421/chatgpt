@@ -278,7 +278,7 @@ Status: `TODO` (low priority; single-user setup makes them unlikely). Fixed the 
 ## SERVER-REVIEW-20260924 — Remaining judgment calls of the Cloud API review
 
 Status: `TODO` (low priority; single-user setup). From [`docs/research/server-review-2026-09-24.md`](../research/server-review-2026-09-24.md) §3; items 1, 2, 4 and 7 were fixed in `39d9ed02` (2026-09-24). Remaining:
-- 3: a client `trashAsset` on an Asset that a pending similarity decision keeps is accepted; `similarity_review.pending_trash_assets` exists but has no caller outside tests. Refuse the trash (or withdraw the decision) in `asset_authority`. The only item with a realistic user-visible effect.
+- 3: fixed 2026-09-26 (not yet deployed; needs the server deploy and the next APK for the native blocking rule): a client `trashAsset` of the image a pending similarity decision keeps is refused with 409 `similarityDecisionKeepsAsset` (publisher/PC trashes unaffected; restore unaffected); the tablet outbox blocks that row as 충돌 and the trash browser explains it.
 - 5: a legacy Collection memo over 10,000 characters answers 422 instead of a conflict (unreachable unless legacy data exceeds the old limit).
 - 6: `mobile_collection_edits`, `mobile_collection_edit_noops`, `mobile_character_review_decisions` and `mobile_similarity_review_decisions` have no retention.
 - 8: the shared legacy token can send `trashAsset` / `restoreAsset` (matches the design; noted only).
@@ -900,7 +900,7 @@ From a 2026-09-23 review of the design documents against real-app screenshots on
 
 Native visual acceptance of items 5–7 and 9–11 remains pending.
 
-Documentation follow-up: move feature/domain rules and verification logs out of `docs/agents/pc-design-reference.md`, record the resulting date/selection/toggle rules there, and point color values at `tokens.css`.
+**Documentation follow-up done 2026-09-26:** `docs/agents/pc-design-reference.md` now records the date, selection (selected-row mark, N4 parent tint) and toggle-label rules and names `tokens.css` properties instead of color literals; character rules moved to the quiet character workflow doc, manga ownership to `lakomics-works-handoff-v2.md`, renderer budgets to `works-viewer-design.md`, and verification logs/statistics notes to `lakomics-completed.md`.
 
 # Desktop verification / low-priority exploration
 
