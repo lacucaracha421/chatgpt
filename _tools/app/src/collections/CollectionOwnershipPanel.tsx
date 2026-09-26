@@ -3,6 +3,7 @@ import { useLibrary } from "../library/LibraryContext";
 import type { CollectionVolume } from "../library/types";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
+import { invalidateReleaseData } from "./releaseData";
 
 type Props = {
   collectionId: string; volumes: CollectionVolume[]; editionIndex: number;
@@ -37,7 +38,7 @@ export function CollectionOwnershipPanel({ collectionId, volumes, editionIndex, 
   async function save() {
     if (!api || busy || input.trim() === "" || !Number.isInteger(count) || count < 0 || count > 2000) return;
     setBusy(true); setError(null);
-    try { await api.setOwnedCount(collectionId, editionIndex, count); setOwned(count); setTracked(true); }
+    try { await api.setOwnedCount(collectionId, editionIndex, count); setOwned(count); setTracked(true); invalidateReleaseData(); }
     catch (err) { setError(commandErrorMessage(err, "보유 권수를 저장하지 못했습니다.")); }
     finally { setBusy(false); }
   }

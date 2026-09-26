@@ -24,6 +24,8 @@ import { KakaoConnectDialog } from "./KakaoConnectDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
 import { CollectionOwnershipPanel } from "./CollectionOwnershipPanel";
+import { MangaConnections } from "./MangaConnections";
+import { invalidateReleaseData } from "./releaseData";
 import { GameCollectionDetail } from "./GameCollectionDetail";
 import { IgdbImportDialog } from "./IgdbImportDialog";
 import { MovieCollectionDetail } from "./MovieCollectionDetail";
@@ -332,8 +334,8 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
 
   const providerMenu = isManga ? (
     <Menu
-      label="연결 및 갱신"
-      trigger={<span>연결 및 갱신</span>}
+      label="작품 관리"
+      trigger={<span>작품 관리</span>}
       items={[
         {
           id: "edit",
@@ -350,18 +352,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
           label: "삭제",
           destructive: true,
           onSelect: () => setDeleteOpen(true),
-        },
-        {
-          id: "mangadex",
-          label: mangaDexConnection ? "MangaDex 새로고침" : "MangaDex 연결",
-          disabled: mangaDexConnection === undefined || refreshing,
-          onSelect: () => mangaDexConnection ? void refresh() : setImportOpen(true),
-        },
-        {
-          id: "kakao",
-          label: needsBookReconnect ? "카카오로 재연결" : kakaoConnection ? "Kakao 새로고침" : "Kakao 연결",
-          disabled: kakaoConnection === undefined || kakaoRefreshing,
-          onSelect: () => kakaoConnection && !needsBookReconnect ? void refreshKakao() : setKakaoOpen(true),
         },
       ]}
     />
@@ -432,6 +422,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
       setBookConnection(await gateway.getBookConnection(collectionId));
       setReleaseWatchStatus(await gateway.getReleaseWatchStatus(collectionId));
       setMessage(kakaoResultMessage(result));
+      invalidateReleaseData();
     } catch (error) {
       setMessage(commandErrorMessage(error, "Kakao 정보를 새로고침하지 못했습니다."));
     } finally {
@@ -477,6 +468,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     setMessage(null);
     try {
       setReleaseWatchStatus(await gateway.setReleaseWatchEnabled(collectionId, enabled));
+      invalidateReleaseData();
     } catch (error) {
       setMessage(commandErrorMessage(error, "신간 알림 설정을 바꾸지 못했습니다."));
     } finally {
@@ -538,7 +530,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
           </Button>
         </>}
       />
-      {needsBookReconnect && <p role="status">기존 알라딘 신간 확인은 중단된 상태입니다. 카카오로 다시 연결해 주세요. <Button size="sm" onClick={() => setKakaoOpen(true)}>카카오 연결</Button></p>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <ReleaseWatchSummary events={releaseChanges} />
       {releaseChanges.length > 0 && gateway.collectionTracking && <Button size="sm" disabled={releaseWatchSaving} onClick={async () => {
@@ -590,6 +581,10 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
       ) : isManga ? (
         <div className="collection-overlay__manga-layout" role="region" aria-label="만화 상세">
             <div className="collection-overlay__manga-main">
+              <MangaConnections mangaDex={mangaDexConnection} kakao={kakaoConnection}
+                mangaDexBusy={mangaDexConnection === undefined || refreshing} kakaoBusy={kakaoConnection === undefined || kakaoRefreshing}
+                onConnectMangaDex={() => setImportOpen(true)} onRefreshMangaDex={() => void refresh()}
+                onConnectKakao={() => setKakaoOpen(true)} onRefreshKakao={() => void refreshKakao()} />
               {volumes !== null ? (
                 <CollectionVolumeGrid
                   volumes={volumes}

@@ -48,23 +48,21 @@ const sample: CollectionSummary = {
 it("shows series season premiere range and a single date for one season", () => {
   const props = { coverUrl: null, onClick: vi.fn(), selected: false };
   const { rerender } = render(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2024-05-05"] }} />);
-  expect(screen.getByText("2016.01.14–2024.05.05")).toBeInTheDocument();
+  expect(screen.getByText("16.1.14~24.5.5")).toBeInTheDocument();
   rerender(<CollectionCard {...props} collection={{ ...sample, type: "movie", seasonDateRange: ["2016-01-14", "2016-01-14"] }} />);
-  expect(screen.getByText("2016.01.14")).toBeInTheDocument();
+  expect(screen.getByText("16.1.14")).toBeInTheDocument();
 });
 
 describe("CollectionCard", () => {
-  it("shows a compact movie release date on a separate line after the studio", () => {
-    render(<CollectionCard collection={{ ...sample, type: "movie", productionCompany: "MAPPA", releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    const date = screen.getByText("10.01");
-    expect(date).toHaveAttribute("datetime", "2026-10-01");
-    expect(screen.getByText("MAPPA").nextElementSibling).toBe(date);
-  });
-  it.each(["game", "manga"] as const)("shows the %s release date or the known year", (type) => {
-    const view = render(<CollectionCard collection={{ ...sample, type, releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(screen.getByText("10.01")).toHaveAttribute("datetime", "2026-10-01");
-    view.rerender(<CollectionCard collection={{ ...sample, type, releaseDate: null, year: 2019 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(screen.getByText("2019")).toHaveAttribute("datetime", "2019");
+  it.each(["game", "manga", "movie"] as const)("shows the %s year and my rating on the meta line after the credit", (type) => {
+    const view = render(<CollectionCard collection={{ ...sample, type, releaseDate: "2026-10-01", year: null, myScore: 4.5 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    const line = document.querySelector(".collection-card__line")!;
+    expect(document.querySelector(".collection-card__credit")!.nextElementSibling).toBe(line);
+    expect(line).toHaveTextContent("4.52026");
+    expect(screen.getByLabelText("내 별점 4.5점")).toBeInTheDocument();
+    view.rerender(<CollectionCard collection={{ ...sample, type, releaseDate: null, year: 2019, myScore: null }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(line).toHaveTextContent(/^2019$/);
+    expect(screen.queryByLabelText(/내 별점/)).not.toBeInTheDocument();
   });
   it.each([
     ["manga", { author: "Kui Ryoko", developer: "Wrong", productionCompany: "Wrong" }, "Kui Ryoko"],
@@ -89,24 +87,30 @@ describe("CollectionCard", () => {
     render(<CollectionCard collection={sample} coverUrl={null} selected={false} onClick={vi.fn()} />);
     expect(screen.queryByText("게임")).not.toBeInTheDocument();
     expect(screen.queryByText("3개")).not.toBeInTheDocument();
-    expect(screen.getByText("2019")).toHaveAttribute("datetime", "2019");
+    expect(screen.getByText("2019")).toHaveClass("collection-card__date");
     expect(screen.queryByText("87")).not.toBeInTheDocument();
-    expect(screen.queryByText("5")).not.toBeInTheDocument();
+    // My rating is on the line; the external score is not.
+    expect(screen.getByLabelText("내 별점 5.0점")).toHaveTextContent("5.0");
     expect(screen.getByText("Sample")).not.toHaveAttribute("title");
     expect(screen.getByText("Developer")).not.toHaveAttribute("title");
   });
 
-  it("shows release notices as a caption line instead of a cover badge", () => {
-    const { rerender } = render(<CollectionCard collection={{ ...sample, unreadReleaseCount: 0, releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+  it("shows release notices as a marker after the stars instead of a cover badge", () => {
+    const { rerender } = render(<CollectionCard collection={{ ...sample, unreadReleaseCount: 0 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
     expect(screen.queryByText(/신간/)).not.toBeInTheDocument();
-    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 2, releaseDate: "2026-10-01" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
-    expect(screen.getByText("신간 알림 2")).toBeInTheDocument();
+    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 2 }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(screen.getByText("신간 알림 2")).toHaveClass("collection-card__release--new");
     expect(document.querySelector(".collection-card__cover")).not.toHaveTextContent(/신간/);
-    // The notice replaces the release date line.
-    expect(document.querySelector("time.collection-card__credit")).not.toBeInTheDocument();
-    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 1 }} releaseCaption={{ kind: "ahead", text: "9권 예약", date: "11.20" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    // The year and the stars stay beside the marker.
+    expect(document.querySelector(".collection-card__line")).toHaveTextContent("5.0·신간 알림 22019");
+    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 0 }} releaseCaption={{ kind: "ahead", text: "9권 예약", date: "11.20" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
     expect(screen.getByText("9권 예약")).toHaveClass("collection-card__release--ahead");
     expect(screen.getByText("· 11.20")).toHaveClass("collection-card__release-date");
+    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 0 }} releaseCaption={{ kind: "out", text: "신간 3권", date: "9.16" }} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(screen.getByText("신간 3권")).toHaveClass("collection-card__release--out");
+    // A Showcase row keeps only the marker.
+    rerender(<CollectionCard collection={{ ...sample, unreadReleaseCount: 1 }} meta={false} coverUrl={null} selected={false} onClick={vi.fn()} />);
+    expect(document.querySelector(".collection-card__line")).toHaveTextContent(/^신간 알림 1$/);
   });
 
   it("uses a game package shell while manga and movie stay flat", () => {

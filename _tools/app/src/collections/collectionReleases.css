@@ -1,0 +1,48 @@
+/* 신간 view (tablet port, 2026-09-26): 한국 정발 / 일본 segments, one group per work with its
+   unowned Korean volumes or the Japanese volumes ahead. Desktop density; the list keeps a readable
+   measure instead of spreading tags across a wide window. */
+.collection-releases { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.collection-releases__bar, .collection-releases__status { box-sizing: border-box; max-width: calc(920px + 2 * var(--space-6)); }
+.collection-releases__bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; padding: var(--space-3) var(--space-6); border-bottom: 1px solid var(--color-border); }
+.collection-releases__segments { display: flex; border: 1px solid var(--color-border); border-radius: var(--radius-tile); overflow: hidden; }
+.collection-releases__segment { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 30px; padding: 0 var(--space-4); border: 0; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.collection-releases__segment + .collection-releases__segment { border-left: 1px solid var(--color-border); }
+.collection-releases__segment:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.collection-releases__segment[aria-selected="true"] { color: var(--color-text); background: var(--color-filter-selected, var(--color-surface-hover)); font-weight: 600; }
+.collection-releases__segment:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.collection-releases__count { min-width: 18px; padding: 0 5px; color: var(--color-on-accent); background: var(--color-accent); border-radius: var(--radius-tile); font-family: var(--font-numeric); font-size: var(--text-xs); font-weight: 600; line-height: 1.5; text-align: center; }
+.collection-releases__actions { display: flex; align-items: center; gap: var(--space-2); }
+.collection-releases__unread { color: var(--color-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; margin-right: var(--space-2); }
+.collection-releases__status { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-4); padding: var(--space-2) var(--space-6); color: var(--color-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--color-border); }
+.collection-releases__error { margin: var(--space-2) var(--space-6); color: var(--color-danger, var(--color-text)); font-size: var(--text-sm); }
+.collection-releases__hint { color: var(--color-muted); font-size: var(--text-sm); }
+.collection-releases__body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-6) var(--space-8, 32px); scrollbar-gutter: stable; }
+.collection-releases__body > * { max-width: 920px; }
+
+.collection-releases__group { padding: var(--space-3) 0 var(--space-2); border-bottom: 1px solid var(--color-border); }
+.collection-releases__head { display: flex; align-items: center; gap: var(--space-2); }
+.collection-releases__open { display: flex; align-items: center; gap: var(--space-3); flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.collection-releases__open:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.collection-releases__open:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.collection-releases__cover { display: block; flex: none; width: 36px; aspect-ratio: 256 / 368; background: var(--color-surface-hover); overflow: hidden; border-radius: var(--radius-tile); }
+.collection-releases__cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.collection-releases__title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.collection-releases__title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); font-weight: 600; }
+.collection-releases__title small { color: var(--color-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.collection-releases__title small.is-ahead { color: var(--color-text); }
+.collection-releases__new { flex: none; padding: 0 6px; color: var(--color-on-accent); background: var(--color-accent); border-radius: var(--radius-tile); font-family: var(--font-numeric); font-size: var(--text-xs); font-weight: 600; line-height: 1.6; }
+.collection-releases__tag { flex: none; padding: 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-tile); color: var(--color-muted); font-size: var(--text-xs); line-height: 1.5; }
+.collection-releases__confirm { flex: none; color: var(--color-muted); }
+
+.collection-releases__volumes { list-style: none; margin: var(--space-2) 0 0; padding: 0 0 0 48px; }
+.collection-releases__volumes li { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; border-top: 1px solid var(--color-border); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.collection-releases__volumes li > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.collection-releases__volumes li.is-new > span:first-child { font-weight: 600; }
+.collection-releases__volumes .is-upcoming { color: var(--color-text); }
+.collection-releases__chips { display: flex; flex-wrap: wrap; gap: var(--space-1); list-style: none; margin: var(--space-2) 0 0; padding: 0 0 0 48px; }
+.collection-releases__chips li { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 26px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-tile); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.collection-releases__chips li.is-new { border-color: var(--color-accent); }
+.collection-releases__chips li.is-more { color: var(--color-muted); border-style: dashed; }
+.collection-releases__others { margin: var(--space-6) 0 0; padding-bottom: var(--space-2); color: var(--color-muted); font-size: var(--text-sm); font-weight: 500; border-bottom: 1px solid var(--color-border); }
+.collection-releases__dialog { display: grid; gap: var(--space-3); }
+.collection-releases__dialog p { margin: 0; }

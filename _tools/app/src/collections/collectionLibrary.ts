@@ -9,6 +9,8 @@ export type CollectionLibraryState = {
   sort: CollectionLibrarySort;
   direction: CollectionLibraryDirection;
   rating: CollectionRatingFilter;
+  /** The library's Showcase row is unfolded (kept while browsing, not a filter). */
+  showcaseOpen?: boolean;
 };
 
 export type CollectionLibraryStateByType = Record<CollectionType, CollectionLibraryState>;

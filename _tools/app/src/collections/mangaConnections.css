@@ -1,0 +1,41 @@
+/* MangaDex / 카카오 connection for a manga (tablet port, 2026-09-26): a folded row once both are
+   connected, otherwise a 작품 연결 panel above the volume shelf. */
+.collection-overlay .collection-overlay__manga-main { flex-direction: column; }
+.manga-connections { flex: none; margin: 0 0 var(--space-3); max-width: 920px; }
+.manga-connections.is-folded { margin-bottom: var(--space-3); }
+.manga-connections__fold { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 32px; padding: 0 var(--space-1); border: 0; border-bottom: 1px solid var(--color-border); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.manga-connections__fold[aria-expanded="true"] { border-bottom-color: transparent; }
+.manga-connections__fold:hover { color: var(--color-text); }
+.manga-connections__fold:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.manga-connections__fold > svg { width: 16px; height: 16px; flex: none; }
+.manga-connections__ok { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text); white-space: nowrap; }
+.manga-connections__ok svg { width: 14px; height: 14px; color: var(--color-accent); stroke-width: 2; }
+.manga-connections__sep { width: 3px; height: 3px; flex: none; background: var(--color-border-strong, var(--color-border)); }
+.manga-connections__chevron { margin-left: auto; transition: transform var(--motion-fast, 120ms) ease; }
+.manga-connections__fold[aria-expanded="true"] .manga-connections__chevron { transform: rotate(180deg); }
+.manga-connections__rows { border-bottom: 1px solid var(--color-border); }
+.manga-connections__row { display: flex; align-items: center; gap: var(--space-3); min-height: 40px; padding: var(--space-1) var(--space-2); border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
+.manga-connections__name { flex: none; width: 88px; color: var(--color-muted); }
+.manga-connections__state { display: flex; flex: 1; min-width: 0; align-items: baseline; gap: var(--space-2); }
+.manga-connections__state small { overflow: hidden; color: var(--color-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+
+.manga-connections.is-panel { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-sm, 4px); background: var(--color-surface); }
+.manga-connections.is-panel h2 { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-md); font-weight: 600; }
+.manga-connections.is-panel h2 svg { width: 18px; height: 18px; color: var(--color-accent); }
+.manga-connections.is-panel > p { margin: var(--space-1) 0 0; color: var(--color-muted); font-size: var(--text-sm); }
+.manga-connections__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-3); }
+@media (max-width: 900px) { .manga-connections__choices { grid-template-columns: 1fr; } }
+.manga-connections__choice { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: 56px; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm, 4px); background: var(--color-control, var(--color-surface-hover)); color: inherit; font: inherit; text-align: left; }
+button.manga-connections__choice { cursor: pointer; }
+button.manga-connections__choice:hover { border-color: var(--color-border-strong, var(--color-muted)); }
+button.manga-connections__choice:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.manga-connections__choice.is-primary { border-color: var(--color-accent); background: var(--color-accent); color: var(--color-on-accent); }
+.manga-connections__choice.is-primary:hover { background: var(--color-accent-hover, var(--color-accent)); }
+.manga-connections__choice > svg { width: 16px; height: 16px; flex: none; }
+.manga-connections__choice.is-done { background: transparent; }
+.manga-connections__choice.is-done > svg { color: var(--color-accent); stroke-width: 2; }
+.manga-connections__text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.manga-connections__text strong { font-size: var(--text-md); font-weight: 600; }
+.manga-connections__choice.is-done .manga-connections__text strong { font-weight: 500; }
+.manga-connections__text small { color: var(--color-muted); font-size: var(--text-xs); line-height: 1.4; }
+.manga-connections__choice.is-primary small { color: color-mix(in srgb, var(--color-on-accent) 72%, var(--color-accent)); }

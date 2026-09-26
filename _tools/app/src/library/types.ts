@@ -1168,6 +1168,18 @@ export type CollectionUpdateStatus = {
   consecutiveFailures?: number; lastFailure?: CollectionUpdateFailure | null;
 };
 export type ReleaseInboxItem = { collectionId: string; collectionName: string; provider?: CollectionUpdateProvider | "aladin"; event: ReleaseWatchEvent };
+/** One manga Collection's 신간 data (`list_release_board`): the tablet's `releaseSchedule` shape, read from the library. */
+export type ReleaseBoardEntry = {
+  collectionId: string;
+  /** `enabled`: 신간 알림 is on; `available`: a Kakao/Aladin binding exists. */
+  releaseWatch: { enabled: boolean; available: boolean };
+  /** Owned volumes per tracked edition (any format); an edition without an entry has no recorded count. */
+  ownedVolumes: { editionIndex: number; count: number }[];
+  releaseSchedule: {
+    kakao: { editionIndex: number; checkedAt: string | null; volumes: { volumeNumber: number; date: string | null; status: "upcoming" | "released" | null }[] } | null;
+    mangadex: { checkedAt: string | null; latestVolume: number | null; volumes: { volumeNumber: number; editionIndex: number | null }[] } | null;
+  };
+};
 export interface CollectionTrackingGateway {
   runUpdates?(provider: CollectionUpdateProvider): Promise<CollectionUpdateStatus>;
   updateStatus?(provider: CollectionUpdateProvider): Promise<CollectionUpdateStatus>;
@@ -1176,6 +1188,8 @@ export interface CollectionTrackingGateway {
   listOwnership(collectionId: string): Promise<VolumeOwnership[]>;
   setOwnership(collectionId: string, editionIndex: number, volumeNumbers: number[], format: "physical" | "digital", owned: boolean): Promise<VolumeOwnership[]>;
   listInbox(): Promise<ReleaseInboxItem[]>;
+  /** Every manga Collection's 신간 알림 state, owned counts and Kakao/MangaDex schedule. */
+  releaseBoard?(): Promise<ReleaseBoardEntry[]>;
   acknowledge(collectionId: string, eventIds: string[]): Promise<void>;
 }
 

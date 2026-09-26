@@ -1528,7 +1528,9 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     const index = screen.getByRole("complementary", { name: "탐색 인덱스" });
-    expect(await within(index).findByLabelText("내 별점")).toBeVisible();
+    // Sort and 내 별점 are chips over the grid now; the index keeps the Library/Showcase mode.
+    expect(await screen.findByRole("button", { name: "내 별점 필터" })).toBeVisible();
+    expect(within(index).getByRole("button", { name: "라이브러리" })).toBeVisible();
     // Plain title search lives in the 찾기 palette; the index head has no separate magnifier.
     expect(within(index).queryByRole("button", { name: "제목 검색" })).not.toBeInTheDocument();
     await user.keyboard("{Control>}f{/Control}");
@@ -1586,16 +1588,17 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
-    await user.click(await screen.findByRole("button", { name: "만화" }));
+    await user.click(await screen.findByRole("tab", { name: "만화" }));
     await user.click(await screen.findByText("던전밥"));
     await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
 
-    expect(await screen.findByRole("heading", { name: "만화 컬렉션" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "만화" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("던전밥")).toBeInTheDocument();
     await user.click(screen.getByText("던전밥"));
     await screen.findByRole("button", { name: "컬렉션으로 돌아가기" });
     fireEvent.mouseUp(window, { button: 3 });
-    expect(await screen.findByRole("heading", { name: "만화 컬렉션" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "만화" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("던전밥")).toBeInTheDocument();
   });
 
   it("returns from a Showcase detail to the originating Showcase mode", async () => {
@@ -1618,7 +1621,7 @@ describe("App", () => {
     await user.click(await screen.findByText("Showcase Game"));
     await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
     expect(await screen.findByRole("button", { name: "쇼케이스" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("tab", { name: "게임" })).toHaveAttribute("aria-selected", "true");
   });
 
 });

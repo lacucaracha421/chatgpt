@@ -1,23 +1,31 @@
 import { useVirtualizer, defaultRangeExtractor } from "@tanstack/react-virtual";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import "./physicalCollections.css";
-type Props<T> = { textRows?:boolean; items:readonly T[]; itemKey:(item:T)=>string; render:(item:T,index:number)=>ReactNode; label:string; scrollRef?:RefObject<HTMLDivElement|null>; centered?:boolean; className?:string; metadataHeight?:number; legacyMetrics?:boolean; onEmptyContextMenu?:()=>void };
-export function VirtualCoverGrid<T>({textRows=false,items,itemKey,render,label,scrollRef,centered=false,className="",metadataHeight=42,legacyMetrics=false,onEmptyContextMenu}:Props<T>) {
+type Props<T> = { textRows?:boolean; items:readonly T[]; itemKey:(item:T)=>string; render:(item:T,index:number)=>ReactNode; label:string; scrollRef?:RefObject<HTMLDivElement|null>; centered?:boolean; className?:string; metadataHeight?:number; legacyMetrics?:boolean; onEmptyContextMenu?:()=>void; /** Scrolls with the grid, above its first row (a section heading, a Showcase row). */leading?:ReactNode; /** Shown after the cells, e.g. an empty state under `leading`. */trailing?:ReactNode };
+export function VirtualCoverGrid<T>({textRows=false,items,itemKey,render,label,scrollRef,centered=false,className="",metadataHeight=42,legacyMetrics=false,onEmptyContextMenu,leading,trailing}:Props<T>) {
   const local=useRef<HTMLDivElement>(null),[width,setWidth]=useState(960);
   const [focusIndex,setFocusIndex]=useState<number|null>(null);
+  // Rows start below `leading`; the virtualizer counts that offset as its scroll margin.
+  const body=useRef<HTMLDivElement>(null),[offset,setOffset]=useState(0);
   const ref=useCallback((element:HTMLDivElement|null)=>{local.current=element;if(scrollRef)scrollRef.current=element;},[scrollRef]);
   const gap=24,minWidth=legacyMetrics?(window.innerWidth<=860?118:132):148;
   const availableColumns=Math.max(1,Math.floor((width+gap)/(minWidth+gap)));
   const columns=textRows?1:centered?Math.min(availableColumns,Math.max(1,items.length)):availableColumns;
   const cellWidth=centered?Math.min(176,(width-gap*(columns-1))/columns):(width-gap*(columns-1))/columns;
   const rowHeight=textRows?44:cellWidth*(legacyMetrics?1.5:368/256)+metadataHeight+gap,rows=Math.ceil(items.length/columns),virtual=items.length>64;
-  const rowVirtualizer=useVirtualizer({count:rows,getScrollElement:()=>local.current,estimateSize:()=>rowHeight,overscan:1,enabled:virtual,rangeExtractor:range=>{const indexes=defaultRangeExtractor(range);const focused=focusIndex===null?-1:Math.floor(focusIndex/columns);if(focused>=0&&focused<rows&&!indexes.includes(focused))indexes.push(focused);return indexes.sort((a,b)=>a-b);},getItemKey:index=>items[index*columns]?itemKey(items[index*columns]):index,initialRect:{width:960,height:640}});
+  const rowVirtualizer=useVirtualizer({count:rows,getScrollElement:()=>local.current,estimateSize:()=>rowHeight,overscan:1,enabled:virtual,rangeExtractor:range=>{const indexes=defaultRangeExtractor(range);const focused=focusIndex===null?-1:Math.floor(focusIndex/columns);if(focused>=0&&focused<rows&&!indexes.includes(focused))indexes.push(focused);return indexes.sort((a,b)=>a-b);},getItemKey:index=>items[index*columns]?itemKey(items[index*columns]):index,initialRect:{width:960,height:640},scrollMargin:offset});
   useLayoutEffect(()=>{
     const element=local.current;if(!element)return;
     const measure=()=>{const next=element.clientWidth-24;if(next>0)setWidth(next);};measure();
     const observer=typeof ResizeObserver==="undefined"?null:new ResizeObserver(measure);observer?.observe(element);return()=>observer?.disconnect();
   },[]);
-  useLayoutEffect(()=>{rowVirtualizer.measure();},[rowHeight,rowVirtualizer]);
+  useLayoutEffect(()=>{rowVirtualizer.measure();},[rowHeight,offset,rowVirtualizer]);
+  const hasLeading=leading!=null&&leading!==false;
+  useLayoutEffect(()=>{
+    const element=body.current;if(!element||!hasLeading){setOffset(0);return;}
+    const measure=()=>setOffset(element.offsetTop);measure();
+    const lead=element.previousElementSibling;const observer=typeof ResizeObserver==="undefined"||!lead?null:new ResizeObserver(measure);if(lead)observer?.observe(lead);return()=>observer?.disconnect();
+  },[hasLeading,virtual]);
   function handleKey(event:KeyboardEvent<HTMLDivElement>) {
     if(event.altKey||event.metaKey||event.target instanceof HTMLInputElement)return;
     const cell=(event.target as HTMLElement).closest<HTMLElement>("[data-cover-index]");if(!cell)return;
@@ -35,10 +43,12 @@ export function VirtualCoverGrid<T>({textRows=false,items,itemKey,render,label,s
   return <div ref={ref} className={`virtual-cover-grid ${legacyMetrics ? "virtual-cover-grid--legacy" : ""} ${className} ${textRows ? "virtual-cover-grid--text" : ""}`} role="group" aria-label={label} data-cover-scroll-root="" onKeyDown={handleKey}
     onFocusCapture={event=>{const index=(event.target as HTMLElement).closest<HTMLElement>("[data-cover-index]")?.dataset.coverIndex;if(index!==undefined)setFocusIndex(Number(index));}} onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setFocusIndex(null);}}
     onContextMenu={event=>{if(onEmptyContextMenu&&!(event.target as HTMLElement).closest("button")){event.preventDefault();onEmptyContextMenu();}}}>
-    {virtual?<div className="virtual-cover-grid__spacer" style={{height:rowVirtualizer.getTotalSize()}}>
-      {rowVirtualizer.getVirtualItems().map(row=><div key={row.key} className="virtual-cover-grid__row" style={{...rowStyle,position:"absolute",top:0,left:0,right:0,transform:`translateY(${row.start}px)`}}>
+    {hasLeading&&<div className="virtual-cover-grid__leading">{leading}</div>}
+    {virtual?<div ref={body} className="virtual-cover-grid__spacer" style={{height:rowVirtualizer.getTotalSize()}}>
+      {rowVirtualizer.getVirtualItems().map(row=><div key={row.key} className="virtual-cover-grid__row" style={{...rowStyle,position:"absolute",top:0,left:0,right:0,transform:`translateY(${row.start-offset}px)`}}>
         {items.slice(row.index*columns,(row.index+1)*columns).map((item,offset)=>cell(item,row.index*columns+offset))}
       </div>)}
-    </div>:<div className="virtual-cover-grid__regular" style={rowStyle}>{items.map(cell)}</div>}
+    </div>:<div ref={body} className="virtual-cover-grid__regular" style={rowStyle}>{items.map(cell)}</div>}
+    {trailing}
   </div>;
 }

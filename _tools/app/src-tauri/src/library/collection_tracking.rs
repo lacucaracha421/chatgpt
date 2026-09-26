@@ -87,6 +87,12 @@ impl Library {
         Ok(result)
     }
 
+    /// Every manga Collection's 신간 알림 state, owned counts and release schedule.
+    pub(crate) fn list_release_board(&self) -> Result<Vec<crate::cloud::collections::ReleaseBoardEntry>, LibraryError> {
+        let connection = self.connection()?;
+        crate::cloud::collections::release_board(&connection)
+    }
+
     pub fn acknowledge_release_events(&self, collection_id: &str, event_ids: Vec<String>) -> Result<(), LibraryError> {
         if event_ids.len() > 2000 { return Err(LibraryError::InvalidCollectionMetadata); }
         let mut connection = self.connection()?;

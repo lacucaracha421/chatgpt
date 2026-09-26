@@ -3831,19 +3831,60 @@ textarea:focus-visible {
 
 /* Browsing hover uses outline/color only. Package depth stays static; showcase adds no extra shadow. */
 
-/* 신간 caption (mobile design C, 2026-09-26): nothing on the cover; the line under the title
-   replaces the release date. Filled square = unread new volume, hollow = upcoming. */
+/* Meta line (tablet port, 2026-09-26): year, ★ my rating, then the 신간 marker. Nothing on the
+   cover. Filled square = unread 신간 (accent), plain muted = released but unowned, hollow = pre-registered. */
+.collection-card__line {
+  display: flex;
+  flex-direction: row-reverse;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  align-content: flex-start;
+  column-gap: var(--space-2);
+  height: var(--line-meta);
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-meta);
+}
+
+.collection-card__tail {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-compact);
+  min-width: 0;
+}
+
+.collection-card__date {
+  flex: none;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.collection-card__score {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-text);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.collection-card__score svg { width: 12px; height: 12px; }
+.collection-card__sep { flex: none; }
+
 .collection-card__release {
   display: flex;
   align-items: center;
   gap: var(--space-compact);
+  min-width: 0;
   overflow: hidden;
-  min-height: var(--line-meta);
-  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--color-accent);
-  font-size: var(--text-sm);
   font-weight: 600;
-  line-height: var(--line-meta);
 }
 
 .collection-card__release::before {
@@ -3863,10 +3904,13 @@ textarea:focus-visible {
   font-weight: 500;
 }
 
+.collection-card__release--out,
 .collection-card__release--ahead {
   color: var(--color-muted);
   font-weight: 500;
 }
+
+.collection-card__release--out::before { content: none; }
 
 .collection-card__release--ahead::before {
   box-sizing: border-box;

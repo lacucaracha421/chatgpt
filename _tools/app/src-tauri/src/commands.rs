@@ -1613,6 +1613,13 @@ pub fn list_release_inbox(state: State<'_, AppState>) -> Result<Vec<crate::libra
 }
 
 #[tauri::command]
+pub async fn list_release_board(state: State<'_, AppState>) -> Result<Vec<crate::cloud::collections::ReleaseBoardEntry>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_release_board()).await
+        .map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn acknowledge_release_events(collection_id: String, event_ids: Vec<String>, state: State<'_, AppState>) -> Result<(), CommandError> {
     current_required(state)?.acknowledge_release_events(&collection_id, event_ids).map_err(CommandError::from)
 }

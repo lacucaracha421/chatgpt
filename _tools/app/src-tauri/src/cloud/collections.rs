@@ -1075,6 +1075,13 @@ mod tests {
         for body in [snapshot(1), legacy] {
             assert!(body["collections"].as_array().unwrap().iter().all(|c| c.get("releaseSchedule").is_none()));
         }
+        // The PC browser reads the same schedule for every manga, without a publication.
+        let board = serde_json::to_value(library.list_release_board().unwrap()).unwrap();
+        let entry = |id: &str| board.as_array().unwrap().iter().find(|e| e["collectionId"] == id).unwrap().clone();
+        assert_eq!(entry("c")["releaseSchedule"], find(&snapshot(2), "c")["releaseSchedule"]);
+        assert_eq!(entry("m"), json!({"collectionId": "m", "releaseWatch": {"enabled": false, "available": false}, "ownedVolumes": [],
+            "releaseSchedule": {"kakao": null, "mangadex": null}}));
+        assert!(board.as_array().unwrap().iter().all(|e| e["collectionId"] != "g"));
     }
 
     #[test]
@@ -1234,6 +1241,32 @@ fn committed_tracking(db: &rusqlite::Connection, id: &str) -> Result<(ReleaseWat
         .query_map([id], |row| Ok(OwnedVolumesPayload { edition_index: row.get(0)?, count: row.get(1)? }))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok((watch, owned))
+}
+
+/// One manga Collection's 신간 data for the PC Collections browser: the same tracking state and
+/// release schedule the mobile replica publishes, read straight from the library.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReleaseBoardEntry {
+    collection_id: String,
+    release_watch: ReleaseWatchPayload,
+    owned_volumes: Vec<OwnedVolumesPayload>,
+    release_schedule: ReleaseSchedulePayload,
+}
+
+/// Every manga Collection's [`ReleaseBoardEntry`].
+pub(crate) fn release_board(db: &rusqlite::Connection) -> Result<Vec<ReleaseBoardEntry>, LibraryError> {
+    let ids = db
+        .prepare("SELECT id FROM collections WHERE type='manga' ORDER BY id")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter()
+        .map(|id| {
+            let (release_watch, owned_volumes) = committed_tracking(db, &id)?;
+            let release_schedule = committed_release_schedule(db, &id)?;
+            Ok(ReleaseBoardEntry { collection_id: id, release_watch, owned_volumes, release_schedule })
+        })
+        .collect()
 }
 
 /// Server bounds of `releaseSchedule` (volume numbers 1-999, <= 999 entries per provider).

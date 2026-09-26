@@ -57,7 +57,7 @@ The visual system is dark-neutral, square/rectilinear, low-radius, line-icon hea
 ### Contextual index
 
 - **Assets**: broad scopes, Classification tree, Album tree, current folder counts and user appearance.
-- **Collections**: Library/Showcase and game/manga/movie type navigation, plus controls that genuinely belong to the collection browser. An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index. These controls move out of the detail body; long descriptions and artwork remain in the body. The detail owns state and callbacks through the shared chrome portal.
+- **Collections**: the index holds only Library/Showcase and the new-collection menu; game/manga/movie/AV type tabs sit centered in the header with a 신간 N button at its right end, and sort/내 별점 are chips over the grid (tablet parity, 2026-09-26). An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index. These controls move out of the detail body; long descriptions and artwork remain in the body. The detail owns state and callbacks through the shared chrome portal.
 - **Manga**: local/online/catalog context and controls owned by the corresponding browser.
 - Do not merge a user Classification named “만화”, Collection type `manga`, local Manga Root, and Online Catalog into one product concept.
 

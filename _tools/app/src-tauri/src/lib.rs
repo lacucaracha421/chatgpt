@@ -444,6 +444,7 @@ pub fn run() {
             commands::set_owned_volume_count,
             commands::set_volume_ownership,
             commands::list_release_inbox,
+            commands::list_release_board,
             commands::acknowledge_release_events,
             commands::get_remote_reading_progress,
             commands::save_remote_reading_progress,

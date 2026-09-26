@@ -1,12 +1,14 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionTrackingGateway, LibraryGateway, ReleaseInboxItem } from "../library/types";
+import { useReleaseData, resetReleaseDataForTests } from "./releaseData";
 import { CollectionOwnershipPanel } from "./CollectionOwnershipPanel";
-import { ReleaseInbox } from "./ReleaseInbox";
+import { CollectionReleases } from "./CollectionReleases";
+import type { CollectionSummary, ReleaseBoardEntry } from "../library/types";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); resetReleaseDataForTests(); });
 const item: ReleaseInboxItem = { collectionId: "m", collectionName: "작품", event: { id: "e", kind: "new_volume", volumeNumber: 7, previousValue: null, currentValue: "2026-10-01", detectedAt: "2026-09-06T00:00:00Z" } };
 function tracking(): CollectionTrackingGateway {
   let inbox = [item];
@@ -26,40 +28,46 @@ it("uses one owned count and permits lowering it to zero", async () => {
   await userEvent.click(screen.getByRole("button", { name: "저장" }));
   expect(api.setOwnedCount).toHaveBeenCalledWith("m", 1, 0);
 });
-it("does not acknowledge inbox on open, and checking a notification does not mark ownership", async () => {
+const works = [{ id: "m", name: "작품", type: "manga", unreadReleaseCount: 1 }] as CollectionSummary[];
+const watched: ReleaseBoardEntry = { collectionId: "m", releaseWatch: { enabled: true, available: true }, ownedVolumes: [{ editionIndex: 0, count: 6 }],
+  releaseSchedule: { kakao: { editionIndex: 0, checkedAt: null, volumes: [{ volumeNumber: 7, date: "2026-10-01", status: null }] }, mangadex: null } };
+/** The 신간 view fed by the shared release data, as the browser mounts it. */
+function Releases({ api, provider = "kakao", onOpen = vi.fn(), onChanged = vi.fn() }: { api: CollectionTrackingGateway; provider?: "kakao" | "mangadex"; onOpen?: (id: string) => void; onChanged?: () => void }) {
+  const data = useReleaseData(api, works, true);
+  return <CollectionReleases provider={provider} collections={works} data={data.data} loading={data.loading} error={data.error} coverUrl={() => null} onOpen={onOpen} onChanged={onChanged} onProviderChange={vi.fn()} />;
+}
+it("does not acknowledge on open, and confirming a notification does not mark ownership", async () => {
   const api = tracking();
-  render(wrap(api, <ReleaseInbox provider="kakao" onOpen={vi.fn()} onChanged={vi.fn()} />));
+  api.releaseBoard = vi.fn().mockResolvedValue([watched]);
+  render(wrap(api, <Releases api={api} />));
   await screen.findByText("작품");
   expect(api.acknowledge).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "모두 확인" }));
+  await userEvent.click(within(screen.getByRole("dialog", { name: "모두 확인할까요?" })).getByRole("button", { name: "모두 확인" }));
   await waitFor(() => expect(api.acknowledge).toHaveBeenCalledWith("m", ["e"]));
   expect(api.setOwnership).not.toHaveBeenCalled();
-  expect(await screen.findByText("확인하지 않은 신간 알림이 없습니다.")).toBeInTheDocument();
+  expect(api.setOwnedCount).not.toHaveBeenCalled();
+  // The release information stays; only the NEW marks go.
+  await waitFor(() => expect(screen.queryByText("NEW")).not.toBeInTheDocument());
+  expect(screen.getByText(/7권 ·/)).toBeInTheDocument();
 });
 it("keeps the notification when confirmation fails", async () => {
   const api = tracking();
+  api.releaseBoard = vi.fn().mockResolvedValue([watched]);
   vi.mocked(api.acknowledge).mockRejectedValue(new Error("저장 실패"));
-  render(wrap(api, <ReleaseInbox provider="kakao" onOpen={vi.fn()} onChanged={vi.fn()} />));
-  await userEvent.click(await screen.findByRole("button", { name: "모두 확인" }));
+  render(wrap(api, <Releases api={api} />));
+  await userEvent.click(await screen.findByRole("button", { name: "작품 확인" }));
   await screen.findByRole("alert");
   expect(api.setOwnedCount).not.toHaveBeenCalled();
-  expect(screen.getByText("작품")).toBeInTheDocument();
+  expect(screen.getByLabelText("새 알림 1개")).toBeInTheDocument();
 });
 
-it("separates providers, groups a work once and navigates without acknowledging", async () => {
+it("opens a work from its title without acknowledging", async () => {
   const api = tracking();
-  vi.mocked(api.listInbox).mockResolvedValue([
-    { ...item, provider: "kakao" },
-    { ...item, provider: "mangadex", collectionName: "MangaDex 작품" },
-    { ...item, provider: "mangadex", collectionName: "MangaDex 작품", event: { ...item.event, id: "e2" } },
-  ]);
+  api.releaseBoard = vi.fn().mockResolvedValue([watched]);
   const open = vi.fn();
-  render(wrap(api, <ReleaseInbox provider="mangadex" onOpen={open} onChanged={vi.fn()} />));
-  const title = await screen.findByRole("button", { name: "MangaDex 작품" });
-  expect(screen.queryByRole("img")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /^작품$/ })).not.toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "MangaDex 작품" })).toHaveLength(1);
-  await userEvent.click(title);
+  render(wrap(api, <Releases api={api} onOpen={open} />));
+  await userEvent.click(await screen.findByRole("button", { name: /^작품(?! 확인)/ }));
   expect(open).toHaveBeenCalledWith("m");
   expect(api.acknowledge).not.toHaveBeenCalled();
 });
@@ -85,7 +93,7 @@ it("explains the failed request, respects cooldown and opens the affected work",
     lastFailure:{collectionId:"failed-work",detectedAt:new Date().toISOString(),kind:"http",endpoint:"covers",httpStatus:503,retryAfterSeconds:60},
   });
   const open = vi.fn();
-  render(wrap(api, <ReleaseInbox provider="mangadex" onOpen={open} onChanged={vi.fn()}/>));
+  render(wrap(api, <Releases api={api} provider="mangadex" onOpen={open} />));
   expect(await screen.findByRole("button", {name:"재시도 대기"})).toBeDisabled();
   expect(screen.getByText(/표지 목록 조회 · HTTP 503 · 서버 오류/)).toBeInTheDocument();
   expect(screen.getByText(/자동 재시도합니다/)).toBeInTheDocument();

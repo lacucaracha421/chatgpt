@@ -195,6 +195,7 @@ export const libraryGateway: LibraryGateway = {
     listOwnership: (collectionId) => invoke("list_volume_ownership", { collectionId }),
     setOwnership: (collectionId, editionIndex, volumeNumbers, format, owned) => invoke("set_volume_ownership", { collectionId, editionIndex, volumeNumbers, format, owned }),
     listInbox: () => invoke("list_release_inbox"),
+    releaseBoard: () => invoke("list_release_board"),
     acknowledge: (collectionId, eventIds) => invoke("acknowledge_release_events", { collectionId, eventIds }),
   },
   openLibrary: (path) => invoke<LibrarySummary>("open_library", { path }),
