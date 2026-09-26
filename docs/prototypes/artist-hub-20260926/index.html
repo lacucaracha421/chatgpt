@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artist Hub Mockups</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css and mobile-client/mobile.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-control:#232425; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --color-filter-selected:#383838; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-dialog:0 10px 30px rgba(0,0,0,.45);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo);
+  --selection-mark-size:7px;
+  --radius-tile:2px; --radius-sm:4px;
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --gutter:16px;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+svg.i.solid { fill:currentColor; stroke:none; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.muted { color:var(--color-muted); }
+img { display:block; }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:2560px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.toolbar a { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; color:var(--color-text); text-decoration:none; font-size:13px; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; width:28px; height:28px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1250px; line-height:1.7; margin-top:8px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:14px; color:var(--color-muted); margin-bottom:10px; line-height:1.6; max-width:800px; }
+figcaption b { color:var(--color-text); }
+.scaled { zoom:.5; }
+.scaled figcaption { font-size:26px; max-width:none; }
+.pc figcaption { max-width:1680px; }
+table.data { border-collapse:collapse; margin-top:14px; font-size:13.5px; width:100%; max-width:1500px; }
+table.data th, table.data td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--color-border); line-height:1.55; }
+table.data th { color:var(--color-muted); font-weight:500; font-size:12.5px; }
+table.data td:first-child { color:var(--color-text); font-weight:500; white-space:nowrap; }
+table.data code, .notes code { font-size:12px; color:#cfd3d6; background:var(--color-surface); padding:0 4px; border-radius:2px; }
+.st { display:inline-block; min-width:44px; text-align:center; font-size:12px; font-weight:600; padding:1px 6px; border-radius:2px; }
+.st.ok { background:#2c3a33; color:#bfe0cc; }
+.st.part { background:#3a3629; color:#e6d9a8; }
+.st.new { background:#3a2c2c; color:#f0c0c0; }
+/* Screenshot mode: one topic at 1:1, no document chrome. */
+body.shot .doc>header, body.shot section.topic:not(.shown) { display:none; }
+body.shot .doc { padding:24px; max-width:none; }
+body.shot section.topic { margin:0; border:0; padding:0; }
+body.shot section.topic>.notes, body.shot section.topic>h2 { display:none; }
+body.shot .scaled { zoom:1; }
+body.shot .scaled figcaption { font-size:15px; }
+body.shot .row { flex-wrap:nowrap; margin-top:0; margin-bottom:24px; }
+
+/* ===== Shared bits ===== */
+.slabel { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--color-muted); letter-spacing:.3px; }
+.slabel::before { content:''; width:5px; height:5px; background:rgba(221,216,202,.6); flex:none; }
+.slabel::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06)); }
+.slabel .numeric { font-size:13px; }
+.chip { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:4px; white-space:nowrap; font-size:14px; color:var(--color-text); }
+.chip.on { background:var(--color-filter-selected); border-color:var(--color-filter-border); }
+.chip .numeric { color:var(--color-muted); font-size:13px; }
+.chip.sm { height:30px; padding:0 9px; font-size:13px; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:36px; padding:0 12px; font-size:14px; font-weight:500; white-space:nowrap; border-radius:4px; border:1px solid var(--color-border); background:var(--color-control); box-shadow:var(--inset-light); flex:none; color:var(--color-text); }
+.btn svg.i { width:18px; height:18px; }
+.btn.primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); box-shadow:none; }
+.btn.ghost { background:transparent; border-color:transparent; box-shadow:none; color:var(--color-muted); }
+.ib { width:44px; height:44px; display:inline-grid; place-items:center; border:0; background:transparent; color:var(--color-muted); border-radius:4px; position:relative; flex-shrink:0; }
+.ib.on { color:var(--color-accent); }
+.th { display:block; background:var(--color-surface); overflow:hidden; border-radius:var(--radius-tile); flex:none; }
+.th img { width:100%; height:100%; object-fit:cover; }
+.name { font-family:"Barlow","SUIT",sans-serif; font-weight:500; }
+.handle { color:var(--color-muted); font-size:12px; font-family:"Barlow",sans-serif; }
+.why { display:inline-flex; align-items:center; gap:7px; font-size:13px; color:var(--color-accent); font-weight:600; white-space:nowrap; }
+.why::before { content:''; width:6px; height:6px; background:var(--color-accent); flex:none; }
+.why.quiet { color:var(--color-muted); font-weight:500; }
+.why.quiet::before { background:transparent; border:1px solid var(--color-muted); }
+/* A masonry block (CSS columns stand in for the real waterfall renderer). */
+.mason { column-gap:8px; }
+.mason .th { width:100%; margin-bottom:8px; break-inside:avoid; }
+.dhead { font:500 15px var(--font-numeric); color:var(--color-text); display:flex; gap:8px; align-items:baseline; margin:14px 0 8px; }
+.dhead small { font:13px var(--font-ui); color:var(--color-muted); }
+.strip { display:flex; gap:6px; overflow:hidden; position:relative; }
+.strip.fade::after { content:''; position:absolute; top:0; right:0; bottom:0; width:60px; background:linear-gradient(90deg,transparent,var(--color-bg)); }
+
+/* ===== Tablet frame: Galaxy Tab S11 portrait 800 × 1280 ===== */
+.frame { position:relative; width:800px; height:1280px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); display:flex; flex-direction:column; }
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 16px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar.sub { padding-left:4px; }
+.bar .brand { display:flex; align-items:center; color:var(--color-accent); margin-right:12px; }
+.bar .brand svg.mark { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.bar h1 { font-size:20px; font-weight:600; line-height:1.2; white-space:nowrap; display:flex; align-items:baseline; gap:8px; }
+.bar h1 .numeric { font-size:16px; font-weight:500; color:var(--color-muted); }
+.bar .stack { display:flex; flex-direction:column; min-width:0; line-height:1.2; margin-left:2px; }
+.bar .crumb { font-size:13px; color:var(--color-muted); }
+.bar .space { flex:1; }
+.content { flex:1; min-height:0; overflow:hidden; position:relative; }
+.fade-end::after { content:''; position:absolute; left:0; right:0; bottom:0; height:40px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:3; }
+.pad { padding:0 var(--gutter); }
+.nav { flex-shrink:0; height:60px; margin-bottom:8px; padding:3px 0; display:flex; justify-content:center; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav button { flex:1 1 0; max-width:122px; min-height:53px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:0; background:transparent; color:var(--color-muted); position:relative; font:11px/1.2 var(--font-ui); }
+.nav button.active { color:var(--color-accent); }
+.nav button.active::after { content:''; position:absolute; top:-3px; left:calc(50% - 8px); width:16px; height:2px; background:currentColor; }
+.seg-tabs { display:flex; align-self:stretch; margin-left:14px; }
+.seg-tabs span { height:100%; padding:0 14px; display:flex; align-items:center; gap:6px; color:var(--color-muted); font-size:15px; position:relative; }
+.seg-tabs span.sel { color:var(--color-text); font-weight:600; }
+.seg-tabs span.sel::after { content:''; position:absolute; left:8px; right:8px; bottom:-1px; height:2px; background:var(--color-accent); }
+.seg-tabs .numeric { font-size:14px; color:var(--color-muted); font-weight:500; }
+
+/* ===== PC frame: 1680 × 1050, Chrome 03b shell ===== */
+.win { position:relative; width:1680px; height:1050px; display:flex; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); }
+.rail { width:64px; flex:none; display:flex; flex-direction:column; gap:6px; padding:6px 6px 10px; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.rail .mk { height:38px; display:grid; place-items:center; margin-bottom:4px; color:var(--color-accent); }
+.rail .mk svg { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.ri { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:56px; color:var(--color-muted); font-size:12px; line-height:14px; }
+.ri svg.i { width:20px; height:20px; }
+.ri.on { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.ri.on::after { content:''; position:absolute; right:4px; top:4px; width:4px; height:4px; background:currentColor; }
+.rail .tail { margin-top:auto; }
+.index { width:260px; flex:none; display:flex; flex-direction:column; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.index-head { height:44px; flex:none; display:flex; align-items:center; padding:0 4px 0 16px; border-bottom:1px solid var(--color-border); font-size:15px; font-weight:500; }
+.index-head .space { flex:1; }
+.index-head .ib { width:36px; height:36px; }
+.index-head .ib svg.i { width:18px; height:18px; }
+.index-body { flex:1; min-height:0; overflow:hidden; padding:14px 14px 12px 14px; display:flex; flex-direction:column; gap:4px; position:relative; }
+.index-body .slabel { margin:10px 0 4px; }
+.index-body .slabel:first-child { margin-top:0; }
+.index-foot { flex:none; border-top:1px solid var(--color-border); padding:10px 14px; display:flex; align-items:center; gap:8px; font-size:13px; color:var(--color-muted); }
+/* Selected rows: ivory slab + hard echo + small dark mark on the right; no outside cursor (2026-09-26 rule). */
+.irow { position:relative; display:flex; align-items:center; gap:10px; min-height:36px; padding:4px 10px; color:var(--color-text); font-size:14px; }
+.irow svg.i { width:18px; height:18px; color:var(--color-muted); }
+.irow .txt { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.irow .n { font:500 13px var(--font-numeric); color:var(--color-muted); }
+.irow .th { width:26px; height:26px; }
+.irow.sel { background:var(--color-accent); color:var(--color-on-accent); box-shadow:var(--selection-echo); }
+.irow.sel svg.i, .irow.sel .n { color:var(--color-on-accent); }
+.irow.sel::after { content:''; width:var(--selection-mark-size); height:var(--selection-mark-size); background:var(--color-on-accent); flex:none; }
+.main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
+.titlebar { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding-left:18px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.titlebar h2 { font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.titlebar h2::before { content:''; width:5px; height:5px; background:var(--color-accent); }
+.titlebar .st { font-size:12.5px; color:var(--color-muted); }
+.titlebar .space { flex:1; }
+.titlebar .ib { width:36px; height:36px; }
+.titlebar .ib svg.i { width:18px; height:18px; }
+.winctl { display:flex; height:100%; margin-left:8px; }
+.winctl span { width:44px; height:100%; display:grid; place-items:center; color:var(--color-muted); }
+.winctl svg.i { width:14px; height:14px; stroke-width:1.3; }
+.mbody { flex:1; min-height:0; overflow:hidden; position:relative; }
+
+/* ===== A — tablet index ===== */
+.asearch { display:flex; align-items:center; gap:8px; height:44px; margin:12px var(--gutter) 0; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; color:var(--color-muted); }
+.asearch svg.i { width:18px; height:18px; }
+.sortrow { display:flex; gap:8px; padding:12px var(--gutter) 0; }
+.pins { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-top:10px; }
+.pin .th { width:100%; aspect-ratio:1; }
+.pin .name { font-size:14px; margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pin .meta { font:500 13px var(--font-numeric); color:var(--color-muted); }
+.arow { display:flex; align-items:center; gap:14px; min-height:84px; border-bottom:1px solid var(--color-border); padding:10px 0; }
+.arow>.th { width:62px; height:62px; }
+.arow .who { flex:1; min-width:0; display:grid; line-height:1.3; }
+.arow .who .name { font-size:16px; }
+.arow .who .meta { font-size:12.5px; color:var(--color-muted); margin-top:3px; }
+.arow .who .meta .numeric { font-size:13.5px; color:var(--color-text); }
+.arow .strip .th { width:58px; height:58px; }
+.arow>svg.i { color:var(--color-faint); width:18px; }
+/* A — tablet artist page */
+.hero { display:flex; gap:4px; height:250px; }
+.hero .th { height:100%; border-radius:0; }
+.ident { display:flex; align-items:flex-start; gap:14px; padding:16px var(--gutter) 0; }
+.ident .who { flex:1; min-width:0; }
+.ident h2 { font:600 26px/1.2 "Barlow","SUIT",sans-serif; }
+.ident .src { font-size:13px; color:var(--color-muted); margin-top:4px; display:flex; gap:10px; }
+.ident .acts { display:flex; gap:8px; }
+.facts { display:flex; gap:0; margin:16px var(--gutter) 0; border-top:1px solid var(--color-border); border-bottom:1px solid var(--color-border); }
+.facts div { flex:1; padding:10px 12px; display:grid; gap:1px; }
+.facts div+div { border-left:1px solid var(--color-border); }
+.facts small { font-size:12px; color:var(--color-muted); }
+.facts .numeric { font-size:19px; line-height:1.2; }
+.facts .txtv { font-size:14px; line-height:1.5; padding-top:2px; }
+.chiprow { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.redisc { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:10px; }
+.rcard { border:1px solid var(--color-border); border-radius:2px; padding:10px; background:var(--color-sidebar); }
+.rcard .why { font-size:13px; }
+.rcard .sub { font-size:12px; color:var(--color-muted); margin:2px 0 8px; }
+.rcard .g { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; }
+.rcard .g .th { aspect-ratio:1; }
+.rcard .flag { font-size:11px; color:var(--color-faint); margin-top:6px; }
+
+/* ===== A — PC ===== */
+.apc-head { display:flex; gap:24px; padding:18px 22px 0; align-items:flex-start; }
+.apc-head .facts { margin:0; flex:none; width:640px; }
+.apc-head .with { flex:1; min-width:0; }
+.apc-red { display:grid; grid-template-columns:1fr 1fr; gap:18px; padding:16px 22px 0; }
+.apc-red .rcard .g { grid-template-columns:repeat(6,1fr); }
+.gal { padding:4px 22px 0; }
+.gal .mason { column-count:7; }
+
+/* ===== B — rediscovery feed ===== */
+.feedtop { display:flex; align-items:center; gap:8px; padding:14px var(--gutter) 6px; font-size:13px; color:var(--color-muted); }
+.feedtop .space { flex:1; }
+.fitem { padding:14px 0 14px; border-bottom:1px solid var(--color-border); }
+.fitem .fh { display:flex; align-items:center; gap:12px; }
+.fitem .fh>.th { width:44px; height:44px; }
+.fitem .fh .who { flex:1; min-width:0; display:grid; line-height:1.25; }
+.fitem .fh .who .name { font-size:16px; }
+.fitem .fline { font-size:13px; color:var(--color-muted); margin:8px 0 10px; }
+.fitem .fline .numeric { color:var(--color-text); font-size:14px; }
+.fitem .strip .th { height:190px; }
+.fitem .ff { display:flex; gap:8px; margin-top:10px; align-items:center; }
+.fitem .ff .space { flex:1; }
+/* B — PC */
+.bpc { padding:0 22px; }
+.brow { display:flex; gap:22px; padding:18px 0; border-bottom:1px solid var(--color-border); }
+.brow .left { width:250px; flex:none; display:flex; flex-direction:column; gap:6px; }
+.brow .left .top { display:flex; gap:10px; align-items:center; }
+.brow .left .top .th { width:44px; height:44px; }
+.brow .left .top .name { font-size:17px; line-height:1.2; }
+.brow .left .l2 { font-size:12.5px; color:var(--color-muted); line-height:1.6; }
+.brow .left .l2 .numeric { color:var(--color-text); font-size:13.5px; }
+.brow .left .acts { display:flex; gap:6px; margin-top:auto; }
+.brow .strip { flex:1; min-width:0; }
+.brow .strip .th { height:196px; }
+
+/* ===== C — artist wall + continuous viewing ===== */
+.wallwrap { display:flex; height:100%; }
+.wall { flex:1; min-width:0; padding:0 8px 0 var(--gutter); }
+.wgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px 12px; }
+.wtile .mos { display:grid; grid-template-columns:1.4fr 1fr; grid-template-rows:1fr 1fr; gap:2px; aspect-ratio:1; }
+.wtile .mos .th:first-child { grid-row:span 2; }
+.wtile .mos .th { border-radius:0; }
+.wtile .cap { display:flex; align-items:baseline; gap:8px; margin-top:6px; padding:0 2px; }
+.wtile .cap .name { font-size:15px; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wtile .cap .numeric { font-size:14px; color:var(--color-muted); }
+.wtile .cap2 { font-size:12px; color:var(--color-muted); padding:0 2px; }
+.wtile.sel .cap { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-bg),3px 3px 0 0 var(--color-selection-echo); padding:3px 8px; align-items:center; }
+.wtile.sel .cap .numeric { color:var(--color-on-accent); }
+.wtile.sel .cap::after { content:''; width:var(--selection-mark-size); height:var(--selection-mark-size); background:var(--color-on-accent); flex:none; }
+.jump { width:30px; flex:none; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:8px 0 16px; font-size:12px; color:var(--color-muted); }
+.jump b { color:var(--color-accent); font-weight:600; }
+.whead { font-size:18px; font-weight:600; margin:14px 0 8px; display:flex; align-items:center; gap:10px; }
+.whead::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06)); }
+/* C — tablet continuous viewer */
+.viewer { background:#0b0b0c; }
+.vtop { position:absolute; left:0; right:0; top:0; height:64px; display:flex; align-items:center; gap:4px; padding:0 6px 0 4px; background:linear-gradient(rgba(0,0,0,.7),transparent); z-index:4; }
+.vtop .stack { display:grid; line-height:1.2; margin-left:2px; }
+.vtop .name { font-size:18px; }
+.vtop .space { flex:1; }
+.vimg { position:absolute; left:0; right:0; top:0; bottom:0; display:grid; place-items:center; }
+.vimg .th { width:760px; height:1000px; border-radius:0; margin-top:-80px; }
+.vbot { position:absolute; left:0; right:0; bottom:0; padding:14px var(--gutter) 22px; background:linear-gradient(transparent,rgba(0,0,0,.85) 30%); z-index:4; }
+.film { display:flex; gap:4px; align-items:flex-end; }
+.film .th { width:62px; height:62px; opacity:.7; }
+.film .th.cur { opacity:1; outline:2px solid var(--color-accent); outline-offset:2px; }
+.vmeta { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--color-muted); margin-bottom:12px; }
+.vmeta .numeric { color:var(--color-text); font-size:15px; }
+.vmeta .space { flex:1; }
+.next { display:flex; align-items:center; gap:12px; margin-top:14px; padding:10px 12px; border:1px solid var(--color-border-strong); background:rgba(26,27,28,.92); border-radius:2px; }
+.next .g { display:flex; gap:3px; }
+.next .g .th { width:44px; height:44px; }
+.next .who { flex:1; display:grid; line-height:1.3; }
+.next .who small { font-size:12px; color:var(--color-muted); }
+.next .who .name { font-size:16px; }
+.prog { height:2px; background:var(--color-border); margin-top:10px; position:relative; }
+.prog b { position:absolute; left:0; top:0; bottom:0; width:38%; background:var(--color-accent); }
+/* C — PC wall + peek */
+.cpc { display:flex; height:100%; }
+.cpc .wall { padding:0 22px; }
+.cpc .wgrid { grid-template-columns:repeat(6,1fr); gap:18px 14px; }
+.peek { width:380px; flex:none; border-left:1px solid var(--color-border); background:var(--color-sidebar); padding:16px; display:flex; flex-direction:column; gap:12px; }
+.peek .hero { height:200px; }
+.peek h3 { font:600 22px/1.2 "Barlow","SUIT",sans-serif; }
+.peek .facts { margin:0; }
+.peek .facts .numeric { font-size:17px; }
+.peek .rcard .g { grid-template-columns:repeat(4,1fr); }
+.peek .acts { display:flex; gap:8px; margin-top:auto; }
+.kgrid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+.kgrid span { height:28px; display:grid; place-items:center; font-size:13px; color:var(--color-muted); border:1px solid var(--color-border); border-radius:2px; }
+.kgrid span.on { color:var(--color-text); border-color:var(--color-filter-border); background:var(--color-filter-selected); }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>작가 허브 목업 — ARTIST-001</h1>
+  <p class="lead">잘 쓰지 않는 <b>다시보기</b>를 없애고 <b>작가</b>로 바꾸는 안입니다. 다시보기의 쓸 만한 부분(오늘의 작가, N년 전 오늘, 오래 안 본 작품)은 작가 화면 안으로 옮깁니다. 방향 세 가지를 태블릿(800 × 1280)과 PC(1680 × 1050)로 그렸습니다. 색·글꼴·반경은 현재 앱 토큰을 그대로 썼고, PC에서 선택된 줄은 <b>아이보리 슬랩 + 오른쪽 작은 어두운 표식</b>이며 왼쪽의 아이보리 사각형은 없습니다. 작가 이름·핸들·이미지는 모두 가상입니다. 각 방향 아래 메모에서 <span class="st ok">있음</span> <span class="st part">일부</span> <span class="st new">새 작업</span>으로 데이터가 준비됐는지 표시했습니다.</p>
+  <div class="toolbar">바로가기
+    <a href="#data">데이터 현황</a><a href="#secA">A 작가 색인</a><a href="#secB">B 다시보기 피드</a><a href="#secC">C 작가 벽 + 연속 보기</a><a href="#replace">다시보기 대체</a>
+  </div>
+</header>
+
+<section class="topic" id="data">
+  <h2>데이터 현황 (2026-09-26 코드 기준)</h2>
+  <div class="notes">PC는 SQLite(<code>_tools/app/src-tauri</code>), 태블릿은 서버 복제본(<code>server/lakomics-api/app.py</code>의 <code>visible_assets</code>)을 읽습니다. 표는 소스 검색으로 확인한 결과이며 실제 라이브러리의 작가 정보 채움 비율은 측정하지 않았습니다.</div>
+  <table class="data">
+    <tr><th>항목</th><th>PC</th><th>태블릿(서버)</th><th>메모</th></tr>
+    <tr><td>작가 식별</td><td><span class="st ok">있음</span> <code>assets.creator_name/handle/url</code> (0009)</td><td><span class="st ok">있음</span> <code>creator_name</code>, <code>creator_handle</code>, <code>source_url</code> (creator_url 없음)</td><td>수집기(X)는 URL에서 핸들을 얻고, 표시 이름은 비는 경우가 있어 핸들로 대신 표시. 출처 없이 가져온 파일은 작가가 없어 허브에 나오지 않음.</td></tr>
+    <tr><td>작가 목록 · 개수 · 최근 저장 · 커버</td><td><span class="st ok">있음</span> <code>list_asset_creators</code> → <code>AssetCreatorSummary</code>(개수, 최근 저장, 최근 열람, 추천 점수, 커버 8장), 화면 <code>CreatorBrowse</code></td><td><span class="st new">새 작업</span> 목록 API 없음. <code>_revisit_creator_groups</code>는 3장 이상이고 30일 넘은 작가만 하루 단위로 돌려줌</td><td>태블릿에는 <code>/v1/library/creators</code>(검색·정렬·커서·커버) 같은 목록 API가 필요.</td></tr>
+    <tr><td>작가별 작품</td><td><span class="st ok">있음</span> <code>AssetQuery.creator_key</code>, 화면 종류 <code>creator</code></td><td><span class="st ok">있음</span> <code>/v1/library/revisit/creator/{key}/assets</code> (최신·오래된 순, 커서)</td><td>경로 이름만 작가 쪽으로 옮기면 됨.</td></tr>
+    <tr><td>처음 저장 / 최근 저장</td><td><span class="st part">일부</span> 최근만 반환, 처음은 MIN 하나 추가</td><td><span class="st part">일부</span> 작가 묶음 쿼리 안에서 둘 다 계산</td><td>기존 <code>collected_at</code>에서 계산. 파일 시각으로 추정하지 않음(STATS-001 규칙).</td></tr>
+    <tr><td>출처별 개수 (X · Pixiv · 가져오기)</td><td colspan="2"><span class="st new">새 작업</span> 집계 없음. <code>source_url</code> 호스트와 <code>import_source</code>에서 계산 가능</td><td>작은 GROUP BY.</td></tr>
+    <tr><td>자주 함께 나온 분류·캐릭터</td><td colspan="2"><span class="st new">새 작업</span> 연결 표(<code>asset_classifications</code>, 캐릭터)는 있으나 작가별 집계 없음</td><td>작가 화면의 칩과 C안의 "다음 작가" 고르기에 사용.</td></tr>
+    <tr><td>마지막으로 본 날 / 오래 안 본</td><td><span class="st ok">있음</span> <code>asset_activity.last_opened_at</code>, <code>open_count</code></td><td><span class="st new">없음</span> 열람 기록이 PC 전용이라 서버에 없음</td><td>태블릿은 "오래전에 저장하고 요즘 안 모은 작가"로 대신하거나, 열람 기록 동기화를 새로 만들어야 함.</td></tr>
+    <tr><td>N년 전 오늘</td><td><span class="st part">일부</span> <code>revisit.rs</code> 날짜 묶음(작가 구분 없음)</td><td><span class="st part">일부</span> <code>_revisit_date_bundle</code> ±7일(작가 구분 없음)</td><td>작가 조건만 더하면 됨.</td></tr>
+    <tr><td>오늘의 작가 (매일 바뀜)</td><td><span class="st ok">있음</span> <code>creator_spotlight</code> + 싫어요 반영(<code>set_revisit_preference</code>)</td><td><span class="st ok">있음</span> <code>_revisit_creator_groups</code> 하루 고정 순환</td><td>B안의 핵심. 현재 로직 그대로 재사용.</td></tr>
+    <tr><td>고정(즐겨찾는 작가)</td><td colspan="2"><span class="st new">새 작업</span> 저장할 곳이 없음</td><td>PC에 작은 표를 만들고 태블릿에 동기화하거나, 처음에는 기기별로만 저장.</td></tr>
+    <tr><td>작가 프로필 사진</td><td colspan="2"><span class="st new">없음</span> 받아오지 않음</td><td>대표 이미지(커버)로 대신함. 프로필을 가져오는 일은 하지 않음.</td></tr>
+    <tr><td>통계 (STATS-001)</td><td><span class="st ok">있음</span> <code>statistics.rs</code> 작가 상위 10</td><td>—</td><td>통계의 작가 줄을 누르면 작가 화면으로 이동.</td></tr>
+    <tr><td>비슷한 작가 (CLIP)</td><td colspan="2"><span class="st new">나중</span> 백로그에 따라 나중에, 선택 사항으로</td><td>C안의 "다음 작가"는 처음에는 같은 분류를 기준으로.</td></tr>
+  </table>
+  <div class="notes" style="margin-top:12px">지금의 다시보기: <b>PC</b>는 더보기 패널의 <code>다시보기</code>(<code>RevisitBrowser</code>: 오늘 묶음 = 작가·과거 수집함·비슷한 색감, 둘러보기 = 날짜 달력·작가 목록). <b>태블릿</b>은 하단 탭에 다시보기가 없습니다. 날짜·작가 목록 화면(<code>view.revisit</code>)과 <code>/v1/library/revisit</code> 요약은 코드에 남아 있지만, 검색해 보니 지금 앱 코드에서 이 화면들을 여는 곳은 테스트뿐이었습니다(실제 기기에서는 확인하지 않음).</div>
+</section>
+
+<section class="topic" id="secA">
+  <h2><span class="k">A</span>작가 색인 → 작가 페이지</h2>
+  <div class="notes">라이브러리 안의 평범한 목록입니다. 첫 화면은 검색, <b>고정한 작가</b> 줄, 정렬(최근 저장 · 많이 저장 · 오래 안 본 · 이름)이 있는 작가 목록입니다. 작가를 누르면 작가 페이지가 열리고, 요약 한 줄, 자주 함께 나온 분류, <b>다시보기 두 칸</b>(N년 전 오늘 · 오래 안 본 작품), 날짜별 전체 갤러리가 이어집니다. PC는 이미 있는 <code>CreatorBrowse</code>와 <code>creator</code> 화면을 거의 그대로 쓰므로 가장 적은 작업으로 만들 수 있습니다. 약점: 무엇을 볼지 앱이 먼저 권하지 않아서, 들어온 뒤에야 다시 볼 거리를 찾게 됩니다.</div>
+  <div class="row scaled" id="rowA"></div>
+  <div class="row scaled" id="rowA2"></div>
+</section>
+
+<section class="topic" id="secB">
+  <h2><span class="k">B</span>다시보기 피드, 작가별 묶음</h2>
+  <div class="notes">첫 화면이 <b>오늘</b>입니다. 매일 바뀌는 작가 몇 명이 <b>이유</b>와 함께 나옵니다(“3년 전 오늘 저장” “214일 동안 안 봄” “이번 주 새 작품 12장”). 각 묶음에는 이미지 줄, <b>모두 보기</b>, <b>오늘은 넘기기</b>(지금의 싫어요 반영을 재사용)가 있습니다. <b>전체</b> 탭은 A의 색인과 같습니다. 지금 다시보기의 오늘 묶음을 작가 기준으로 바꾼 셈이라 기존 추천 로직을 가장 많이 살립니다. 약점: 피드가 매일 비슷해 보이면 지금의 다시보기처럼 안 쓰게 될 수 있습니다.</div>
+  <div class="row scaled" id="rowB"></div>
+  <div class="row scaled" id="rowB2"></div>
+</section>
+
+<section class="topic" id="secC">
+  <h2><span class="k">C</span>작가 벽 + 작가 연속 보기</h2>
+  <div class="notes">작가 한 명이 <b>타일 하나</b>입니다(대표 이미지 3장 모자이크). 초성·알파벳 바로가기로 훑어보고, 타일을 누르면 <b>작가 연속 보기</b>가 전체 화면으로 시작합니다. 한 작가를 다 보면 같은 분류를 자주 함께 가진 <b>다음 작가</b>로 자연스럽게 넘어갑니다(백로그의 작가 라디오). PC는 벽 옆에 떠 있는 미리보기 패널(보기 설정처럼 갤러리를 밀지 않음)에서 요약과 다시보기를 보여 줍니다. 약점: 작가 수가 많으면 벽이 길고, 다음 작가 고르기에 새 집계가 필요합니다.</div>
+  <div class="row scaled" id="rowC"></div>
+  <div class="row scaled" id="rowC2"></div>
+</section>
+
+<section class="topic" id="replace">
+  <h2>다시보기를 무엇으로 바꾸나</h2>
+  <div class="notes"><ul>
+    <li><b>PC</b>: 더보기 패널의 <code>다시보기</code> 자리를 <code>작가</code>로 바꿉니다(메뉴 개수는 그대로). 통계의 작가 줄과 갤러리 캡션의 작가 이름도 작가 페이지로 연결합니다.</li>
+    <li><b>태블릿</b>: 하단 탭은 5개 그대로 둡니다. 라이브러리 첫 화면(앨범·캐릭터 옆)에 <code>작가</code> 입구를 두고, 홈에는 작은 <b>오늘의 작가</b> 모듈(백로그 Home artist Revisit)을 두어 같은 화면으로 연결합니다.</li>
+    <li><b>옮기는 것</b>: 작가 다시보기 → 오늘의 작가, 과거 수집함 → 작가 페이지의 N년 전 오늘, 다시 만난 자산 → 오래 안 본 작품(PC 열람 기록), 새로고침·싫어요 → 오늘은 넘기기.</li>
+    <li><b>빼는 것</b>: 비슷한 색감 묶음(나중에 비슷한 작가로 다시 검토), 날짜 달력(IDEA-002 타임라인 보류와 함께 둠).</li>
+    <li><b>추천</b>: A를 뼈대로 하고, 색인 맨 위에 B의 “오늘” 두세 줄을 얹는 조합. C의 연속 보기는 작가 페이지의 <b>연속 보기</b> 버튼으로 나중에 더합니다.</li>
+  </ul></div>
+</section>
+</div>
+
+<script>
+const IC={"MagnifyingGlass":["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],"Trash":["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],"ArrowPath":["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],"ArrowsUpDown":["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],"AdjustmentsHorizontal":["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],"ArrowLeft":["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],"EllipsisVertical":["M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z"],"ChevronDown":["m19.5 8.25-7.5 7.5-7.5-7.5"],"ChevronRight":["m8.25 4.5 7.5 7.5-7.5 7.5"],"Funnel":["M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"],"Bookmark":["M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"],"Home":["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],"Photo":["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"RectangleStack":["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],"BookOpen":["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],"PencilSquare":["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],"Tag":["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],"Folder":["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],"InformationCircle":["m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"],"UserPlus":["M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"XMark":["M6 18 18 6M6 6l12 12"],"Plus":["M12 4.5v15m7.5-7.5h-15"],"CloudArrowDown":["M12 9.75v6.75m0 0-3-3m3 3 3-3m-8.25 6a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],"Cog6Tooth":["M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z","M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],"UserMinus":["M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"Squares2X2":["M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"],"Square2Stack":["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],"FolderOpen":["M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"],"Sparkles":["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"]};
+Object.assign(IC,{
+  Bell:["M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"],
+  BellSlash:["M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"],
+  LockClosed:["M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"],
+  Link:["M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"],
+  Wallet:["M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3"],
+  Check:["m4.5 12.75 6 6 9-13.5"],
+  ChevronUp:["m4.5 15.75 7.5-7.5 7.5 7.5"],
+  EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+  Pin:["M15.75 3.75 20.25 8.25M18 6l-4.5 4.5 1.5 5.25-2.25 2.25-3.375-3.375L4.5 19.5M9.375 14.625 6 11.25 8.25 9l5.25 1.5"],
+  Star:["M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"],
+});
+
+Object.assign(IC,{
+  Minus:["M5 12h14"],
+  Play:["M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"],
+  ArrowTopRightOnSquare:["M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"],
+  Clock:["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  CalendarDays:["M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"],
+  UserGroup:["M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z"],
+  ArrowRight:["M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"],
+});
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${(IC[n]||[]).map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const ib=(n,cls='')=>`<span class="ib ${cls}">${I(n)}</span>`;
+
+/* Placeholder artwork: each artist has its own palette so their works read as one hand. */
+const P=[['#c9b6b0','#5a3c3c','#93706a','#efe0cc'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#b6b7c4','#363d57','#737c93','#d4cbc3'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#a9b9a0','#34443a','#6d8466','#dfe3c8'],['#9fb0c8','#2e3a52','#5f7596','#e0d6c4'],['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#d0b8c6','#4a3448','#8c6784','#f0dde2'],['#c2c9a4','#3f452c','#7d875a','#ebe8cf'],['#a8c4cc','#26404a','#5a8894','#e6ecdf']];
+const R=[0.72,1,1.35,0.66,0.8,1.5,0.75,1.1,0.62,1.25,0.9,0.7];
+const art=(pal,j,ratio=1)=>{const p=P[pal%P.length];const k=j%4;const W=300,H=Math.round(300/ratio);
+  const cy=H*(0.25+0.1*(j%3)),r=W*(0.12+0.03*k);
+  const fig=k%2?`<ellipse cx="${W*0.5}" cy="${H*0.62}" rx="${W*0.16}" ry="${H*0.3}" fill="${p[1]}" opacity=".9"/><circle cx="${W*0.5}" cy="${H*0.3}" r="${W*0.09}" fill="${p[1]}"/>`:'';
+  return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="${p[0]}"/><circle cx="${W*(0.25+0.17*k)}" cy="${cy}" r="${r}" fill="${p[3]}"/><path d="M0 ${H*0.62}L${W*0.3} ${H*(0.42+0.04*k)} ${W*0.58} ${H*0.7} ${W*0.8} ${H*0.5} ${W} ${H*0.6}V${H}H0Z" fill="${p[2]}"/>${fig}<path d="M0 ${H*0.8}L${W*0.4} ${H*0.66} ${W*0.7} ${H*0.82} ${W} ${H*0.74}V${H}H0Z" fill="${p[1]}" opacity=".85"/></svg>`);};
+const th=(pal,j,style='',ratio=1)=>`<span class="th" style="${style}"><img src="${art(pal,j,ratio)}" alt=""></span>`;
+/* Image of intrinsic ratio at a fixed height (strips/hero). */
+const thh=(pal,j,h)=>{const r=R[(pal*3+j)%R.length];return th(pal,j,`height:${h}px;width:${Math.round(h*r)}px`,r);};
+const thm=(pal,j)=>{const r=R[(pal*5+j)%R.length];return th(pal,j,`aspect-ratio:${r}`,r);};
+
+/* Fictional artists: [name, handle, count, lastSaved, firstSaved, pal, pinned, unseenDays] */
+const A=[
+  ['하나모리','hanamori_ink',412,'9.24','2021.03.14',0,1,12],
+  ['윤슬','yunseul_art',238,'9.25','2022.01.08',1,1,40],
+  ['Kuroneko','kuroneko_draws',187,'9.22','2020.11.30',2,0,96],
+  ['Aoi Mizuhara','mizu_aoi',154,'9.19','2023.02.02',3,1,21],
+  ['Rin Kagura','kagura_rin',129,'9.12','2021.07.19',4,0,150],
+  ['모래시계','sandglass_k',96,'9.08','2022.06.11',5,1,214],
+  ['Tetsu','tetsu_sketch',77,'8.30','2020.04.25',6,0,301],
+  ['레몬밤','lemonbalm_d',61,'8.21','2023.08.30',7,0,33],
+  ['도토리','dotori_pix',58,'8.14','2024.01.05',8,1,62],
+  ['Pale Moth','palemoth',45,'7.29','2021.10.10',9,0,388],
+  ['새벽녘','dawnline',33,'7.02','2022.12.24',2,0,120],
+  ['이끼','moss_studio',22,'6.18','2023.04.01',4,0,241],
+  ['오르골','orgel_box',18,'5.30','2024.03.17',7,0,95],
+  ['Sora Nakaji','nakaji_sky',9,'4.11','2025.02.09',5,0,170],
+];
+const tabletNav=active=>`<nav class="nav">${[['Home','Home'],['Photo','Library'],['RectangleStack','Collections'],['BookOpen','Catalog'],['PencilSquare','Notes']].map(([i,l])=>`<button class="${l===active?'active':''}">${I(i)}<span>${l}</span></button>`).join('')}</nav>`;
+const fig=(cap,body,cls='')=>`<figure class="${cls}"><figcaption>${cap}</figcaption>${body}</figure>`;
+const RAIL=[['RectangleStack','에셋'],['BookOpen','컬렉션'],['Photo','망가'],['PencilSquare','메모'],['ArrowsUpDown','전송']];
+const rail=`<nav class="rail"><div class="mk">${MARK}</div>${RAIL.map(([ic,l])=>`<div class="ri ${l==='에셋'?'on':''}">${I(ic)}<span>${l}</span></div>`).join('')}<div class="tail"><div class="ri">${I('EllipsisHorizontal')}<span>더보기</span></div></div></nav>`;
+const winctl=`<span class="winctl"><span>${I('Minus')}</span><span>${I('Square2Stack')}</span><span>${I('XMark')}</span></span>`;
+const titlebar=(t,st,extra='')=>`<header class="titlebar"><h2>${t}</h2><span class="st">${st}</span><span class="space"></span>${extra}${winctl}</header>`;
+const pcwin=(index,main)=>`<div class="win">${rail}<aside class="index">${index}</aside><div class="main">${main}</div></div>`;
+const irowA=(a,sel=false)=>`<div class="irow ${sel?'sel':''}">${th(a[5],0)}<span class="txt name">${a[0]}</span><span class="n">${a[2]}</span></div>`;
+
+/* ================= A ================= */
+const aIndexTablet=()=>{
+  const pins=A.filter(a=>a[6]).slice(0,5).map(a=>`<div class="pin">${th(a[5],1)}<div class="name">${a[0]}</div><div class="meta">${a[2]}</div></div>`).join('');
+  const rows=A.slice(0,10).map(a=>`<div class="arow">${th(a[5],0)}<div class="who"><span class="name">${a[0]}</span><span class="handle">@${a[1]}</span><span class="meta"><span class="numeric">${a[2]}</span>장 · 최근 저장 <span class="numeric">${a[3]}</span></span></div><div class="strip">${[2,3,4,5].map(j=>th(a[5],j)).join('')}</div>${I('ChevronRight')}</div>`).join('');
+  return `<div class="frame"><div class="bar sub">${ib('ArrowLeft')}<div class="stack"><span class="crumb">라이브러리</span><h1>작가 <span class="numeric">214</span></h1></div><span class="space"></span>${ib('MagnifyingGlass')}${ib('EllipsisVertical')}</div>
+  <div class="content fade-end">
+    <div class="sortrow"><span class="chip on">최근 저장</span><span class="chip">많이 저장</span><span class="chip">오래 안 본</span><span class="chip">이름</span></div>
+    <div class="pad" style="margin-top:16px"><div class="slabel">고정한 작가 <span class="numeric">5</span></div><div class="pins">${pins}</div>
+    <div class="slabel" style="margin-top:18px">최근 저장 순</div>${rows}</div>
+  </div>${tabletNav('Library')}</div>`;
+};
+const redisc=(a,cols=4,n=4)=>`<div class="rcard"><span class="why">3년 전 오늘</span><div class="sub">2023년 9월 26일에 <span class="numeric">7</span>장 저장</div><div class="g" style="grid-template-columns:repeat(${cols},1fr)">${Array.from({length:n},(_,j)=>th(a[5],j+6)).join('')}</div></div>
+  <div class="rcard"><span class="why quiet">오래 안 본 작품</span><div class="sub">1년 넘게 열지 않은 <span class="numeric">58</span>장</div><div class="g" style="grid-template-columns:repeat(${cols},1fr)">${Array.from({length:n},(_,j)=>th(a[5],j+12)).join('')}</div><div class="flag">태블릿은 열람 기록이 없어 “오래전 저장”으로 대체</div></div>`;
+const aArtistTablet=()=>{const a=A[0];
+  return `<div class="frame"><div class="bar sub">${ib('ArrowLeft')}<div class="stack"><span class="crumb">작가</span><h1 class="name">${a[0]}</h1></div><span class="space"></span>${ib('Pin','on')}${ib('ArrowTopRightOnSquare')}${ib('EllipsisVertical')}</div>
+  <div class="content fade-end">
+    <div class="hero">${[0,1,2].map(j=>`<span class="th" style="flex:${R[j*2]};height:250px;border-radius:0"><img src="${art(a[5],j+20,R[j*2])}" alt=""></span>`).join('')}</div>
+    <div class="ident"><div class="who"><h2>${a[0]}</h2><div class="src"><span class="handle" style="font-size:14px">@${a[1]}</span><span>x.com</span><span>pixiv</span></div></div><div class="acts"><span class="btn primary">${I('Play')}연속 보기</span></div></div>
+    <div class="facts"><div><small>저장</small><span class="numeric">412</span></div><div><small>처음 저장</small><span class="numeric">2021.03.14</span></div><div><small>최근 저장</small><span class="numeric">2026.09.24</span></div><div><small>출처</small><span class="txtv">X <span class="numeric">398</span> · Pixiv <span class="numeric">14</span></span></div></div>
+    <div class="pad" style="margin-top:14px"><div class="slabel">자주 함께</div><div class="chiprow"><span class="chip sm">블루 아카이브 <span class="numeric">118</span></span><span class="chip sm">오리지널 <span class="numeric">64</span></span><span class="chip sm">원신 <span class="numeric">40</span></span><span class="chip sm">호시노 <span class="numeric">31</span></span></div></div>
+    <div class="pad" style="margin-top:16px"><div class="slabel">다시보기</div><div class="redisc">${redisc(a)}</div></div>
+    <div class="pad" style="margin-top:6px"><div class="dhead">9월 24일 <small>3장</small></div><div class="mason" style="column-count:4">${[0,1,2,3,4,5,6,7,8,9,10,11].map(j=>thm(a[5],j+30)).join('')}</div></div>
+  </div>${tabletNav('Library')}</div>`;};
+const aPC=()=>{const a=A[0];
+  const idx=`<div class="index-head">작가<span class="space"></span>${ib('MagnifyingGlass')}</div><div class="index-body">
+    <div class="slabel">고정</div>${A.filter(x=>x[6]).map((x,i)=>irowA(x,i===0)).join('')}
+    <div class="slabel">최근 저장</div>${A.filter(x=>!x[6]).map(x=>irowA(x)).join('')}</div>
+    <div class="index-foot">${I('ArrowsUpDown')}정렬 · 최근 저장</div>`;
+  const main=titlebar(a[0],`@${a[1]} · 412장`,`${ib('Pin','on')}${ib('ArrowTopRightOnSquare')}<span class="btn primary" style="height:30px">${I('Play')}연속 보기</span>`)+`<div class="mbody fade-end">
+    <div class="apc-head"><div class="facts"><div><small>저장</small><span class="numeric">412</span></div><div><small>처음 저장</small><span class="numeric">2021.03.14</span></div><div><small>최근 저장</small><span class="numeric">2026.09.24</span></div><div><small>마지막으로 봄</small><span class="numeric">12일 전</span></div><div><small>출처</small><span class="txtv">X <span class="numeric">398</span> · Pixiv <span class="numeric">14</span></span></div></div>
+    <div class="with"><div class="slabel">자주 함께</div><div class="chiprow"><span class="chip sm">블루 아카이브 <span class="numeric">118</span></span><span class="chip sm">오리지널 <span class="numeric">64</span></span><span class="chip sm">원신 <span class="numeric">40</span></span><span class="chip sm">호시노 <span class="numeric">31</span></span><span class="chip sm">시로코 <span class="numeric">22</span></span></div></div></div>
+    <div class="apc-red">${redisc(a,6,6).replace('<div class="flag">태블릿은 열람 기록이 없어 “오래전 저장”으로 대체</div>','')}</div>
+    <div class="gal"><div class="dhead">9월 24일 <small>3장</small></div><div class="mason">${Array.from({length:22},(_,j)=>thm(a[5],j+40)).join('')}</div></div>
+  </div>`;
+  return pcwin(idx,main);};
+
+/* ================= B ================= */
+const REASONS=[[0,'3년 전 오늘 저장','2023년 9월 26일에 <span class="numeric">7</span>장 · 전체 <span class="numeric">412</span>장',''],[5,'214일 동안 안 봄','전체 <span class="numeric">96</span>장 · 마지막 저장 <span class="numeric">9.08</span>','quiet'],[1,'이번 주 새 작품 12장','전체 <span class="numeric">238</span>장 · 처음 저장 <span class="numeric">2022.01.08</span>',''],[9,'요즘 조용한 작가','<span class="numeric">7.29</span> 이후 저장 없음 · 전체 <span class="numeric">45</span>장','quiet'],[2,'처음 저장한 지 6년','<span class="numeric">2020.11.30</span> 첫 저장 · 전체 <span class="numeric">187</span>장','']];
+const bTablet=()=>{
+  const items=REASONS.slice(0,4).map(([ai,why,line,q])=>{const a=A[ai];return `<div class="fitem"><div class="fh">${th(a[5],0)}<div class="who"><span class="name">${a[0]}</span><span class="handle">@${a[1]}</span></div><span class="why ${q}">${why}</span></div><div class="fline">${line}</div><div class="strip fade">${[1,2,3,4,5,6].map(j=>thh(a[5],j+ai,190)).join('')}</div><div class="ff"><span class="btn">모두 보기</span><span class="btn">${I('Play')}연속 보기</span><span class="space"></span><span class="btn ghost">오늘은 넘기기</span></div></div>`;}).join('');
+  return `<div class="frame"><div class="bar sub">${ib('ArrowLeft')}<h1 style="margin-left:2px">작가</h1><div class="seg-tabs"><span class="sel">오늘</span><span>전체 <span class="numeric">214</span></span></div><span class="space"></span>${ib('MagnifyingGlass')}</div>
+  <div class="content fade-end"><div class="feedtop">9월 26일 토요일 · 오늘의 작가 <span class="numeric" style="color:var(--color-text)">6</span>명<span class="space"></span><span class="btn ghost" style="height:32px">${I('ArrowPath')}다시 고르기</span></div><div class="pad">${items}</div></div>${tabletNav('Library')}</div>`;};
+const bPC=()=>{
+  const idx=`<div class="index-head">작가<span class="space"></span>${ib('MagnifyingGlass')}</div><div class="index-body">
+    <div class="slabel">다시보기</div>
+    <div class="irow sel">${I('Sparkles')}<span class="txt">오늘의 작가</span><span class="n">6</span></div>
+    <div class="irow">${I('CalendarDays')}<span class="txt">N년 전 오늘</span><span class="n">4</span></div>
+    <div class="irow">${I('Clock')}<span class="txt">오래 안 본 작가</span><span class="n">31</span></div>
+    <div class="irow">${I('ArrowPath')}<span class="txt">요즘 자주 저장</span><span class="n">9</span></div>
+    <div class="irow">${I('Bookmark')}<span class="txt">요즘 조용한 작가</span><span class="n">17</span></div>
+    <div class="slabel">모든 작가</div>
+    <div class="irow">${I('UserGroup')}<span class="txt">전체 작가</span><span class="n">214</span></div>
+    <div class="irow">${I('Pin')}<span class="txt">고정</span><span class="n">5</span></div>
+    <div class="slabel">고정</div>${A.filter(x=>x[6]).map(x=>irowA(x)).join('')}</div>`;
+  const rows=REASONS.map(([ai,why,line,q])=>{const a=A[ai];return `<div class="brow"><div class="left"><div class="top">${th(a[5],0)}<div style="display:grid"><span class="name">${a[0]}</span><span class="handle">@${a[1]}</span></div></div><span class="why ${q}">${why}</span><span class="l2">${line}</span><div class="acts"><span class="btn" style="height:30px">모두 보기</span><span class="btn" style="height:30px">${I('Play')}</span><span class="btn ghost" style="height:30px">넘기기</span></div></div><div class="strip fade">${[1,2,3,4,5,6,7,8].map(j=>thh(a[5],j+ai*2,196)).join('')}</div></div>`;}).join('');
+  return pcwin(idx,titlebar('오늘의 작가','9월 26일 · 6명',`<span class="btn ghost" style="height:30px">${I('ArrowPath')}다시 고르기</span>`)+`<div class="mbody fade-end"><div class="bpc">${rows}</div></div>`);};
+
+/* ================= C ================= */
+const wtile=(a,sel=false)=>`<div class="wtile ${sel?'sel':''}"><div class="mos">${th(a[5],0)}${th(a[5],1)}${th(a[5],2)}</div><div class="cap"><span class="name">${a[0]}</span><span class="numeric">${a[2]}</span></div>${sel?'':`<div class="cap2">최근 저장 <span class="numeric">${a[3]}</span></div>`}</div>`;
+const byInitial=[['ㄷ',[8,10]],['ㄹ',[7]],['ㅁ',[5]],['ㅇ',[11,1,12]],['ㅎ',[0]],['A',[3]],['K',[2]],['P',[9]],['R',[4]]];
+const cTablet=()=>{
+  // One continuous grid in name order; the jump strip marks the current initial instead of sparse per-initial headings.
+  const groups=`<div class="whead">ㄷ – ㅎ</div><div class="wgrid">${[8,10,7,5,11,1,12,0].map(i=>wtile(A[i])).join('')}</div><div class="whead">A – Z</div><div class="wgrid">${[3,2,9,4,6,13].map(i=>wtile(A[i])).join('')}</div>`;
+  const jump=['ㄱ','ㄴ','<b>ㄷ</b>','ㄹ','ㅁ','ㅂ','ㅅ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ','A','E','K','P','R','T','#'].map(x=>`<span>${x}</span>`).join('');
+  return `<div class="frame"><div class="bar sub">${ib('ArrowLeft')}<div class="stack"><span class="crumb">라이브러리</span><h1>작가 <span class="numeric">214</span></h1></div><span class="space"></span>${ib('MagnifyingGlass')}${ib('ArrowsUpDown')}</div>
+  <div class="sortrow" style="padding-bottom:4px"><span class="chip on">전체</span><span class="chip">고정 <span class="numeric">5</span></span><span class="chip">요즘 저장</span><span class="chip">잊힌 작가</span></div>
+  <div class="content fade-end"><div class="wallwrap"><div class="wall">${groups}</div><div class="jump">${jump}</div></div></div>${tabletNav('Library')}</div>`;};
+const cViewer=()=>{const a=A[1],n=A[3];
+  return `<div class="frame viewer"><div class="vtop">${ib('ArrowLeft')}<div class="stack"><span class="name">${a[0]}</span><span class="handle">@${a[1]} · 작가 연속 보기</span></div><span class="space"></span>${ib('Pin','on')}${ib('InformationCircle')}${ib('EllipsisVertical')}</div>
+  <div class="vimg"><span class="th" style="width:760px;height:1000px;border-radius:0;margin-top:-90px"><img src="${art(a[5],27,0.76)}" alt=""></span></div>
+  <div class="vbot"><div class="vmeta"><span class="numeric">27 / 238</span><span>2024년 5월 3일 저장</span><span class="space"></span><span>이 작가 다 보면 다음 작가로</span></div>
+  <div class="film">${Array.from({length:11},(_,j)=>th(a[5],j+22).replace('class="th"',`class="th ${j===5?'cur':''}"`)).join('')}</div><div class="prog"><b></b></div>
+  <div class="next"><div class="g">${[0,1,2].map(j=>th(n[5],j)).join('')}</div><div class="who"><small>다음 작가 · 블루 아카이브 분류가 자주 겹침</small><span class="name">${n[0]}</span></div><span class="btn">건너뛰기 ${I('ArrowRight')}</span></div></div></div>`;};
+const cPC=()=>{
+  const idx=`<div class="index-head">작가<span class="space"></span>${ib('MagnifyingGlass')}</div><div class="index-body">
+    <div class="irow sel">${I('UserGroup')}<span class="txt">전체 작가</span><span class="n">214</span></div>
+    <div class="irow">${I('Pin')}<span class="txt">고정</span><span class="n">5</span></div>
+    <div class="irow">${I('ArrowPath')}<span class="txt">요즘 저장</span><span class="n">23</span></div>
+    <div class="irow">${I('Clock')}<span class="txt">잊힌 작가</span><span class="n">31</span></div>
+    <div class="slabel">바로가기</div>
+    <div class="kgrid">${['ㄱ','ㄴ','ㄷ','ㄹ','ㅁ','ㅂ','ㅅ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','#'].map(x=>`<span class="${x==='ㄷ'?'on':''}">${x}</span>`).join('')}</div></div>
+    <div class="index-foot">${I('ArrowsUpDown')}정렬 · 이름</div>`;
+  const wallIds=[8,10,7,5,11,1,12,0,3,2,9,4,6,13];
+  const groups=[['ㄷ',[8,10]],['ㄹ · ㅁ',[7,5]],['ㅇ',[11,1,12]],['ㅎ',[0]],['A–K',[3,2]],['P–T',[9,4,6,13]]];
+  const wall=`<div class="wgrid" style="margin-top:16px">${wallIds.map(i=>wtile(A[i],i===1)).join('')}</div>`;
+  const a=A[1];
+  const peek=`<aside class="peek"><div class="hero">${[0,1].map(j=>`<span class="th" style="flex:${R[j+1]};height:200px;border-radius:0"><img src="${art(a[5],j+50,R[j+1])}" alt=""></span>`).join('')}</div>
+    <div><h3>${a[0]}</h3><span class="handle" style="font-size:13px">@${a[1]} · x.com</span></div>
+    <div class="facts"><div><small>저장</small><span class="numeric">238</span></div><div><small>처음</small><span class="numeric">2022.01.08</span></div><div><small>최근</small><span class="numeric">9.25</span></div></div>
+    <div class="slabel">다시보기</div>
+    <div class="rcard"><span class="why">2년 전 오늘</span><div class="sub">2024년 9월 26일에 <span class="numeric">4</span>장 저장</div><div class="g">${[0,1,2,3].map(j=>th(a[5],j+60)).join('')}</div></div>
+    <div class="rcard"><span class="why quiet">오래 안 본 작품</span><div class="sub"><span class="numeric">40</span>일 넘게 열지 않은 <span class="numeric">31</span>장</div><div class="g">${[0,1,2,3].map(j=>th(a[5],j+70)).join('')}</div></div>
+    <div class="acts"><span class="btn primary">${I('Play')}연속 보기</span><span class="btn">작가 페이지</span><span class="btn ghost">${I('Pin')}</span></div></aside>`;
+  return pcwin(idx,titlebar('전체 작가','214명 · 이름순')+`<div class="mbody"><div class="cpc"><div class="wall fade-end" style="position:relative">${wall}</div>${peek}</div></div>`);};
+
+document.getElementById('rowA').innerHTML=fig('<b>A1 태블릿 · 작가 색인</b> — 라이브러리 첫 화면의 “작가”에서 들어옵니다. 고정한 작가, 정렬, 최근 이미지 4장이 붙은 목록.',aIndexTablet())+fig('<b>A2 태블릿 · 작가 페이지</b> — 대표 이미지, 요약 한 줄, 자주 함께 나온 분류, 다시보기 두 칸, 날짜별 전체 작품.',aArtistTablet());
+document.getElementById('rowA2').innerHTML=fig('<b>A3 PC</b> — 에셋 인덱스가 작가 목록으로 바뀌고 본문은 그 작가의 갤러리(지금의 creator 화면). 선택된 작가 줄은 아이보리 슬랩 + 오른쪽 어두운 표식.',aPC(),'pc');
+document.getElementById('rowB').innerHTML=fig('<b>B1 태블릿 · 오늘</b> — 매일 바뀌는 작가 묶음. 이유 한 줄과 이미지 줄, 모두 보기 · 연속 보기 · 오늘은 넘기기.',bTablet());
+document.getElementById('rowB2').innerHTML=fig('<b>B2 PC</b> — 인덱스에 다시보기 이유별 목록(오늘의 작가가 선택된 슬랩), 본문은 작가 한 줄에 이미지 한 줄.',bPC(),'pc');
+document.getElementById('rowC').innerHTML=fig('<b>C1 태블릿 · 작가 벽</b> — 작가마다 이미지 3장 모자이크 타일, 오른쪽 초성·알파벳 바로가기.',cTablet())+fig('<b>C2 태블릿 · 작가 연속 보기</b> — 한 작가를 넘겨 보다가 끝나면 분류가 자주 겹치는 다음 작가로 이어집니다.',cViewer());
+document.getElementById('rowC2').innerHTML=fig('<b>C3 PC</b> — 벽 6열 + 오른쪽 미리보기 패널. 열린 타일은 캡션이 슬랩으로 바뀌고 오른쪽에 어두운 표식.',cPC(),'pc');
+
+const params=new URLSearchParams(location.search);
+if(params.get('shot')){document.body.classList.add('shot');document.getElementById(params.get('shot')).classList.add('shown');}
+</script>
+</body>
+</html>
