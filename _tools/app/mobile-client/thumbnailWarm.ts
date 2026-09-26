@@ -4,8 +4,8 @@ import {api,native} from './transport';
 import {normalizePage, pagePath} from './model';
 import {EMPTY_FILTERS} from './assetFilters';
 import {ALL_ASSETS} from './libraryModel';
-import {warmThumbnail} from './media';
-import type {Page} from './types';
+import {invalidateTicket, warmThumbnail} from './media';
+import type {Asset, Page} from './types';
 
 /**
  * Library-wide thumbnail warm-up.
@@ -14,16 +14,20 @@ import type {Page} from './types';
  * only instant once thumbnails are in the native disk cache. While the app is visible and
  * not on a metered connection, this walks every Library asset a page at a time and asks
  * native for each thumbnail through the lowest-priority queue (visible tiles always go
- * first). Native answers cached thumbnails immediately. Progress is kept per endpoint so a
- * restart resumes, and a finished pass repeats after a day to pick up new assets.
+ * first). A batch probe skips cached thumbnails. Progress is kept per endpoint and cache
+ * generation so a restart resumes. Daily passes stop at the last completed newest
+ * sort key; a monthly sweep repairs evictions and late/backdated publications.
  */
 export type WarmState = {status:'off'|'waiting'|'running'|'metered'|'done'|'error'; warmed:number; completedAt:number|null};
+type Mark = {id:string; at:string|null};
 /** `failures` counts consecutive failed reads of the page at `cursor`. */
-type Saved = {scope:string; cursor:string|null; warmed:number; completedAt:number|null; failures?:number};
+type Saved = {scope:string; cursor:string|null; warmed:number; completedAt:number|null; failures?:number;
+  generation?:string; highWater?:Mark; newest?:Mark; fullCompletedAt?:number};
+type Cached = {generation:string; cachedIds:string[]};
 const PROGRESS_KEY = 'lakomics.mobile.thumbnailWarm', OFF_KEY = 'lakomics.mobile.thumbnailWarmOff';
 const WARM_PAGE = 100, REPEAT_AFTER = 24 * 60 * 60 * 1000, RETRY_AFTER = 60_000, MAX_PAGE_FAILURES = 3;
 // Let the first screen load before background work starts after launch or return.
-const START_DELAY = 5_000;
+const START_DELAY = 5_000, FULL_REPEAT_AFTER = 30 * REPEAT_AFTER;
 const EVENT = 'lakomics-thumbnail-warm';
 
 function read<T>(key:string):T|null { try {const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : null;} catch {return null;} }
@@ -53,35 +57,91 @@ export type BatteryState={charging:boolean;level:number;powerSave:boolean};
 export function batteryAllowsWarm(battery:BatteryState|undefined) {
   return !!battery&&(battery.charging===true||(battery.level>=50&&battery.powerSave===false));
 }
+function mark(asset:Asset):Mark { return {id:asset.id, at:asset.collected_at ?? asset.created_at ?? null}; }
+function atOrBelow(asset:Asset, boundary:Mark) {
+  if (asset.id === boundary.id) return true;
+  const at = mark(asset).at;
+  // Match the server's COALESCE(collected_at, created_at) DESC, id DESC order.
+  // With old/missing date fields, only an exact id match can safely stop the walk.
+  return at !== null && boundary.at !== null && (at < boundary.at || (at === boundary.at && asset.id < boundary.id));
+}
+async function probe(items:Asset[], signal:AbortSignal) {
+  const result = await native<Cached>('thumbnailsCached', {assetIds:items.map(asset => asset.id)}, signal);
+  if (!result.generation || !Array.isArray(result.cachedIds)) throw new Error('Invalid thumbnail cache probe');
+  return result;
+}
 async function pass(scope:string, signal:AbortSignal) {
   let progress = saved(scope);
-  if (progress.completedAt !== null) {
-    if (Date.now() - progress.completedAt < REPEAT_AFTER) { publish({status:'done', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
-    progress = {scope, cursor:null, warmed:0, completedAt:null};
-  }
   for (;;) {
     const status=await native<{battery?:BatteryState}>('status',{},signal);
     if(signal.aborted)return;
     if(!batteryAllowsWarm(status.battery)) {publish({status:'waiting',warmed:progress.warmed,completedAt:progress.completedAt});return false;}
+    if (progress.completedAt !== null) {
+      if (Date.now() - progress.completedAt < REPEAT_AFTER) {
+        // Validate even a recent completion: native clearing/reconfiguration may have
+        // happened without this WebView receiving the settings callback.
+        const cache = await probe([], signal);
+        if (signal.aborted) return;
+        if (cache.generation === progress.generation) {
+          publish({status:'done', warmed:progress.warmed, completedAt:progress.completedAt}); return;
+        }
+        progress = {scope, cursor:null, warmed:0, completedAt:null, generation:cache.generation};
+      } else {
+        const full = !progress.fullCompletedAt || Date.now() - progress.fullCompletedAt >= FULL_REPEAT_AFTER;
+        progress = {...progress, cursor:null, warmed:0, completedAt:null, newest:undefined,
+          highWater:full ? undefined : progress.highWater};
+      }
+      write(PROGRESS_KEY, progress);
+    }
     publish({status:'running', warmed:progress.warmed, completedAt:null});
     let page:Page;
     try { page = normalizePage(await api<Page>(pagePath(ALL_ASSETS, progress.cursor, EMPTY_FILTERS, WARM_PAGE), signal)); }
     catch (error) {
       if (signal.aborted) throw error;
-      // A transient failure keeps the walk where it is, so the retry resumes at this page.
-      // A cursor the server rejects (from an older list generation) is not resumable, and
-      // repeated failures at one page may be that too: then the pass starts again.
       const failures = (progress.failures ?? 0) + 1;
       progress = cursorRejected(error) || failures >= MAX_PAGE_FAILURES
-        ? {scope, cursor:null, warmed:0, completedAt:null}
+        ? {...progress, cursor:null, warmed:0, completedAt:null, newest:undefined, failures:0}
         : {...progress, failures};
       write(PROGRESS_KEY, progress);
       throw error;
     }
-    await Promise.all(page.items.map(asset => warmThumbnail(asset, signal)));
     if (signal.aborted) return;
-    progress = {scope, cursor:page.next_cursor, warmed:progress.warmed + page.items.length, completedAt:null};
-    if (!page.has_more || !page.next_cursor) progress = {...progress, cursor:null, completedAt:Date.now()};
+    const eligible = page.items.filter(asset => !asset.pending && asset.thumbnail_available !== false);
+    const cache = await probe(eligible, signal);
+    if (signal.aborted) return;
+    if (cache.generation !== progress.generation) {
+      const hadCursor = progress.cursor !== null;
+      progress = {scope, cursor:null, warmed:0, completedAt:null, generation:cache.generation};
+      write(PROGRESS_KEY, progress);
+      // An old cursor can skip now-empty pages. Reuse a first page, otherwise restart.
+      if (hadCursor) continue;
+    }
+    const boundary = progress.highWater ? page.items.findIndex(asset => atOrBelow(asset, progress.highWater!)) : -1;
+    const items = boundary < 0 ? page.items : page.items.slice(0, boundary);
+    const hits = new Set(cache.cachedIds);
+    const misses = items.filter(asset => !asset.pending && asset.thumbnail_available !== false && !hits.has(asset.id));
+    // Native is authoritative; a JS ticket can outlive an eviction or cache clear.
+    await Promise.all(misses.map(asset => { invalidateTicket(asset, 'thumbnail'); return warmThumbnail(asset, signal); }));
+    if (signal.aborted) return;
+    if (misses.length) {
+      // warmThumbnail intentionally swallows errors for speculative callers. Do not
+      // promote the high-water mark until all eligible misses actually reached disk.
+      const verified = await probe(misses, signal);
+      if (signal.aborted) return;
+      if (verified.generation !== cache.generation) {
+        progress = {scope, cursor:null, warmed:0, completedAt:null, generation:verified.generation};
+        write(PROGRESS_KEY, progress); continue;
+      }
+      const ready = new Set(verified.cachedIds);
+      if (misses.some(asset => !ready.has(asset.id))) throw new Error('Thumbnail page incomplete');
+    }
+    const newest = progress.newest ?? (items[0] ? mark(items[0]) : undefined);
+    progress = {...progress, cursor:page.next_cursor, warmed:progress.warmed + items.length,
+      completedAt:null, newest, failures:0};
+    if (boundary >= 0 || !page.has_more || !page.next_cursor) {
+      progress = {...progress, cursor:null, completedAt:Date.now(), highWater:newest ?? progress.highWater,
+        newest:undefined, fullCompletedAt:progress.highWater ? progress.fullCompletedAt : Date.now()};
+    }
     write(PROGRESS_KEY, progress);
     if (progress.completedAt !== null) { publish({status:'done', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
     publish({status:'running', warmed:progress.warmed, completedAt:null});

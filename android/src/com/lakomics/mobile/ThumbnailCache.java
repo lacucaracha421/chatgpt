@@ -36,6 +36,31 @@ final class ThumbnailCache {
   StringBuilder result=new StringBuilder();for(byte b:digest)result.append(String.format(Locale.ROOT,"%02x",b&255));return result.toString();
  }
  synchronized long generation(){return generation;}
+ // A marker in the disposable directory survives process restarts, but not cache
+ // clearing (including Android removing the directory). Never persist credentials.
+ synchronized String warmGeneration()throws IOException{
+  File marker=new File(directory,".warm-generation");
+  if(marker.isFile())try(DataInputStream input=new DataInputStream(new FileInputStream(marker))){
+   String value=input.readUTF();
+   if(value.matches("[a-f0-9-]{36}"))return value;
+  }catch(EOFException ignored){}
+  if(!directory.isDirectory() && !directory.mkdirs())throw new IOException("Cache unavailable");
+  String value=UUID.randomUUID().toString();
+  try(DataOutputStream output=new DataOutputStream(new FileOutputStream(marker))){output.writeUTF(value);}
+  bytes=-1; // Android may have removed bytes without going through clear().
+  return value;
+ }
+ /** One bounded, read-only probe; it does not download or refresh LRU timestamps. */
+ synchronized boolean[] cached(List<String> keys,long expected)throws IOException{
+  check(expected);
+  if(keys.size()>100)throw new IllegalArgumentException("Too many thumbnails");
+  boolean[] result=new boolean[keys.size()];long now=System.currentTimeMillis();
+  for(int i=0;i<keys.size();i++){
+   File file=entry(keys.get(i));
+   result[i]=file.isFile() && now-file.lastModified()<=MAX_AGE;
+  }
+  return result;
+ }
  private File[] files(){File[] files=directory.listFiles();return files==null?new File[0]:files;}
  private File entry(String key)throws IOException{if(!key.matches("[a-f0-9]{64}"))throw new IOException("Invalid cache key");return new File(directory,key);}
  private void check(long expected)throws IOException{if(expected!=generation)throw new IOException("Cache invalidated");}
@@ -53,6 +78,9 @@ final class ThumbnailCache {
  }
  synchronized void clear()throws IOException{
   generation++;
+  // Invalidate progress before deleting bytes, even if a later deletion fails.
+  File marker=new File(directory,".warm-generation");
+  if(marker.exists() && !marker.delete())throw new IOException("Cache clear incomplete");
   boolean failed=false;
   for(File file:files())if(file.isFile() && !file.delete())failed=true;
   bytes=-1;index(true);

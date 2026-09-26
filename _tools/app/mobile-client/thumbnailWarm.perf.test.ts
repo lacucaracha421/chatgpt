@@ -20,10 +20,15 @@ const pageOf=(cursor:string|null)=>{
   return {items,has_more:next!==null,next_cursor:next};
 };
 let stop:(()=>void)|null=null;
+const cached=new Set<string>();
 beforeEach(()=>{
   vi.useFakeTimers({shouldAdvanceTime:true});
-  localStorage.clear();resetWarmProgress();setWarmEnabled(true);
-  mocks.native.mockImplementation(async(op:string,payload:{assetId:string})=>op==='status'?{battery:{charging:true,level:80,powerSave:false}}:{url:`https://app.lakomics.local/media-cache/0/${payload.assetId}`,expires_in:240});
+  localStorage.clear();resetWarmProgress();setWarmEnabled(true);cached.clear();
+  mocks.native.mockImplementation(async(op:string,payload:{assetId:string;assetIds:string[]})=>{
+    if(op==='status')return {battery:{charging:true,level:80,powerSave:false}};
+    if(op==='thumbnailsCached')return {generation:'cache-1',cachedIds:payload.assetIds.filter(id=>cached.has(id))};
+    cached.add(payload.assetId);return {url:`https://app.lakomics.local/media-cache/0/${payload.assetId}`,expires_in:240};
+  });
 });
 afterEach(()=>{vi.useRealTimers();stop?.();stop=null;clearMediaCache();mocks.api.mockReset();mocks.native.mockReset();});
 
@@ -61,4 +66,37 @@ it('a transient page failure mid-pass resumes at the failed page', async()=>{
   expect(mocks.api).toHaveBeenCalledTimes(ASSETS/PAGE+1);
   expect(tally().get('thumbnail')).toBe(ASSETS);
   expect(warmState().warmed).toBe(ASSETS);
+});
+
+const nextDay=async()=>{
+  stop?.();stop=null;clearMediaCache();mocks.api.mockClear();mocks.native.mockClear();
+  vi.setSystemTime(Date.now()+24*60*60*1000+1);
+  stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(5_500);
+  await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+};
+
+it('gates a cached 9,300-asset sweep, unchanged daily pass and 50 additions',async()=>{
+  for(let i=0;i<ASSETS;i++)cached.add(`a${i}`);
+  let added=0;
+  mocks.api.mockImplementation(async(path:string)=>{
+    const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor');
+    if(!cursor&&added)return {items:[...Array.from({length:added},(_,i)=>({id:`new${i}`,kind:'image'})),...pageOf(null).items.slice(0,PAGE-added)],has_more:true,next_cursor:'50'};
+    return pageOf(cursor);
+  });
+  stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(5_500);
+  expect(warmState().status).toBe('done');
+  expect(mocks.api).toHaveBeenCalledTimes(93);
+  expect(tally().get('thumbnailsCached')).toBe(93);
+  expect(mocks.native.mock.calls.length).toBeLessThanOrEqual(ASSETS/PAGE*2);
+  expect(tally().get('thumbnail')??0).toBe(0);
+  await nextDay();
+  expect(mocks.api).toHaveBeenCalledTimes(1);
+  expect(mocks.native).toHaveBeenCalledTimes(2);
+  expect(tally().get('thumbnail')??0).toBe(0);
+  expect(warmState().warmed).toBe(0);
+  added=50;await nextDay();
+  expect(mocks.api).toHaveBeenCalledTimes(1);
+  expect(tally().get('thumbnail')).toBe(50);
+  expect(mocks.native.mock.calls.filter(([op])=>op==='thumbnail').map(([,p])=>p.assetId)).toEqual(Array.from({length:50},(_,i)=>`new${i}`));
+  expect(warmState().warmed).toBe(50);
 });

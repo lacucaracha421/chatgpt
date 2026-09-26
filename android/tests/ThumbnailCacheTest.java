@@ -33,6 +33,26 @@ public final class ThumbnailCacheTest {
    check(cache.status()[0]==4);
    cache.obtain(b,cache.generation(),6,file->Files.write(file.toPath(),new byte[6]));check(cache.status()[0]==10);
    cache.clear();cache.obtain(c,cache.generation(),10,file->Files.write(file.toPath(),new byte[10]));check(cache.file(c,cache.generation()).length()==10);
+   // Batched probes neither download nor refresh age/LRU, and respect invalidation.
+   long used=System.currentTimeMillis()-10000;new File(dir,c).setLastModified(used);
+   boolean[] hits=cache.cached(java.util.Arrays.asList(a,c),cache.generation());
+   check(!hits[0] && hits[1]);check(new File(dir,c).lastModified()==used);
+   check(cache.cached(java.util.Collections.emptyList(),cache.generation()).length==0);
+   try{cache.cached(java.util.Collections.nCopies(101,c),cache.generation());throw new AssertionError("unbounded probe");}catch(IllegalArgumentException expected){check(true);}
+   try{cache.cached(java.util.Arrays.asList("../outside"),cache.generation());throw new AssertionError("probe path escape");}catch(IOException expected){check(true);}
+   new File(dir,c).setLastModified(System.currentTimeMillis()-(ThumbnailCache.MAX_AGE_SECONDS+1)*1000);
+   check(!cache.cached(java.util.Arrays.asList(c),cache.generation())[0]);
+   String epoch=cache.warmGeneration();
+   check(new ThumbnailCache(dir,10).warmGeneration().equals(epoch));
+   long beforeClear=cache.generation();cache.clear();String cleared=cache.warmGeneration();
+   check(!epoch.equals(cleared));check(new ThumbnailCache(dir,10).warmGeneration().equals(cleared));
+   try{cache.cached(java.util.Arrays.asList(c),beforeClear);throw new AssertionError("stale probe");}catch(IOException expected){check(true);}
+   // Android can remove the disposable directory independently of the WebView state.
+   put(cache,a,5);
+   for(File file:dir.listFiles())Files.delete(file.toPath());Files.delete(dir.toPath());
+   String removed=cache.warmGeneration();check(!removed.equals(cleared));
+   put(cache,b,10);check(cache.status()[0]==10);
+   check(new ThumbnailCache(dir,10).warmGeneration().equals(removed));
    System.out.println("ThumbnailCache: "+checks+" checks passed");
   }finally{for(File file:dir.listFiles())Files.deleteIfExists(file.toPath());Files.deleteIfExists(dir.toPath());}
  }

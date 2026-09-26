@@ -49,6 +49,27 @@ final class MediaRepository {
   }
  }
  JSONObject status()throws Exception{long[] s=cache.status();return new JSONObject().put("bytes",s[0]).put("count",s[1]).put("limit",s[2]);}
+ JSONObject thumbnailsCached(JSONArray ids,CancellationSignal signal)throws Exception{
+  if(ids.length()>100)throw new IllegalArgumentException("Too many thumbnails");
+  synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
+   // Read/decrypt the connection once for the entire page, not once per id.
+   JSONObject connection=settings.read();if(!connection.has("token"))throw new IllegalStateException();
+   String account=connection.getString("endpoint")+"\n"+connection.getString("token");
+   List<String> keys=new ArrayList<>();
+   for(int i=0;i<ids.length();i++){
+    signal.throwIfCanceled();String id=ids.getString(i);
+    if(!id.matches("[A-Za-z0-9_-]{1,128}"))throw new IllegalArgumentException("Invalid asset id");
+    keys.add(ThumbnailCache.key(account+"\n"+id));
+   }
+   synchronized(cache){
+    String generation=ThumbnailCache.key(account)+"/"+cache.warmGeneration();
+    boolean[] hits=cache.cached(keys,cache.generation());JSONArray cached=new JSONArray();
+    for(int i=0;i<hits.length;i++)if(hits[i])cached.put(ids.getString(i));
+    signal.throwIfCanceled();
+    return new JSONObject().put("generation",generation).put("cachedIds",cached);
+   }
+  }
+ }
  void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache.clear();}finally{tickets.clear();}}}
  InputStream stream(String key,long generation)throws IOException{return cache.open(key,generation);}
  private final ScheduledExecutorService ticketWorker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
