@@ -44,3 +44,10 @@ Effort ≈ 6–8 days (FANZA client 1–1.5, LibreDMM 0.5, candidates/refresh 1.
 3. Allow the keyless LibreDMM fallback?
 4. Confirm no scraper sources.
 5. Allow Wikidata lookups (sends only the FANZA actress id)?
+
+## Probe from the Tokyo VPS (2026-09-26, user asked about routing through the Japan server)
+Browser User-Agent, 3 s apart, a handful of requests:
+- **JavBus:** reachable; redirects to an age-verification page unless an age cookie is sent (`existmag=all` etc.); with it, `https://www.javbus.com/SSIS-001` returns the work page (JA title, `bigImage` cover link). Usable as a VPS-routed fallback (scraping: fragile, terms grey area, keep request rate very low, cache results).
+- **JavDB:** HTTP 200 but a Cloudflare challenge page (1.3 KB) on home and search — not usable without a browser/challenge solver.
+- **JavLibrary:** 403 Cloudflare "Just a moment…" — not usable.
+Plan: LibreDMM + Wikidata first; add a VPS-routed JavBus fallback provider only if LibreDMM misses many of the user's codes.
