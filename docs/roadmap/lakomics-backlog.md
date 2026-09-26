@@ -17,7 +17,7 @@ Updated 2026-09-26 (evening) with the user: PERF-ALL-001 batches landed (see its
 1. **PERF-ALL-001** — remaining: classification/similarity count queries (same CROSS JOIN pattern as albums), `PRAGMA optimize` as its own measured change, tablet connectivity/power callbacks, one-request Library pages, moving PC sync state kept in `notes_state` into a table at the next migration; deferred transfer-review items (TRANSFER-REVIEW-001 below).
 2. **NET-R2-001** — the R2 hostname resolves to 172.64.190.1 and 172.64.66.1, and 172.64.66.1 is unreachable from the user's home network (TCP never completes; the Tokyo VPS reaches both). Tablet fixed (native video proxy `b8517ee`, 3 s connect timeout `cd09e31`, 0.8.32; user confirmed video playback). PC: shared ureq agent with short per-address connect and failed-address memory (in progress / see latest commit). Watch whether the dead address persists; nothing to change at Cloudflare.
 3. **CHAR-AUTO-007** — S36 is enabled for the 백합 series on the user's PC (2026-09-26); watch its automatic results.
-4. **Server review judgment calls** (`docs/research/server-review-2026-09-24.md` §3: 1, 2, 4, 7) — decisions pending with the user. Catalog artifact pruning is running (hourly auto-prune, ~100 catalog files retained, server disk 71% on 2026-09-26).
+4. **USER-REQ-20260926B** — new mobile/PC UI and creation requests (entry below). The server review judgment calls 1, 2, 4 and 7 were already fixed in `39d9ed02` (2026-09-24, deployed); the rest are in `SERVER-REVIEW-20260924` (low priority). Catalog artifact pruning is running (hourly auto-prune, catalog tokens 2 h / retention 3 h; server disk 53% after `6bc2d05`).
 5. **WIN-SYNC-001 / VAULT-ENC-001 (Windows) / PC-DECLUTTER-001 (Windows)** — when the Windows PC is available.
 6. **PC-REVIEW-001** — remaining medium/low findings and recorded follow-ups.
 7. **CLOUD-POST-001** — remaining publication/compatibility cleanup only.
@@ -156,6 +156,22 @@ Mobile app:
 - `DONE` (0.8.27, accepted; native fix: edge-to-edge on Android 15+ never resized the WebView for the keyboard, now a frame pads the keyboard height below it; the bottom navigation may now show above the keyboard): Notes (text/checklist notes; the ledger is fine): with the keyboard open, content below the visible area cannot be scrolled into view, so the lower part of a long note stays hidden behind the keyboard while editing. Make the editor scroll so every line can be brought above the keyboard.
 - Collections covers right after app start (possibly only right after installing a new build): missing covers stay blank for a while in the Collections tab; after visiting other screens and coming back, missing covers load fairly quickly. Suspect a cold-start ticket/cache warm-up or an image-request queue stall; measure and fix during PERF-ALL-001.
 
+## USER-REQ-20260926B — User requests, 2026-09-26 (second batch)
+
+Status: `TODO` — requested by the user 2026-09-26; details beyond the wording below are not clarified yet. Follow `MOBILE-DESIGN-001`'s process for visual changes (browser mockups at 800×1280 before the APK).
+
+Mobile app:
+- Collections: show a work's new-release notification (신간 알림) on its tile in the grid, not only on the 신간 screen.
+- Collections top bar: center the 게임 / 만화 / 영화 / AV type switch and restyle it (moved into the top bar in 0.8.27).
+- Manga detail: when MangaDex/Kakao are already connected, shrink the connect section into a small, collapsed row; when not connected, keep it prominent.
+- Notes: replace the long full-width note rows with sticky-note (포스트잇) style cards — roughly square/portrait tiles in a multi-column grid (clarified by the user 2026-09-26).
+- File exchange (전송): a redesigned transfer UI shared by the PC app and mobile.
+- Characters: register character reference images and create characters from the tablet. Characters are PC-owned publication today (`CLOUD-POST-001`); the mobile channel covers only exclusions and review decisions, so this needs a Character write contract first.
+- Collections: create a Collection from the tablet. Needs Collections authority slice 1 (docs/research/collection-authority-design-20260924.md; only the inactive slice 0 exists).
+
+PC app:
+- Notes: rework the Notes UI to match the mobile Notes design.
+
 ## TEST-BASELINE-20260926 — Full-suite baseline
 
 Status: `DONE` 2026-09-26. Rust `cargo test` 0 failed (lib 1818, foundation_flow 18, others); desktop vitest 1446, mobile vitest 673, server unittest 1494, collector 314 all pass. Fixed: stale classification assertions after the subtree totals (`cc620e7`); the character-exclusion bootstrap test's keyring dependency; a real Trash purge bug (an Asset with an unsafe recorded path lost its record and thumbnail while its original stayed — now reported failed and kept, ADR-0011); flaky warm-up assertions (SimilarityReview, CharacterReview), a slow LedgerView query and a `/proc/<pid>/stat` race in the thumbnail-worker test. Still flaky only under heavy concurrent load: two `mobile-client/Catalog.test.tsx` tests (cover retention, tag budget timeout).
@@ -229,6 +245,15 @@ Status: `TODO` (low priority; single-user setup makes them unlikely). Fixed the 
 - Exchange orphan cleanup rescans the first 1,000 storage keys each sweep (`file_exchange.py` ~645): keep a continuation.
 - Catalog duplicate decisions are scoped by server address only; a `libraryId` on `/v1/mobile-catalog/duplicates` and its decisions route would scope them per library.
 - Similarity-review withdrawal accepted after the PC read the log but before the next feed PUT still leaves the image in Library Trash (known design edge).
+
+## SERVER-REVIEW-20260924 — Remaining judgment calls of the Cloud API review
+
+Status: `TODO` (low priority; single-user setup). From [`docs/research/server-review-2026-09-24.md`](../research/server-review-2026-09-24.md) §3; items 1, 2, 4 and 7 were fixed in `39d9ed02` (2026-09-24). Remaining:
+- 3: a client `trashAsset` on an Asset that a pending similarity decision keeps is accepted; `similarity_review.pending_trash_assets` exists but has no caller outside tests. Refuse the trash (or withdraw the decision) in `asset_authority`. The only item with a realistic user-visible effect.
+- 5: a legacy Collection memo over 10,000 characters answers 422 instead of a conflict (unreachable unless legacy data exceeds the old limit).
+- 6: `mobile_collection_edits`, `mobile_collection_edit_noops`, `mobile_character_review_decisions` and `mobile_similarity_review_decisions` have no retention.
+- 8: the shared legacy token can send `trashAsset` / `restoreAsset` (matches the design; noted only).
+- 9: structural commands parse the body before the role check, so a client-role caller sees 422 vs 401 (cosmetic).
 
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
