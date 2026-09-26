@@ -1,5 +1,7 @@
 import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
+import {setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 import type {CollectionDetail, CollectionPage} from './collectionModel';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
@@ -22,7 +24,7 @@ const page=():CollectionPage=>({ready:true,filterVersion:1,revision,publishedAt:
 const commands=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/personal-edits').map(([, ,body])=>body as Record<string,unknown>);
 const conflict=(current:unknown)=>new ApiError('다른 기기에서 값이 바뀌었습니다.',409,{detail:{code:'collectionPersonalConflict',message:'다른 기기에서 값이 바뀌었습니다.',current}});
 
-beforeEach(()=>{
+beforeEach(()=>{setOutboxConnection(CONNECTION);
   localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();
   item={...base};revision='r1';personal=true;tracking=true;
   command=body=>{
@@ -99,7 +101,7 @@ it('refuses an out-of-range count in the sheet instead of queuing it',async()=>{
   fireEvent.change(within(sheet).getByRole('textbox',{name:'소장 권수'}),{target:{value:'2001'}});
   expect(within(sheet).getByRole('alert').textContent).toContain('0–2,000권');
   expect((within(sheet).getByRole('button',{name:'저장'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(() => commitCollectionEdit('w','ownedVolumes',{editionIndex:0,count:2001},{editionIndex:0,count:3})).toThrow();
+  expect(() => commitCollectionEdit('w','ownedVolumes',{editionIndex:0,count:2001},{editionIndex:0,count:3},LIBRARY)).toThrow();
   expect(readCollectionEdits()).toEqual({});
 });
 
@@ -174,8 +176,8 @@ it('shows tracking read-only with a short note while the PC has not been upgrade
 
 it('withholds a queued tracking edit until the capability returns, while other edits still send',async()=>{
   tracking=false;
-  commitCollectionEdit('w','releaseWatch',true,false);
-  commitCollectionEdit('w','myScore',4,null);
+  commitCollectionEdit('w','releaseWatch',true,false,LIBRARY);
+  commitCollectionEdit('w','myScore',4,null,LIBRARY);
   const report=await flushCollectionEdits();
   expect(report.outcomes).toEqual(expect.arrayContaining([{key:'w:releaseWatch',outcome:'withheld'},{key:'w:myScore',outcome:'confirmed'}]));
   expect(commands().map(body=>body.field)).toEqual(['myScore']);
@@ -203,8 +205,8 @@ it('keeps one queue entry per edition and compares owned entries by content',()=
   expect(collectionEditKey('w','ownedVolumes',{editionIndex:2,count:5})).toBe('w:ownedVolumes:2');
   expect(sameEditValue({editionIndex:0,count:3},{editionIndex:0,count:3})).toBe(true);
   expect(sameEditValue({editionIndex:0,count:3},{editionIndex:1,count:3})).toBe(false);
-  expect(commitCollectionEdit('w','ownedVolumes',{editionIndex:0,count:3},{editionIndex:0,count:3})).toBeNull();
-  commitCollectionEdit('w','ownedVolumes',{editionIndex:0,count:4},{editionIndex:0,count:3});
-  commitCollectionEdit('w','ownedVolumes',{editionIndex:1,count:2},{editionIndex:1,count:null});
+  expect(commitCollectionEdit('w','ownedVolumes',{editionIndex:0,count:3},{editionIndex:0,count:3},LIBRARY)).toBeNull();
+  commitCollectionEdit('w','ownedVolumes',{editionIndex:0,count:4},{editionIndex:0,count:3},LIBRARY);
+  commitCollectionEdit('w','ownedVolumes',{editionIndex:1,count:2},{editionIndex:1,count:null},LIBRARY);
   expect(Object.keys(readCollectionEdits()).sort()).toEqual(['w:ownedVolumes:0','w:ownedVolumes:1']);
 });

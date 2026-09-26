@@ -1,5 +1,7 @@
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 import type {CollectionDetail, CollectionPage} from './collectionModel';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
@@ -18,7 +20,7 @@ let item:CollectionDetail, revision:string, capable:boolean, command:(body:Recor
 const page=():CollectionPage=>({ready:true,filterVersion:1,revision,publishedAt:null,items:[item],nextCursor:null});
 const commands=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/personal-edits').map(([, ,body])=>body as Record<string,unknown>);
 
-beforeEach(()=>{
+beforeEach(()=>{setOutboxConnection(CONNECTION);
   localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();
   item={...base};revision='r1';capable=true;
   command=body=>{

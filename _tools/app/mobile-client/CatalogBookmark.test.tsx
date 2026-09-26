@@ -1,4 +1,6 @@
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
+import {outboxKey,setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {Catalog} from './Catalog';
 import type {CatalogItem,CatalogPage} from './catalogModel';
@@ -18,7 +20,7 @@ function status(write=true,cursor=0){
 }
 const accepted={libraryId:LIBRARY,epoch:1,contractVersion:1,provider:'kHentai',providerWorkId:'42',desiredState:true,entityRevision:1,changed:true};
 
-beforeEach(()=>{
+beforeEach(()=>{setOutboxConnection(CONNECTION);
   localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();mocks.decode.mockReset();
   mocks.decode.mockResolvedValue({naturalWidth:600,naturalHeight:900});
   mocks.native.mockImplementation(async(operation:string,payload:Record<string,unknown>)=>{
@@ -118,7 +120,7 @@ describe('catalog bookmark toggle',()=>{
     fireEvent.click(screen.getByRole('button',{name:'카탈로그 목록으로'}));
     expect(document.querySelector('.catalog-saved')).toBeTruthy();
     await act(async()=>reply.resolve(accepted));
-    await waitFor(()=>expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toBe('{}'));
+    await waitFor(()=>expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)).toBe('{}'));
     expect(document.querySelector('.catalog-saved')).toBeTruthy();
   });
 
@@ -171,7 +173,7 @@ describe('catalog bookmark toggle',()=>{
     fireEvent.click(screen.getByRole('button',{name:'카탈로그 목록으로'}));
     expect(document.querySelector('.catalog-saved')).toBeNull();
     await act(async()=>reply.resolve({...accepted,desiredState:false,entityRevision:2}));
-    await waitFor(()=>expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toBe('{}'));
+    await waitFor(()=>expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)).toBe('{}'));
     expect(document.querySelector('.catalog-saved')).toBeNull();
   });
 
@@ -206,7 +208,7 @@ describe('catalog bookmark toggle',()=>{
     fireEvent.click(toggle);
     // Nothing durable is created by a click the authority cannot accept.
     expect(mocks.native.mock.calls.filter(([operation])=>operation==='bookmarkCommand')).toHaveLength(0);
-    expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')??'').not.toContain('operationId');
+    expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)??'').not.toContain('operationId');
   });
 
   it('marks the write pending until the authority confirms it',async()=>{
@@ -223,11 +225,11 @@ describe('catalog bookmark toggle',()=>{
     const pending=await screen.findByRole('button',{name:'북마크 저장 중'});
     expect((pending as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText('저장 대기')).toBeTruthy();
-    expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toContain('operationId');
+    expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)).toContain('operationId');
     await act(async()=>reply.resolve(accepted));
     await waitFor(()=>expect(screen.getByRole('button',{name:'북마크 해제'})).toBeTruthy());
     expect(screen.queryByText('저장 대기')).toBeNull();
-    expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toBe('{}');
+    expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)).toBe('{}');
   });
 
   it('keeps the intent and reports it when the server rejects the write',async()=>{
@@ -242,11 +244,11 @@ describe('catalog bookmark toggle',()=>{
     expect(failure.getAttribute('role')).toBe('alert');
     // The user's decision is not silently lost.
     await waitFor(()=>expect(screen.getByRole('button',{name:'북마크 저장 중'})).toBeTruthy());
-    expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toContain('operationId');
+    expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)).toContain('operationId');
   });
 
   it('survives a restart with the pending write intact',async()=>{
-    localStorage.setItem('lakomics.catalog.bookmarks.outbox.v1',JSON.stringify({'kHentai:42':{provider:'kHentai',providerWorkId:'42',desired:true,operationId:'11111111-1111-4111-8111-111111111111',baseRevision:0,epoch:1,libraryId:LIBRARY,createdAt:1}}));
+    localStorage.setItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!,JSON.stringify({'kHentai:42':{provider:'kHentai',providerWorkId:'42',desired:true,operationId:'11111111-1111-4111-8111-111111111111',baseRevision:0,epoch:1,libraryId:LIBRARY,createdAt:1}}));
     render(<Catalog active paused={false} backRef={{current:null}}/>);
     fireEvent.click(await screen.findByText('밤의 도서관'));
     // A fresh mount re-reads the durable intent rather than a memory-only copy.

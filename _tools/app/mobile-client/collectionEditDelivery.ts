@@ -19,15 +19,22 @@
  *   `collectionTrackingEdit` (a PC that publishes personal-edit version 2);
  * * 신간 알림 / owned volumes resolve a `collectionPersonalConflict` like a rating
  *   (adopt `current`, retry once); a Collection that cannot be tracked, or 신간 알림
- *   without an Aladin/Kakao binding, is dropped with a short message.
+ *   without an Aladin/Kakao binding, is dropped with a short message;
+ * * only the current connection's queue is sent (`outboxConnection.ts`), each intent
+ *   under the library it was composed against — never the server's current one. An
+ *   intent for another library stays queued (`suspended`) until the server reports its
+ *   library again. An intent queued before library identity was recorded is bound once to
+ *   the library its own connection reports on the first pass after the upgrade.
  *
  * It never enqueues and never schedules itself.
  */
 
-import {api, ApiError} from './transport';
+import {ApiError} from './transport';
+import {apiOn, outboxConnection} from './outboxConnection';
 import {
   type CollectionEditIntent,
   type CollectionEditValue,
+  bindCollectionEditLibrary,
   confirmCollectionEdit,
   markCollectionEditConflict,
   sameEditValue,
@@ -39,7 +46,7 @@ import {
 
 export const PERSONAL_EDIT_PATH = '/v1/collections/personal-edits';
 
-export type CollectionEditOutcome = 'confirmed' | 'already-current' | 'superseded' | 'deferred' | 'withheld' | 'conflict' | 'rejected' | 'failed';
+export type CollectionEditOutcome = 'confirmed' | 'already-current' | 'superseded' | 'deferred' | 'withheld' | 'suspended' | 'conflict' | 'rejected' | 'failed';
 
 export type CollectionEditReport = {
   /** `message` explains a `rejected` (dropped) edit to the user. */
@@ -88,9 +95,10 @@ export function flushCollectionEdits(signal?: AbortSignal): Promise<CollectionEd
 
 async function pass(signal?: AbortSignal): Promise<CollectionEditReport> {
   const report: CollectionEditReport = {outcomes: [], unsupported: false};
+  const endpoint = outboxConnection();
   const pending = Object.entries(readCollectionEdits()).sort(([, a], [, b]) => a.createdAt - b.createdAt);
-  if (!pending.length) return report;
-  const status = await api<CollectionEditStatus>('/v1/collections/status', signal);
+  if (!endpoint || !pending.length) return report;
+  const status = await apiOn<CollectionEditStatus>(endpoint, '/v1/collections/status', signal);
   const libraryId = personalEditLibrary(status);
   const tracking = trackingEditAllowed(status);
   if (!libraryId) {
@@ -100,15 +108,20 @@ async function pass(signal?: AbortSignal): Promise<CollectionEditReport> {
     return report;
   }
   for (const [key] of pending) {
-    if (signal?.aborted) break;
+    // The connection changed under this pass: the rest belongs to the old server.
+    if (signal?.aborted || outboxConnection() !== endpoint) break;
     // Re-read: an earlier send or a user action may have changed this row.
-    const intent = readCollectionEdits()[key];
+    let intent: CollectionEditIntent | null | undefined = readCollectionEdits()[key];
     if (!intent) continue;
+    if (intent.libraryId === null) intent = bindCollectionEditLibrary(intent, libraryId);
+    if (!intent) continue;
+    // Composed against another library: kept, never re-pointed at this one.
+    if (intent.libraryId !== libraryId) { report.outcomes.push({key, outcome: 'suspended'}); continue; }
     if (intent.conflict) { report.outcomes.push({key, outcome: 'conflict'}); continue; }
     // A tracking edit waits, still queued, until the PC is upgraded again.
     if (!tracking && TRACKING_FIELDS.includes(intent.field)) { report.outcomes.push({key, outcome: 'withheld'}); continue; }
     try {
-      const outcome = await deliver(intent, libraryId, 1, signal);
+      const outcome = await deliver(intent, endpoint, 1, signal);
       report.outcomes.push(typeof outcome === 'string' ? {key, outcome} : {key, ...outcome});
     } catch (error) {
       if (!refusedByServer(error)) throw error;
@@ -133,11 +146,11 @@ type Receipt = {operationId?: string; changed?: boolean};
 
 type Delivered = CollectionEditOutcome | {outcome: 'rejected'; message: string};
 
-async function deliver(intent: CollectionEditIntent, libraryId: string, attempt: number, signal?: AbortSignal): Promise<Delivered> {
+async function deliver(intent: CollectionEditIntent, endpoint: string, attempt: number, signal?: AbortSignal): Promise<Delivered> {
   try {
-    const receipt = await api<Receipt>(PERSONAL_EDIT_PATH, signal, {
+    const receipt = await apiOn<Receipt>(endpoint, PERSONAL_EDIT_PATH, signal, {
       version: 1,
-      libraryId,
+      libraryId: intent.libraryId,
       operationId: intent.operationId,
       collectionId: intent.collectionId,
       field: intent.field,
@@ -150,7 +163,7 @@ async function deliver(intent: CollectionEditIntent, libraryId: string, attempt:
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     const detail = detailOf(error);
     if (detail?.code === 'collectionPersonalConflict' && 'current' in detail) {
-      return conflict(intent, libraryId, detail.current as CollectionEditValue, attempt, signal);
+      return conflict(intent, endpoint, detail.current as CollectionEditValue, attempt, signal);
     }
     // A deleted Collection or a malformed edit can never succeed: drop it rather
     // than retrying forever. Everything else stays queued for the next pass.
@@ -160,13 +173,13 @@ async function deliver(intent: CollectionEditIntent, libraryId: string, attempt:
       const reissued = reissueCollectionEdit(intent);
       if (!reissued) return 'superseded';
       if (attempt > 1) return 'deferred';
-      return deliver(reissued, libraryId, attempt + 1, signal);
+      return deliver(reissued, endpoint, attempt + 1, signal);
     }
     throw error;
   }
 }
 
-async function conflict(intent: CollectionEditIntent, libraryId: string, current: CollectionEditValue, attempt: number, signal?: AbortSignal): Promise<Delivered> {
+async function conflict(intent: CollectionEditIntent, endpoint: string, current: CollectionEditValue, attempt: number, signal?: AbortSignal): Promise<Delivered> {
   if (sameEditValue(current, intent.value)) return confirmCollectionEdit(intent) ? 'already-current' : 'superseded';
   // A memo is only rebased when `current` is this device's own earlier value.
   if (intent.field === 'memo' && !intent.own.includes(current)) {
@@ -176,7 +189,7 @@ async function conflict(intent: CollectionEditIntent, libraryId: string, current
   if (!rebased) return 'superseded';
   // A second consecutive conflict means another writer is racing; wait for a later pass.
   if (attempt > 1) return 'deferred';
-  return deliver(rebased, libraryId, attempt + 1, signal);
+  return deliver(rebased, endpoint, attempt + 1, signal);
 }
 
 /** The server's structured `detail`, from a raw body or an `ApiError` wrapper. */

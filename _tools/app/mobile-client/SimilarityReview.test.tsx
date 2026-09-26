@@ -1,5 +1,7 @@
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 import type {Asset} from './types';
 
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
@@ -41,7 +43,7 @@ const doubleTap=(target:HTMLElement)=>{for(let i=0;i<2;i++){fireEvent.pointerDow
 const scales=()=>screen.getAllByRole('img').map(img=>(img as HTMLImageElement).style.transform.match(/scale\(([\d.]+)\)/)?.[1]);
 
 afterEach(()=>{cleanup();localStorage.clear();vi.useRealTimers();});
-beforeEach(()=>{localStorage.clear();mocks.api.mockReset();vi.mocked(warmThumbnail).mockClear();vi.mocked(mediaTicket).mockClear();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();vi.mocked(warmThumbnail).mockClear();vi.mocked(mediaTicket).mockClear();});
 
 describe('similarity review screen',()=>{
   it('shows A and B with metadata, accents the larger image, marks the recommendation and warms the next pairs',async()=>{

@@ -35,22 +35,28 @@ final class MediaRepository {
   File[] legacy=new File(context.getCacheDir(),"document-media").listFiles();
   if(legacy!=null)for(File file:legacy)if(file.isFile())file.delete();
  }
- private Scope scope(String id,String variant)throws Exception{
-  if(id==null || !id.matches("[A-Za-z0-9_-]{1,128}") || !(variant.equals("thumbnail") || variant.equals("original")))throw new IllegalArgumentException();
-  return scopedIdentity(variant.equals("thumbnail")?id:id+"\noriginal");
+ private Scope scope(String id,String variant)throws Exception{return scope(id,variant,"");}
+ /** `revision` is the server's thumbnail revision, or empty; originals ignore it. */
+ private Scope scope(String id,String variant,String revision)throws Exception{
+  if(id==null || !id.matches("[A-Za-z0-9_-]{1,128}") || !(variant.equals("thumbnail") || variant.equals("original")) || !ThumbnailCache.validRevision(revision))throw new IllegalArgumentException();
+  return scoped(account->ThumbnailCache.mediaKey(account,id,variant,variant.equals("thumbnail")?revision:""));
  }
- private Scope scopedIdentity(String value)throws Exception{
+ private Scope scopedIdentity(String value)throws Exception{return scoped(account->ThumbnailCache.key(account+"\n"+value));}
+ private interface KeyFor{String key(String account)throws Exception;}
+ private Scope scoped(KeyFor keyFor)throws Exception{
   synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
    JSONObject connection=settings.read();if(!connection.has("token"))throw new IllegalStateException();
    Scope scope=new Scope();String account=connection.getString("endpoint")+"\n"+connection.getString("token");
-   scope.key=ThumbnailCache.key(account+"\n"+value);scope.generation=cache.generation();scope.connection=connection;
+   scope.key=keyFor.key(account);scope.generation=cache.generation();scope.connection=connection;
    // Every connection replacement clears the cache, including same-credential reconfiguration.
    scope.ticketGroup=scope.generation+"/"+ThumbnailCache.key(account);return scope;
   }
  }
  JSONObject status()throws Exception{long[] s=cache.status();return new JSONObject().put("bytes",s[0]).put("count",s[1]).put("limit",s[2]);}
- JSONObject thumbnailsCached(JSONArray ids,CancellationSignal signal)throws Exception{
+ /** `revisions` (optional, parallel to `ids`) names each thumbnail's revision, as {@link #browser} keys it. */
+ JSONObject thumbnailsCached(JSONArray ids,JSONArray revisions,CancellationSignal signal)throws Exception{
   if(ids.length()>100)throw new IllegalArgumentException("Too many thumbnails");
+  if(revisions!=null && revisions.length()!=ids.length())throw new IllegalArgumentException("Revisions do not match");
   synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
    // Read/decrypt the connection once for the entire page, not once per id.
    JSONObject connection=settings.read();if(!connection.has("token"))throw new IllegalStateException();
@@ -59,7 +65,7 @@ final class MediaRepository {
    for(int i=0;i<ids.length();i++){
     signal.throwIfCanceled();String id=ids.getString(i);
     if(!id.matches("[A-Za-z0-9_-]{1,128}"))throw new IllegalArgumentException("Invalid asset id");
-    keys.add(ThumbnailCache.key(account+"\n"+id));
+    keys.add(ThumbnailCache.mediaKey(account,id,"thumbnail",revisions==null||revisions.isNull(i)?"":revisions.getString(i)));
    }
    synchronized(cache){
     String generation=ThumbnailCache.key(account)+"/"+cache.warmGeneration();
@@ -131,11 +137,13 @@ final class MediaRepository {
   // The URL stays stable for the lifetime of one cached object so WebView can reuse its
   // own copy. A replaced connection or a cleared cache moves the generation, which
   // changes this URL, so the namespace remains invalidated by the existing paths.
-  return new JSONObject().put("url","https://app.lakomics.local/media-cache/"+scope.generation+"/"+scope.key+"?mime="+Uri.encode(mime)).put("expires_in",240);
+  // A thumbnail revision is part of the key, so a regenerated thumbnail gets a new URL too.
+  return new JSONObject().put("url",ThumbnailCache.localPath(scope.generation,scope.key)+"?mime="+Uri.encode(mime)).put("expires_in",240);
  }
- JSONObject browser(String id,String variant,String mime,CancellationSignal signal)throws Exception{
+ JSONObject browser(String id,String variant,String mime,CancellationSignal signal)throws Exception{return browser(id,variant,mime,"",signal);}
+ JSONObject browser(String id,String variant,String mime,String revision,CancellationSignal signal)throws Exception{
   if(signal==null)signal=new CancellationSignal();signal.throwIfCanceled();
-  Scope scope=scope(id,variant);
+  Scope scope=scope(id,variant,revision);
   PerfLog.Op perf=PerfLog.current.get();
   if(variant.equals("original") && mime!=null && !mime.isEmpty() && !imageMime(mime)){if(perf!=null)perf.cache="bypass";return directTicket(id,scope,signal);}
   // Hold the existing reentrant fill lock before requesting a ticket: a caller

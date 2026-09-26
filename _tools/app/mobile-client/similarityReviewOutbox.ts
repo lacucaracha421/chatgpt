@@ -12,7 +12,12 @@
  *
  * At most {@link SIMILARITY_OUTBOX_LIMIT} intents wait at once. Committing throws when the
  * device cannot store the decision, so the screen never shows an unsaved decision as queued.
+ *
+ * The queue is stored per connection (`outboxConnection.ts`) and each intent names its library:
+ * only the current server's intents are shown and sent, and only while it reports that library.
  */
+
+import {connectionOutbox, outboxKey} from './outboxConnection';
 
 export type SimilarityChoice = 'keep_existing' | 'replace_existing' | 'keep_both';
 export type SimilarityDecision = SimilarityChoice | 'withdrawn';
@@ -32,7 +37,7 @@ export type SimilarityIntent = {
   notBefore: number;
 };
 
-const INTENTS_KEY = 'lakomics.similarity.review.outbox.v1';
+const INTENTS_KEY = connectionOutbox('lakomics.similarity.review.outbox.v1');
 export const SIMILARITY_OUTBOX_LIMIT = 500;
 export const SIMILARITY_SEND_DELAY_MS = 5000;
 export const SIMILARITY_SAVE_FAILED = '기기에 저장하지 못했습니다.';
@@ -57,9 +62,11 @@ function valid(value: unknown): value is SimilarityIntent {
     && !!intent.basis && DIGEST.test(intent.basis.feedRevision) && DIGEST.test(intent.basis.aSha256) && DIGEST.test(intent.basis.bSha256);
 }
 
+/** The current connection's queue (empty while no connection is known). */
 export function readSimilarityIntents(): Record<string, SimilarityIntent> {
   try {
-    const raw = localStorage.getItem(INTENTS_KEY);
+    const key = outboxKey(INTENTS_KEY);
+    const raw = key === null ? null : localStorage.getItem(key);
     const parsed = raw === null ? null : JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return Object.fromEntries(Object.entries(parsed).filter(([, intent]) => valid(intent))) as Record<string, SimilarityIntent>;
@@ -67,7 +74,9 @@ export function readSimilarityIntents(): Record<string, SimilarityIntent> {
 }
 
 function write(intents: Record<string, SimilarityIntent>): boolean {
-  try { localStorage.setItem(INTENTS_KEY, JSON.stringify(intents)); } catch { return false; }
+  const key = outboxKey(INTENTS_KEY);
+  if (key === null) return false;
+  try { localStorage.setItem(key, JSON.stringify(intents)); } catch { return false; }
   try { window.dispatchEvent(new Event(SIMILARITY_REVIEW_EVENT)); } catch { /* No window outside the app. */ }
   return true;
 }

@@ -12,7 +12,12 @@
  *
  * At most {@link REVIEW_OUTBOX_LIMIT} pairs wait at once. Committing throws when the device
  * cannot store the decision, so the screen never shows an unsaved decision as queued.
+ *
+ * The queue is stored per connection (`outboxConnection.ts`) and each intent names its library:
+ * only the current server's intents are shown and sent, and only while it reports that library.
  */
+
+import {connectionOutbox, outboxKey} from './outboxConnection';
 
 export type ReviewDecision = 'accepted' | 'rejected' | 'cleared';
 export type ReviewOrigin = 'feed' | 'viewer';
@@ -29,7 +34,7 @@ export type ReviewIntent = {
   createdAt: number;
 };
 
-const INTENTS_KEY = 'lakomics.characters.review.outbox.v1';
+const INTENTS_KEY = connectionOutbox('lakomics.characters.review.outbox.v1');
 export const REVIEW_OUTBOX_LIMIT = 500;
 export const REVIEW_SAVE_FAILED = '기기에 저장하지 못했습니다.';
 export const REVIEW_OUTBOX_FULL = '전송을 기다리는 검토가 너무 많습니다. 연결된 뒤 다시 시도해 주세요.';
@@ -46,9 +51,11 @@ function valid(value: unknown): value is ReviewIntent {
     && (intent.origin === 'feed' || intent.origin === 'viewer') && (intent.basis === null || typeof intent.basis === 'string');
 }
 
+/** The current connection's queue (empty while no connection is known). */
 export function readReviewIntents(): Record<string, ReviewIntent> {
   try {
-    const raw = localStorage.getItem(INTENTS_KEY);
+    const key = outboxKey(INTENTS_KEY);
+    const raw = key === null ? null : localStorage.getItem(key);
     const parsed = raw === null ? null : JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return Object.fromEntries(Object.entries(parsed).filter(([, intent]) => valid(intent))) as Record<string, ReviewIntent>;
@@ -57,7 +64,9 @@ export function readReviewIntents(): Record<string, ReviewIntent> {
 
 /** Persist the queue; false when storage refused it (the stored queue is unchanged). */
 function write(intents: Record<string, ReviewIntent>): boolean {
-  try { localStorage.setItem(INTENTS_KEY, JSON.stringify(intents)); } catch { return false; }
+  const key = outboxKey(INTENTS_KEY);
+  if (key === null) return false;
+  try { localStorage.setItem(key, JSON.stringify(intents)); } catch { return false; }
   try { window.dispatchEvent(new Event(CHARACTER_REVIEW_EVENT)); } catch { /* No window outside the app. */ }
   return true;
 }

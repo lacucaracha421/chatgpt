@@ -21,7 +21,13 @@
  *
  * Nothing here enqueues from a replica read or a reconciliation pass. Only
  * {@link commitBookmarkIntent} writes an intent, and only user actions call it.
+ *
+ * Intents and observed revisions are stored per connection (`outboxConnection.ts`): only
+ * the current server's are read and sent, and each intent keeps the library it was
+ * composed against, which delivery never replaces with the server's current one.
  */
+
+import {connectionOutbox, outboxKey} from './outboxConnection';
 
 export type BookmarkIntent = {
   provider: 'kHentai';
@@ -42,8 +48,8 @@ export type ConfirmedBookmark = { revision: number; desired: boolean; epoch: num
 /** Authority identity a command is composed against. */
 export type BookmarkAuthority = { libraryId: string; epoch: number; contractVersion: number };
 
-const INTENTS_KEY = 'lakomics.catalog.bookmarks.outbox.v1';
-const CONFIRMED_KEY = 'lakomics.catalog.bookmarks.confirmed.v1';
+const INTENTS_KEY = connectionOutbox('lakomics.catalog.bookmarks.outbox.v1');
+const CONFIRMED_KEY = connectionOutbox('lakomics.catalog.bookmarks.confirmed.v1');
 export const BOOKMARK_CONTRACT_VERSION = 1;
 
 /** Provider-qualified key: two providers must not collide on the same id text. */
@@ -51,16 +57,20 @@ export function bookmarkEntityKey(provider: string, providerWorkId: string): str
   return `${provider}:${providerWorkId}`;
 }
 
-function readJson<T>(key: string, fallback: T): T {
+/** `base`'s bucket for the current connection (the fallback while none is known). */
+function readJson<T>(base: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(key);
+    const key = outboxKey(base);
+    const raw = key === null ? null : localStorage.getItem(key);
     if (raw === null) return fallback;
     const parsed = JSON.parse(raw);
     return parsed === null ? fallback : parsed as T;
   } catch { return fallback; }
 }
 
-function writeJson(key: string, value: unknown): void {
+function writeJson(base: string, value: unknown): void {
+  const key = outboxKey(base);
+  if (key === null) return; // No connection: nothing can be queued for one.
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Storage may be unavailable; the caller keeps the change in memory. */ }
 }
 

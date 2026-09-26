@@ -28,13 +28,14 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, vault}: {as
   },[asset.id,asset.kind,asset.pending,paused,vault]);
   const [preview, setPreview] = useState(asset.preview);
   const [retried, setRetried] = useState(false);
+  // A new thumbnail revision is a new image: it reloads while the tile keeps the old one.
   useEffect(() => {
     const controller = new AbortController();
     if (!paused && !vault && !asset.preview) void loadThumbnail(asset, controller.signal).then(ready => {
       if (!controller.signal.aborted && ready.preview) {setPreview(ready.preview); onReady(ready);}
     }, () => {});
     return () => controller.abort();
-  }, [asset.id, asset.preview, asset.thumbnail_available, asset.pending, onReady, paused, vault]);
+  }, [asset.id, asset.preview, asset.thumbnail_available, asset.thumbnail_revision, asset.pending, onReady, paused, vault]);
   const retry = () => {
     if (vault) {setPreview(undefined); return;}
     if (retried || asset.pending || asset.thumbnail_available === false) return;

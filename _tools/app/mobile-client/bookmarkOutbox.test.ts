@@ -1,4 +1,6 @@
 import {beforeEach,describe,expect,it} from 'vitest';
+import {outboxKey,setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 import {
   commitBookmarkIntent,
   confirmBookmarkIntent,
@@ -12,7 +14,7 @@ import {
 const authority={libraryId:'a'.repeat(32),epoch:1,contractVersion:1};
 const OTHER={libraryId:'b'.repeat(32),epoch:1,contractVersion:1};
 
-beforeEach(()=>{localStorage.clear();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();});
 
 describe('durable bookmark intents',()=>{
   it('creates exactly one durable intent per add, with a minted operation id',()=>{
@@ -55,7 +57,7 @@ describe('durable bookmark intents',()=>{
     const intent=commitBookmarkIntent('kHentai','42',true,authority);
     // A restart is a fresh read of the same durable store; nothing is held in memory.
     expect(readIntent('kHentai','42')?.operationId).toBe(intent.operationId);
-    expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toContain(intent.operationId);
+    expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)).toContain(intent.operationId);
   });
 
   it('survives a superseding action by identity, so an older response cannot clear it',()=>{
@@ -83,7 +85,7 @@ describe('durable bookmark intents',()=>{
     const intent=commitBookmarkIntent('kHentai','42',true,authority);
     confirmBookmarkIntent(intent,1,3);
     expect(Object.keys(readIntents())).toHaveLength(0);
-    expect(localStorage.getItem('lakomics.catalog.bookmarks.outbox.v1')).toBe('{}');
+    expect(localStorage.getItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!)).toBe('{}');
   });
 
   it('re-bases a stale intent onto the reported revision under the same operation id',()=>{

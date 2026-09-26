@@ -15,9 +15,15 @@
  *
  * It never enqueues. Only `commitBookmarkIntent` does that, and only the user's
  * action calls it.
+ *
+ * Only the current connection's intents are sent (`outboxConnection.ts`), and native
+ * refuses the command unless the app is still connected to that endpoint. An intent is
+ * sent under its own library only: one composed against another library than the
+ * authority's stays queued (`suspended`), never re-pointed at the current library.
  */
 
 import {native} from './transport';
+import {outboxConnection} from './outboxConnection';
 import {
   BOOKMARK_CONTRACT_VERSION,
   type BookmarkAuthority,
@@ -28,7 +34,7 @@ import {
 } from './bookmarkOutbox';
 
 /** How one intent settled. */
-export type DeliveryOutcome = 'confirmed' | 'already-current' | 'superseded' | 'deferred' | 'withheld';
+export type DeliveryOutcome = 'confirmed' | 'already-current' | 'superseded' | 'deferred' | 'withheld' | 'suspended';
 
 export type DeliveryReport = {
   outcomes: {providerWorkId: string; outcome: DeliveryOutcome}[];
@@ -52,13 +58,13 @@ type CommandResult = {
  * domain is still PC-owned" are the same answer here — no traffic — so a queued
  * intent waits rather than being discarded.
  */
-async function resolveAuthority(signal?: AbortSignal): Promise<BookmarkAuthority | null> {
+async function resolveAuthority(endpoint: string, signal?: AbortSignal): Promise<BookmarkAuthority | null> {
   const status = await native<{
     authorityLibraryId?: string | null;
     authorityEpoch?: number | null;
     authorityContractVersion?: number | null;
     capabilities?: {bookmarkWrite?: boolean};
-  }>('api', {path: '/v1/mobile-catalog/status', method: 'GET'}, signal);
+  }>('api', {path: '/v1/mobile-catalog/status', method: 'GET', connection: endpoint}, signal);
   if (!status.authorityLibraryId || status.capabilities?.bookmarkWrite !== true) return null;
   const epoch = status.authorityEpoch;
   if (typeof epoch !== 'number' || epoch < 1) return null;
@@ -78,9 +84,11 @@ async function resolveAuthority(signal?: AbortSignal): Promise<BookmarkAuthority
  */
 export async function flushBookmarkIntents(signal?: AbortSignal): Promise<DeliveryReport> {
   const report: DeliveryReport = {outcomes: [], authorityUnavailable: false};
+  const endpoint = outboxConnection();
+  if (!endpoint) return report;
   let authority: BookmarkAuthority | null = null;
   try {
-    authority = await resolveAuthority(signal);
+    authority = await resolveAuthority(endpoint, signal);
   } catch { authority = null; }
   const intents = Object.keys(readIntents())
     .map(key => readIntents()[key])
@@ -93,8 +101,11 @@ export async function flushBookmarkIntents(signal?: AbortSignal): Promise<Delive
     return report;
   }
   for (const intent of intents) {
-    if (signal?.aborted) break;
-    report.outcomes.push({providerWorkId: intent.providerWorkId, outcome: await deliver(intent, authority, 1, signal)});
+    // The connection changed under this pass: the rest belongs to the old server.
+    if (signal?.aborted || outboxConnection() !== endpoint) break;
+    // Composed against another library: kept, never re-pointed at this one.
+    if (intent.libraryId !== authority.libraryId) { report.outcomes.push({providerWorkId: intent.providerWorkId, outcome: 'suspended'}); continue; }
+    report.outcomes.push({providerWorkId: intent.providerWorkId, outcome: await deliver(intent, authority, endpoint, 1, signal)});
   }
   return report;
 }
@@ -106,7 +117,7 @@ export async function flushBookmarkIntents(signal?: AbortSignal): Promise<Delive
  * writer is racing this entity, so the intent is left queued for a later pass
  * rather than thrashing here.
  */
-async function deliver(intent: BookmarkIntent, authority: BookmarkAuthority, attempt: number, signal?: AbortSignal): Promise<DeliveryOutcome> {
+async function deliver(intent: BookmarkIntent, authority: BookmarkAuthority, endpoint: string, attempt: number, signal?: AbortSignal): Promise<DeliveryOutcome> {
   // An intent composed under another epoch cannot present a meaningful revision:
   // revisions are only comparable inside one epoch, so it starts at 0 and lets the
   // server's compare-and-set decide.
@@ -115,18 +126,19 @@ async function deliver(intent: BookmarkIntent, authority: BookmarkAuthority, att
     const result = await native<CommandResult>('bookmarkCommand', {
       provider: intent.provider,
       providerWorkId: intent.providerWorkId,
-      libraryId: authority.libraryId,
+      libraryId: intent.libraryId,
       epoch: authority.epoch,
       contractVersion: authority.contractVersion,
       operationId: intent.operationId,
       expectedRevision: baseRevision,
       desiredState: intent.desired,
+      connection: endpoint,
     }, signal);
     // A `revisionConflict` is a recoverable state, not a failure: the native
     // bridge reports it as a resolved conflict carrying the authoritative
     // revision, so the same intent can be re-based instead of dropped.
     const reported = conflictOf(result);
-    if (reported) return applyConflict(intent, authority, reported, attempt, signal);
+    if (reported) return applyConflict(intent, authority, endpoint, reported, attempt, signal);
     const revision = typeof result?.entityRevision === 'number' ? result.entityRevision : baseRevision;
     // A superseding action may have replaced this row while the request was in
     // flight; then the older response must not clear the newer intent.
@@ -140,7 +152,7 @@ async function deliver(intent: BookmarkIntent, authority: BookmarkAuthority, att
       // the intent durable for the next pass. Only the surface text differs.
       throw error;
     }
-    return applyConflict(intent, authority, conflict, attempt, signal);
+    return applyConflict(intent, authority, endpoint, conflict, attempt, signal);
   }
 }
 
@@ -154,6 +166,7 @@ async function deliver(intent: BookmarkIntent, authority: BookmarkAuthority, att
 async function applyConflict(
   intent: BookmarkIntent,
   authority: BookmarkAuthority,
+  endpoint: string,
   conflict: {revision: number; desiredState: boolean},
   attempt: number,
   signal?: AbortSignal,
@@ -167,7 +180,7 @@ async function applyConflict(
   // intent stays queued with its identity for a later pass instead of the client
   // thrashing here; nothing replaced it, so it is not reported as superseded.
   if (attempt > 1) return 'deferred';
-  return deliver(rebased, authority, attempt + 1, signal);
+  return deliver(rebased, authority, endpoint, attempt + 1, signal);
 }
 
 /**

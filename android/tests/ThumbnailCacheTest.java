@@ -53,6 +53,26 @@ public final class ThumbnailCacheTest {
    String removed=cache.warmGeneration();check(!removed.equals(cleared));
    put(cache,b,10);check(cache.status()[0]==10);
    check(new ThumbnailCache(dir,10).warmGeneration().equals(removed));
+   // A thumbnail revision is part of the key: a regenerated thumbnail of the same Asset
+   // misses the retained entry and is served under a new URL. No revision keeps the old key.
+   String account="https://a.example\ntoken";
+   String legacy=ThumbnailCache.mediaKey(account,"asset1","thumbnail","");
+   check(legacy.equals(ThumbnailCache.key(account+"\nasset1")));
+   check(ThumbnailCache.mediaKey(account,"asset1","original","").equals(ThumbnailCache.key(account+"\nasset1\noriginal")));
+   String r1=ThumbnailCache.mediaKey(account,"asset1","thumbnail","r1"),r2=ThumbnailCache.mediaKey(account,"asset1","thumbnail","r2");
+   check(!r1.equals(r2) && !r1.equals(legacy));
+   check(ThumbnailCache.mediaKey(account,"asset1","original","r1").equals(ThumbnailCache.mediaKey(account,"asset1","original","")));
+   File revisionDir=Files.createTempDirectory("lakomics-revisions-").toFile();
+   try{
+   ThumbnailCache revisions=new ThumbnailCache(revisionDir,10);
+   revisions.obtain(r1,revisions.generation(),file->Files.write(file.toPath(),new byte[3]));
+   boolean[] revised=revisions.cached(java.util.Arrays.asList(r1,r2),revisions.generation());
+   check(revised[0] && !revised[1]);
+   AtomicInteger refetched=new AtomicInteger();revisions.obtain(r2,revisions.generation(),file->{refetched.incrementAndGet();Files.write(file.toPath(),new byte[3]);});
+   check(refetched.get()==1);
+   check(!ThumbnailCache.localPath(revisions.generation(),r1).equals(ThumbnailCache.localPath(revisions.generation(),r2)));
+   }finally{for(File file:revisionDir.listFiles())Files.deleteIfExists(file.toPath());Files.deleteIfExists(revisionDir.toPath());}
+   try{ThumbnailCache.mediaKey(account,"asset1","thumbnail","../x");throw new AssertionError("unsafe revision");}catch(IllegalArgumentException expected){check(true);}
    System.out.println("ThumbnailCache: "+checks+" checks passed");
   }finally{for(File file:dir.listFiles())Files.deleteIfExists(file.toPath());Files.deleteIfExists(dir.toPath());}
  }

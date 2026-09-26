@@ -7,9 +7,17 @@ const tickets = new Map<string, {ticket: Ticket; until: number}>();
 const inFlight = new Map<string, Promise<Ticket>>();
 let epoch = 0;
 export function clearMediaCache() { epoch++; tickets.clear(); inFlight.clear(); for(const entry of originals.values())entry.controller.abort(); originals.clear(); clearOriginalTicketWarm(); }
-export function invalidateTicket(asset: Asset, variant: string) { tickets.delete(`${asset.pending ? 'pending' : 'asset'}:${asset.id}:${variant}`); }
+/** The server's thumbnail revision when it sends a usable one (see `Asset.thumbnail_revision`). */
+export function thumbnailRevision(asset: Asset): string | null {
+  const revision = asset.thumbnail_revision;
+  return typeof revision === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(revision) ? revision : null;
+}
+/** A thumbnail with a new revision is a different ticket, like a different native cache entry. */
+const ticketKey = (asset: Asset, variant: string) =>
+  `${asset.pending ? 'pending' : 'asset'}:${asset.id}:${variant}${variant === 'thumbnail' && thumbnailRevision(asset) ? `:${thumbnailRevision(asset)}` : ''}`;
+export function invalidateTicket(asset: Asset, variant: string) { tickets.delete(ticketKey(asset, variant)); }
 async function requestMediaTicket(asset: Asset, variant: 'thumbnail' | 'original', signal?:AbortSignal, timing?:MediaTiming): Promise<Ticket> {
-  const key = `${asset.pending ? 'pending' : 'asset'}:${asset.id}:${variant}`;
+  const key = ticketKey(asset, variant);
   const cached = tickets.get(key);
   if (cached && cached.until > Date.now()) {if(timing)timing.source='memory';return cached.ticket;}
   if (!signal && inFlight.has(key)) {if(timing)timing.source='shared';return inFlight.get(key)!;}
@@ -19,7 +27,7 @@ async function requestMediaTicket(asset: Asset, variant: 'thumbnail' | 'original
     const ticket = asset.pending
       ? await api<{download_url: string}>(`/v1/captures/${encodeURIComponent(asset.id)}/download`, signal).then(t => ({url: t.download_url, expires_in: 540}))
       : variant === 'thumbnail'
-        ? await native<Ticket>('thumbnail', {assetId:asset.id}, signal)
+        ? await native<Ticket>('thumbnail', {assetId:asset.id,...(thumbnailRevision(asset) ? {revision:thumbnailRevision(asset)} : {})}, signal)
         : await native<Ticket>('media', {assetId:asset.id,mime:asset.content_type,...(timing?{perfId:timing.requestId}:{})}, signal);
     if (!/^https:\/\//.test(ticket.url) && !(import.meta.env.DEV && ticket.url.startsWith('data:image/'))) throw new Error('유효한 미디어 주소를 받지 못했습니다.');
     const expiry = 'expires_at' in ticket && ticket.expires_at ? Date.parse(ticket.expires_at) : Date.now() + (ticket.expires_in ?? 240) * 1000;

@@ -108,7 +108,20 @@ public final class MainActivity extends Activity {
  private void reply(String id,boolean ok,Object data,String error){reply(id,ok,data,error,null,null);}
  private void reply(String id,boolean ok,Object data,String error,Integer status,Object details){try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",ok).put("status",status==null?JSONObject.NULL:status).put("data",data==null?JSONObject.NULL:data).put("error",error==null?JSONObject.NULL:error).put("details",details==null?JSONObject.NULL:details));}catch(JSONException ignored){}}
  private void cancelOtherRequests(CancellationSignal current){for(CancellationSignal s:active.values())if(s!=current)s.cancel();}
+ /** A durable outbox send for another connection than the configured one; nothing was sent. */
+ static final class ConnectionChanged extends IOException{ConnectionChanged(){super("Connection changed");}}
+ /**
+  * The stored connection for one API call. A WebView outbox names the endpoint its intent
+  * was queued on (`connection`); the call is refused unless that is still the configured
+  * endpoint, and it then goes to exactly the connection that was checked.
+  */
+ private JSONObject connectionFor(JSONObject p)throws Exception{
+  JSONObject connection=settings.read();
+  if(p.has("connection")&&!p.getString("connection").equals(connection.optString("endpoint","")))throw new ConnectionChanged();
+  return connection;
+ }
  private static String errorMessage(Exception e){
+  if(e instanceof ConnectionChanged)return "서버 연결이 바뀌어 전송을 미뤘습니다.";
   if(e instanceof VaultCrypto.Invalid || e instanceof ExchangeService.UserError || e instanceof NotesRepository.UserError)return e.getMessage();
   if(e instanceof CloudClient.HttpFailure){int status=((CloudClient.HttpFailure)e).status;if(status==401 || status==403)return "인증에 실패했습니다. 토큰을 확인해 주세요.";if(status==404)return "요청한 정보를 찾을 수 없습니다.";return "서버가 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";}
   if(e instanceof java.net.SocketTimeoutException)return "연결 시간이 초과되었습니다. 다시 시도해 주세요.";
@@ -143,7 +156,7 @@ public final class MainActivity extends Activity {
   catch(java.util.concurrent.ExecutionException e){Throwable cause=e.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IOException("Clipboard write failed");}
   finally{write.cancel(false);}
  }
- private JSONObject thumbnail(String id,CancellationSignal signal)throws Exception{return media==null?client.api("/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","thumbnail"),signal):media.browser(id,"thumbnail","image/webp",signal);}
+ private JSONObject thumbnail(String id,String revision,CancellationSignal signal)throws Exception{return media==null?client.api("/v1/library/assets/"+Uri.encode(id)+"/media-ticket","POST",new JSONObject().put("variant","thumbnail"),signal):media.browser(id,"thumbnail","image/webp",revision,signal);}
  /** Fingerprint (BiometricPrompt, API 28+) can open secret notes; the PIN is always the fallback. */
  private boolean biometricAvailable(){
   if(Build.VERSION.SDK_INT<28)return false;
@@ -249,8 +262,8 @@ public final class MainActivity extends Activity {
      case "status":data=connectionStatus();break;
      case "cacheStatus":data=cacheStatus();break;
      case "clearCache":if(media==null)throw new IOException();media.clear();data=cacheStatus();break;
-     case "thumbnail":data=thumbnail(p.getString("assetId"),signal);break;
-     case "thumbnailsCached":if(media==null)throw new IOException("Cache unavailable");data=media.thumbnailsCached(p.getJSONArray("assetIds"),signal);break;
+     case "thumbnail":data=thumbnail(p.getString("assetId"),p.optString("revision",""),signal);break;
+     case "thumbnailsCached":if(media==null)throw new IOException("Cache unavailable");data=media.thumbnailsCached(p.getJSONArray("assetIds"),p.optJSONArray("revisions"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
      case "mediaTickets":data=media==null?new JSONObject().put("items",new JSONArray()):media.prewarmTickets(p.getJSONArray("assetIds"),signal,MainActivity.this::ticketWarmAllowed);break;
@@ -283,9 +296,9 @@ public final class MainActivity extends Activity {
       // loop until the user backgrounded and resumed the app.
       AlbumReplicaService.get(MainActivity.this).replaceConnection();LibraryDocumentsProvider.reset(MainActivity.this);exchange().reset();}}finally{LibraryDocumentsProvider.endConnectionChange();} data=connectionStatus();break;
      case "disconnect":LibraryDocumentsProvider.beginConnectionChange();try{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){signal.throwIfCanceled();cancelOtherRequests(signal);settings.clear();client.clearConditional();if(media!=null)media.clear();PickerLibrary.get(MainActivity.this).reset();AlbumReplicaService.get(MainActivity.this).reset();LibraryDocumentsProvider.reset(MainActivity.this);settings.clearExchangeTokens();exchange().reset();}}finally{LibraryDocumentsProvider.endConnectionChange();}data=connectionStatus();break;
-     case "api":data=p.optBoolean("conditional")&&p.optString("method","GET").equals("GET")?client.conditionalApi(p.getString("path"),signal):client.api(p.getString("path"),p.optString("method","GET"),p.optJSONObject("body"),signal);break;
+     case "api":{JSONObject connection=connectionFor(p);data=p.optBoolean("conditional")&&p.optString("method","GET").equals("GET")?client.conditionalApiFor(connection,p.getString("path"),signal):client.apiFor(connection,p.getString("path"),p.optString("method","GET"),p.optJSONObject("body"),signal);break;}
      case "bookmarkCommand": String provider=p.getString("provider");String workId=p.getString("providerWorkId");if(!provider.matches("kHentai|heliotrope") || !workId.matches("[0-9A-Za-z_-]{1,64}"))throw new IllegalArgumentException("Invalid bookmark identity");BookmarkCommand.validate(p);JSONObject command=BookmarkCommand.body(p);
-      try{data=client.api(BookmarkCommand.path(provider,workId),"PUT",command,signal);}
+      try{data=client.apiFor(connectionFor(p),BookmarkCommand.path(provider,workId),"PUT",command,signal);}
       catch(CloudClient.HttpFailure failure){
        // A revision conflict is a recoverable state, not a failure: it carries the
        // authoritative revision the client must re-base the same intent onto.

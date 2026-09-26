@@ -11,12 +11,16 @@
  *   same pair (`pendingCharacterCorrection`) keeps it queued for a later pass;
  * * a server refusal of one intent does not stop the others; a transport failure ends
  *   the pass, since every other send would fail too;
- * * nothing is sent until the review feed reports `ready` (a PC adopted the feature).
+ * * nothing is sent until the review feed reports `ready` (a PC adopted the feature);
+ * * only the current connection's queue is sent (`outboxConnection.ts`), and a decision made
+ *   for another library than the one the feed reports (or refused as `libraryMismatch`) stays
+ *   queued (`suspended`) instead of being sent or dropped.
  *
  * It never enqueues and never schedules itself.
  */
 
-import {api, ApiError} from './transport';
+import {ApiError} from './transport';
+import {apiOn, outboxConnection} from './outboxConnection';
 import {confirmReviewIntent, readReviewIntents, reissueReviewIntent, type ReviewIntent} from './characterReviewOutbox';
 import type {Asset} from './types';
 
@@ -41,7 +45,7 @@ export function reviewPath(params: {target?: string | null; cursor?: string | nu
   return `${REVIEW_PATH}?${query}`;
 }
 
-export type ReviewOutcome = 'confirmed' | 'superseded' | 'deferred' | 'withheld' | 'rejected' | 'failed';
+export type ReviewOutcome = 'confirmed' | 'superseded' | 'deferred' | 'withheld' | 'suspended' | 'rejected' | 'failed';
 export type ReviewReport = {
   outcomes: {key: string; outcome: ReviewOutcome; message?: string}[];
   /** True when no PC has adopted review yet, so everything waits. */
@@ -55,7 +59,6 @@ const REJECTED: Record<string, string> = {
   characterReviewAssetMissing: '자산이 삭제되었거나 아직 서버에 없어 검토를 반영하지 못했습니다.',
   characterReferenceProtected: '기준 이미지로 쓰이는 자산이라 검토를 반영하지 못했습니다.',
   characterReviewOutsideSeries: '이 자산의 시리즈에 속하지 않은 캐릭터라 추가하지 못했습니다.',
-  libraryMismatch: '다른 라이브러리에 연결되어 검토를 반영하지 못했습니다.',
   invalidCharacterReviewDecision: '서버가 이 검토를 받지 않았습니다.',
 };
 
@@ -73,20 +76,23 @@ export function flushCharacterReview(signal?: AbortSignal): Promise<ReviewReport
 
 async function pass(signal?: AbortSignal): Promise<ReviewReport> {
   const report: ReviewReport = {outcomes: [], unsupported: false};
+  const endpoint = outboxConnection();
   const pending = Object.entries(readReviewIntents()).sort(([, a], [, b]) => a.createdAt - b.createdAt);
-  if (!pending.length) return report;
-  const feed = await api<ReviewFeed>(reviewPath({limit: 1}), signal);
+  if (!endpoint || !pending.length) return report;
+  const feed = await apiOn<ReviewFeed>(endpoint, reviewPath({limit: 1}), signal);
   if (feed?.ready !== true) {
     report.unsupported = true;
     report.outcomes = pending.map(([key]) => ({key, outcome: 'withheld' as const}));
     return report;
   }
   for (const [key] of pending) {
-    if (signal?.aborted) break;
+    // The connection changed under this pass: the rest belongs to the old server.
+    if (signal?.aborted || outboxConnection() !== endpoint) break;
     const intent = readReviewIntents()[key];
     if (!intent) continue;
+    if (feed.libraryId && intent.libraryId !== feed.libraryId) { report.outcomes.push({key, outcome: 'suspended'}); continue; }
     try {
-      const outcome = await deliver(intent, 1, signal);
+      const outcome = await deliver(intent, endpoint, 1, signal);
       report.outcomes.push(typeof outcome === 'string' ? {key, outcome} : {key, ...outcome});
     } catch (error) {
       if (!refusedByServer(error)) throw error;
@@ -110,10 +116,10 @@ function codeOf(error: unknown): string | null {
 
 type Delivered = ReviewOutcome | {outcome: 'rejected'; message: string};
 
-async function deliver(intent: ReviewIntent, attempt: number, signal?: AbortSignal): Promise<Delivered> {
+async function deliver(intent: ReviewIntent, endpoint: string, attempt: number, signal?: AbortSignal): Promise<Delivered> {
   inFlight.add(intent.operationId);
   try {
-    const receipt = await api<{operationId?: string}>(REVIEW_DECISIONS_PATH, signal, {
+    const receipt = await apiOn<{operationId?: string}>(endpoint, REVIEW_DECISIONS_PATH, signal, {
       version: 1,
       libraryId: intent.libraryId,
       operationId: intent.operationId,
@@ -130,12 +136,14 @@ async function deliver(intent: ReviewIntent, attempt: number, signal?: AbortSign
     const code = codeOf(error);
     if (code && code in REJECTED) return confirmReviewIntent(intent) ? {outcome: 'rejected', message: REJECTED[code]} : 'superseded';
     if (code === 'pendingCharacterCorrection') return 'deferred';
+    // Another library than the decision's: kept for when the server reports it again.
+    if (code === 'libraryMismatch') return 'suspended';
     if (code === 'operationConflict') {
       const reissued = reissueReviewIntent(intent);
       if (!reissued) return 'superseded';
       if (attempt > 1) return 'deferred';
       inFlight.delete(intent.operationId);
-      return deliver(reissued, attempt + 1, signal);
+      return deliver(reissued, endpoint, attempt + 1, signal);
     }
     throw error;
   } finally {

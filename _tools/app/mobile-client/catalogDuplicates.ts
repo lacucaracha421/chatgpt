@@ -15,9 +15,14 @@
  *   (another device decided first, the candidate is gone) drops it and is reported.
  *
  * The PC applies decisions when it next republishes the catalog; nothing changes locally.
+ *
+ * The queue is stored per connection (`outboxConnection.ts`): only the current server's
+ * decisions are shown and sent, and another server's stay queued until the app connects to
+ * it again. The duplicates contract carries no library identity (a candidate is checked by
+ * its `expectedRevision` on the server that listed it), so the connection is the scope.
  */
 
-import {api} from './transport';
+import {apiOn, connectionOutbox, outboxConnection, outboxKey} from './outboxConnection';
 import {codeOf, refusedByServer} from './similarityReviewDelivery';
 
 export const DUPLICATES_PATH = '/v1/mobile-catalog/duplicates';
@@ -60,7 +65,7 @@ export type DuplicateIntent = {
   notBefore: number;
 };
 
-const INTENTS_KEY = 'lakomics.catalog.duplicates.outbox.v1';
+const INTENTS_KEY = connectionOutbox('lakomics.catalog.duplicates.outbox.v1');
 export const DUPLICATE_OUTBOX_LIMIT = 500;
 export const DUPLICATE_SEND_DELAY_MS = 4000;
 export const DUPLICATE_SAVE_FAILED = '기기에 저장하지 못했습니다.';
@@ -80,9 +85,11 @@ function valid(value: unknown): value is DuplicateIntent {
     && typeof intent.createdAt === 'number' && typeof intent.notBefore === 'number';
 }
 
+/** The current connection's queue (empty while no connection is known). */
 export function readDuplicateIntents(): Record<string, DuplicateIntent> {
   try {
-    const raw = localStorage.getItem(INTENTS_KEY);
+    const key = outboxKey(INTENTS_KEY);
+    const raw = key === null ? null : localStorage.getItem(key);
     const parsed = raw === null ? null : JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return Object.fromEntries(Object.entries(parsed).filter(([, intent]) => valid(intent))) as Record<string, DuplicateIntent>;
@@ -90,7 +97,9 @@ export function readDuplicateIntents(): Record<string, DuplicateIntent> {
 }
 
 function write(intents: Record<string, DuplicateIntent>): boolean {
-  try { localStorage.setItem(INTENTS_KEY, JSON.stringify(intents)); } catch { return false; }
+  const key = outboxKey(INTENTS_KEY);
+  if (key === null) return false;
+  try { localStorage.setItem(key, JSON.stringify(intents)); } catch { return false; }
   try { window.dispatchEvent(new Event(DUPLICATE_REVIEW_EVENT)); } catch { /* No window outside the app. */ }
   return true;
 }
@@ -159,12 +168,16 @@ export function flushDuplicateDecisions(now: () => number = Date.now): Promise<D
 
 async function pass(now: () => number): Promise<DuplicateOutcome[]> {
   const outcomes: DuplicateOutcome[] = [];
+  const endpoint = outboxConnection();
+  if (!endpoint) return outcomes;
   const due = Object.values(readDuplicateIntents()).filter(intent => intent.notBefore <= now())
     .sort((a, b) => a.createdAt - b.createdAt);
   for (const {candidateId} of due) {
+    // The connection changed under this pass: the rest belongs to the old server.
+    if (outboxConnection() !== endpoint) break;
     const intent = readDuplicateIntents()[candidateId];
     if (!intent || intent.notBefore > now()) continue;
-    const outcome = await deliver(intent, 1);
+    const outcome = await deliver(intent, endpoint, 1);
     outcomes.push(outcome);
     try { window.dispatchEvent(new CustomEvent(DUPLICATE_SETTLED_EVENT, {detail: outcome})); } catch { /* No window outside the app. */ }
   }
@@ -177,11 +190,11 @@ function messageOf(error: unknown): string {
   return typeof message === 'string' && message.length <= 180 ? message : '서버가 이 검토를 받지 않았어요.';
 }
 
-async function deliver(intent: DuplicateIntent, attempt: number): Promise<DuplicateOutcome> {
+async function deliver(intent: DuplicateIntent, endpoint: string, attempt: number): Promise<DuplicateOutcome> {
   const candidateId = intent.candidateId;
   inFlight.add(intent.operationId);
   try {
-    const receipt = await api<{operationId?: string}>(DUPLICATE_DECISIONS_PATH, undefined, {
+    const receipt = await apiOn<{operationId?: string}>(endpoint, DUPLICATE_DECISIONS_PATH, undefined, {
       version: 1, operationId: intent.operationId, candidateId, decision: intent.decision,
       expectedRevision: intent.expectedRevision,
     });
@@ -196,7 +209,7 @@ async function deliver(intent: DuplicateIntent, attempt: number): Promise<Duplic
       stored.operationId = crypto.randomUUID();
       if (!write(intents)) throw error;
       inFlight.delete(intent.operationId);
-      return deliver(stored, attempt + 1);
+      return deliver(stored, endpoint, attempt + 1);
     }
     // Another device decided first, the candidate is gone, or the request is invalid:
     // resending cannot succeed, so the intent is dropped and the list is re-read.

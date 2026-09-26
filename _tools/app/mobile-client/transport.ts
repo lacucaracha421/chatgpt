@@ -74,11 +74,15 @@ export function native<T>(operation: string, payload: Record<string, unknown> = 
     catch { pending.delete(id); cleanup(); reject(new Error('앱 연결을 시작하지 못했습니다.')); }
   });
 }
-export function api<T>(path: string, signal?: AbortSignal, body?: unknown, method?: 'GET' | 'POST' | 'PUT', conditional=false): Promise<T> {
+/**
+ * One API call through the native connection. `connection` (an endpoint) makes native refuse
+ * the call unless the app is still configured for that endpoint (see `outboxConnection.ts`).
+ */
+export function api<T>(path: string, signal?: AbortSignal, body?: unknown, method?: 'GET' | 'POST' | 'PUT', conditional=false, connection?: string): Promise<T> {
   // An explicit method only ever refines a body-bearing request; a bodyless call
   // stays a read, so no existing caller can accidentally become a write.
   const resolved = method ?? (body === undefined ? 'GET' : 'POST');
-  return native<T>('api', {path, method: resolved, ...(conditional && resolved === 'GET' ? {conditional:true} : {}), ...(body === undefined ? {} : {body})}, signal);
+  return native<T>('api', {path, method: resolved, ...(conditional && resolved === 'GET' ? {conditional:true} : {}), ...(body === undefined ? {} : {body}), ...(connection ? {connection} : {})}, signal);
 }
 export function errorText(error: unknown): string {
   if (error instanceof DOMException && error.name === 'AbortError') return '';

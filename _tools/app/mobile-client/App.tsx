@@ -48,6 +48,9 @@ import {CharacterBrowser} from './CharacterBrowser';
 import {FaultGame} from './FaultGame';
 import {faultCandidates} from '../src/games/fault/host';
 import {useLevelMotion,useScrollMemory} from './motion';
+import {setOutboxConnection} from './outboxConnection';
+/** The durable outboxes follow the connection before any screen re-renders against it. */
+const adoptConnection=(next:Status)=>{setOutboxConnection(next.configured?next.endpoint:null);return next;};
 
 const HOME: View = {tab:'home', title:'최근 저장'};
 const LIBRARY = LIBRARY_ROOT;
@@ -317,7 +320,7 @@ export function App() {
   }, []);
   // Warm every thumbnail into the native cache while the app is open on an unmetered link.
   useEffect(() => status.configured ? startThumbnailWarm(status.endpoint) : undefined, [status.configured, status.endpoint]);
-  useEffect(() => { void native<Status>('status').then(setStatus).catch(reason => setError(errorText(reason))).finally(() => setChecking(false)); return () => {gate.current.cancel(); secondaryGate.current.cancel();}; }, []);
+  useEffect(() => { void native<Status>('status').then(next=>setStatus(adoptConnection(next))).catch(reason => setError(errorText(reason))).finally(() => setChecking(false)); return () => {gate.current.cancel(); secondaryGate.current.cancel();}; }, []);
   useEffect(() => {
     if (!status.configured) return;
     setRecentFolders(readRecentFolders(status.endpoint));
@@ -481,7 +484,7 @@ export function App() {
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
     setPage({generation:null,items:[],has_more:false,next_cursor:null,view:LIBRARY,cursor:null,previous:[],version:0,restoreScroll:0,filters:{...EMPTY_FILTERS}});
     setArea('assets'); setNotesVisited(false); setCollectionsVisited(false); setCatalogVisited(false); setCharactersVisited(false);
-    setStatus(next);
+    setStatus(adoptConnection(next));
   };
   usePublicationCheck(status.configured&&area==='assets'&&!settings&&!viewer,'/v1/library/characters/status',characterIndex?.revision,(_reply,changed)=>{if(changed)setIndexRevision(n=>n+1);});
   useEffect(()=>{

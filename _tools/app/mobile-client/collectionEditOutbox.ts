@@ -18,7 +18,15 @@
  * Only {@link commitCollectionEdit} enqueues, and only user actions call it. It
  * throws when the device cannot store the edit, so the UI never shows an unsaved
  * edit as queued.
+ *
+ * **Connection and library.** The queue is stored per connection (`outboxConnection.ts`):
+ * only the current server's intents are read, shown and sent. Each intent also records
+ * the library it was composed against, and delivery sends it only while the server
+ * reports that library. An intent from before this identity existed has `libraryId: null`;
+ * delivery binds it once to the library its own connection reports (see there).
  */
+
+import {connectionOutbox, outboxKey} from './outboxConnection';
 
 export type CollectionEditField = 'myScore' | 'showcase' | 'memo' | 'releaseWatch' | 'ownedVolumes';
 /** One edition's owned-volume count; an `expected` count is null while the edition is not tracked. */
@@ -31,6 +39,8 @@ const FIELDS: readonly CollectionEditField[] = ['myScore', 'showcase', 'memo', .
 export const MAX_OWNED_COUNT = 2000;
 
 export type CollectionEditIntent = {
+  /** The library the edit was composed against; null only for an intent queued before this was recorded. */
+  libraryId: string | null;
   collectionId: string;
   field: CollectionEditField;
   value: CollectionEditValue;
@@ -44,7 +54,7 @@ export type CollectionEditIntent = {
   conflict?: {current: CollectionEditValue};
 };
 
-const INTENTS_KEY = 'lakomics.collections.edits.outbox.v1';
+const INTENTS_KEY = connectionOutbox('lakomics.collections.edits.outbox.v1');
 export const SAVE_FAILED = '기기에 저장하지 못했습니다.';
 export const MEMO_LIMIT = 2000;
 /** Fired after the durable queue changes, so every screen re-reads it. */
@@ -95,21 +105,27 @@ export function normalizeCollectionEdit(field: CollectionEditField, value: Colle
 function valid(intent: unknown): intent is CollectionEditIntent {
   const value = intent as CollectionEditIntent | null;
   return !!value && typeof value === 'object' && typeof value.collectionId === 'string' && typeof value.operationId === 'string'
-    && FIELDS.includes(value.field) && Array.isArray(value.own) && (value.field !== 'ownedVolumes' || isOwned(value.value));
+    && FIELDS.includes(value.field) && Array.isArray(value.own) && (value.field !== 'ownedVolumes' || isOwned(value.value))
+    && (value.libraryId === undefined || value.libraryId === null || typeof value.libraryId === 'string');
 }
 
+/** The current connection's queue (empty while no connection is known). */
 export function readCollectionEdits(): Record<string, CollectionEditIntent> {
   try {
-    const raw = localStorage.getItem(INTENTS_KEY);
+    const key = outboxKey(INTENTS_KEY);
+    const raw = key === null ? null : localStorage.getItem(key);
     const parsed = raw === null ? null : JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter(([, intent]) => valid(intent))) as Record<string, CollectionEditIntent>;
+    return Object.fromEntries(Object.entries(parsed).filter(([, intent]) => valid(intent))
+      .map(([key, intent]) => [key, {...intent as CollectionEditIntent, libraryId: (intent as CollectionEditIntent).libraryId ?? null}])) as Record<string, CollectionEditIntent>;
   } catch { return {}; }
 }
 
-/** Persist the queue; false when storage refused it (the stored queue is unchanged). */
+/** Persist the current connection's queue; false when there is none or storage refused it. */
 function write(intents: Record<string, CollectionEditIntent>): boolean {
-  try { localStorage.setItem(INTENTS_KEY, JSON.stringify(intents)); } catch { return false; }
+  const key = outboxKey(INTENTS_KEY);
+  if (key === null) return false;
+  try { localStorage.setItem(key, JSON.stringify(intents)); } catch { return false; }
   try { window.dispatchEvent(new Event(COLLECTION_EDITS_EVENT)); } catch { /* No window outside the app. */ }
   return true;
 }
@@ -119,25 +135,30 @@ export function readCollectionEdit(collectionId: string, field: CollectionEditFi
 }
 
 /**
- * Commit the user's edit. `authoritative` is the server value the screen shows.
- * Returns the queued intent, or null when nothing needs sending (the value is
- * already the server's and no earlier edit is queued). Throws {@link SAVE_FAILED}
- * when the device could not store it.
+ * Commit the user's edit. `authoritative` is the server value the screen shows and
+ * `libraryId` the library the server reported with it. Returns the queued intent, or
+ * null when nothing needs sending (the value is already the server's and no earlier
+ * edit is queued). Throws {@link SAVE_FAILED} when the device could not store it.
  */
 export function commitCollectionEdit(
   collectionId: string,
   field: CollectionEditField,
   value: CollectionEditValue,
   authoritative: CollectionEditValue,
+  libraryId: string,
   operationId: () => string = () => crypto.randomUUID(),
 ): CollectionEditIntent | null {
   const next = normalizeCollectionEdit(field, value);
   const intents = readCollectionEdits();
   const key = collectionEditKey(collectionId, field, next);
-  const previous = intents[key] ?? null;
+  const queued = intents[key] ?? null;
+  // An edit this server queued for another library (its library changed since) is not a
+  // basis for this one: the new action starts from what the screen shows now.
+  const previous = queued && (queued.libraryId === null || queued.libraryId === libraryId) ? queued : null;
   if (!previous && sameEditValue(next, authoritative)) return null;
   if (previous && sameEditValue(previous.value, next) && !previous.conflict) return previous;
   const intent: CollectionEditIntent = {
+    libraryId,
     collectionId,
     field,
     value: next,
@@ -172,6 +193,14 @@ export function rebaseCollectionEdit(
   operationId: () => string = () => crypto.randomUUID(),
 ): CollectionEditIntent | null {
   return replace(expected, stored => { stored.expected = current; delete stored.conflict; stored.operationId = operationId(); });
+}
+
+/**
+ * Bind an intent queued before library identity was recorded to the library its own
+ * connection reports; unchanged when it already has one. Null when replaced or not saved.
+ */
+export function bindCollectionEditLibrary(expected: CollectionEditIntent, libraryId: string): CollectionEditIntent | null {
+  return replace(expected, stored => { stored.libraryId ??= libraryId; });
 }
 
 /** A new operation id for an unchanged payload, after the server refused the old id. */

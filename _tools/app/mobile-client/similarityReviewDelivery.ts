@@ -8,12 +8,16 @@
  * * an `operationConflict` retries once under a new id;
  * * a decision that can never succeed (the pair is gone or changed, another library) is
  *   dropped and reported; a pending decision elsewhere keeps it queued for a later pass;
- * * nothing is sent until the review queue reports `ready` (a PC adopted the feature).
+ * * nothing is sent until the review queue reports `ready` (a PC adopted the feature);
+ * * only the current connection's queue is sent (`outboxConnection.ts`), and a decision made
+ *   for another library than the one the queue reports (or refused as `libraryMismatch`)
+ *   stays queued (`suspended`) instead of being sent or dropped.
  *
  * It never enqueues and never schedules itself.
  */
 
-import {api, ApiError} from './transport';
+import {ApiError} from './transport';
+import {apiOn, outboxConnection} from './outboxConnection';
 import {confirmSimilarityIntent, readSimilarityIntents, reissueSimilarityIntent, type SimilarityChoice, type SimilarityIntent} from './similarityReviewOutbox';
 import type {Asset} from './types';
 
@@ -41,7 +45,7 @@ export function similarityPath(params: {cursor?: string | null; limit?: number})
   return `${SIMILARITY_PATH}?${query}`;
 }
 
-export type SimilarityOutcome = 'confirmed' | 'superseded' | 'deferred' | 'withheld' | 'rejected' | 'failed';
+export type SimilarityOutcome = 'confirmed' | 'superseded' | 'deferred' | 'withheld' | 'suspended' | 'rejected' | 'failed';
 export type SimilarityReport = {
   outcomes: {key: string; outcome: SimilarityOutcome; message?: string}[];
   /** True when no PC has adopted similarity review yet, so everything waits. */
@@ -54,7 +58,6 @@ const REJECTED: Record<string, string> = {
   similarityReviewMissing: 'PC에서 이미 정리된 검토라 반영하지 못했습니다.',
   similarityAssetChanged: '이미지가 바뀌었거나 정리되어 검토를 반영하지 못했습니다.',
   similarityDecisionApplied: 'PC가 이미 반영했습니다. 휴지통에서 복원해 주세요.',
-  libraryMismatch: '다른 라이브러리에 연결되어 검토를 반영하지 못했습니다.',
   invalidSimilarityReviewDecision: '서버가 이 검토를 받지 않았습니다.',
 };
 /** Already true on the server: nothing left to send. */
@@ -76,22 +79,26 @@ export function flushSimilarityReview(signal?: AbortSignal, now: () => number = 
 
 async function pass(signal: AbortSignal | undefined, now: () => number): Promise<SimilarityReport> {
   const report: SimilarityReport = {outcomes: [], unsupported: false};
+  const endpoint = outboxConnection();
+  if (!endpoint) return report;
   const at = now();
   const pending = Object.entries(readSimilarityIntents()).filter(([, intent]) => intent.notBefore <= at)
     .sort(([, a], [, b]) => a.createdAt - b.createdAt || (a.decision === 'withdrawn' ? -1 : 1));
   if (!pending.length) return report;
-  const feed = await api<SimilarityFeed>(similarityPath({limit: 1}), signal);
+  const feed = await apiOn<SimilarityFeed>(endpoint, similarityPath({limit: 1}), signal);
   if (feed?.ready !== true) {
     report.unsupported = true;
     report.outcomes = pending.map(([key]) => ({key, outcome: 'withheld' as const}));
     return report;
   }
   for (const [key] of pending) {
-    if (signal?.aborted) break;
+    // The connection changed under this pass: the rest belongs to the old server.
+    if (signal?.aborted || outboxConnection() !== endpoint) break;
     const intent = readSimilarityIntents()[key];
     if (!intent || intent.notBefore > now()) continue;
+    if (feed.libraryId && intent.libraryId !== feed.libraryId) { report.outcomes.push({key, outcome: 'suspended'}); continue; }
     try {
-      const outcome = await deliver(intent, 1, signal);
+      const outcome = await deliver(intent, endpoint, 1, signal);
       report.outcomes.push(typeof outcome === 'string' ? {key, outcome} : {key, ...outcome});
     } catch (error) {
       if (!refusedByServer(error)) throw error;
@@ -117,10 +124,10 @@ export function codeOf(error: unknown): string | null {
 
 type Delivered = SimilarityOutcome | {outcome: 'rejected'; message: string};
 
-async function deliver(intent: SimilarityIntent, attempt: number, signal?: AbortSignal): Promise<Delivered> {
+async function deliver(intent: SimilarityIntent, endpoint: string, attempt: number, signal?: AbortSignal): Promise<Delivered> {
   inFlight.add(intent.operationId);
   try {
-    const receipt = await api<{operationId?: string}>(SIMILARITY_DECISIONS_PATH, signal, {
+    const receipt = await apiOn<{operationId?: string}>(endpoint, SIMILARITY_DECISIONS_PATH, signal, {
       version: 1,
       libraryId: intent.libraryId,
       operationId: intent.operationId,
@@ -136,12 +143,14 @@ async function deliver(intent: SimilarityIntent, attempt: number, signal?: Abort
     if (code && SETTLED.has(code)) return confirmSimilarityIntent(intent) ? 'confirmed' : 'superseded';
     if (code && code in REJECTED) return confirmSimilarityIntent(intent) ? {outcome: 'rejected', message: REJECTED[code]} : 'superseded';
     if (code && DEFERRED.has(code)) return 'deferred';
+    // Another library than the decision's: kept for when the server reports it again.
+    if (code === 'libraryMismatch') return 'suspended';
     if (code === 'operationConflict') {
       const reissued = reissueSimilarityIntent(intent);
       if (!reissued) return 'superseded';
       if (attempt > 1) return 'deferred';
       inFlight.delete(intent.operationId);
-      return deliver(reissued, attempt + 1, signal);
+      return deliver(reissued, endpoint, attempt + 1, signal);
     }
     throw error;
   } finally {

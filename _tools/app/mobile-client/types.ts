@@ -7,6 +7,10 @@ export interface Asset {
   // is kept distinct from `collected_at` rather than being inferred from it.
   duration_ms?: number | null; source_published_at?: string | null;
   classification_ids?: string[]; thumbnail_available?: boolean;
+  // An opaque token that changes whenever the Asset's thumbnail object changes. Native keys
+  // its disk cache and local URL by it, so a regenerated thumbnail is not served from the
+  // retained old copy. Absent from servers that do not send it (then the cache keys by id).
+  thumbnail_revision?: string | null;
   pending?: boolean; preview?: string; ratio?: number;
 }
 export interface Classification { id: string; name: string; parent_id: string | null; asset_count: number; color_key?: string; icon_key?: string }

@@ -1,4 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {outboxKey,setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
 vi.mock('./transport',async()=>{
@@ -25,12 +27,12 @@ const sent=()=>mocks.api.mock.calls.filter(([path])=>path===REVIEW_DECISIONS_PAT
 const decide=(assetId:string,decision:'accepted'|'rejected'='accepted',targetId='c')=>
   commitReviewDecision({libraryId:LIBRARY,targetId,assetId,decision,origin:'feed',basis:'b1'});
 
-beforeEach(()=>{localStorage.clear();mocks.api.mockReset();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();});
 
 describe('character review outbox',()=>{
   it('keeps one durable intent per pair and replaces it under a new id',()=>{
     const first=decide('a');
-    expect(JSON.parse(localStorage.getItem('lakomics.characters.review.outbox.v1')!)['c:a'].operationId).toBe(first.operationId);
+    expect(JSON.parse(localStorage.getItem(outboxKey('lakomics.characters.review.outbox.v1')!)!)['c:a'].operationId).toBe(first.operationId);
     const second=decide('a','rejected');
     expect(second.operationId).not.toBe(first.operationId);
     expect(Object.keys(readReviewIntents())).toEqual(['c:a']);
@@ -53,7 +55,7 @@ describe('character review outbox',()=>{
   });
   it('refuses more than the outbox limit of waiting pairs',()=>{
     const intents=Object.fromEntries(Array.from({length:REVIEW_OUTBOX_LIMIT},(_,i)=>[`c:x${i}`,{libraryId:LIBRARY,targetId:'c',assetId:`x${i}`,decision:'accepted',origin:'feed',basis:null,operationId:`op${i}`,createdAt:i}]));
-    localStorage.setItem('lakomics.characters.review.outbox.v1',JSON.stringify(intents));
+    localStorage.setItem(outboxKey('lakomics.characters.review.outbox.v1')!,JSON.stringify(intents));
     expect(()=>decide('new')).toThrow(REVIEW_OUTBOX_FULL);
     expect(decide('x3','rejected').decision).toBe('rejected');
   });
@@ -97,5 +99,27 @@ describe('character review delivery',()=>{
     expect(byKey['c:reused'].outcome).toBe('confirmed');
     expect(Object.keys(readReviewIntents())).toEqual(['c:excluded']);
     expect(sent().filter(body=>body.assetId==='reused')).toHaveLength(2);
+  });
+});
+
+describe('character review connection identity',()=>{
+  it('keeps A\'s decisions away from B, keeps another library\'s queued, and sends them back on A',async()=>{
+    const intent=decide('a');
+    setOutboxConnection('https://b.example');
+    install(()=>{throw new Error('must not send');});
+    expect(readReviewIntents()).toEqual({});
+    expect(await flushCharacterReview()).toEqual({outcomes:[],unsupported:false});
+    expect(mocks.api).not.toHaveBeenCalled();
+    setOutboxConnection(CONNECTION);
+    // A reports another library now: kept, not sent under it and not dropped.
+    install(()=>{throw new Error('must not send');},{...ready,libraryId:'f'.repeat(32)});
+    expect((await flushCharacterReview()).outcomes).toEqual([{key:'c:a',outcome:'suspended'}]);
+    // The server refusing the library is not a drop either.
+    install(()=>refused('libraryMismatch'));
+    expect((await flushCharacterReview()).outcomes).toEqual([{key:'c:a',outcome:'suspended'}]);
+    expect(readReviewIntents()['c:a'].operationId).toBe(intent.operationId);
+    install(body=>({operationId:body.operationId}));
+    expect((await flushCharacterReview()).outcomes).toEqual([{key:'c:a',outcome:'confirmed'}]);
+    expect(mocks.api.mock.calls.every(call=>call[5]===CONNECTION)).toBe(true);
   });
 });

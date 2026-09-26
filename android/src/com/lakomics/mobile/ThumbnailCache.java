@@ -35,6 +35,23 @@ final class ThumbnailCache {
   byte[] digest=MessageDigest.getInstance("SHA-256").digest(identity.getBytes(StandardCharsets.UTF_8));
   StringBuilder result=new StringBuilder();for(byte b:digest)result.append(String.format(Locale.ROOT,"%02x",b&255));return result.toString();
  }
+ /** An opaque server media revision (e.g. `thumbnail_revision`); empty when the server sends none. */
+ static boolean validRevision(String revision){return revision!=null && (revision.isEmpty() || revision.matches("[A-Za-z0-9._-]{1,128}"));}
+ /**
+  * The cache key of one Asset's media on one account (`endpoint\ntoken`).
+  *
+  * A thumbnail with a revision is its own entry, so a regenerated thumbnail is fetched
+  * again and served under a new URL instead of the retained old one. Without a revision
+  * (a server that sends none, DocumentsUI, Photo Picker) the key is the pre-revision key,
+  * so existing entries stay valid.
+  */
+ static String mediaKey(String account,String id,String variant,String revision)throws Exception{
+  if(!validRevision(revision))throw new IllegalArgumentException("Invalid media revision");
+  String value=variant.equals("thumbnail")?(revision.isEmpty()?id:id+"\nthumbnail\n"+revision):id+"\n"+variant;
+  return key(account+"\n"+value);
+ }
+ /** The WebView URL path of one cached object: a new key or generation is a new URL. */
+ static String localPath(long generation,String key){return "https://app.lakomics.local/media-cache/"+generation+"/"+key;}
  synchronized long generation(){return generation;}
  // A marker in the disposable directory survives process restarts, but not cache
  // clearing (including Android removing the directory). Never persist credentials.

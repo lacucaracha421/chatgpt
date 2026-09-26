@@ -12,6 +12,7 @@ import {usePendingRetry} from './useBookmarks';
 import {flushCollectionEdits, personalEditLibrary, trackingEditAllowed, type CollectionEditStatus} from './collectionEditDelivery';
 import {
   COLLECTION_EDITS_EVENT,
+  SAVE_FAILED,
   type CollectionEditField,
   type CollectionEditValue,
   collectionEditKey,
@@ -38,6 +39,8 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
    */
   const [confirmed, setConfirmed] = useState<Record<string, {value: CollectionEditValue; expected: CollectionEditValue}>>({});
   const mounted = useRef(true);
+  /** The library the Collection `/status` check last reported; edits are queued under it. */
+  const library = useRef<string | null>(null);
   const settled = useRef(onSettled);
   settled.current = onSettled;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -78,13 +81,15 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
 
   /** Take the capability from the Collection `/status` check the screen already runs. */
   const observeStatus = useCallback((reply: unknown) => {
-    setSupported(personalEditLibrary(reply as CollectionEditStatus) !== null);
+    library.current = personalEditLibrary(reply as CollectionEditStatus);
+    setSupported(library.current !== null);
     setTrackingSupported(trackingEditAllowed(reply as CollectionEditStatus));
   }, []);
 
   const edit = useCallback((collectionId: string, field: CollectionEditField, value: CollectionEditValue, authoritative: CollectionEditValue) => {
     try {
-      commitCollectionEdit(collectionId, field, value, authoritative);
+      if (!library.current) throw new Error(SAVE_FAILED);
+      commitCollectionEdit(collectionId, field, value, authoritative, library.current);
     } catch (error) {
       // Not stored, so not queued: say so instead of showing it as 전송 대기.
       setNotice(errorText(error));

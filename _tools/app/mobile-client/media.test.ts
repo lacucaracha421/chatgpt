@@ -144,3 +144,20 @@ it('bounds visible ticket subscriptions to 128 and each native batch to 50',asyn
     expect(new Set(mocks.native.mock.calls.flatMap(([,payload])=>payload.assetIds)).size).toBe(128);
   }finally{controller.abort();vi.useRealTimers();}
 });
+
+it('treats a new thumbnail revision of the same asset as a different ticket and URL',async()=>{
+  mocks.native.mockImplementation(async(_op:string,payload:{assetId:string;revision?:string})=>({url:`https://app.lakomics.local/media-cache/0/${payload.revision ?? 'none'}`,expires_in:240}));
+  const before={id:'a',kind:'image',thumbnail_revision:'r1'};
+  const first=await mediaTicket(before,'thumbnail');
+  expect(await mediaTicket(before,'thumbnail')).toBe(first);
+  const after=await mediaTicket({...before,thumbnail_revision:'r2'},'thumbnail');
+  expect(after.url).not.toBe(first.url);
+  expect(mocks.native.mock.calls.map(([op,payload])=>[op,payload])).toEqual([
+    ['thumbnail',{assetId:'a',revision:'r1'}],
+    ['thumbnail',{assetId:'a',revision:'r2'}],
+  ]);
+  // A server without revisions keeps today's request; an unusable token is not sent to native.
+  await mediaTicket({id:'b',kind:'image'},'thumbnail');
+  await mediaTicket({id:'c',kind:'image',thumbnail_revision:'../x'},'thumbnail');
+  expect(mocks.native.mock.calls.slice(2).map(([,payload])=>payload)).toEqual([{assetId:'b'},{assetId:'c'}]);
+});

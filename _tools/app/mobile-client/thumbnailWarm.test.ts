@@ -222,3 +222,14 @@ it('does not save completion after its owner stops during a cache probe',async()
   await start();expect(downloads()).toEqual([]);
   expect(localStorage.getItem('lakomics.mobile.thumbnailWarm')).toBeNull();
 });
+
+it('probes the native cache with each thumbnail revision, the same key the tiles load', async () => {
+  const revised = {first:{items:[{id:'a',kind:'image',thumbnail_revision:'r2'},asset('b')],has_more:false,next_cursor:null}};
+  mocks.api.mockImplementation(async () => revised.first);
+  stop = startThumbnailWarm('https://server.invalid');
+  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.waitFor(() => expect(warmState().status).toBe('done'));
+  const probes = mocks.native.mock.calls.filter(([op]) => op === 'thumbnailsCached').map(([, payload]) => payload);
+  expect(probes[0]).toEqual({assetIds:['a','b'], revisions:['r2','']});
+  expect(mocks.native.mock.calls.filter(([op]) => op === 'thumbnail').map(([, payload]) => payload)).toEqual([{assetId:'a',revision:'r2'},{assetId:'b'}]);
+});

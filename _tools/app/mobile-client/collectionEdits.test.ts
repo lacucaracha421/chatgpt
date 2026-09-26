@@ -1,4 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {outboxKey,setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
 vi.mock('./transport',async()=>{
@@ -25,27 +27,27 @@ function install(command:(body:Body)=>unknown,status:unknown=ready){
 const sent=()=>mocks.api.mock.calls.filter(([path])=>path===PERSONAL_EDIT_PATH).map(([, ,body])=>body as Body);
 const receipt=(body:Body,changed=true)=>({version:1,operationId:body.operationId,collectionId:body.collectionId,field:body.field,value:body.value,sequence:changed?1:null,revision:'r2',changed});
 
-beforeEach(()=>{localStorage.clear();mocks.api.mockReset();vi.restoreAllMocks();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();vi.restoreAllMocks();});
 
 describe('collection edit outbox',()=>{
   it('persists one intent per field across a reload and replaces it with a new id',()=>{
-    const first=commitCollectionEdit('a','myScore',4.5,3)!;
-    commitCollectionEdit('a','memo','메모',null);
+    const first=commitCollectionEdit('a','myScore',4.5,3,LIBRARY)!;
+    commitCollectionEdit('a','memo','메모',null,LIBRARY);
     // A reload reads the same durable rows.
-    expect(JSON.parse(localStorage.getItem('lakomics.collections.edits.outbox.v1')!)['a:myScore'].operationId).toBe(first.operationId);
+    expect(JSON.parse(localStorage.getItem(outboxKey('lakomics.collections.edits.outbox.v1')!)!)['a:myScore'].operationId).toBe(first.operationId);
     expect(Object.keys(readCollectionEdits()).sort()).toEqual(['a:memo','a:myScore']);
-    const second=commitCollectionEdit('a','myScore',2,4.5)!;
+    const second=commitCollectionEdit('a','myScore',2,4.5,LIBRARY)!;
     expect(second.operationId).not.toBe(first.operationId);
     // Still composed against the server value, remembering the replaced value as its own.
     expect([second.expected,second.own]).toEqual([3,[4.5]]);
     expect(Object.keys(readCollectionEdits())).toHaveLength(2);
     // Repeating the queued value keeps the operation id.
-    expect(commitCollectionEdit('a','myScore',2,3)!.operationId).toBe(second.operationId);
+    expect(commitCollectionEdit('a','myScore',2,3,LIBRARY)!.operationId).toBe(second.operationId);
     expect(visibleCollectionEdit('a','myScore',3)).toEqual({value:2,pending:true,conflict:false});
   });
   it('does not queue the value the server already has',()=>{
-    expect(commitCollectionEdit('a','showcase',true,true)).toBeNull();
-    expect(commitCollectionEdit('a','memo','  ',null)).toBeNull();
+    expect(commitCollectionEdit('a','showcase',true,true,LIBRARY)).toBeNull();
+    expect(commitCollectionEdit('a','memo','  ',null,LIBRARY)).toBeNull();
     expect(readCollectionEdits()).toEqual({});
   });
   it('validates like the PC',()=>{
@@ -59,14 +61,14 @@ describe('collection edit outbox',()=>{
     // Counted in characters: 2000 emoji are 4000 UTF-16 units but still allowed.
     expect(()=>normalizeCollectionEdit('memo','😀'.repeat(2000))).not.toThrow();
     expect(()=>normalizeCollectionEdit('memo','가'.repeat(2001))).toThrow('2,000자');
-    expect(()=>commitCollectionEdit('a','myScore',7,3)).toThrow();
+    expect(()=>commitCollectionEdit('a','myScore',7,3,LIBRARY)).toThrow();
     expect(readCollectionEdits()).toEqual({});
   });
   it('reports an edit the device could not store instead of pretending it is queued',()=>{
-    const first=commitCollectionEdit('a','myScore',4,3)!;
+    const first=commitCollectionEdit('a','myScore',4,3,LIBRARY)!;
     vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('full','QuotaExceededError');});
-    expect(()=>commitCollectionEdit('a','myScore',5,3)).toThrow(SAVE_FAILED);
-    expect(()=>commitCollectionEdit('b','memo','메모',null)).toThrow(SAVE_FAILED);
+    expect(()=>commitCollectionEdit('a','myScore',5,3,LIBRARY)).toThrow(SAVE_FAILED);
+    expect(()=>commitCollectionEdit('b','memo','메모',null,LIBRARY)).toThrow(SAVE_FAILED);
     // The stored queue is unchanged.
     expect(readCollectionEdits()).toEqual({'a:myScore':first});
   });
@@ -74,7 +76,7 @@ describe('collection edit outbox',()=>{
 
 describe('collection edit delivery',()=>{
   it('withholds every send until the server advertises the capability',async()=>{
-    commitCollectionEdit('a','myScore',4,3);
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);
     install(()=>{throw new Error('must not send');},{revision:'r1',capabilities:{collectionPersonalEdit:false}});
     const report=await flushCollectionEdits();
     expect(report.unsupported).toBe(true);
@@ -90,7 +92,7 @@ describe('collection edit delivery',()=>{
     expect(mocks.api).not.toHaveBeenCalled();
   });
   it('removes the intent on receipt and treats changed:false as confirmation',async()=>{
-    commitCollectionEdit('a','myScore',4,3);commitCollectionEdit('b','showcase',true,false);
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);commitCollectionEdit('b','showcase',true,false,LIBRARY);
     install(body=>receipt(body,body.collectionId==='a'));
     const report=await flushCollectionEdits();
     expect(report.outcomes.map(o=>o.outcome)).toEqual(['confirmed','already-current']);
@@ -98,7 +100,7 @@ describe('collection edit delivery',()=>{
     expect(readCollectionEdits()).toEqual({});
   });
   it('retries a lost response with the same operation id',async()=>{
-    const intent=commitCollectionEdit('a','memo','메모',null)!;
+    const intent=commitCollectionEdit('a','memo','메모',null,LIBRARY)!;
     install(()=>new Error('연결 시간이 초과되었습니다.'));
     await expect(flushCollectionEdits()).rejects.toThrow('연결 시간');
     expect(readCollectionEdit('a','memo')?.operationId).toBe(intent.operationId);
@@ -108,15 +110,15 @@ describe('collection edit delivery',()=>{
     expect(readCollectionEdits()).toEqual({});
   });
   it('ignores a late receipt for an intent a newer action replaced',async()=>{
-    commitCollectionEdit('a','myScore',4,3);
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);
     let replacement='';
-    install(body=>{if(!replacement)replacement=commitCollectionEdit('a','myScore',5,3)!.operationId;return receipt(body);});
+    install(body=>{if(!replacement)replacement=commitCollectionEdit('a','myScore',5,3,LIBRARY)!.operationId;return receipt(body);});
     const report=await flushCollectionEdits();
     expect(report.outcomes[0].outcome).toBe('superseded');
     expect(readCollectionEdit('a','myScore')?.operationId).toBe(replacement);
   });
   it('rebases a rating once onto the current value under a new id',async()=>{
-    const intent=commitCollectionEdit('a','myScore',4,3)!;
+    const intent=commitCollectionEdit('a','myScore',4,3,LIBRARY)!;
     install(body=>body.expected===3?conflict(2.5):receipt(body));
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('confirmed');
     // A changed payload never reuses an operation id.
@@ -124,7 +126,7 @@ describe('collection edit delivery',()=>{
     expect([first.operationId,first.expected,second.expected]).toEqual([intent.operationId,3,2.5]);
     expect(second.operationId).not.toBe(intent.operationId);
     // A second consecutive conflict leaves the intent queued for a later pass.
-    commitCollectionEdit('b','myScore',4,3);
+    commitCollectionEdit('b','myScore',4,3,LIBRARY);
     mocks.api.mockClear();
     let calls=0;install(()=>conflict(++calls===1?2:1));
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('deferred');
@@ -132,13 +134,13 @@ describe('collection edit delivery',()=>{
     expect(sent()).toHaveLength(2);
   });
   it('completes when the conflict already holds the wanted value',async()=>{
-    commitCollectionEdit('a','showcase',true,false);
+    commitCollectionEdit('a','showcase',true,false,LIBRARY);
     install(()=>conflict(true));
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('already-current');
     expect(readCollectionEdits()).toEqual({});
   });
   it('parks a memo conflict for the user, then overwrites or discards',async()=>{
-    const intent=commitCollectionEdit('a','memo','내 메모','예전')!;
+    const intent=commitCollectionEdit('a','memo','내 메모','예전',LIBRARY)!;
     install(body=>body.expected==='예전'?conflict('PC 메모'):receipt(body));
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('conflict');
     expect(visibleCollectionEdit('a','memo','PC 메모')).toEqual({value:'내 메모',pending:true,conflict:true});
@@ -150,28 +152,28 @@ describe('collection edit delivery',()=>{
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('confirmed');
     expect(sent().at(-1)).toMatchObject({expected:'PC 메모',value:'내 메모'});
     expect(sent().at(-1)!.operationId).not.toBe(intent.operationId);
-    commitCollectionEdit('b','memo','초안',null);
+    commitCollectionEdit('b','memo','초안',null,LIBRARY);
     install(()=>conflict('PC'));
     await flushCollectionEdits();
     expect(resolveCollectionEditConflict('b','memo','discard')).toBeNull();
     expect(readCollectionEdits()).toEqual({});
   });
   it('rebases a memo silently when the server holds this device\'s own earlier value',async()=>{
-    commitCollectionEdit('a','memo','첫 초안',null);
-    commitCollectionEdit('a','memo','둘째 초안',null);
+    commitCollectionEdit('a','memo','첫 초안',null,LIBRARY);
+    commitCollectionEdit('a','memo','둘째 초안',null,LIBRARY);
     // The first draft was accepted but its response was lost before the replacement.
     install(body=>body.expected===null?conflict('첫 초안'):receipt(body));
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('confirmed');
     expect(sent().at(-1)).toMatchObject({value:'둘째 초안',expected:'첫 초안'});
   });
   it('drops an edit for a deleted Collection with a message but keeps it on other failures',async()=>{
-    commitCollectionEdit('gone','myScore',4,3);
+    commitCollectionEdit('gone','myScore',4,3,LIBRARY);
     install(()=>new ApiError('없음',404,{detail:{code:'collectionNotFound',message:'m'}}));
     const [dropped]=(await flushCollectionEdits()).outcomes;
     expect(dropped.outcome).toBe('rejected');
     expect(dropped.message).toContain('PC에서 삭제');
     expect(readCollectionEdits()).toEqual({});
-    commitCollectionEdit('a','myScore',4,3);
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);
     const refused=new ApiError('다른 라이브러리',409,{detail:{code:'libraryMismatch',message:'m'}});
     install(()=>refused);
     const report=await flushCollectionEdits();
@@ -180,21 +182,21 @@ describe('collection edit delivery',()=>{
     expect(readCollectionEdit('a','myScore')).not.toBeNull();
   });
   it('keeps sending the other intents after one is refused',async()=>{
-    commitCollectionEdit('a','myScore',4,3);
-    commitCollectionEdit('b','showcase',true,false);
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);
+    commitCollectionEdit('b','showcase',true,false,LIBRARY);
     install(body=>body.collectionId==='a'?new ApiError('x',409,{detail:{code:'libraryMismatch',message:'m'}}):receipt(body));
     const report=await flushCollectionEdits();
     expect(report.outcomes.map(o=>o.outcome)).toEqual(['failed','confirmed']);
     expect(Object.keys(readCollectionEdits())).toEqual(['a:myScore']);
     // A transport failure still ends the pass.
-    commitCollectionEdit('b','showcase',false,true);
+    commitCollectionEdit('b','showcase',false,true,LIBRARY);
     install(()=>new Error('연결 시간이 초과되었습니다.'));
     await expect(flushCollectionEdits()).rejects.toThrow('연결 시간');
     // 'a' (older) failed in transport, so the new 'b' edit was not sent in that pass.
     expect(sent().filter(body=>body.collectionId==='b').map(body=>body.value)).toEqual([true]);
   });
   it('retries once under a new id when the server reports operationConflict',async()=>{
-    const intent=commitCollectionEdit('a','myScore',4,3)!;
+    const intent=commitCollectionEdit('a','myScore',4,3,LIBRARY)!;
     const reused=new ApiError('x',409,{detail:{code:'operationConflict',message:'m'}});
     install(body=>body.operationId===intent.operationId?reused:receipt(body));
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('confirmed');
@@ -204,11 +206,75 @@ describe('collection edit delivery',()=>{
     expect(second.operationId).not.toBe(intent.operationId);
     expect(readCollectionEdits()).toEqual({});
     // Only once per pass: a second refusal waits under the newest id.
-    commitCollectionEdit('b','myScore',4,3);
+    commitCollectionEdit('b','myScore',4,3,LIBRARY);
     mocks.api.mockClear();
     install(()=>reused);
     expect((await flushCollectionEdits()).outcomes[0].outcome).toBe('deferred');
     expect(sent()).toHaveLength(2);
     expect(readCollectionEdit('b','myScore')?.operationId).not.toBe(sent()[1].operationId);
+  });
+});
+
+describe('collection edit connection identity',()=>{
+  const B='https://b.example';
+  it('never delivers an edit queued on server A to server B, and delivers it on returning to A',async()=>{
+    const intent=commitCollectionEdit('a','myScore',4,3,LIBRARY)!;
+    // Server B even reports the same library: the connection alone keeps A's edit away.
+    setOutboxConnection(B);
+    install(receipt);
+    expect(readCollectionEdits()).toEqual({});
+    expect(visibleCollectionEdit('a','myScore',3)).toEqual({value:3,pending:false,conflict:false});
+    expect(await flushCollectionEdits()).toEqual({outcomes:[],unsupported:false});
+    expect(mocks.api).not.toHaveBeenCalled();
+    // An edit made on B stays B's.
+    const onB=commitCollectionEdit('b','showcase',true,false,LIBRARY)!;
+    setOutboxConnection(CONNECTION);
+    expect(Object.keys(readCollectionEdits())).toEqual(['a:myScore']);
+    expect((await flushCollectionEdits()).outcomes).toEqual([{key:'a:myScore',outcome:'confirmed'}]);
+    expect(sent()).toEqual([expect.objectContaining({operationId:intent.operationId,libraryId:LIBRARY,collectionId:'a'})]);
+    // Every call named connection A, so native refuses it once the app points elsewhere.
+    expect(mocks.api.mock.calls.every(call=>call[5]===CONNECTION)).toBe(true);
+    setOutboxConnection(B);
+    expect(readCollectionEdits()['b:showcase'].operationId).toBe(onB.operationId);
+  });
+  it('stops a pass when the connection changes under it',async()=>{
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);
+    commitCollectionEdit('b','myScore',2,3,LIBRARY);
+    const first=readCollectionEdit('a','myScore')!;
+    install(body=>{setOutboxConnection(B);return receipt(body);});
+    const report=await flushCollectionEdits();
+    // The answer arrived after the switch: A's row is not touched from B, so it is resent
+    // later under the same operation id (the server answers from its receipt).
+    expect(report.outcomes).toEqual([{key:'a:myScore',outcome:'superseded'}]);
+    expect(sent()).toHaveLength(1);
+    setOutboxConnection(CONNECTION);
+    expect(Object.keys(readCollectionEdits()).sort()).toEqual(['a:myScore','b:myScore']);
+    expect(readCollectionEdit('a','myScore')?.operationId).toBe(first.operationId);
+  });
+  it('keeps an edit for another library queued instead of sending it under the current library',async()=>{
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);
+    install(()=>{throw new Error('must not send');},{...ready,libraryId:'f'.repeat(32)});
+    expect((await flushCollectionEdits()).outcomes).toEqual([{key:'a:myScore',outcome:'suspended'}]);
+    expect(sent()).toEqual([]);
+    expect(readCollectionEdit('a','myScore')?.libraryId).toBe(LIBRARY);
+    // The library comes back: it is sent under its own library.
+    install(receipt);
+    expect((await flushCollectionEdits()).outcomes).toEqual([{key:'a:myScore',outcome:'confirmed'}]);
+  });
+  it('moves the pre-upgrade queue to the first known connection and binds its library once',async()=>{
+    setOutboxConnection(null);
+    localStorage.setItem('lakomics.collections.edits.outbox.v1',JSON.stringify({'a:myScore':{collectionId:'a',field:'myScore',value:4,expected:3,operationId:'op-legacy',createdAt:1,own:[]}}));
+    expect(readCollectionEdits()).toEqual({});
+    expect(()=>commitCollectionEdit('b','myScore',4,3,LIBRARY)).toThrow(SAVE_FAILED);
+    setOutboxConnection(CONNECTION);
+    expect(localStorage.getItem('lakomics.collections.edits.outbox.v1')).toBeNull();
+    expect(readCollectionEdit('a','myScore')).toMatchObject({operationId:'op-legacy',libraryId:null});
+    // Another server never sees it.
+    setOutboxConnection(B);
+    expect(readCollectionEdits()).toEqual({});
+    setOutboxConnection(CONNECTION);
+    install(receipt);
+    expect((await flushCollectionEdits()).outcomes).toEqual([{key:'a:myScore',outcome:'confirmed'}]);
+    expect(sent()).toEqual([expect.objectContaining({operationId:'op-legacy',libraryId:LIBRARY})]);
   });
 });

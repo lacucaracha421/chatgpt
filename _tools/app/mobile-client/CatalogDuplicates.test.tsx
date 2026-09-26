@@ -1,5 +1,7 @@
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:vi.fn(),
@@ -34,7 +36,7 @@ function install(){
 const mount=()=>{const onClose=vi.fn();render(<CatalogDuplicates context="ctx" onClose={onClose}/>);return onClose;};
 const posted=()=>mocks.api.mock.calls.filter(([path])=>path===DUPLICATE_DECISIONS_PATH).map(([, ,body])=>body as Body);
 
-beforeEach(()=>{localStorage.clear();mocks.api.mockReset();decide=body=>({operationId:body.operationId});lists={undecided:feed([]),decided:feed([])};install();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();decide=body=>({operationId:body.operationId});lists={undecided:feed([]),decided:feed([])};install();});
 afterEach(()=>{cleanup();localStorage.clear();});
 
 describe('catalog duplicate review',()=>{

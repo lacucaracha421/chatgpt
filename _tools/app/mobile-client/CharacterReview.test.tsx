@@ -1,5 +1,7 @@
 import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 import type {Asset} from './types';
 
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
@@ -41,7 +43,7 @@ const candidate=()=>screen.getByLabelText('검토 후보');
 const swipe=(dx:number,dy=0)=>{const card=candidate();fireEvent.pointerDown(card,{pointerId:1,button:0,clientX:500,clientY:500});fireEvent.pointerMove(card,{pointerId:1,clientX:500+dx,clientY:500+dy});fireEvent.pointerUp(card,{pointerId:1,clientX:500+dx,clientY:500+dy});};
 
 afterEach(()=>{cleanup();localStorage.clear();});
-beforeEach(()=>{localStorage.clear();mocks.api.mockReset();vi.mocked(warmThumbnail).mockClear();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();vi.mocked(warmThumbnail).mockClear();});
 
 describe('character review screen',()=>{
   it('shows the candidate with its character, source and references, and warms the next ones',async()=>{

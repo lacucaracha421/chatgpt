@@ -12,6 +12,7 @@ vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,o
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 import {ApiError} from './transport';
+import {outboxConnection,setOutboxConnection} from './outboxConnection';
 const a=[{id:'a1',kind:'image'},{id:'a2',kind:'image'}],b=[{id:'b1',kind:'image'},{id:'b2',kind:'image'}];
 async function openFolder(name:string){
   if(!screen.queryByRole('button',{name})){
@@ -32,6 +33,11 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+it('points the durable outboxes at the configured connection as soon as the status arrives',async()=>{
+  setOutboxConnection(null);
+  render(<App/>);
+  await waitFor(()=>expect(outboxConnection()).toBe('https://example.invalid'));
+});
 it('opens character browsing inside Library and uses Android back for its parent',async()=>{
   const original=mocks.api.getMockImplementation()!;
   const revision='a'.repeat(64);

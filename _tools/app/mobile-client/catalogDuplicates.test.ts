@@ -1,4 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
 vi.mock('./transport',async()=>{
@@ -25,7 +27,7 @@ const later=()=>Date.now()+DUPLICATE_SEND_DELAY_MS+1;
 let ids=0;
 const nextId=()=>`00000000-0000-4000-8000-${String(++ids).padStart(12,'0')}`;
 
-beforeEach(()=>{localStorage.clear();mocks.api.mockReset();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();});
 
 describe('duplicate review outbox',()=>{
   it('builds review list paths with state, limit and cursor',()=>{
@@ -97,5 +99,30 @@ describe('duplicate review delivery',()=>{
     expect(sent()).toHaveLength(2);
     expect(sent()[1].operationId).not.toBe(sent()[0].operationId);
     expect(outcomes).toEqual([{candidateId:C1,outcome:'confirmed'}]);
+  });
+});
+
+describe('duplicate review connection identity',()=>{
+  it('never sends a decision queued on server A to server B, and sends it on returning to A',async()=>{
+    const intent=commitDuplicateDecision(undecided(),'keepBoth',nextId)!;
+    setOutboxConnection('https://b.example');
+    install(()=>{throw new Error('must not send');});
+    expect(readDuplicateIntents()).toEqual({});
+    expect(await flushDuplicateDecisions(later)).toEqual([]);
+    expect(mocks.api).not.toHaveBeenCalled();
+    setOutboxConnection(CONNECTION);
+    install(body=>({operationId:body.operationId}));
+    expect(await flushDuplicateDecisions(later)).toEqual([{candidateId:C1,outcome:'confirmed'}]);
+    expect(sent()).toEqual([expect.objectContaining({operationId:intent.operationId,candidateId:C1})]);
+    expect(mocks.api.mock.calls.every(call=>call[5]===CONNECTION)).toBe(true);
+  });
+  it('moves the pre-upgrade queue to the first known connection',async()=>{
+    setOutboxConnection(null);
+    const legacy={candidateId:C1,decision:'keepBoth',base:null,expectedRevision:0,operationId:nextId(),createdAt:1,notBefore:1};
+    localStorage.setItem('lakomics.catalog.duplicates.outbox.v1',JSON.stringify({[C1]:legacy}));
+    setOutboxConnection(CONNECTION);
+    expect(readDuplicateIntents()).toEqual({[C1]:legacy});
+    setOutboxConnection('https://b.example');
+    expect(readDuplicateIntents()).toEqual({});
   });
 });

@@ -4,7 +4,7 @@ import {api,native} from './transport';
 import {normalizePage, pagePath} from './model';
 import {EMPTY_FILTERS} from './assetFilters';
 import {ALL_ASSETS} from './libraryModel';
-import {invalidateTicket, warmThumbnail} from './media';
+import {invalidateTicket, thumbnailRevision, warmThumbnail} from './media';
 import type {Asset, Page} from './types';
 
 /**
@@ -66,7 +66,8 @@ function atOrBelow(asset:Asset, boundary:Mark) {
   return at !== null && boundary.at !== null && (at < boundary.at || (at === boundary.at && asset.id < boundary.id));
 }
 async function probe(items:Asset[], signal:AbortSignal) {
-  const result = await native<Cached>('thumbnailsCached', {assetIds:items.map(asset => asset.id)}, signal);
+  // Probe the same entries the tiles load: a thumbnail's revision is part of its cache key.
+  const result = await native<Cached>('thumbnailsCached', {assetIds:items.map(asset => asset.id), revisions:items.map(asset => thumbnailRevision(asset) ?? '')}, signal);
   if (!result.generation || !Array.isArray(result.cachedIds)) throw new Error('Invalid thumbnail cache probe');
   return result;
 }

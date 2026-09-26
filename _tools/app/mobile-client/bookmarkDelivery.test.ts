@@ -1,4 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {outboxKey,setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 
 const mocks=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',async()=>{
@@ -51,7 +53,7 @@ function sent(){
   return mocks.native.mock.calls.filter(([operation])=>operation==='bookmarkCommand').map(([,payload])=>payload as Record<string,unknown>);
 }
 
-beforeEach(()=>{localStorage.clear();mocks.native.mockReset();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.native.mockReset();});
 
 describe('mobile bookmark delivery',()=>{
   it('confirms a successful add and records the authoritative revision',async()=>{
@@ -228,7 +230,7 @@ describe('mobile bookmark delivery',()=>{
     const intents=readIntents();
     intents['kHentai:1'].createdAt=1000;
     intents['kHentai:2']={...first,providerWorkId:'2',operationId:crypto.randomUUID(),createdAt:500};
-    localStorage.setItem('lakomics.catalog.bookmarks.outbox.v1',JSON.stringify(intents));
+    localStorage.setItem(outboxKey('lakomics.catalog.bookmarks.outbox.v1')!,JSON.stringify(intents));
     install({});
     await flushBookmarkIntents();
     expect(sent().map(command=>command.providerWorkId)).toEqual(['2','1']);
@@ -253,5 +255,28 @@ describe('conflict carrier shapes',()=>{
     install({command:identityMismatch()});
     await expect(flushBookmarkIntents()).rejects.toThrow();
     expect(readIntent('kHentai','42')?.baseRevision).toBe(0);
+  });
+});
+
+describe('mobile bookmark connection identity',()=>{
+  it('keeps A\'s intents away from B and never re-points one at another library',async()=>{
+    const intent=commitBookmarkIntent('kHentai','42',true,authority);
+    setOutboxConnection('https://b.example');
+    install({});
+    expect(readIntents()).toEqual({});
+    expect((await flushBookmarkIntents()).outcomes).toEqual([]);
+    expect(sent()).toEqual([]);
+    setOutboxConnection(CONNECTION);
+    // A now reports another library: the intent waits instead of being sent under it.
+    install({status:status(true,{authorityLibraryId:'b'.repeat(32)})});
+    expect((await flushBookmarkIntents()).outcomes).toEqual([{providerWorkId:'42',outcome:'suspended'}]);
+    expect(sent()).toEqual([]);
+    mocks.native.mockClear();
+    install({});
+    expect((await flushBookmarkIntents()).outcomes).toEqual([{providerWorkId:'42',outcome:'confirmed'}]);
+    expect(sent()).toEqual([expect.objectContaining({operationId:intent.operationId,libraryId:LIBRARY,connection:CONNECTION})]);
+    // The status read is guarded by the same connection.
+    expect(mocks.native.mock.calls.filter(([,payload])=>(payload as {path?:string}).path)
+      .every(([,payload])=>(payload as {connection?:string}).connection===CONNECTION)).toBe(true);
   });
 });

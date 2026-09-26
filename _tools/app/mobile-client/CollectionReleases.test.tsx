@@ -1,5 +1,6 @@
 import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
+import {setOutboxConnection} from './outboxConnection';
 import type {CollectionDetail, CollectionPage, CollectionSummary, ReleaseSchedule} from './collectionModel';
 import type {ReleaseEvent} from './collectionReleases';
 
@@ -44,7 +45,7 @@ const listReply=()=>{
   return {version:1,revision:1,generation:'g',publishedAt:null,counts:{unread:events.length,collections:Object.entries(counts).sort().map(([collectionId,unread])=>({collectionId,unread}))},items:events,nextCursor:null,hasMore:false};
 };
 
-beforeEach(()=>{
+beforeEach(()=>{setOutboxConnection('https://a.example');
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(2026,8,25,12));
   localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();offline=false;editsOffline=false;works=initialWorks();
   events=[

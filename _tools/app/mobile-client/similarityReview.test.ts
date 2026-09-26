@@ -1,4 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {outboxKey,setOutboxConnection} from './outboxConnection';
+const CONNECTION='https://a.example';
 
 const mocks=vi.hoisted(()=>({api:vi.fn()}));
 vi.mock('./transport',async()=>{
@@ -27,7 +29,7 @@ const decide=(reviewId:string,decision:SimilarityChoice='keep_existing',a='a',b=
   commitSimilarityDecision({libraryId:LIBRARY,reviewId,decision,basis:{feedRevision:REV,aSha256:SHA,bSha256:SHA},aAssetId:a,bAssetId:b},undefined,now);
 const later=()=>Date.now()+SIMILARITY_SEND_DELAY_MS+1;
 
-beforeEach(()=>{localStorage.clear();mocks.api.mockReset();});
+beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();});
 
 describe('similarity review outbox',()=>{
   it('keeps one delayed intent per review and tracks the images it will trash',()=>{
@@ -60,7 +62,7 @@ describe('similarity review outbox',()=>{
   });
   it('refuses more than the outbox limit',()=>{
     const intents=Object.fromEntries(Array.from({length:SIMILARITY_OUTBOX_LIMIT},(_,i)=>[`x${i}`,{libraryId:LIBRARY,reviewId:`x${i}`,decision:'keep_both',basis:{feedRevision:REV,aSha256:SHA,bSha256:SHA},aAssetId:'a',bAssetId:'b',operationId:`op${i}`,createdAt:i,notBefore:i}]));
-    localStorage.setItem('lakomics.similarity.review.outbox.v1',JSON.stringify(intents));
+    localStorage.setItem(outboxKey('lakomics.similarity.review.outbox.v1')!,JSON.stringify(intents));
     expect(()=>decide('new')).toThrow(SIMILARITY_OUTBOX_FULL);
     expect(decide('x3','keep_existing').decision).toBe('keep_existing');
   });
@@ -99,7 +101,7 @@ describe('similarity review delivery',()=>{
     decide('gone','keep_existing','a','b',0);decide('busy','keep_existing','c','d',0);const reused=decide('reused','keep_both','e','f',0);
     const applied=decide('applied','keep_existing','g','h',0);localStorage.clear();
     decide('gone','keep_existing','a','b',0);decide('busy','keep_existing','c','d',0);
-    localStorage.setItem('lakomics.similarity.review.outbox.v1',JSON.stringify({...readSimilarityIntents(),reused}));
+    localStorage.setItem(outboxKey('lakomics.similarity.review.outbox.v1')!,JSON.stringify({...readSimilarityIntents(),reused}));
     undoSimilarityDecision(applied,undefined,undefined,0);
     install(body=>{
       if(body.reviewId==='gone')return refused('similarityAssetChanged');
@@ -115,6 +117,25 @@ describe('similarity review delivery',()=>{
     expect(byKey['applied:withdrawn'].message).toContain('휴지통에서 복원');
     expect(byKey['reused'].outcome).toBe('confirmed');
     expect(Object.keys(readSimilarityIntents())).toEqual(['busy']);
+  });
+});
+
+describe('similarity review connection identity',()=>{
+  it('keeps A\'s decisions away from B, keeps another library\'s queued, and sends them back on A',async()=>{
+    const intent=decide('r1');
+    setOutboxConnection('https://b.example');
+    install(()=>{throw new Error('must not send');});
+    expect(await flushSimilarityReview(undefined,later)).toEqual({outcomes:[],unsupported:false});
+    expect(mocks.api).not.toHaveBeenCalled();
+    setOutboxConnection(CONNECTION);
+    install(()=>{throw new Error('must not send');},{...ready,libraryId:'f'.repeat(32)});
+    expect((await flushSimilarityReview(undefined,later)).outcomes).toEqual([{key:'r1',outcome:'suspended'}]);
+    install(()=>refused('libraryMismatch'));
+    expect((await flushSimilarityReview(undefined,later)).outcomes).toEqual([{key:'r1',outcome:'suspended'}]);
+    expect(readSimilarityIntents().r1.operationId).toBe(intent.operationId);
+    install(body=>({operationId:body.operationId}));
+    expect((await flushSimilarityReview(undefined,later)).outcomes).toEqual([{key:'r1',outcome:'confirmed'}]);
+    expect(mocks.api.mock.calls.every(call=>call[5]===CONNECTION)).toBe(true);
   });
 });
 
