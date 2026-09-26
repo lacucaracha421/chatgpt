@@ -278,7 +278,7 @@ Status: `TODO` (low priority; single-user setup makes them unlikely). Fixed the 
 ## SERVER-REVIEW-20260924 — Remaining judgment calls of the Cloud API review
 
 Status: `TODO` (low priority; single-user setup). From [`docs/research/server-review-2026-09-24.md`](../research/server-review-2026-09-24.md) §3; items 1, 2, 4 and 7 were fixed in `39d9ed02` (2026-09-24). Remaining:
-- 3: fixed 2026-09-26 (not yet deployed; needs the server deploy and the next APK for the native blocking rule): a client `trashAsset` of the image a pending similarity decision keeps is refused with 409 `similarityDecisionKeepsAsset` (publisher/PC trashes unaffected; restore unaffected); the tablet outbox blocks that row as 충돌 and the trash browser explains it.
+- 3: fixed 2026-09-26 (deployed 2026-09-26 with tablet 0.8.42; needs the server deploy and the next APK for the native blocking rule): a client `trashAsset` of the image a pending similarity decision keeps is refused with 409 `similarityDecisionKeepsAsset` (publisher/PC trashes unaffected; restore unaffected); the tablet outbox blocks that row as 충돌 and the trash browser explains it.
 - 5: a legacy Collection memo over 10,000 characters answers 422 instead of a conflict (unreachable unless legacy data exceeds the old limit).
 - 6: `mobile_collection_edits`, `mobile_collection_edit_noops`, `mobile_character_review_decisions` and `mobile_similarity_review_decisions` have no retention.
 - 8: the shared legacy token can send `trashAsset` / `restoreAsset` (matches the design; noted only).

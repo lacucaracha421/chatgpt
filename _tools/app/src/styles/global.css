@@ -6603,10 +6603,6 @@ textarea:focus-visible {
 }
 .collection-browser__segment-button[aria-pressed="true"] { border-radius: 0; box-shadow: var(--selection-echo); }
 .collection-browser__segment-button[aria-pressed="true"]:hover { background: var(--color-accent-hover); }
-.collection-browser__segment--context > .collection-browser__segment-button[aria-pressed="true"] {
-  color: var(--color-selection-context-text); background: var(--color-selection-context); border-color: transparent; box-shadow: none;
-}
-.collection-browser__segment--context > .collection-browser__segment-button[aria-pressed="true"]:hover { background: var(--color-selection-context-hover); }
 .collection-browser__segment-button[aria-pressed="true"]::before { background: currentColor; }
 .settings-view__section-button[aria-current="page"] { border-radius: 0; box-shadow: var(--selection-echo-surface); }
 .workspace-index .settings-view__section-button[aria-current="page"] { box-shadow: var(--selection-echo); }
