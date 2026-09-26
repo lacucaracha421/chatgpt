@@ -117,11 +117,13 @@ fn kakao_choice(anchor: &str) -> Value {
 }
 
 /// Applies with the PC apply code on fixtures instead of the network; queued errors are
-/// returned first.
+/// returned first. `during_fetch` is SQL the PC runs while the provider requests are in
+/// flight (after the lane's precheck, before the apply's write transaction).
 #[derive(Default)]
 struct Fake {
     errors: Mutex<Vec<LibraryError>>,
     calls: Mutex<Vec<String>>,
+    during_fetch: Mutex<Option<String>>,
 }
 
 impl Fake {
@@ -134,8 +136,11 @@ impl Fake {
     fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }
-    fn queued(&self, call: String) -> Result<(), LibraryError> {
+    fn queued(&self, library: &Library, call: String) -> Result<(), LibraryError> {
         self.calls.lock().unwrap().push(call);
+        if let Some(sql) = self.during_fetch.lock().unwrap().take() {
+            library.connection().unwrap().execute_batch(&sql).unwrap();
+        }
         match self.errors.lock().unwrap().pop() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -148,8 +153,9 @@ impl BindingApplier for Fake {
         &self,
         library: &Library,
         request: MangaDexApplyRequest,
+        check: CommitCheck<'_>,
     ) -> Result<(), LibraryError> {
-        self.queued(format!("mangadex:{}", request.manga_id))?;
+        self.queued(library, format!("mangadex:{}", request.manga_id))?;
         let mut preview = parse_work_preview(
             include_str!("fixtures/mangadex_detail.json"),
             include_str!("fixtures/mangadex_covers.json"),
@@ -163,15 +169,20 @@ impl BindingApplier for Fake {
             snapshot_json: "{}".into(),
         };
         library
-            .apply_fetched_mangadex(request, fetched, None)
+            .apply_fetched_mangadex_checked(request, fetched, None, Some(check))
             .map(|_| ())
     }
-    fn kakao(&self, library: &Library, request: AladinApplyRequest) -> Result<(), LibraryError> {
+    fn kakao(
+        &self,
+        library: &Library,
+        request: AladinApplyRequest,
+        check: CommitCheck<'_>,
+    ) -> Result<(), LibraryError> {
         let anchors: Vec<_> = request.groups.iter().map(|g| g.anchor_item_id.as_str()).collect();
-        self.queued(format!("kakao:{}", anchors.join("+")))?;
+        self.queued(library, format!("kakao:{}", anchors.join("+")))?;
         library
             .book_flow("kakao")
-            .apply_requested_items(request, kakao_items())
+            .apply_requested_items(request, kakao_items(), Some(check))
             .map(|_| ())
     }
 }
@@ -466,7 +477,7 @@ fn a_kakao_request_binds_its_group_even_after_the_anchor_drifted() {
     assert!(matches!(
         library
             .book_flow("kakao")
-            .apply_requested_items(request, kakao_items()),
+            .apply_requested_items(request, kakao_items(), None),
         Err(LibraryError::AmbiguousAladinBinding)
     ));
 }
@@ -515,6 +526,89 @@ fn a_changed_binding_fails_the_request_without_applying() {
         binding(&library, "mangadex").as_deref(),
         Some("11111111-2222-4333-8444-555555555555")
     );
+}
+
+fn volume_count(library: &Library) -> i64 {
+    library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM collection_volumes WHERE collection_id='m'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+
+fn pending_item(provider: &str, choice: Value) -> BindRequest {
+    serde_json::from_value(request(
+        1,
+        "m",
+        provider,
+        choice,
+        json!({"externalId":null}),
+        "pending",
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_pc_connection_made_during_the_provider_fetch_is_not_overwritten() {
+    let other = "11111111-2222-4333-8444-555555555555";
+    let pc_binds = |provider: &str, external: &str| {
+        format!(
+            "INSERT INTO collection_external_bindings(collection_id,provider,external_id,created_at,updated_at)
+             VALUES('m','{provider}','{external}','2026','2026')"
+        )
+    };
+    let changed = |decision: Decision| match decision {
+        Decision::Failed(reason) => reason.code == "bindingChanged",
+        _ => false,
+    };
+
+    // MangaDex: the tablet saw the Collection unbound; the PC binds another work meanwhile.
+    let (_temp, library) = fixture();
+    let fake = Fake::default();
+    *fake.during_fetch.lock().unwrap() = Some(pc_binds("mangadex", other));
+    let decision =
+        library.decide_binding_request(&pending_item("mangadex", mangadex_choice()), &fake);
+    assert!(changed(decision));
+    assert_eq!(
+        fake.calls(),
+        [format!("mangadex:{MANGA_ID}")],
+        "the fetch ran"
+    );
+    assert_eq!(binding(&library, "mangadex").as_deref(), Some(other));
+    assert_eq!(volume_count(&library), 0, "the apply rolled back");
+
+    // Kakao: the same race with another Kakao item.
+    let (_temp, library) = fixture();
+    let fake = Fake::default();
+    *fake.during_fetch.lock().unwrap() = Some(pc_binds("kakao", "pc-item"));
+    let decision =
+        library.decide_binding_request(&pending_item("kakao", kakao_choice("k-1")), &fake);
+    assert!(changed(decision));
+    assert_eq!(fake.calls(), ["kakao:k-1"]);
+    assert_eq!(binding(&library, "kakao").as_deref(), Some("pc-item"));
+    assert_eq!(volume_count(&library), 0, "the apply rolled back");
+
+    // The PC connected exactly the requested work meanwhile: nothing to protect, applied.
+    let (_temp, library) = fixture();
+    let fake = Fake::default();
+    *fake.during_fetch.lock().unwrap() = Some(pc_binds("mangadex", MANGA_ID));
+    let decision =
+        library.decide_binding_request(&pending_item("mangadex", mangadex_choice()), &fake);
+    assert!(matches!(decision, Decision::Applied), "{decision:?}");
+    assert_eq!(binding(&library, "mangadex").as_deref(), Some(MANGA_ID));
+
+    // Nothing changed during the fetch: the request applies as before.
+    let (_temp, library) = fixture();
+    let fake = Fake::default();
+    let decision =
+        library.decide_binding_request(&pending_item("kakao", kakao_choice("k-1")), &fake);
+    assert!(matches!(decision, Decision::Applied), "{decision:?}");
+    assert_eq!(binding(&library, "kakao").as_deref(), Some("k-1"));
+    assert_eq!(volume_count(&library), 3);
 }
 
 #[test]
@@ -912,7 +1006,7 @@ fn a_requested_multi_group_apply_resolves_each_group_and_merges() {
     request.groups[1].anchor_item_id = "gone".into();
     library
         .book_flow("kakao")
-        .apply_requested_items(request, split_kakao_items())
+        .apply_requested_items(request, split_kakao_items(), None)
         .unwrap();
     let volumes: i64 = library
         .connection()
@@ -931,13 +1025,16 @@ fn a_requested_multi_group_apply_resolves_each_group_and_merges() {
     let target_now = target(&item).unwrap();
     assert!(matches!(
         library.binding_precheck(&item, &target_now).unwrap(),
-        Some(Decision::Applied)
+        Precheck::Decided(Decision::Applied)
     ));
     let mut single = split_groups_choice();
     single["groups"].as_array_mut().unwrap().truncate(1);
     let item = bind_item(single);
     let target_now = target(&item).unwrap();
-    assert!(library.binding_precheck(&item, &target_now).unwrap().is_none());
+    assert!(matches!(
+        library.binding_precheck(&item, &target_now).unwrap(),
+        Precheck::Apply(Some(_))
+    ));
 }
 
 /// Design gate G2 (desktop): with the status watcher live, a tablet bind request reaches this

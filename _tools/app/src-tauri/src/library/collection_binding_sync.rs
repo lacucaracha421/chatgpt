@@ -15,7 +15,10 @@
 //! * Before applying: the Collection must exist and be manga; a request whose binding the
 //!   PC already has is reported applied without applying again (a crash between applying and
 //!   reporting); `expected.externalId` that differs from the PC's binding fails with
-//!   `bindingChanged`.
+//!   `bindingChanged`. The binding seen by this check is compared again inside the
+//!   transaction that writes the new binding ([`CommitCheck`]), after the provider requests:
+//!   a PC connection made meanwhile also fails the request with `bindingChanged` instead of
+//!   being overwritten.
 //! * Outcomes: [`classify`] turns an apply error into a permanent failure (reported
 //!   `failed` with a Korean message shown on the tablet) or a transient one (network, rate
 //!   limit, locked credential store, local database/disk): the lane stops before that
@@ -29,6 +32,8 @@
 //! State lives per endpoint as one JSON value in the existing key/value table `notes_state`
 //! (key `collectionBindingSync:<endpoint>`), so no schema migration is needed. No database
 //! lock is held during network work (log, result, or the provider calls inside the apply).
+use std::cell::Cell;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -83,14 +88,25 @@ impl BindingSyncState {
     }
 }
 
+/// A precondition the apply runs inside the transaction that writes the binding, after its
+/// provider requests; an error rolls the apply back.
+pub(crate) type CommitCheck<'a> = &'a dyn Fn(&Connection) -> Result<(), LibraryError>;
+
 /// How the lane applies a request; production is [`LiveApplier`], tests inject fixtures.
+/// Each apply must run `check` inside its binding write transaction.
 pub(crate) trait BindingApplier {
     fn mangadex(
         &self,
         library: &Library,
         request: MangaDexApplyRequest,
+        check: CommitCheck<'_>,
     ) -> Result<(), LibraryError>;
-    fn kakao(&self, library: &Library, request: AladinApplyRequest) -> Result<(), LibraryError>;
+    fn kakao(
+        &self,
+        library: &Library,
+        request: AladinApplyRequest,
+        check: CommitCheck<'_>,
+    ) -> Result<(), LibraryError>;
 }
 
 /// The PC commands' own code (`commands.rs` `apply_mangadex` / `apply_kakao`).
@@ -101,12 +117,22 @@ impl BindingApplier for LiveApplier {
         &self,
         library: &Library,
         request: MangaDexApplyRequest,
+        check: CommitCheck<'_>,
     ) -> Result<(), LibraryError> {
-        library.apply_mangadex(request).map(|_| ())
+        library
+            .apply_mangadex_checked(request, Some(check))
+            .map(|_| ())
     }
-    fn kakao(&self, library: &Library, request: AladinApplyRequest) -> Result<(), LibraryError> {
+    fn kakao(
+        &self,
+        library: &Library,
+        request: AladinApplyRequest,
+        check: CommitCheck<'_>,
+    ) -> Result<(), LibraryError> {
         let key = credential::read_kakao_key()?;
-        library.apply_requested_kakao(&key, request).map(|_| ())
+        library
+            .apply_requested_kakao(&key, request, check)
+            .map(|_| ())
     }
 }
 
@@ -126,6 +152,12 @@ enum Pass {
     Done,
     More,
     Unsupported,
+}
+
+enum Precheck {
+    Decided(Decision),
+    /// Apply; the binding identity ([`binding_identity`]) seen now, `None` when unbound.
+    Apply(Option<String>),
 }
 
 fn unix_now() -> i64 {
@@ -173,6 +205,59 @@ fn reason(code: &str, message: &str) -> BindReason {
         code: code.into(),
         message: message.chars().take(500).collect(),
     }
+}
+
+fn binding_changed() -> BindReason {
+    reason(
+        "bindingChanged",
+        "태블릿에서 확인한 뒤 PC의 연결이 바뀌었습니다. 현재 연결을 확인하고 다시 선택해 주세요.",
+    )
+}
+
+/// What a binding row binds, compared at commit: the MangaDex id, or the sorted fingerprints
+/// of the bound Kakao groups (a refresh may move a group's anchor without changing them).
+fn binding_identity(provider: &str, external_id: &str, config: Option<&str>) -> String {
+    if provider == "kakao" {
+        if let Some(groups) = bound_group_keys(config, external_id) {
+            let mut fingerprints: Vec<String> = groups
+                .into_iter()
+                .map(|(_, fingerprint)| fingerprint)
+                .collect();
+            fingerprints.sort();
+            return fingerprints.join(",");
+        }
+    }
+    external_id.to_owned()
+}
+
+/// The identity the request itself binds, in [`binding_identity`]'s form.
+fn target_identity(target: &Target) -> String {
+    match target {
+        Target::MangaDex(manga_id) => manga_id.clone(),
+        Target::Kakao(request) => {
+            let mut fingerprints: Vec<&str> = request
+                .groups
+                .iter()
+                .map(|group| group.group_fingerprint.as_str())
+                .collect();
+            fingerprints.sort_unstable();
+            fingerprints.join(",")
+        }
+    }
+}
+
+fn read_binding(
+    c: &Connection,
+    collection_id: &str,
+    provider: &str,
+) -> Result<Option<(String, Option<String>)>, LibraryError> {
+    Ok(c.query_row(
+        "SELECT external_id, provider_config_json FROM collection_external_bindings
+         WHERE collection_id=?1 AND provider=?2",
+        params![collection_id, provider],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()?)
 }
 
 fn invalid_choice() -> BindReason {
@@ -588,11 +673,27 @@ impl Library {
             Ok(target) => target,
             Err(reason) => return Decision::Failed(reason),
         };
-        match self.binding_precheck(item, &target) {
-            Ok(Some(decision)) => return decision,
-            Ok(None) => {}
+        let seen = match self.binding_precheck(item, &target) {
+            Ok(Precheck::Decided(decision)) => return decision,
+            Ok(Precheck::Apply(seen)) => seen,
             Err(error) => return classify(error),
-        }
+        };
+        // The provider requests below run without the library lock, so the PC may connect
+        // this Collection meanwhile: the apply's write transaction checks that its binding is
+        // still the one seen above (or already the requested one) before writing.
+        let wanted = target_identity(&target);
+        let changed = Cell::new(false);
+        let check = |c: &Connection| -> Result<(), LibraryError> {
+            let now =
+                read_binding(c, &item.collection_id, &item.provider)?.map(|(external, config)| {
+                    binding_identity(&item.provider, &external, config.as_deref())
+                });
+            if now != seen && now.as_deref() != Some(wanted.as_str()) {
+                changed.set(true);
+                return Err(LibraryError::InvalidExternalBinding);
+            }
+            Ok(())
+        };
         let result = match target {
             Target::MangaDex(manga_id) => applier.mangadex(
                 self,
@@ -602,11 +703,13 @@ impl Library {
                     },
                     manga_id,
                 },
+                &check,
             ),
-            Target::Kakao(request) => applier.kakao(self, request),
+            Target::Kakao(request) => applier.kakao(self, request, &check),
         };
         match result {
             Ok(()) => Decision::Applied,
+            Err(_) if changed.get() => Decision::Failed(binding_changed()),
             Err(error) => classify(error),
         }
     }
@@ -615,7 +718,7 @@ impl Library {
         &self,
         item: &BindRequest,
         target: &Target,
-    ) -> Result<Option<Decision>, LibraryError> {
+    ) -> Result<Precheck, LibraryError> {
         let c = self.connection()?;
         let kind: Option<String> = c
             .query_row(
@@ -625,18 +728,19 @@ impl Library {
             )
             .optional()?;
         match kind.as_deref() {
-            None => return Ok(Some(classify(LibraryError::CollectionNotFound))),
+            None => {
+                return Ok(Precheck::Decided(classify(
+                    LibraryError::CollectionNotFound,
+                )))
+            }
             Some("manga") => {}
-            Some(_) => return Ok(Some(classify(LibraryError::InvalidCollectionType))),
+            Some(_) => {
+                return Ok(Precheck::Decided(classify(
+                    LibraryError::InvalidCollectionType,
+                )))
+            }
         }
-        let current: Option<(String, Option<String>)> = c
-            .query_row(
-                "SELECT external_id, provider_config_json FROM collection_external_bindings
-                 WHERE collection_id=?1 AND provider=?2",
-                params![item.collection_id, item.provider],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
+        let current = read_binding(&c, &item.collection_id, &item.provider)?;
         let already = current
             .as_ref()
             .is_some_and(|(external, config)| match target {
@@ -656,17 +760,16 @@ impl Library {
                 }
             });
         if already {
-            return Ok(Some(Decision::Applied));
+            return Ok(Precheck::Decided(Decision::Applied));
         }
         if let Some(expected) = expected_external_id(item) {
-            if current.map(|(external, _)| external) != expected {
-                return Ok(Some(Decision::Failed(reason(
-                    "bindingChanged",
-                    "태블릿에서 확인한 뒤 PC의 연결이 바뀌었습니다. 현재 연결을 확인하고 다시 선택해 주세요.",
-                ))));
+            if current.as_ref().map(|(external, _)| external) != expected.as_ref() {
+                return Ok(Precheck::Decided(Decision::Failed(binding_changed())));
             }
         }
-        Ok(None)
+        Ok(Precheck::Apply(current.map(|(external, config)| {
+            binding_identity(&item.provider, &external, config.as_deref())
+        })))
     }
 }
 

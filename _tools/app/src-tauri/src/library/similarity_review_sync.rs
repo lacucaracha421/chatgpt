@@ -13,8 +13,11 @@
 //!   (`baseRevision: null`) adopts the feature on the server. Durable, debounced and throttled
 //!   like the character candidate feed (migration 0094). A missing route (`404`) or an
 //!   unlinked server library is retried after five minutes and never fails another lane.
-//! * **Apply** (`GET …/decisions`): per page, entries taken back by a later `withdrawn` in the
-//!   same page are skipped; the local sha256 of both Assets must match the entry's `basis`.
+//! * **Apply** (`GET …/decisions`): the log is read to its confirmed end (bounded by
+//!   [`LOOKAHEAD_PAGES`] past the applied window) before anything is applied, and entries taken
+//!   back by any later `withdrawn` read so far are skipped, so a decision and its withdrawal on
+//!   different pages never trash an image; the local sha256 of both Assets must match the
+//!   entry's `basis`.
 //!   `decide_similarity_review` runs its own transactions, so each entry's receipt and cursor
 //!   step are written afterwards; a crash in between re-delivers the entry, and the same
 //!   decision on an already resolved review is `Ok`, which records `applied`.
@@ -44,6 +47,10 @@ use crate::library::credential;
 
 /// Pages one pass may apply; the durable cursor lets a backlog drain across passes.
 const MAX_PAGES: usize = 10;
+/// Pages the withdrawal look-ahead may read past the applied window. A decision stays
+/// withdrawable on the server until the PC reports it applied, so its `withdrawn` can be on any
+/// later page; only a backlog longer than this window plus the look-ahead is read partially.
+const LOOKAHEAD_PAGES: usize = 50;
 /// Item bytes kept under the server's 8 MiB body limit, leaving room for the envelope.
 const MAX_ITEM_BYTES: usize = 7 * 1024 * 1024 + 512 * 1024;
 
@@ -387,41 +394,59 @@ impl Library {
                 Err(error) => return Err(error),
             },
         };
-        for _ in 0..MAX_PAGES {
+        // Read before applying: up to MAX_PAGES pages form the applied window, and the log is
+        // read on to its end (or LOOKAHEAD_PAGES further) only to collect withdrawals. The
+        // durable cursor moves only as window entries are applied, so an entry that is not
+        // applied in this pass is read again by the next one.
+        let window_limit = MAX_PAGES * PAGE_LIMIT as usize;
+        let mut window = Vec::new();
+        let mut withdrawn = HashSet::new();
+        let mut after = cursor;
+        for _ in 0..MAX_PAGES + LOOKAHEAD_PAGES {
             let page = client
-                .similarity_review_decisions(publisher_token, &library_id, cursor, PAGE_LIMIT)?
+                .similarity_review_decisions(publisher_token, &library_id, after, PAGE_LIMIT)?
                 .ok_or(LibraryError::SimilarityReviewUnsupported)?;
-            self.apply_similarity_review_page(endpoint, &library_id, &page.items)?;
-            let durable = self
+            withdrawn.extend(page.items.iter().filter_map(|item| item.withdraws));
+            let room = window_limit.saturating_sub(window.len());
+            window.extend(page.items.into_iter().take(room));
+            if !page.has_more {
+                break;
+            }
+            after = page.next_cursor;
+        }
+        if !window.is_empty() {
+            self.apply_similarity_review_page(endpoint, &library_id, &window, &withdrawn)?;
+            cursor = self
                 .similarity_review_adoption(endpoint)?
                 .map(|(_, cursor)| cursor)
                 .ok_or(LibraryError::SimilarityReviewCursorRejected)?;
-            cursor = durable;
-            if !page.has_more || durable <= page.after {
-                break;
-            }
         }
         Ok(Some(cursor))
     }
 
-    /// Apply one validated page in order. Each entry is decided first (its own transactions)
-    /// and then its receipt and the cursor step are written together, compare-and-set on the
-    /// cursor, so a replay is harmless and a stale page can never rewind it.
+    /// Apply validated, contiguous entries in order. Each entry is decided first (its own
+    /// transactions) and then its receipt and the cursor step are written together,
+    /// compare-and-set on the cursor, so a replay is harmless and a stale page can never
+    /// rewind it. `read_ahead` holds the targets of the withdrawals read so far, including
+    /// those after `items` (the look-ahead); withdrawals inside `items` are added here.
     pub(crate) fn apply_similarity_review_page(
         &self,
         endpoint: &str,
         library_id: &str,
         items: &[DecisionEntry],
+        read_ahead: &HashSet<i64>,
     ) -> Result<PageOutcome, LibraryError> {
         if !super::is_valid_library_id(library_id) || self.library_id()? != library_id {
             return Err(LibraryError::SimilarityReviewCursorRejected);
         }
-        // Look-ahead: a decision taken back later in this page is never applied.
-        let withdrawn: HashSet<i64> = items
-            .iter()
-            .filter(|item| item.decision == "withdrawn")
-            .filter_map(|item| item.withdraws)
-            .collect();
+        // Look-ahead: a decision taken back by a later entry that was read is never applied.
+        let mut withdrawn = read_ahead.clone();
+        withdrawn.extend(
+            items
+                .iter()
+                .filter(|item| item.decision == "withdrawn")
+                .filter_map(|item| item.withdraws),
+        );
         let mut outcome = PageOutcome::default();
         for item in items {
             let durable = self.similarity_received_cursor(endpoint, library_id)?;

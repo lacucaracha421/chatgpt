@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use super::{
     aladin::{self, AladinItem},
     collection::require_collection,
+    collection_binding_sync::CommitCheck,
     error::LibraryError,
     models::{
         AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
@@ -95,14 +96,16 @@ impl Library {
     /// [`Self::apply_kakao`] for a pick the tablet made earlier (`collection_binding_sync.rs`):
     /// the same search and apply, tolerating anchor drift (see
     /// [`BookFlow::apply_requested_items`]).
+    /// `check` runs inside the transaction that writes the binding, after the search.
     pub(crate) fn apply_requested_kakao(
         &self,
         key: &str,
         request: AladinApplyRequest,
+        check: CommitCheck<'_>,
     ) -> Result<AladinSyncResult, LibraryError> {
         let flow = self.book_flow("kakao");
         let items = flow.search_items(key, &request.query)?;
-        flow.apply_requested_items(request, items)
+        flow.apply_requested_items(request, items, Some(check))
     }
 }
 
@@ -349,7 +352,7 @@ impl BookFlow<'_> {
                 }),
             }
         }
-        self.reconcile_aladin_at(collection_id, &config.query, picked, checked_at)
+        self.reconcile_aladin_at(collection_id, &config.query, picked, checked_at, None)
     }
 
     pub fn get_aladin_connection(
@@ -415,6 +418,15 @@ impl BookFlow<'_> {
         request: AladinApplyRequest,
         items: Vec<AladinItem>,
     ) -> Result<AladinSyncResult, LibraryError> {
+        self.apply_aladin_items_checked(request, items, None)
+    }
+
+    fn apply_aladin_items_checked(
+        &self,
+        request: AladinApplyRequest,
+        items: Vec<AladinItem>,
+        check: Option<CommitCheck<'_>>,
+    ) -> Result<AladinSyncResult, LibraryError> {
         if !valid_selection(&request) {
             return Err(LibraryError::AmbiguousAladinBinding);
         }
@@ -436,18 +448,26 @@ impl BookFlow<'_> {
         }
         let checked_at = chrono::Utc::now().to_rfc3339();
         Ok(self
-            .reconcile_aladin_at(&request.collection_id, &request.query, picked, &checked_at)?
+            .reconcile_aladin_at(
+                &request.collection_id,
+                &request.query,
+                picked,
+                &checked_at,
+                check,
+            )?
             .sync_result)
     }
 
     /// The PC apply, except that a picked group whose anchor no longer matches the fresh
     /// search (the tablet's pick may be applied days later) binds the one group with the
     /// picked fingerprint, anchored at that group's current anchor. Each group is resolved
-    /// on its own. The PC UI keeps the strict [`Self::apply_aladin_items`].
+    /// on its own. The PC UI keeps the strict [`Self::apply_aladin_items`]. `check` runs
+    /// inside the transaction that writes the binding.
     pub(super) fn apply_requested_items(
         &self,
         mut request: AladinApplyRequest,
         items: Vec<AladinItem>,
+        check: Option<CommitCheck<'_>>,
     ) -> Result<AladinSyncResult, LibraryError> {
         let groups = grouped_items(items);
         for selection in &mut request.groups {
@@ -468,7 +488,7 @@ impl BookFlow<'_> {
             }
         }
         let items = groups.into_iter().flat_map(|group| group.items).collect();
-        self.apply_aladin_items(request, items)
+        self.apply_aladin_items_checked(request, items, check)
     }
 
     /// Writes the merged volumes of the picked groups and the binding. Groups are ordered
@@ -481,6 +501,7 @@ impl BookFlow<'_> {
         query: &str,
         mut picked: Vec<PickedGroup>,
         checked_at: &str,
+        check: Option<CommitCheck<'_>>,
     ) -> Result<AladinReconcileOutcome, LibraryError> {
         if picked.is_empty() {
             return Err(LibraryError::AmbiguousAladinBinding);
@@ -536,6 +557,9 @@ impl BookFlow<'_> {
         let mut connection = self.library.connection()?;
         let transaction = connection.transaction()?;
         require_collection(&transaction, collection_id)?;
+        if let Some(check) = check {
+            check(&transaction)?;
+        }
         let subscription_last_checked_at = transaction
             .query_row(
                 "SELECT last_checked_at

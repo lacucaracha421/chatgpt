@@ -269,7 +269,12 @@ fn each_decision_moves_the_right_image_to_trash_and_queues_its_lifecycle_command
             .unwrap();
         let outcome = f
             .library
-            .apply_similarity_review_page(ENDPOINT, &f.id, &[entry(1, "r1", decision, "a", "b")])
+            .apply_similarity_review_page(
+                ENDPOINT,
+                &f.id,
+                &[entry(1, "r1", decision, "a", "b")],
+                &HashSet::new(),
+            )
             .unwrap();
         assert_eq!(outcome.applied, 1, "{decision}");
         assert_eq!(
@@ -321,7 +326,7 @@ fn a_redelivery_after_a_crash_before_the_receipt_records_applied_once() {
     let page = [entry(1, "r1", "keep_existing", "a", "b")];
     let outcome = f
         .library
-        .apply_similarity_review_page(ENDPOINT, &f.id, &page)
+        .apply_similarity_review_page(ENDPOINT, &f.id, &page, &HashSet::new())
         .unwrap();
     assert_eq!(outcome.applied, 1);
     assert_eq!(receipts(&f), [(1, "applied".to_string())]);
@@ -329,7 +334,7 @@ fn a_redelivery_after_a_crash_before_the_receipt_records_applied_once() {
     // A replayed page is a no-op.
     let again = f
         .library
-        .apply_similarity_review_page(ENDPOINT, &f.id, &page)
+        .apply_similarity_review_page(ENDPOINT, &f.id, &page, &HashSet::new())
         .unwrap();
     assert_eq!(again.already_consumed, 1);
     assert_eq!(outbox(&f).len(), 1);
@@ -340,7 +345,7 @@ fn a_redelivery_after_a_crash_before_the_receipt_records_applied_once() {
     forged.trash_asset_id = None;
     assert!(f
         .library
-        .apply_similarity_review_page(ENDPOINT, &f.id, &[forged])
+        .apply_similarity_review_page(ENDPOINT, &f.id, &[forged], &HashSet::new())
         .is_err());
 }
 
@@ -394,7 +399,7 @@ fn skipped_decisions_advance_the_cursor_and_are_reported_by_the_next_feed() {
         .unwrap();
     let outcome = f
         .library
-        .apply_similarity_review_page(&base, &f.id, &page)
+        .apply_similarity_review_page(&base, &f.id, &page, &HashSet::new())
         .unwrap();
     assert_eq!((outcome.applied, outcome.skipped), (1, 4));
     let recorded: Vec<(i64, String)> = receipts(&f);
@@ -473,6 +478,7 @@ fn a_decision_withdrawn_later_in_the_page_is_never_applied() {
             ENDPOINT,
             &f.id,
             &[entry(1, "r1", "keep_existing", "a", "b"), undo],
+            &HashSet::new(),
         )
         .unwrap();
     assert_eq!((outcome.applied, outcome.skipped), (1, 1));
@@ -497,6 +503,105 @@ fn a_decision_withdrawn_later_in_the_page_is_never_applied() {
             .unwrap()
             .applied,
         0
+    );
+}
+
+/// One log page for the scripted server.
+fn log_page(f: &F, after: i64, items: &[DecisionEntry], has_more: bool) -> String {
+    serde_json::json!({
+        "version": 1, "libraryId": f.id, "after": after,
+        "nextCursor": items.last().map_or(after, |item| item.sequence),
+        "hasMore": has_more, "items": items,
+    })
+    .to_string()
+}
+
+/// Receive through a scripted server whose log is split over `pages`; returns the requests.
+fn receive_pages(f: &F, pages: Vec<String>) -> Vec<(String, Option<String>, String)> {
+    let decisions = "/v1/library/similarity/review/decisions?libraryId=";
+    let (base, handle) = scripted(
+        pages
+            .into_iter()
+            .map(|page| (decisions, 200, page))
+            .collect(),
+    );
+    configure(&f.library, &base);
+    // The scripted server's endpoint differs from ENDPOINT, so bind it the same way.
+    f.library
+        .adopt_similarity_review_library(&base, &f.id)
+        .unwrap();
+    let client = CloudClient::new(&base).unwrap();
+    f.library
+        .receive_similarity_review_with(&client, "publisher", &base)
+        .unwrap();
+    handle.join().unwrap()
+}
+
+#[test]
+fn a_decision_withdrawn_on_a_later_page_is_never_applied() {
+    let f = fixture();
+    eligible(&f, &["a", "b", "c", "d"]);
+    review(&f, "r1", "a", "b", "historical", "open", 1);
+    review(&f, "r2", "c", "d", "historical", "open", 2);
+    // Page one ends with the trash-producing decision on r2 and holds one on r1 before it;
+    // page two withdraws both (the PC was offline while the phone decided and undid them).
+    let mut undo_r2 = entry(3, "r2", "withdrawn", "c", "d");
+    undo_r2.withdraws = Some(2);
+    let mut undo_r1 = entry(4, "r1", "withdrawn", "a", "b");
+    undo_r1.withdraws = Some(1);
+    let first = [
+        entry(1, "r1", "keep_existing", "a", "b"),
+        entry(2, "r2", "replace_existing", "c", "d"),
+    ];
+    let seen = receive_pages(
+        &f,
+        vec![
+            log_page(&f, 0, &first, true),
+            log_page(&f, 2, &[undo_r2, undo_r1], false),
+        ],
+    );
+    assert!(seen[0].0.contains("&after=0&"), "{}", seen[0].0);
+    assert!(seen[1].0.contains("&after=2&"), "{}", seen[1].0);
+    assert_eq!(
+        receipts(&f),
+        [
+            (1, "skipped:withdrawn".to_string()),
+            (2, "skipped:withdrawn".to_string()),
+            (3, "applied".to_string()),
+            (4, "applied".to_string()),
+        ]
+    );
+    for id in ["a", "b", "c", "d"] {
+        assert_eq!(status(&f, id), "normal", "{id} must not be trashed");
+    }
+    assert!(outbox(&f).is_empty());
+    assert_eq!(review_state(&f, "r1"), ("open".into(), None));
+    assert_eq!(review_state(&f, "r2"), ("open".into(), None));
+}
+
+#[test]
+fn a_decision_at_a_page_end_is_applied_once_the_next_page_does_not_withdraw_it() {
+    let f = fixture();
+    eligible(&f, &["a", "b", "c", "d"]);
+    review(&f, "r1", "a", "b", "historical", "open", 1);
+    review(&f, "r2", "c", "d", "historical", "open", 2);
+    let seen = receive_pages(
+        &f,
+        vec![
+            log_page(&f, 0, &[entry(1, "r1", "keep_existing", "a", "b")], true),
+            log_page(&f, 1, &[entry(2, "r2", "keep_both", "c", "d")], false),
+        ],
+    );
+    assert_eq!(seen.len(), 2, "the page after the decision was read");
+    assert_eq!(
+        receipts(&f),
+        [(1, "applied".to_string()), (2, "applied".to_string())]
+    );
+    assert_eq!(status(&f, "b"), "trash");
+    assert_eq!(outbox(&f), [("b".to_string(), "trash".to_string())]);
+    assert_eq!(
+        review_state(&f, "r1"),
+        ("resolved".into(), Some("keep_existing".into()))
     );
 }
 

@@ -2,6 +2,7 @@ use rusqlite::{params, OptionalExtension};
 
 use super::{
     collection::{collection_by_id, map_duplicate_name, normalized_name, require_collection},
+    collection_binding_sync::CommitCheck,
     collection_volume::materialize_mangadex_volumes,
     error::LibraryError,
     external_binding::upsert_external_binding,
@@ -51,11 +52,22 @@ impl Library {
         &self,
         request: MangaDexApplyRequest,
     ) -> Result<CollectionSummary, LibraryError> {
+        self.apply_mangadex_checked(request, None)
+    }
+
+    /// [`Self::apply_mangadex`] with `check` run inside the transaction that writes the
+    /// binding (a tablet request's precondition, `collection_binding_sync.rs`); the MangaDex
+    /// requests run before it without the library lock.
+    pub(crate) fn apply_mangadex_checked(
+        &self,
+        request: MangaDexApplyRequest,
+        check: Option<CommitCheck<'_>>,
+    ) -> Result<CollectionSummary, LibraryError> {
         let fetched = mangadex::fetch_work(&request.manga_id)?;
         let bytes = representative_japanese_cover(&fetched.preview.covers)
             .map(|cover| mangadex::download_cover(&request.manga_id, &cover.file_name))
             .transpose()?;
-        self.apply_fetched_mangadex(request, fetched, bytes.as_deref())
+        self.apply_fetched_mangadex_checked(request, fetched, bytes.as_deref(), check)
     }
 
     pub(crate) fn apply_fetched_mangadex(
@@ -63,6 +75,16 @@ impl Library {
         request: MangaDexApplyRequest,
         fetched: MangaDexFetchedWork,
         cover_bytes: Option<&[u8]>,
+    ) -> Result<CollectionSummary, LibraryError> {
+        self.apply_fetched_mangadex_checked(request, fetched, cover_bytes, None)
+    }
+
+    pub(crate) fn apply_fetched_mangadex_checked(
+        &self,
+        request: MangaDexApplyRequest,
+        fetched: MangaDexFetchedWork,
+        cover_bytes: Option<&[u8]>,
+        check: Option<CommitCheck<'_>>,
     ) -> Result<CollectionSummary, LibraryError> {
         if request.manga_id != fetched.preview.manga_id {
             return Err(LibraryError::InvalidMangaDexIdentity);
@@ -105,6 +127,9 @@ impl Library {
         {
             let mut connection = self.connection()?;
             let transaction = connection.transaction()?;
+            if let Some(check) = check {
+                check(&transaction)?;
+            }
             let owner: Option<String> = transaction
                 .query_row(
                     "SELECT collection_id FROM collection_external_bindings
