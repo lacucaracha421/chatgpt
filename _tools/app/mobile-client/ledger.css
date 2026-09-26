@@ -90,8 +90,10 @@
 .is-ended .ledger-row{opacity:.6}
 .ledger-empty{margin:28px 0;font-size:14px;line-height:1.6;color:var(--color-muted)}
 /* Ledger card in the Notes list */
-.ledger-card .ledger-meter{height:4px;margin-top:8px;background:var(--color-surface-pressed)}
-.ledger-card>span b{font-weight:500;color:var(--color-text);font-size:15px}
+.ledger-card .ledger-meter{height:4px;margin-top:10px;background:var(--color-surface-pressed)}
+.ledger-card__figure{margin-top:10px;font-size:12px;color:var(--color-muted)}
+.ledger-card__figure b{display:block;margin-top:2px;font-size:28px;font-weight:500;line-height:1.1;color:var(--color-text)}
+.ledger-card__next{margin-top:8px;font-size:12px;color:var(--color-muted)}
 /* Sheets */
 .ledger-sheet{position:relative;display:flex;flex-direction:column;gap:12px}
 .ui-dialog:has(>.ledger-sheet){max-height:92dvh;overflow:auto}

@@ -43,10 +43,12 @@ export function LedgerCard({ledger,notes,onOpen,meta}:{ledger:Note;notes:Note[];
   const summary=monthSummary(ledger,monthNotesOf(notes,ledger.id),month,today);
   const next=upcoming(ledger.recurring??[],[],addDays(today,1),1)[0];
   return <button className="note-card ledger-card" onClick={onOpen}>
-    <strong><WalletIcon aria-hidden="true"/>{ledger.title.trim()||'가계부'}</strong>
-    <span>{summary.available!==null?<>{monthOnly(month)} 쓸 수 있는 돈 <b className="numeric">{signedWon(summary.available)}</b></>:<>{monthOnly(month)} 쓴 돈 <b className="numeric">{won(summary.spent)}</b></>}</span>
+    <strong className="note-card__title"><WalletIcon aria-hidden="true"/><span>{ledger.title.trim()||'가계부'}</span></strong>
+    {ledger.pinned&&<PinIcon className="note-card__pin" role="img" aria-label="고정됨"/>}
+    <span className="ledger-card__figure">{summary.available!==null?<>{monthOnly(month)} 쓸 수 있는 돈 <b className="numeric">{signedWon(summary.available)}</b></>:<>{monthOnly(month)} 쓴 돈 <b className="numeric">{won(summary.spent)}</b></>}</span>
     <Meter summary={summary}/>
-    <small>{next&&<>다음 결제 {longDate(next.date)} {next.recurring.name} · </>}{meta}</small>
+    {next&&<span className="ledger-card__next">다음 결제 {longDate(next.date)} {next.recurring.name}</span>}
+    <small className="note-card__foot"><span className="note-card__meta">{meta}</span></small>
   </button>;
 }
 /** The next `count` open charges on or after `from`, across months (confirmed ones are left out). */

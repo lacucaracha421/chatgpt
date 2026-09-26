@@ -239,3 +239,36 @@ export function japanReleases(works: CollectionSummary[], events: ReleaseEvent[]
   const news = (row: JapanRow) => Number(row.aheadVolumes.some(volume => volume.fresh));
   return rows.sort((a, b) => news(b) - news(a) || (b.ahead ?? 0) - (a.ahead ?? 0) || a.work.name.localeCompare(b.work.name, 'ko'));
 }
+
+/** A short date for a grid caption: `9.24` this year, `2027.1.5` otherwise. */
+export function shortReleaseDate(date: string, today: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  return `${String(year) === today.slice(0, 4) ? '' : `${year}.`}${month}.${day}`;
+}
+export type ReleaseCaption = {kind: 'new' | 'ahead'; text: string; date: string | null};
+/**
+ * The grid tile's 신간 line (it replaces the year/rating line): "신간 13권 · 9.24" while the work
+ * has unread 신간 알림, naming the unowned Korean volumes already out (only the newest when the
+ * owned count is unknown) and the latest of their dates; "9권 예약 · 11.20" for the
+ * soonest dated, pre-registered unowned volume of a watched work with nothing unread. An unread
+ * notice the schedule cannot name (a MangaDex volume, a date change, or no schedule from an
+ * older PC) reads "신간 알림 N".
+ */
+export function releaseCaption(work: CollectionSummary, unread: number, owned: number | null, watching: boolean, today: string): ReleaseCaption | null {
+  if (work.type !== 'manga') return null;
+  const volumes = (work.releaseSchedule?.kakao?.volumes ?? []).filter(volume => Number.isInteger(volume.volumeNumber) && volume.volumeNumber > (owned ?? 0));
+  if (unread > 0) {
+    // A known date decides against this device's today, as on the 신간 screen.
+    const out = volumes.filter(volume => { const date = validDate(volume.date); return date ? date <= today : volume.status === 'released'; });
+    if (!out.length) return {kind: 'new', text: `신간 알림 ${unread}`, date: null};
+    // Without an owned count every volume is unowned, so only the newest one is named.
+    const numbers = out.map(volume => volume.volumeNumber), high = Math.max(...numbers), low = owned == null ? high : Math.min(...numbers);
+    const latest = out.map(volume => validDate(volume.date)).filter((date): date is string => !!date).sort().reverse()[0];
+    return {kind: 'new', text: `신간 ${low === high ? low : `${low}–${high}`}권`, date: latest ? shortReleaseDate(latest, today) : null};
+  }
+  if (!watching) return null;
+  const soonest = volumes.map(volume => ({number: volume.volumeNumber, date: validDate(volume.date)}))
+    .filter((volume): volume is {number: number; date: string} => !!volume.date && volume.date > today)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.number - b.number)[0];
+  return soonest ? {kind: 'ahead', text: `${soonest.number}권 예약`, date: shortReleaseDate(soonest.date, today)} : null;
+}

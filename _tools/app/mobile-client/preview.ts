@@ -1,5 +1,19 @@
 import type {MobileNote} from './Notes';
-let demoNotes:MobileNote[]=[{id:'a'.repeat(32),title:'다음에 볼 작품',body:'마음에 남은 장면과 감상을 적어 두세요.',pinned:true,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false},...demoLedger()];
+let demoNotes:MobileNote[]=[{id:'a'.repeat(32),title:'다음에 볼 작품',body:'마음에 남은 장면과 감상을 적어 두세요.',pinned:true,deleted:false,createdAt:'2026-09-13',updatedAt:'2026-09-13',localRevision:1,pending:false,conflict:false},...demoStickyNotes(),...demoLedger()];
+/** A few notes of every kind so the sticky-note cards can be seen: colours, a checklist, a secret, labels. */
+function demoStickyNotes():MobileNote[]{
+  const base={body:'',pinned:false,deleted:false,createdAt:'2026-09-10',localRevision:1,pending:false,conflict:false,schema:2};
+  const check=(id:string,items:[string,boolean][])=>items.map(([text,checked],i)=>({id:`${id}-${i}`,text,checked,order:String.fromCharCode(97+i)}));
+  return [
+    {...base,id:'3'.repeat(32),type:'checklist',title:'장보기',color:'green',pinned:true,pending:true,updatedAt:'2026-09-26T08:00:00Z',items:check('shop',[['우유',false],['계란 한 판',false],['두부',true],['대파',false],['커피 원두',true],['휴지',false]])},
+    {...base,id:'4'.repeat(32),type:'secret',title:'서버 계정',updatedAt:'2026-09-20T08:00:00Z',redacted:true},
+    {...base,id:'5'.repeat(32),type:'text',title:'캐릭터 분류 아이디어',color:'blue',labels:['작업','아이디어'],updatedAt:'2026-09-23T08:00:00Z',body:'시리즈별로 레퍼런스 3장 이상일 때만 자동 인식 켜기. 겹치는 의상은 따로 묶고, 헷갈리는 두 캐릭터는 제외 목록으로.\n\n다음 주에 PC에서 한 번에 정리.'},
+    {...base,id:'6'.repeat(32),type:'checklist',title:'여행 준비물',color:'teal',updatedAt:'2026-09-21T08:00:00Z',items:check('trip',[['여권',true],['충전기',true],['우산',false],['상비약',false],['카메라 배터리',true],['어댑터',false],['잠옷',false],['선글라스',false],['슬리퍼',false]])},
+    {...base,id:'7'.repeat(32),type:'text',title:'읽을 책',color:'pink',labels:['책'],updatedAt:'2026-09-19T08:00:00Z',body:'소설 두 권, 에세이 한 권.\n도서관 반납일 10월 2일.'},
+    {...base,id:'1'.repeat(32),type:'text',title:'',updatedAt:'2026-09-18T08:00:00Z',body:'택배 보관함 비밀번호 바뀜 — 관리실 문의'},
+    {...base,id:'2'.repeat(32),type:'text',title:'회의 메모 9/24',color:'indigo',labels:['작업'],updatedAt:'2026-09-24T08:00:00Z',body:'- 모바일 신간 표시 방식 정하기\n- 메모 화면 카드형으로\n- 컬렉션 유형 전환 가운데로\n\n다음 회의: 10월 첫째 주'},
+  ];
+}
 /** A demo 가계부 in the current month (the mockup's numbers when today is the 25th). */
 function demoLedger():MobileNote[]{
   const now=new Date(),month=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`,day=(d:number)=>`${month}-${String(Math.min(d,now.getDate())).padStart(2,'0')}`;
@@ -109,7 +123,7 @@ function demoMembershipState(assetId:string){
 const collectionNames={game:['여름의 항로','조용한 행성','먼 바다의 기억','숲의 기록'],manga:['밤의 도서관','여름과 파도','푸른 궤도','작은 정원'],movie:['오후의 빛','도시의 창','먼 곳에서','겨울의 초상']};
 const collections:CollectionDetail[]=(['game','manga','movie'] as const).flatMap(type=>Array.from({length:12},(_,i)=>({id:`collection-${type}-${i}`,name:collectionNames[type][i%4]+(i>3?` ${Math.floor(i/4)+1}`:''),type,publisher:type==='game'?'Field Publishing':type==='manga'?'대원씨아이':null,platforms:type==='game'?'Windows · PlayStation · Switch':null,genres:type==='manga'?'Action, Romance, Isekai, School Life, Long Strip':'드라마 · 모험',seasonDateRange:type==='movie'&&i%2===0?['2024-04-01','2026-06-30']:null,productionCompany:type==='movie'?'Studio Archive':null,externalScore:type==='movie'?86:null,runtimeMinutes:type==='movie'?24:null,series:type==='movie'?{status:'방영 종료',cast:['서유진','하루'],seasons:[{id:1,seasonNumber:1,name:'시즌 1',airDate:'2024-04-01',posterArtworkId:`cover-${i}`,episodes:Array.from({length:12},(_,episode)=>({id:episode+1,episodeNumber:episode+1,name:`기억의 장면 ${episode+1}`,airDate:'2024-04-01',runtimeMinutes:24}))}]}:null,showcase:i<7,showcaseOrder:i,year:2024+i%3,myScore:i%4===0?null:i%2===0?4.5:3,createdAt:`2026-09-${String(i+1).padStart(2,'0')}T00:00:00Z`,author:type==='manga'?'서유진':null,developer:type==='game'?'Studio Field':null,director:type==='movie'?'이수현':null,selectedWorkArtworkId:`cover-${i}`,selectedHeroArtworkId:type==='game'?`hero-${i}`:null,selectedBackdropArtworkId:type==='movie'?`hero-${i}`:null,overview:'조용히 보관해 두었다가 다시 꺼내 보는 작품. 빛과 계절, 그리고 오래 남아 있는 장면들을 따라갑니다.',volumes:type==='manga'?Array.from({length:8},(_,v)=>({id:`volume-${v}`,volumeNumber:v%5+1,editionIndex:v<5?0:1,displayLabel:`${v%5+1}권`,coverArtworkId:`volume-cover-${v}`})):[],artworks:[{id:`hero-${i}`,kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true},{id:`cover-${i}`,kind:'cover',selected:true,thumbnailAvailable:true,originalAvailable:true}]})));
 // 신간 알림 and tracking in the preview: manga works carry the upgraded PC's keys, and a few
-// unread release events exercise the entry badge, card badges and the 신간 screen highlights.
+// unread release events exercise the entry badge, the cards' 신간 lines and the 신간 screen highlights.
 for(const [i,item] of collections.filter(item=>item.type==='manga').entries()){item.releaseWatch={enabled:i%3===0,available:i%4!==3};item.ownedVolumes=i%2===0?[{editionIndex:0,count:Math.min(5,i+1)}]:[];}
 // 신간 screen: per-volume release data on the watched works (0, 3, 6, 9) from an upgraded PC.
 const kakaoDemo=(dates:(string|null)[],upcomingFrom:number)=>({editionIndex:0,checkedAt:'2026-09-25T08:00:00Z',volumes:dates.map((date,i)=>({volumeNumber:i+1,date,status:(i+1>=upcomingFrom?'upcoming':'released') as 'upcoming'|'released'}))});

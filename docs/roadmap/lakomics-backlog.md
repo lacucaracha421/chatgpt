@@ -170,7 +170,10 @@ Mobile app:
 - Collections: create a Collection from the tablet. Needs Collections authority slice 1 (docs/research/collection-authority-design-20260924.md; only the inactive slice 0 exists).
 
 PC app:
-- Notes: rework the Notes UI to match the mobile Notes design.
+- Notes: rework the Notes UI to match the mobile Notes design (user, 2026-09-26: follow the chosen mobile masonry sticky-note cards).
+- Collections: show new-release notices like the chosen mobile design (caption line under the title instead of a cover badge).
+
+Mobile designs chosen 2026-09-26 from [the mockups](../prototypes/mobile-requests-20260926b/index.html): release notice C (caption line), type switch B (centered underline tabs), manga connect section as proposed (collapsed row when connected), Notes B (masonry sticky notes).
 
 ## TEST-BASELINE-20260926 — Full-suite baseline
 

@@ -1,7 +1,7 @@
 import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
-import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject,type ReactNode} from 'react';
 import {ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
 import {Button,IconButton} from './ui';
@@ -49,13 +49,41 @@ export function noteMatches(note:Note,query:string) {
   const text=isSecret(note)||isLedgerKind(note)?note.title:[note.title,note.body,...(note.items??[]).map(item=>item.text),...(note.labels??[])].join('\n');
   return text.toLocaleLowerCase().includes(query.toLocaleLowerCase());
 }
-function preview(note:Note) {
-  if(isSecret(note))return '암호 메모';
-  if(noteKind(note)==='checklist'&&!note.readOnly){
-    const items=[...(note.items??[])].sort(byOrder);const open=items.filter(item=>!item.checked).map(item=>item.text.trim()).filter(Boolean);
-    return items.length?`${items.length-open.length}/${items.length} · ${open.slice(0,4).join(', ')||'모두 완료'}`:'빈 체크리스트';
+const CARD_CHECKS=8,CARD_FIELDS=4;
+/** A sticky note's content: text, a checklist with its progress, or a secret note's masked fields. */
+function NoteCardBody({note}:{note:Note}) {
+  if(isSecret(note)){
+    // Values never reach the list: only the field names of an open session, masked.
+    const fields=note.redacted?[]:[...(note.fields??[])].sort(byOrder).slice(0,CARD_FIELDS);
+    const rows=fields.length?fields.map(field=>({key:field.id,label:field.label.trim()||'항목'})):[{key:'locked',label:note.redacted?'잠김':'빈 암호 메모'}];
+    return <span className="note-card__secret">{rows.map(row=><span key={row.key}><span>{row.label}</span><span aria-hidden="true">••••••</span></span>)}</span>;
   }
-  return stripMarkdown(note.body);
+  if(noteKind(note)==='checklist'&&!note.readOnly){
+    const items=[...(note.items??[])].sort(byOrder),ordered=[...items.filter(item=>!item.checked),...items.filter(item=>item.checked)];
+    if(!ordered.length)return <span className="note-card__body is-empty">빈 체크리스트</span>;
+    const done=items.length-items.filter(item=>!item.checked).length,shown=ordered.slice(0,CARD_CHECKS);
+    return <>
+      <span className="note-card__progress"><i aria-hidden="true"><b style={{width:`${done/items.length*100}%`}}/></i><span className="numeric">{done}/{items.length}</span></span>
+      <span className="note-card__checks">{shown.map(item=><span key={item.id} className={item.checked?'is-done':undefined}><span>{item.text.trim()||'\u00a0'}</span></span>)}
+        {ordered.length>shown.length&&<span className="is-more">외 {ordered.length-shown.length}개</span>}</span>
+    </>;
+  }
+  // Markdown is stripped line by line so the note keeps its line breaks (one blank line at most).
+  const text=note.body.split('\n').map(stripMarkdown).join('\n').replace(/\n{3,}/g,'\n\n').trim();
+  return text?<span className="note-card__body">{text.slice(0,600)}</span>:null;
+}
+/**
+ * One sticky note: a thin strip of the note colour on top, the title (pinned notes carry a pin),
+ * the content at its own height, then labels and the edit time (a dot while it waits to sync).
+ */
+function NoteCard({note,meta,onOpen}:{note:Note;meta:ReactNode;onOpen():void}) {
+  const title=note.title.trim(),labels=isSecret(note)?[]:note.labels??[];
+  return <button className={`note-card${noteColorValue(note.color)?' has-tint':''}`} style={tint(note.color)} onClick={onOpen}>
+    <strong className={`note-card__title${title?'':' is-untitled'}`}>{isSecret(note)&&<LockClosedIcon role="img" aria-label="암호 메모"/>}<span>{title||'제목 없음'}</span></strong>
+    {note.pinned&&<PinIcon className="note-card__pin" role="img" aria-label="고정됨"/>}
+    <NoteCardBody note={note}/>
+    <small className="note-card__foot">{labels.length>0&&<em className="note-card__labels">{labels.map(l=><i key={l}>{l}</i>)}</em>}<span className="note-card__meta">{meta}</span></small>
+  </button>;
 }
 
 function LabelEditor({labels,suggestions,readOnly,onChange}:{labels:string[];suggestions:string[];readOnly:boolean;onChange(labels:string[]):void}) {
@@ -223,13 +251,9 @@ export function Notes({active,backRef}:{active:boolean;backRef:MutableRefObject<
   const status=state.error?'확인 필요':state.saving?'저장 중':state.syncing?'동기화 중':pending?'동기화 대기':'동기화됨';
   const list=useRef<HTMLDivElement>(null);
   const pull=usePullToRefresh(list,()=>void store.sync(),state.syncing,!active||!state.unlocked||editing);
-  const meta=(n:Note)=><>{n.conflictCopy&&<><b>사본</b> · </>}{relativeTime(n.updatedAt)}{n.pending&&<> · <i aria-hidden="true"/>동기화 대기</>}</>;
-  const card=(n:Note)=>n.type===LEDGER&&!n.readOnly&&!n.deleted?<LedgerCard key={n.id} ledger={n} notes={state.notes} onOpen={()=>select(n.id)} meta={meta(n)}/>:<button key={n.id} className={`note-card${noteColorValue(n.color)?' has-tint':''}`} style={tint(n.color)} onClick={()=>select(n.id)}>
-    <strong className={n.title.trim()?undefined:'is-untitled'}>{isSecret(n)&&<LockClosedIcon aria-label="암호 메모"/>}{n.title.trim()||'제목 없음'}</strong>
-    {preview(n)&&<span>{preview(n).slice(0,240)}</span>}
-    {!isSecret(n)&&!!n.labels?.length&&<em className="note-card__labels">{n.labels.map(l=><i key={l}>{l}</i>)}</em>}
-    <small>{meta(n)}</small>
-  </button>;
+  // A dot marks a note still waiting to sync; the words are there for screen readers.
+  const meta=(n:Note)=><>{n.pending&&<i className="note-card__pending" aria-hidden="true"/>}{n.conflictCopy&&<><b>사본</b> · </>}{relativeTime(n.updatedAt)}{n.pending&&<span className="sr-only"> · 동기화 대기</span>}</>;
+  const card=(n:Note)=>n.type===LEDGER&&!n.readOnly&&!n.deleted?<LedgerCard key={n.id} ledger={n} notes={state.notes} onOpen={()=>select(n.id)} meta={meta(n)}/>:<NoteCard key={n.id} note={n} meta={meta(n)} onOpen={()=>select(n.id)}/>;
   const syncButton=<Button type="button" size="icon" variant="ghost" className={`notes-sync${state.syncing?' is-syncing':''}${state.error?' is-error':''}`} aria-label="동기화" aria-busy={state.syncing} disabled={state.syncing} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button>;
   // ---- Editor body
   const colorValue=note?noteColorValue(note.color):null;

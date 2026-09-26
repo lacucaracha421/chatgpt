@@ -59,7 +59,13 @@ function Harness({item}: {item: CollectionDetail}) {
   return <CollectionBindings item={item} active refreshKey="0" sheet={sheet} onSheet={setSheet}/>;
 }
 const area = () => screen.getByRole('region', {name: '연결'});
-const row = (name: string) => within(area()).getByText(name, {selector: '.collection-personal-label'}).closest('.collection-binding-row') as HTMLElement;
+/** A provider's row (folded view, opened) or its choice in the 작품 연결 panel. */
+const row = (name: string) => {
+  const found = area().querySelector<HTMLElement>(`[data-provider="${name === 'MangaDex' ? 'mangadex' : 'kakao'}"]`);
+  if (!found) throw new Error(`no ${name} row`);
+  return found;
+};
+const connected = {mangadex: {checkedAt: null, latestVolume: 3, volumes: []}, kakao: {editionIndex: 0, checkedAt: null, volumes: []}};
 async function renderArea(item: CollectionDetail = base) {
   render(<Harness item={item}/>);
   await waitFor(() => expect(calls('/requests?')).toHaveLength(1));
@@ -84,8 +90,12 @@ it('shows each connection from the published schedule and reads the requests for
 it('shows unconnected providers, and a note when no PC has read the bind requests yet', async () => {
   routes.status = {version: 1, mangadexSearch: true, kakaoSearch: true, bindRequests: true, publisherSeenAt: null};
   await renderArea();
-  expect(row('MangaDex').textContent).toContain('연결 안 됨');
-  expect(within(row('카카오')).getByRole('button', {name: '카카오 연결'})).toBeTruthy();
+  // Not connected: the prominent panel, with Kakao (신간 알림) as the primary choice.
+  expect(within(area()).getByRole('heading', {name: '작품 연결'})).toBeTruthy();
+  expect(row('MangaDex').textContent).toContain('일본판 권 목록');
+  expect(row('카카오')).toBe(within(area()).getByRole('button', {name: '카카오 연결'}));
+  expect(row('카카오').classList.contains('is-primary')).toBe(true);
+  expect(row('MangaDex').classList.contains('is-primary')).toBe(false);
   expect(await screen.findByText('PC 앱을 업데이트해야 여기서 고른 연결이 적용돼요.')).toBeTruthy();
 });
 
@@ -94,11 +104,12 @@ it('shows a pending request waiting for the PC and a failed one with its reason'
   const pending = request({requestId: 4, provider: 'mangadex', choice: {mangaId: 'm', title: 'The Night Library'}});
   routes.requests = {version: 1, items: [pending, failed, request({requestId: 2, provider: 'kakao', state: 'superseded'})], pending: {mangadex: pending, kakao: null}};
   await renderArea();
-  await waitFor(() => expect(row('MangaDex').textContent).toContain('연결 대기 · PC가 켜지면 적용'));
+  await waitFor(() => expect(row('MangaDex').textContent).toMatch(/연결 대기.*PC가 켜지면 적용/));
   expect(row('MangaDex').textContent).toContain('The Night Library');
   expect(row('카카오').textContent).toContain('연결 실패');
   expect(row('카카오').textContent).toContain('카카오에서 같은 시리즈를 찾지 못했어요.');
-  expect(within(row('카카오')).getByRole('button', {name: '카카오 다시 연결'})).toBeTruthy();
+  // Not connected yet: the failed choice is itself the button to try again.
+  expect(row('카카오')).toBe(within(area()).getByRole('button', {name: '카카오 다시 연결'}));
 });
 
 it('reads the requests again when the status long-poll reports a bind request moved', async () => {
@@ -153,7 +164,7 @@ it('searches MangaDex for the title, lists covers and details, and files the con
   expect(body).toEqual({version: 1, operationId: body.operationId, collectionId: 'w1', provider: 'mangadex',
     choice: {mangaId: mangadexItems[0].mangaId, title: 'Yoru no Toshokan', coverUrl: mangadexItems[0].coverUrl}, expected: {externalId: null}});
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(row('MangaDex').textContent).toContain('연결 대기 · PC가 켜지면 적용');
+  expect(row('MangaDex').textContent).toMatch(/연결 대기.*PC가 켜지면 적용/);
   expect(row('MangaDex').textContent).toContain('Yoru no Toshokan');
   // The list is read again after filing.
   await waitFor(() => expect(calls('/requests?').length).toBeGreaterThanOrEqual(2));
@@ -195,7 +206,7 @@ it('searches Kakao and sends back the normalized query with the exact group fiel
   expect(posts()[0]).toEqual({version: 1, operationId: posts()[0].operationId, collectionId: 'w1', provider: 'kakao',
     choice: {query: '밤의 도서관 (normalized)', groups: [{anchorItemId: 'k-anchor', groupFingerprint: 'f'.repeat(64), title: '밤의 도서관', firstVolume: 1, lastVolume: 12, volumeCount: 12}],
       title: '밤의 도서관', author: '서유진', publisher: '대원씨아이', volumeCount: 12, thumbnailUrl: kakaoItems[0].thumbnailUrl}});
-  await waitFor(() => expect(row('카카오').textContent).toContain('연결 대기 · PC가 켜지면 적용'));
+  await waitFor(() => expect(row('카카오').textContent).toMatch(/연결 대기.*PC가 켜지면 적용/));
 });
 
 const splitItems = [
@@ -234,7 +245,7 @@ it('toggles several Kakao groups and joins them in volume order into one request
       {anchorItemId: 'k-late', groupFingerprint: 'b'.repeat(64), title: '밤의 도서관', firstVolume: 11, lastVolume: 15, volumeCount: 5},
     ], title: '밤의 도서관', author: '서유진', publisher: '대원씨아이', volumeCount: 15, thumbnailUrl: kakaoItems[0].thumbnailUrl}});
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(row('카카오').textContent).toContain('연결 대기 · PC가 켜지면 적용');
+  expect(row('카카오').textContent).toMatch(/연결 대기.*PC가 켜지면 적용/);
   expect(row('카카오').textContent).toContain('밤의 도서관 · 1–15권 · 2개 묶음');
 });
 
@@ -257,7 +268,7 @@ it('shows a pending Kakao request of several groups with the joined title and ra
     {anchorItemId: 'b', groupFingerprint: 'b'.repeat(64), firstVolume: 11, lastVolume: 15, volumeCount: 5}]}});
   routes.requests = {version: 1, items: [pending], pending: {mangadex: null, kakao: pending}};
   await renderArea();
-  await waitFor(() => expect(row('카카오').textContent).toContain('연결 대기 · PC가 켜지면 적용'));
+  await waitFor(() => expect(row('카카오').textContent).toMatch(/연결 대기.*PC가 켜지면 적용/));
   expect(row('카카오').textContent).toContain('밤의 도서관 · 1–15권 · 2개 묶음');
 });
 
@@ -356,4 +367,43 @@ it('keeps the confirm open on a failed request and retries with the same operati
   await waitFor(() => expect(posts()).toHaveLength(2));
   expect(posts()[1].operationId).toBe(posts()[0].operationId);
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
+it('folds into one row when both are connected and opens to the rows with 다시 연결', async () => {
+  await renderArea({...base, releaseWatch: {enabled: true, available: true}, releaseSchedule: connected});
+  const fold = within(area()).getByRole('button', {name: /^연결/});
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
+  expect(fold.textContent).toBe('연결MangaDex카카오');
+  expect(within(fold).getAllByLabelText('연결됨')).toHaveLength(2);
+  expect(within(area()).queryByRole('heading', {name: '작품 연결'})).toBeNull();
+  expect(within(area()).queryByRole('button', {name: 'MangaDex 다시 연결'})).toBeNull();
+  fireEvent.click(fold);
+  expect(fold.getAttribute('aria-expanded')).toBe('true');
+  expect(row('MangaDex').textContent).toContain('연결됨');
+  const sheet = await openSheet('카카오', '다시 연결');
+  expect(sheet).toBeTruthy();
+});
+
+it('spells out a waiting or failed request in the folded row', async () => {
+  const pending = request({requestId: 4, provider: 'kakao', choice: {title: '밤의 도서관'}});
+  routes.requests = {version: 1, items: [pending], pending: {mangadex: null, kakao: pending}};
+  // MangaDex connected and a Kakao pick waiting for the PC: nothing to do, so it stays folded.
+  await renderArea({...base, releaseSchedule: {...connected, kakao: null}});
+  const fold = () => within(area()).getByRole('button', {name: /^연결/});
+  await waitFor(() => expect(fold().textContent).toContain('카카오 연결 대기 · PC가 켜지면 적용'));
+  cleanup(); mocks.api.mockClear();
+  // A failed re-connect of a connected provider keeps the fold and says so.
+  const failed = request({requestId: 5, provider: 'mangadex', state: 'failed', reason: {code: 'x', message: '못 찾음'}});
+  routes.requests = {version: 1, items: [failed], pending: {mangadex: null, kakao: null}};
+  await renderArea({...base, releaseSchedule: connected});
+  await waitFor(() => expect(fold().textContent).toContain('MangaDex 연결 실패'));
+});
+
+it('keeps the large panel while only one side is connected, the connected one quiet', async () => {
+  await renderArea({...base, releaseSchedule: {...connected, kakao: null}});
+  expect(within(area()).getByRole('heading', {name: '작품 연결'})).toBeTruthy();
+  expect(row('MangaDex').classList.contains('is-done')).toBe(true);
+  expect(row('MangaDex').textContent).toContain('MangaDex 연결됨');
+  expect(within(row('MangaDex')).getByRole('button', {name: 'MangaDex 다시 연결'})).toBeTruthy();
+  expect(row('카카오').getAttribute('aria-label')).toBe('카카오 연결');
 });

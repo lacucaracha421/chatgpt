@@ -4,7 +4,7 @@ import {CollectionPersonal,PersonalActions,PersonalRecord,type PersonalSheet} fr
 import {koreanGenres} from '../src/collections/genreNames';
 import {useCollectionEdits} from './useCollectionEdits';
 import {CollectionReleases} from './CollectionReleases';
-import {NO_RELEASES, RELEASE_COUNTS_PATH, releaseCounts, type ReleaseCounts} from './collectionReleases';
+import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
@@ -284,9 +284,11 @@ function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:st
     {!!item.series?.cast.length&&<p className="collection-cast">출연 · {item.series.cast.join(' · ')}</p>}</section>;
 }
 const Stars=({score}:{score:number})=><span className="collection-score" aria-label={`내 별점 ${score.toFixed(1)}점`}><StarSolid aria-hidden="true"/><span className="numeric">{score.toFixed(1)}</span></span>;
-function WorkCard({work,revision,active,meta=true,unread=0,onOpen}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;/** Unread 신간 알림 of this manga, as on the PC card. */unread?:number;onOpen(id:string):void}) {
+/** A manga's 신간 line under the title; the cover itself stays clean (user choice C, 2026-09-26). */
+const ReleaseLine=({caption}:{caption:ReleaseCaption})=><span className={`collection-release-line${caption.kind==='ahead'?' is-ahead':''}`}>{caption.text}{caption.date&&<span className="numeric"> · {caption.date}</span>}</span>;
+function WorkCard({work,revision,active,meta=true,caption,onOpen}:{work:CollectionSummary;revision:string;active:boolean;meta?:boolean;/** The 신간 line, which takes the year/rating line's place. */caption?:ReleaseCaption|null;onOpen(id:string):void}) {
   const credit=collectionCardCredit(work),date=collectionCardDate(work);
-  return <button className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active}/>{work.type==='manga'&&unread>0&&<span className="collection-release-badge numeric">신간 {unread}</span>}<span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{meta&&(date||work.myScore!=null)&&<span className="collection-card-meta">{date&&<span className="collection-date numeric">{date}</span>}{work.myScore!=null&&<Stars score={work.myScore}/>}</span>}</button>;
+  return <button className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{caption?<ReleaseLine caption={caption}/>:meta&&(date||work.myScore!=null)&&<span className="collection-card-meta">{date&&<span className="collection-date numeric">{date}</span>}{work.myScore!=null&&<Stars score={work.myScore}/>}</span>}</button>;
 }
 
 type ListState={key:string;items:CollectionSummary[];page:CollectionPage|null;next:string|null;busy:boolean;more:boolean;error:string;moreError:string;legacy:boolean};
@@ -371,6 +373,8 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const [personalSheet,setPersonalSheet]=useState<PersonalSheet>(null);
   // MangaDex / 카카오 연결: the open search sheet in the manga detail.
   const [bindSheet,setBindSheet]=useState<BindProvider|null>(null);
+  // The large 작품 연결 panel (not yet connected) spans the width under the cover and info.
+  const [bindHost,setBindHost]=useState<HTMLDivElement|null>(null);
   // 신간: unread counts for the entry badge and manga card badges, and the 신간 screen level (Collections tab only).
   const [releases,setReleases]=useState<ReleaseCounts>(NO_RELEASES),[inboxOpen,setInboxOpen]=useState(false);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
@@ -440,6 +444,12 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   // The 신간 screen reads owned counts and 신간 알림 through the edit outbox, so a queued change shows at once.
   const ownedOf=(work:CollectionSummary,edition:number)=>edits.visible(work.id,'ownedVolumes',{editionIndex:edition,count:work.ownedVolumes?.find(entry=>entry.editionIndex===edition)?.count??null}).value.count;
   const watching=(work:CollectionSummary)=>work.type==='manga'&&!!work.releaseWatch&&edits.visible(work.id,'releaseWatch',work.releaseWatch.enabled).value;
+  const today=localToday();
+  const captionOf=(work:CollectionSummary)=>{
+    if(work.type!=='manga')return null;
+    const kakao=work.releaseSchedule?.kakao;
+    return releaseCaption(work,unreadOf(work),kakao?ownedOf(work,kakao.editionIndex):null,watching(work),today);
+  };
 
   const item=detail?.item, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];
   const covers=item?[{id:collectionCover(item),label:item.name},...volumes.map(v=>({id:v.coverArtworkId,label:[volumeLabel(v),volumeReleaseLabel(v)].filter(Boolean).join(' · ')}))]:[];
@@ -458,8 +468,10 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
   // The type switch lives in the list bar (also while searching) so it stays in reach after
-  // scrolling; 신간 and search keep the right edge like the other tabs' actions.
-  const typeSwitch=<div className="library-segments collection-type-switch" role="tablist" aria-label="컬렉션 유형">{TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>chooseTab(value)}>{labels[value]}</button>)}</div>;
+  // scrolling: text tabs centred in the bar with an underline on its edge; while searching they
+  // shrink to the right end. 신간 and search keep the right edge like the other tabs' actions.
+  // Each label reserves its bold width, so selecting never nudges the centred group.
+  const typeSwitch=<div className="collection-type-tabs" role="tablist" aria-label="컬렉션 유형">{TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>chooseTab(value)}><span data-label={labels[value]}>{labels[value]}</span></button>)}</div>;
   const header=selected
     ?<TopBar back={{label:'뒤로',onClick:()=>setSelected(null)}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
     :inboxOpen
@@ -487,7 +499,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {unpublished(main)?unpublishedNotice:<>
         {!filtered&&<section className="collection-showcase-fold" aria-label="쇼케이스">
           <div className="collection-section"><button className="collection-fold" aria-expanded={showcaseOpen} onClick={()=>setShowcaseOpen(open=>!open)}><h2>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</h2><ChevronDownIcon aria-hidden="true"/></button>{showcaseOpen&&<Button variant="ghost" className="collection-more" onClick={()=>setShowcaseAll(true)}>전체 보기<ChevronRightIcon/></Button>}</div>
-          {showcaseOpen&&<div className="collection-shelf">{showcase.busy&&!showcase.items.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{!showcase.busy&&showcase.committed&&!showcase.items.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcase.items.map(work=><WorkCard key={work.id} work={card(work)} revision={showcase.page?.revision??''} active={live&&!selected} meta={false} unread={unreadOf(work)} onOpen={openWork}/>)}</div>}
+          {showcaseOpen&&<div className="collection-shelf">{showcase.busy&&!showcase.items.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{!showcase.busy&&showcase.committed&&!showcase.items.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcase.items.map(work=><WorkCard key={work.id} work={card(work)} revision={showcase.page?.revision??''} active={live&&!selected} meta={false} caption={captionOf(work)} onOpen={openWork}/>)}</div>}
         </section>}
         <div className="collection-section collection-all"><h2>{filtered?'검색 결과':'전체'}{main.page?.totalCount!=null&&<span className="numeric muted collection-total" aria-label="필터 결과 개수"> {main.page.totalCount.toLocaleString()}</span>}</h2>
         <div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
@@ -496,7 +508,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
           {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
         </div></div>
         {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
-        <div className={`collection-grid collection-grid-${type}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} unread={unreadOf(work)} onOpen={openWork}/>)}</div>
+        <div className={`collection-grid collection-grid-${type}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork}/>)}</div>
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
         {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
@@ -506,7 +518,7 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
       {showcasePull}
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} unread={unreadOf(work)} onOpen={openWork}/>)}</div>}
+      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
     </>}</div>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} onCounts={setReleases} onOpen={openWork} ownedOf={ownedOf} watching={watching}
@@ -518,8 +530,9 @@ export function Collections({active,paused,backRef}:{active:boolean;paused:boole
         <div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{item.type==='manga'&&originalTitle(item)&&<span className="collection-detail-original">{originalTitle(item)}</span>}{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}
           {item.type==='manga'?<MangaFacts item={item}/>:<span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span>}
           <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>
-          {item.type==='manga'&&<CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet}/>}</div>
+          {item.type==='manga'&&<CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet} panelHost={bindHost}/>}</div>
       </div>
+      {item.type==='manga'&&<div ref={setBindHost} className="collection-bind-host"/>}
       <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
       {volumes.length>0&&<section className="collection-block collection-volume-section" aria-label="권별 표지"><h2>{volumes.length}권</h2>
         {editionOptions.length>1&&<div className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setVolumeLimit(96);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}

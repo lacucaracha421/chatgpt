@@ -365,6 +365,9 @@ describe('read-only collections',()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     const switcher=()=>screen.getByRole('tablist',{name:'컬렉션 유형'});
     expect(switcher().closest('header.top-bar')).toBeTruthy();
+    // Underline text tabs (centred by CSS), no longer the segmented control.
+    expect(switcher().classList.contains('collection-type-tabs')).toBe(true);
+    expect(switcher().classList.contains('library-segments')).toBe(false);
     expect(list().querySelector('[role=tablist]')).toBeNull();
     expect(screen.getAllByRole('tablist',{name:'컬렉션 유형'})).toHaveLength(1);
     const listPaths=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.startsWith('/v1/collections?'));

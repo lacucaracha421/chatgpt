@@ -167,13 +167,19 @@
 .collection-personal-pending.is-slot{display:inline-block;min-width:4.5em;text-align:right}
 .collection-personal-switch{transition:background-color .15s var(--ease-standard),border-color .15s var(--ease-standard)}
 .collection-personal-switch::after{transition:transform .15s var(--ease-standard),background-color .15s var(--ease-standard)}
-/* 신간 알림: a quiet chip in the bar, a card badge like the PC's, and the inbox level. */
+/* 신간 알림: a quiet chip in the bar, a line under a card's title, and the inbox level. */
 .collection-release-chip{display:inline-flex;align-items:center;gap:6px;min-height:36px;margin:0 4px;padding:0 10px;background:transparent;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font:inherit;font-size:13px;white-space:nowrap}
 .collection-release-count{min-width:18px;padding:1px 5px;color:var(--color-bg);background:var(--color-accent);border-radius:var(--radius-sm);font-size:11px;font-weight:600;line-height:1.4;text-align:center}
 .collection-segments .collection-release-count{margin-left:6px}
 .collection-release-chip:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
 .collection-tile{position:relative}
-.collection-release-badge{position:absolute;top:6px;right:6px;padding:2px 6px;color:var(--color-bg);background:var(--color-accent);border-radius:var(--radius-sm);font-size:11px;font-weight:600;line-height:1.4;pointer-events:none}
+/* The 신간 line takes the year/rating line's place: an ivory square and 신간 for unread news,
+   a hollow square and 예약 for the next pre-registered volume. Nothing is laid over the cover. */
+.collection-release-line{display:flex;align-items:center;gap:6px;min-height:18px;margin-top:2px;font-size:12px;font-weight:600;line-height:1.4;color:var(--color-accent);white-space:nowrap;overflow:hidden}
+.collection-release-line::before{content:'';width:6px;height:6px;flex:none;background:var(--color-accent)}
+.collection-release-line .numeric{font-size:13px;font-weight:500;color:var(--color-muted)}
+.collection-release-line.is-ahead{color:var(--color-muted);font-weight:500}
+.collection-release-line.is-ahead::before{background:transparent;box-shadow:inset 0 0 0 1px var(--color-muted)}
 /* The 신간 screen: region tabs, then one block per work (cover, name, what matters, volumes). */
 .collection-releases-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;margin-top:4px}
 .collection-releases-head .hint{margin:0}
@@ -239,16 +245,28 @@
 .collection-bar-pending{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:50%;background:transparent;pointer-events:none}
 .collection-bar-action.is-pending .collection-bar-pending{background:var(--color-text)}
 .collection-toast{position:fixed;z-index:190;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));width:max-content;max-width:calc(100vw - 2*var(--mobile-gutter,16px));margin:0;padding:10px 14px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-sidebar);color:var(--color-text);box-shadow:var(--shadow-dialog);font-size:13px}
-/* 게임 / 만화 / 영화 / AV: the library segment look, compacted into the list bar before its
-   actions. The segments are 40px tall; each hit area extends to 56px so the bar stays one row. */
-.top-bar .collection-type-switch{flex-shrink:0;margin:0 8px 0 0;overflow:visible}
-.top-bar.is-search .collection-type-switch{margin:0 0 0 4px}
-.top-bar.is-search:has(>.collection-type-switch){padding-right:6px}
-.top-bar .collection-type-switch button{position:relative;flex:0 0 auto;min-width:58px;min-height:40px;padding:0 14px;font:inherit;font-size:14px;cursor:pointer}
-.top-bar .collection-type-switch button::before{content:'';position:absolute;inset:-8px 0}
-.top-bar .collection-type-switch button:first-child{border-radius:3px 0 0 3px}
-.top-bar .collection-type-switch button:last-child{border-radius:0 3px 3px 0}
-.top-bar .collection-type-switch button:focus-visible{outline:2px solid var(--color-focus);outline-offset:-2px;z-index:1}
+/* 게임 / 만화 / 영화 / AV: text tabs centred in the list bar, the selected one white with an
+   ivory underline on the bar's bottom edge (user choice B, 2026-09-26). The tabs fill the bar's
+   height, so each keeps a 56px hit area. While searching they sit small at the right end. */
+.collection-type-tabs{display:flex;flex-shrink:0}
+.top-bar .collection-type-tabs{position:absolute;left:50%;top:0;bottom:-1px;transform:translateX(-50%);z-index:1}
+.collection-type-tabs button{position:relative;display:flex;align-items:center;height:100%;padding:0 20px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:16px;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.collection-type-tabs button>span{display:inline-flex;flex-direction:column;align-items:center}
+.collection-type-tabs button>span::after{content:attr(data-label);height:0;overflow:hidden;visibility:hidden;font-weight:600}
+.collection-type-tabs button[aria-selected=true]{color:var(--color-text);font-weight:600}
+.collection-type-tabs button[aria-selected=true]::after{content:'';position:absolute;left:14px;right:14px;bottom:0;height:2px;background:var(--color-accent)}
+.collection-type-tabs button+button::before{content:'';position:absolute;left:0;top:calc(50% - 6px);width:1px;height:12px;background:var(--color-border)}
+.collection-type-tabs button:active:not([aria-selected=true]){color:var(--color-text)}
+.collection-type-tabs button:focus-visible{outline:2px solid var(--color-focus);outline-offset:-8px}
+.top-bar.is-search .collection-type-tabs{position:relative;left:auto;top:auto;bottom:auto;transform:none;align-self:stretch;margin:0 0 -1px 4px}
+.top-bar.is-search .collection-type-tabs button{padding:0 12px;font-size:14px}
+.top-bar.is-search .collection-type-tabs button[aria-selected=true]::after{left:8px;right:8px}
+.top-bar.is-search:has(>.collection-type-tabs){padding-right:6px}
+/* Narrow phones: the tabs join the actions in the row; while searching the field keeps the room. */
+@media(max-width:600px){
+  .top-bar .collection-type-tabs{position:relative;left:auto;top:auto;bottom:auto;transform:none;align-self:stretch;margin:0 4px -1px 0}
+  .collection-type-tabs button{padding:0 8px;font-size:14px}
+  .collection-type-tabs button[aria-selected=true]::after{left:6px;right:6px}
+  .top-bar.is-search .collection-type-tabs{display:none}
+}
 .collection-list{padding-top:6px}
-/* Narrow phones: tighter segments; while searching the field keeps the room. */
-@media(max-width:600px){.top-bar .collection-type-switch button{min-width:0;padding:0 10px}.top-bar.is-search .collection-type-switch{display:none}}

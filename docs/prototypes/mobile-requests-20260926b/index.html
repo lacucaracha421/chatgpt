@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile Request Mockups</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css and mobile-client/mobile.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-control:#232425; --color-control-pressed:#353637;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --color-filter-selected:#383838; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --work-shadow-rest:0 3px 4px rgba(0,0,0,.28);
+  --radius-tile:2px; --radius-sm:4px;
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --gutter:16px;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+svg.i.solid { fill:currentColor; stroke:none; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.muted { color:var(--color-muted); }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:2560px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1100px; margin:8px 0 0; line-height:1.7; }
+.toolbar { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.toolbar button, .toolbar a { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; cursor:pointer; color:var(--color-text); text-decoration:none; font-size:13px; }
+.toolbar button[aria-pressed=true] { background:var(--color-filter-selected); border-color:var(--color-filter-border); }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; width:28px; height:28px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-numeric); }
+section.topic>p { color:var(--color-muted); max-width:1200px; line-height:1.7; margin-top:8px; }
+section.topic>p b { color:var(--color-text); font-weight:600; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; margin-top:20px; }
+figure { margin:0; }
+figcaption { font-size:14px; color:var(--color-muted); margin-bottom:10px; width:800px; line-height:1.6; min-height:68px; }
+.scaled figcaption { font-size:26px; min-height:120px; }
+figcaption b { color:var(--color-text); }
+.tag { display:inline-block; font:600 12px var(--font-ui); letter-spacing:1px; padding:1px 7px; margin-right:6px; border-radius:2px; background:var(--color-surface-elevated); color:var(--color-text); vertical-align:1px; }
+.tag.now { background:#3a2c2c; }
+.tag.a { background:var(--color-accent); color:var(--color-on-accent); }
+.tag.b { background:#2c3a3a; }
+.tag.c { background:#33304a; }
+.scaled { zoom:.5; }
+body.full .scaled { zoom:1; }
+body.full .scaled figcaption { font-size:14px; min-height:68px; }
+/* Screenshot mode: one topic at 1:1, no document chrome. */
+body.shot .doc>header, body.shot section.topic:not(.shown) { display:none; }
+body.shot .doc { padding:24px; max-width:none; }
+body.shot section.topic { margin:0; border:0; padding:0; }
+body.shot .scaled { zoom:1; }
+body.shot .scaled figcaption { font-size:15px; min-height:72px; }
+body.shot .row { flex-wrap:nowrap; }
+
+/* ===== App frame: Galaxy Tab S11 portrait, 800 × 1280 CSS px ===== */
+.frame { position:relative; width:800px; height:1280px; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); display:flex; flex-direction:column; }
+.strip { position:relative; width:800px; background:var(--color-bg); border:1px solid var(--color-border); }
+.content { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+.fade-end::after { content:''; position:absolute; left:0; right:0; bottom:0; height:32px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:3; }
+.lab { padding:12px 16px 6px; font-size:12px; color:var(--color-muted); letter-spacing:.4px; }
+
+/* ----- Shared top bar (mobile.css .top-bar) ----- */
+.bar { height:56px; flex-shrink:0; display:flex; align-items:center; gap:2px; padding:0 6px 0 16px; background:var(--color-sidebar); border-bottom:1px solid var(--color-border); position:relative; z-index:5; }
+.bar.sub { padding-left:4px; }
+.bar .brand { display:flex; align-items:center; color:var(--color-accent); margin-right:12px; flex-shrink:0; }
+.bar .brand svg.mark { width:22px; height:26px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.bar h1 { font-size:20px; font-weight:600; line-height:1.2; letter-spacing:-.2px; white-space:nowrap; }
+.bar .stack { display:flex; flex-direction:column; min-width:0; line-height:1.2; }
+.bar .crumb { font-size:14px; color:var(--color-text); white-space:nowrap; }
+.bar .space { flex:1; min-width:4px; }
+.bar .state { font-size:12px; color:var(--color-muted); margin-right:4px; white-space:nowrap; }
+.ib { width:44px; height:44px; display:inline-grid; place-items:center; border:0; background:transparent; color:var(--color-muted); border-radius:4px; position:relative; flex-shrink:0; }
+.ib.on { color:var(--color-text); }
+.ib.dim svg { opacity:.45; }
+.searchbar { flex:1; display:flex; align-items:center; gap:8px; height:40px; padding:0 4px 0 12px; background:var(--color-bg); border:1px solid var(--color-border-strong); border-radius:4px; min-width:0; }
+.searchbar svg.i { width:18px; height:18px; color:var(--color-muted); }
+.searchbar span.ph { flex:1; color:var(--color-muted); white-space:nowrap; overflow:hidden; }
+.searchbar .caret { width:1px; height:18px; background:var(--color-text); margin-right:-6px; flex:none; }
+/* 신간 chip (Collections.css .collection-release-chip) */
+.rchip { display:inline-flex; align-items:center; gap:6px; height:36px; margin:0 4px; padding:0 10px; border:1px solid var(--color-border); border-radius:4px; font-size:13px; white-space:nowrap; flex-shrink:0; }
+.rcount { min-width:18px; padding:1px 5px; color:var(--color-bg); background:var(--color-accent); border-radius:4px; font:600 12px/1.35 var(--font-numeric); text-align:center; }
+/* Current type switch in the bar (library-segments, compacted) */
+.seg-now { display:flex; border:1px solid var(--color-border); border-radius:4px; overflow:hidden; box-shadow:var(--inset-light); flex-shrink:0; margin-right:8px; }
+.seg-now span { min-width:58px; height:40px; padding:0 14px; display:grid; place-items:center; background:var(--color-control); color:var(--color-muted); font-size:14px; }
+.seg-now span+span { border-left:1px solid var(--color-border); }
+.seg-now span.sel { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+/* Proposal 2A: centered slabs (the PC's Collection-type slab with its hard echo) */
+.seg-slab { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; gap:6px; }
+.seg-slab span { width:72px; height:36px; display:grid; place-items:center; color:var(--color-muted); font-size:15px; border-radius:2px; position:relative; }
+.seg-slab span.sel { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; box-shadow:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo); }
+.seg-slab span.sel::before { content:''; position:absolute; left:-9px; top:calc(50% - 2.5px); width:5px; height:5px; background:var(--color-accent); }
+.seg-slab.compact { position:static; transform:none; gap:4px; margin-left:6px; }
+.seg-slab.compact span { width:auto; padding:0 10px; height:34px; font-size:14px; }
+.seg-slab.compact span.sel::before { display:none; }
+/* Proposal 2B: centered text tabs, the selected one underlined on the bar's edge */
+.seg-tabs { position:absolute; left:50%; top:0; bottom:-1px; transform:translateX(-50%); display:flex; }
+.seg-tabs span { height:100%; padding:0 20px; display:flex; align-items:center; color:var(--color-muted); font-size:16px; position:relative; }
+.seg-tabs span.sel { color:var(--color-text); font-weight:600; }
+.seg-tabs span.sel::after { content:''; position:absolute; left:14px; right:14px; bottom:0; height:2px; background:var(--color-accent); }
+.seg-tabs span+span::before { content:''; position:absolute; left:0; top:calc(50% - 6px); height:12px; width:1px; background:var(--color-border); }
+.seg-tabs.compact { position:relative; left:auto; transform:none; top:auto; height:56px; margin-left:4px; align-self:stretch; }
+.seg-tabs.compact span { padding:0 12px; font-size:14px; }
+.seg-tabs.compact span.sel::after { left:8px; right:8px; }
+.bell-count { position:relative; }
+.bell-count .rcount { position:absolute; top:4px; right:2px; min-width:16px; padding:0 4px; font-size:11px; line-height:16px; }
+
+/* ----- Bottom navigation (portrait, 60 px + 8 px lift) ----- */
+.nav { flex-shrink:0; height:60px; margin-bottom:8px; padding:3px 0; display:flex; justify-content:center; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav button { flex:1 1 0; max-width:122px; min-height:53px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:0; background:transparent; color:var(--color-muted); position:relative; font-size:11px; line-height:1.2; }
+.nav button.active { color:var(--color-accent); }
+.nav button.active::after { content:''; position:absolute; top:-3px; left:calc(50% - 8px); width:16px; height:2px; background:currentColor; }
+
+/* ----- Collections list (Collections.css) ----- */
+.clist { flex:1; min-height:0; overflow:hidden; padding:6px var(--gutter) 28px; }
+.csection { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:44px; margin-top:8px; }
+.csection h2, .fold { font-size:15px; font-weight:600; }
+.csection h2 .numeric { font-size:13px; font-weight:500; color:var(--color-muted); }
+.fold { display:flex; align-items:center; gap:6px; }
+.fold svg.i { width:18px; height:18px; color:var(--color-muted); }
+.csection.all { min-height:52px; }
+.chips { display:flex; gap:8px; align-items:center; }
+.chip { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 12px; background:var(--color-control); border:1px solid var(--color-border); box-shadow:var(--inset-light); border-radius:4px; white-space:nowrap; font-size:14px; }
+.chip svg.i { width:14px; height:14px; color:var(--color-muted); }
+.chip svg.i.lead { width:16px; height:16px; }
+.cgrid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:22px 12px; }
+.ctile { display:flex; flex-direction:column; min-width:0; position:relative; }
+.art { position:relative; width:100%; aspect-ratio:2/3; background:var(--color-surface); border-radius:var(--radius-tile); }
+.art img { width:100%; height:100%; object-fit:cover; display:block; border-radius:inherit; }
+/* Static paperback look of the manga list (thin book: spine shade, page edge, resting shadow). */
+.book { border-radius:1px 2px 2px 1px; box-shadow:var(--work-shadow-rest); }
+.book::before { content:''; position:absolute; inset:0; background:linear-gradient(90deg,rgba(0,0,0,.28),rgba(255,255,255,.08) 3%,transparent 7%); border-radius:inherit; pointer-events:none; z-index:1; }
+.book::after { content:''; position:absolute; top:2px; bottom:2px; right:-3px; width:3px; background:linear-gradient(90deg,#cfcabd,#9d998f); border-radius:0 1px 1px 0; }
+.ctitle { font-size:14px; font-weight:500; line-height:1.35; margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ccredit { font-size:12px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+.cmeta { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--color-muted); margin-top:1px; min-height:18px; }
+.cmeta .score { display:inline-flex; align-items:center; gap:2px; color:var(--color-text); }
+.cmeta .score svg.i { width:12px; height:12px; }
+/* Today: .collection-release-badge */
+.badge-now { position:absolute; top:6px; right:6px; z-index:2; padding:2px 6px; color:var(--color-bg); background:var(--color-accent); border-radius:4px; font-size:11px; font-weight:600; line-height:1.4; }
+/* 1A corner flag: a square ivory tab flush with the cover's top-left corner. */
+.flag { position:absolute; top:0; left:0; z-index:2; display:flex; align-items:stretch; height:26px; font-size:12px; font-weight:600; line-height:26px; box-shadow:0 0 0 1px rgba(22,23,24,.6); }
+.flag b { padding:0 7px; background:var(--color-accent); color:var(--color-on-accent); font-weight:600; }
+.flag .numeric { padding:0 7px; background:#161718; color:var(--color-accent); font-size:14px; font-weight:500; }
+.flag.ahead b { background:#161718e6; color:var(--color-text); font-weight:500; }
+.flag.ahead .numeric { background:#161718e6; color:var(--color-muted); border-left:1px solid var(--color-border); font-size:13px; }
+/* 1B bottom strip: a band over the cover's foot, ivory rule on the left. */
+.band { position:absolute; left:0; right:0; bottom:0; z-index:2; display:flex; align-items:center; gap:6px; height:32px; padding:0 8px 0 9px; background:rgba(17,18,19,.9); border-left:3px solid var(--color-accent); font-size:12.5px; font-weight:600; white-space:nowrap; }
+.band .numeric { margin-left:auto; color:var(--color-muted); font-size:13px; font-weight:500; }
+.band .n { color:var(--color-accent); font:600 14px var(--font-numeric); }
+.band.ahead { border-left-color:var(--color-border-strong); color:var(--color-muted); font-weight:500; }
+/* 1C caption line: nothing on the cover; the notice replaces the meta line under the title. */
+.cnew { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--color-accent); margin-top:2px; min-height:18px; white-space:nowrap; }
+.cnew::before { content:''; width:6px; height:6px; background:var(--color-accent); flex:none; }
+.cnew .numeric { font-weight:500; font-size:13px; color:var(--color-muted); }
+.cnew.ahead { color:var(--color-muted); font-weight:500; }
+.cnew.ahead::before { background:transparent; border:1px solid var(--color-muted); }
+
+/* ----- Manga detail ----- */
+.detail { flex:1; min-height:0; overflow:hidden; padding:0 var(--gutter) 28px; }
+.intro { display:flex; align-items:flex-start; gap:18px; padding-top:16px; }
+.dcover { width:220px; flex-shrink:0; }
+.ident { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.kind { color:var(--color-muted); font-size:12px; }
+.ident h1 { font-size:22px; line-height:1.25; font-weight:600; }
+.orig, .credit { color:var(--color-muted); font-size:13px; }
+.credit { font-size:14px; }
+.facts { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:8px 0 0; font-size:13px; }
+.facts dt { color:var(--color-muted); }
+.facts dd { margin:0; }
+.genres { display:flex; flex-wrap:wrap; gap:6px; list-style:none; margin:10px 0 0; padding:0; }
+.genres li { padding:2px 8px; border:1px solid var(--color-border); border-radius:4px; font-size:12px; line-height:1.5; }
+.personal { margin-top:14px; border-top:1px solid var(--color-border); }
+.prow { display:flex; align-items:center; gap:12px; min-height:44px; padding:8px 2px; border-bottom:1px solid var(--color-border); font-size:15px; }
+.plabel { color:var(--color-muted); min-width:5.8em; }
+.pval { flex:1; min-width:0; }
+.pval .numeric { font-size:16px; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:36px; padding:0 10px; font-size:14px; font-weight:500; white-space:nowrap; border-radius:4px; border:1px solid var(--color-border); background:var(--color-surface); flex:none; }
+.btn.secondary { background:var(--color-control); box-shadow:var(--inset-light); }
+.btn.primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); }
+.btn.ghost { background:transparent; border-color:transparent; color:var(--color-muted); }
+/* Current 연결 section (collectionBindings.css) */
+.bind { margin-top:14px; border-top:1px solid var(--color-border); }
+.bind-title { margin:10px 2px 2px; font-size:12px; font-weight:500; color:var(--color-muted); }
+.brow { display:flex; align-items:center; gap:12px; min-height:44px; padding:6px 2px; border-bottom:1px solid var(--color-border); }
+.bval { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.bval small { font-size:12px; color:var(--color-muted); }
+.brow.idle .bval>span { color:var(--color-muted); }
+.brow.pending .bval>span { font-size:13px; }
+/* 3 · connected: one small folded row */
+.bfold { display:flex; align-items:center; gap:8px; min-height:40px; margin-top:6px; padding:0 2px; font-size:13px; color:var(--color-muted); border-bottom:1px solid var(--color-border); }
+.bfold svg.i { width:16px; height:16px; }
+.bfold .ok { display:inline-flex; align-items:center; gap:4px; color:var(--color-text); }
+.bfold .ok svg.i { width:14px; height:14px; color:var(--color-accent); stroke-width:2; }
+.bfold .dotsep { width:3px; height:3px; background:var(--color-border-strong); }
+.bfold .chev { margin-left:auto; }
+.bfold.open { border-bottom:0; }
+.bfold .wait { color:var(--color-text); }
+.bfold .wait i { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--color-accent); margin-right:4px; vertical-align:1px; }
+.bexpanded .brow { padding-left:8px; }
+/* 3 · not connected: a prominent panel under the intro */
+.bpanel { margin-top:24px; padding:18px 18px 18px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:4px; }
+.bpanel h2 { display:flex; align-items:center; gap:8px; font-size:17px; font-weight:600; }
+.bpanel h2 svg.i { width:20px; height:20px; color:var(--color-accent); }
+.bpanel p { margin-top:6px; font-size:14px; line-height:1.65; color:var(--color-muted); }
+.bchoices { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+.bchoice { display:flex; align-items:center; gap:12px; min-height:68px; padding:10px 14px; border:1px solid var(--color-border); border-radius:4px; background:var(--color-control); box-shadow:var(--inset-light); text-align:left; }
+.bchoice.main { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); }
+.bchoice .t { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.bchoice strong { font-size:15px; font-weight:600; }
+.bchoice small { font-size:12px; color:var(--color-muted); line-height:1.4; }
+.bchoice.main small { color:#4a4f50; }
+.bchoice svg.i { width:18px; height:18px; }
+.bchoice.done { background:transparent; box-shadow:none; }
+.bchoice.done strong { font-weight:500; }
+.bnote { margin-top:10px; font-size:12px; color:var(--color-muted); }
+.block { margin-top:28px; }
+.block>h2 { font-size:15px; font-weight:600; margin-bottom:12px; }
+.shelf { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:16px 12px; }
+.shelf .vol>span { display:block; font-size:12px; color:var(--color-muted); margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.empty-inline { margin-top:28px; padding-top:14px; border-top:1px solid var(--color-border); color:var(--color-muted); font-size:13px; }
+
+/* ----- Notes ----- */
+.nscroll { flex:1; min-height:0; overflow:hidden; padding:0 var(--gutter) 96px; }
+.nsearch { display:flex; align-items:center; gap:10px; height:48px; margin:4px 0 12px; border-bottom:1px solid var(--color-border); color:var(--color-muted); }
+.nsearch svg.i { width:20px; height:20px; }
+.nchips { display:flex; gap:8px; padding:0 0 12px; }
+.nchips .chip .numeric { color:var(--color-muted); margin-left:2px; }
+.nlabel { display:flex; align-items:center; gap:6px; margin:6px 0 8px; font-size:12px; font-weight:500; color:var(--color-muted); letter-spacing:.04em; }
+.nlabel svg.i { width:14px; height:14px; }
+.fab { position:absolute; right:var(--gutter); bottom:88px; z-index:4; display:flex; align-items:center; gap:8px; height:56px; padding:0 20px 0 16px; border-radius:16px; background:var(--color-accent); color:var(--color-on-accent); font-weight:600; box-shadow:0 6px 18px rgba(0,0,0,.45); }
+.fab svg.i { stroke-width:2; }
+/* Today (notes.css): 2 columns at 800 px, wide rows. */
+.ngrid-now { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:22px; }
+.ncard-now { display:flex; flex-direction:column; gap:4px; min-width:0; min-height:96px; padding:14px 16px; border-radius:6px; background:var(--color-surface); }
+.ncard-now strong { display:flex; align-items:center; gap:6px; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ncard-now strong svg.i { width:15px; height:15px; color:var(--color-muted); }
+.ncard-now .body { font-size:13px; line-height:1.5; color:var(--color-muted); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; }
+.ncard-now small { display:flex; align-items:center; gap:4px; margin-top:auto; padding-top:4px; font-size:12px; color:var(--color-muted); }
+.labels { display:flex; flex-wrap:wrap; gap:4px; }
+.labels i { font-style:normal; font-size:11px; padding:1px 8px; border:1px solid var(--color-border); border-radius:999px; color:var(--color-muted); }
+/* Sticky-note tiles (both proposals) */
+.sticky { position:relative; display:flex; flex-direction:column; min-width:0; overflow:hidden; padding:14px 14px 12px; border-radius:3px; background:var(--color-surface); }
+.sticky .t { display:flex; align-items:flex-start; gap:6px; font-size:15px; font-weight:600; line-height:1.35; padding-right:20px; }
+.sticky .t span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.sticky .t.untitled { color:var(--color-muted); font-weight:500; }
+.sticky .t svg.i { width:16px; height:16px; color:var(--color-muted); margin-top:2px; }
+.sticky .pin { position:absolute; top:12px; right:10px; width:17px; height:17px; color:var(--color-accent); }
+.sticky .body { margin-top:8px; font-size:13px; line-height:1.6; color:#c3c6c8; white-space:pre-wrap; overflow:hidden; overflow-wrap:anywhere; }
+.sticky .foot { display:flex; align-items:flex-end; justify-content:space-between; gap:6px; margin-top:auto; padding-top:10px; font-size:12px; color:var(--color-muted); }
+.sticky .foot .labels { flex:1; min-width:0; overflow:hidden; flex-wrap:nowrap; }
+.sticky .foot time { white-space:nowrap; font-family:var(--font-ui); }
+.sticky .foot .pend { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--color-accent); margin-right:4px; }
+.cl { list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:5px; font-size:13px; line-height:1.4; color:#d2d4d6; }
+.cl li { display:flex; align-items:center; gap:8px; min-width:0; }
+.cl li span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cl li::before { content:''; width:13px; height:13px; flex:none; border:1.5px solid var(--color-muted); border-radius:2px; }
+.cl li.done { color:var(--color-muted); }
+.cl li.done span { text-decoration:line-through; }
+.cl li.done::before { background:var(--color-muted) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23222324' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7'/%3E%3C/svg%3E") center/11px no-repeat; }
+.cl .more { color:var(--color-muted); font-size:12px; padding-left:21px; }
+.cl .more::before { display:none; }
+.progress { display:flex; align-items:center; gap:8px; margin-top:8px; font:500 13px var(--font-numeric); color:var(--color-muted); }
+.progress i { flex:1; height:3px; background:rgba(255,255,255,.1); position:relative; }
+.progress i b { position:absolute; left:0; top:0; bottom:0; background:var(--color-accent); }
+.secret { margin-top:10px; display:flex; flex-direction:column; gap:7px; }
+.secret div { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; color:var(--color-muted); padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,.07); }
+.secret div span:last-child { letter-spacing:2px; color:#80848a; }
+.ledger { margin-top:10px; }
+.ledger .lbl { font-size:12px; color:var(--color-muted); }
+.ledger .amt { display:block; margin-top:2px; font:500 28px/1.1 var(--font-numeric); color:var(--color-text); }
+.ledger .meter { margin-top:10px; height:4px; background:rgba(255,255,255,.1); }
+.ledger .meter b { display:block; height:100%; background:var(--color-accent); }
+.ledger .next { margin-top:8px; font-size:12px; color:var(--color-muted); }
+/* 4A: 3 columns of equal tiles (a touch taller than square). */
+.ngrid-a { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
+.ngrid-a .sticky { height:246px; }
+.ngrid-a .sticky .body { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:7; }
+/* 4B: masonry — height follows the content, a colour tab on top like a paper strip. */
+.ngrid-b { column-count:3; column-gap:12px; margin-bottom:8px; }
+.ngrid-b .sticky { break-inside:avoid; margin-bottom:12px; padding-top:17px; min-height:150px; max-height:400px; }
+.ngrid-b .sticky::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; background:var(--tab,var(--color-border-strong)); }
+.ngrid-b .sticky .body { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:12; }
+.ngrid-b .sticky .pin { top:15px; }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>USER-REQ-20260926B · 모바일 화면 제안 (Galaxy Tab S11 세로 800 × 1280)</h1>
+  <p class="lead">네 가지 요청의 목업입니다. 현재 앱의 색·글꼴·반경·간격 토큰(<code>tokens.css</code>, <code>mobile.css</code>, <code>Collections.css</code>, <code>notes.css</code>, <code>collectionBindings.css</code>)을 그대로 썼고, 표지는 자리표시 그림, 이름·숫자는 모두 가상입니다. 고를 안을 알려 주시면 그 안으로 구현합니다. 각 항목에서 <b>현재</b> 화면은 비교용 재현입니다.</p>
+  <div class="toolbar"><button id="toggle-full" aria-pressed="false">실제 크기 (1:1)</button><span>기본은 절반 크기로 맞춤 · PNG: req1-release-badge.png, req2-type-switch.png, req3-manga-connect.png, req4-sticky-notes.png</span></div>
+</header>
+
+<section class="topic" id="req1">
+  <h2><span class="k">1</span>컬렉션 격자에 신간 알림 표시</h2>
+  <p>만화 목록 타일에서 새로 나온 권(읽지 않은 신간 알림)과 발매 예정 권을 바로 알아보게 합니다. <b>A</b>는 표지 왼쪽 위 모서리의 사각 꼬리표, <b>B</b>는 표지 아래쪽을 가로지르는 띠(권 번호와 날짜까지), <b>C</b>는 표지는 그대로 두고 제목 아래 줄에 표시합니다. 탭하면 지금처럼 작품 상세로 가고, 상단의 <b>신간 3</b> 칩은 그대로 신간 화면을 엽니다. 참고: 코드에는 이미 표지 오른쪽 위 작은 배지(<code>collection-release-badge</code>)가 있으나 신간 수가 잡힌 작품에만 붙어서 눈에 잘 띄지 않습니다.</p>
+  <div class="row scaled" id="req1-row"></div>
+</section>
+
+<section class="topic" id="req2">
+  <h2><span class="k">2</span>컬렉션 상단 막대: 게임 / 만화 / 영화 / AV 가운데 정렬</h2>
+  <p>유형 전환을 막대 한가운데로 옮기고 모양을 바꿉니다. <b>A</b>는 PC 컬렉션 유형 선택과 같은 아이보리 슬랩(각진 모서리, 1px 잔상, 작은 사각 커서). <b>B</b>는 글자 탭과 막대 아래 가장자리에 붙는 아이보리 밑줄. 검색을 열면 두 안 모두 유형 전환이 오른쪽 끝으로 작게 비켜서 입력칸에 자리를 줍니다.</p>
+  <div class="row scaled" id="req2-row"></div>
+</section>
+
+<section class="topic" id="req3">
+  <h2><span class="k">3</span>만화 상세: MangaDex / 카카오 연결 영역</h2>
+  <p>둘 다 연결되어 있으면 <b>연결</b> 칸이 한 줄(40px)로 접히고, 누르면 지금의 두 줄(다시 연결 버튼 포함)이 펼쳐집니다. 연결되지 않았으면 표지 아래에 폭 전체의 눈에 띄는 칸으로 두 서비스를 고르게 합니다(연결해야 권별 표지·신간 알림이 생긴다는 한 문장 포함). 연결 대기·실패는 접힌 줄에서도 글로 보입니다.</p>
+  <div class="row scaled" id="req3-row"></div>
+</section>
+
+<section class="topic" id="req4">
+  <h2><span class="k">4</span>메모: 포스트잇 카드</h2>
+  <p>폭 전체의 긴 줄 대신 세 칸 격자의 포스트잇 카드로 바꿉니다. <b>A</b>는 모든 카드가 같은 크기(약 245 × 246)라 줄이 가지런합니다. <b>B</b>는 내용 길이만큼 높이가 달라지는 벽돌 쌓기(masonry)이고, 카드 위에 메모 색의 얇은 띠가 붙습니다. 두 안 모두 고정 메모(핀), 체크리스트(진행 막대), 암호 메모(값은 가림), 가계부 카드를 포함합니다. 메모 색은 지금의 8색 팔레트를 더 진하게(20%) 칠합니다.</p>
+  <div class="row scaled" id="req4-row"></div>
+</section>
+</div>
+
+<script>
+const IC={"MagnifyingGlass":["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],"Trash":["m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"],"ArrowPath":["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],"ArrowsUpDown":["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],"AdjustmentsHorizontal":["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],"ArrowLeft":["M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"],"EllipsisVertical":["M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z"],"ChevronDown":["m19.5 8.25-7.5 7.5-7.5-7.5"],"ChevronRight":["m8.25 4.5 7.5 7.5-7.5 7.5"],"Funnel":["M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"],"Bookmark":["M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"],"Home":["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],"Photo":["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],"RectangleStack":["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],"BookOpen":["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],"PencilSquare":["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],"Tag":["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],"Folder":["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],"InformationCircle":["m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"],"UserPlus":["M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"XMark":["M6 18 18 6M6 6l12 12"],"Plus":["M12 4.5v15m7.5-7.5h-15"],"CloudArrowDown":["M12 9.75v6.75m0 0-3-3m3 3 3-3m-8.25 6a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z"],"Cog6Tooth":["M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z","M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],"UserMinus":["M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],"Squares2X2":["M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"],"Square2Stack":["M16.5 8.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v8.25A2.25 2.25 0 0 0 6 16.5h2.25m8.25-8.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-7.5A2.25 2.25 0 0 1 8.25 18v-1.5m8.25-8.25h-6a2.25 2.25 0 0 0-2.25 2.25v6"],"FolderOpen":["M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"],"Sparkles":["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"]};
+Object.assign(IC,{
+  Bell:["M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"],
+  BellSlash:["M9.143 17.082a24.248 24.248 0 0 0 3.844.148m-3.844-.148a23.856 23.856 0 0 1-5.455-1.31 8.964 8.964 0 0 0 2.3-5.542m3.155 6.852a3 3 0 0 0 5.667 1.97m1.965-2.277L21 21m-4.225-4.225a23.81 23.81 0 0 0 3.536-1.003A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6.53 6.53m10.245 10.245L6.53 6.53M3 3l3.53 3.53"],
+  LockClosed:["M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"],
+  Link:["M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"],
+  Wallet:["M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3"],
+  Check:["m4.5 12.75 6 6 9-13.5"],
+  ChevronUp:["m4.5 15.75 7.5-7.5 7.5 7.5"],
+  EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+  Pin:["M15.75 3.75 20.25 8.25M18 6l-4.5 4.5 1.5 5.25-2.25 2.25-3.375-3.375L4.5 19.5M9.375 14.625 6 11.25 8.25 9l5.25 1.5"],
+  Star:["M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"],
+});
+const SOLID={
+  Bell:"M5.25 9a6.75 6.75 0 0 1 13.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 0 1-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 1 1-7.48 0 24.585 24.585 0 0 1-4.831-1.244.75.75 0 0 1-.298-1.205A8.217 8.217 0 0 0 5.25 9.75V9Zm4.502 8.9a2.25 2.25 0 1 0 4.496 0 25.057 25.057 0 0 1-4.496 0Z",
+  Sparkles:"M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576l-2.846-.813a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 7.466 7.89l.813-2.846A.75.75 0 0 1 9 4.5Z",
+};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n].map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const S=(n,cls='')=>`<svg class="i solid ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${SOLID[n]}"/></svg>`;
+const STAR='<svg class="i solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z"/></svg>';
+const MARK='<svg class="mark" viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const ib=(n,extra='',solid=false)=>`<span class="ib ${extra}">${solid?S(n):I(n)}</span>`;
+
+/* Placeholder cover art: flat shapes in muted palettes, a title band for manga covers. */
+const P=[['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3'],['#c9b6b0','#5a3c3c','#93706a','#efe0cc'],['#a9b9a0','#34443a','#6d8466','#dfe3c8']];
+const art=(i,manga=true)=>{const p=P[i%P.length];const k=i%3;
+  const band=manga?`<rect x="60" y="${70+k*14}" width="${340-k*50}" height="30" fill="${p[1]}" opacity=".85"/><rect x="60" y="${112+k*14}" width="${200+k*30}" height="12" fill="${p[1]}" opacity=".55"/>`:'';
+  return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" preserveAspectRatio="none"><rect width="600" height="900" fill="${p[0]}"/><circle cx="${190+k*95}" cy="330" r="${80+k*10}" fill="${p[3]}"/><path d="M0 560L150 360 330 660 470 440 600 560V900H0" fill="${p[2]}"/><path d="M0 700L240 500 430 720 600 610V900H0" fill="${p[1]}"/><path d="M280 900L360 690 333 560 383 690 336 900" fill="${p[3]}" opacity=".7"/>${band}</svg>`);};
+const img=(i,manga=true)=>`<img src="${art(i,manga)}" alt="">`;
+
+const TABS=[['Home','Home'],['Photo','Library'],['RectangleStack','Collections'],['BookOpen','Catalog'],['PencilSquare','Notes']];
+const nav=active=>`<nav class="nav">${TABS.map(([icon,label])=>`<button class="${label===active?'active':''}">${I(icon)}<span>${label}</span></button>`).join('')}</nav>`;
+const fig=(tag,cls,caption,body)=>`<figure><figcaption><span class="tag ${cls}">${tag}</span>${caption}</figcaption>${body}</figure>`;
+
+/* ===== Collections data (fictional) ===== */
+const WORKS=[
+  {n:'바다 건너 편지',a:'한여름',y:2021,s:4.5,r:{k:'new',c:2,v:'13권',d:'9.24'}},
+  {n:'별빛 식당',a:'윤서담',y:2022,s:4.0},
+  {n:'검은 숲의 기사',a:'도하진',y:2019,s:3.5,r:{k:'ahead',v:'9권',d:'11.20'}},
+  {n:'고양이와 등대',a:'마린',y:2023,s:null},
+  {n:'달의 도서관',a:'서유나',y:2020,s:5.0,r:{k:'new',c:1,v:'22권',d:'9.19'}},
+  {n:'하루 한 그릇',a:'김하루',y:2018,s:4.0},
+  {n:'은빛 검술사',a:'류세온',y:2024,s:4.5,r:{k:'new',c:3,v:'5–7권',d:'9.12'}},
+  {n:'여름 교실',a:'이온',y:2017,s:3.0},
+  {n:'푸른 역',a:'한채',y:2021,s:null},
+  {n:'이세계 우체국',a:'오바나',y:2022,s:3.5,r:{k:'ahead',v:'4권',d:'10.30'}},
+  {n:'소리 없는 밴드',a:'진서',y:2016,s:4.0},
+  {n:'마지막 정거장',a:'하윤',y:2025,s:4.5},
+];
+const score=s=>s==null?'':`<span class="score">${STAR}<span class="numeric">${s.toFixed(1)}</span></span>`;
+function tile(w,i,v){
+  const r=w.r; let over='',meta=`<div class="cmeta"><span class="numeric">${w.y}</span>${score(w.s)}</div>`;
+  if(r&&v==='now'&&r.k==='new') over=`<span class="badge-now">신간 ${r.c}</span>`;
+  if(r&&v==='a') over=r.k==='new'?`<span class="flag"><b>신간</b><span class="numeric">${r.c}</span></span>`:`<span class="flag ahead"><b>예약</b><span class="numeric">${r.d}</span></span>`;
+  if(r&&v==='b') over=r.k==='new'?`<span class="band">신간 <span class="n">${r.v}</span><span class="numeric">${r.d}</span></span>`:`<span class="band ahead">${r.v} 예약<span class="numeric">${r.d}</span></span>`;
+  if(r&&v==='c') meta=r.k==='new'?`<div class="cnew">신간 ${r.v} <span class="numeric">· ${r.d}</span></div>`:`<div class="cnew ahead">${r.v} 예약 <span class="numeric">· ${r.d}</span></div>`;
+  return `<div class="ctile"><div class="art book">${img(i)}${over}</div><div class="ctitle">${w.n}</div><div class="ccredit">${w.a}</div>${meta}</div>`;
+}
+const listBody=(v,{showcase=true}={})=>`<div class="content fade-end"><div class="clist">
+  ${showcase?`<div class="csection"><span class="fold">쇼케이스 <span class="numeric muted" style="font-weight:500;font-size:13px">9</span>${I('ChevronDown')}</span></div>`:''}
+  <div class="csection all"><h2>전체 <span class="numeric">48</span></h2><div class="chips"><span class="chip">${I('ArrowsUpDown','lead')}최근 추가 · 최신순${I('ChevronDown')}</span><span class="chip">내 별점${I('ChevronDown')}</span></div></div>
+  <div class="cgrid">${WORKS.map((w,i)=>tile(w,i,v)).join('')}</div></div></div>`;
+
+/* Collections bars */
+const TYPES=['게임','만화','영화','AV'];
+const segNow=(sel=1)=>`<span class="seg-now">${TYPES.map((t,i)=>`<span class="${i===sel?'sel':''}">${t}</span>`).join('')}</span>`;
+const segSlab=(sel=1,compact=false)=>`<span class="seg-slab${compact?' compact':''}">${TYPES.map((t,i)=>`<span class="${i===sel?'sel':''}">${t}</span>`).join('')}</span>`;
+const segTabs=(sel=1,compact=false)=>`<span class="seg-tabs${compact?' compact':''}">${TYPES.map((t,i)=>`<span class="${i===sel?'sel':''}">${t}</span>`).join('')}</span>`;
+const chip=(n=3)=>`<span class="rchip">신간${n?`<span class="rcount">${n}</span>`:''}</span>`;
+const brandTitle=`<span class="brand">${MARK}</span><span class="stack"><h1>컬렉션</h1></span>`;
+const barNow=(n=3)=>`<header class="bar">${brandTitle}<span class="space"></span>${segNow()}${chip(n)}${ib('MagnifyingGlass')}</header>`;
+const barA=(n=3,sel=1)=>`<header class="bar">${brandTitle}${segSlab(sel)}<span class="space"></span>${chip(n)}${ib('MagnifyingGlass')}</header>`;
+const barB=(n=3,sel=1)=>`<header class="bar">${brandTitle}${segTabs(sel)}<span class="space"></span>${chip(n)}${ib('MagnifyingGlass')}</header>`;
+const searchField=`<span class="searchbar">${I('MagnifyingGlass')}<span class="caret"></span><span class="ph">제목이나 작가 찾기</span></span>`;
+const barSearch=seg=>`<header class="bar sub">${ib('ArrowLeft','on')}${searchField}${seg}</header>`;
+
+function req1(){
+  const f=(v,tag,cls,cap)=>fig(tag,cls,cap,`<div class="frame">${barNow()}${listBody(v)}${nav('Collections')}</div>`);
+  document.getElementById('req1-row').innerHTML=
+    f('now','현재','now','<b>현재</b> — 오른쪽 위 작은 배지 "신간 N"(신간 수가 잡힌 작품만). 발매 예정은 표시 없음.')+
+    f('a','A','a','<b>A · 모서리 꼬리표</b> — 표지 왼쪽 위에 딱 붙는 사각 꼬리표. 새 권은 아이보리 "신간" + 개수, 발매 예정은 어두운 "예약" + 날짜.')+
+    f('b','B','b','<b>B · 하단 띠</b> — 표지 아래쪽 띠에 권 번호와 날짜까지. 새 권은 왼쪽 아이보리 선, 예정은 회색 선. 정보가 가장 많음.')+
+    f('c','C','c','<b>C · 제목 아래 줄</b> — 표지는 가리지 않고, 연도·별점 줄 자리에 "■ 신간 13권 · 9.24". 가장 조용함.');
+}
+function req2(){
+  const f=(bar,tag,cls,cap)=>fig(tag,cls,cap,`<div class="frame">${bar}${listBody('now')}${nav('Collections')}</div>`);
+  const states=(mk,seg,tag)=>`<div class="strip" style="margin-top:20px"><div class="lab">${tag} · 다른 유형 선택(게임)</div>${mk(3,0)}<div class="lab">${tag} · 신간 알림 없음</div>${mk(0,1)}<div class="lab">${tag} · 검색 열림: 유형 전환은 오른쪽 끝으로 작게</div>${barSearch(seg)}<div style="height:14px"></div></div>`;
+  document.getElementById('req2-row').innerHTML=
+    fig('현재','now','<b>현재 (0.8.27)</b> — 제목 오른쪽에 붙은 회색 분할 버튼, 선택은 옅은 틴트.',`<div class="frame">${barNow()}${listBody('now')}${nav('Collections')}</div><div class="strip" style="margin-top:20px"><div class="lab">현재 · 검색 열림</div>${barSearch(segNow().replace('margin-right:8px',''))}<div style="height:14px"></div></div>`)+
+    fig('A','a','<b>A · 가운데 슬랩</b> — 네 유형이 막대 정중앙. 선택된 유형은 PC 컬렉션 유형처럼 아이보리 슬랩 + 1px 잔상 + 왼쪽 작은 사각 커서. 나머지는 테두리 없는 회색 글자.',`<div class="frame">${barA()}${listBody('now')}${nav('Collections')}</div>${states(barA,segSlab(1,true),'A')}`)+
+    fig('B','b','<b>B · 가운데 밑줄 탭</b> — 글자만 있는 탭, 선택은 흰 글자 + 막대 아래 가장자리에 붙는 아이보리 밑줄. 가장 가볍고 막대가 넓어 보임.',`<div class="frame">${barB()}${listBody('now')}${nav('Collections')}</div>${states(barB,segTabs(1,true),'B')}`);
+}
+
+/* ===== Manga detail ===== */
+const detailBar=(bell='on')=>`<header class="bar sub">${ib('ArrowLeft','on')}<span class="stack"><span class="crumb">컬렉션 › 만화</span></span><span class="space"></span>${ib('Sparkles','on',true)}${bell==='on'?ib('Bell','on',true):ib('BellSlash','dim')}</header>`;
+const ident=(title,orig,author,rest)=>`<div class="ident"><span class="kind">만화</span><h1>${title}</h1><span class="orig">${orig}</span><span class="credit">작가 · ${author}</span>
+  <dl class="facts"><dt>출판사</dt><dd>서림코믹스</dd><dt>출간년도</dt><dd class="numeric">2021</dd><dt>상태</dt><dd>연재 중</dd></dl>
+  <ul class="genres"><li>드라마</li><li>일상</li><li>로맨스</li></ul>${rest}</div>`;
+const personal=(owned=true)=>`<section class="personal"><div class="prow"><span class="plabel">내 평점</span><span class="pval">${STAR.replace('class="i solid"','class="i solid" style="width:14px;height:14px;vertical-align:-1px;margin-right:3px"')}<span class="numeric">4.5</span></span></div>
+  <div class="prow"><span class="plabel">소장</span><span class="pval">${owned?'<span class="numeric">12</span>권까지<span class="muted"> / 전체 <span class="numeric">14</span>권</span>':'<span class="muted">기록 없음</span>'}</span></div></section>`;
+const bindNow=`<section class="bind"><h2 class="bind-title">연결</h2>
+  <div class="brow"><span class="plabel">MangaDex</span><span class="bval"><span>연결됨</span></span><span class="btn">다시 연결</span></div>
+  <div class="brow"><span class="plabel">카카오</span><span class="bval"><span>연결됨</span></span><span class="btn">다시 연결</span></div></section>`;
+const okMark=name=>`<span class="ok">${I('Check')}${name}</span>`;
+const bindFold=`<div class="bfold">${I('Link')}<span>연결</span>${okMark('MangaDex')}<span class="dotsep"></span>${okMark('카카오')}${I('ChevronDown','chev')}</div>`;
+const shelf=n=>`<section class="block"><h2>${n}권</h2><div class="shelf">${Array.from({length:n},(_,i)=>`<div class="vol"><div class="art book">${img(i*5+1)}</div><span>${i+1}권 · <span class="numeric">${2021+Math.floor(i/4)}.${String((i*3)%12+1).padStart(2,'0')}</span></span></div>`).join('')}</div></section>`;
+const bPanel=(opts={})=>`<section class="bpanel"><h2>${I('Link')}작품 연결</h2><p>연결하면 권별 표지와 발매일을 가져오고, 새 권이 나오면 신간 알림을 받을 수 있어요. 고르면 PC가 켜질 때 적용됩니다.</p>
+  <div class="bchoices">
+    ${opts.mdDone?`<div class="bchoice done">${I('Check')}<span class="t"><strong>MangaDex 연결됨</strong><small>일본판 권 목록 · 표지</small></span><span class="btn ghost">다시 연결</span></div>`
+      :`<div class="bchoice"><span class="t"><strong>MangaDex 연결</strong><small>일본판 권 목록 · 표지 · 원제</small></span>${I('ChevronRight')}</div>`}
+    <div class="bchoice main"><span class="t"><strong>카카오 연결</strong><small>국내 출판 권 목록 · 발매일 · 신간 알림</small></span>${I('ChevronRight')}</div>
+  </div></section>`;
+function req3(){
+  const intro=(rest,cover=3)=>`<div class="intro"><div class="dcover"><div class="art book">${img(cover)}</div></div>${ident('바다 건너 편지','海の向こうの手紙','한여름',rest)}</div>`;
+  const cur=`<div class="frame">${detailBar()}<div class="content fade-end"><div class="detail">${intro(personal()+bindNow)}${shelf(14)}</div></div>${nav('Collections')}</div>`;
+  const con=`<div class="frame">${detailBar()}<div class="content fade-end"><div class="detail">${intro(personal()+bindFold)}${shelf(14)}</div></div>${nav('Collections')}</div>`;
+  const introB=`<div class="intro"><div class="dcover"><div class="art book">${img(10)}</div></div><div class="ident"><span class="kind">만화</span><h1>고양이와 등대</h1><span class="credit">작가 · 마린</span><dl class="facts"><dt>출판사</dt><dd>파도북스</dd><dt>출간년도</dt><dd class="numeric">2023</dd></dl>${personal(false)}</div></div>`;
+  const un=`<div class="frame">${detailBar('off')}<div class="content fade-end"><div class="detail">${introB}${bPanel()}<p class="empty-inline">권 정보가 아직 없습니다. 연결하면 여기에 권별 표지가 나옵니다.</p></div></div>${nav('Collections')}</div>`;
+  const strip=`<div class="strip" style="margin-top:20px;padding:0 16px 16px">
+    <div class="lab" style="padding-left:0">연결됨 · 접힌 줄을 누르면 펼침 (지금의 두 줄 그대로)</div>
+    <div class="bfold open">${I('Link')}<span>연결</span>${okMark('MangaDex')}<span class="dotsep"></span>${okMark('카카오')}${I('ChevronUp','chev')}</div>
+    <div class="bexpanded"><div class="brow"><span class="plabel">MangaDex</span><span class="bval"><span>연결됨</span></span><span class="btn">다시 연결</span></div><div class="brow"><span class="plabel">카카오</span><span class="bval"><span>연결됨</span></span><span class="btn">다시 연결</span></div></div>
+    <div class="lab" style="padding-left:0;margin-top:14px">연결 대기 중 · 접힌 줄에 글로 표시</div>
+    <div class="bfold">${I('Link')}<span>연결</span>${okMark('MangaDex')}<span class="dotsep"></span><span class="wait"><i></i>카카오 연결 대기 · PC가 켜지면 적용</span>${I('ChevronDown','chev')}</div>
+    <div class="lab" style="padding-left:0;margin-top:14px">한쪽만 연결됨(MangaDex만) · 연결 안 된 쪽이 남아 있으면 큰 칸 유지</div>
+    ${bPanel({mdDone:true}).replace('class="bpanel"','class="bpanel" style="margin-top:4px"')}
+  </div>`;
+  document.getElementById('req3-row').innerHTML=
+    fig('현재','now','<b>현재</b> — 둘 다 연결돼 있어도 "연결" 제목과 두 줄(연결됨 · 다시 연결)이 오른쪽 열을 차지해 첫 화면의 권 목록을 밀어냄.',cur)+
+    fig('제안 · 연결됨','a','<b>연결됨 → 한 줄로 접기</b> — "연결 ✓MangaDex · ✓카카오 ⌄" 40px 한 줄. 권 목록이 한 줄 더 올라옴. 누르면 펼쳐져 다시 연결 가능.',con+strip)+
+    fig('제안 · 연결 안 됨','b','<b>연결 안 됨 → 눈에 띄는 칸</b> — 표지 아래 폭 전체 칸. 한 문장 설명 + 두 버튼, 신간 알림에 필요한 카카오를 주 버튼(아이보리)으로. 상단 종 아이콘은 꺼진 상태.',un);
+}
+
+/* ===== Notes ===== */
+const COLORS={red:'#ef6b73',orange:'#f28c52',amber:'#dba84b',green:'#58b67a',teal:'#47b6a7',blue:'#5b8def',indigo:'#7c7ee8',pink:'#df6fa7'};
+const PINNED=[
+  {t:'다음에 볼 작품',c:'amber',kind:'text',body:'은빛 검술사 7권 나오면 바로 읽기\n별빛 식당 애니 2쿨 방영일 확인\n달의 도서관 완결 몰아보기\n검은 숲의 기사 예약 구매',labels:['보기'],when:'어제'},
+  {t:'장보기',c:'green',kind:'check',items:[['우유',0],['계란 한 판',0],['두부',1],['대파',0],['커피 원두',1],['휴지',0]],when:'2시간 전',pending:true},
+  {t:'서버 계정',c:null,kind:'secret',fields:['아이디','비밀번호','복구 코드'],when:'9월 20일'},
+];
+const RECENT=[
+  {t:'10월 가계부',c:null,kind:'ledger',when:'오늘'},
+  {t:'캐릭터 분류 아이디어',c:'blue',kind:'text',body:'시리즈별로 레퍼런스 3장 이상일 때만 자동 인식 켜기. 겹치는 의상은 따로 묶고, 헷갈리는 두 캐릭터는 제외 목록으로.\n\n다음 주에 PC에서 한 번에 정리.',labels:['작업','아이디어'],when:'3일 전'},
+  {t:'여행 준비물',c:'teal',kind:'check',items:[['여권',1],['충전기',1],['우산',0],['상비약',0],['카메라 배터리',1],['어댑터',0],['잠옷',0],['선글라스',0]],when:'5일 전'},
+  {t:'읽을 책',c:'pink',kind:'text',body:'소설 두 권, 에세이 한 권.\n도서관 반납일 10월 2일.',labels:['책'],when:'1주 전'},
+  {t:'',c:null,kind:'text',body:'택배 보관함 비밀번호 바뀜 — 관리실 문의',when:'1주 전'},
+  {t:'회의 메모 9/24',c:'indigo',kind:'text',body:'모바일 신간 표시 방식 정하기\n메모 화면 카드형으로\n컬렉션 유형 전환 가운데로\n다음 회의: 10월 첫째 주',labels:['작업'],when:'2일 전'},
+  {t:'선물 목록',c:'orange',kind:'check',items:[['엄마 · 스카프',1],['동생 · 키보드',0],['친구 · 원두 세트',0]],when:'2주 전'},
+  {t:'와이파이',c:null,kind:'secret',fields:['집','작업실'],when:'8월 30일'},
+];
+const tintStyle=(c,pct)=>c?`background:color-mix(in srgb,${COLORS[c]} ${pct}%,#222324);--tab:${COLORS[c]}`:'';
+function noteNow(n){
+  const title=n.kind==='secret'?`${I('LockClosed')}${n.t}`:n.kind==='ledger'?`${I('Wallet')}${n.t}`:(n.t||'제목 없음');
+  const body=n.kind==='text'?n.body:n.kind==='check'?n.items.map(([t,d])=>`${d?'☑':'☐'} ${t}`).join('\n'):n.kind==='ledger'?'10월 쓸 수 있는 돈 ₩412,300':'';
+  return `<div class="ncard-now" style="${tintStyle(n.c,16)}"><strong style="${n.t?'':'color:var(--color-muted);font-weight:500'}">${title}</strong>${body?`<span class="body">${body}</span>`:''}${n.labels?`<span class="labels">${n.labels.map(l=>`<i>${l}</i>`).join('')}</span>`:''}<small>${n.when}${n.pending?' · 동기화 대기':''}</small></div>`;
+}
+function sticky(n,pinned,maxItems){
+  const title=n.t?`<div class="t">${n.kind==='secret'?I('LockClosed'):n.kind==='ledger'?I('Wallet'):''}<span>${n.t}</span></div>`:`<div class="t untitled"><span>제목 없음</span></div>`;
+  let body='';
+  if(n.kind==='text') body=`<div class="body">${n.body}</div>`;
+  if(n.kind==='check'){const done=n.items.filter(x=>x[1]).length;const open=n.items.filter(x=>!x[1]),closed=n.items.filter(x=>x[1]);const list=[...open,...closed];const shown=list.slice(0,maxItems);
+    body=`<div class="progress"><i><b style="width:${done/n.items.length*100}%"></b></i>${done}/${n.items.length}</div><ul class="cl">${shown.map(([t,d])=>`<li class="${d?'done':''}"><span>${t}</span></li>`).join('')}${list.length>shown.length?`<li class="more">외 ${list.length-shown.length}개</li>`:''}</ul>`;}
+  if(n.kind==='secret') body=`<div class="secret">${n.fields.map(f=>`<div><span>${f}</span><span>••••••</span></div>`).join('')}</div>`;
+  if(n.kind==='ledger') body=`<div class="ledger"><span class="lbl">10월 쓸 수 있는 돈</span><span class="amt">₩412,300</span><div class="meter"><b style="width:58%"></b></div><div class="next">다음 결제 10월 5일 · 통신비</div></div>`;
+  const labels=n.kind==='secret'?'':(n.labels||[]).map(l=>`<i>${l}</i>`).join('');
+  return `<div class="sticky" style="${tintStyle(n.c,20)}">${title}${pinned?I('Pin','pin'):''}${body}<div class="foot"><span class="labels">${labels}</span><time>${n.pending?'<span class="pend"></span>':''}${n.when}</time></div></div>`;
+}
+const notesBar=`<header class="bar"><span class="brand">${MARK}</span><span class="stack"><h1>메모</h1></span><span class="space"></span><span class="state">동기화됨</span>${ib('ArrowPath')}${ib('EllipsisHorizontal')}</header>`;
+const notesHead=`<div class="nsearch">${I('MagnifyingGlass')}제목, 본문, 라벨 검색</div><div class="nchips"><span class="chip">보기<span class="numeric">1</span></span><span class="chip">아이디어<span class="numeric">1</span></span><span class="chip">작업<span class="numeric">2</span></span><span class="chip">책<span class="numeric">1</span></span></div>`;
+const fab=`<span class="fab">${I('Plus')}새 메모</span>`;
+function req4(){
+  const frame=inner=>`<div class="frame">${notesBar}<div class="content fade-end"><div class="nscroll">${notesHead}${inner}</div></div>${fab}${nav('Notes')}</div>`;
+  const now=frame(`<h2 class="nlabel">${I('Pin')}고정됨</h2><div class="ngrid-now">${PINNED.map(noteNow).join('')}</div><h2 class="nlabel">최근</h2><div class="ngrid-now">${RECENT.map(noteNow).join('')}</div>`);
+  const a=frame(`<h2 class="nlabel">${I('Pin')}고정됨</h2><div class="ngrid-a">${PINNED.map(n=>sticky(n,true,5)).join('')}</div><h2 class="nlabel">최근</h2><div class="ngrid-a">${RECENT.map(n=>sticky(n,false,5)).join('')}</div>`);
+  const b=frame(`<h2 class="nlabel">${I('Pin')}고정됨</h2><div class="ngrid-b">${PINNED.map(n=>sticky(n,true,8)).join('')}</div><h2 class="nlabel">최근</h2><div class="ngrid-b">${RECENT.map(n=>sticky(n,false,8)).join('')}</div>`);
+  document.getElementById('req4-row').innerHTML=
+    fig('현재','now','<b>현재</b> — 800 px에서 두 칸의 넓은 줄, 본문 3줄. 체크리스트는 글자로만 보임.',now)+
+    fig('A','a','<b>A · 같은 크기 3칸</b> — 모든 카드 약 245 × 246. 줄이 가지런하고 한 화면에 3줄(9장) 가까이. 긴 본문은 7줄에서 잘림.',a)+
+    fig('B','b','<b>B · 벽돌 쌓기(masonry)</b> — 내용만큼 높이가 달라 긴 메모가 더 많이 보임. 카드 위 메모 색 띠. 순서는 열 단위(위→아래)로 읽힘.',b);
+}
+
+req1();req2();req3();req4();
+const params=new URLSearchParams(location.search);
+if(params.get('shot')){document.body.classList.add('shot');document.getElementById(params.get('shot')).classList.add('shown');}
+const toggle=document.getElementById('toggle-full');
+toggle.addEventListener('click',()=>{const on=document.body.classList.toggle('full');toggle.setAttribute('aria-pressed',String(on));});
+</script>
+</body>
+</html>

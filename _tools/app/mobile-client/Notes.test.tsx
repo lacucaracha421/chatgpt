@@ -121,7 +121,10 @@ it('filters by label chips and searches secret notes by title only',async()=>{
  const labelled:MobileNote={...note,id:'e'.repeat(32),title:'여행',labels:['개인']};
  mock.native.mockImplementation(state([note,secret,labelled]));
  render(<Notes active backRef={{current:null}}/>);await screen.findByText('서버 계정');
- expect(screen.getByText('암호 메모')).toBeTruthy();
+ // A secret note's card is masked: a lock on the title, no preview text.
+ const secretCard=screen.getByText('서버 계정').closest('button')!;
+ expect(within(secretCard).getByLabelText('암호 메모')).toBeTruthy();
+ expect(secretCard.textContent).toContain('잠김••••••');
  fireEvent.click(screen.getByRole('button',{name:/^개인/}));
  expect(screen.queryByText('제목')).toBeNull();expect(screen.getByText('여행')).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:/^개인/}));
@@ -221,4 +224,31 @@ it('syncs at once from the 동기화 button and backs pending sync off while wri
  await act(()=>vi.advanceTimersByTimeAsync(1));expect(syncs()).toBe(2);
  fireEvent.click(screen.getByRole('button',{name:'동기화'}));await act(async()=>{});
  expect(syncs()).toBe(3);
+});
+it('shows sticky-note cards: pin, checklist progress with done items struck, masked secret fields, labels and the pending dot',async()=>{
+ const checklist:MobileNote={...note,id:'f'.repeat(32),type:'checklist',schema:2,title:'장보기',body:'',pinned:true,color:'green',pending:true,
+   items:[{id:'1',text:'우유',checked:false,order:'a'},{id:'2',text:'두부',checked:true,order:'b'},{id:'3',text:'대파',checked:false,order:'c'}]};
+ const secret:MobileNote={...note,id:'1'.repeat(32),type:'secret',schema:2,title:'와이파이',body:'',fields:[{id:'x',label:'집',value:'hunter2',order:'a'}],memo:'비밀 메모'};
+ const text:MobileNote={...note,id:'2'.repeat(32),title:'',body:'**택배** 보관함',labels:['작업']};
+ mock.native.mockImplementation(state([checklist,secret,text]));
+ render(<Notes active backRef={{current:null}}/>);
+ const card=(await screen.findByText('장보기')).closest('button')!;
+ expect(within(card).getByLabelText('고정됨')).toBeTruthy();
+ expect(card.style.getPropertyValue('--note-tint')).not.toBe('');
+ expect(card.querySelector('.note-card__progress')!.textContent).toBe('1/3');
+ // Open items first, then done ones (struck through).
+ expect([...card.querySelectorAll('.note-card__checks>span')].map(el=>[el.textContent,el.className])).toEqual([['우유',''],['대파',''],['두부','is-done']]);
+ expect(within(card).getByText('· 동기화 대기',{exact:false}).className).toBe('sr-only');
+ expect(card.querySelector('.note-card__pending')).toBeTruthy();
+ const secretCard=screen.getByText('와이파이').closest('button')!;
+ expect(secretCard.textContent).toContain('집••••••');
+ expect(secretCard.textContent).not.toContain('hunter2');expect(secretCard.textContent).not.toContain('비밀 메모');
+ expect(within(secretCard).queryByLabelText('고정됨')).toBeNull();
+ const textCard=screen.getByText('제목 없음').closest('button')!;
+ expect(textCard.querySelector('.note-card__body')!.textContent).toBe('택배 보관함');
+ expect(textCard.querySelector('.note-card__labels')!.textContent).toBe('작업');
+ // Pinned and recent notes keep their own masonry blocks; a tap still opens the note.
+ expect(document.querySelectorAll('.notes-grid')).toHaveLength(2);
+ fireEvent.click(card);
+ expect(await screen.findByRole('button',{name:'메모 목록'})).toBeTruthy();
 });

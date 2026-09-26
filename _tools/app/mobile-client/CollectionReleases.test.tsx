@@ -13,7 +13,7 @@ vi.mock('./media',()=>({mediaTicket:vi.fn()}));
 import {ApiError} from './transport';
 import {Collections} from './Collections';
 import {SCHEDULE_ABSENT_NOTE} from './CollectionReleases';
-import {japanReleases, koreanReleases, koreanVolumeLine, releaseCounts, releaseLine} from './collectionReleases';
+import {japanReleases, koreanReleases, koreanVolumeLine, releaseCaption, releaseCounts, releaseLine} from './collectionReleases';
 
 const LIBRARY='e'.repeat(32);
 const KINDS=['new_volume','release_date_changed','release_status_changed'];
@@ -231,4 +231,44 @@ it('offers a retry when the release information cannot be read',async()=>{
   await screen.findByRole('region',{name:'밤의 도서관'});
   // The only release routes are the client read and 확인; publisher routes are never touched.
   expect(mocks.api.mock.calls.every(([path])=>!String(path).includes('/releases/reads')&&!String(path).includes('/releases/unread'))).toBe(true);
+});
+
+it('words the grid 신간 line from the unread count and the schedule',()=>{
+  const today='2026-09-25';
+  const [night,sea,quiet,full]=works;
+  // Unread: the unowned Korean volumes already out, and the latest of their dates.
+  expect(releaseCaption(night,1,3,true,today)).toEqual({kind:'new',text:'신간 4권',date:'9.16'});
+  expect(releaseCaption(night,2,1,true,today)).toEqual({kind:'new',text:'신간 2–4권',date:'9.16'});
+  // No owned count: only the newest volume is named.
+  expect(releaseCaption(sea,1,null,true,today)).toEqual({kind:'new',text:'신간 2권',date:'9.20'});
+  expect(releaseCaption(quiet,1,0,false,today)).toEqual({kind:'new',text:'신간 1권',date:'9.1'});
+  // Unread news the schedule cannot name (a MangaDex volume): the count.
+  expect(releaseCaption(full,1,2,true,today)).toEqual({kind:'new',text:'신간 알림 1',date:null});
+  // Nothing unread: the soonest dated pre-registered volume of a watched work, with the year when it differs.
+  expect(releaseCaption(night,0,3,true,today)).toEqual({kind:'ahead',text:'5권 예약',date:'10.10'});
+  expect(releaseCaption(night,0,3,true,'2025-12-30')).toEqual({kind:'ahead',text:'4권 예약',date:'2026.9.16'});
+  expect(releaseCaption(night,0,3,false,today)).toBeNull();
+  expect(releaseCaption(full,0,2,true,today)).toBeNull();
+  expect(releaseCaption({...night,type:'game'},3,0,true,today)).toBeNull();
+});
+
+it('shows the 신간 line under the title in the manga grid instead of the year line, with nothing on the cover',async()=>{
+  works=works.map(work=>({...work,year:2020}));
+  renderTab();
+  await waitFor(async()=>expect((await entry()).getAttribute('aria-label')).toBe('신간 보기, 새 알림 4개'));
+  fireEvent.click(tab('만화'));
+  const tile=(name:string)=>screen.getByText(name,{selector:'.collection-grid .collection-title'}).closest('button')!;
+  await waitFor(()=>expect(tile('밤의 도서관').querySelector('.collection-release-line')?.textContent).toBe('신간 4권 · 9.16'));
+  expect(tile('밤의 도서관').querySelector('.collection-card-meta')).toBeNull();
+  expect(tile('밤의 도서관').querySelector('.collection-art .collection-release-badge,.collection-release-badge')).toBeNull();
+  expect(tile('가득 찬 서가').querySelector('.collection-release-line')!.textContent).toBe('신간 알림 1');
+  cleanup();
+  // Everything read: a watched work shows its next pre-registered volume; the others keep the year.
+  events=[];
+  renderTab();
+  await screen.findByRole('button',{name:'신간 보기'});
+  fireEvent.click(tab('만화'));
+  await waitFor(()=>expect(tile('밤의 도서관').querySelector('.collection-release-line.is-ahead')?.textContent).toBe('5권 예약 · 10.10'));
+  expect(tile('조용한 숲').querySelector('.collection-release-line')).toBeNull();
+  expect(tile('조용한 숲').querySelector('.collection-card-meta')!.textContent).toBe('2020');
 });

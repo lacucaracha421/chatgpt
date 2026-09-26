@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState, type FormEvent} from 'react';
-import {MagnifyingGlassIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
+import {createPortal} from 'react-dom';
+import {CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon, MagnifyingGlassIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
 import {Button, Dialog, DialogDescription} from './ui';
 import {ApiError, api, errorText} from './transport';
 import {visibleInterval} from './useVisibleInterval';
@@ -33,14 +34,24 @@ function rowState(connection: Connection, request: BindRequest | null): RowState
   }
 }
 
+/** What each provider brings, for the large 작품 연결 panel. */
+const PROVIDER_GAINS: Record<BindProvider, string> = {mangadex: '일본판 권 목록 · 표지 · 원제', kakao: '국내 출판 권 목록 · 발매일 · 신간 알림'};
+const PANEL_TEXT = '연결하면 권별 표지와 발매일을 가져오고, 새 권이 나오면 신간 알림을 받을 수 있어요. 고르면 PC가 켜질 때 적용됩니다.';
+/** Nothing to do for this provider: connected, or a pick is waiting for (or was applied by) the PC. */
+const settled = (connection: Connection, request: BindRequest | null) =>
+  request?.state === 'failed' ? connection === 'connected' : connection === 'connected' || request?.state === 'pending' || request?.state === 'applied';
+
 /**
- * 연결 beside the cover: whether the manga is connected to MangaDex and Kakao, a request still
- * waiting for the PC or one the PC could not apply, and the buttons that open the search sheet.
+ * 연결 for a manga. When both MangaDex and Kakao are settled (connected, or a pick waiting for
+ * the PC) it is one small folded row beside the cover, "연결 ✓MangaDex · ✓카카오", which opens
+ * to the per-provider rows (다시 연결); a waiting or failed request is spelled out in the folded
+ * row. Otherwise it is a prominent 작품 연결 panel under the cover and info (`panelHost`, or in
+ * place without one), with Kakao — which brings 신간 알림 — as the primary choice.
  */
-export function CollectionBindings({item, active, refreshKey, sheet, onSheet}: {item: CollectionDetail; active: boolean; refreshKey: string; sheet: BindProvider | null; onSheet(provider: BindProvider | null): void}) {
+export function CollectionBindings({item, active, refreshKey, sheet, onSheet, panelHost}: {item: CollectionDetail; active: boolean; refreshKey: string; sheet: BindProvider | null; onSheet(provider: BindProvider | null): void; /** Where the large panel goes (full width under the intro). */panelHost?: HTMLElement | null}) {
   const [status, setStatus] = useState<BindStatus | null>(null), [legacy, setLegacy] = useState(false);
   const [requests, setRequests] = useState<RequestsReply | null>(null), [loadError, setLoadError] = useState('');
-  const [nonce, setNonce] = useState(0);
+  const [nonce, setNonce] = useState(0), [open, setOpen] = useState(false);
   // A request just filed shows at once, before the list is read again.
   const [filed, setFiled] = useState<Partial<Record<BindProvider, BindRequest>>>({});
   useEffect(() => {
@@ -63,23 +74,69 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet}: {
   const signalled = useSyncSignal('bindingRequests', () => setNonce(n => n + 1), active && item.type === 'manga');
   useEffect(() => { if (!active || !waiting) return; return visibleInterval(() => setNonce(n => n + 1), signalled ? SIGNAL_FALLBACK_MS : 60_000); }, [active, waiting, signalled]);
   if (item.type !== 'manga') return null;
-  return <section className="collection-bindings" aria-label="연결">
-    <h2 className="collection-bindings-title">연결</h2>
-    {PROVIDERS.map(provider => {
-      const name = PROVIDER_NAMES[provider], state = rowState(connectionOf(item, provider), latest(provider));
-      const verb = `${name} ${state.again ? '다시 연결' : '연결'}`;
-      return <div key={provider} className={`collection-binding-row is-${state.tone}`}>
-        <span className="collection-personal-label">{name}</span>
-        <span className="collection-binding-value"><span className="collection-binding-state">{state.text}</span>{state.detail && <small>{state.detail}</small>}</span>
-        {!legacy && <Button size="sm" aria-label={verb} onClick={() => onSheet(provider)}>{state.again ? '다시 연결' : '연결'}</Button>}
-      </div>;
-    })}
+  const providers = PROVIDERS.map(provider => {
+    const connection = connectionOf(item, provider), request = latest(provider);
+    return {provider, name: PROVIDER_NAMES[provider], connection, request, state: rowState(connection, request), settled: settled(connection, request)};
+  });
+  const notes = <>
     {legacy && <p className="collection-bindings-note">{LEGACY_NOTE}</p>}
     {!legacy && status?.publisherSeenAt === null && <p className="collection-bindings-note">{PUBLISHER_UPDATE_NOTE}</p>}
     {loadError && <div className="collection-bindings-note is-error" role="alert"><span>연결 요청 상태를 불러오지 못했어요.</span><Button size="sm" variant="ghost" onClick={() => setNonce(n => n + 1)}>다시 시도</Button></div>}
-    {sheet && !legacy && <BindSearchSheet key={sheet} item={item} provider={sheet} status={status} connection={connectionOf(item, sheet)} onClose={() => onSheet(null)}
-      onRequested={request => { setFiled(current => ({...current, [request.provider]: request})); onSheet(null); setNonce(n => n + 1); }}/>}
+  </>;
+  const searchSheet = sheet && !legacy && <BindSearchSheet key={sheet} item={item} provider={sheet} status={status} connection={connectionOf(item, sheet)} onClose={() => onSheet(null)}
+    onRequested={request => { setFiled(current => ({...current, [request.provider]: request})); onSheet(null); setNonce(n => n + 1); }}/>;
+
+  if (providers.every(entry => entry.settled)) {
+    return <section className="collection-bindings is-folded" aria-label="연결">
+      <button type="button" className="collection-bindings-fold" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        <LinkIcon aria-hidden="true"/><span className="collection-bindings-fold__label">연결</span>
+        {providers.map(({provider, name, state}, index) => <span key={provider} className="collection-bindings-fold__item">
+          {index > 0 && <span className="collection-bindings-fold__sep" aria-hidden="true"/>}
+          {state.tone === 'pending' ? <span className="collection-bindings-fold__wait"><i aria-hidden="true"/>{name} {state.text}</span>
+            : state.tone === 'failed' ? <span className="collection-bindings-fold__failed">{name} {state.text}</span>
+            : <span className="collection-bindings-fold__ok"><CheckIcon aria-label="연결됨"/>{name}</span>}
+        </span>)}
+        <ChevronDownIcon className="collection-bindings-fold__chevron" aria-hidden="true"/>
+      </button>
+      {open && <div className="collection-bindings-rows">{providers.map(({provider, name, state}) => {
+        const verb = `${name} ${state.again ? '다시 연결' : '연결'}`;
+        return <div key={provider} className={`collection-binding-row is-${state.tone}`} data-provider={provider}>
+          <span className="collection-personal-label">{name}</span>
+          <span className="collection-binding-value"><span className="collection-binding-state">{state.text}</span>{state.detail && <small>{state.detail}</small>}</span>
+          {!legacy && <Button size="sm" aria-label={verb} onClick={() => onSheet(provider)}>{state.again ? '다시 연결' : '연결'}</Button>}
+        </div>;
+      })}</div>}
+      {notes}
+      {searchSheet}
+    </section>;
+  }
+
+  const panel = <section className="collection-bind-panel" aria-label="연결">
+    <h2><LinkIcon aria-hidden="true"/>작품 연결</h2>
+    <p>{PANEL_TEXT}</p>
+    <div className="collection-bind-choices">{providers.map(({provider, name, connection, state}) => {
+      const verb = `${name} ${state.again ? '다시 연결' : '연결'}`;
+      const primary = provider === 'kakao';
+      // A connected (or waiting) provider stays quiet with a small 다시 연결; the rest are the big buttons.
+      if (connection === 'connected' || state.tone === 'pending' || (state.tone === 'ok' && state.again)) {
+        return <div key={provider} className={`collection-bind-choice is-done is-${state.tone}`} data-provider={provider}>
+          {state.tone === 'pending' ? <i className="collection-bind-choice__wait" aria-hidden="true"/> : <CheckIcon aria-hidden="true"/>}
+          <span className="collection-bind-choice__text">{state.tone === 'pending'
+            ? <><strong>{name} 연결 대기</strong><small>{['PC가 켜지면 적용', state.detail].filter(Boolean).join(' · ')}</small></>
+            : <><strong>{name} {state.text}</strong><small>{state.detail || PROVIDER_GAINS[provider]}</small></>}</span>
+          {!legacy && <Button size="sm" variant="ghost" aria-label={verb} onClick={() => onSheet(provider)}>다시 연결</Button>}
+        </div>;
+      }
+      const detail = state.detail ? `${state.text} · ${state.detail}` : PROVIDER_GAINS[provider];
+      const body = <><span className="collection-bind-choice__text"><strong>{name} 연결</strong><small>{detail}</small></span><ChevronRightIcon aria-hidden="true"/></>;
+      return legacy
+        ? <div key={provider} className={`collection-bind-choice is-static is-${state.tone}`} data-provider={provider}>{body}</div>
+        : <button key={provider} type="button" className={`collection-bind-choice is-${state.tone}${primary ? ' is-primary' : ''}`} data-provider={provider} aria-label={verb} onClick={() => onSheet(provider)}>{body}</button>;
+    })}</div>
+    {notes}
+    {searchSheet}
   </section>;
+  return panelHost ? createPortal(panel, panelHost) : panel;
 }
 
 function BindThumb({url, provider}: {url: string | null; provider: BindProvider}) {
