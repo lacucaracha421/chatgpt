@@ -16,7 +16,7 @@ export function CollectionExhibition<T>({items, page, onPageChange, render, scro
     const observer=typeof ResizeObserver==="undefined"?null:new ResizeObserver(update);observer?.observe(element);return()=>observer?.disconnect();
   },[]);
   const width=(height-(layout.columns-1)*4)*256/368+(layout.columns-1)*14;
-  return <div className="collection-exhibition" ref={element=>{root.current=element;if(scrollRef)scrollRef.current=element;}}>
+  return <div className="collection-exhibition" data-cover-scroll-root="" ref={element=>{root.current=element;if(scrollRef)scrollRef.current=element;}}>
     <div className="collection-exhibition__wall" style={{"--exhibit-columns":layout.columns,height,width,maxWidth:"100%"} as CSSProperties} aria-label={`${layout.columns}행 ${layout.columns}열 전시`}>
       {items.slice(layout.start,layout.end).map((item,index)=>render(item,layout.start+index))}
     </div>

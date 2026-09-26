@@ -32,7 +32,7 @@ export function VirtualCoverGrid<T>({textRows=false,items,itemKey,render,label,s
   }
   const rowStyle={...(textRows?{gap:0}:{}),gridTemplateColumns:`repeat(${columns},minmax(0,1fr))`,width:centered?Math.min(width,columns*cellWidth+(columns-1)*gap):undefined} satisfies CSSProperties;
   const cell=(item:T,index:number)=><div className="virtual-cover-grid__cell" key={itemKey(item)} data-cover-index={index}>{render(item,index)}</div>;
-  return <div ref={ref} className={`virtual-cover-grid ${legacyMetrics ? "virtual-cover-grid--legacy" : ""} ${className} ${textRows ? "virtual-cover-grid--text" : ""}`} role="group" aria-label={label} onKeyDown={handleKey}
+  return <div ref={ref} className={`virtual-cover-grid ${legacyMetrics ? "virtual-cover-grid--legacy" : ""} ${className} ${textRows ? "virtual-cover-grid--text" : ""}`} role="group" aria-label={label} data-cover-scroll-root="" onKeyDown={handleKey}
     onFocusCapture={event=>{const index=(event.target as HTMLElement).closest<HTMLElement>("[data-cover-index]")?.dataset.coverIndex;if(index!==undefined)setFocusIndex(Number(index));}} onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setFocusIndex(null);}}
     onContextMenu={event=>{if(onEmptyContextMenu&&!(event.target as HTMLElement).closest("button")){event.preventDefault();onEmptyContextMenu();}}}>
     {virtual?<div className="virtual-cover-grid__spacer" style={{height:rowVirtualizer.getTotalSize()}}>

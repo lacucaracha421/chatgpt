@@ -205,8 +205,8 @@ Manga uses the approved **Paperback FINAL** model and volume-centered shelf gram
 - Library and volume lists display nearby cached static renders; row virtualization bounds large-list DOM work.
 - Appreciation uses one live book with on-demand cursor tilt. A separate footer owns same-edition thumbnails, position and original-image mode, so it never overlays the large cover.
 - Showcase keeps manual membership/order within each media type. Cover-only pages use 3×3 for up to 9 works, 4×4 from 10, and pagination beyond 16. The wall is packed around the objects rather than spread across the viewport.
-- A shared serialized raster cache is capped at 64 entries / estimated decoded 24 MiB; book GPU textures at 4 / estimated 12 MiB. Drawing stops at idle and when hidden. Current-view callbacks and image URLs are released on scope/source changes.
-- Source keys include library scope, artwork URL, revision, render preset and pixel bucket. No DB or provider-state ownership moves into the renderer; there is no persistent thumbnail-cache schema in this slice.
+- A shared serialized raster cache is capped at 256 entries / 64 MiB of encoded snapshots (128 pending, on-screen covers first); book GPU textures at 4 / estimated 12 MiB. Drawing stops at idle and when hidden. Current-view callbacks and image URLs are released on scope/source changes.
+- Source keys include library scope, artwork URL, revision, render preset and pixel bucket. No DB or provider-state ownership moves into the renderer. Finished renders persist in the WebView's IndexedDB (`physical/snapshotStore.ts`, keyed by the same source key, LRU at 64 MiB, versioned); while a render is pending the cover shows a neutral placeholder in the final shape and fades in, never the flat source (the flat image is only the failure fallback).
 - Game cases share cached 2D snapshots while `drawGameCase.ts` geometry/lighting remains unchanged. Existing neutral loading silhouettes are cached too.
 - Native cover responses allow anonymous canvas use only for exact app origins and cover-image routes. CSP permits local blob images, not remote script execution. Failure falls back to the original cover.
 

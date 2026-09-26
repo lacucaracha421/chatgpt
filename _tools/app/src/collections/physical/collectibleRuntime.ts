@@ -1,9 +1,10 @@
 import { drawGameCase } from "../drawGameCase";
 import { PaperbackEngine, PAPERBACK_FINAL, type BookTexture } from "./PaperbackEngine";
-import { RenderCache, type RenderResult, type Snapshot } from "./RenderCache";
+import { RenderCache, THUMBNAIL_LIMIT, type Rank, type RenderResult, type Snapshot } from "./RenderCache";
 import { loadCoverImage } from "./loadCoverImage";
+import { createSnapshotStore } from "./snapshotStore";
 export type CoverRequest = { kind:"book"|"game"; src:string; scope:string; revision:string; pixels:number };
-const cache=new RenderCache();
+const cache=new RenderCache(THUMBNAIL_LIMIT,createSnapshotStore());
 let engine:PaperbackEngine|null=null, bookCanvas:HTMLCanvasElement|null=null, gameCanvas:HTMLCanvasElement|null=null;
 let contextLost=false, unavailable=false, liveOwner:symbol|null=null, wakeLive:(()=>void)|null=null;
 let visibilityInstalled=false;
@@ -12,8 +13,8 @@ function ensureEngine() {
   if(engine&&!engine.disposed) return engine;
   if(!bookCanvas) {
     bookCanvas=document.createElement("canvas"); bookCanvas.setAttribute("aria-hidden","true");
-    bookCanvas.addEventListener("webglcontextlost",event=>{ event.preventDefault(); contextLost=true; cache.pause(true); wakeLive?.(); });
-    bookCanvas.addEventListener("webglcontextrestored",()=>{ engine?.dispose(); engine=null; contextLost=false; unavailable=false; cache.pause(liveOwner!==null||document.hidden); wakeLive?.(); });
+    bookCanvas.addEventListener("webglcontextlost",event=>{ event.preventDefault(); contextLost=true; cache.pause(true); cache.setUnavailable(true); wakeLive?.(); });
+    bookCanvas.addEventListener("webglcontextrestored",()=>{ engine?.dispose(); engine=null; contextLost=false; unavailable=false; cache.setUnavailable(false); cache.pause(liveOwner!==null||document.hidden); wakeLive?.(); });
   }
   try { engine=new PaperbackEngine(bookCanvas); return engine; } catch(error) { unavailable=true; throw error; }
 }
@@ -54,9 +55,10 @@ async function bake(request:CoverRequest, signal:AbortSignal):Promise<RenderResu
     return await snapshot(output);
   } finally { if(image) image.src=""; output.width=output.height=0; if(gameCanvas) gameCanvas.width=gameCanvas.height=2; }
 }
-export function acquireCover(request:CoverRequest, listener:(value:Snapshot)=>void) {
+/** `rank` is read whenever a producer is picked; on-screen covers (0) go before nearby ones (1). */
+export function acquireCover(request:CoverRequest, listener:(value:Snapshot)=>void, rank?:Rank) {
   watchVisibility(); cache.pause(document.hidden||liveOwner!==null||contextLost);
-  return cache.acquire(coverKey(request),signal=>bake(request,signal),listener);
+  return cache.acquire(coverKey(request),signal=>bake(request,signal),listener,rank);
 }
 export function collectibleStats() {
   return { cache:cache.stats(), book:engine?.stats()??null, liveModels:liveOwner?1:0, gameContexts:gameCanvas?1:0, contextLost };
@@ -110,7 +112,7 @@ export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(
   releaseLive=dispose; refresh();
   return {tilt:(nextX,nextY)=>{x=nextX;y=nextY;refresh();},refresh,dispose};
 }
-// Development/test observation only; no polling, telemetry upload or persistent state.
+// Development/test observation only; no polling or telemetry upload. Clears memory, not the persistent snapshots.
 export function clearCollectibleCache() { cache.clear(); engine?.clearTextures(); }
 export function attachLiveCase(host:HTMLElement, request:{src:string;scope:string;revision:string;pose:"front"|"spine"|"back"}, onReady:(ready:boolean)=>void) {
   releaseLive?.();watchVisibility();

@@ -8,7 +8,7 @@ vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
   ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
   acquireCover:(request:CoverRequest,notify:(value:Snapshot)=>void)=>{const release=vi.fn();pending.push({request,notify,release});return release;},
 }));
-vi.mock("./physical/coverVisibility",()=>({observeCover:(_element:unknown,notify:(value:boolean)=>void)=>{notify(true);return()=>undefined;},observeCoverSize:()=>()=>undefined}));
+vi.mock("./physical/coverVisibility",()=>({observeCover:(_element:unknown,notify:(near:boolean,visible:boolean)=>void)=>{notify(true,true);return()=>undefined;},observeCoverSize:()=>()=>undefined}));
 afterEach(()=>{cleanup();pending.length=0;vi.clearAllMocks();});
 it("uses shared snapshots without creating a canvas for every case",()=>{
   const view=render(<GameCase src="" alt="게임 표지" />);
@@ -17,13 +17,15 @@ it("uses shared snapshots without creating a canvas for every case",()=>{
   act(()=>shell.notify({url:"blob:shell",width:256,height:362}));
   expect(screen.getByRole("img")).toHaveAttribute("src","blob:shell");
   view.rerender(<GameCase src="first.jpg" alt="게임 표지" />);
-  expect(shell.release).toHaveBeenCalledOnce();
+  // The shared neutral case stays as the pending silhouette; the flat artwork is never shown first.
+  expect(shell.release).not.toHaveBeenCalled();
   expect(pending.filter(job=>job.request.src==="")).toHaveLength(1);
-  expect(screen.getByRole("img")).toHaveAttribute("src","first.jpg");
+  expect(screen.getByRole("img")).not.toHaveAttribute("src");
+  expect(view.container.querySelector(".physical-cover__shell")).toHaveAttribute("src","blob:shell");
   const obsolete=pending.find(job=>job.request.src==="first.jpg")!;
   view.rerender(<GameCase src="second.jpg" alt="게임 표지" />);
   expect(obsolete.release).toHaveBeenCalledOnce();
-  expect(screen.getByRole("img")).toHaveAttribute("src","second.jpg");
+  expect(screen.getByRole("img")).not.toHaveAttribute("src");
   act(()=>obsolete.notify({url:"blob:obsolete",width:256,height:362}));
   expect(screen.getByRole("img")).not.toHaveAttribute("src","blob:obsolete");
   act(()=>pending.find(job=>job.request.src==="second.jpg")!.notify({url:"blob:current",width:256,height:362}));
@@ -33,4 +35,5 @@ it("releases the raster subscription on unmount and forwards revision scope",()=
   const view=render(<GameCase src="cover.jpg" alt="게임" scope="library-a" revision="2" />);
   const job=pending.find(item=>item.request.src==="cover.jpg")!;
   expect(job.request.scope).toBe("library-a");expect(job.request.revision).toBe("2");view.unmount();expect(job.release).toHaveBeenCalledOnce();
+  expect(pending.find(item=>item.request.scope==="neutral-shell")!.release).toHaveBeenCalledOnce();
 });

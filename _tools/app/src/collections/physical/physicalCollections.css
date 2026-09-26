@@ -2,9 +2,23 @@
 .physical-cover { display:block; position:relative; width:100%; height:100%; min-width:0; min-height:0; background:transparent; }
 .physical-cover > img { display:block; width:100%; height:100%; object-fit:contain; border:0; border-radius:0; background:transparent; box-shadow:none; }
 .physical-cover--game > img { object-fit:fill; }
-.physical-cover[data-source="preview"] > img, .physical-cover[data-source="fallback"] > img { object-fit:contain; }
-.physical-cover[data-ready="false"] > img { opacity:0; }
-.physical-cover[data-ready="false"]::before { content:""; position:absolute; inset:8% 13% 10%; background:var(--color-surface); border:var(--border-width) solid var(--color-border); border-radius:var(--radius-tile); }
+.physical-cover[data-source="fallback"] > img { object-fit:contain; }
+/* Pending: a neutral object in the final silhouette; the finished image fades in over it (never a flat preview first). */
+.physical-cover > .physical-cover__image { position:relative; z-index:1; opacity:0; transition:opacity 140ms ease-out; }
+.physical-cover[data-ready="true"] > .physical-cover__image { opacity:1; }
+.physical-cover[data-instant="true"] > .physical-cover__image { transition:none; }
+.physical-cover > .physical-cover__shell { position:absolute; inset:0; }
+.physical-cover::before, .physical-cover::after { content:""; position:absolute; pointer-events:none; }
+.physical-cover > .physical-cover__shell, .physical-cover::before, .physical-cover::after { transition:opacity 140ms ease-out, visibility 0s; }
+.physical-cover[data-ready="true"] > .physical-cover__shell, .physical-cover[data-ready="true"]::before, .physical-cover[data-ready="true"]::after { opacity:0; visibility:hidden; transition:opacity 140ms ease-out, visibility 0s linear 140ms; }
+.physical-cover[data-instant="true"]::before, .physical-cover[data-instant="true"]::after, .physical-cover[data-instant="true"] > .physical-cover__shell { transition:none; }
+/* Projected outline of the baked Paperback FINAL pose (rx .13, ry .40) for a typical 0.704 cover. */
+.physical-cover--book::before, .physical-cover--book::after { clip-path:polygon(12.9% 7.8%, 91% 11.7%, 83.6% 87.6%, 11.1% 91.3%, 8.4% 89.5%, 8.2% 83%); }
+.physical-cover--book::before { inset:0; background:var(--color-border); }
+.physical-cover--book::after { inset:var(--border-width); background:var(--color-surface); }
+.physical-cover--game::before { inset:8% 9.5%; background:var(--color-surface); border:var(--border-width) solid var(--color-border); border-radius:var(--radius-tile); }
+.physical-cover--game::after, .physical-cover[data-shell="true"]::before { display:none; }
+@media (prefers-reduced-motion:reduce) { .physical-cover[data-ready] > .physical-cover__image, .physical-cover[data-ready] > .physical-cover__shell, .physical-cover[data-ready]::before, .physical-cover[data-ready]::after { transition:none; } }
 .game-case.game-case--cached { display:block; width:100%; height:100%; }
 .collection-card--manga .collection-card__object { background:transparent; padding:0; box-shadow:none; }
 .collection-card--manga .collection-card__cover { aspect-ratio:256 / 368; background:transparent; outline:none; overflow:visible; }
