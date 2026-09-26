@@ -376,9 +376,10 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
         return {"version": 1, "ready": False, "libraryId": None, "revision": None, "generatedAt": None,
                 "policyVersion": None, "decisionCursor": 0, "appliedDecisionCursor": 0,
                 "counts": {"total": 0, "s36": 0, "b36": 0, "doubtful": 0, "pendingPc": 0, "skipped": 0},
+                "countsByTarget": [], "countsBySeries": [],
                 "items": [], "targets": {}, "nextCursor": None, "hasMore": False, **(extra or {})}
 
-    def read_feed(source, target, limit, cursor):
+    def read_feed(source, target, series_id, limit, cursor):
         position = -1
         if cursor is not None:
             revision, position = decode_cursor(cursor)
@@ -398,11 +399,22 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                 JOIN visible_assets a ON a.id=i.asset_id AND a.committed=1
                 WHERE i.target_id IN (SELECT value FROM json_each(?))
                 AND COALESCE({LATEST_PENDING},'cleared')='cleared'"""
-            params = [json.dumps(sorted(nodes if target is None else ({target} & nodes.keys()))),
-                      current["feed_cursor"]]
+            selected = {k for k, n in nodes.items() if (target is None or k == target)
+                        and (series_id is None or n["seriesId"] == series_id)}
+            params = [json.dumps(sorted(selected)), current["feed_cursor"]]
             counts = db.execute(f"SELECT COUNT(*),SUM(i.s36),SUM(i.b36),SUM(i.doubtful) {base}", params).fetchone()
             # `source` is a closed Literal, so naming its column is not an injection.
             where = f" AND i.{source}=1" if source is not None else ""
+            # Exact per-character/per-series counts over every published character (not
+            # narrowed by `target`/`series`, so one read can badge the whole split), with
+            # the same pending rules and `source` filter as the list and `counts.total`.
+            by_target = [{"targetId": t, "seriesId": nodes[t]["seriesId"], "pending": n}
+                         for t, n in db.execute(f"SELECT i.target_id,COUNT(*) {base}{where} GROUP BY i.target_id "
+                                                "ORDER BY i.target_id", [json.dumps(sorted(nodes)),
+                                                                        current["feed_cursor"]])]
+            by_series = {}
+            for entry in by_target:
+                by_series[entry["seriesId"]] = by_series.get(entry["seriesId"], 0) + entry["pending"]
             total = counts[0] if source is None else counts[SOURCES.index(source) + 1] or 0
             rows = db.execute(f"SELECT i.* {base}{where} AND i.position>? ORDER BY i.position LIMIT ?",
                               params + [position, limit + 1]).fetchall()
@@ -441,6 +453,8 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
                     "decisionCursor": current["last_sequence"], "appliedDecisionCursor": current["feed_cursor"],
                     "counts": {"total": total, "s36": counts[1] or 0, "b36": counts[2] or 0,
                                "doubtful": counts[3] or 0, "pendingPc": pending, "skipped": skipped},
+                    "countsByTarget": by_target,
+                    "countsBySeries": [{"seriesId": k, "pending": v} for k, v in sorted(by_series.items())],
                     "items": items, "targets": described,
                     "nextCursor": encode_cursor(current["feed_revision"], rows[-1]["position"]) if more else None,
                     "hasMore": more}
@@ -478,16 +492,16 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
 
     @app.get(PREFIX)
     def review(request: Request, source: Source | None = None, target: ID | None = None,
-               asset: ID | None = None, limit: int = Query(default=20, ge=1, le=50),
+               series: ID | None = None, asset: ID | None = None, limit: int = Query(default=20, ge=1, le=50),
                cursor: str | None = Query(default=None, max_length=512),
                authorization: str | None = Header(default=None)):
         require_client(authorization)
         keys = set(request.query_params.keys())
-        if keys - {"source", "target", "limit", "cursor", "asset"} or (asset is not None and keys != {"asset"}):
+        if keys - {"source", "target", "series", "limit", "cursor", "asset"} or (asset is not None and keys != {"asset"}):
             raise HTTPException(422, "Invalid character review request")
         if asset is not None:
             return asset_targets(asset)
-        return read_feed(source, target, limit, cursor)
+        return read_feed(source, target, series, limit, cursor)
 
     def apply(command):
         try:

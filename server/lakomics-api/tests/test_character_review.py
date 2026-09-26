@@ -86,6 +86,7 @@ class CharacterReviewTests(unittest.TestCase):
         self.assertFalse(before['capabilities']['characterReview'])
         self.assertNotIn('reviewDecisionCursor', before)
         self.assertFalse(self.read()['ready'])
+        self.assertEqual((self.read()['countsByTarget'], self.read()['countsBySeries']), ([], []))
         self.assertEqual(self.read(asset='a'), {'version': 1, 'ready': False, 'assetId': 'a', 'targets': []})
         self.assertEqual(self.code(self.decide(self.command())), 'characterReviewUnsupported')
         # The PC's probe: an upgraded server answers the log route before adoption.
@@ -135,6 +136,69 @@ class CharacterReviewTests(unittest.TestCase):
         self.assertEqual(self.put_feed(body).status_code, 200)
         stale = self.client.get(REVIEW, headers=self.auth, params={'cursor': first['nextCursor']})
         self.assertEqual(self.code(stale), 'characterReviewChanged')
+
+    def test_exact_counts_by_target_and_series_filter(self):
+        body = self.snapshot(0)
+        body['nodes'] += [{'id': 'series:t', 'kind': 'series', 'sourceId': 't', 'seriesId': 't', 'parentId': None, 'name': '둘째 시리즈'},
+                          {'id': 'character:e', 'kind': 'character', 'sourceId': 'e', 'seriesId': 't',
+                           'parentId': 'series:t', 'name': '셋째', 'protectedAssetIds': []}]
+        body['scopes'] += [{'nodeId': 'series:t', 'filter': f, 'assetIds': ['other'] if f == 'all' else []}
+                           for f in ('all', 'unclassified', 'needs_review')]
+        body['scopes'].append({'nodeId': 'character:e', 'filter': 'all', 'assetIds': []})
+        self.ready(body)
+        feed = feed_fixture()
+        feed['targets']['e'] = {'name': '셋째', 'seriesId': 't', 'fingerprint': 'fp-e-1', 'referenceAssetIds': []}
+        feed['items'].append({'assetId': 'other', 'targetId': 'e', 'sources': ['s36'], 'verdict': 'recommended',
+                              'basis': '2026-09-24T08:56:00Z'})
+        self.assertEqual(self.put_feed(feed).status_code, 200)
+
+        def check(source=None):
+            extra = {} if source is None else {'source': source}
+            page = self.read(**extra)
+            for entry in page['countsByTarget']:
+                narrowed = self.read(target=entry['targetId'], limit=50, **extra)
+                self.assertEqual(entry['pending'], narrowed['counts']['total'])
+                self.assertEqual(entry['pending'], len(narrowed['items']))
+                self.assertEqual(narrowed['countsByTarget'], page['countsByTarget'])  # not narrowed
+            for entry in page['countsBySeries']:
+                narrowed = self.read(series=entry['seriesId'], limit=50, **extra)
+                self.assertEqual(entry['pending'], narrowed['counts']['total'])
+                self.assertEqual(entry['pending'], len(narrowed['items']))
+            self.assertEqual(sum(e['pending'] for e in page['countsByTarget']), page['counts']['total'])
+            return page
+
+        page = check()
+        self.assertEqual(page['countsByTarget'], [{'targetId': 'c', 'seriesId': 's', 'pending': 2},
+                                                  {'targetId': 'd', 'seriesId': 's', 'pending': 2},
+                                                  {'targetId': 'e', 'seriesId': 't', 'pending': 1}])
+        self.assertEqual(page['countsBySeries'], [{'seriesId': 's', 'pending': 4}, {'seriesId': 't', 'pending': 1}])
+        self.assertEqual(check('s36')['countsByTarget'], [{'targetId': 'c', 'seriesId': 's', 'pending': 1},
+                                                          {'targetId': 'd', 'seriesId': 's', 'pending': 1},
+                                                          {'targetId': 'e', 'seriesId': 't', 'pending': 1}])
+        # A pending decision drops the pair from the list and the counts alike; undo restores it.
+        self.assertEqual(self.decide(self.command()).status_code, 200)
+        self.assertEqual(check()['countsByTarget'][0], {'targetId': 'c', 'seriesId': 's', 'pending': 1})
+        self.assertEqual(self.decide(self.command(target='e', asset='other')).status_code, 200)
+        page = check()
+        self.assertEqual([e['targetId'] for e in page['countsByTarget']], ['c', 'd'])
+        self.assertEqual(page['countsBySeries'], [{'seriesId': 's', 'pending': 3}])
+        self.assertEqual(self.read(series='t')['items'], [])
+        self.assertEqual(self.decide(self.command(decision='cleared')).status_code, 200)
+        self.assertEqual(check()['countsBySeries'], [{'seriesId': 's', 'pending': 4}])
+        # Series-scoped paging stays inside the series.
+        first = self.read(series='s', limit=3)
+        self.assertTrue(first['hasMore'])
+        rest = self.read(series='s', limit=3, cursor=first['nextCursor'])
+        self.assertEqual([i['assetId'] for i in first['items'] + rest['items']], ['a', 'cand-1', 'cand-2', 'cand-3'])
+        self.assertFalse(rest['hasMore'])
+        self.assertEqual({i['targetId'] for i in self.read(series='s', target='e')['items']}, set())
+        # Unknown series: empty page, zero total, global counts still present.
+        unknown = self.read(series='nope')
+        self.assertEqual((unknown['items'], unknown['counts']['total'], unknown['hasMore']), ([], 0, False))
+        self.assertEqual(len(unknown['countsByTarget']), 2)
+        self.assertEqual(self.client.get(REVIEW, headers=self.auth, params={'series': 'bad id!'}).status_code, 422)
+        self.assertEqual(self.client.get(REVIEW, headers=self.auth, params={'series': 's', 'asset': 'a'}).status_code, 422)
+        self.assertEqual(self.client.get(REVIEW, params={'series': 's'}).status_code, 401)
 
     def test_atomic_replace_stale_base_and_limits(self):
         revision = self.adopt()
