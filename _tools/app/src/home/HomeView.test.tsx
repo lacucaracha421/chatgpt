@@ -18,7 +18,11 @@ const gateway = vi.hoisted(() => ({
   authoritySyncHealth: vi.fn(),
 }));
 vi.mock("../library/LibraryContext", () => ({ useLibrary: () => ({ gateway, library: { root: "fixture" } }) }));
-vi.mock("../characters/ShadowReview", () => ({ ShadowReview: ({ onClose }: { onClose: () => void }) => <div role="dialog" aria-label="S36 확인"><button type="button" onClick={onClose}>닫기</button></div> }));
+const workload = vi.hoisted(() => ({ restricted: false }));
+vi.mock("../app/workloadProfile", async (importOriginal) => ({ ...await importOriginal<typeof import("../app/workloadProfile")>(), useWorkloadProfile: () => ({ ...workload }) }));
+type Scope = { id: string; name: string } | undefined;
+vi.mock("../characters/ShadowReview", () => ({ ShadowReview: ({ onClose, series, target }: { onClose: () => void; series?: Scope; target?: Scope }) =>
+  <div role="dialog" aria-label="S36 확인"><span>{`범위 ${series?.id ?? "-"}/${target?.id ?? "-"}`}</span><button type="button" onClick={onClose}>닫기</button></div> }));
 vi.mock("../manga/CatalogReviewDialog", () => ({ CatalogReviewDialog: ({ onClose }: { onClose: () => void }) => <div role="dialog" aria-label="중복 후보 검토"><button type="button" onClick={onClose}>닫기</button></div> }));
 
 // Saturday 2026-09-26 14:31 local.
@@ -59,21 +63,23 @@ function notesWith(notes: Note[]) {
   return new NotesStore(async <T,>() => ({ unlocked: true, notes, lastSyncedAt: null }) as T);
 }
 
-type Setup = { props?: Partial<HomeViewProps>; exchange?: Partial<ExchangeSnapshot>; notes?: Note[]; characters?: number };
-function renderHome({ props = {}, exchange = {}, notes = [], characters = 0 }: Setup = {}) {
+type Candidate = { targetId: string; targetName: string };
+type Setup = { props?: Partial<HomeViewProps>; exchange?: Partial<ExchangeSnapshot>; notes?: Note[]; characters?: number; candidates?: Candidate[] };
+function renderHome({ props = {}, exchange = {}, notes = [], characters = 0, candidates = [] }: Setup = {}) {
   const onNavigate = vi.fn();
-  const shadowApi = { page: vi.fn().mockResolvedValue({ items: [], nextOffset: null, policyVersion: null, summary: { automatic: { pending: characters, accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 }, byOrigin: {} } }) };
-  render(<WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
+  const shadowApi = { page: vi.fn().mockResolvedValue({ items: candidates, nextOffset: null, policyVersion: null, summary: { automatic: { pending: Math.max(characters, candidates.length), accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 }, byOrigin: {} } }) };
+  const view = render(<WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
     <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={onNavigate} exchange={exchangeWith(exchange)} notes={notesWith(notes)}
       shadowApi={shadowApi} now={() => NOW} {...props} />
   </WorkspaceChromeProvider>);
-  return { onNavigate, shadowApi };
+  return { onNavigate, shadowApi, view };
 }
 const section = (name: string) => screen.getByRole("region", { name });
 const head = (name: string) => screen.getByRole("button", { name: `${name} 열기` });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  workload.restricted = false;
   resetReleaseDataForTests();
   gateway.collectionTracking.listInbox.mockResolvedValue([]);
   gateway.collectionTracking.releaseBoard.mockResolvedValue([]);
@@ -101,7 +107,7 @@ describe("HomeView", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByText(/기준$/)).not.toBeInTheDocument();
     expect(gateway.getHomeOverview).toHaveBeenCalledWith(new Date(2026, 8, 26).toISOString(), new Date(2026, 8, 21).toISOString());
-    expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 1 });
+    expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 200 });
     // The index: connection rows even when nothing is pinned.
     const index = screen.getByRole("navigation", { name: "홈 인덱스" });
     await waitFor(() => expect(within(index).getAllByRole("button").map((button) => button.textContent)).toEqual(
@@ -216,6 +222,59 @@ describe("HomeView", () => {
     await waitFor(() => expect(within(section("확인할 것")).getByRole("button", { name: /처리 대기/ })).toHaveTextContent("14:31 기준"));
     expect(within(section("신간")).queryByText("기준")).not.toBeInTheDocument();
     expect(within(section("자산 현황")).queryByText("기준")).not.toBeInTheDocument();
+  });
+});
+
+describe("HomeView 캐릭터 검토", () => {
+  const targets = [
+    { id: "lala", seriesClassificationId: "lily", displayName: "라라" },
+    { id: "mari", seriesClassificationId: "lily", displayName: "마리" },
+    { id: "geum", seriesClassificationId: "wuwa", displayName: "금희" },
+  ] as never;
+  const classifications = [{ id: "lily", name: "백합" }, { id: "wuwa", name: "명조" }] as never;
+  const repeat = (targetId: string, targetName: string, count: number) => Array.from({ length: count }, () => ({ targetId, targetName }));
+
+  it("splits the count by series and character, each opening that scope", async () => {
+    renderHome({ props: { characters: targets, classifications },
+      candidates: [...repeat("mari", "마리", 2), ...repeat("geum", "금희", 3), ...repeat("lala", "라라", 5)] });
+    const todo = section("확인할 것");
+    await waitFor(() => expect(within(todo).getByRole("button", { name: /자동 분류 후보/ })).toHaveTextContent("10건"));
+    const split = within(todo).getByRole("group", { name: "캐릭터 검토 나누어 보기" });
+    expect(split.textContent?.replace(/\s+/g, "")).toBe("백합›라라5마리2명조›금희3");
+    await user().click(within(split).getByRole("button", { name: "백합 › 마리 캐릭터 검토 2건" }));
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 lily/mari");
+    await user().click(screen.getByRole("button", { name: "닫기" }));
+    await user().click(within(split).getByRole("button", { name: "명조 캐릭터 검토 3건" }));
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 wuwa/-");
+    await user().click(screen.getByRole("button", { name: "닫기" }));
+    await user().click(within(todo).getByRole("button", { name: /자동 분류 후보/ }));
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 -/-");
+  });
+
+  it("collapses one waiting character into the cell", async () => {
+    renderHome({ props: { characters: targets, classifications }, candidates: repeat("lala", "라라", 3) });
+    const todo = section("확인할 것");
+    const cell = await within(todo).findByRole("button", { name: /캐릭터 검토/ });
+    await waitFor(() => expect(cell.textContent?.replace(/\s+/g, "")).toBe("3건캐릭터검토백합›라라"));
+    expect(within(todo).queryByRole("group", { name: "캐릭터 검토 나누어 보기" })).not.toBeInTheDocument();
+    await user().click(cell);
+    expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 lily/lala");
+  });
+
+  it("skips the candidate read in lightweight mode and reads it when the mode ends", async () => {
+    workload.restricted = true;
+    const { shadowApi, view } = renderHome({ props: { characters: targets, classifications }, candidates: repeat("lala", "라라", 3) });
+    await waitFor(() => expect(within(section("자산 현황")).getByText(/이번 주/)).toBeInTheDocument());
+    expect(shadowApi.page).not.toHaveBeenCalled();
+    expect(within(section("확인할 것")).queryByRole("button", { name: /캐릭터 검토/ })).not.toBeInTheDocument();
+
+    workload.restricted = false;
+    view.rerender(<WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
+      <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={vi.fn()} shadowApi={shadowApi} now={() => NOW}
+        characters={targets} classifications={classifications} />
+    </WorkspaceChromeProvider>);
+    await waitFor(() => expect(shadowApi.page).toHaveBeenCalledOnce());
+    expect(await within(section("확인할 것")).findByRole("button", { name: /캐릭터 검토/ })).toHaveTextContent("3건");
   });
 });
 

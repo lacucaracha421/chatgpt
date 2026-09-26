@@ -150,11 +150,18 @@ function renderApp(gateway: ReturnType<typeof perfGateway>) {
   );
 }
 
-/** Start the app, open the library and let startup work settle (fake time). */
+/**
+ * Start the app, open the library and let startup work settle (fake time). The app opens on
+ * Home; the measurements and gates are about the Library grid, so enter 에셋 first.
+ */
 async function startWorkspace(gateway: ReturnType<typeof perfGateway>) {
   renderApp(gateway);
   await advance(5_000);
   expect(screen.getByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
+  const rail = screen.getByRole("navigation", { name: "주요 영역" });
+  await act(async () => { fireEvent.click(within(rail).getByRole("button", { name: "에셋" })); });
+  await advance(2_000);
+  expect(document.querySelector(".asset-gallery__scroll")).not.toBeNull();
 }
 
 // Shared by the measurement suite and the idle gate.

@@ -11,6 +11,8 @@ import { emptyShadowSummary, nativeOutcomeLabel, shadowItemKey, shadowReviewApi,
 import "./ShadowReview.css";
 
 const PAGE_SIZE = 40;
+/** One character's candidates are picked out of its series' list, so read that list in larger pages. */
+const TARGET_PAGE_SIZE = 200;
 const REFILL_BELOW = 5;
 
 type Props = {
@@ -22,6 +24,8 @@ type Props = {
   decisions?: Pick<CharacterApi, "decide">;
   /** Limit both lists and their counts to one series' characters; omitted = all series. */
   series?: { id: string; name: string };
+  /** Only this character's candidates (picked out of the series list); counts show what is loaded. */
+  target?: { id: string; name: string };
 };
 
 type Judgment = { item: ShadowReviewItem; decision: Extract<DecisionKind, "accepted" | "rejected"> };
@@ -47,8 +51,9 @@ function adjust(summary: ShadowReviewSummary, item: ShadowReviewItem, decision: 
  * One shadow candidate at a time. Every judgment is an ordinary manual decision
  * through `record_character_decisions`; history scoring is explicit and cancellable.
  */
-export function ShadowReview({ onClose, onChanged, privacyMode = false, api = shadowReviewApi, decisions = characterApi, series }: Props) {
+export function ShadowReview({ onClose, onChanged, privacyMode = false, api = shadowReviewApi, decisions = characterApi, series, target }: Props) {
   const seriesId = series?.id;
+  const targetId = target?.id;
   const [queue, setQueue] = useState<ShadowReviewItem[]>([]);
   const [summary, setSummary] = useState<ShadowReviewSummary>(emptyShadowSummary);
   const [hasMore, setHasMore] = useState(false);
@@ -64,6 +69,8 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
   const [backfillError, setBackfillError] = useState<string | null>(null);
   const wasRunning = useRef(false);
   const skipped = useRef(new Set<string>());
+  // Other characters' items already paged past while scoped to one character.
+  const outside = useRef(new Set<string>());
   // Judged in this window. A page requested before a judgment was stored can still list
   // it, so every page and the queue are filtered by key rather than by object identity.
   const judged = useRef(new Map<string, Judgment>());
@@ -77,16 +84,25 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     loadingRef.current = true;
     setLoading(true); setError(null);
     try {
-      const offset = reset ? 0 : queueRef.current.length + skipped.current.size;
-      const page = await api.page({ offset, limit: PAGE_SIZE, ...(mode === "doubtful" ? { mode } : {}), ...(seriesId ? { seriesId } : {}) });
+      if (reset) outside.current.clear();
+      const offset = reset ? 0 : queueRef.current.length + skipped.current.size + outside.current.size;
+      const page = await api.page({ offset, limit: targetId ? TARGET_PAGE_SIZE : PAGE_SIZE, ...(mode === "doubtful" ? { mode } : {}), ...(seriesId ? { seriesId } : {}) });
       const known = new Set((reset ? [] : queueRef.current).map(shadowItemKey));
-      const fresh = page.items.filter(item => { const key = shadowItemKey(item); return !skipped.current.has(key) && !known.has(key); });
+      let passed = 0;
+      const fresh = page.items.filter(item => {
+        const key = shadowItemKey(item);
+        if (targetId && item.targetId !== targetId) {
+          if (!outside.current.has(key)) { outside.current.add(key); passed += 1; }
+          return false;
+        }
+        return !skipped.current.has(key) && !known.has(key);
+      });
       const open = (item: ShadowReviewItem) => !judged.current.has(shadowItemKey(item));
       setQueue(previous => (reset ? fresh : [...previous, ...fresh]).filter(open));
       setSummary(page.summary);
       // A page with nothing new to show means the order shifted under us (or every item was
       // just judged here); stop refilling until a reload instead of asking again forever.
-      setHasMore(page.nextOffset !== null && fresh.some(open));
+      setHasMore(page.nextOffset !== null && (fresh.some(open) || passed > 0));
     } catch (e) {
       setError(commandErrorMessage(e, "S36 확인 목록을 불러오지 못했습니다."));
     } finally {
@@ -94,7 +110,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
       setLoading(false);
       if (reloadQueued.current) { reloadQueued.current = false; setReload(value => value + 1); }
     }
-  }, [api, mode, seriesId]);
+  }, [api, mode, seriesId, targetId]);
 
   useEffect(() => { void load(true); }, [load, reload]);
   function chooseMode(next: ShadowReviewMode) {
@@ -220,6 +236,8 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
 
   const doubtfulCounts = summary.doubtful ?? { pending: 0, accepted: 0, rejected: 0 };
   const remaining = mode === "doubtful" ? doubtfulCounts.pending : summary.automatic.pending + summary.recommended.pending;
+  // The page summary covers the whole series; one character's count is what has been loaded.
+  const remainingLabel = targetId ? `${queue.length.toLocaleString()}${hasMore ? "+" : ""}` : remaining.toLocaleString();
   const automaticJudged = summary.automatic.accepted + summary.automatic.rejected;
   const recommendedJudged = summary.recommended.accepted + summary.recommended.rejected;
 
@@ -235,18 +253,18 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
     <section className="shadow-review" aria-label="S36 확인">
       <header className="shadow-review__header">
         <h2>S36 확인</h2>
-        {series && <small className="shadow-review__scope">{series.name}</small>}
+        {(series || target) && <small className="shadow-review__scope">{[series?.name, target?.name].filter(Boolean).join(" › ")}</small>}
         <div className="shadow-review__modes" role="tablist" aria-label="확인 목록">
           <button role="tab" aria-selected={mode === "candidates"} disabled={busy} onClick={() => chooseMode("candidates")}>새 후보</button>
           <button role="tab" aria-selected={mode === "doubtful"} disabled={busy} onClick={() => chooseMode("doubtful")}>기존 자동 분류 점검</button>
         </div>
         {mode === "doubtful"
           ? <dl className="shadow-review__stats" aria-label="진행 상황">
-            <div><dt>남은 항목</dt><dd>{remaining.toLocaleString()}</dd></div>
+            <div><dt>남은 항목</dt><dd>{remainingLabel}</dd></div>
             <div><dt>확인 결과</dt><dd>맞음 {doubtfulCounts.accepted} · 아님 {doubtfulCounts.rejected}</dd></div>
           </dl>
           : <dl className="shadow-review__stats" aria-label="진행 상황">
-            <div><dt>남은 항목</dt><dd>{remaining.toLocaleString()}</dd></div>
+            <div><dt>남은 항목</dt><dd>{remainingLabel}</dd></div>
             <div><dt>자동 후보 정확도</dt><dd>{summary.automatic.accepted}/{automaticJudged}{originStats("automatic")}</dd></div>
             <div><dt>추천 수락</dt><dd>{summary.recommended.accepted}/{recommendedJudged}{originStats("recommended")}</dd></div>
           </dl>}

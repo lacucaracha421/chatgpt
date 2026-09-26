@@ -204,3 +204,22 @@ it("reloads on window focus and when mobile decisions are applied in the backgro
   await waitFor(() => expect(page).toHaveBeenCalledTimes(3), { timeout: 3500 });
   expect(inboundStatus.mock.calls.length).toBeGreaterThanOrEqual(3);
 });
+
+it("scoped to one character, pages past the series' other characters and counts what is loaded", async () => {
+  const first = [item("a1", "automatic", 0.1, "kisaki"), item("a2", "automatic", 0.1, "hina")];
+  const second = [item("a3", "recommended", 0.2, "kisaki"), item("a4", "recommended", 0.2, "hina")];
+  const summary = { ...emptyShadowSummary(), automatic: { pending: 2, accepted: 0, rejected: 0 }, recommended: { pending: 2, accepted: 0, rejected: 0 } };
+  const page = vi.fn(async ({ offset }: { offset: number }): Promise<ShadowReviewPage> => offset === 0
+    ? { items: first, nextOffset: 2, policyVersion: "v1", summary }
+    : { items: second, nextOffset: null, policyVersion: "v1", summary });
+  render(<ShadowReview onClose={vi.fn()} api={{ ...idleApi(), page }} decisions={{ decide: vi.fn(async () => 1) }}
+    series={{ id: "blue", name: "블루 아카이브" }} target={{ id: "hina", name: "히나" }} />);
+  const dialog = await screen.findByRole("dialog", { name: "S36 확인" });
+  expect(await within(dialog).findByRole("heading", { level: 3, name: "히나" })).toBeInTheDocument();
+  expect(within(dialog).getByText("블루 아카이브 › 히나")).toBeInTheDocument();
+  expect(page).toHaveBeenCalledWith({ offset: 0, limit: 200, seriesId: "blue" });
+  // The second page starts after both first-page items (one kept, one another character's).
+  await waitFor(() => expect(page).toHaveBeenLastCalledWith({ offset: 2, limit: 200, seriesId: "blue" }));
+  await waitFor(() => expect(within(dialog).getByLabelText("진행 상황")).toHaveTextContent("남은 항목2"));
+  expect(within(dialog).getByText(/a2\.png/)).toBeInTheDocument();
+});

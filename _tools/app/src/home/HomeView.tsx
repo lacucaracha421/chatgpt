@@ -1,6 +1,7 @@
 import { CheckCircleIcon, ChevronRightIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, SignalSlashIcon, WalletIcon } from "@heroicons/react/24/outline";
 import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useAuthoritySyncHealth, useCloudSyncStatus } from "../app/useCloudProblems";
+import { useWorkloadProfile } from "../app/workloadProfile";
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { collectionCoverUrl } from "../collections/collectionCover";
 import { groupInbox, localDay } from "../collections/releaseCaption";
@@ -8,11 +9,12 @@ import { useReleaseData } from "../collections/releaseData";
 import { exchangeStore as defaultExchangeStore, useExchangeSnapshot, type ExchangeStore } from "../exchange/exchangeStore";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetView, CatalogStatus, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
+import type { AssetView, CatalogStatus, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
+import type { CharacterTarget } from "../characters/api";
 import { notesStore, type NotesStore } from "../notes/store";
 import { usePrivacy } from "../privacy/PrivacyContext";
-import { shadowReviewApi, type ShadowReviewApi } from "../characters/shadowReviewApi";
-import { agoLabel, clockLabel, cloudLine, dateBlock, daysAfter, localBoundaries, memoRows, receivedFrom, releaseRows, sendingSummary, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, watchedMangaCount, type MemoRow, type ReleaseKind, type ReleaseRow, type UpcomingRow } from "./homeModel";
+import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewItem } from "../characters/shadowReviewApi";
+import { agoLabel, characterReviewGroups, clockLabel, cloudLine, dateBlock, daysAfter, localBoundaries, memoRows, receivedFrom, releaseRows, sendingSummary, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, watchedMangaCount, type CharacterReviewCharacter, type CharacterReviewGroup, type MemoRow, type ReleaseKind, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import "./home.css";
 
 const ShadowReview = lazy(() => import("../characters/ShadowReview").then((module) => ({ default: module.ShadowReview })));
@@ -23,6 +25,12 @@ const KIND_LABEL: Record<ReleaseKind, string> = { manga: "만화", game: "게임
 type KindFilter = "all" | ReleaseKind;
 type Tone = "ok" | "busy" | "idle" | "off";
 type Connection = { key: string; label: string; value: string; time?: string; tone: Tone; view: AssetView };
+type Scope = { id: string; name: string };
+type Dialog = { kind: "character"; series?: Scope; target?: Scope } | { kind: "duplicates" };
+/** S36 candidates read for the 캐릭터 검토 split: pages of the native maximum, at most this many. */
+const CHARACTER_PAGE = 200;
+const CHARACTER_PAGES = 5;
+type CharacterQueue = { total: number; items: Pick<ShadowReviewItem, "targetId" | "targetName">[] };
 
 export type HomeViewProps = {
   collections: CollectionSummary[];
@@ -38,6 +46,9 @@ export type HomeViewProps = {
   exchange?: ExchangeStore;
   notes?: NotesStore;
   shadowApi?: Pick<ShadowReviewApi, "page">;
+  /** Registered characters (series of each S36 target) and classifications (series names). */
+  characters?: CharacterTarget[];
+  classifications?: ClassificationEntry[];
   now?: () => Date;
 };
 
@@ -48,7 +59,7 @@ export type HomeViewProps = {
  * counts again after imports); live parts follow the stores the app already keeps (exchange,
  * notes, cloud progress, server-sync health, the 신간 cache). No polling.
  */
-export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, exchange = defaultExchangeStore, notes, shadowApi, now = () => new Date() }: HomeViewProps) {
+export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, exchange = defaultExchangeStore, notes, shadowApi, characters = [], classifications = [], now = () => new Date() }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const { privacyMode } = usePrivacy();
@@ -91,19 +102,34 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   }, [gateway]);
 
   // 확인할 것 counts other screens own; read when Home opens and after their dialogs close.
-  const [dialog, setDialog] = useState<"character" | "duplicates" | null>(null);
+  const [dialog, setDialog] = useState<Dialog | null>(null);
   const [queueRead, setQueueRead] = useState(0);
-  const [characterCount, setCharacterCount] = useState(0);
+  const [characterQueue, setCharacterQueue] = useState<CharacterQueue | null>(null);
   const [duplicateCount, setDuplicateCount] = useState(0);
   const characterApi = shadowApi ?? (native() ? shadowReviewApi : null);
+  // Lightweight mode skips the S36 candidate read (it scans the whole shadow list); the row
+  // stays hidden until the mode ends, then the list is read once.
+  const { restricted } = useWorkloadProfile();
+  useEffect(() => {
+    if (!characterApi || restricted) { setCharacterQueue(null); return; }
+    let live = true;
+    void (async () => {
+      const items: CharacterQueue["items"] = [];
+      let total = 0;
+      for (let offset: number | null = 0, pages = 0; offset !== null && pages < CHARACTER_PAGES; pages += 1) {
+        const page = await characterApi.page({ offset, limit: CHARACTER_PAGE });
+        if (!live || !page) return;
+        if (page.summary) total = page.summary.automatic.pending + page.summary.recommended.pending;
+        items.push(...(page.items ?? []));
+        offset = page.nextOffset;
+      }
+      if (live) setCharacterQueue({ total: Math.max(total, items.length), items });
+    })().catch(() => undefined);
+    return () => { live = false; };
+  }, [characterApi, restricted, queueRead]);
   useEffect(() => {
     let live = true;
     onQueuesRequested?.();
-    if (characterApi) {
-      void characterApi.page({ offset: 0, limit: 1 }).then((page) => {
-        if (live && page?.summary) setCharacterCount(page.summary.automatic.pending + page.summary.recommended.pending);
-      }, () => undefined);
-    }
     void Promise.resolve().then(() => gateway.listCatalogReview()).then((page) => {
       if (live) setDuplicateCount((page?.rows ?? []).filter((row) => row.state === "pending" && row.actionable).length);
     }, () => undefined);
@@ -125,12 +151,19 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   const releaseView: AssetView = { kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" };
   const calendarView = (type: "game" | "movie" = "game"): AssetView => ({ kind: "collections", typeFilter: type, showcase: false, releaseCalendar: true });
 
-  /* 확인할 것 */
+  /* 확인할 것; 캐릭터 검토 split by series › character (one character collapses into the cell) */
+  const seriesNames = useMemo(() => new Map(classifications.map((entry) => [entry.id, entry.name])), [classifications]);
+  const characterGroups = useMemo(() => characterQueue ? characterReviewGroups(characterQueue.items, characters, (id) => seriesNames.get(id)) : [],
+    [characterQueue, characters, seriesNames]);
+  const characterEntries = characterGroups.reduce((sum, group) => sum + group.characters.length, 0);
+  const single = characterEntries === 1 && characterGroups[0].total === characterQueue?.total ? { group: characterGroups[0], character: characterGroups[0].characters[0] } : null;
+  const unlisted = characterQueue ? characterQueue.total - characterQueue.items.length : 0;
   const todos = [
     { key: "pending", label: "처리 대기", unit: "건", note: staleAt ? `${staleAt} 기준 · 태블릿 수집 요청` : "태블릿 수집 요청 · 아직 안 받음", count: overview?.server.capturesPending ?? 0, open: go({ kind: "settings", section: "cloud" }) },
-    { key: "character", label: "캐릭터 검토", unit: "건", note: "자동 분류 후보 확인", count: characterCount, open: () => setDialog("character") },
+    { key: "character", label: "캐릭터 검토", unit: "건", note: single ? `${single.group.seriesName} › ${single.character.name}` : "자동 분류 후보 확인", count: characterQueue?.total ?? 0,
+      open: () => setDialog(single ? { kind: "character", ...reviewScope(single.group, single.character) } : { kind: "character" }) },
     { key: "similar", label: "유사 이미지", unit: "쌍", note: "같은 그림일 수 있음", count: reviewCount, open: go({ kind: "similarity_review" }) },
-    { key: "duplicates", label: "중복 판본", unit: "건", note: "카탈로그 · 같은 작품", count: duplicateCount, open: () => setDialog("duplicates") },
+    { key: "duplicates", label: "중복 판본", unit: "건", note: "카탈로그 · 같은 작품", count: duplicateCount, open: () => setDialog({ kind: "duplicates" }) },
     { key: "unsorted", label: "미분류", unit: "장", note: "분류가 없는 새 자산", count: unsortedCount ?? 0, open: go({ kind: "unsorted" }) },
   ].filter((todo) => todo.count > 0);
 
@@ -215,6 +248,20 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
               <span className="home-row__n numeric">{todo.count.toLocaleString()}<small>{todo.unit}</small></span>
               <span className="home-row__t">{todo.label}<small>{todo.note}</small></span><Chevron />
             </button>)}
+          </div>}
+          {!single && characterGroups.length > 0 && <div className="home-split" role="group" aria-label="캐릭터 검토 나누어 보기">
+            {characterGroups.map((group) => <span key={group.seriesId ?? ""} className="home-split__series">
+              {group.seriesId
+                ? <button type="button" className="home-split__name" aria-label={`${group.seriesName} 캐릭터 검토 ${group.total}건`}
+                  onClick={() => setDialog({ kind: "character", ...reviewScope(group) })}>{group.seriesName}</button>
+                : <span className="home-split__name">{group.seriesName}</span>}
+              <span className="home-split__sep" aria-hidden="true">›</span>
+              {group.characters.map((character) => <button key={character.targetId} type="button" className="home-split__character"
+                aria-label={`${group.seriesName} › ${character.name} 캐릭터 검토 ${character.count}건`}
+                onClick={() => setDialog({ kind: "character", ...reviewScope(group, character) })}>
+                {character.name} <span className="numeric">{character.count.toLocaleString()}</span></button>)}
+            </span>)}
+            {unlisted > 0 && <span className="home-split__more">외 <span className="numeric">{unlisted.toLocaleString()}</span>건</span>}
           </div>}
         </Section>
 
@@ -303,11 +350,20 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
       </div>
     </div>
     {dialog && <Suspense fallback={null}>
-      {dialog === "character"
-        ? <ShadowReview onClose={() => { setDialog(null); setQueueRead((value) => value + 1); }} onChanged={() => undefined} privacyMode={privacyMode} />
+      {dialog.kind === "character"
+        ? <ShadowReview onClose={() => { setDialog(null); setQueueRead((value) => value + 1); }} onChanged={() => undefined} privacyMode={privacyMode}
+          series={dialog.series} target={dialog.target} />
         : <CatalogReviewDialog onClose={() => { setDialog(null); setQueueRead((value) => value + 1); }} onChange={() => undefined} />}
     </Suspense>}
   </div>;
+}
+
+/** The review scope for one series (and optionally one character in it). */
+function reviewScope(group: CharacterReviewGroup, character?: CharacterReviewCharacter): { series?: Scope; target?: Scope } {
+  return {
+    ...(group.seriesId ? { series: { id: group.seriesId, name: group.seriesName } } : {}),
+    ...(character ? { target: { id: character.targetId, name: character.name } } : {}),
+  };
 }
 
 const noopSubscribe = () => () => undefined;

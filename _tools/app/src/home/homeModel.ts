@@ -183,3 +183,35 @@ export function agoLabel(at: string, now: Date) {
   const date = new Date(at);
   return `${date.getMonth() + 1}.${date.getDate()} ${clockLabel(date)}`;
 }
+
+export type CharacterReviewCharacter = { targetId: string; name: string; count: number };
+export type CharacterReviewGroup = { seriesId: string | null; seriesName: string; total: number; characters: CharacterReviewCharacter[] };
+
+/**
+ * 캐릭터 검토 split by series and character: S36 candidates counted per target, grouped under
+ * the target's series (busiest first). A target without a known series lands in "기타".
+ */
+export function characterReviewGroups(
+  items: readonly { targetId: string; targetName: string }[],
+  targets: readonly { id: string; seriesClassificationId: string | null; displayName: string }[],
+  seriesName: (id: string) => string | undefined,
+): CharacterReviewGroup[] {
+  const targetSeries = new Map(targets.map((target) => [target.id, target.seriesClassificationId]));
+  const groups = new Map<string, CharacterReviewGroup>();
+  const counts = new Map<string, CharacterReviewCharacter>();
+  for (const item of items) {
+    const seriesId = targetSeries.get(item.targetId) ?? null;
+    const key = seriesId ?? "";
+    let group = groups.get(key);
+    if (!group) groups.set(key, group = { seriesId, seriesName: (seriesId && seriesName(seriesId)) || "기타", total: 0, characters: [] });
+    group.total += 1;
+    let character = counts.get(item.targetId);
+    if (!character) { counts.set(item.targetId, character = { targetId: item.targetId, name: item.targetName, count: 0 }); group.characters.push(character); }
+    character.count += 1;
+  }
+  const byCount = <T extends { name?: string; seriesName?: string }>(count: (value: T) => number) => (a: T, b: T) =>
+    count(b) - count(a) || (a.name ?? a.seriesName ?? "").localeCompare(b.name ?? b.seriesName ?? "", "ko");
+  const result = [...groups.values()];
+  for (const group of result) group.characters.sort(byCount<CharacterReviewCharacter>((value) => value.count));
+  return result.sort(byCount<CharacterReviewGroup>((value) => value.total));
+}

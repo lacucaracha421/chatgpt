@@ -165,10 +165,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [collectionLibraryState, setCollectionLibraryState] = useState<CollectionLibraryStateByType>(createDefaultCollectionLibraryState);
   const collectionNavigationMemory = useRef<CollectionNavigationMemory>(new Map());
   const assetNavigationMemory = useRef<AssetNavigationMemory>(new Map());
-  const [view, setView] = useState<AssetView>({
-    kind: "classification",
-    classificationId: null,
-  });
+  // The app opens on Home (HOME-DASH-001); the rail's 에셋 opens the library.
+  const [view, setView] = useState<AssetView>({ kind: "home" });
   const viewHistoryRef = useRef<AssetView[]>([]);
   useCollectionOpen(gateway, libraryRoot, view.kind === "collection" ? view.collectionId : null);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
@@ -834,7 +832,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     : <DeferredViewFallback />
                 ) : view.kind === "home" ? (
                   <HomeView collections={collections} reviewCount={reviewCount} unsortedCount={unsortedCount} trashCount={trashCount}
-                    refreshVersion={assetRefresh} onNavigate={navigateView} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)} />
+                    refreshVersion={assetRefresh} onNavigate={navigateView} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
+                    characters={characterHub.targets} classifications={entries} />
                 ) : view.kind === "notes" ? <NotesView noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}

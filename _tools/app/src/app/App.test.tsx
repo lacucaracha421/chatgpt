@@ -205,6 +205,13 @@ async function openStatusPanel(user: ReturnType<typeof userEvent.setup>, gateway
   await act(async () => { await Promise.resolve(); });
 }
 
+/** The app opens on Home; tests of the library screens enter 에셋 from the rail first. */
+async function openAssets() {
+  const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+  await userEvent.click(await within(rail).findByRole("button", { name: "에셋" }));
+  await waitFor(() => expect(within(rail).getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page"));
+}
+
 async function openManagementItem(name: string) {
   await userEvent.click(await screen.findByRole("button", { name: /^더보기/ }));
   const panel = await screen.findByRole("dialog", { name: "더보기" });
@@ -293,11 +300,15 @@ describe("App", () => {
       .mockResolvedValue([{ ...games, id: "new-root", name: "New library" }]);
     vi.mocked(open).mockResolvedValue("D:\\Next");
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+    await openAssets();
 
     expect(await screen.findByRole("treeitem", { name: "Old library" })).toBeVisible();
     await openSettings();
     await userEvent.click(await screen.findByRole("button", { name: "다른 저장소 열기" }));
 
+    // The new library's workspace starts over on Home.
+    expect(await screen.findByRole("region", { name: "확인할 것" }, { timeout: 5000 })).toBeInTheDocument();
+    await openAssets();
     expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
     expect(screen.queryByRole("treeitem", { name: "Old library" })).not.toBeInTheDocument();
   });
@@ -309,6 +320,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.runDueReleaseWatch).mockReturnValue(new Promise((resolve) => { finishWatch = resolve; }));
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeVisible();
     expect(await screen.findByRole("button", { name: "전체" })).toBeVisible();
@@ -331,6 +343,7 @@ describe("App", () => {
       .mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null });
     vi.mocked(open).mockResolvedValue("D:\\Next");
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+    await openAssets();
 
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
     await openSettings();
@@ -356,6 +369,23 @@ describe("App", () => {
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/(?:Kakao 신간|MangaDex 새 권) 정보가 있는 작품/)).not.toBeInTheDocument();
+  });
+
+  it("starts on Home and opens the library from 에셋", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+    expect(await screen.findByRole("region", { name: "확인할 것" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("toolbar", { name: "자산 도구" })).not.toBeInTheDocument();
+
+    await openAssets();
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: null, unclassifiedOnly: false })));
+    expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
+    await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
+    expect(await screen.findByRole("region", { name: "확인할 것" })).toBeInTheDocument();
   });
 
   it("opens Home from the rail and leaves it for the screen a row owns", async () => {
@@ -419,6 +449,7 @@ describe("App", () => {
     ]);
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     expect(await screen.findByRole("treeitem", { name: "표지" })).toBeVisible();
     expect(libraryGateway.listClassifications).toHaveBeenCalledOnce();
@@ -485,6 +516,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
     await screen.findByRole("main", { name: "라이브러리 작업 공간" });
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
     const classificationCalls = vi.mocked(libraryGateway.listClassifications).mock.calls.length;
@@ -531,6 +563,7 @@ describe("App", () => {
     const libraryGateway = gateway();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+    await openAssets();
 
     expect(await screen.findByRole("main", { name: "라이브러리 작업 공간" })).toBeInTheDocument();
     const sidebar = screen.getByRole("complementary", { name: "분류" });
@@ -558,6 +591,7 @@ describe("App", () => {
     const libraryGateway = gateway();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({
       classificationId: null,
@@ -637,6 +671,7 @@ describe("App", () => {
     const libraryGateway = gateway();
     const user = userEvent.setup();
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
     const all = await screen.findByRole("button", { name: "전체" });
     expect(all).toHaveAttribute("aria-current", "page");
 
@@ -701,6 +736,7 @@ describe("App", () => {
     };
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} subscribeExtensionIngest={subscribeExtensionIngest} />);
+    await openAssets();
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
     const assetCallsBefore = vi.mocked(libraryGateway.listAssets).mock.calls.length;
     const prepareCallsBefore = vi.mocked(libraryGateway.preparePendingVideos).mock.calls.length;
@@ -718,6 +754,7 @@ describe("App", () => {
       { id: "album-cover", name: "표지", parentId: null, iconKey: null, colorKey: null },
     ]);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
     await screen.findByRole("treeitem", { name: "표지" });
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
     const albumCallsBefore = vi.mocked(libraryGateway.listAlbums).mock.calls.length;
@@ -750,6 +787,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+    await openAssets();
 
     await user.click(await screen.findByRole("button", { name: "보기 설정" }));
     const metadata = await screen.findByLabelText("정보 숨기기");
@@ -848,6 +886,7 @@ describe("App", () => {
       const user = userEvent.setup();
 
       render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+      await openAssets();
 
       await user.click(await screen.findByRole("treeitem", { name: "게임" }));
       await waitFor(() => expect(drop).toBeDefined());
@@ -899,6 +938,7 @@ describe("App", () => {
         .mockImplementationOnce(async () => { visible.push(first); return { status: "added", asset: first }; })
         .mockReturnValueOnce(pending);
       const { container } = render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+      await openAssets();
       await userEvent.click(await screen.findByRole("treeitem", { name: "게임" }));
       await waitFor(() => expect(send).toBeDefined());
       act(() => send?.({ type: "drop", paths: ["/incoming/first.png", "/incoming/second.png"], position: { x: 0, y: 0 } }));
@@ -944,6 +984,7 @@ describe("App", () => {
         subscribeDrops={subscribeDrops}
       />,
     );
+    await openAssets();
 
     await user.click(await screen.findByRole("button", { name: "게임 펼치기" }));
     await user.click(await screen.findByRole("button", { name: "블루 아카이브 펼치기" }));
@@ -1038,6 +1079,7 @@ describe("App", () => {
         subscribeDrops={subscribeDrops}
       />,
     );
+    await openAssets();
 
     await user.click(await screen.findByRole("treeitem", { name: "게임" }));
     await waitFor(() => expect(drop).toBeDefined());
@@ -1093,6 +1135,7 @@ describe("App", () => {
       classificationChanged: true,
     });
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} />);
+    await openAssets();
 
     await waitFor(() => expect(drop).toBeDefined());
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
@@ -1117,6 +1160,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     vi.mocked(libraryGateway.setAssetClassification).mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     const tile = await screen.findByRole("option", { name: "arona.png" });
     const target = await screen.findByRole("treeitem", { name: games.name });
@@ -1162,6 +1206,7 @@ describe("App", () => {
       vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
       vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
       render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+      await openAssets();
       const tile = await screen.findByRole("option", { name: "arona.png" });
       await userEvent.click(await screen.findByRole("button", { name: "게임 펼치기" }));
       const target = await screen.findByRole("treeitem", { name: "마커스" });
@@ -1197,6 +1242,7 @@ describe("App", () => {
     ]);
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     const tile = await screen.findByRole("option", { name: "arona.png" });
     const target = await screen.findByRole("treeitem", { name: "표지" });
@@ -1233,6 +1279,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive, arona, images]);
     vi.mocked(libraryGateway.moveClassification).mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     const rootRow = await screen.findByRole("treeitem", { name: games.name });
     const workRow = await screen.findByRole("treeitem", { name: blueArchive.name });
@@ -1273,6 +1320,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, images]);
     vi.mocked(libraryGateway.moveClassification).mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     const gamesRow = await screen.findByRole("treeitem", { name: games.name });
     const imagesRow = await screen.findByRole("treeitem", { name: images.name });
@@ -1295,6 +1343,7 @@ describe("App", () => {
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, images]);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
     const target = await screen.findByRole("treeitem", { name: games.name });
     const source = screen.getByRole("treeitem", { name: images.name });
     vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top: 100, bottom: 140, height: 40 } as DOMRect);
@@ -1313,6 +1362,7 @@ describe("App", () => {
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, images]);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
     const target = await screen.findByRole("treeitem", { name: games.name });
     const source = screen.getByRole("treeitem", { name: images.name });
     const scroller = target.closest<HTMLElement>(".workspace-index__scroll")!;
@@ -1346,6 +1396,7 @@ describe("App", () => {
     const libraryGateway = gateway();
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games, blueArchive, arona, images, duplicate]);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await openAssets();
 
     const tagRow = await screen.findByRole("treeitem", { name: arona.name });
     const imagesRow = await screen.findByRole("treeitem", { name: images.name });
@@ -1374,6 +1425,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     const startAssetDrag = vi.fn().mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} startAssetDrag={startAssetDrag} />);
+    await openAssets();
     const tile = await screen.findByRole("option", { name: "arona.png" });
     Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
 
@@ -1398,6 +1450,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
     const startAssetDrag = vi.fn().mockResolvedValue(undefined);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} />);
+    await openAssets();
     const tile = await screen.findByRole("option", { name: "arona.png" });
     const folder = await screen.findByRole("treeitem", { name: "게임" });
     Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
@@ -1422,6 +1475,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     const startAssetDrag = vi.fn().mockRejectedValue(new Error("탐색기 복사 실패"));
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} startAssetDrag={startAssetDrag} />);
+    await openAssets();
     const tile = await screen.findByRole("option", { name: "arona.png" });
     Object.defineProperties(tile, { setPointerCapture: { configurable: true, value: vi.fn() }, releasePointerCapture: { configurable: true, value: vi.fn() } });
 
@@ -1652,6 +1706,7 @@ describe("Chrome 03b app integration", () => {
     const user = userEvent.setup(); const libraryGateway = gateway();
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+    await openAssets();
     const tile = await screen.findByRole("option", { name: "arona.png" });
     await user.click(tile);
     const gallery = document.querySelector(".asset-gallery");
@@ -1670,6 +1725,7 @@ describe("Chrome 03b app integration", () => {
     vi.mocked(libraryGateway.ingestMedia).mockResolvedValue({ status: "added", asset });
     vi.mocked(open).mockResolvedValue(["C:\\images\\picked.png"]);
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
+    await openAssets();
     await user.click(await screen.findByRole("treeitem", { name: "게임" }));
     await user.click(screen.getByRole("button", { name: "파일 가져오기" }));
     await waitFor(() => expect(libraryGateway.ingestMedia).toHaveBeenCalledWith(expect.objectContaining({ sourcePath: "C:\\images\\picked.png", classificationId: games.id, importSource: "direct" })));
