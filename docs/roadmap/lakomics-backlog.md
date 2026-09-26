@@ -241,7 +241,7 @@ Notable medium follow-ups: restore guard lacks an Asset authority probe (two rev
 
 ## OSS-SCAN-20260926 — Open-source projects worth using (idea)
 
-Status: `IDEA` — surveyed 2026-09-26 at the user's request (read-only web research; stars and licenses read from each GitHub/Hugging Face page that day, activity inferred). Nothing installed or adopted. GPL/AGPL projects are reimplement-only: borrow ideas, never copy code.
+Status: `IN PROGRESS` — trials 2026-09-26: sqlite-vec later (exact but ~12× slower than NumPy at our size), Chinese Whispers over S36 is the best character-discovery method ([trial report](../research/oss-trial-sqlitevec-ccip-20260926.md)); vPDQ trial running. Surveyed 2026-09-26 at the user's request (read-only web research; stars and licenses read from each GitHub/Hugging Face page that day, activity inferred). Nothing installed or adopted. GPL/AGPL projects are reimplement-only: borrow ideas, never copy code.
 
 Suggested order: sqlite-vec → imgutils-style clustering for `CHAR-AUTO-003` → vPDQ for `SIMILARITY-003` → evaluate the PixAI tagger.
 
