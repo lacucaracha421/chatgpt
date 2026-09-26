@@ -158,7 +158,7 @@ Mobile app:
 
 ## USER-REQ-20260926B — User requests, 2026-09-26 (second batch)
 
-Status: `TODO` — requested by the user 2026-09-26; details beyond the wording below are not clarified yet. Follow `MOBILE-DESIGN-001`'s process for visual changes (browser mockups at 800×1280 before the APK).
+Status: `PARTIAL` — the four mobile UI items (release caption, type tabs, connect row, sticky notes) shipped in 0.8.34 (`a3e4846`) and were accepted on the tablet by the user 2026-09-26; PC Notes board and release captions landed in `a83209c` (native PC check pending). Remaining: file exchange redesign, tablet character creation, tablet Collection creation. Follow `MOBILE-DESIGN-001`'s process for visual changes (browser mockups at 800×1280 before the APK).
 
 Mobile app:
 - Collections: show a work's new-release notification (신간 알림) on its tile in the grid, not only on the 신간 screen.
