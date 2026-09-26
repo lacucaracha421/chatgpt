@@ -831,6 +831,8 @@ Keep clustering/re-identification research deferred while explicit-reference cla
 
 Status: `PARTIAL` — implementation exists; verification is deferred because representative duplicate/variant videos have not naturally appeared yet.
 
+2026-09-26 vPDQ trial ([report](../research/oss-trial-vpdq-20260926.md)): adds trim/subclip detection the fixed 12-slot check cannot do (0 false positives; 8–14 real candidate pairs vs 7). User decision: **later**, as an opt-in extension of the current video similarity, not a replacement.
+
 Do not redesign the architecture without evidence. When suitable samples exist, validate re-encode/resolution positives plus trim/crop/watermark hard cases in the existing Similarity Review surface. Audio remains optional.
 
 Reference: [video similarity execution record](../research/video-similarity-execution-plan-20260908.md).
