@@ -1,13 +1,13 @@
-import { ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "@heroicons/react/24/outline";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CreateCollection, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
-import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { Button } from "../shared/ui/Button";
+import { Select } from "../shared/ui/Select";
 import { Slider } from "../shared/ui/Slider";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
@@ -62,10 +62,9 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
 }
 
 /**
- * The Collections browser, laid out like the tablet: type tabs centred in the header with the
- * 신간 entry beside them, then (in the library) a folding Showcase row, the 전체 heading with the
- * sort and 내 별점 chips, and the grid. The index keeps the Library/Showcase mode and the
- * new-collection menu; search stays the index magnifier.
+ * The Collections browser. The workspace index holds the type list, the 신간 row and the sort /
+ * 내 별점 controls; the header holds only the title. The content shows a folding Showcase row
+ * (전체 보기 drills into the paged exhibition) above the 전체 heading and the grid.
  */
 export function CollectionBrowser({
   releaseProvider,
@@ -135,8 +134,8 @@ export function CollectionBrowser({
   }
 
   function setTypeFilter(next: CollectionType) {
-    if (next === typeFilter && !releaseProvider) return;
-    onViewChange({ kind: "collections", typeFilter: next, showcase });
+    if (next === typeFilter && !releaseProvider && !showcase) return;
+    onViewChange({ kind: "collections", typeFilter: next, showcase: false });
   }
 
   function setShowcase(next: boolean) {
@@ -226,15 +225,28 @@ export function CollectionBrowser({
           </>
         );
 
-  // The tablet's type switch: text tabs centred in the header with an underline.
-  const typeTabs = <div className="collection-type-tabs" role="tablist" aria-label="컬렉션 유형">
-    {TYPES.map(value => <button key={value} type="button" role="tab" aria-selected={!releaseProvider && value === typeFilter} onClick={() => setTypeFilter(value)}>
-      <span data-label={TYPE_LABEL[value]}>{TYPE_LABEL[value]}</span>
-    </button>)}
-  </div>;
-  const releaseEntry = tracking && !releaseProvider ? <button type="button" className="collection-release-entry"
-    aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
-    onClick={() => openInbox("kakao")}>신간{unreadTotal > 0 && <span className="collection-release-entry__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button> : null;
+  const libraryView = !releaseProvider && !showcase;
+  const sortValue = `${libraryState.sort}:${libraryState.direction}`;
+  // The index: type rows and the 신간 row as selected-slab links, then the library's sort / 내 별점.
+  const indexNavigation = <>
+    <span className="workspace-section-label">작품 유형</span>
+    <div className="collection-index__types" role="group" aria-label="컬렉션 유형">
+      {TYPES.map(value => <button key={value} type="button" className="workspace-index-link" aria-current={!releaseProvider && value === typeFilter ? "page" : undefined} onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}</button>)}
+      {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
+        aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
+        onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
+    </div>
+    {libraryView && <div className="chrome-index-controls chrome-settings-controls collection-index__controls">
+      <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
+        <Select label="정렬" value={sortValue} onChange={(event) => {
+          const [sort, direction] = event.target.value.split(":") as [CollectionLibrarySort, "asc" | "desc"];
+          patchLibraryState({ sort, direction });
+        }}>{SORT_OPTIONS.map(([sort, direction, label]) => <option key={`${sort}:${direction}`} value={`${sort}:${direction}`}>{label}</option>)}</Select>
+        <RatingFilter rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
+        {libraryState.rating !== "all" && <Button size="sm" variant="ghost" className="collection-index__reset" onClick={() => patchLibraryState({ rating: "all" })}>초기화</Button>}
+      </fieldset>
+    </div>}
+  </>;
 
   const showcaseOpen = libraryState.showcaseOpen ?? false;
   const toggleShowcaseRow = () => patchLibraryState({ showcaseOpen: !showcaseOpen });
@@ -249,15 +261,8 @@ export function CollectionBrowser({
       {showcaseItems.map(collection => <div key={collection.id} className={`collection-browser__shelf-item collection-browser__shelf-item--${collection.type}`}>{renderCollection(collection, { meta: false })}</div>)}
     </div>}
   </section> : null;
-  const sortChoice = SORT_OPTIONS.find(([sort, direction]) => sort === libraryState.sort && direction === libraryState.direction) ?? SORT_OPTIONS[0]!;
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
     <h3>{filtered ? "검색 결과" : "전체"}<span className="collection-browser__total" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span></h3>
-    <div className="collection-browser__chips" role="group" aria-label="정렬과 필터">
-      <Menu label={`정렬: ${sortChoice[2]}`} triggerClassName="collection-chip" trigger={<><ArrowsUpDownIcon aria-hidden="true" />{sortChoice[2]}<ChevronDownIcon aria-hidden="true" /></>}
-        items={SORT_OPTIONS.map(([sort, direction, label]) => ({ id: `${sort}:${direction}`, label, group: "sort", selected: sort === libraryState.sort && direction === libraryState.direction, onSelect: () => patchLibraryState({ sort, direction }) }))} />
-      <RatingChip rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
-      {libraryState.rating !== "all" && <button type="button" className="collection-chip" onClick={() => patchLibraryState({ rating: "all" })}>초기화</button>}
-    </div>
   </div>;
   const leading = <>{showcaseRow}{sectionRow}</>;
   const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
@@ -269,15 +274,11 @@ export function CollectionBrowser({
         title={releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
         titleContent={releaseProvider ? "신간" : showcase ? "쇼케이스" : "컬렉션"}
         ariaLabel="컬렉션 도구"
-        leadingAction={releaseProvider ? <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={closeInbox}><ChevronLeftIcon aria-hidden="true" /></Button> : undefined}
-        titleAccessory={releaseProvider ? undefined : typeTabs}
+        leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={releaseProvider ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
         chrome={{
           actions: indexActions,
-          navigation: <>
-            <ModeSegment showcase={showcase} onChange={setShowcase} />
-          </>,
+          navigation: indexNavigation,
           summary: `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
-          status: releaseEntry,
           search: showcase ? undefined : { scope: releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
         }}
       />
@@ -420,41 +421,5 @@ function RatingFilter({ rating, onChange }: { rating: CollectionLibraryState["ra
       <output className="collection-rating-filter__value">{shown}</output>
       <Button size="sm" variant="secondary" aria-pressed={rating === "unrated"} onClick={() => onChange(rating === "unrated" ? "all" : "unrated")}>미평가</Button>
     </div>
-  </div>;
-}
-
-/**
- * The 내 별점 chip: shows the active filter and opens the slider (전체, 0.5 … 5.0) with the
- * 미평가 toggle in a small popover under the chip. Esc or an outside click closes it.
- */
-function RatingChip({ rating, onChange }: { rating: CollectionLibraryState["rating"]; onChange: (rating: CollectionLibraryState["rating"]) => void }) {
-  const [open, setOpen] = useState(false);
-  const host = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const close = () => { setOpen(false); trigger.current?.focus(); };
-  useBackHandler(close, 90, open);
-  useEffect(() => {
-    if (!open) return;
-    const outside = (event: PointerEvent) => { if (!host.current?.contains(event.target as Node)) setOpen(false); };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
-  }, [open]);
-  const label = rating === "all" ? "내 별점" : rating === "unrated" ? "미평가" : `★ ${rating.toFixed(1)}`;
-  return <div ref={host} className="collection-chip-popover">
-    <button ref={trigger} type="button" className={`collection-chip${rating !== "all" ? " collection-chip--selected" : ""}`} aria-expanded={open} aria-haspopup="dialog"
-      aria-label={rating === "all" ? "내 별점 필터" : `내 별점 필터: ${ratingLabel(rating)}`} onClick={() => setOpen(value => !value)}>
-      {label}<ChevronDownIcon aria-hidden="true" />
-    </button>
-    {open && <div className="collection-chip-popover__panel" role="dialog" aria-label="내 별점" onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>
-      <RatingFilter rating={rating} onChange={onChange} />
-      <p className="collection-chip-popover__hint">고른 별점과 같은 작품만 보여 줍니다.</p>
-    </div>}
-  </div>;
-}
-
-function ModeSegment({ showcase, onChange }: { showcase: boolean; onChange: (next: boolean) => void }) {
-  return <div className="collection-browser__segment collection-browser__segment--context" role="group" aria-label="보기">
-    <button type="button" className="collection-browser__segment-button" aria-pressed={!showcase} onClick={() => onChange(false)}>라이브러리</button>
-    <button type="button" className="collection-browser__segment-button" aria-pressed={showcase} onClick={() => onChange(true)}>쇼케이스</button>
   </div>;
 }
