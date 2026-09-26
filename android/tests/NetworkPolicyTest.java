@@ -174,6 +174,11 @@ public final class NetworkPolicyTest {
  for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/duplicates/decisions",method));
  for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/duplicates/candidates",method));
  for(String path:new String[]{"/v1/mobile-catalog/duplicates/","/v1/mobile-catalog/duplicates/changes","/v1/mobile-catalog/duplicatesx","/v1/mobile-catalog/duplicates/decisions/","/v1/mobile-catalog/duplicates%2f..","/v1/mobile-catalog/duplicates/../duplicates/candidates"})for(String method:new String[]{"GET","POST","PUT"})reject(()->NetworkPolicy.api(path,method));
+ // HOME-DASH-001: the Home library summary is one exact GET.
+ pass(()->NetworkPolicy.api("/v1/library/summary","GET"));
+ pass(()->NetworkPolicy.api("/v1/library/summary?tzOffsetMinutes=540","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/summary",method));
+ for(String path:new String[]{"/v1/library/summary/","/v1/library/summaryx","/v1/library/summary/extra","/v1/library/summary%2f.."})reject(()->NetworkPolicy.api(path,"GET"));
  // Mobile Library Trash: the trash list is a GET, the lifecycle command route a PUT, and
  // trash-scoped tickets reuse the existing ticket POSTs with a query that widens nothing.
  pass(()->NetworkPolicy.api("/v1/library/trash","GET"));

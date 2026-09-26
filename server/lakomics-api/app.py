@@ -32,6 +32,7 @@ import authority
 import change_signal
 import classification_authority
 import classification_snapshot
+import conditional
 import head_cache
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -2152,6 +2153,82 @@ def list_mobile_classification_assets(
     # of bracketing the fetch with two `/v1/library/list-generation` reads.
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more,
             "filterVersion": asset_filters.FILTER_VERSION, "listGeneration": generation}
+
+
+def _summary_now() -> datetime:
+    """The clock the library summary reads; a seam so tests can pin "today"."""
+    return datetime.now(timezone.utc)
+
+
+def _summary_bound(instant: datetime) -> str:
+    # Bare `YYYY-MM-DDTHH:MM:SS` in UTC. Stored sort timestamps are UTC ISO text in
+    # several spellings (`...Z`, `....000Z`, `...+00:00`); every one of them at or after
+    # the bound shares or exceeds this prefix, so a plain text comparison — the same one
+    # the list's keyset cursor uses — includes an Asset collected exactly at midnight.
+    return instant.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+@app.get("/v1/library/summary")
+def mobile_library_summary(
+    authorization: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None),
+    # Minutes EAST of UTC (KST = 540). This is the negation of JavaScript's
+    # `Date.getTimezoneOffset()`. The day and the Monday-start week are cut at the
+    # client's local midnight in this fixed offset.
+    tz_offset_minutes: int = Query(default=0, alias="tzOffsetMinutes", ge=-840, le=840),
+):
+    """Counts for the tablet Home's library card, over the ordinary library's visibility.
+
+    Every count reads `visible_assets` with `committed = 1`, exactly the rows
+    `/v1/library/assets` can list, and dates by that list's sort key
+    `COALESCE(collected_at, created_at)`. `unclassified` is a visible Asset with no
+    Classification: after the classification authority is active, no assignment row with a
+    non-null Classification; before it, no legacy `asset_classifications` row.
+    """
+    # Client role (shared token, a client token or the publisher), like the media tickets.
+    client_guard(get_db, API_TOKEN)(authorization)
+    offset = timedelta(minutes=tz_offset_minutes)
+    local_now = _summary_now().astimezone(timezone(offset))
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = _summary_bound(local_midnight)
+    week_start = _summary_bound(local_midnight - timedelta(days=local_midnight.weekday()))
+    with get_db() as db:
+        db.execute("BEGIN")
+        generation = list_generation(db)
+        active = authority.active_domain(db, classification_authority.DOMAIN)
+        if active is not None:
+            classified_sql = """EXISTS (SELECT 1 FROM classification_authority_assignments AS assignment
+                WHERE assignment.library_id = ? AND assignment.asset_id = asset.id
+                  AND assignment.classification_id IS NOT NULL)"""
+            classified_params: list[object] = [active["libraryId"]]
+        else:
+            classified_sql = """EXISTS (SELECT 1 FROM asset_classifications AS relationship
+                WHERE relationship.asset_id = asset.id)"""
+            classified_params = []
+        # One pass over the visible library: the dated counts read the indexed sort key and
+        # the classification probe is a primary-key seek per Asset.
+        row = db.execute(
+            f"""
+            SELECT COUNT(*) AS total,
+                   COALESCE(SUM(COALESCE(asset.collected_at, asset.created_at) >= ?), 0) AS added_today,
+                   COALESCE(SUM(COALESCE(asset.collected_at, asset.created_at) >= ?), 0) AS added_week,
+                   COALESCE(SUM(NOT {classified_sql}), 0) AS unclassified
+            FROM visible_assets AS asset
+            WHERE asset.committed = 1
+            """,
+            [today_start, week_start, *classified_params],
+        ).fetchone()
+    payload = {
+        "total": row["total"],
+        "addedToday": row["added_today"],
+        "addedThisWeek": row["added_week"],
+        "unclassified": row["unclassified"],
+        "todayStart": today_start + "Z",
+        "weekStart": week_start + "Z",
+        "tzOffsetMinutes": tz_offset_minutes,
+        "listGeneration": generation,
+    }
+    return conditional.json_response(payload, if_none_match)
 
 
 def _revisit_creator_exclusion_sql(alias: str = "asset") -> str:
