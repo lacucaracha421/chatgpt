@@ -14,6 +14,11 @@ import { s36PublicationApi } from "./S36Publication";
 import { FaultGameProvider } from "../games/FaultGame";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 
+vi.mock("./suggestions/client", async importOriginal => {
+  const actual = await importOriginal<typeof import("./suggestions/client")>();
+  return { ...actual, suggestionApi: { ...actual.suggestionApi, list: async () => [], ignored: async () => [] } };
+});
+
 vi.mock("@tauri-apps/api/core", { spy: true });
 
 async function openReferencePicker(user: ReturnType<typeof userEvent.setup>) {

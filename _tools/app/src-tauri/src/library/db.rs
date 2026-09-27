@@ -4,13 +4,14 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 105;
+pub(crate) const SCHEMA_VERSION: i64 = 106;
 
-/// Test helper: undoes migrations 0103 through 0105 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0106 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE character_suggestion_ignored_tags;
     DROP VIEW character_tagger_pending;
     ALTER TABLE character_learned_references DROP COLUMN provenance;
     DROP TRIGGER character_tagger_manual_decision;
@@ -624,6 +625,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 104 {
             transaction.execute_batch(include_str!("../../migrations/0105_tagger_review.sql"))?;
         }
+        if version <= 105 {
+            transaction.execute_batch(include_str!("../../migrations/0106_character_suggestions.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -726,13 +730,29 @@ mod tests {
     }
 
     #[test]
+    fn character_suggestions_migration_from_105_preserves_tagger_data() {
+        let mut c = Connection::open_in_memory().unwrap();
+        historical_schema(&mut c, 105);
+        c.execute("INSERT INTO tagger_character_vocabulary VALUES('pixai','new_character')", []).unwrap();
+        migrate_to_latest(&mut c, 105).unwrap();
+        assert_eq!(c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
+        assert_eq!(c.query_row("SELECT tag FROM tagger_character_vocabulary", [], |r| r.get::<_, String>(0)).unwrap(), "new_character");
+        c.execute("INSERT INTO character_suggestion_ignored_tags VALUES('new_character','now')", []).unwrap();
+        assert!(!c.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+        c.execute_batch(UNDO_AFTER_102).unwrap();
+        c.pragma_update(None, "user_version", 102).unwrap();
+        migrate_to_latest(&mut c, 102).unwrap();
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM character_suggestion_ignored_tags", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
     fn tagger_migration_from_104_preserves_previous_objects_and_edits() {
         let mut c = Connection::open_in_memory().unwrap();
         historical_schema(&mut c, 104);
         c.execute_batch("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at) VALUES('a','h','image','a','assets/a','thumbnails/a',1,1,1,'now');
             INSERT INTO asset_auto_tag_edits(asset_id,tag,state,created_at) VALUES('a','hair','removed','now');").unwrap();
         migrate_to_latest(&mut c,104).unwrap();
-        assert_eq!(c.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),105);
+        assert_eq!(c.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),SCHEMA_VERSION);
         assert_eq!(c.query_row("SELECT state FROM asset_auto_tag_edits WHERE asset_id='a'",[],|r|r.get::<_,String>(0)).unwrap(),"removed");
         for table in ["av_link_inbox","character_folder_order","asset_tagger_character_scores","character_tagger_candidates"] {
             c.prepare(&format!("SELECT * FROM {table}")).unwrap();

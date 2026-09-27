@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -8,16 +8,22 @@ import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
-import { ArrowPathIcon, CheckIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, XMarkIcon } from "./artistIcons";
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
+import { ArtistCollage } from "./ArtistCollage";
+import { ArrowPathIcon, CheckIcon, ChevronRightIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, PinIcon, XMarkIcon } from "./artistIcons";
 import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead } from "./artistStore";
 import { UNKNOWN_SOURCE, type ArtistBucket, type ArtistMergeSuggestion, type ArtistSettings, type ArtistSort, type ArtistSummary } from "./types";
 import "./artists.css";
 
 type Navigate = (view: AssetView) => void;
 const PAGE = 200;
+/** Scroll position and 더 보기 depth per hub section, kept while the app runs so 뒤로 returns to the same place. */
+const hubScroll = new Map<ArtistHubSection, number>();
+let mainShown = 30;
 const formatCount = (value: number) => value.toLocaleString("ko-KR");
 
 /** `@handle` for the first handle key, else the host of a creator URL. */
@@ -61,6 +67,9 @@ export function ArtistHub({ view, onNavigate, privacyMode }: { view: Extract<Ass
     main: "주요 작가", others: "그 외 작가", singles: "한 장뿐인 작가들", hidden: "숨긴 작가", merge: "같은 작가일 수 있어요", "source-fill": "출처에서 작가 채우기",
   };
   const rule = overview?.settings;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Restores after the first paint of remembered reads; a section read for the first time starts at the top.
+  useLayoutEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = hubScroll.get(section) ?? 0; }, [section]);
   const accessory = section === "main" && overview ? <span className="artist-hub__count">{formatCount(overview.main)}명</span>
     : section === "merge" && overview ? <span className="artist-hub__count">{formatCount(overview.mergeSuggestions)}쌍 · 따로 두기 한 쌍은 다시 나오지 않음</span>
       : section === "source-fill" && overview ? <span className="artist-hub__count">출처 주소는 있고 작가가 없는 {formatCount(overview.unknownSource)}장</span> : undefined;
@@ -70,7 +79,7 @@ export function ArtistHub({ view, onNavigate, privacyMode }: { view: Extract<Ass
         {ruleText(rule)}<Cog6ToothIcon aria-hidden="true" />
       </button> : undefined,
     }} />
-    <div className="artist-hub__scroll">
+    <div className="artist-hub__scroll" ref={scrollRef} onScroll={(event) => { hubScroll.set(section, event.currentTarget.scrollTop); }}>
       {section === "main" && <MainSection onNavigate={onNavigate} privacyMode={privacyMode} />}
       {(section === "others" || section === "hidden") && <OthersList key={section} initialBucket={section === "hidden" ? "hidden" : "other"} onNavigate={onNavigate} privacyMode={privacyMode} />}
       {section === "singles" && <SinglesMosaic onNavigate={onNavigate} privacyMode={privacyMode} />}
@@ -110,72 +119,138 @@ function TierRuleDialog({ settings, mainCount, onClose }: { settings: ArtistSett
 }
 
 function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privacyMode: boolean }) {
-  const [shown, setShown] = useState(30);
+  const [shown, setShownState] = useState(mainShown);
+  const setShown = (next: (value: number) => number) => setShownState((value) => (mainShown = next(value)));
   const rule = useArtistOverview()?.settings;
   const page = useArtistRead((gateway) => gateway.list({ bucket: "main", sort: "recent", limit: 1000 }), "main").data;
-  const open = (artist: ArtistSummary) => onNavigate({ kind: "creator", creatorKey: artist.id });
   return <>
-    <TodayStrip onNavigate={onNavigate} privacyMode={privacyMode} />
-    <div className="artist-section-head"><span className="workspace-section-label">최근 저장 순 · 고정한 작가 제외</span></div>
+    <TodaySection onNavigate={onNavigate} privacyMode={privacyMode} />
+    <div className="artist-section-head"><span className="workspace-section-label">최근 저장 순 · 고정한 작가 제외</span>{page && <span className="artist-section-count">{formatCount(page.total)}명</span>}</div>
     {!page && <Skeleton className="artist-hub__skeleton" label="작가를 불러오는 중" />}
     {page && page.artists.length === 0 && <EmptyState title="주요 작가가 아직 없습니다">작가 정보가 있는 이미지를 모으면 기준에 맞는 작가가 여기에 모입니다.</EmptyState>}
-    {page && <ul className="artist-rows" aria-label="주요 작가">
-      {page.artists.slice(0, shown).map((artist) => <li key={artist.id}>
-        <ArtistMenu artist={artist} onNavigate={onNavigate}>
-          <button type="button" className="artist-row" onClick={() => open(artist)} aria-label={`${artist.label} ${metaLine(artist, rule)}`}>
-            <ArtistThumb assetId={artist.coverAssetIds[0]} privacyMode={privacyMode} />
-            <span className="artist-row__copy">
-              <span className="artist-row__name artist-name">{artist.label}</span>
-              {artistHandle(artist) && <span className="artist-row__handle">{artistHandle(artist)}</span>}
-              <span className="artist-row__meta">{metaLine(artist, rule)}</span>
-            </span>
-            <ThumbStrip assetIds={artist.coverAssetIds} privacyMode={privacyMode} label={artist.label} />
-          </button>
-        </ArtistMenu>
-      </li>)}
-    </ul>}
+    {page && <div className="artist-grid" role="list" aria-label="주요 작가">
+      {page.artists.slice(0, shown).map((artist) => <ArtistCard key={artist.id} artist={artist} rule={rule} privacyMode={privacyMode} onNavigate={onNavigate} />)}
+    </div>}
     {page && page.artists.length > shown && <div className="artist-more"><Button variant="ghost" onClick={() => setShown((value) => value + 30)}>주요 작가 {formatCount(page.artists.length - shown)}명 더 보기</Button></div>}
   </>;
 }
 
+function gridMetaLine(artist: ArtistSummary, rule?: ArtistSettings) {
+  const recent = artist.recentCount > 0 && rule ? `최근 ${rule.recentDays}일 ${formatCount(artist.recentCount)}장` : null;
+  const saved = artist.lastSavedAt ? `${recent ? "저장" : "최근 저장"} ${displayDate(artist.lastSavedAt)}` : null;
+  return [recent, saved].filter(Boolean).join(" · ") || "최근 저장 없음";
+}
+
+function ArtistCard({ artist, rule, privacyMode, onNavigate }: { artist: ArtistSummary; rule?: ArtistSettings; privacyMode: boolean; onNavigate: Navigate }) {
+  const gateway = useArtistGateway();
+  const handlePin = () => {
+    if (gateway) void gateway.setFlags(artist.id, { pinned: !artist.pinned }).then(invalidateArtists, () => undefined);
+  };
+  return <ArtistMenu artist={artist} onNavigate={onNavigate}>
+    <div className="artist-card" role="listitem">
+      <button type="button" className="artist-card__open" onClick={() => onNavigate({ kind: "creator", creatorKey: artist.id })} aria-label={`${artist.label} ${metaLine(artist, rule)}`}>
+        <ArtistCollage assetIds={artist.coverAssetIds} privacyMode={privacyMode} />
+      </button>
+      <div className="artist-card__caption">
+        <div className="artist-card__line">
+          <span className="artist-card__name artist-name">{artist.label}</span>
+          {artistHandle(artist) && <><span className="artist-card__separator" aria-hidden="true">·</span><span className="artist-card__handle">{artistHandle(artist)}</span></>}
+          <span className="artist-card__count">{formatCount(artist.assetCount)}</span>
+          <span className="artist-card__tools">
+            <button type="button" className="artist-card__tool" aria-label={artist.pinned ? `${artist.label} 고정 해제` : `${artist.label} 고정`} aria-pressed={artist.pinned} onClick={handlePin}><PinIcon aria-hidden="true" /></button>
+            <Menu label={`${artist.label} 더보기`} triggerClassName="artist-card__tool" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={artistMenuItems(artist, onNavigate, gateway)} />
+          </span>
+        </div>
+        <div className="artist-card__meta">{gridMetaLine(artist, rule)}</div>
+      </div>
+    </div>
+  </ArtistMenu>;
+}
+
+function HeroMosaic({ assetIds, assetCount, privacyMode }: { assetIds: string[]; assetCount: number; privacyMode: boolean }) {
+  const ids = assetIds.slice(0, 5);
+  const cells = ids.length > 0 ? ids : [undefined];
+  const extra = ids.length > 0 ? Math.max(0, assetCount - ids.length) : 0;
+  const count = cells.length;
+  return <span className={`artist-hero-mosaic artist-hero-mosaic--n${count}`} aria-hidden="true">
+    {cells.map((assetId, index) => <span key={`${assetId ?? "empty"}-${index}`} className={`artist-hero-mosaic__cell${extra > 0 && index === cells.length - 1 ? " artist-hero-mosaic__cell--more" : ""}`}>
+      {assetId && !privacyMode && <img src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
+      {extra > 0 && index === cells.length - 1 && <span>+{formatCount(extra)}</span>}
+    </span>)}
+  </span>;
+}
+
+function HeroFact({ value, label, suffix }: { value: string | number; label: string; suffix?: string }) {
+  return <div><span className="artist-today__fact-value">{typeof value === "number" ? formatCount(value) : value}{suffix && <small>{suffix}</small>}</span><span className="artist-today__fact-label">{label}</span></div>;
+}
+
 /** 오늘: two or three artists to revisit, fixed for the day until 다시 고르기. */
-function TodayStrip({ onNavigate, privacyMode }: { onNavigate: Navigate; privacyMode: boolean }) {
+function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; privacyMode: boolean }) {
   const [seed, setSeed] = useState(0);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [heroId, setHeroId] = useState<string | null>(null);
+  const gateway = useArtistGateway();
   const { localDate, offsetMinutes } = localDateAndOffset();
   const rows = useArtistRead((gateway) => gateway.today(localDate, offsetMinutes, seed, dismissed), `today:${localDate}:${seed}:${dismissed.join("|")}`).data;
   if (rows && rows.length === 0) return null;
   const [, month, day] = localDate.split("-");
-  return <section className="artist-today" aria-label="오늘">
+  const hero = rows?.find((row) => row.artist.id === heroId) ?? rows?.[0];
+  if (!hero) return <section className="artist-today" aria-label="오늘">
     <div className="artist-section-head">
       <span className="workspace-section-label">오늘 · {Number(month)}월 {Number(day)}일</span>
       <Button size="sm" variant="ghost" onClick={() => setSeed((value) => value + 1)}><ArrowPathIcon aria-hidden="true" />다시 고르기</Button>
     </div>
-    <div className="artist-today__rows">
-      {(rows ?? []).map((row) => <article key={row.artist.id} className="artist-today__row" aria-label={`${row.artist.label} · ${row.reason}`}>
-        <header>
-          <button type="button" className="artist-today__who" onClick={() => onNavigate({ kind: "creator", creatorKey: row.artist.id })}>
-            <ArtistThumb assetId={row.artist.coverAssetIds[0]} privacyMode={privacyMode} className="artist-thumb artist-thumb--small" />
-            <span><span className="artist-name">{row.artist.label}</span><small className={`artist-today__reason artist-today__reason--${row.kind}`}>{row.reason}</small></span>
-          </button>
-          <Button size="icon" variant="ghost" aria-label={`${row.artist.label} 오늘에서 빼기`} onClick={() => setDismissed((list) => [...list, row.artist.id])}><XMarkIcon aria-hidden="true" /></Button>
-        </header>
-        <ThumbStrip assetIds={row.assetIds} privacyMode={privacyMode} label={row.artist.label} onOpen={() => onNavigate({ kind: "creator", creatorKey: row.artist.id })} />
-      </article>)}
+  </section>;
+  return <section className="artist-today" aria-label="오늘">
+    <div className="artist-section-head">
+      <span className="workspace-section-label">오늘 · {Number(month)}월 {Number(day)}일</span>
+      <Button size="sm" variant="ghost" onClick={() => { setHeroId(null); setSeed((value) => value + 1); }}><ArrowPathIcon aria-hidden="true" />다시 고르기</Button>
     </div>
+    {hero && <article className="artist-today__hero" aria-label={`${hero.artist.label} · ${hero.reason}`}>
+      <button type="button" className="artist-today__dismiss" aria-label={`${hero.artist.label} 오늘에서 빼기`} onClick={() => { setHeroId(null); setDismissed((list) => [...list, hero.artist.id]); }}><XMarkIcon aria-hidden="true" /></button>
+      <button type="button" className="artist-hero-mosaic-button" aria-label={`${hero.artist.label} 작가 페이지`} onClick={() => onNavigate({ kind: "creator", creatorKey: hero.artist.id })}>
+        <HeroMosaic assetIds={hero.assetIds} assetCount={hero.artist.assetCount} privacyMode={privacyMode} />
+      </button>
+      <div className="artist-today__info">
+        <span className={`artist-today__reason artist-today__reason--${hero.kind}`}>{hero.reason}</span>
+        <h2 className="artist-today__name artist-name">{hero.artist.label}</h2>
+        {artistHandle(hero.artist) && <span className="artist-today__handle">{artistHandle(hero.artist)}</span>}
+        <div className="artist-today__facts">
+          <HeroFact value={hero.artist.assetCount} label="모은 그림" suffix="장" />
+          {hero.artist.firstSavedAt && <HeroFact value={displayDate(hero.artist.firstSavedAt)} label="처음 저장" />}
+          {hero.artist.lastSavedAt && <HeroFact value={displayDate(hero.artist.lastSavedAt)} label="최근 저장" />}
+        </div>
+        <div className="artist-today__actions">
+          <Button variant="secondary" onClick={() => onNavigate({ kind: "creator", creatorKey: hero.artist.id })}>작가 페이지 열기<ChevronRightIcon aria-hidden="true" /></Button>
+          <Button variant={hero.artist.pinned ? "secondary" : "ghost"} aria-pressed={hero.artist.pinned} onClick={() => { if (gateway) void gateway.setFlags(hero.artist.id, { pinned: !hero.artist.pinned }).then(invalidateArtists, () => undefined); }}><PinIcon aria-hidden="true" />{hero.artist.pinned ? "고정 해제" : "고정"}</Button>
+        </div>
+        <div className="artist-today__others">
+          <span className="workspace-section-label">오늘의 다른 작가</span>
+          {(rows ?? []).filter((row) => row.artist.id !== hero.artist.id).map((row) => <button key={row.artist.id} type="button" className="artist-today__other" aria-label={`${row.artist.label} · ${row.reason}`} onClick={() => setHeroId(row.artist.id)}>
+            <ArtistCollage assetIds={row.assetIds} privacyMode={privacyMode} className="artist-today__other-collage" />
+            <span className="artist-today__other-copy"><strong className="artist-name">{row.artist.label}</strong><small className={`artist-today__reason artist-today__reason--${row.kind}`}>{row.reason}</small></span>
+            <ChevronRightIcon aria-hidden="true" />
+          </button>)}
+        </div>
+      </div>
+    </article>}
   </section>;
 }
 
-/** Right-click actions shared by artist rows: 고정, 이름 바꾸기, 다른 작가와 합치기, 숨기기. */
-function ArtistMenu({ artist, onNavigate, children }: { artist: ArtistSummary; onNavigate: Navigate; children: React.ReactElement }) {
-  const gateway = useArtistGateway();
+/** Actions shared by artist tiles (right-click and ⋯): 고정, 이름 바꾸기, 다른 작가와 합치기, 숨기기. */
+function artistMenuItems(artist: ArtistSummary, onNavigate: Navigate, gateway: ReturnType<typeof useArtistGateway>) {
   const flag = (flags: { pinned?: boolean; hidden?: boolean }) => { if (gateway) void gateway.setFlags(artist.id, flags).then(invalidateArtists, () => undefined); };
-  return <ContextMenu items={[
+  return [
     { id: "pin", label: artist.pinned ? "고정 해제" : "고정", onSelect: () => flag({ pinned: !artist.pinned }) },
     { id: "rename", label: "이름 바꾸기", onSelect: () => onNavigate({ kind: "creator", creatorKey: artist.id, edit: true }) },
     { id: "merge", label: "다른 작가와 합치기", onSelect: () => onNavigate({ kind: "creator", creatorKey: artist.id, edit: true }) },
     { id: "hide", label: artist.hidden ? "다시 보이기" : "숨기기", onSelect: () => flag({ hidden: !artist.hidden }) },
-  ]}>{children}</ContextMenu>;
+  ];
+}
+
+function ArtistMenu({ artist, onNavigate, children }: { artist: ArtistSummary; onNavigate: Navigate; children: React.ReactElement }) {
+  const gateway = useArtistGateway();
+  return <ContextMenu items={artistMenuItems(artist, onNavigate, gateway)}>{children}</ContextMenu>;
 }
 
 function useDebounced<T>(value: T, delay = 150) {

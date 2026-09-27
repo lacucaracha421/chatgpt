@@ -19,6 +19,8 @@ type Props = {
   onOpenGroup?: (groupId: string | null) => void;
   onGroupsChanged?: () => void;
   folderCards?: ReactNode[];
+  suggestionCards?: ReactNode[];
+  suggestionCount?: number;
   /** Quiet action on the right of the series count line (e.g. waiting S36 candidates). */
   headerAccessory?: ReactNode;
   /** Incremented by the owner's "그룹 만들기" command; each change opens a new group draft. */
@@ -30,7 +32,7 @@ type Props = {
   children: (members: CharacterTarget[]) => ReactNode;
 };
 
-export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, rows = 2, children }: Props) {
+export function CharacterGroups({ seriesId, members, groups: providedGroups, activeGroupId, privacyMode = false, onOpenGroup, onGroupsChanged, folderCards, suggestionCards = [], suggestionCount = 0, headerAccessory, groupCreateRequest = 0, groupEditRequest = 0, rows = 2, children }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [columns, setColumns] = useState(1);
   const [pagination, setPagination] = useState({ scope: "", page: 0 });
@@ -88,13 +90,15 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
   const rootGroups = current ? [] : groups;
   const rootFolders = current ? [] : (folderCards ?? []).filter(Boolean);
   const pageSize = columns * rows;
-  const pageCount = Math.max(1, Math.ceil((rootGroups.length + visibleMembers.length + rootFolders.length) / pageSize));
+  const pageCount = Math.max(1, Math.ceil((rootGroups.length + visibleMembers.length + rootFolders.length + suggestionCards.length) / pageSize));
   const page = Math.min(pagination.scope === scope ? pagination.page : 0, pageCount - 1);
   const start = page * pageSize;
   const end = start + pageSize;
   const pageGroups = rootGroups.slice(start, end);
   const pageMembers = visibleMembers.slice(Math.max(0, start - rootGroups.length), Math.max(0, end - rootGroups.length));
   const folderOffset = rootGroups.length + visibleMembers.length;
+  const suggestionOffset = folderOffset + rootFolders.length;
+  const pageSuggestions = suggestionCards.slice(Math.max(0, start - suggestionOffset), Math.max(0, end - suggestionOffset));
   const pageFolders = rootFolders.slice(Math.max(0, start - folderOffset), Math.max(0, end - folderOffset));
   useEffect(() => {
     setPagination(previous => previous.scope === scope && previous.page === page ? previous : { scope, page });
@@ -123,6 +127,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     {!current && <div className="series-gallery-heading character-group-heading">
       <h3><span className="character-group-heading__counts">
         캐릭터 <span className="character-group-heading__count">{members.length.toLocaleString()}</span>
+        {suggestionCount > 0 && <> · 제안 <span className="character-group-heading__count">{suggestionCount}</span></>}
         {groups.length > 0 && <> · 그룹 <span className="character-group-heading__count">{groups.length.toLocaleString()}</span></>}
         {rootFolders.length > 0 && <> · 폴더 <span className="character-group-heading__count">{rootFolders.length.toLocaleString()}</span></>}
       </span></h3>
@@ -133,7 +138,8 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
       {pageGroups.map(group => <CharacterGroupCard key={group.id} group={group} members={members} privacyMode={privacyMode} onOpen={() => onOpenGroup?.(group.id)} onEdit={() => setDraft({ ...group, targetIds: [...group.targetIds] })} />)}
       {children(pageMembers)}
       {pageFolders}
-      {!groups.length && !members.length && !folderCards && <p className="series-empty">캐릭터를 등록하고 기준 이미지를 선택하세요.</p>}
+      {pageSuggestions}
+      {!groups.length && !members.length && !folderCards && !suggestionCards.length && <p className="series-empty">캐릭터를 등록하고 기준 이미지를 선택하세요.</p>}
     </div>
     {pageCount > 1 && <nav className="series-card-pagination" aria-label="캐릭터·폴더 페이지">
       {Array.from({ length: pageCount }, (_, index) => <Button key={index} size="sm" variant="ghost" className="series-card-pagination__page" aria-label={`${index + 1}페이지`} aria-current={page === index ? "page" : undefined} onClick={() => setPagination({ scope, page: index })}>{index + 1}</Button>)}

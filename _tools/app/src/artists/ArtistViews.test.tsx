@@ -6,6 +6,7 @@ import { AssetBrowser } from "../assets/AssetBrowser";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetSummary, AssetView, LibraryGateway } from "../library/types";
+import { ArtistCollage } from "./ArtistCollage";
 import { ArtistHub } from "./ArtistHub";
 import { ArtistIndex } from "./ArtistIndex";
 import type { ArtistDetail, ArtistGateway, ArtistMergeSuggestion, ArtistOverview, ArtistSummary, SourceFillPreview } from "./types";
@@ -54,9 +55,9 @@ const detail: ArtistDetail = {
 function artistGateway(): ArtistGateway {
   return {
     overview: vi.fn().mockResolvedValue(overview),
-    list: vi.fn().mockImplementation(async (query) => ({ total: 2, artists: query.bucket === "main" ? [artist("rin", "Rin Kagura"), artist("sky", "하늘고래")] : [artist("seori", "서리", { main: false, assetCount: 4 })] })),
+    list: vi.fn().mockImplementation(async (query) => ({ total: 2, artists: query.bucket === "main" ? [artist("rin", "Rin Kagura"), artist("sky", "하늘고래", { recentCount: 3 })] : [artist("seori", "서리", { main: false, assetCount: 4 })] })),
     detail: vi.fn().mockResolvedValue(detail),
-    today: vi.fn().mockResolvedValue([{ artist: artist("yun", "윤슬"), kind: "anniversary", reason: "3년 전 오늘 저장", assetIds: ["t1", "t2"] }]),
+    today: vi.fn().mockResolvedValue([{ artist: artist("yun", "윤슬"), kind: "anniversary", reason: "3년 전 오늘 저장", assetIds: ["t1", "t2", "t3", "t4", "t5", "t6"] }]),
     mergeSuggestions: vi.fn().mockResolvedValue([suggestion]),
     sourceFillPreview: vi.fn().mockResolvedValue(fill),
     applySourceFill: vi.fn().mockResolvedValue({ assigned: 2, createdArtists: 1 }),
@@ -123,10 +124,15 @@ describe("ArtistHub", () => {
   it("shows 오늘 and the main artists, and edits the tier rule from the header", async () => {
     const user = userEvent.setup();
     const { gateway, onNavigate } = renderHub({ kind: "artists" });
-    expect(await screen.findByRole("article", { name: "윤슬 · 3년 전 오늘 저장" })).toBeInTheDocument();
-    const rows = await screen.findByRole("list", { name: "주요 작가" });
-    expect(within(rows).getAllByRole("button").map((button) => button.textContent)).toEqual([expect.stringContaining("Rin Kagura"), expect.stringContaining("하늘고래")]);
-    await user.click(within(rows).getAllByRole("button")[0]!);
+    const hero = await screen.findByRole("article", { name: "윤슬 · 3년 전 오늘 저장" });
+    expect(hero).toBeInTheDocument();
+    expect(within(hero).getByText("+7")).toBeInTheDocument();
+    const grid = await screen.findByRole("list", { name: "주요 작가" });
+    expect(within(grid).getByRole("button", { name: /^Rin Kagura 12장/ })).toBeInTheDocument();
+    expect(within(grid).getByRole("button", { name: /^하늘고래 12장/ })).toBeInTheDocument();
+    expect(within(grid).getByText("최근 저장 09.12")).toBeInTheDocument();
+    expect(within(grid).getByText("최근 30일 3장 · 저장 09.12")).toBeInTheDocument();
+    await user.click(within(grid).getByRole("button", { name: /^Rin Kagura 12장/ }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: "creator", creatorKey: "rin" });
 
     await user.click(screen.getByRole("button", { name: /^주요 작가 기준 바꾸기/ }));
@@ -137,6 +143,32 @@ describe("ArtistHub", () => {
 
     await user.click(screen.getByRole("button", { name: "다시 고르기" }));
     await waitFor(() => expect(gateway.today).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 1, []));
+  });
+
+  it("swaps the hero to another today artist without refetching today", async () => {
+    const user = userEvent.setup();
+    const gateway = artistGateway();
+    gateway.today = vi.fn().mockResolvedValue([
+      { artist: artist("yun", "윤슬"), kind: "anniversary", reason: "3년 전 오늘 저장", assetIds: ["t1", "t2", "t3"] },
+      { artist: artist("mira", "미라", { assetCount: 3 }), kind: "fresh", reason: "이번 주 새로 저장", assetIds: ["m1", "m2"] },
+    ]);
+    renderHub({ kind: "artists" }, gateway);
+    await screen.findByRole("article", { name: "윤슬 · 3년 전 오늘 저장" });
+    await user.click(screen.getByRole("button", { name: "미라 · 이번 주 새로 저장" }));
+    expect(await screen.findByRole("article", { name: "미라 · 이번 주 새로 저장" })).toBeInTheDocument();
+    expect(gateway.today).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the card pin action and existing menu items", async () => {
+    const user = userEvent.setup();
+    const { gateway } = renderHub({ kind: "artists" });
+    const grid = await screen.findByRole("list", { name: "주요 작가" });
+    within(grid).getByRole("button", { name: "Rin Kagura 더보기" }).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("menuitem", { name: "이름 바꾸기" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(within(grid).getByRole("button", { name: "Rin Kagura 고정" }));
+    expect(gateway.setFlags).toHaveBeenCalledWith("rin", { pinned: true });
   });
 
   it("searches 그 외 작가 by 초성 and narrows with the count filters", async () => {
@@ -174,6 +206,24 @@ describe("ArtistHub", () => {
     expect(await screen.findByText("2장을 작가와 이었어요 · 새 작가 1명")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "작가 미상에서 보기" }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: "creator", creatorKey: "unknown:source" });
+  });
+});
+
+describe("ArtistCollage", () => {
+  it("uses the 1, 2, and 3 image split rules and keeps privacy cells empty", () => {
+    const { container } = render(<>
+      <ArtistCollage assetIds={["a1"]} privacyMode={false} />
+      <ArtistCollage assetIds={["a1", "a2"]} privacyMode={false} />
+      <ArtistCollage assetIds={["a1", "a2", "a3", "a4"]} privacyMode={true} />
+    </>);
+    const collages = container.querySelectorAll(".artist-collage");
+    expect(collages[0]).toHaveClass("artist-collage--n1");
+    expect(collages[0]?.querySelectorAll(".artist-collage__cell")).toHaveLength(1);
+    expect(collages[1]).toHaveClass("artist-collage--n2");
+    expect(collages[1]?.querySelectorAll(".artist-collage__cell")).toHaveLength(2);
+    expect(collages[2]).toHaveClass("artist-collage--n3");
+    expect(collages[2]?.querySelectorAll(".artist-collage__cell")).toHaveLength(3);
+    expect(collages[2]?.querySelectorAll("img")).toHaveLength(0);
   });
 });
 

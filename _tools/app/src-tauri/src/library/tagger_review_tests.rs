@@ -78,6 +78,65 @@ fn review(f: &Fixture, t: &Target, target: bool) -> serde_json::Value {
     .unwrap()
 }
 
+fn paged_tagger_projection(f: &Fixture) -> Vec<serde_json::Value> {
+    let mut after = None;
+    let mut projection = Vec::new();
+    loop {
+        let page = f
+            .library
+            .character_review_page(ReviewQuery {
+                series_id: f.series.clone(),
+                target_id: None,
+                filter: "recommended".into(),
+                after,
+                limit: 1,
+            })
+            .unwrap();
+        let value = serde_json::to_value(&page).unwrap();
+        for row in value["rows"].as_array().unwrap() {
+            for prediction in row["predictions"].as_array().unwrap() {
+                if prediction["evidence"]["source"] != "tagger"
+                    || matches!(
+                        prediction["decision"].as_str(),
+                        Some("accepted" | "rejected")
+                    )
+                {
+                    continue;
+                }
+                projection.push(serde_json::json!({
+                    "asset": row["asset"].clone(),
+                    "seriesId": f.series,
+                    "targetId": prediction["targetId"].clone(),
+                    "targetName": prediction["targetName"].clone(),
+                    "targetFingerprint": prediction["targetFingerprint"].clone(),
+                    "evidence": prediction["evidence"].clone(),
+                    "crop": null,
+                }));
+            }
+        }
+        after = page.next_cursor;
+        if after.is_none() {
+            break;
+        }
+    }
+    projection
+}
+
+fn paged_tagger_counts(f: &Fixture) -> TaggerReviewCounts {
+    paged_tagger_projection(f).into_iter().fold(
+        TaggerReviewCounts::default(),
+        |mut counts, item| {
+            counts.total += 1;
+            match item["evidence"]["reason"].as_str() {
+                Some("recommendation") => counts.recommendation += 1,
+                Some("veto") => counts.veto += 1,
+                _ => {}
+            }
+            counts
+        },
+    )
+}
+
 fn settings(t: &Target, reference_ids: Vec<String>) -> CharacterSettingsDraft {
     CharacterSettingsDraft {
         target: TargetDraft {
@@ -237,6 +296,42 @@ fn tagger_veto_clears_only_automatic_membership_and_publishes_review() {
         .library
         .character_review_pending(&f.series, &t.id)
         .unwrap());
+}
+
+#[test]
+fn fast_counts_equal_the_paged_review_projection() {
+    let f = Fixture::new();
+    let t = f.ready("A");
+    signals(&f, &t, 0.2, 0.2);
+    automatic(&f, &t);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_tagger_character_scores SET score=0.9 WHERE asset_id='asset-6'",
+            [],
+        )
+        .unwrap();
+    let preview = f.library.preview_tagger_review().unwrap();
+    assert_eq!((preview.veto.count, preview.recommend.count), (1, 1));
+    f.library
+        .apply_tagger_review(&preview.preview_token)
+        .unwrap();
+
+    let fast = f.library.tagger_review_counts().unwrap();
+    assert_eq!(fast, paged_tagger_counts(&f));
+    assert_eq!(
+        fast,
+        TaggerReviewCounts {
+            total: 2,
+            recommendation: 1,
+            veto: 1,
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(f.library.tagger_review_items().unwrap()).unwrap(),
+        serde_json::Value::Array(paged_tagger_projection(&f)),
+    );
 }
 
 #[test]
@@ -481,11 +576,12 @@ fn tagger_veto_and_recommendations_block_s36_then_manual_reaccept_sticks() {
         let response = serde_json::json!({"scores":{&t.id:0.01}});
         let mut s36 = S36Publication::default();
         s36.s36_series.insert(f.series.clone());
+        // Vetoed pairs wait for a human; two-tagger agreement may pass S36's automatic rule.
         assert_eq!(
             f.library
                 .publish_s36(&pending, &policy, &response, 100, &s36)
                 .unwrap(),
-            0
+            usize::from(!veto)
         );
         manual(&f, &t, "asset-5", DecisionKind::Accepted);
         assert_eq!(
@@ -712,7 +808,7 @@ fn tagger_migration_105_protects_all_historical_reference_origins() {
     assert_eq!(
         c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        105
+        crate::library::db::SCHEMA_VERSION
     );
     assert_eq!(
         c.query_row(
@@ -729,4 +825,136 @@ fn tagger_migration_105_protects_all_historical_reference_origins() {
             .unwrap(),
         None
     );
+}
+
+fn crop_fixture() -> (Fixture, Target) {
+    let f = Fixture::new();
+    let t = f.ready("Crop");
+    signals(&f, &t, 0.95, 0.95);
+    let preview = f.library.preview_tagger_review().unwrap();
+    f.library
+        .apply_tagger_review(&preview.preview_token)
+        .unwrap();
+    let c = f.library.connection().unwrap();
+    c.execute(
+        "UPDATE assets SET width=200,height=400 WHERE id='asset-5'",
+        [],
+    )
+    .unwrap();
+    c.execute("INSERT INTO character_autotag_jobs(asset_id,generation,source_generation,content_hash,relative_path,classification_ids,state,review_state,updated_at)
+        SELECT id,2,1,content_hash,relative_path,'[]','completed','unresolved','now' FROM assets WHERE id='asset-5'", []).unwrap();
+    for (generation, crop) in [(1, 0), (2, 1)] {
+        let id = format!("crop-{generation}");
+        c.execute("INSERT INTO character_autotag_evidence(id,asset_id,generation,source_generation,content_hash,context_hash,runtime_fingerprint,scope_json,unresolved_regions,created_at)
+            SELECT ?1,id,?2,1,content_hash,'context','runtime','{}','[]','now' FROM assets WHERE id='asset-5'", params![id,generation]).unwrap();
+        c.execute("INSERT INTO character_autotag_predictions(evidence_id,target_id,series_id,target_fingerprint,result_json) VALUES(?1,?2,?3,?4,?5)",
+            params![id,t.id,f.series,t.fingerprint,serde_json::json!({"evidence": {
+                "bestQueryCrop":crop,"queryBoxes":[[0,0,50,100],[20,80,120,320]],"wholeFallback":false,"distance":0.23
+            }}).to_string()]).unwrap();
+    }
+    drop(c);
+    (f, t)
+}
+
+#[test]
+fn tagger_crop_uses_latest_pair_and_normalizes_pixels() {
+    let (f, t) = crop_fixture();
+    let items = f.library.tagger_review_items().unwrap();
+    let present = items.iter().find(|i| i.asset.id == "asset-5").unwrap();
+    assert_eq!(
+        present.crop,
+        Some(TaggerReviewCrop {
+            r#box: [0.1, 0.2, 0.6, 0.8],
+            distance: 0.23
+        })
+    );
+    assert_eq!(
+        present.target_fingerprint,
+        f.library.get_character_target(&t.id).unwrap().fingerprint
+    );
+    assert!(items
+        .iter()
+        .find(|i| i.asset.id == "asset-6")
+        .unwrap()
+        .crop
+        .is_none());
+    for sql in [
+        "UPDATE character_autotag_predictions SET result_json=json_set(result_json,'$.evidence.wholeFallback',json('true')) WHERE evidence_id='crop-2'",
+        "UPDATE character_autotag_evidence SET content_hash='old-content'",
+        "UPDATE character_autotag_jobs SET state='superseded'",
+    ] {
+        let c = f.library.connection().unwrap();
+        c.execute("UPDATE character_autotag_predictions SET result_json=json_set(result_json,'$.evidence.wholeFallback',json('false'))", []).unwrap();
+        c.execute("UPDATE character_autotag_evidence SET content_hash=(SELECT content_hash FROM assets WHERE id='asset-5')", []).unwrap();
+        c.execute(sql, []).unwrap();
+        drop(c);
+        assert!(f.library.tagger_review_items().unwrap().iter().all(|i| i.crop.is_none()));
+    }
+}
+
+#[test]
+fn tagger_crop_shows_the_b36_box_in_an_s36_series() {
+    let (f, _) = crop_fixture();
+    let config = serde_json::from_value(serde_json::json!({
+        "python":"unused","script":"unused","models":"unused","s36_series":[f.series]
+    }))
+    .unwrap();
+    *f.library.character_incremental.lock().unwrap() =
+        super::super::character_incremental::Engine::shadow_fixture(config);
+    assert!(f
+        .library
+        .tagger_review_items()
+        .unwrap()
+        .iter()
+        .find(|i| i.asset.id == "asset-5")
+        .is_some_and(|i| i.crop.is_some()));
+}
+
+#[test]
+fn tagger_crop_rejects_missing_invalid_and_whole_image_boxes() {
+    assert!(review_crop(None, 200, 400).is_none());
+    for evidence in [
+        serde_json::json!({"bestQueryCrop":0,"queryBoxes":[[0,0,200,400]],"distance":0.1}),
+        serde_json::json!({"bestQueryCrop":1,"queryBoxes":[[20,80,120,320]],"distance":0.1}),
+        serde_json::json!({"bestQueryCrop":0,"queryBoxes":[[120,80,20,320]],"distance":0.1}),
+        serde_json::json!({"bestQueryCrop":0,"queryBoxes":[[20,80,120,320]]}),
+    ] {
+        assert!(review_crop(
+            Some(&serde_json::json!({"evidence":evidence}).to_string()),
+            200,
+            400
+        )
+        .is_none());
+    }
+    let result = serde_json::json!({"evidence":{"bestQueryCrop":0,"queryBoxes":[[-20,80,220,320]],"distance":0.1}}).to_string();
+    assert_eq!(
+        review_crop(Some(&result), 200, 400).unwrap().r#box,
+        [0., 0.2, 1., 0.8]
+    );
+    assert!(review_crop(Some(&result), 0, 400).is_none());
+}
+
+#[test]
+fn tagger_batched_fingerprints_match_manual_decisions_for_unavailable_references() {
+    let (f, t) = crop_fixture();
+    f.library.connection().unwrap().execute(
+        "INSERT INTO character_reference_regions(target_id,asset_id,asset_hash,baseline_fingerprint,bounds_json)
+         SELECT ?1,id,content_hash,'fixture','[0,0,1,1]' FROM assets WHERE id='asset-0'", [&t.id],
+    ).unwrap();
+    for sql in [
+        "UPDATE assets SET status='trash' WHERE id='asset-0'",
+        "UPDATE assets SET content_hash='changed' WHERE id='asset-1'",
+        "UPDATE assets SET relative_path='assets/missing.png' WHERE id='asset-2'",
+        "UPDATE character_references SET asset_id=NULL WHERE slot=3",
+        "DELETE FROM asset_classifications WHERE asset_id='asset-4'",
+    ] {
+        f.library.connection().unwrap().execute(sql, []).unwrap();
+        let expected = f.library.get_character_target(&t.id).unwrap().fingerprint;
+        assert!(f
+            .library
+            .tagger_review_items()
+            .unwrap()
+            .iter()
+            .all(|i| i.target_fingerprint == expected));
+    }
 }

@@ -28,23 +28,45 @@ export function useArtistGateway(): ArtistGateway | null {
   return useOptionalLibrary()?.gateway.artists ?? null;
 }
 
-/** Loads `read` whenever the gateway, `key` or the artist revision changes. */
+/**
+ * Last result per read key, per gateway, so a view opened again (back from an artist page)
+ * shows what it showed at once and refreshes behind it. Bounded; oldest keys drop first.
+ */
+const lastReads = new WeakMap<ArtistGateway, Map<string, unknown>>();
+const LAST_READS_MAX = 200;
+function remembered(gateway: ArtistGateway | null) {
+  if (!gateway) return null;
+  let map = lastReads.get(gateway);
+  if (!map) { map = new Map(); lastReads.set(gateway, map); }
+  return map;
+}
+
+/** Loads `read` whenever the gateway, `key` or the artist revision changes; starts from the last result for `key`. */
 export function useArtistRead<T>(read: ((gateway: ArtistGateway) => Promise<T>) | null, key: string): { data: T | null; error: unknown } {
   const gateway = useArtistGateway();
   const current = useArtistRevision();
-  const [state, setState] = useState<{ data: T | null; error: unknown; key: string | null }>({ data: null, error: null, key: null });
+  const memory = remembered(gateway);
+  const [state, setState] = useState<{ data: T | null; error: unknown; key: string | null }>(() =>
+    read && memory?.has(key) ? { data: memory.get(key) as T, error: null, key } : { data: null, error: null, key: null });
   useEffect(() => {
     if (!gateway || !read) return;
     let cancelled = false;
     read(gateway).then(
-      (data) => { if (!cancelled) setState({ data, error: null, key }); },
+      (data) => {
+        if (cancelled) return;
+        memory?.delete(key);
+        memory?.set(key, data);
+        if (memory && memory.size > LAST_READS_MAX) memory.delete(memory.keys().next().value as string);
+        setState({ data, error: null, key });
+      },
       (error: unknown) => { if (!cancelled) setState((previous) => ({ data: previous.key === key ? previous.data : null, error, key })); },
     );
     return () => { cancelled = true; };
     // `read` is an inline closure; `key` names what it reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, key, current]);
-  return state.key === key ? { data: state.data, error: state.error } : { data: null, error: null };
+  if (state.key === key) return { data: state.data, error: state.error };
+  return read && memory?.has(key) ? { data: memory.get(key) as T, error: null } : { data: null, error: null };
 }
 
 export function useArtistOverview(): ArtistOverview | null {

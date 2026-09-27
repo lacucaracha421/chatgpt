@@ -469,7 +469,7 @@ impl Library {
         Ok(result)
     }
 
-    fn save_character_target_selection_in(
+    pub(super) fn save_character_target_selection_in(
         &self,
         transaction: &Connection,
         draft: TargetDraft,

@@ -45,28 +45,37 @@ export function weekdayLabel(now: Date) {
 /* ---- 신간 · 나온 권 ---- */
 export type ReleaseKind = "manga" | "game" | "movie";
 export type ReleaseRow = { key: string; kind: ReleaseKind; name: string; caption: ReleaseCaption | { kind: "info"; text: string; date: null };
-  collection?: CollectionSummary; title?: ReleaseWishlistItem };
+  collection?: CollectionSummary; title?: ReleaseWishlistItem; date?: string | null; volume?: number | null; watch?: boolean };
 
 /**
- * Manga with unread 신간 알림 (most notices first) and 관심 목록 games/movies with unread
- * events (released, date set or moved), newest event first.
+ * Released unread manga notices (most notices first) and released 관심 목록 items, newest event first.
  */
 export function releaseRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>, wishlist: ReleaseWishlistItem[], today: string): ReleaseRow[] {
+  const mangaSchedules = new Map(koreanReleases(collections.filter((work) => work.type === "manga"), board, inbox, today).map((row) => [row.work.id, row]));
   const manga = collections
     .filter((work) => work.type === "manga" && Math.max(work.unreadReleaseCount, inbox.get(work.id)?.length ?? 0) > 0)
     .map((work) => ({ work, unread: Math.max(work.unreadReleaseCount, inbox.get(work.id)?.length ?? 0) }))
     .sort((a, b) => b.unread - a.unread || a.work.name.localeCompare(b.work.name, "ko"))
-    .map(({ work }): ReleaseRow => ({
-      key: `manga:${work.id}`, kind: "manga", name: work.name, collection: work,
-      caption: releaseCaption(work, board.get(work.id), inbox.get(work.id) ?? [], today) ?? { kind: "new", text: "신간 알림", date: null },
-    }));
+    .map(({ work }): ReleaseRow => {
+      const events = inbox.get(work.id) ?? [];
+      const scheduled = mangaSchedules.get(work.id)?.volumes.filter((volume) => volume.released && volume.date)
+        .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "") || b.volumeNumber - a.volumeNumber)[0];
+      const event = events.filter((item) => item.provider !== "mangadex" && item.event.currentValue && /^\d{4}-\d{2}-\d{2}/.test(item.event.currentValue))
+        .sort((a, b) => (b.event.currentValue ?? "").localeCompare(a.event.currentValue ?? ""))[0];
+      return {
+        key: `manga:${work.id}`, kind: "manga", name: work.name, collection: work, watch: false,
+        date: scheduled?.date ?? event?.event.currentValue?.slice(0, 10) ?? null, volume: scheduled?.volumeNumber ?? event?.event.volumeNumber ?? null,
+        caption: releaseCaption(work, board.get(work.id), events, today) ?? { kind: "new", text: "신간 알림", date: null },
+      };
+    });
   const year = Number(today.slice(0, 4));
   const titles = wishlist
-    .filter((item) => item.unread.length > 0 && !item.muted)
+    .filter((item) => item.unread.length > 0 && !item.muted && (item.released || item.unread.some((event) => event.kind === "released")))
     .map((item) => ({ item, latest: [...item.unread].sort((a, b) => b.detectedAt.localeCompare(a.detectedAt))[0]! }))
     .sort((a, b) => b.latest.detectedAt.localeCompare(a.latest.detectedAt))
     .map(({ item, latest }): ReleaseRow => ({
       key: `title:${item.id}`, kind: item.kind, name: item.title, title: item,
+      date: latest.currentValue && /^\d{4}-\d{2}-\d{2}/.test(latest.currentValue) ? latest.currentValue.slice(0, 10) : null, watch: true,
       caption: latest.kind === "released" ? { kind: "new", text: "발매됨 · 관심 목록", date: latest.currentValue && /^\d{4}-\d{2}-\d{2}$/.test(latest.currentValue) ? shortReleaseDate(latest.currentValue, today) : null }
         : { kind: "info", text: releaseEventLine(latest, year), date: null },
     }));
@@ -81,8 +90,8 @@ export function watchedMangaCount(board: Map<string, ReleaseBoardEntry>) {
 }
 
 /* ---- 발매 예정 · 나올 권 ---- */
-export type UpcomingRow = { key: string; kind: ReleaseKind; date: string; name: string; detail: string; watch: boolean; collectionId?: string };
-export const UPCOMING_DAYS = 30;
+export type UpcomingRow = { key: string; kind: ReleaseKind; date: string; name: string; detail: string; watch: boolean; volume?: number; collectionId?: string };
+export const UPCOMING_DAYS = 60;
 
 /**
  * Dated upcoming releases, soonest first: the Korean volumes of watched manga beyond the owned
@@ -91,7 +100,7 @@ export const UPCOMING_DAYS = 30;
 export function upcomingRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>, wishlist: ReleaseWishlistItem[], today: string): UpcomingRow[] {
   const manga = koreanReleases(collections.filter((work) => work.type === "manga"), board, inbox, today).flatMap((row) => row.volumes
     .filter((volume): volume is typeof volume & { date: string } => volume.upcoming && !!volume.date && volume.date >= today)
-    .map((volume): UpcomingRow => ({ key: `manga:${row.work.id}:${volume.volumeNumber}`, kind: "manga", date: volume.date, name: row.work.name, detail: `${volume.volumeNumber}권`, watch: false, collectionId: row.work.id })));
+    .map((volume): UpcomingRow => ({ key: `manga:${row.work.id}:${volume.volumeNumber}`, kind: "manga", date: volume.date, name: row.work.name, detail: `${volume.volumeNumber}권`, watch: false, volume: volume.volumeNumber, collectionId: row.work.id })));
   const titles = wishlist
     .filter((item) => !item.released && item.precision === "exact" && item.date && item.date >= today)
     .map((item): UpcomingRow => {

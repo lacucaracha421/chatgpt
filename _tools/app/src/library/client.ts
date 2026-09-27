@@ -185,7 +185,7 @@ async function classificationMutation<T>(run: () => Promise<T>): Promise<T> {
 
 export const libraryGateway: LibraryGateway = {
   getLibraryStatistics: () => invoke("get_library_statistics"),
-  getHomeOverview: (todayStart, weekStart) => invoke("get_home_overview", { todayStart, weekStart }),
+  getHomeOverview: (todayStart, weekStart, localDate) => invoke("get_home_overview", { todayStart, weekStart, localDate }),
   measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
   recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
   artists: {

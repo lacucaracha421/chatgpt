@@ -104,8 +104,27 @@ export type CloudBackfillProgress = {
 
 /** `get_home_overview`: local counts and the sync watcher's in-memory view of the server; no network. */
 export type HomeOverview = {
-  assets: { total: number; today: number; week: number };
+  assets: { total: number; today: number; week: number; images: number; videos: number };
+  collections: Record<CollectionType, number>;
+  tagger: { total: number; recommendation: number; veto: number };
+  avPerformer: {
+    id: string;
+    displayName: string;
+    originalName: string | null;
+    knownWorks: number;
+    ownedWorks: number;
+    latestWork: HomeAvWork;
+    recentOwnedWorks: HomeAvWork[];
+  } | null;
   server: { configured: boolean; live: boolean; confirmedAt: string | null; capturesPending: number | null };
+};
+
+export type HomeAvWork = {
+  collectionId: string;
+  productCode: string | null;
+  title: string;
+  releaseDate: string | null;
+  frontArtworkId: string | null;
 };
 
 export type CloudBackfillControlState = "idle" | "running" | "paused";
@@ -1263,7 +1282,7 @@ export interface LibraryGateway {
   autoTags?: import("../autotags/types").AutoTagGateway;
   getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
   /** PC Home: asset totals since local midnight / this Monday and the server's last known state (desktop only). */
-  getHomeOverview?(todayStart: string, weekStart: string): Promise<HomeOverview>;
+  getHomeOverview?(todayStart: string, weekStart: string, localDate: string): Promise<HomeOverview>;
   measureLibraryDerivativeStorage?(): Promise<import("../statistics/types").DerivativeStorage>;
   recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;
   collectionTracking?: CollectionTrackingGateway;

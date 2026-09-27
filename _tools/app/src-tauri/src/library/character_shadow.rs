@@ -469,8 +469,11 @@ impl Library {
             if s36.s36_excluded_targets.contains(&target.id) {
                 continue;
             }
+            // As in B36, only agreement recommendations may reach automatic acceptance.
             let earlier: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2) OR EXISTS(SELECT 1 FROM character_tagger_candidates WHERE target_id=?1 AND asset_id=?2 AND asset_hash=?3)",
+                "SELECT EXISTS(SELECT 1 FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2)
+                 OR EXISTS(SELECT 1 FROM character_tagger_candidates WHERE target_id=?1 AND asset_id=?2 AND asset_hash=?3
+                           AND NOT (reason='recommendation' AND pixai_score>=0.85 AND canary_score>=0.85))",
                 params![target.id, pending.asset_id, pending.content_hash],
                 |r| r.get(0),
             )?;
@@ -734,6 +737,176 @@ mod tests {
     fn response(pending: &Pending, target: &str, score: f64) -> Value {
         json!({"type":"s36_shadow_result","assetId":pending.asset_id,"contentHash":pending.content_hash,
                "featureId":"a".repeat(64),"queryAvailable":true,"scores":{target: score}})
+    }
+    #[test]
+    fn s36_publication_tagger_agreement_requires_automatic_verdict() {
+        let (f, target, policy, pending) = s36_fixture();
+        let mut s36 = super::super::character_worker::S36Publication::default();
+        s36.s36_series.insert(f.series.clone());
+        for (reason, pixai, canary, score, rejections, accepted) in [
+            ("recommendation", 0.85, 0.85, 0.05, 100, true),
+            ("recommendation", 0.9, 0.9, 0.11, 100, false),
+            ("recommendation", 0.9, 0.9, 0.9, 100, false),
+            ("recommendation", 0.9, 0.9, 0.05, 99, false),
+            ("recommendation", 0.9, 0.849, 0.05, 100, false),
+            ("recommendation", 0.849, 0.9, 0.05, 100, false),
+            ("veto", 0.2, 0.2, 0.05, 100, false),
+            ("veto", 0.9, 0.9, 0.05, 100, false),
+        ] {
+            let c = f.library.connection().unwrap();
+            // Reuse the migrated fixture, resetting only this test pair between cases.
+            c.execute(
+                "DELETE FROM character_tagger_candidates WHERE target_id=?1 AND asset_id=?2",
+                params![target.id, pending.asset_id],
+            )
+            .unwrap();
+            c.execute(
+                "DELETE FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2",
+                params![target.id, pending.asset_id],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO character_tagger_candidates(target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,'now')",
+                params![target.id, pending.asset_id, pending.content_hash, reason, pixai, canary],
+            ).unwrap();
+            drop(c);
+            assert_eq!(f.library.tagger_review_counts().unwrap().total, 1);
+            assert_eq!(
+                f.library
+                    .publish_s36(
+                        &pending,
+                        &policy,
+                        &response(&pending, &target.id, score),
+                        rejections,
+                        &s36,
+                    )
+                    .unwrap(),
+                usize::from(accepted),
+                "{reason}, pixai={pixai}, canary={canary}, score={score}, rejections={rejections}",
+            );
+            let expected_pending = i64::from(!accepted);
+            assert_eq!(
+                f.library
+                    .connection()
+                    .unwrap()
+                    .query_row("SELECT COUNT(*) FROM character_tagger_pending", [], |r| {
+                        r.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                expected_pending,
+            );
+            let counts = f.library.tagger_review_counts().unwrap();
+            assert_eq!(counts.total, expected_pending);
+            assert_eq!(
+                counts.recommendation,
+                i64::from(!accepted && reason == "recommendation")
+            );
+            assert_eq!(counts.veto, i64::from(!accepted && reason == "veto"));
+            assert_eq!(
+                f.library.tagger_review_items().unwrap().len(),
+                usize::from(!accepted)
+            );
+            assert_eq!(
+                f.library
+                    .character_relations_for_asset(&pending.asset_id)
+                    .unwrap(),
+                if accepted {
+                    vec![target.id.clone()]
+                } else {
+                    vec![]
+                },
+            );
+            let c = f.library.connection().unwrap();
+            let decisions = c.prepare(
+                "SELECT decision,origin,json_extract(reference_snapshot,'$.prediction.engine')
+                 FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence",
+            ).unwrap().query_map(params![target.id, pending.asset_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            }).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+            assert_eq!(
+                decisions,
+                if accepted {
+                    vec![("accepted".into(), "automatic".into(), "s36".into())]
+                } else {
+                    vec![]
+                }
+            );
+        }
+    }
+    #[test]
+    fn s36_publication_tagger_agreement_never_overrides_existing_decisions() {
+        let (f, target, policy, pending) = s36_fixture();
+        let mut s36 = super::super::character_worker::S36Publication::default();
+        s36.s36_series.insert(f.series.clone());
+        for origin in ["manual", "automatic"] {
+            for decision in ["accepted", "rejected", "cleared"] {
+                let c = f.library.connection().unwrap();
+                c.execute(
+                    "DELETE FROM character_tagger_candidates WHERE target_id=?1 AND asset_id=?2",
+                    params![target.id, pending.asset_id],
+                )
+                .unwrap();
+                c.execute(
+                    "DELETE FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2",
+                    params![target.id, pending.asset_id],
+                )
+                .unwrap();
+                c.execute(
+                    "INSERT INTO character_decisions(target_id,asset_id,source_asset_id,asset_hash,decision,target_fingerprint,reference_snapshot,origin,created_at)
+                     VALUES(?1,?2,?2,?3,?4,?5,'{}',?6,'before')",
+                    params![target.id, pending.asset_id, pending.content_hash, decision, target.fingerprint, origin],
+                ).unwrap();
+                let sequence = c.last_insert_rowid();
+                // Keep an agreement candidate present even for manual decisions,
+                // whose insert trigger would otherwise consume an earlier candidate.
+                c.execute(
+                    "INSERT INTO character_tagger_candidates(target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+                     VALUES(?1,?2,?3,'recommendation',0.9,0.9,'now')",
+                    params![target.id, pending.asset_id, pending.content_hash],
+                ).unwrap();
+                drop(c);
+                assert_eq!(
+                    f.library
+                        .publish_s36(
+                            &pending,
+                            &policy,
+                            &response(&pending, &target.id, 0.05),
+                            100,
+                            &s36
+                        )
+                        .unwrap(),
+                    0,
+                    "{origin} {decision}",
+                );
+                let c = f.library.connection().unwrap();
+                let decisions = c.prepare(
+                    "SELECT sequence,decision,origin,reference_snapshot FROM character_decisions
+                     WHERE target_id=?1 AND source_asset_id=?2 ORDER BY sequence",
+                ).unwrap().query_map(params![target.id, pending.asset_id], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+                }).unwrap().collect::<std::result::Result<Vec<_>, _>>().unwrap();
+                drop(c);
+                assert_eq!(
+                    decisions,
+                    vec![(sequence, decision.into(), origin.into(), "{}".into())]
+                );
+                assert_eq!(
+                    f.library
+                        .character_relations_for_asset(&pending.asset_id)
+                        .unwrap(),
+                    if decision == "accepted" {
+                        vec![target.id.clone()]
+                    } else {
+                        vec![]
+                    },
+                );
+                assert_eq!(
+                    f.library.tagger_review_counts().unwrap().total,
+                    i64::from(decision == "cleared")
+                );
+            }
+        }
     }
     #[test]
     fn s36_publication_accepts_only_confident_unjudged_pairs_in_s36_series_and_rolls_back() {

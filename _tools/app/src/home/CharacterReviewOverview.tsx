@@ -1,3 +1,4 @@
+import { CharacterSuggestionsOverview } from "../characters/suggestions/CharacterSuggestions";
 import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
@@ -40,6 +41,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState(ALL);
+  const [suggestionCount, setSuggestionCount] = useState(0);
 
   useEffect(() => {
     if (restricted) return;
@@ -63,6 +65,10 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
   const reading = progress !== null;
 
   const index = <nav className="crv-index" aria-label="캐릭터 검토 시리즈">
+    {!restricted && suggestionCount > 0 && <>
+      <h2 className="workspace-section-label">제안</h2>
+      <IndexRow label="새 캐릭터 제안" count={suggestionCount} current={false} onClick={() => document.getElementById("new-character-suggestions")?.scrollIntoView({ block: "start" })} />
+    </>}
     {groups.length > 0 && !restricted && <>
       <h2 className="workspace-section-label">시리즈</h2>
       <IndexRow label="전체" count={total} current={!current} onClick={() => setSelected(ALL)} />
@@ -110,6 +116,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
       chrome={{ navigation: index }} />
     <div className="crv-scroll">
       <div className="crv-page">
+        {!restricted && <CharacterSuggestionsOverview version={version} privacyMode={privacyMode} onCount={setSuggestionCount} />}
         {tallies && !restricted && !error && groups.length > 0 && <div className="crv-summary">
           <span className="crv-count crv-count--lg numeric">{total.toLocaleString()}<small>건</small></span>
           <span className="crv-summary__t">{groups.length.toLocaleString()}개 시리즈 · {groups.reduce((sum, group) => sum + group.characters.length, 0).toLocaleString()}명

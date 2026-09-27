@@ -38,6 +38,7 @@ export type TaggerReviewItem = {
   targetName: string;
   targetFingerprint: string;
   evidence: TaggerReviewEvidence;
+  crop?: { box: [number, number, number, number]; distance: number } | null;
 };
 
 export type TaggerReviewCounts = { recommendation: number; veto: number };
@@ -74,41 +75,14 @@ export function taggerCounts(items: readonly TaggerReviewItem[]): TaggerReviewCo
   return items.reduce((counts, item) => ({ ...counts, [item.evidence.reason]: counts[item.evidence.reason] + 1 }), { recommendation: 0, veto: 0 });
 }
 
-/**
- * Reads every series review once with the native `recommended` filter. Tagger predictions
- * share that projection with S36, so only explicit `evidence.source === "tagger"` pairs count.
- */
-export function taggerReviewSource(api: Pick<CharacterApi, "review">, targets: readonly CharacterTarget[]): TaggerReviewSource {
+/** Reads the complete pending tagger projection with one native call. */
+export function taggerReviewSource(_api: Pick<CharacterApi, "review">, targets: readonly CharacterTarget[]): TaggerReviewSource {
   const seriesIds = [...new Set(targets.flatMap((target) => target.seriesClassificationId ? [target.seriesClassificationId] : []))];
   return async (onProgress, isLive) => {
-    const items: TaggerReviewItem[] = [];
-    const seen = new Set<string>();
-    for (let seriesIndex = 0; seriesIndex < seriesIds.length; seriesIndex += 1) {
-      const seriesId = seriesIds[seriesIndex];
-      let after: string | null = null;
-      do {
-        const page = await api.review({ seriesId, targetId: null, filter: "recommended", after, limit: 80 });
-        if (!isLive()) return null;
-        for (const row of page.rows) {
-          for (const prediction of row.predictions) {
-            if (!isTaggerEvidence(prediction.evidence) || prediction.decision === "accepted" || prediction.decision === "rejected") continue;
-            const item: TaggerReviewItem = {
-              asset: row.asset,
-              seriesId,
-              targetId: prediction.targetId,
-              targetName: prediction.targetName,
-              targetFingerprint: prediction.targetFingerprint,
-              evidence: prediction.evidence,
-            };
-            const key = taggerItemKey(item);
-            if (seen.has(key)) continue;
-            seen.add(key); items.push(item);
-          }
-        }
-        after = page.nextCursor;
-        onProgress({ read: items.length, seriesDone: seriesIndex + (after === null ? 1 : 0), seriesTotal: seriesIds.length });
-      } while (after !== null);
-    }
+    if (!isLive()) return null;
+    const items = await invoke<TaggerReviewItem[]>("tagger_review_items");
+    if (!isLive()) return null;
+    onProgress({ read: items.length, seriesDone: seriesIds.length, seriesTotal: seriesIds.length });
     return items;
   };
 }

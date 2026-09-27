@@ -1,6 +1,6 @@
 import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { assetThumbnailUrl } from "../assets/mediaUrl";
+import { assetUrl, assetThumbnailUrl } from "../assets/mediaUrl";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ClassificationEntry } from "../library/types";
@@ -37,6 +37,7 @@ type Group = {
   characters: { targetId: string; targetName: string; items: TaggerReviewItem[]; thumbnailAssetId: string | null }[];
 };
 
+const TILE_SIZE_KEY = "lakomics.taggerReview.tileSize";
 const ALL = "\u0000all";
 const manualRequest = (item: TaggerReviewItem, assetIds: string[], decision: BulkDecision): DecisionRequest => ({
   targetId: item.targetId,
@@ -85,6 +86,14 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
   const [membership, setMembership] = useState<Map<string, Membership>>(new Map());
   const [bulkDecision, setBulkDecision] = useState<BulkDecision | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [tileSize, setTileSize] = useState<"small" | "large">(() => {
+    try { return localStorage.getItem(TILE_SIZE_KEY) === "small" ? "small" : "large"; } catch { return "large"; }
+  });
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const previewRef = useRef<HTMLElement>(null);
+  const restoreTileFocus = useRef<string | null>(null);
+  const selectionAnchor = useRef<string | null>(null);
+  const decisionPending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tileRefs = useRef(new Map<string, HTMLElement>());
@@ -101,8 +110,34 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
   const shownGroups = currentGroup ? [currentGroup] : groups;
   const character = groups.flatMap((group) => group.characters.map((entry) => ({ ...entry, group }))).find((entry) => entry.targetId === selectedTarget) ?? null;
   const total = remaining.length;
+  const previewItem = character?.items.find((item) => taggerItemKey(item) === previewKey);
+
+  useEffect(() => {
+    try { localStorage.setItem(TILE_SIZE_KEY, tileSize); } catch { /* Storage can be disabled. */ }
+  }, [tileSize]);
+  useEffect(() => { if (previewItem) previewRef.current?.focus(); }, [previewItem?.asset.id]);
+  useEffect(() => { setPreviewKey(null); selectionAnchor.current = null; }, [selectedTarget]);
+
+  useEffect(() => {
+    if (!previewKey && restoreTileFocus.current) {
+      tileRefs.current.get(restoreTileFocus.current)?.focus();
+      restoreTileFocus.current = null;
+    }
+  }, [previewKey]);
+
+  function closePreview() {
+    restoreTileFocus.current = previewKey;
+    setPreviewKey(null);
+  }
+  function movePreview(direction: number) {
+    if (!character || !previewItem || busy) return;
+    const index = character.items.indexOf(previewItem);
+    const next = character.items[Math.max(0, Math.min(character.items.length - 1, index + direction))];
+    setPreviewKey(taggerItemKey(next));
+  }
 
   const goBack = () => {
+    if (previewItem) { closePreview(); return; }
     if (selectedTarget) {
       setSelectedTarget(null); setBulkDecision(null); setChecked(new Set()); setError(null);
     } else onBack();
@@ -137,36 +172,50 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
   }
 
   async function decideOne(item: TaggerReviewItem, decision: BulkDecision) {
-    if (busy) return;
+    if (decisionPending.current) return;
     const state = membership.get(item.asset.id);
     if (decision === "accepted" && state !== "inside" && state !== "outside") return;
+    decisionPending.current = true;
     setBusy(true); setError(null);
     try {
       if (decision === "accepted" && state === "outside") await api.move(item.targetId, item.targetFingerprint, [item.asset.id]);
       else await api.decide(manualRequest(item, [item.asset.id], decision));
+      if (previewKey === taggerItemKey(item) && character) {
+        const index = character.items.indexOf(item);
+        const next = character.items[index + 1] ?? character.items[index - 1];
+        setPreviewKey((current) => current === taggerItemKey(item) ? (next ? taggerItemKey(next) : null) : current);
+      }
       remove(new Set([taggerItemKey(item)]));
     } catch (reason) {
       setError(commandErrorMessage(reason, "판단을 저장하지 못했습니다."));
     } finally {
+      decisionPending.current = false;
       setBusy(false);
     }
   }
 
   function startBulk(decision: BulkDecision) {
     if (!character || busy) return;
+    selectionAnchor.current = null;
     setBulkDecision(decision);
     setChecked(new Set(character.items.map(taggerItemKey)));
     setError(null);
   }
 
-  function toggle(item: TaggerReviewItem) {
-    if (!bulkDecision || busy) return;
+  function toggle(item: TaggerReviewItem, range = false) {
+    if (!character || !bulkDecision || busy) return;
     const key = taggerItemKey(item);
+    const keys = character.items.map(taggerItemKey);
+    const anchor = selectionAnchor.current ? keys.indexOf(selectionAnchor.current) : -1;
+    const end = keys.indexOf(key);
+    const affected = range && anchor >= 0 ? keys.slice(Math.min(anchor, end), Math.max(anchor, end) + 1) : [key];
     setChecked((current) => {
       const next = new Set(current);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      const select = !current.has(key);
+      for (const entry of affected) { if (select) next.add(entry); else next.delete(entry); }
       return next;
     });
+    selectionAnchor.current = key;
   }
 
   async function confirmBulk() {
@@ -234,10 +283,44 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
         titleAccessory={<span className="tagger-review__title-count numeric">{character.items.length.toLocaleString()}건</span>}
         chrome={{ navigation: index }} />
       <div className="tagger-review__detail">
+        {previewItem ? <section className="tagger-review__preview" role="region" aria-label="이미지 미리보기" tabIndex={-1} ref={previewRef}
+          onKeyDown={(event) => {
+            if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+            const key = event.key.toLowerCase();
+            if (!["arrowleft", "arrowright", "a", "x", "escape"].includes(key)) return;
+            event.preventDefault(); event.stopPropagation();
+            if (key === "escape") closePreview();
+            else if (key === "arrowleft") movePreview(-1);
+            else if (key === "arrowright") movePreview(1);
+            else void decideOne(previewItem, key === "a" ? "accepted" : "rejected");
+          }}>
+          <div className="tagger-review__preview-toolbar">
+            <Button size="sm" disabled={busy || character.items[0] === previewItem} aria-label="이전 이미지" onClick={() => movePreview(-1)}>←</Button>
+            <span>{previewItem.asset.originalName} · {character.items.indexOf(previewItem) + 1}/{character.items.length}</span>
+            <Button size="sm" disabled={busy || character.items[character.items.length - 1] === previewItem} aria-label="다음 이미지" onClick={() => movePreview(1)}>→</Button>
+            <Button size="sm" onClick={closePreview}>닫기 (Esc)</Button>
+          </div>
+          <ReviewImage key={previewItem.asset.id} item={previewItem} privacyMode={privacyMode} large />
+          <Scores item={previewItem} />
+          {membership.get(previewItem.asset.id) === "outside" && <p className="tagger-review__notice">폴더 밖 · 확정하면 캐릭터 폴더로 이동합니다.</p>}
+          {["loading", "error"].includes(membership.get(previewItem.asset.id) ?? "loading") && <p role="status" className="tagger-review__notice">폴더 위치를 확인할 수 있을 때 확정할 수 있습니다.</p>}
+          <div className="tagger-review__preview-toolbar">
+            <Button disabled={busy || !["inside", "outside"].includes(membership.get(previewItem.asset.id) ?? "")} onClick={() => void decideOne(previewItem, "accepted")}>확정 (A)</Button>
+            <Button disabled={busy} onClick={() => void decideOne(previewItem, "rejected")}>거부 (X)</Button>
+          </div>
+          {error && <p className="tagger-review__notice is-error" role="alert">{error}</p>}
+        </section> : <>
+
         <div className="tagger-review__bulk">
+          <div role="group" aria-label="이미지 크기">
+            <Button size="sm" aria-pressed={tileSize === "small"} onClick={() => setTileSize("small")}>작게</Button>
+            <Button size="sm" aria-pressed={tileSize === "large"} onClick={() => setTileSize("large")}>크게</Button>
+          </div>
           <Button size="sm" variant={bulkDecision === "accepted" ? "primary" : "secondary"} disabled={busy} onClick={() => startBulk("accepted")}>모두 맞음</Button>
           <Button size="sm" variant={bulkDecision === "rejected" ? "primary" : "secondary"} disabled={busy} onClick={() => startBulk("rejected")}>모두 아님</Button>
           {bulkDecision && <>
+            <Button size="sm" disabled={busy} onClick={() => { setChecked(new Set(character.items.map(taggerItemKey))); selectionAnchor.current = null; }}>전부 선택</Button>
+            <Button size="sm" disabled={busy} onClick={() => { setChecked(new Set()); selectionAnchor.current = null; }}>선택 해제</Button>
             <span><b className="numeric">{checked.size.toLocaleString()}</b>건 선택 · 이미지에서 제외할 항목을 체크 해제하세요.</span>
             <Button size="sm" variant="primary" disabled={busy || checked.size === 0 || acceptingUnresolved} onClick={() => void confirmBulk()}>
               {busy ? "저장 중…" : `${checked.size.toLocaleString()}건 ${bulkDecision === "accepted" ? "맞음" : "아님"} 저장`}
@@ -247,7 +330,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
         </div>
         {acceptingUnresolved && <p className="tagger-review__notice" role="status">폴더 위치를 확인하는 동안 맞음 저장을 기다려 주세요.</p>}
         {error && <p className="tagger-review__notice is-error" role="alert">{error}</p>}
-        <div className="tagger-review__grid" role="grid" aria-label={`${character.targetName} 태거 후보`}>
+        <div className={`tagger-review__grid tagger-review__grid--${tileSize}`} role="grid" aria-label={`${character.targetName} 태거 후보`}>
           {character.items.map((item) => {
             const key = taggerItemKey(item);
             const state = membership.get(item.asset.id) ?? "loading";
@@ -256,21 +339,23 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
             return <article key={key} role="gridcell" tabIndex={0} aria-selected={bulkDecision ? isChecked : undefined}
               ref={(node) => { if (node) tileRefs.current.set(key, node); else tileRefs.current.delete(key); }}
               className={`tagger-review__tile${bulkDecision && isChecked ? " is-selected" : ""}`}
+              onClick={(event) => {
+                if ((event.target as HTMLElement).closest("button, input, label")) return;
+                if (bulkDecision) toggle(item, event.shiftKey); else setPreviewKey(key);
+              }}
               onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
                 moveFocus(event, item);
-                if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) { event.preventDefault(); toggle(item); }
+                if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) { event.preventDefault(); if (bulkDecision) toggle(item, event.shiftKey); else setPreviewKey(key); }
               }}>
               <div className="tagger-review__image">
-                <img src={assetThumbnailUrl(item.asset)} alt={`${item.asset.originalName} — ${item.targetName} 후보`} loading="lazy" decoding="async" className={privacyMode ? "character-private" : undefined} />
+                <ReviewImage item={item} privacyMode={privacyMode} />
                 <span className={`tagger-review__badge tagger-review__badge--${item.evidence.reason}`}>{item.evidence.reason === "recommendation" ? "태거 추천" : "검토로 돌림"}</span>
                 {state === "outside" && <span className="tagger-review__outside">폴더 밖</span>}
                 {bulkDecision && <label className="tagger-review__check"><input type="checkbox" checked={isChecked} disabled={busy}
-                  aria-label={`${item.asset.originalName} 선택`} onChange={() => toggle(item)} /><span aria-hidden="true" /></label>}
+                  aria-label={`${item.asset.originalName} 선택`} onClick={(event) => { event.stopPropagation(); toggle(item, event.shiftKey); }} onChange={() => {}} /><span aria-hidden="true" /></label>}
               </div>
-              <div className="tagger-review__meta">
-                <span>PixAI <b className="numeric">{item.evidence.pixaiScore.toFixed(2)}</b></span>
-                <span>Canary <b className="numeric">{item.evidence.canaryScore.toFixed(2)}</b></span>
-              </div>
+              <Scores item={item} />
               {state === "error" && <small className="tagger-review__folder-error">폴더 위치를 확인하지 못해 맞음을 사용할 수 없습니다.</small>}
               <div className="tagger-review__actions">
                 <Button size="sm" variant="primary" disabled={acceptDisabled} aria-label={`${item.asset.originalName} 맞음`} onClick={() => void decideOne(item, "accepted")}>맞음</Button>
@@ -279,6 +364,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
             </article>;
           })}
         </div>
+        </>}
       </div>
     </div>;
   }
@@ -318,4 +404,27 @@ function IndexRow({ label, count, current, onClick }: { label: string; count: nu
   return <button type="button" className="workspace-index-link crv-index__row" aria-current={current ? "page" : undefined} onClick={onClick}>
     <span className="crv-index__label">{label}</span><span className="crv-index__count numeric">{count.toLocaleString()}</span>
   </button>;
+}
+
+function Scores({ item }: { item: TaggerReviewItem }) {
+  return <div className="tagger-review__meta">
+    <span>PixAI <b className="numeric">{item.evidence.pixaiScore.toFixed(2)}</b></span>
+    <span>Canary <b className="numeric">{item.evidence.canaryScore.toFixed(2)}</b></span>
+    {item.crop && <span>B36 <b className="numeric">{item.crop.distance.toFixed(3)}</b></span>}
+  </div>;
+}
+
+function ReviewImage({ item, privacyMode, large = false }: { item: TaggerReviewItem; privacyMode: boolean; large?: boolean }) {
+  const ratio = item.asset.width > 0 && item.asset.height > 0 ? item.asset.width / item.asset.height : 1;
+  const box = item.crop?.box;
+  return <div className={`tagger-review__media${large ? " tagger-review__media--large" : ""}`}>
+    {!privacyMode && <div className="tagger-review__frame" style={large
+      ? { aspectRatio: ratio, width: `min(100%, ${65 * ratio}vh)` }
+      : { width: `${Math.min(1, ratio) * 100}%`, height: `${Math.min(1, 1 / ratio) * 100}%` }}>
+      <img src={large ? assetUrl(item.asset.id) : assetThumbnailUrl(item.asset)} alt={`${item.asset.originalName} — ${item.targetName} 후보`} loading={large ? "eager" : "lazy"} decoding="async" />
+      {box && <span className="tagger-review__crop" aria-label={`${item.targetName} 감지 영역`} role="img" style={{
+        left: `${box[0] * 100}%`, top: `${box[1] * 100}%`, width: `${(box[2] - box[0]) * 100}%`, height: `${(box[3] - box[1]) * 100}%`,
+      }} />}
+    </div>}
+  </div>;
 }

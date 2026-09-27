@@ -61,6 +61,7 @@ pub(crate) mod release_calendar;
 pub(crate) mod artists;
 pub(crate) mod auto_tags;
 pub(crate) mod tagger_review;
+pub(crate) mod character_suggestions;
 pub(crate) mod home;
 
 #[tauri::command]

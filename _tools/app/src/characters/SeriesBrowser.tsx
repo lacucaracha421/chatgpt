@@ -1,3 +1,4 @@
+import { CharacterSuggestionTile, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
@@ -75,6 +76,10 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
 
 export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi }: Props) {
   const { gateway } = useLibrary();
+  const suggestions = useCharacterSuggestions(refreshVersion);
+  const [hiddenSuggestions, setHiddenSuggestions] = useState<string[]>([]);
+  const seriesSuggestions = suggestions.rows.filter(row => row.seriesId === series.classificationId);
+  const suggestionsHidden = hiddenSuggestions.includes(series.classificationId);
   const [folders, setFolders] = useState<SeriesFolder[]>([]);
   // `series`: opened from this series' candidate count, so scoped to it; `all`: the overflow entry.
   const [shadowReview, setShadowReview] = useState<false | "series" | "all">(false);
@@ -438,7 +443,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           {!currentGroup && series.heroAssetId && <img draggable={false} className={`series-hero${privacyMode ? " character-private" : ""}`} src={assetUrl(series.heroAssetId)} alt={`${name} 히어로 이미지`} />}
           <CharacterGroups key={`${series.classificationId}:${currentGroup?.id ?? "series"}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} rows={1}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
-            onGroupsChanged={onChanged} headerAccessory={candidateReview} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest}
+            onGroupsChanged={onChanged} suggestionCount={currentGroup ? 0 : seriesSuggestions.length}
+            suggestionCards={!currentGroup && !suggestionsHidden ? seriesSuggestions.map(suggestion => <CharacterSuggestionTile key={suggestion.tag} suggestion={suggestion} state={suggestions} privacyMode={privacyMode} onChanged={onChanged} />) : undefined}
+            headerAccessory={<>{candidateReview}{seriesSuggestions.length > 0 && <Button size="sm" variant="ghost" onClick={() => setHiddenSuggestions(ids => suggestionsHidden ? ids.filter(id => id !== series.classificationId) : [...ids, series.classificationId])}>{suggestionsHidden ? "제안 보기" : "제안 숨기기"}</Button>}</>} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest}
             folderCards={folders.length > 0 ? folders.map(item => {
               const folder = classifications.find(folder => folder.id === item.classificationId);
               if (!folder) return null;
@@ -471,6 +478,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             </article></ContextMenu>;
             })}</>}</CharacterGroups>
         </div>}
+        {!current && suggestions.error && <p role="alert">{suggestions.error}<Button size="sm" onClick={suggestions.refresh}>제안 다시 불러오기</Button></p>}
+        {!current && suggestions.message && <p role="status">{suggestions.message}</p>}
         {folderError && <p className="character-message" role="alert">{folderError}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
         {!picking && currentStatus && currentStatus.detail.length > 0 && <p className={`series-character-status${currentStatus.warning ? " series-character-status--warning" : ""}`}>{currentStatus.detail.join(" · ")}</p>}
         {!picking && current?.description && <p className="series-description">{current.description}</p>}

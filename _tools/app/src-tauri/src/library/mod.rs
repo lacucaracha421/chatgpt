@@ -138,6 +138,7 @@ pub(crate) mod artists;
 mod artists_tests;
 pub(crate) mod auto_tags;
 pub(crate) mod tagger_review;
+pub(crate) mod character_suggestions;
 #[cfg(test)]
 mod auto_tags_tests;
 pub(crate) mod release_wishlist;

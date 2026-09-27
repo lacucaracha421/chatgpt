@@ -75,3 +75,16 @@ it("shows a single row of cards per page when asked and pages the rest", async (
     expect(within(grid).getAllByRole("button").map(button => button.textContent)).toEqual(["캐릭터 4"]);
   } finally { vi.unstubAllGlobals(); }
 });
+
+it("counts suggestions and pages their tiles after registered characters", async () => {
+  const user = userEvent.setup();
+  render(<CharacterGroups seriesId="series" members={[members[0]]} groups={[]} rows={1}
+    suggestionCount={1} suggestionCards={[<button key="suggestion">새 캐릭터 제안</button>]}>
+    {page => <>{page.map(member => <button key={member.id}>{member.displayName}</button>)}</>}
+  </CharacterGroups>);
+  expect(screen.getByRole("heading", { name: "캐릭터 1 · 제안 1" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "A" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "새 캐릭터 제안" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "2페이지" }));
+  expect(screen.getByRole("button", { name: "새 캐릭터 제안" })).toBeVisible();
+});

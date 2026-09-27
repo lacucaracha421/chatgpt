@@ -2486,6 +2486,10 @@ fn tagger_pending_blocks_native_automatic_pass_and_manual_reaccept_sticks() {
         signals(&f,&t,if veto {0.2}else{0.9},if veto {0.2}else{0.9});
         if veto {automatic(&f,&t);}
         let p=f.library.preview_tagger_review().unwrap();f.library.apply_tagger_review(&p.preview_token).unwrap();
+        // Registration also queues one-tagger recommendations; those remain blocked.
+        if !veto {
+            f.library.connection().unwrap().execute("UPDATE character_tagger_candidates SET canary_score=0.2 WHERE target_id=?1", [&t.id]).unwrap();
+        }
         for manual in [false,true] {
             if manual {
                 let t=f.library.get_character_target(&t.id).unwrap();
@@ -2509,6 +2513,58 @@ fn tagger_pending_blocks_native_automatic_pass_and_manual_reaccept_sticks() {
             if manual {
                 assert_eq!(f.library.connection().unwrap().query_row("SELECT origin FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1",[&t.id],|r|r.get::<_,String>(0)).unwrap(),"manual");
             }
+        }
+    }
+}
+
+#[test]
+fn tagger_agreement_requires_native_acceptance_and_preserves_manual_rejection() {
+    for (pixai, canary, native_accepts, manual_reject) in [
+        (0.85, 0.85, true, false),
+        (0.9, 0.9, false, false),
+        (0.9, 0.849, true, false),
+        (0.849, 0.9, true, false),
+        (0.9, 0.9, true, true),
+    ] {
+        let f = Fixture::new();
+        let t = f.ready("Agreement");
+        add_learned_reference(&f, &t.id);
+        // Isolate the persisted pair consumed by the automatic pass. Registration
+        // creates this row even when only one tagger clears the threshold.
+        f.library.connection().unwrap().execute(
+            "INSERT INTO character_tagger_candidates(target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+             SELECT ?1,id,content_hash,'recommendation',?2,?3,'now' FROM assets WHERE id='asset-5'",
+            params![t.id, pixai, canary],
+        ).unwrap();
+        assert_eq!(f.library.tagger_review_counts().unwrap().total, 1);
+        if manual_reject {
+            let current = f.library.get_character_target(&t.id).unwrap();
+            f.library.record_character_decisions(crate::library::characters::DecisionRequest {
+                target_id: current.id, expected_fingerprint: current.fingerprint,
+                asset_ids: vec!["asset-5".into()], decision: crate::library::characters::DecisionKind::Rejected,
+                scan_id: None, baseline_fingerprint: None,
+            }).unwrap();
+        }
+        character_autotag::enqueue(&f.library.connection().unwrap(), "asset-5", character_autotag::Cause::Reconsideration).unwrap();
+        let job = f.library.claim_character_autotag().unwrap().unwrap();
+        let mut c = f.library.connection().unwrap();
+        let tx = c.transaction().unwrap();
+        let context = f.library.character_autotag_context(&tx, &job, &"a".repeat(64)).unwrap();
+        let prediction = Prediction { target_id: t.id.clone(), result: ScanResult {
+            asset_id: job.asset_id.clone(), content_hash: job.content_hash.clone(), state: "recommended".into(), error: None,
+            evidence: Some(json!({"passed":native_accepts,"wholeFallback":false,"queryBoxes":[[0,0,832,1216]],
+                "evidence":[{"matchedReferences":[0,1,2,3,4,5],"referenceDistances":vec![if native_accepts {0.05} else {0.9};6]}]})),
+        }};
+        f.library.finalize_incremental(&tx, &job, &context, &[prediction], &BTreeSet::new(), &BTreeSet::new()).unwrap();
+        tx.commit().unwrap();
+        drop(c);
+        let accepted = pixai >= 0.85 && canary >= 0.85 && native_accepts && !manual_reject;
+        assert_eq!(!f.library.character_relations_for_asset("asset-5").unwrap().is_empty(), accepted);
+        assert_eq!(f.library.tagger_review_counts().unwrap().total, i64::from(!accepted && !manual_reject));
+        assert_eq!(f.library.tagger_review_items().unwrap().len(), usize::from(!accepted && !manual_reject));
+        if accepted || manual_reject {
+            let decision: (String, String) = f.library.connection().unwrap().query_row("SELECT decision,origin FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1", [&t.id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+            assert_eq!(decision, if accepted { ("accepted".into(), "automatic".into()) } else { ("rejected".into(), "manual".into()) });
         }
     }
 }

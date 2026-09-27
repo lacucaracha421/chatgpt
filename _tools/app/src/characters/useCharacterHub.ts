@@ -1,3 +1,4 @@
+import { CHARACTER_SUGGESTIONS_CHANGED_EVENT } from "./suggestions/client";
 import { useCallback, useEffect, useState } from "react";
 import { characterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterGroup, type CharacterSeries } from "./hubApi";
@@ -11,6 +12,10 @@ export function useCharacterHub(refreshVersion: number) {
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision(v => v + 1), []);
+  useEffect(() => {
+    window.addEventListener(CHARACTER_SUGGESTIONS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(CHARACTER_SUGGESTIONS_CHANGED_EVENT, refresh);
+  }, [refresh]);
   useEffect(() => {
     let active = true;
     void Promise.all([characterApi.targets(), characterHubApi.series(), characterHubApi.folderExclusions()]).then(async ([targets, series, folderExclusions]) => {
