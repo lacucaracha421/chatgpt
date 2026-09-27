@@ -216,6 +216,7 @@ pub(crate) struct PublisherLogs {
     pub similarity_decisions: Option<i64>,
     pub catalog_duplicate_decisions: Option<i64>,
     pub release_reads: Option<ReleaseReadsHead>,
+    pub upcoming_intents: Option<ReleaseReadsHead>,
     pub bindings: Option<BindingsHead>,
     pub personal_edits: Option<i64>,
     pub captures: Option<CapturesHead>,
@@ -266,6 +267,12 @@ impl PublisherLogs {
             character_review_decisions: head("characterReviewDecisions"),
             similarity_decisions: head("similarityDecisions"),
             catalog_duplicate_decisions: head("catalogDuplicateDecisions"),
+            upcoming_intents: block.get("upcomingIntents").and_then(|value| {
+                Some(ReleaseReadsHead {
+                    last: sequence(value.get("last"))?,
+                    pruned_through: sequence(value.get("prunedThrough"))?,
+                })
+            }),
             release_reads,
             bindings,
             personal_edits: head("personalEdits"),
@@ -3801,10 +3808,19 @@ fn release_status_error(status: u16, response: &mut ureq::http::Response<ureq::B
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CollectionsStatus {
+    /// Replica schema capability, independent of the personal-edit handshake.
+    #[serde(default)]
+    pub collection_types: Vec<String>,
     #[serde(default)]
     pub capabilities: Option<CollectionsCapabilities>,
     #[serde(default)]
     pub library_id: Option<String>,
+}
+
+impl CollectionsStatus {
+    pub(crate) fn supports_av_collections(&self) -> bool {
+        self.collection_types.iter().any(|kind| kind == "av")
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -3991,3 +4007,6 @@ impl CloudClient {
         Err(LibraryError::CloudRequestUnavailable)
     }
 }
+
+#[path = "home_publications.rs"]
+mod home_publications;

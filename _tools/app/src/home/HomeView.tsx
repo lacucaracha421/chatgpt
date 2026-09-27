@@ -16,6 +16,7 @@ import { TaggerReview } from "../characters/TaggerReview";
 import { taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type TaggerReviewItem, type TaggerReviewSource } from "../characters/taggerReviewClient";
 import { notesStore, type NotesStore } from "../notes/store";
 import { usePrivacy } from "../privacy/PrivacyContext";
+import { AvPortrait } from "../collections/av/AvPortrait";
 import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewItem } from "../characters/shadowReviewApi";
 import { ArtistThumb, ThumbStrip } from "../artists/ArtistHub";
 import { localDateAndOffset, useArtistGateway, useArtistRead } from "../artists/artistStore";
@@ -29,7 +30,7 @@ const ShadowReview = lazy(() => import("../characters/ShadowReview").then((modul
 const CatalogReviewDialog = lazy(() => import("../manga/CatalogReviewDialog").then((module) => ({ default: module.CatalogReviewDialog })));
 
 const native = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-const KIND_LABEL: Record<ReleaseKind, string> = { manga: "만화", game: "게임", movie: "영화" };
+const KIND_LABEL: Record<ReleaseKind, string> = { manga: "만화", game: "게임", movie: "영화", anime: "애니" };
 type KindFilter = "all" | ReleaseKind;
 type Tone = "ok" | "busy" | "idle" | "off";
 type Connection = { key: string; label: string; value: string; time?: string; tone: Tone; view: AssetView };
@@ -308,7 +309,7 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
               summary={<span className="home-release-summary">새 권 <span className="numeric">{releases.length}</span> · {UPCOMING_DAYS}일 안 <span className="numeric">{upcoming.length}</span> · 관심 <span className="numeric">{wishlist.filter((item) => !item.muted).length}</span></span>}
               actions={<>
                 <div className="home-chips" role="radiogroup" aria-label="종류">
-                  {(["all", "manga", "game", "movie"] as const).map((value) => {
+                  {(["all", "manga", "game", "movie", "anime"] as const).map((value) => {
                     const count = value === "all" ? shelfAll.length : shelfAll.filter(({ row }) => row.kind === value).length;
                     return <button key={value} type="button" role="radio" aria-checked={kind === value} className="home-chip" onClick={() => setKind(value)}>
                       {value === "all" ? "전체" : KIND_LABEL[value]} <span className="numeric">{count}</span></button>;
@@ -383,7 +384,7 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
               actions={<button type="button" className="home-header-action" onClick={go({ kind: "collections", typeFilter: "av", showcase: false })}>AV <Chevron /></button>}>
               <div className="home-av-performer">
                 <span className="home-av-performer__portrait">
-                  {overview.avPerformer.latestWork.frontArtworkId && <img src={workArtworkThumbnailUrl(overview.avPerformer.latestWork.frontArtworkId)} alt="" loading="lazy" decoding="async" />}
+                  {overview.avPerformer.portrait ? <AvPortrait portrait={overview.avPerformer.portrait} name={overview.avPerformer.displayName} size="home" /> : overview.avPerformer.latestWork.frontArtworkId && <img src={workArtworkThumbnailUrl(overview.avPerformer.latestWork.frontArtworkId)} alt="" loading="lazy" decoding="async" />}
                 </span>
                 <div className="home-av-performer__identity">
                   <b>{overview.avPerformer.displayName}</b>

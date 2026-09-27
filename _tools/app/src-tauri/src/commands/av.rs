@@ -1,6 +1,6 @@
-use tauri::State;
 use super::{current_required, AppState, CommandError};
-use crate::library::av_models::*;
+use crate::library::{av_models::*, av_portrait::AvPortraitState};
+use tauri::State;
 
 impl From<AvError> for CommandError {
     fn from(error: AvError) -> Self {
@@ -13,32 +13,190 @@ impl From<AvError> for CommandError {
     }
 }
 #[tauri::command]
-pub async fn get_av_details(collection_id:String,state:State<'_,AppState>) -> Result<AvDetails,CommandError> {
-    let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move||library.get_av_details(&collection_id)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+pub async fn get_av_details(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<AvDetails, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_av_details(&collection_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 #[tauri::command]
-pub async fn save_av_details(collection_id:String,input:SaveAvDetails,state:State<'_,AppState>) -> Result<AvDetails,CommandError> {
-    let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move||library.save_av_details(&collection_id,input)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+pub async fn save_av_details(
+    collection_id: String,
+    input: SaveAvDetails,
+    state: State<'_, AppState>,
+) -> Result<AvDetails, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.save_av_details(&collection_id, input))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 #[tauri::command]
-pub async fn search_av_people(query:String,state:State<'_,AppState>) -> Result<Vec<AvPerson>,CommandError> {
-    let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move||library.search_av_people(&query)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+pub async fn search_av_people(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<AvPerson>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.search_av_people(&query))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 #[tauri::command]
-pub async fn preview_av_artwork(path:String,surface:CoverSurface,state:State<'_,AppState>) -> Result<LocalArtworkPreview,CommandError> {
-    let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move||library.preview_av_artwork(&path,surface)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+pub async fn preview_av_artwork(
+    path: String,
+    surface: CoverSurface,
+    state: State<'_, AppState>,
+) -> Result<LocalArtworkPreview, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.preview_av_artwork(&path, surface))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 #[tauri::command]
-pub async fn apply_av_artwork(collection_id:String,input:ApplyAvArtwork,state:State<'_,AppState>) -> Result<AvCoverSet,CommandError> {
-    let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move||library.apply_av_artwork(&collection_id,input)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+pub async fn apply_av_artwork(
+    collection_id: String,
+    input: ApplyAvArtwork,
+    state: State<'_, AppState>,
+) -> Result<AvCoverSet, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.apply_av_artwork(&collection_id, input))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 #[tauri::command]
-pub async fn get_av_cover_set(collection_id:String,state:State<'_,AppState>) -> Result<AvCoverSet,CommandError> {
-    let library=current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move||library.get_av_cover_set(&collection_id)).await.map_err(|_|super::background_task_error())?.map_err(Into::into)
+pub async fn get_av_cover_set(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<AvCoverSet, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_av_cover_set(&collection_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn get_av_related(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<AvRelated, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_av_related(&collection_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn get_av_performer(
+    person_id: String,
+    state: State<'_, AppState>,
+) -> Result<AvPerformerPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_av_performer(&person_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn list_av_portrait_sources(
+    person_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<AvPortraitSource>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.list_av_portrait_sources(&person_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn save_av_person_memo(
+    person_id: String,
+    memo: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<AvPerformerPage, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.save_av_person_memo(&person_id, memo))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn set_av_portrait_crop(
+    person_id: String,
+    artwork_id: String,
+    rect: AvPortraitRect,
+    state: State<'_, AppState>,
+    portraits: State<'_, AvPortraitState>,
+) -> Result<AvPortrait, CommandError> {
+    let library = current_required(state)?;
+    let portraits = portraits.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = library.set_av_portrait_crop(&person_id, &artwork_id, rect)?;
+        portraits.discard(&library, &person_id);
+        Ok::<_, AvError>(result)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn preview_av_commons_portrait(
+    person_id: String,
+    state: State<'_, AppState>,
+    portraits: State<'_, AvPortraitState>,
+) -> Result<Option<AvCommonsPreview>, CommandError> {
+    let library = current_required(state)?;
+    let portraits = portraits.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.preview_av_commons_portrait_with(
+            &person_id,
+            &portraits,
+            &crate::library::av_link::provider::NetworkClient::new(),
+        )
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn use_av_commons_portrait(
+    person_id: String,
+    state: State<'_, AppState>,
+    portraits: State<'_, AvPortraitState>,
+) -> Result<AvPortrait, CommandError> {
+    let library = current_required(state)?;
+    let portraits = portraits.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.use_av_commons_portrait(&person_id, &portraits)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn clear_av_portrait(
+    person_id: String,
+    state: State<'_, AppState>,
+    portraits: State<'_, AvPortraitState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    let portraits = portraits.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.clear_av_portrait(&person_id)?;
+        portraits.discard(&library, &person_id);
+        Ok::<_, AvError>(())
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
 }

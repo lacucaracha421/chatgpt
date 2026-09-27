@@ -180,8 +180,9 @@ async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
 
 describe("CollectionOverlay MangaDex flow", () => {
   it("closes AV info editing before leaving the collection on Escape", async () => {
-    const details = vi.spyOn(avGateway, "getDetails").mockResolvedValue({ collectionId: "av-1", revision: 0, productCode: null, label: null, series: null, people: [] });
+    const details = vi.spyOn(avGateway, "getDetails").mockResolvedValue({ collectionId: "av-1", revision: 0, productCode: null, label: null, series: null, titleJa: null, releaseDate: null, maker: null, genres: [], makerCount: 0, labelCount: 0, seriesCount: 0, people: [] });
     const covers = vi.spyOn(avGateway, "getCoverSet").mockResolvedValue({ frontId: null, spineId: null, backId: null, revision: "0" });
+    const related = vi.spyOn(avGateway, "getRelated").mockResolvedValue({ performers: [], series: null, label: null });
     const people = vi.spyOn(avGateway, "searchPeople").mockResolvedValue([]);
     try {
       const { onExit } = renderOverlay({}, undefined, undefined, { ...collection, id: "av-1", type: "av" });
@@ -193,7 +194,7 @@ describe("CollectionOverlay MangaDex flow", () => {
       await userEvent.keyboard("{Escape}");
       expect(onExit).toHaveBeenCalledTimes(1);
     } finally {
-      details.mockRestore(); covers.mockRestore(); people.mockRestore();
+      details.mockRestore(); covers.mockRestore(); related.mockRestore(); people.mockRestore();
     }
   });
 

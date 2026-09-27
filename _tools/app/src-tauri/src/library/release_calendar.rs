@@ -1,5 +1,5 @@
-//! The 발매 캘린더: upcoming games (IGDB) and movies (TMDB, Korean theatrical releases) for
-//! roughly the next six months, cached locally and refreshed at most once a day.
+//! The 발매 캘린더: upcoming games (IGDB), Korean theatrical movies and Japanese TV anime
+//! seasons (TMDB) for roughly the next six months, cached locally and refreshed daily.
 //!
 //! Sources and filters (see `docs/research/home-upcoming-sources-20260926.md`):
 //!
@@ -7,7 +7,7 @@
 //!   window on a current major platform ([`IGDB_MAJOR_PLATFORMS`]), it has at least
 //!   [`IGDB_MIN_HYPES`] hypes (IGDB follows before release, the only pre-release popularity
 //!   signal IGDB exposes), it is not an edition (`version_parent = null`) or a DLC/expansion
-//!   (`parent_game = null`), and its `game_type` is not an add-on type. That keeps the list to
+//!   (`parent_game = null`, except remakes and remasters), and its `game_type` is not an add-on type. That keeps the list to
 //!   the few hundred titles people are waiting for instead of thousands of store uploads.
 //!   The headline date prefers the Korean release, then Asia, then worldwide, then the
 //!   earliest; its precision comes from `release_dates.date_format` (deprecated `category` as a
@@ -18,6 +18,17 @@
 //!   [`TMDB_DETAIL_LIMIT`] titles is read from `/movie/{id}/release_dates`. Titles whose
 //!   primary release is more than a year before the window are re-releases and are dropped.
 //!   TMDB content is cached for at most [`TMDB_MAX_CACHE_DAYS`] days, as its terms require.
+//!
+//! * **Anime — TMDB `/discover/tv`**, Japanese origin and animation genre, sorted by
+//!   popularity, at most three pages and [`TMDB_TV_DETAIL_LIMIT`] unique shows. `/tv/{id}`
+//!   supplies season starts: season 1 is a new series, later seasons are new seasons.
+//!   Specials and continuing episodes of seasons that started outside the window are omitted.
+//!   Dates are Japanese broadcast dates (JP); Korean names fall back to original names.
+//!
+//! Anime uses provider `tmdb`, external id `tv:<showId>:s<season>` (season >= 1), hence
+//! `tmdb:tv:123:s2` cannot collide with movie `tmdb:123`. The `tmdb_tv` cache/source key
+//! isolates TV refresh failures from movies; both use the same credentials, daily refresh,
+//! and 180-day expiry. It is a cache key, not a title provider.
 //!
 //! Stable title ids are `provider:external_id` (`igdb:1942`, `tmdb:12345`).
 
@@ -46,7 +57,11 @@ pub(crate) const IGDB_MAJOR_PLATFORMS: &[(i64, &str)] = &[
 ];
 /// Minimum IGDB hypes for a game to appear in the calendar.
 pub(crate) const IGDB_MIN_HYPES: i64 = 3;
+/// Minimum IGDB hypes for a title released only on PC.
+pub(crate) const IGDB_PC_ONLY_MIN_HYPES: i64 = 10;
 const IGDB_PAGE_SIZE: usize = 500;
+// Remakes (game_type 8) and remasters (9) point `parent_game` at the original, so the add-on
+// filter `parent_game = null` alone would drop them (e.g. a Zelda remake).
 const IGDB_MAX_PAGES: usize = 2;
 /// IGDB `game_type` values that are add-ons rather than games of their own.
 const IGDB_EXCLUDED_GAME_TYPES: &[&str] = &[
@@ -70,6 +85,8 @@ game_localizations.name,game_localizations.region.identifier,game_localizations.
 const TMDB_DISCOVER_PAGES: u32 = 3;
 /// How many of the most popular Discover results get their Korean date looked up.
 pub(crate) const TMDB_DETAIL_LIMIT: usize = 60;
+/// Maximum unique TV shows whose season starts are read from their details.
+pub(crate) const TMDB_TV_DETAIL_LIMIT: usize = 60;
 const TMDB_RERELEASE_DAYS: i64 = 365;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +126,7 @@ impl DatePrecision {
 pub enum ReleaseKind {
     Game,
     Movie,
+    Anime,
 }
 
 impl ReleaseKind {
@@ -116,13 +134,14 @@ impl ReleaseKind {
         match self {
             Self::Game => "game",
             Self::Movie => "movie",
+            Self::Anime => "anime",
         }
     }
 
     pub(crate) fn provider(self) -> &'static str {
         match self {
             Self::Game => "igdb",
-            Self::Movie => "tmdb",
+            Self::Movie | Self::Anime => "tmdb",
         }
     }
 }
@@ -138,7 +157,7 @@ pub struct ProviderReleaseDate {
     pub precision: DatePrecision,
 }
 
-/// A game or movie with its headline date and every known date.
+/// A game, movie or anime season with its headline date and every known date.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseTitle {
@@ -596,7 +615,7 @@ pub(crate) fn igdb_calendar_body(start: NaiveDate, end: NaiveDate, offset: usize
     format!(
         "fields {IGDB_FIELDS}; where release_dates.date >= {} & release_dates.date < {} \
          & release_dates.platform = ({platforms}) & hypes >= {IGDB_MIN_HYPES} \
-         & version_parent = null & parent_game = null; sort hypes desc; limit {IGDB_PAGE_SIZE}; \
+         & version_parent = null & (parent_game = null | game_type = (8,9)); sort hypes desc; limit {IGDB_PAGE_SIZE}; \
          offset {offset};",
         timestamp(start),
         timestamp(end),
@@ -628,6 +647,12 @@ pub(crate) fn fetch_upcoming_games(
         )?;
         let count = games.len();
         for title in games.iter().filter_map(|game| igdb_title(game, true)) {
+            // PC-only titles are mostly small Steam releases: they need more hypes than
+            // console titles to appear (user, 2026-09-27). Watched games are not filtered.
+            let pc_only = title.platforms.iter().all(|platform| platform == "PC");
+            if pc_only && title.popularity < IGDB_PC_ONLY_MIN_HYPES as f64 {
+                continue;
+            }
             if overlaps(&title, start, end) && !titles.iter().any(|known| known.id == title.id) {
                 titles.push(title);
             }
@@ -755,7 +780,14 @@ pub(crate) fn tmdb_title(movie: &Value, release_dates: Option<&Value>) -> Option
 fn tmdb_object(json: &str) -> Result<Value, LibraryError> {
     match serde_json::from_str::<Value>(json) {
         Ok(value @ Value::Object(_)) => Ok(value),
-        _ => Err(LibraryError::TmdbInvalidResponse),
+        _ => {
+            // Diagnostic for the dev terminal: the start of a body that is not a JSON object.
+            eprintln!(
+                "[tmdb] unreadable body: {}",
+                json.chars().take(200).collect::<String>()
+            );
+            Err(LibraryError::TmdbInvalidResponse)
+        }
     }
 }
 
@@ -844,6 +876,172 @@ pub(crate) fn fetch_movie(
     tmdb_title(&movie, None).ok_or(LibraryError::TmdbInvalidResponse)
 }
 
+/// Normalize a season from the Korean TV detail. Undated seasons remain trackable in
+/// the wishlist, but do not enter the calendar until an exact start is available.
+pub(crate) fn tmdb_anime_title(show: &Value, season: &Value) -> Option<ReleaseTitle> {
+    let id = show.get("id")?.as_i64().filter(|id| *id > 0)?;
+    let number = season
+        .get("season_number")?
+        .as_i64()
+        .filter(|number| *number >= 1)?;
+    let original = tmdb_text(show, "original_name");
+    let name = tmdb_text(show, "name").or_else(|| original.clone())?;
+    let title = if number == 1 {
+        name.clone()
+    } else {
+        let label = tmdb_text(season, "name")
+            .filter(|label| {
+                let compact = label.to_lowercase().replace(' ', "");
+                let generic = compact
+                    .strip_prefix("season")
+                    .or_else(|| compact.strip_prefix("시즌"));
+                label != &name
+                    && original.as_ref() != Some(label)
+                    && label
+                        .chars()
+                        .any(|ch| ('\u{ac00}'..='\u{d7a3}').contains(&ch))
+                    && !generic.is_some_and(|suffix| {
+                        suffix.is_empty() || suffix.chars().all(|ch| ch.is_ascii_digit())
+                    })
+            })
+            .unwrap_or_else(|| format!("시즌 {number}"));
+        format!("{name} · {label}")
+    };
+    let day = tmdb_day(season.get("air_date").and_then(Value::as_str));
+    let date = day.map(|day| day.format("%Y-%m-%d").to_string());
+    let precision = if day.is_some() {
+        DatePrecision::Exact
+    } else {
+        DatePrecision::Tbd
+    };
+    let external_id = format!("tv:{id}:s{number}");
+    Some(ReleaseTitle {
+        id: format!("tmdb:{external_id}"),
+        kind: ReleaseKind::Anime,
+        provider: "tmdb".into(),
+        external_id,
+        original_title: original.filter(|original| original != &name),
+        title,
+        cover: tmdb_text(season, "poster_path")
+            .filter(|path| path.starts_with('/'))
+            .or_else(|| tmdb_text(show, "poster_path").filter(|path| path.starts_with('/'))),
+        platforms: Vec::new(),
+        date: date.clone(),
+        precision,
+        region: Some("JP".into()),
+        popularity: show
+            .get("popularity")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
+        dates: vec![ProviderReleaseDate {
+            region: "JP".into(),
+            platform: String::new(),
+            date,
+            precision,
+        }],
+    })
+}
+
+fn fetch_tv(transport: &dyn ReleaseTransport, id: i64) -> Result<Value, LibraryError> {
+    let show =
+        tmdb_object(&transport.tmdb(&format!("/tv/{id}"), &[("language", "ko-KR".into())])?)?;
+    if show.get("id").and_then(Value::as_i64) != Some(id) {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    if !show.get("seasons").is_some_and(Value::is_array) {
+        return Err(LibraryError::TmdbInvalidResponse);
+    }
+    Ok(show)
+}
+
+pub(crate) fn fetch_anime(
+    transport: &dyn ReleaseTransport,
+    id: i64,
+    number: i64,
+) -> Result<ReleaseTitle, LibraryError> {
+    if id <= 0 || number <= 0 {
+        return Err(LibraryError::InvalidTmdbIdentity);
+    }
+    let show = fetch_tv(transport, id)?;
+    let season = show["seasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|season| season.get("season_number").and_then(Value::as_i64) == Some(number))
+        .ok_or(LibraryError::TmdbNotFound)?;
+    tmdb_anime_title(&show, season).ok_or(LibraryError::TmdbInvalidResponse)
+}
+
+pub(crate) fn fetch_upcoming_anime(
+    transport: &dyn ReleaseTransport,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<Vec<ReleaseTitle>, LibraryError> {
+    let mut discovered = Vec::new();
+    for page in 1..=TMDB_DISCOVER_PAGES {
+        let response = tmdb_object(&transport.tmdb(
+            "/discover/tv",
+            &[
+                ("with_origin_country", "JP".into()),
+                ("with_genres", "16".into()),
+                ("language", "ko-KR".into()),
+                ("sort_by", "popularity.desc".into()),
+                ("air_date.gte", start.format("%Y-%m-%d").to_string()),
+                (
+                    "air_date.lte",
+                    (end - Duration::days(1)).format("%Y-%m-%d").to_string(),
+                ),
+                ("include_adult", "false".into()),
+                ("page", page.to_string()),
+            ],
+        )?)?;
+        let results = response
+            .get("results")
+            .and_then(Value::as_array)
+            .ok_or(LibraryError::TmdbInvalidResponse)?;
+        discovered.extend(results.iter().cloned());
+        if u64::from(page)
+            >= response
+                .get("total_pages")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+        {
+            break;
+        }
+    }
+    let popularity = |show: &Value| {
+        show.get("popularity")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+    };
+    discovered.sort_by(|a, b| popularity(b).total_cmp(&popularity(a)));
+    let mut seen = std::collections::HashSet::new();
+    let ids = discovered
+        .iter()
+        .filter_map(|show| show.get("id").and_then(Value::as_i64))
+        .filter(|id| *id > 0 && seen.insert(*id))
+        .take(TMDB_TV_DETAIL_LIMIT);
+    let mut titles: Vec<ReleaseTitle> = Vec::new();
+    for id in ids {
+        let show = match fetch_tv(transport, id) {
+            Ok(show) => show,
+            Err(LibraryError::TmdbNotFound) => continue,
+            Err(error) => return Err(error),
+        };
+        for title in show["seasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|season| tmdb_anime_title(&show, season))
+        {
+            if overlaps(&title, start, end) && !titles.iter().any(|known| known.id == title.id) {
+                titles.push(title);
+            }
+        }
+    }
+    Ok(titles)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Cache
 
@@ -919,7 +1117,7 @@ pub(crate) fn cached_title(
     id: &str,
     now: DateTime<Utc>,
 ) -> Result<Option<ReleaseTitle>, LibraryError> {
-    for provider in ["igdb", "tmdb"] {
+    for provider in ["igdb", "tmdb", "tmdb_tv"] {
         if let Some(title) = read_cache(connection, provider, now)?
             .entries
             .into_iter()
@@ -957,7 +1155,7 @@ impl Library {
             .collect::<Result<_, _>>()?;
         let mut entries = Vec::new();
         let mut sources = Vec::new();
-        for provider in ["igdb", "tmdb"] {
+        for provider in ["igdb", "tmdb", "tmdb_tv"] {
             let cache = read_cache(&connection, provider, now)?;
             sources.push(CalendarSourceStatus {
                 provider: provider.into(),
@@ -1013,7 +1211,7 @@ impl Library {
         today: NaiveDate,
     ) -> Result<ReleaseCalendar, LibraryError> {
         let (start, end) = window(today);
-        for provider in ["igdb", "tmdb"] {
+        for provider in ["igdb", "tmdb", "tmdb_tv"] {
             let due = {
                 let connection = self.connection()?;
                 let cache = read_cache(&connection, provider, now)?;
@@ -1021,14 +1219,12 @@ impl Library {
                     now - fetched < Duration::minutes(RETRY_AFTER_FAILURE_MINUTES)
                 });
                 if force {
-                    !recently_fetched
-                        && refresh_due(
-                            &CacheRow {
-                                fetched_at: None,
-                                ..cache
-                            },
-                            now,
-                        )
+                    // A manual refresh retries a failed provider after a minute instead of
+                    // waiting out the automatic back-off; a fresh success still is not refetched.
+                    let just_tried = cache
+                        .attempted_at
+                        .is_some_and(|attempted| now - attempted < Duration::minutes(1));
+                    !recently_fetched && !just_tried
                 } else {
                     refresh_due(&cache, now)
                 }
@@ -1038,8 +1234,10 @@ impl Library {
             }
             let fetched = if provider == "igdb" {
                 fetch_upcoming_games(transport, start, end)
-            } else {
+            } else if provider == "tmdb" {
                 fetch_upcoming_movies(transport, start, end)
+            } else {
+                fetch_upcoming_anime(transport, start, end)
             };
             let connection = self.connection()?;
             let attempted = now.to_rfc3339();

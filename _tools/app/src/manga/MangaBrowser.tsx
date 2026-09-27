@@ -149,14 +149,14 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
 
   if (root === undefined) {
     return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
+      <ViewToolbar title="망가" titleContent="로컬" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
       <div className="manga-browser__content"><Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /></div>
     </section>;
   }
 
   if (!root) {
     return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
+      <ViewToolbar title="망가" titleContent="로컬" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
       <div className="manga-browser__content"><EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState></div>
     </section>;
   }
@@ -168,6 +168,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   return <section className="manga-browser" aria-label="망가">
     <ViewToolbar
       title="망가"
+      titleContent="로컬"
       ariaLabel="망가 도구"
       chrome={{
         navigation: localNavigation,

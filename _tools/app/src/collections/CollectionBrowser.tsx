@@ -246,20 +246,30 @@ export function CollectionBrowser({
   const inbox = Boolean(releaseProvider) || releaseCalendar;
   const libraryView = !inbox && !showcase;
   const sortValue = `${libraryState.sort}:${libraryState.direction}`;
-  // The index: type rows and the 신간 row as selected-slab links, then the library's sort / 내 별점.
+  // The index: type rows and news rows as separate selected-slab sections, then the library's sort / 내 별점.
+  const hasNewsNavigation = Boolean(tracking || calendarApi);
   const indexNavigation = <>
-    <span className="workspace-section-label">작품 유형</span>
-    <div className="collection-index__types" role="group" aria-label="컬렉션 유형">
-      {TYPES.map(value => <button key={value} type="button" className={`workspace-index-link${value === "av" ? " collection-index__av" : ""}`}
-        aria-current={!inbox && value === typeFilter ? "page" : undefined}
-        aria-label={value === "av" && avInbox.items.length > 0 ? `AV, 받은 품번 ${avInbox.items.length.toLocaleString()}개` : undefined}
-        onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}{value === "av" && avInbox.items.length > 0 && <span className="collection-index__count" aria-hidden="true">{avInbox.items.length.toLocaleString()}</span>}</button>)}
-      {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
-        aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
-        onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
-      {calendarApi && <button type="button" className="workspace-index-link collection-index__calendar" aria-current={releaseCalendar ? "page" : undefined}
-        aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"}
-        onClick={() => { if (!releaseCalendar) openCalendar(); }}>발매 캘린더{wishlistUnread > 0 && <span className="collection-index__count" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}</button>}
+    <div className="collection-index">
+      <div className="collection-index__section">
+        <span className="workspace-section-label">작품 유형</span>
+        <div className="collection-index__types" role="group" aria-label="컬렉션 유형">
+          {TYPES.map(value => <button key={value} type="button" className={`workspace-index-link${value === "av" ? " collection-index__av" : ""}`}
+            aria-current={!inbox && value === typeFilter ? "page" : undefined}
+            aria-label={value === "av" && avInbox.items.length > 0 ? `AV, 받은 품번 ${avInbox.items.length.toLocaleString()}개` : undefined}
+            onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}{value === "av" && avInbox.items.length > 0 && <span className="collection-index__count" aria-hidden="true">{avInbox.items.length.toLocaleString()}</span>}</button>)}
+        </div>
+      </div>
+      {hasNewsNavigation && <div className="collection-index__section">
+        <span className="workspace-section-label">소식</span>
+        <div className="collection-index__news" role="group" aria-label="컬렉션 소식">
+          {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
+            aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
+            onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
+          {calendarApi && <button type="button" className="workspace-index-link collection-index__calendar" aria-current={releaseCalendar ? "page" : undefined}
+            aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"}
+            onClick={() => { if (!releaseCalendar) openCalendar(); }}>발매 캘린더{wishlistUnread > 0 && <span className="collection-index__count" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}</button>}
+        </div>
+      </div>}
     </div>
     {libraryView && <div className="chrome-index-controls chrome-settings-controls collection-index__controls">
       <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
@@ -298,7 +308,7 @@ export function CollectionBrowser({
     <section className="collection-browser" aria-label="컬렉션">
       <ViewToolbar
         title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
-        titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? "쇼케이스" : "컬렉션"}
+        titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
         ariaLabel="컬렉션 도구"
         leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
         chrome={{

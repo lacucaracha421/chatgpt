@@ -6,10 +6,12 @@
 .collection-rating-filter .ui-slider input.is-idle { opacity: .45; }
 .collection-rating-filter .ui-button[aria-pressed="true"] { background: var(--color-filter-selected); border-color: var(--color-filter-border); color: var(--color-filter-text); }
 
-/* Index (2026-09-26): type rows and the 신간 row as selected-slab links (mark on the right, no
-   outside cursor), then the library's 정렬 · 필터 controls. */
-.collection-index__types { display: flex; flex-direction: column; gap: var(--space-1); }
-.collection-index__release { margin-top: var(--space-2); }
+/* Index (2026-09-26): type and news rows are separate selected-slab sections (mark on the right,
+   no outside cursor), then the library's 정렬 · 필터 controls. */
+.collection-index { display: flex; flex-direction: column; gap: var(--space-3); }
+.collection-index__section { display: flex; flex-direction: column; gap: var(--space-1); }
+.collection-index__types, .collection-index__news { display: flex; flex-direction: column; gap: var(--space-1); }
+.collection-index__release { margin-top: 0; }
 .collection-index__count { margin-left: auto; color: var(--color-text); font-family: var(--font-numeric); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
 .collection-index__release[aria-current=page] .collection-index__count, .collection-index__calendar[aria-current=page] .collection-index__count, .collection-index__av[aria-current=page] .collection-index__count { color: inherit; }
 .collection-index__release[aria-current=page]:has(.collection-index__count)::after, .collection-index__calendar[aria-current=page]:has(.collection-index__count)::after, .collection-index__av[aria-current=page]:has(.collection-index__count)::after { margin-left: 0; }

@@ -1,4 +1,4 @@
-//! 발매 캘린더 and 관심 목록 (game/movie wishlist) commands.
+//! 발매 캘린더 and 관심 목록 (game/movie/anime wishlist) commands.
 
 use tauri::State;
 
@@ -45,7 +45,7 @@ pub async fn list_release_wishlist(
         .map_err(CommandError::from)
 }
 
-/// `id` is `igdb:<game id>` or `tmdb:<movie id>`.
+/// `id` is `igdb:<game id>`, `tmdb:<movie id>` or `tmdb:tv:<show id>:s<season>`.
 #[tauri::command]
 pub async fn add_release_wishlist_item(
     id: String,

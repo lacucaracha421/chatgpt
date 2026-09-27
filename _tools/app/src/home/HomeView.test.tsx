@@ -187,7 +187,7 @@ describe("HomeView", () => {
     gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 0, week: 41 }, {}, {
       collections: { game: 0, manga: 0, movie: 0, av: 9 },
       avPerformer: { id: "person-1", displayName: "하야세 미오", originalName: "早瀬みお", knownWorks: 24, ownedWorks: 9,
-        latestWork: latest, recentOwnedWorks: [latest, { ...latest, collectionId: "av-2", frontArtworkId: "cover-2" }, { ...latest, collectionId: "av-3", frontArtworkId: "cover-3" }] },
+        latestWork: latest, recentOwnedWorks: [latest, { ...latest, collectionId: "av-2", frontArtworkId: "cover-2" }, { ...latest, collectionId: "av-3", frontArtworkId: "cover-3" }], portrait: null },
     }));
     const { onNavigate } = renderHome({ props: { avLinkApi } });
     const row = await within(section("확인할 것")).findByRole("button", { name: /AV 품번/ });
@@ -211,6 +211,18 @@ describe("HomeView", () => {
     const index = await screen.findByRole("navigation", { name: "홈 인덱스" });
     await waitFor(() => expect(within(index).getByRole("button", { name: /48,213이미지/ })).toBeInTheDocument());
     expect(within(index).queryByRole("button", { name: /9AV/ })).not.toBeInTheDocument();
+  });
+
+  it("uses the saved AV performer portrait on the Home card", async () => {
+    const latest = { collectionId: "av-1", productCode: "MOCK-417", title: "여름 끝의 약속", releaseDate: "2026-09-12", frontArtworkId: "cover-1" };
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 0, week: 41 }, {}, {
+      collections: { game: 0, manga: 0, movie: 0, av: 9 },
+      avPerformer: { id: "person-1", displayName: "하야세 미오", originalName: "早瀬みお", knownWorks: 24, ownedWorks: 9,
+        latestWork: latest, recentOwnedWorks: [latest], portrait: { kind: "commons", dataUrl: "data:image/png;base64,portrait", fileName: "mio.png", author: "저자", license: "CC BY", licenseUrl: null, sourceUrl: "https://commons.wikimedia.org/wiki/File:mio.png" } },
+    }));
+    renderHome();
+    const performer = await screen.findByRole("region", { name: "오늘의 AV 배우" });
+    expect(within(performer).getByRole("img", { name: "하야세 미오 대표 이미지" })).toHaveAttribute("src", "data:image/png;base64,portrait");
   });
 
   it("lays out a busy day and sends every row to the screen that owns it", async () => {

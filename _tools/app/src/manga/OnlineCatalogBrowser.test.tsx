@@ -158,6 +158,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(within(index).queryByRole("button", { name: "중복 후보 검토" })).not.toBeInTheDocument();
     expect(within(index).queryByRole("checkbox", { name: "숨긴 결과 표시" })).not.toBeInTheDocument();
     expect(within(index).getByRole("button", { name: "카탈로그" })).toBeVisible();
+    expect(within(screen.getByTestId("shared-titlebar")).getByRole("heading", { name: "카탈로그" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "창 닫기" })).toHaveLength(1);
     expect(screen.getByTestId("shared-titlebar")).toContainElement(screen.getByRole("toolbar"));
     expect(within(screen.getByTestId("shared-titlebar")).queryByLabelText("정렬")).not.toBeInTheDocument();
@@ -681,6 +682,7 @@ describe("OnlineCatalogBrowser", () => {
 it("opens bookmarks without the default hot-day date restriction", async () => {
   const gateway = createGateway(true);
   renderBrowser(gateway, "bookmarked");
+  expect(screen.getByRole("heading", { name: "북마크" })).toBeInTheDocument();
   await waitFor(() => expect(gateway.searchOnlineCatalog).toHaveBeenCalledWith(
     expect.objectContaining({ scope: "bookmarked", sort: "latest", page: 0 }),
   ));

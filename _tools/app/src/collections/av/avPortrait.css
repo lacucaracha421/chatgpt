@@ -1,0 +1,21 @@
+.av-portrait {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  width: var(--portrait-width);
+  height: var(--portrait-height);
+  overflow: hidden;
+  place-items: center;
+  color: var(--color-muted);
+  background: linear-gradient(160deg, #34373a, #222527);
+  border-radius: 50%;
+  font-size: calc(var(--portrait-width) * .34);
+  font-weight: 500;
+  line-height: 1;
+}
+.av-portrait__crop { position: absolute; inset: 0 0 auto; aspect-ratio: 3 / 4; background-repeat: no-repeat; }
+.av-portrait img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.av-portrait--performer { border-radius: var(--radius-tile); }
+.av-portrait--home { border-radius: var(--radius-tile); }
+.av-portrait--custom { border-radius: 50%; }
+.av-portrait[aria-label$="이니셜"] { box-shadow: inset 0 0 0 1px rgb(255 255 255 / 8%); }

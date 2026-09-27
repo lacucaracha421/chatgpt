@@ -2080,3 +2080,86 @@ impl super::Library {
         set_settings(&*self.connection()?, settings)
     }
 }
+
+/// The hub's complete read projection, including hidden and explicitly managed empty artists.
+/// Keys describe creator fallback ownership; an asset assignment must never move its key.
+pub(crate) fn home_publication(
+    connection: &Connection,
+    now: DateTime<Utc>,
+) -> Result<serde_json::Value, LibraryError> {
+    let snapshot = Snapshot::load(connection)?;
+    let mut groups = snapshot.groups();
+    let mut keys: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for id in snapshot.artists.keys() {
+        groups.entry(format!("{ARTIST_PREFIX}{id}")).or_default();
+    }
+    for key in snapshot
+        .members
+        .keys()
+        .chain(snapshot.assets.iter().filter_map(|a| a.key.as_ref()))
+    {
+        let scope = snapshot.scope_of_key(key);
+        groups.entry(scope.clone()).or_default();
+        keys.entry(scope).or_default().insert(key.clone());
+    }
+    let mut artists: Vec<_> = groups
+        .iter()
+        .map(|(scope, group)| {
+            let mut artist = snapshot.summary(scope, group, &now);
+            artist.keys = keys.remove(scope).unwrap_or_default().into_iter().collect();
+            artist.cover_asset_ids.truncate(8);
+            // Source-provided names may be longer or multiline; the publication text is bounded.
+            let clean = |value: &str| {
+                value
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect::<String>()
+                    .trim()
+                    .chars()
+                    .take(500)
+                    .collect::<String>()
+            };
+            artist.label = clean(&artist.label);
+            if artist.label.is_empty() {
+                artist.label = clean(&artist.id);
+            }
+            artist.display_name = artist
+                .display_name
+                .as_deref()
+                .map(clean)
+                .filter(|v| !v.is_empty());
+            artist.source_name = artist
+                .source_name
+                .as_deref()
+                .map(clean)
+                .filter(|v| !v.is_empty());
+            artist
+        })
+        .collect();
+    sort_summaries(&mut artists, ArtistSort::Recent);
+    artists.sort_by_key(|artist| !artist.pinned);
+    let normal: HashSet<_> = snapshot.assets.iter().map(|a| &a.id).collect();
+    let mut assignments: Vec<_> = snapshot
+        .assignments
+        .iter()
+        .filter(|(asset, _)| normal.contains(asset))
+        .map(|(asset, assignment)| {
+            serde_json::json!({
+                "assetId": asset, "artistId": format!("{ARTIST_PREFIX}{}", assignment.artist_id),
+                "source": assignment.source,
+            })
+        })
+        .collect();
+    assignments.sort_by(|a, b| a["assetId"].as_str().cmp(&b["assetId"].as_str()));
+    if artists.len() > 20_000
+        || assignments.len() > 50_000
+        || artists.iter().any(|a| a.keys.len() > 500)
+    {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    let (none, source) = snapshot.unknown_counts();
+    Ok(
+        serde_json::json!({"version": 1, "settings": snapshot.settings,
+        "unknown": {"none": none, "source": source}, "artists": artists, "assignments": assignments}),
+    )
+}

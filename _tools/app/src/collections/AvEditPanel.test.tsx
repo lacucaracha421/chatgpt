@@ -4,10 +4,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AvEditPanel } from "./AvEditPanel";
 import type { AvDetails, AvGateway } from "./avTypes";
 afterEach(cleanup);
-const details: AvDetails = { collectionId: "av", revision: 2, productCode: "CODE", label: null, series: null, people: [
-  { id: "person-a", displayName: "동명", role: "performer", order: 0, creditName: null },
-  { id: "person-b", displayName: "동명", role: "performer", order: 1, creditName: null },
-] };
+const person = (id: string, order: number) => ({ id, displayName: "동명", role: "performer" as const, order, creditName: null, nameJa: null, workCount: 2, portrait: null });
+const details: AvDetails = { collectionId: "av", revision: 2, productCode: "CODE", label: null, series: null, titleJa: null, releaseDate: null, maker: null, genres: [], makerCount: 0, labelCount: 0, seriesCount: 0, people: [person("person-a", 0), person("person-b", 1)] };
 it("keeps same-name identities and saves role order with the original revision", async () => {
   const user = userEvent.setup(), saveDetails = vi.fn().mockResolvedValue({ ...details, revision: 3 });
   render(<AvEditPanel details={details} api={{ saveDetails, searchPeople: vi.fn() } as unknown as AvGateway} onClose={vi.fn()} onSaved={vi.fn()} />);

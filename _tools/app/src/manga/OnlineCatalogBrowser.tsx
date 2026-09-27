@@ -524,6 +524,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     <ViewToolbar
       title="망가"
+      titleContent={scope === "bookmarked" ? "북마크" : "카탈로그"}
       titleAccessory={refreshAge && latestUpdate && <time className="online-catalog__refresh-age" dateTime={latestUpdate}
         aria-description={`카탈로그 DB 갱신 ${localDateTime(latestUpdate)}`}>{refreshAge}</time>}
       ariaLabel="온라인 망가 도구"

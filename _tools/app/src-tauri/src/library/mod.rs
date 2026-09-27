@@ -15,7 +15,9 @@ pub(crate) mod authority_pass;
 pub(crate) mod av_link;
 pub(crate) mod av_artwork;
 pub(crate) mod av_collection;
+mod av_detail;
 pub(crate) mod av_models;
+pub(crate) mod av_portrait;
 mod backup;
 pub mod book_migration;
 pub(crate) mod bookmark_outbox;
@@ -63,6 +65,7 @@ pub mod character_reference_refresh;
 #[cfg(test)]
 mod character_reference_refresh_bench;
 pub mod character_reference_regions;
+pub(crate) mod home_publications;
 pub(crate) mod character_review_feed;
 pub(crate) mod character_review_sync;
 pub mod character_scan;

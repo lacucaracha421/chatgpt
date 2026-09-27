@@ -227,7 +227,7 @@ fn igdb_calendar_drops_add_ons_minor_platforms_and_out_of_window_titles() {
         "release_dates.platform = (6,167,48,508,130,169,49)",
         "hypes >= 3",
         "version_parent = null",
-        "parent_game = null",
+        "(parent_game = null | game_type = (8,9))",
         "sort hypes desc",
         "release_dates.date_format.format",
         "release_dates.release_region.region",
@@ -351,15 +351,19 @@ fn calendar_refreshes_at_most_daily_backs_off_after_failures_and_expires_old_tmd
         .unwrap();
     assert!(igdb.fetched_at.is_some() && !igdb.due && igdb.error_code.is_none());
 
-    // Within the day (and the failure back-off) nothing is requested again, even when forced.
+    // Within the day (and the failure back-off) an automatic refresh requests nothing; a manual
+    // (forced) refresh retries only the failed provider, never the fresh one.
     let before = transport.requests.borrow().len();
     library
         .refresh_release_calendar_with(&transport, false, at("2026-09-26T03:30:00Z"), today)
         .unwrap();
+    assert_eq!(transport.requests.borrow().len(), before);
     library
         .refresh_release_calendar_with(&transport, true, at("2026-09-26T03:30:00Z"), today)
         .unwrap();
-    assert_eq!(transport.requests.borrow().len(), before);
+    assert!(transport.requests.borrow()[before..]
+        .iter()
+        .all(|request| request.starts_with("tmdb ")));
 
     // After the back-off the failed provider is retried; the fresh one is not.
     library
@@ -455,5 +459,256 @@ fn provider_failures_map_to_public_codes() {
     assert_eq!(
         error_code(&LibraryError::TmdbInvalidResponse),
         "invalid_response"
+    );
+}
+
+pub(crate) fn anime_show(id: i64, seasons: Value) -> Value {
+    json!({"id": id, "name": "한국어 애니", "original_name": "日本アニメ", "poster_path": "/show.jpg", "popularity": 80.0, "seasons": seasons})
+}
+
+#[test]
+fn anime_calendar_lists_only_season_starts_and_keeps_movie_ids_distinct() {
+    let transport = MockTransport::default();
+    transport.tmdb.borrow_mut().extend([
+        ("/discover/tv".into(), json!({"total_pages": 1, "results": [{"id": 123, "popularity": 80}, {"id": 124}, {"id": 125}]})),
+        ("/tv/123".into(), anime_show(123, json!([
+            {"season_number": 0, "air_date": "2026-10-01"},
+            {"season_number": 1, "air_date": "2026-09-27", "name": "시즌 1"},
+            {"season_number": 2, "air_date": "2026-10-01", "name": "새로운 모험", "poster_path": "/season.jpg"},
+            {"season_number": 2, "air_date": "2026-10-01"},
+            {"season_number": 3, "air_date": "2027-03-28", "name": "Season 3"},
+            {"season_number": 4, "air_date": "2027-03-29"},
+            {"season_number": 5, "air_date": null}
+        ]))),
+        // Episodes continue in the window, but this season started earlier.
+        ("/tv/124".into(), anime_show(124, json!([{"season_number": 1, "air_date": "2026-09-26"}]))),
+        ("/tv/125".into(), json!({"id": 125, "name": " ", "seasons": [{"season_number": 1, "air_date": "2026-10-01"}]})),
+    ]);
+    let titles = fetch_upcoming_anime(&transport, day("2026-09-27"), day("2027-03-29")).unwrap();
+    assert_eq!(
+        titles.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+        ["tmdb:tv:123:s1", "tmdb:tv:123:s2", "tmdb:tv:123:s3"]
+    );
+    assert_eq!(titles[0].title, "한국어 애니");
+    assert_eq!(titles[0].cover.as_deref(), Some("/show.jpg"));
+    assert_eq!(titles[1].title, "한국어 애니 · 새로운 모험");
+    assert_eq!(titles[1].cover.as_deref(), Some("/season.jpg"));
+    assert_eq!(titles[2].title, "한국어 애니 · 시즌 3");
+    assert!(titles.iter().all(|t| t.kind == ReleaseKind::Anime
+        && t.precision == DatePrecision::Exact
+        && t.region.as_deref() == Some("JP")
+        && t.provider == "tmdb"));
+    assert_ne!(
+        titles[0].id,
+        tmdb_title(&json!({"id":123, "title":"Movie"}), None)
+            .unwrap()
+            .id
+    );
+    let requests = transport.requests.borrow();
+    for query in [
+        "with_origin_country=JP",
+        "with_genres=16",
+        "language=ko-KR",
+        "sort_by=popularity.desc",
+        "air_date.gte=2026-09-27",
+        "air_date.lte=2027-03-28",
+    ] {
+        assert!(requests[0].contains(query), "{query}");
+    }
+    assert!(requests[1..]
+        .iter()
+        .all(|request| request.contains("language=ko-KR")));
+}
+
+#[test]
+fn anime_names_fall_back_and_generic_or_repeated_season_labels_are_not_used() {
+    let mut show = anime_show(1, json!([]));
+    for label in [
+        "시즌 2",
+        "시즌2",
+        "Season 2",
+        "한국어 애니",
+        "日本アニメ",
+        "English arc",
+        "",
+    ] {
+        let title = tmdb_anime_title(
+            &show,
+            &json!({"season_number":2, "name":label, "air_date":"invalid"}),
+        )
+        .unwrap();
+        assert_eq!(title.title, "한국어 애니 · 시즌 2", "{label}");
+        assert_eq!(title.precision, DatePrecision::Tbd);
+        assert_eq!(title.date, None);
+    }
+    show["name"] = json!(" ");
+    assert_eq!(
+        tmdb_anime_title(&show, &json!({"season_number":1}))
+            .unwrap()
+            .title,
+        "日本アニメ"
+    );
+    show["original_name"] = json!(null);
+    assert!(tmdb_anime_title(&show, &json!({"season_number":1})).is_none());
+    assert!(tmdb_anime_title(&anime_show(1, json!([])), &json!({"season_number":0})).is_none());
+}
+
+#[test]
+fn anime_discovery_caps_pages_and_unique_details_by_popularity() {
+    let transport = MockTransport::default();
+    // Unsorted duplicates across pages must neither consume slots nor cause duplicate requests.
+    let results: Vec<_> = (1..=80)
+        .map(|id| json!({"id":id, "popularity":id}))
+        .collect();
+    transport.tmdb.borrow_mut().push((
+        "/discover/tv".into(),
+        json!({"total_pages": 20, "results": results}),
+    ));
+    for id in 21..=80 {
+        transport.tmdb.borrow_mut().push((
+            format!("/tv/{id}"),
+            anime_show(id, json!([{"season_number":1,"air_date":"2026-10-01"}])),
+        ));
+    }
+    let titles = fetch_upcoming_anime(&transport, day("2026-09-27"), day("2027-03-29")).unwrap();
+    assert_eq!(titles.len(), TMDB_TV_DETAIL_LIMIT);
+    assert_eq!(titles[0].id, "tmdb:tv:80:s1");
+    assert_eq!(titles.last().unwrap().id, "tmdb:tv:21:s1");
+    let requests = transport.requests.borrow();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.starts_with("tmdb /discover/tv?"))
+            .count(),
+        3
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.starts_with("tmdb /tv/"))
+            .count(),
+        60
+    );
+}
+
+#[test]
+fn anime_cache_is_independent_daily_watchable_and_expires_at_tmdb_limit() {
+    let (_temp, library) = library();
+    let transport = MockTransport::default();
+    transport.tmdb.borrow_mut().extend([
+        ("/discover/tv".into(), json!({"results":[{"id":123}]})),
+        (
+            "/tv/123".into(),
+            anime_show(123, json!([{"season_number":2,"air_date":"2026-10-01"}])),
+        ),
+    ]);
+    let now = at("2026-09-27T00:00:00Z");
+    let today = day("2026-09-27");
+    let calendar = library
+        .refresh_release_calendar_with(&transport, false, now, today)
+        .unwrap();
+    assert_eq!(
+        calendar.entries.len(),
+        1,
+        "movie failure does not discard anime"
+    );
+    assert!(calendar
+        .sources
+        .iter()
+        .find(|s| s.provider == "tmdb")
+        .unwrap()
+        .error_code
+        .is_some());
+    let tv = calendar
+        .sources
+        .iter()
+        .find(|s| s.provider == "tmdb_tv")
+        .unwrap();
+    assert!(tv.error_code.is_none() && !tv.due);
+    transport.requests.borrow_mut().clear();
+    let item = library
+        .add_release_watch_with(&transport, "tmdb:tv:123:s2", now, today)
+        .unwrap();
+    assert_eq!(item.source, "calendar");
+    assert_eq!(item.kind, ReleaseKind::Anime);
+    assert_eq!(item.external_id, "tv:123:s2");
+    assert!(transport.requests.borrow().is_empty());
+    assert!(library.release_calendar_at(now, today).unwrap().entries[0].watched);
+    library
+        .refresh_release_calendar_with(&transport, false, now + Duration::hours(23), today)
+        .unwrap();
+    assert!(!transport
+        .requests
+        .borrow()
+        .iter()
+        .any(|r| r.contains("/discover/tv")));
+    transport.tmdb.borrow_mut().clear();
+    let failed = library
+        .refresh_release_calendar_with(&transport, false, now + Duration::days(1), today)
+        .unwrap();
+    assert_eq!(
+        failed.entries.len(),
+        1,
+        "failed refresh keeps the previous cache"
+    );
+    let before = transport.requests.borrow().len();
+    library
+        .refresh_release_calendar_with(
+            &transport,
+            true,
+            now + Duration::hours(24) + Duration::minutes(30),
+            today,
+        )
+        .unwrap();
+    // A manual refresh retries the failed providers (TMDB only) after a minute.
+    assert!(transport.requests.borrow()[before..]
+        .iter()
+        .all(|request| request.starts_with("tmdb ")));
+    assert_eq!(
+        library
+            .release_calendar_at(now + Duration::days(180), today)
+            .unwrap()
+            .entries
+            .len(),
+        1
+    );
+    assert!(library
+        .release_calendar_at(now + Duration::days(180) + Duration::seconds(1), today)
+        .unwrap()
+        .entries
+        .is_empty());
+}
+
+#[test]
+fn pc_only_upcoming_games_need_more_hypes_than_console_games() {
+    let mut small_pc = igdb_game(
+        1,
+        "Small PC",
+        json!([release("2026-10-10", "YYYYMMMMDD", "worldwide", 6)]),
+    );
+    small_pc["hypes"] = json!(5);
+    let mut small_console = igdb_game(
+        2,
+        "Small console",
+        json!([release("2026-10-10", "YYYYMMMMDD", "worldwide", 167)]),
+    );
+    small_console["hypes"] = json!(5);
+    let big_pc = igdb_game(
+        3,
+        "Big PC",
+        json!([release("2026-10-10", "YYYYMMMMDD", "worldwide", 6)]),
+    );
+    let transport = MockTransport::default();
+    transport
+        .igdb_pages
+        .borrow_mut()
+        .push(Ok(json!([small_pc, small_console, big_pc])));
+    let titles = fetch_upcoming_games(&transport, day("2026-09-26"), day("2027-03-28")).unwrap();
+    assert_eq!(
+        titles
+            .iter()
+            .map(|title| title.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["igdb:2", "igdb:3"]
     );
 }

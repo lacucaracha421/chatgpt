@@ -29,6 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(app_state.clone())
+        .manage(library::av_portrait::AvPortraitState::default())
         .manage(extension_runtime.clone())
         .manage(catalog_transport::CatalogTransport::default())
         .manage(library::catalog_update::CatalogUpdateState::default())
@@ -411,6 +412,14 @@ pub fn run() {
             commands::av_link::apply_av_link,
             commands::av_link::av_link_pending_count,
             commands::av::get_av_details,
+            commands::av::get_av_related,
+            commands::av::get_av_performer,
+            commands::av::save_av_person_memo,
+            commands::av::list_av_portrait_sources,
+            commands::av::set_av_portrait_crop,
+            commands::av::preview_av_commons_portrait,
+            commands::av::use_av_commons_portrait,
+            commands::av::clear_av_portrait,
             commands::av::save_av_details,
             commands::av::search_av_people,
             commands::av::preview_av_artwork,

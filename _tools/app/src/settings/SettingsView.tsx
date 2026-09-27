@@ -757,12 +757,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     setSaved(null);
   }
 
+  const sectionLabel = SECTIONS.find((item) => item.id === section)?.label ?? "일반";
   const catalogDbUpdatedAt = catalogStatus ? latestCatalogUpdate(catalogStatus) : null;
   const navigation = <nav className="settings-view__navigation" aria-label="설정 구역">
     {SECTIONS.map(({ id, label }) => <Button key={id} className="settings-view__section-button" variant="ghost" aria-current={section === id ? "page" : undefined} onClick={() => openSection(id)}>{label}</Button>)}
   </nav>;
   return <section className="settings-view" aria-label="설정" >
-    <ViewToolbar title={`설정 · ${SECTIONS.find((item) => item.id === section)?.label}`} chrome={{ navigation }} />
+    <ViewToolbar title={`설정 · ${sectionLabel}`} titleContent={workspace ? sectionLabel : undefined} chrome={{ navigation }} />
     <div className={`settings-view__body${workspace ? " settings-view__body--integrated" : ""}`}>
     {!workspace && navigation}
     <div className="settings-view__content" key={section}>

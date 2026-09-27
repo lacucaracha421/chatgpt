@@ -1264,6 +1264,7 @@ it("uses the existing sidebar and avoids backup work outside 고급", async () =
   </LibraryProvider>);
   const sidebar = screen.getByTestId("settings-sidebar");
   expect(within(sidebar).getByRole("navigation", { name: "설정 구역" })).toBeInTheDocument();
+  expect(within(container.querySelector(".view-toolbar")!).getByRole("heading", { name: "일반" })).toBeInTheDocument();
   expect(container.querySelector(".settings-view__body nav")).toBeNull();
   await userEvent.click(within(sidebar).getByRole("button", { name: "클라우드" }));
   await screen.findByText("클라우드 → PC");

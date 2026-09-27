@@ -1,3 +1,5 @@
+import type { AvPortrait } from "../collections/avTypes";
+
 export type LibrarySummary = {
   root: string;
 };
@@ -115,6 +117,7 @@ export type HomeOverview = {
     ownedWorks: number;
     latestWork: HomeAvWork;
     recentOwnedWorks: HomeAvWork[];
+    portrait: AvPortrait | null;
   } | null;
   server: { configured: boolean; live: boolean; confirmedAt: string | null; capturesPending: number | null };
 };
@@ -1228,9 +1231,9 @@ export interface CollectionTrackingGateway {
 
 /** 발매 캘린더: a provider date's precision. `date` is the first day of the stated period. */
 export type ReleaseDatePrecision = "exact" | "month" | "quarter" | "year" | "tbd";
-export type ReleaseTitleKind = "game" | "movie";
+export type ReleaseTitleKind = "game" | "movie" | "anime";
 export type ReleaseProviderDate = { region: string; platform: string; date: string | null; precision: ReleaseDatePrecision };
-/** An upcoming game (IGDB) or movie (TMDB); `id` is `provider:externalId`. */
+/** An upcoming game (IGDB), movie or anime season (TMDB); `id` is `provider:externalId`. */
 export type ReleaseTitle = {
   id: string;
   kind: ReleaseTitleKind;
@@ -1247,7 +1250,7 @@ export type ReleaseTitle = {
   popularity: number;
   dates: ReleaseProviderDate[];
 };
-export type ReleaseCalendarSource = { provider: "igdb" | "tmdb"; fetchedAt: string | null; attemptedAt: string | null; errorCode: string | null; due: boolean };
+export type ReleaseCalendarSource = { provider: "igdb" | "tmdb" | "tmdb_tv"; fetchedAt: string | null; attemptedAt: string | null; errorCode: string | null; due: boolean };
 export type ReleaseCalendar = { rangeStart: string; rangeEnd: string; entries: Array<ReleaseTitle & { watched: boolean }>; sources: ReleaseCalendarSource[] };
 export type ReleaseWishlistEvent = { id: string; itemId: string; kind: "date_set" | "date_changed" | "released"; previousValue: string | null; currentValue: string | null; detectedAt: string; readAt: string | null };
 export type ReleaseWishlistItem = ReleaseTitle & {

@@ -4,13 +4,16 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 106;
+pub(crate) const SCHEMA_VERSION: i64 = 109;
 
-/// Test helper: undoes migrations 0103 through 0106 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0109 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE home_publication_state;
+    DROP TABLE collection_person_portraits;
+    ALTER TABLE collection_people DROP COLUMN memo;
     DROP TABLE character_suggestion_ignored_tags;
     DROP VIEW character_tagger_pending;
     ALTER TABLE character_learned_references DROP COLUMN provenance;
@@ -628,6 +631,15 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 105 {
             transaction.execute_batch(include_str!("../../migrations/0106_character_suggestions.sql"))?;
         }
+        if version <= 106 {
+            transaction.execute_batch(include_str!("../../migrations/0107_av_portraits.sql"))?;
+        }
+        if version <= 107 {
+            transaction.execute_batch(include_str!("../../migrations/0108_release_calendar_anime.sql"))?;
+        }
+        if version <= 108 {
+            transaction.execute_batch(include_str!("../../migrations/0109_home_publications.sql"))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -696,6 +708,10 @@ pub(super) fn prepare_snapshot_for_restore(path: &Path) -> Result<(), LibraryErr
 mod library_identity_tests;
 
 #[cfg(test)]
+#[path = "release_calendar_migration_tests.rs"]
+mod release_calendar_migration_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -727,6 +743,45 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn av_portraits_migration_from_106_preserves_people() {
+        let mut c = Connection::open_in_memory().unwrap();
+        historical_schema(&mut c, 106);
+        c.execute("INSERT INTO collection_people(id,display_name,created_at,updated_at) VALUES('p','Person','t','t')", []).unwrap();
+        migrate_to_latest(&mut c, 106).unwrap();
+        assert_eq!(
+            c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            c.query_row(
+                "SELECT display_name,memo FROM collection_people WHERE id='p'",
+                [],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            )
+            .unwrap(),
+            ("Person".into(), None)
+        );
+        c.execute("INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at) VALUES('p','commons',X'1234','image/png',1,1,'File.png','https://commons.wikimedia.org/','t')", []).unwrap();
+        c.execute("DELETE FROM collection_people WHERE id='p'", [])
+            .unwrap();
+        assert_eq!(
+            c.query_row(
+                "SELECT COUNT(*) FROM collection_person_portraits",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(!c
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
     }
 
     #[test]

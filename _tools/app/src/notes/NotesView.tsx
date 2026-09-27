@@ -189,6 +189,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const convertLabel=kind==="checklist"?"메모로 바꾸기":"체크리스트로 바꾸기";
   const colorValue=note?noteColorValue(note.color):null;
   const syncTitle=state.error?`동기화 확인 필요: ${state.error}`:state.syncing?"동기화 중…":state.lastSyncedAt?`동기화 · 마지막 ${new Date(state.lastSyncedAt).toLocaleString("ko-KR")}`:"동기화";
+  const notesSectionTitle=query.trim()?"검색 결과":label??({all:"모든 메모",pinned:"고정",archive:"보관함",trash:"휴지통"} as const)[scope];
   const body=!note?null:isSecret(note)&&state.secretLocked&&!note.redacted?<SecretGate key={`resume-${note.id}`} store={store} onOpened={()=>store.resumeSecretSaves()}/>
     :isSecret(note)?(note.redacted?<SecretGate key={note.id} store={store} onOpened={()=>void store.refresh()}/>
       :<SecretEditor fields={note.fields??[]} memo={note.memo??""} readOnly={!editable} onChange={change=>edit(change)}/>)
@@ -251,7 +252,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       if(mod&&key==="s"){e.preventDefault();void store.sync();}
       if(mod&&!e.shiftKey&&key==="e"&&note&&kind==="text"&&!note.readOnly&&!trash){e.preventDefault();editingBody?setEditingBody(false):startBodyEdit();}
       if(mod&&e.shiftKey&&key==="l"){e.preventDefault();convert();}}}>
-    <ViewToolbar title="메모" chrome={{navigation:state.unlocked?navigation:<p className="notes-list-empty">암호화된 개인 메모</p>,search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,actions:state.unlocked?<Menu label="새 메모" items={newItems} trigger={<PlusIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>:undefined,settings:state.unlocked?settings:undefined,summary:"메모 백업과 복원",status:state.unlocked?<span className="notes-save-status" role="status" aria-description={state.lastSyncedAt?`마지막 동기화 ${new Date(state.lastSyncedAt).toLocaleString()}`:undefined}>{status}</span>:undefined}}/>
+    <ViewToolbar title="메모" titleContent={notesSectionTitle} chrome={{navigation:state.unlocked?navigation:<p className="notes-list-empty">암호화된 개인 메모</p>,search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,actions:state.unlocked?<Menu label="새 메모" items={newItems} trigger={<PlusIcon aria-hidden="true"/>} triggerClassName="notes-menu-trigger"/>:undefined,settings:state.unlocked?settings:undefined,summary:"메모 백업과 복원",status:state.unlocked?<span className="notes-save-status" role="status" aria-description={state.lastSyncedAt?`마지막 동기화 ${new Date(state.lastSyncedAt).toLocaleString()}`:undefined}>{status}</span>:undefined}}/>
     {state.error&&<div className="notes-error" role="alert"><span>{state.error}</span><Button size="sm" variant="ghost" disabled={state.syncing} onClick={()=>void (state.unlocked?store.sync():store.load())}>다시 시도</Button></div>}
     {main}
   </div>;

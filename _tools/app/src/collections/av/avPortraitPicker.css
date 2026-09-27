@@ -1,0 +1,43 @@
+.av-portrait-picker { display: grid; grid-template-columns: 220px minmax(0, 1fr) 220px; min-height: 610px; }
+.av-portrait-picker__sources, .av-portrait-picker__previews { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); background: var(--color-bg); }
+.av-portrait-picker__sources { border-right: 1px solid var(--color-border); }
+.av-portrait-picker__previews { border-left: 1px solid var(--color-border); }
+.av-portrait-picker__section-label { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-1); color: var(--color-muted); font-size: var(--text-sm); }
+.av-portrait-picker__section-label::before { width: 5px; height: 5px; content: ""; background: var(--color-section-mark); }
+.av-portrait-picker__source { display: grid; gap: 2px; padding: var(--space-2); color: var(--color-muted); text-align: left; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer; }
+.av-portrait-picker__source:hover { background: var(--color-surface-hover); }
+.av-portrait-picker__source.is-selected { color: var(--color-text); border-color: var(--color-accent); box-shadow: var(--selection-echo); }
+.av-portrait-picker__source b { font-size: var(--text-md); font-weight: 600; }
+.av-portrait-picker__source span, .av-portrait-picker__note { color: var(--color-muted); font-size: var(--text-xs); }
+.av-portrait-picker__note { margin-top: auto; line-height: 1.5; }
+.av-portrait-picker__work { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
+.av-portrait-picker__cover-list { display: flex; gap: var(--space-2); overflow-x: auto; padding: 2px; }
+.av-portrait-picker__cover-list button { position: relative; display: grid; flex: none; width: 64px; height: 92px; padding: 0; overflow: hidden; color: var(--color-muted); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-tile); cursor: pointer; }
+.av-portrait-picker__cover-list button.is-selected { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.av-portrait-picker__cover-list img { width: 100%; height: 100%; object-fit: cover; }
+.av-portrait-picker__cover-list small { position: absolute; right: 0; bottom: 0; left: 0; overflow: hidden; padding: 1px 2px; color: var(--color-text); background: rgb(0 0 0 / 68%); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.av-portrait-picker__crop-surface { position: relative; display: grid; flex: 1; min-height: 400px; place-items: center; overflow: hidden; background: #18191a; border: 1px solid var(--color-border); }
+.av-portrait-picker__crop-image { position: relative; width: min(100%, 360px); max-height: 100%; overflow: hidden; }
+.av-portrait-picker__crop-image > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.av-portrait-picker__crop-frame { position: absolute; border: 1px solid #fff; box-shadow: 0 0 0 9999px rgb(10 11 12 / 62%); cursor: move; }
+.av-portrait-picker__crop-frame::before { position: absolute; inset: 0; content: ""; background: linear-gradient(90deg, transparent 33%, rgb(255 255 255 / 35%) 33%, rgb(255 255 255 / 35%) calc(33% + 1px), transparent calc(33% + 1px), transparent 66%, rgb(255 255 255 / 35%) 66%, rgb(255 255 255 / 35%) calc(66% + 1px), transparent calc(66% + 1px)), linear-gradient(0deg, transparent 33%, rgb(255 255 255 / 35%) 33%, rgb(255 255 255 / 35%) calc(33% + 1px), transparent calc(33% + 1px), transparent 66%, rgb(255 255 255 / 35%) 66%, rgb(255 255 255 / 35%) calc(66% + 1px), transparent calc(66% + 1px)); }
+.av-portrait-picker__crop-frame i { position: absolute; width: 10px; height: 10px; background: #fff; }
+.av-portrait-picker__crop-frame i:nth-child(1) { top: -5px; left: -5px; }.av-portrait-picker__crop-frame i:nth-child(2) { top: -5px; right: -5px; }.av-portrait-picker__crop-frame i:nth-child(3) { bottom: -5px; left: -5px; }.av-portrait-picker__crop-frame i:nth-child(4) { right: -5px; bottom: -5px; }
+.av-portrait-picker__crop-controls { display: flex; align-items: center; gap: var(--space-2); color: var(--color-muted); font-size: var(--text-sm); }
+.av-portrait-picker__crop-controls input { width: 180px; accent-color: var(--color-accent); }
+.av-portrait-picker__crop-controls span { margin-left: auto; color: var(--color-faint); font-size: var(--text-xs); }
+.av-portrait-picker__commons { display: grid; align-content: center; justify-items: center; gap: var(--space-3); min-height: 480px; color: var(--color-muted); text-align: center; }
+.av-portrait-picker__commons > img { max-width: min(100%, 320px); max-height: 420px; object-fit: contain; }
+.av-portrait-picker__commons dl { width: min(100%, 480px); margin: 0; text-align: left; }
+.av-portrait-picker__commons dl > div { display: grid; grid-template-columns: 80px 1fr; gap: var(--space-2); padding: 3px 0; border-bottom: 1px solid var(--color-border); font-size: var(--text-sm); }
+.av-portrait-picker__commons dt { color: var(--color-faint); }.av-portrait-picker__commons dd { margin: 0; overflow-wrap: anywhere; }
+.av-portrait-picker__none { display: grid; flex: 1; place-content: center; justify-items: center; gap: var(--space-3); color: var(--color-muted); }
+.av-portrait-picker__previews > span { color: var(--color-faint); font-size: var(--text-xs); }
+.av-portrait-picker__avatar-row { display: flex; align-items: center; gap: var(--space-3); min-height: 84px; }
+.av-portrait-picker__performer-preview { display: grid; width: 100%; height: 220px; place-items: center; overflow: hidden; background: var(--color-surface); }
+.av-portrait-picker__performer-preview .av-portrait { width: 150px; height: 200px; }
+.av-portrait-picker__home-preview { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--color-surface); border: 1px solid var(--color-border); }
+.av-portrait-picker__home-preview .av-portrait { width: 56px; height: 74px; border-radius: var(--radius-tile); }
+.av-portrait-picker__preload { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.av-portrait-picker__empty { display: grid; flex: 1; place-items: center; color: var(--color-muted); }
+@media (max-width: 980px) { .av-portrait-picker { grid-template-columns: 180px minmax(0, 1fr); }.av-portrait-picker__previews { display: none; } }

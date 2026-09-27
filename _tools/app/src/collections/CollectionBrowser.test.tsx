@@ -120,6 +120,7 @@ describe("CollectionBrowser", () => {
     const index = screen.getByRole("complementary", { name: "index" });
     const types = within(index).getByRole("group", { name: "컬렉션 유형" });
     expect(within(types).getAllByRole("button").map(row => row.textContent)).toEqual(["게임", "만화", "영화", "AV"]);
+    expect(within(index).queryByRole("group", { name: "컬렉션 소식" })).not.toBeInTheDocument();
     expect(within(types).getByRole("button", { name: "게임" })).toHaveAttribute("aria-current", "page");
     expect(within(types).getByRole("button", { name: "만화" })).not.toHaveAttribute("aria-current");
     // No Library/Showcase mode, no header tabs, no chips over the grid.
@@ -210,6 +211,8 @@ describe("CollectionBrowser", () => {
     const tracking = trackingWith([]);
     renderBrowser({ collections: [{ ...manga, unreadReleaseCount: 2 }, { ...manga, id: "m2", unreadReleaseCount: 1 }], typeFilter: "game", showcase: false, tracking, onViewChange });
     const index = screen.getByRole("complementary", { name: "index" });
+    const news = within(index).getByRole("group", { name: "컬렉션 소식" });
+    expect(within(news).getByRole("button", { name: "신간 보기, 새 알림 3개" })).toHaveTextContent("신간3");
     const entry = within(index).getByRole("button", { name: "신간 보기, 새 알림 3개" });
     expect(entry).toHaveTextContent("신간3");
     expect(entry).not.toHaveAttribute("aria-current");
@@ -235,7 +238,7 @@ describe("CollectionBrowser", () => {
 
     renderBrowser({ collections: [], typeFilter: "game", showcase: false, tracking: trackingWith([]), calendarApi, releaseCalendar: true });
     expect(await screen.findByRole("region", { name: "발매 캘린더" })).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "컬렉션 유형" })).getAllByRole("button").filter(row => row.hasAttribute("aria-current")).map(row => row.textContent)).toEqual(["발매 캘린더2"]);
+    expect(within(screen.getByRole("group", { name: "컬렉션 소식" })).getAllByRole("button").filter(row => row.hasAttribute("aria-current")).map(row => row.textContent)).toEqual(["발매 캘린더2"]);
     expect(screen.queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
   });
 
@@ -247,7 +250,7 @@ describe("CollectionBrowser", () => {
     expect(screen.getByRole("heading", { name: "신간" })).toBeInTheDocument();
     // The 신간 row is the current location; no type row is, and the library controls step aside.
     expect(screen.getByRole("button", { name: "신간 보기" })).toHaveAttribute("aria-current", "page");
-    expect(within(screen.getByRole("group", { name: "컬렉션 유형" })).getAllByRole("button").filter(row => row.hasAttribute("aria-current")).map(row => row.textContent)).toEqual(["신간"]);
+    expect(within(screen.getByRole("group", { name: "컬렉션 소식" })).getAllByRole("button").filter(row => row.hasAttribute("aria-current")).map(row => row.textContent)).toEqual(["신간"]);
     expect(screen.queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
   });
 
@@ -447,13 +450,13 @@ describe("CollectionBrowser", () => {
   it("shows showcase collections when showcase on and a collection is showcased", () => {
     renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "쇼케이스" })).toHaveAttribute("aria-description", "게임 쇼케이스");
+    expect(screen.getByRole("heading", { name: "게임 쇼케이스" })).toHaveAttribute("aria-description", "게임 쇼케이스");
   });
 
   it("labels the ordinary library with the visible work count", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
 
-    expect(screen.getByRole("heading", { name: "컬렉션" })).toHaveAttribute("aria-description", "게임 컬렉션");
+    expect(screen.getByRole("heading", { name: "게임" })).toHaveAttribute("aria-description", "게임 컬렉션");
     expect(screen.getByLabelText("작품 1개")).toHaveTextContent("1");
   });
 

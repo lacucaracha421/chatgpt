@@ -43,7 +43,7 @@ export function weekdayLabel(now: Date) {
 }
 
 /* ---- 신간 · 나온 권 ---- */
-export type ReleaseKind = "manga" | "game" | "movie";
+export type ReleaseKind = "manga" | "game" | "movie" | "anime";
 export type ReleaseRow = { key: string; kind: ReleaseKind; name: string; caption: ReleaseCaption | { kind: "info"; text: string; date: null };
   collection?: CollectionSummary; title?: ReleaseWishlistItem; date?: string | null; volume?: number | null; watch?: boolean };
 
@@ -105,7 +105,7 @@ export function upcomingRows(collections: CollectionSummary[], board: Map<string
     .filter((item) => !item.released && item.precision === "exact" && item.date && item.date >= today)
     .map((item): UpcomingRow => {
       const moved = item.unread.some((event) => event.kind === "date_changed");
-      const where = item.kind === "game" ? item.platforms.slice(0, 3).join(" · ") : "극장 개봉";
+      const where = item.kind === "game" ? item.platforms.slice(0, 3).join(" · ") : item.kind === "anime" ? "일본 방영" : "극장 개봉";
       return { key: `title:${item.id}`, kind: item.kind, date: item.date!, name: item.title, detail: [where, moved ? "날짜 바뀜" : ""].filter(Boolean).join(" · "), watch: true };
     });
   return [...manga, ...titles].sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ko") || a.key.localeCompare(b.key));

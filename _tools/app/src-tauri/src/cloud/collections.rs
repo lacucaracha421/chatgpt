@@ -2,6 +2,11 @@
 //! No provider calls, lazy imports or writes to the library. Source previews stage in TEMP.
 #[path = "collection_cache.rs"]
 mod cache;
+#[path = "collections_av.rs"]
+mod av;
+#[cfg(test)]
+#[path = "collections_av_tests.rs"]
+mod av_tests;
 use super::publication::{report, Reporter};
 use super::client::CloudClient;
 use crate::library::{
@@ -56,6 +61,8 @@ pub(crate) struct ReplicaCollection {
     // Omitted rather than null so a server without Film details still accepts film-less replicas.
     #[serde(skip_serializing_if = "Option::is_none")]
     film: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    av: Option<av::AvInfo>,
     artworks: Vec<ReplicaArtwork>,
     /// Manga tracking state, only on manga Collections of a version-2 handshake
     /// (`collection_personal_edits.py`); omitted otherwise so older servers accept the body.
@@ -198,7 +205,8 @@ impl Library {
         // publisher must result in a conflict, never silently overwrite its snapshot. Mobile
         // edits also move it, so it is read after receiving.
         let base_revision = client.collections_revision(token)?;
-        let mut snapshot = self.cloud_collections_snapshot_with_feature(base_revision, feature.as_ref(), progress)?;
+        let include_av = status.supports_av_collections();
+        let mut snapshot = self.cloud_collections_snapshot_with_feature(base_revision, feature.as_ref(), include_av, progress)?;
         let Some(publisher) = snapshot.replica.personal_edit.as_ref().and(publisher) else {
             snapshot.replica.personal_edit = None;
             return publish_snapshot_as(client, token, token, &snapshot, progress);
@@ -222,13 +230,14 @@ impl Library {
         base_revision: Option<String>,
         progress: Reporter<'_>,
     ) -> Result<Snapshot, LibraryError> {
-        self.cloud_collections_snapshot_with_feature(base_revision, None, progress)
+        self.cloud_collections_snapshot_with_feature(base_revision, None, false, progress)
     }
 
     fn cloud_collections_snapshot_with_feature(
         &self,
         base_revision: Option<String>,
         feature: Option<&PersonalEditFeature>,
+        include_av: bool,
         progress: Reporter<'_>,
     ) -> Result<Snapshot, LibraryError> {
         let root = self
@@ -239,7 +248,7 @@ impl Library {
         let mut connection = rusqlite::Connection::open_with_flags(
             self.root().join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        snapshot_from_connection_with_feature(&root, &mut connection, base_revision, feature, progress)
+        snapshot_from_connection_with_feature(&root, &mut connection, base_revision, feature, include_av, progress)
     }
 }
 
@@ -312,10 +321,10 @@ fn upload_local_blob(client: &CloudClient, token: &str, local: &LocalBlob) -> Re
 
 #[cfg(test)]
 fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
-    snapshot_from_connection_with_feature(root, connection, base_revision, None, progress)
+    snapshot_from_connection_with_feature(root, connection, base_revision, None, false, progress)
 }
 
-fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, feature: Option<&PersonalEditFeature>, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
+fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, feature: Option<&PersonalEditFeature>, include_av: bool, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
         let transaction = connection.transaction()?;
         // The received cursor is read in the same read transaction as the rows, so the
         // snapshot never advertises edits its rows do not reflect. An adopted feature with
@@ -341,12 +350,12 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
         let mut total_bytes = 0;
         let mut collections = Vec::new();
         let mut metadata_bytes = 128usize;
-        // AV is local Collection data; the current Mobile replica supports three types.
-        // Filter before collecting any artwork paths, while retaining the complete supported snapshot.
-        let sql = format!("{COLLECTION_SUMMARY_SQL} WHERE (collection.legacy_kind IS NULL OR collection.legacy_kind <> 'gacha') AND collection.type IN ('game','manga','movie') ORDER BY collection.updated_at DESC, collection.id DESC LIMIT {}", MAX_COLLECTIONS + 1);
+        // Gate before collecting artwork paths: older servers reject an entire snapshot
+        // containing AV. Keep the same complete-snapshot and collection-count bounds.
+        let sql = format!("{COLLECTION_SUMMARY_SQL} WHERE (collection.legacy_kind IS NULL OR collection.legacy_kind <> 'gacha') AND (collection.type IN ('game','manga','movie') OR (?1 AND collection.type='av')) ORDER BY collection.updated_at DESC, collection.id DESC LIMIT {}", MAX_COLLECTIONS + 1);
         let summaries = transaction
             .prepare(&sql)?
-            .query_map([], collection_from_row)?
+            .query_map([include_av], collection_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         if summaries.len() > MAX_COLLECTIONS {
             return Err(LibraryError::InvalidCloudResponse);
@@ -408,6 +417,7 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
             let collection = ReplicaCollection {
                 series,
                 film,
+                av: None,
                 summary,
                 volumes,
                 artworks,
@@ -424,6 +434,20 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
             }
             collections.push(collection);
             report(progress, "preparing", collections.len() as u64, Some(total), "items");
+        }
+        // A person's crop can refer to another AV work. Resolve it only after the
+        // complete snapshot's selected covers and byte descriptors are known.
+        let covers = av::published_covers(&collections);
+        for collection in &mut collections {
+            if collection.summary.collection_type == crate::library::models::CollectionType::Av {
+                let info = av::committed_av(&transaction, &collection.summary.id, &covers)?;
+                metadata_bytes += serde_json::to_vec(&info)
+                    .map_err(|_| LibraryError::InvalidCloudResponse)?.len() + 6;
+                if metadata_bytes > MAX_METADATA_BYTES {
+                    return Err(LibraryError::InvalidCloudResponse);
+                }
+                collection.av = Some(info);
+            }
         }
         // Keep the single committed SQLite view during extraction, release it before HTTP.
         transaction.commit()?;
@@ -619,7 +643,7 @@ fn read_existing_image(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, Libra
     Ok(Some(bytes))
 }
 
-fn blob_for(bytes: &[u8]) -> Result<ArtworkBlob, LibraryError> {
+pub(crate) fn blob_for(bytes: &[u8]) -> Result<ArtworkBlob, LibraryError> {
     let content_type =
         match image::guess_format(bytes).map_err(|_| LibraryError::InvalidWorkArtwork)? {
             image::ImageFormat::Png => "image/png",
@@ -970,12 +994,12 @@ mod tests {
         }
         for cursor in [3, 9] {
             library.connection().unwrap().execute("UPDATE mobile_collection_personal_edit_sync SET received_cursor=?1", [cursor]).unwrap();
-            let value = serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}).unwrap().replica).unwrap();
+            let value = serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), false, &|_| {}).unwrap().replica).unwrap();
             assert_eq!((value["personalEditVersion"].as_i64(), value["libraryId"].as_str(), value["personalEditCursor"].as_i64()), (Some(1), Some(library_id.as_str()), Some(cursor)));
             assert_eq!(value["collections"][0]["id"], "c");
         }
         library.connection().unwrap().execute("DELETE FROM mobile_collection_personal_edit_sync", []).unwrap();
-        assert!(matches!(library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}), Err(LibraryError::CollectionPersonalEditCursorRejected)));
+        assert!(matches!(library.cloud_collections_snapshot_with_feature(None, Some(&feature), false, &|_| {}), Err(LibraryError::CollectionPersonalEditCursorRejected)));
     }
 
     #[test]
@@ -993,7 +1017,7 @@ mod tests {
         library.adopt_collection_personal_edit_library(endpoint, &library_id).unwrap();
         let snapshot = |edit_version| {
             let feature = PersonalEditFeature { endpoint: endpoint.into(), library_id: library_id.clone(), edit_version };
-            serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}).unwrap().replica).unwrap()
+            serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), false, &|_| {}).unwrap().replica).unwrap()
         };
         let find = |value: &serde_json::Value, id: &str| value["collections"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
         let v2 = snapshot(2);
@@ -1042,7 +1066,7 @@ mod tests {
         library.adopt_collection_personal_edit_library(endpoint, &library_id).unwrap();
         let snapshot = |edit_version| {
             let feature = PersonalEditFeature { endpoint: endpoint.into(), library_id: library_id.clone(), edit_version };
-            serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), &|_| {}).unwrap().replica).unwrap()
+            serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), false, &|_| {}).unwrap().replica).unwrap()
         };
         let find = |value: &serde_json::Value, id: &str| value["collections"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
         let v2 = snapshot(2);

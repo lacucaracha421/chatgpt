@@ -3,7 +3,7 @@ use crate::library::{Library,error::LibraryError};
 use rusqlite::params;
 use std::sync::Mutex;
 // Separate lanes prevent slow artwork uploads from blocking character/settings changes.
-static RUNNING: [Mutex<()>;8] = [const { Mutex::new(()) };8];
+static RUNNING: [Mutex<()>;11] = [const { Mutex::new(()) };11];
 fn dispatch(running: &'static Mutex<()>, work: impl FnOnce()+Send+'static) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new().name("mobile-publication".into()).spawn(move || {
         let Ok(_permit)=running.try_lock() else {return};
@@ -50,13 +50,15 @@ impl Library {
         let endpoint=config.api_base_url.unwrap_or_default();
         if !config.enabled || endpoint.is_empty() {return Ok(())}
         self.connection()?.execute("UPDATE mobile_publication_state SET endpoint=?1,generation=generation+1,first_dirty=0,last_dirty=0,retry_after=0 WHERE endpoint<>?1",[&endpoint])?;
-        for (slot,kind) in ["collections","characters","visibility","similarity","catalogDuplicates","releases","bindings","metadata"].into_iter().enumerate() {
+        for (slot,kind) in ["collections","characters","visibility","similarity","catalogDuplicates","releases","bindings","metadata","upcoming","avPick","artists"].into_iter().enumerate() {
             let library=self.clone();let endpoint=endpoint.clone();
             // Return after dispatch so the native owner's next tick can service every free lane.
             dispatch(&RUNNING[slot],move || {
                 // `similarity`: automatic comparison of newly materialized Assets, then mobile
                 // similarity decisions and the pair feed (`similarity_review_sync.rs`).
                 let _=match kind {
+                    "upcoming" | "avPick" | "artists" => library.run_due_home_publication(kind, &endpoint)
+                        .map_err(|error| { eprintln!("home publication {kind}: {error}"); error }),
                     "visibility" => library.publish_due_catalog_visibility(&endpoint),
                     "similarity" => library.run_due_similarity_review(&endpoint).map_err(|error| {eprintln!("similarity review: {error}");error}),
                     // Manga Catalog duplicate editions (`catalog_duplicate_sync.rs`).

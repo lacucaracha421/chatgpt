@@ -14,6 +14,7 @@ it("creates, edits, pins, trashes and restores through the actual notes editor",
   }) as NotesRequest;
   const store=new NotesStore(request);surface(store);
   await userEvent.click(await screen.findByRole("button",{name:"새 메모"}));
+  expect(screen.getByRole("heading",{name:"모든 메모"})).toBeInTheDocument();
   await userEvent.click(await screen.findByRole("menuitem",{name:"메모"}));
   fireEvent.change(screen.getByRole("textbox",{name:"메모 제목"}),{target:{value:"읽을 책"}});
   fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"내일 2장 읽기"}});

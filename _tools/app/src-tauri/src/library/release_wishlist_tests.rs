@@ -420,3 +420,146 @@ fn a_release_on_a_minor_platform_does_not_move_a_watched_game() {
     let game = library.list_release_watch().unwrap().pop().unwrap();
     assert_eq!(game.date.as_deref(), Some("2026-12-01"));
 }
+
+#[test]
+fn anime_identity_requires_canonical_show_and_positive_season_numbers() {
+    assert_eq!(
+        split_id("tmdb:tv:123:s2").unwrap(),
+        (ReleaseKind::Anime, 123, Some(2))
+    );
+    assert_eq!(
+        split_id("tmdb:123").unwrap(),
+        (ReleaseKind::Movie, 123, None)
+    );
+    for id in [
+        "tmdb:tv:0:s1",
+        "tmdb:tv:123:s0",
+        "tmdb:tv:01:s2",
+        "tmdb:tv:1:s02",
+        "tmdb:tv:1:s-1",
+        "tmdb:tv:1:s2:3",
+        "tmdb:tv:1",
+        "tmdb:tv:1/2:s1",
+        "igdb:tv:1:s2",
+    ] {
+        assert!(split_id(id).is_err(), "{id}");
+    }
+}
+
+#[test]
+fn anime_watch_tracks_only_its_season_records_events_and_stops_after_release() {
+    use crate::library::release_calendar::tests::anime_show;
+    let (_temp, library) = library();
+    let transport = MockTransport::default();
+    let update = |date: Option<&str>| {
+        *transport.tmdb.borrow_mut() = vec![(
+            "/tv/123".into(),
+            anime_show(
+                123,
+                json!([
+                    {"season_number":1,"air_date":"2020-01-01"},
+                    {"season_number":2,"air_date":date},
+                    {"season_number":3,"air_date":"2026-09-28"}
+                ]),
+            ),
+        )];
+    };
+    update(None);
+    let item = library
+        .add_release_watch_with(
+            &transport,
+            "tmdb:tv:123:s2",
+            at("2026-09-27T00:00:00Z"),
+            day("2026-09-27"),
+        )
+        .unwrap();
+    assert_eq!(item.source, "manual");
+    assert_eq!(item.precision, DatePrecision::Tbd);
+    assert_eq!(item.kind, ReleaseKind::Anime);
+    assert!(item.unread.is_empty());
+    update(Some("2026-10-10"));
+    let run = library
+        .run_due_release_watchlist_with(&transport, at("2026-09-28T00:00:00Z"), day("2026-09-28"))
+        .unwrap();
+    assert_eq!((run.checked, run.changed), (1, 1));
+    let item = library.list_release_watch().unwrap().pop().unwrap();
+    assert_eq!(item.unread[0].kind, "date_set");
+    assert_eq!(item.date.as_deref(), Some("2026-10-10"));
+    update(Some("2026-10-12"));
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-09-29T00:00:00Z"), day("2026-09-29"))
+        .unwrap();
+    let item = library.list_release_watch().unwrap().pop().unwrap();
+    assert_eq!(item.unread[1].kind, "date_changed");
+    assert_eq!(item.unread[1].previous_value.as_deref(), Some("2026-10-10"));
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-10-12T00:00:00Z"), day("2026-10-12"))
+        .unwrap();
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-10-12T07:00:00Z"), day("2026-10-12"))
+        .unwrap();
+    let item = library.list_release_watch().unwrap().pop().unwrap();
+    assert!(item.released);
+    assert_eq!(
+        item.unread.iter().filter(|e| e.kind == "released").count(),
+        1
+    );
+    library
+        .acknowledge_release_watch_events(&[item.unread[0].id.clone()])
+        .unwrap();
+    assert_eq!(library.list_release_watch().unwrap()[0].unread.len(), 2);
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-11-12T00:00:00Z"), day("2026-11-12"))
+        .unwrap();
+    assert_eq!(library.list_release_watch().unwrap()[0].next_check_at, None);
+    transport.requests.borrow_mut().clear();
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-11-13T00:00:00Z"), day("2026-11-13"))
+        .unwrap();
+    assert!(transport.requests.borrow().is_empty());
+    library.remove_release_watch("tmdb:tv:123:s2").unwrap();
+    for table in ["release_watch_dates", "release_watch_item_events"] {
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[test]
+fn missing_anime_season_keeps_dates_and_wrong_show_identity_is_rejected() {
+    use crate::library::release_calendar::tests::anime_show;
+    let (_temp, library) = library();
+    let transport = MockTransport::default();
+    transport.tmdb.borrow_mut().push((
+        "/tv/123".into(),
+        anime_show(123, json!([{"season_number":2,"air_date":"2026-12-01"}])),
+    ));
+    library
+        .add_release_watch_with(
+            &transport,
+            "tmdb:tv:123:s2",
+            at("2026-09-27T00:00:00Z"),
+            day("2026-09-27"),
+        )
+        .unwrap();
+    *transport.tmdb.borrow_mut() = vec![("/tv/123".into(), anime_show(123, json!([])))];
+    let run = library
+        .run_due_release_watchlist_with(&transport, at("2026-09-28T00:00:00Z"), day("2026-09-28"))
+        .unwrap();
+    assert_eq!((run.checked, run.changed), (1, 0));
+    assert_eq!(
+        library.list_release_watch().unwrap()[0].date.as_deref(),
+        Some("2026-12-01")
+    );
+    *transport.tmdb.borrow_mut() = vec![("/tv/123".into(), anime_show(456, json!([])))];
+    assert!(matches!(
+        fetch_anime(&transport, 123, 2),
+        Err(LibraryError::InvalidTmdbIdentity)
+    ));
+}

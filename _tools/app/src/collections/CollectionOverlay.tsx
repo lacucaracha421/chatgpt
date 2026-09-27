@@ -507,7 +507,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
 
   return (
     <section className="collection-overlay" aria-label="컬렉션 표지 보기">
-      {sidebar && collection && <CollectionSidebarSection>
+      {sidebar && collection && !isAv && <CollectionSidebarSection>
         <h2 className="collection-detail-sidebar__title">{collection.name}</h2>
         <CollectionInfoPanel collection={collection} compact />
         {isManga && volumes && <CollectionEditionSelector volumes={volumes} editionIndex={editionIndex} onEditionIndexChange={selectEdition} />}
@@ -541,7 +541,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
         } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); }
         finally { setReleaseWatchSaving(false); }
       }}>표시된 신간 알림 확인</Button>}
-      {isAv && collection ? <AvCollectionDetail key={collection.id} collection={collection} scope={library?.root ?? ""} onChanged={onChanged}
+      {isAv && collection ? <AvCollectionDetail key={collection.id} collection={collection} scope={library?.root ?? ""} onChanged={onChanged} onOpenCollection={onOpenCollection}
         onEdit={() => setEditMode({ kind: "edit", collection })} onToggleShowcase={() => void toggleShowcase()} onDelete={() => setDeleteOpen(true)} /> : isGame && collection ? (
         <GameCollectionDetail
           collection={collection}

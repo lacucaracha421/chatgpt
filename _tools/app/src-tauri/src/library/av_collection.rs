@@ -1,6 +1,6 @@
 use super::{av_models::*, Library};
 use chrono::NaiveDate;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -15,12 +15,13 @@ pub struct AvHomeWork {
     pub front_artwork_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvHomePerformer {
     pub id: String,
     pub display_name: String,
     pub original_name: Option<String>,
+    pub portrait: Option<AvPortrait>,
     pub known_works: i64,
     pub owned_works: i64,
     pub latest_work: AvHomeWork,
@@ -39,7 +40,7 @@ pub(crate) fn require_av(connection: &Connection, id: &str) -> Result<(), AvErro
         Err(AvError::Invalid)
     }
 }
-fn text(value: Option<String>, max: usize) -> Result<Option<String>, AvError> {
+pub(super) fn text(value: Option<String>, max: usize) -> Result<Option<String>, AvError> {
     let value = value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
     if value.as_ref().is_some_and(|v| v.chars().count() > max) {
         return Err(AvError::Invalid);
@@ -48,12 +49,25 @@ fn text(value: Option<String>, max: usize) -> Result<Option<String>, AvError> {
 }
 pub(crate) fn details(connection: &Connection, id: &str) -> Result<AvDetails, AvError> {
     require_av(connection, id)?;
-    let mut value = connection.query_row("SELECT product_code,label,series,revision FROM collection_av_details WHERE collection_id=?1", [id], |r| Ok(AvDetails {
+    let mut value = connection.query_row("SELECT d.product_code,NULLIF(TRIM(d.label),''),NULLIF(TRIM(d.series),''),COALESCE(d.revision,0),d.title_ja,COALESCE(NULLIF(TRIM(d.release_date),''),NULLIF(TRIM(c.release_date),'')),NULLIF(TRIM(d.maker),''),d.genres_json FROM collections c LEFT JOIN collection_av_details d ON d.collection_id=c.id WHERE c.id=?1", [id], |r| Ok(AvDetails {
         collection_id: id.into(), product_code: r.get(0)?, label: r.get(1)?, series: r.get(2)?, revision: r.get(3)?, people: vec![],
-    })).optional()?.unwrap_or(AvDetails { collection_id: id.into(), product_code: None, label: None, series: None, revision: 0, people: vec![] });
-    value.people = connection.prepare("SELECT p.id,p.display_name,r.role,r.sort_order,r.credit_name FROM collection_person_relations r JOIN collection_people p ON p.id=r.person_id WHERE r.collection_id=?1 ORDER BY CASE r.role WHEN 'performer' THEN 0 ELSE 1 END,r.sort_order,p.id")?.query_map([id], |r| Ok(AvPersonCredit {
-        id: r.get(0)?, display_name: r.get(1)?, role: if r.get::<_, String>(2)? == "performer" { AvPersonRole::Performer } else { AvPersonRole::Director }, order: r.get(3)?, credit_name: r.get(4)?,
+        title_ja: r.get(4)?, release_date: r.get(5)?, maker: r.get(6)?, genres: r.get::<_,Option<String>>(7)?.and_then(|v|serde_json::from_str(&v).ok()).unwrap_or_default(), maker_count:0,label_count:0,series_count:0,
+    }))?;
+    for (column, name, count) in [
+        ("maker", &value.maker, &mut value.maker_count),
+        ("label", &value.label, &mut value.label_count),
+        ("series", &value.series, &mut value.series_count),
+    ] {
+        if let Some(name) = name {
+            *count = connection.query_row(&format!("SELECT COUNT(*) FROM collection_av_details d JOIN collections c ON c.id=d.collection_id AND c.type='av' WHERE TRIM(d.{column})=?1"), [name], |r|r.get(0))?;
+        }
+    }
+    value.people = connection.prepare("SELECT p.id,p.display_name,r.role,r.sort_order,r.credit_name,p.name_ja,(SELECT COUNT(DISTINCT cr.collection_id) FROM collection_person_relations cr JOIN collections c ON c.id=cr.collection_id AND c.type='av' WHERE cr.person_id=p.id) FROM collection_person_relations r JOIN collection_people p ON p.id=r.person_id WHERE r.collection_id=?1 ORDER BY CASE r.role WHEN 'performer' THEN 0 ELSE 1 END,r.sort_order,p.id")?.query_map([id], |r| Ok(AvPersonCredit {
+        id: r.get(0)?, display_name: r.get(1)?, role: if r.get::<_, String>(2)? == "performer" { AvPersonRole::Performer } else { AvPersonRole::Director }, order: r.get(3)?, credit_name: r.get(4)?, name_ja:r.get(5)?,work_count:r.get(6)?,portrait:None,
     }))?.collect::<Result<Vec<_>,_>>()?;
+    for person in &mut value.people {
+        person.portrait = super::av_portrait::portrait(connection, &person.id)?;
+    }
     Ok(value)
 }
 impl Library {
@@ -128,7 +142,9 @@ impl Library {
             return Ok(None);
         };
         let original_name = original_name.filter(|name| name != &display_name);
+        let portrait = super::av_portrait::portrait(&connection, &id)?;
         Ok(Some(AvHomePerformer {
+            portrait,
             id,
             display_name,
             original_name,

@@ -125,7 +125,7 @@ button.home-section__head:hover { background: var(--color-surface-hover); }
 .home-index__conn-value .numeric { font-size: 14px; }
 
 /* Direction B: the index is compact context, while the content is an image shelf plus ledger. */
-.home-section__actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.home-section__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-width: 0; }
 .home-header-action { display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 0 3px; color: var(--color-muted); font-size: 12.5px; white-space: nowrap; }
 .home-header-action:hover { color: var(--color-text); background: var(--color-surface-hover); }
 .home-header-action .home-chevron { width: 14px; height: 14px; }
@@ -237,3 +237,7 @@ button.home-section__head:hover { background: var(--color-surface-hover); }
   .home-section__actions { flex-wrap: wrap; justify-content: flex-end; }
   .home-artist__row { grid-template-columns: 170px minmax(0, 1fr) 15px; }
 }
+
+/* A header with many actions (발매 예정 kind chips + calendar link) wraps onto a second row instead of overlapping the title. */
+.home-section__head { flex-wrap: wrap; row-gap: 4px; }
+.home-section__actions .home-chips { padding: 0; }

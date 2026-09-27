@@ -1,4 +1,4 @@
-//! The game/movie wishlist (관심 목록): titles the user picked from the 발매 캘린더 (or added by
+//! The game/movie/anime wishlist (관심 목록): titles the user picked from the 발매 캘린더 (or added by
 //! provider id), tracked like manga releases.
 //!
 //! A due-runner re-reads each watched title every 24 hours, every 6 hours within 14 days of an
@@ -7,13 +7,13 @@
 //! acknowledged by exact id. Watched titles are never Collections.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
 use super::{
     error::LibraryError,
     release_calendar::{
-        cached_title, error_code, fetch_games, fetch_movie, headline, period, period_token,
+        cached_title, error_code, fetch_anime, fetch_games, fetch_movie, headline, period, period_token,
         DatePrecision, ProviderReleaseDate, ReleaseKind, ReleaseTitle, ReleaseTransport,
     },
     Library,
@@ -130,10 +130,27 @@ fn released_on(date: Option<&str>, precision: DatePrecision, today: NaiveDate) -
         && period(date, precision).is_some_and(|(day, _)| day <= today)
 }
 
-fn split_id(id: &str) -> Result<(ReleaseKind, i64), LibraryError> {
+fn split_id(id: &str) -> Result<(ReleaseKind, i64, Option<i64>), LibraryError> {
     let (provider, external) = id
         .split_once(':')
         .ok_or(LibraryError::InvalidIgdbIdentity)?;
+    if provider == "tmdb" && external.starts_with("tv:") {
+        let (show, season) = external[3..]
+            .split_once(":s")
+            .ok_or(LibraryError::InvalidTmdbIdentity)?;
+        let canonical = |value: &str| {
+            value
+                .parse::<i64>()
+                .ok()
+                .filter(|number| *number > 0 && number.to_string() == value)
+                .ok_or(LibraryError::InvalidTmdbIdentity)
+        };
+        return Ok((
+            ReleaseKind::Anime,
+            canonical(show)?,
+            Some(canonical(season)?),
+        ));
+    }
     let kind = match provider {
         "igdb" => ReleaseKind::Game,
         "tmdb" => ReleaseKind::Movie,
@@ -145,9 +162,9 @@ fn split_id(id: &str) -> Result<(ReleaseKind, i64), LibraryError> {
         .filter(|value| *value > 0 && value.to_string() == external)
         .ok_or(match kind {
             ReleaseKind::Game => LibraryError::InvalidIgdbIdentity,
-            ReleaseKind::Movie => LibraryError::InvalidTmdbIdentity,
+            ReleaseKind::Movie | ReleaseKind::Anime => LibraryError::InvalidTmdbIdentity,
         })?;
-    Ok((kind, number))
+    Ok((kind, number, None))
 }
 
 fn read_dates(
@@ -171,7 +188,7 @@ fn read_dates(
 }
 
 fn write_title(
-    transaction: &Transaction<'_>,
+    transaction: &rusqlite::Connection,
     title: &ReleaseTitle,
     checked_at: &str,
 ) -> Result<(), LibraryError> {
@@ -200,6 +217,78 @@ fn write_title(
     Ok(())
 }
 
+pub(crate) fn insert_watch(
+    transaction: &rusqlite::Connection,
+    title: &ReleaseTitle,
+    source: &str,
+    now: DateTime<Utc>,
+    today: NaiveDate,
+) -> Result<(), LibraryError> {
+    let id = &title.id;
+    let checked_at = now.to_rfc3339();
+    let exists: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM release_watch_items WHERE id = ?1)",
+        [id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        let released = released_on(title.date.as_deref(), title.precision, today);
+        transaction.execute(
+                "INSERT INTO release_watch_items(id, kind, provider, external_id, title, original_title, cover,
+                   platforms_json, source, added_at, last_checked_at, next_check_at, released_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', ?8, ?9, ?9, ?10, ?11)",
+                params![
+                    title.id,
+                    title.kind.as_str(),
+                    title.kind.provider(),
+                    title.external_id,
+                    title.title,
+                    title.original_title,
+                    title.cover,
+                    source,
+                    checked_at,
+                    next_check(now, today, title.date.as_deref(), title.precision).map(|time| time.to_rfc3339()),
+                    released.then(|| checked_at.clone()),
+                ],
+            )?;
+        write_title(transaction, &title, &checked_at)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_watch(db: &rusqlite::Connection, id: &str) -> Result<(), LibraryError> {
+    split_id(id)?;
+    db.execute("DELETE FROM release_watch_items WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+pub(crate) fn mute_watch(
+    db: &rusqlite::Connection,
+    id: &str,
+    muted: bool,
+) -> Result<(), LibraryError> {
+    split_id(id)?;
+    db.execute(
+        "UPDATE release_watch_items SET muted = ?2 WHERE id = ?1",
+        params![id, muted],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn acknowledge_watch(
+    db: &rusqlite::Connection,
+    event_ids: &[String],
+) -> Result<(), LibraryError> {
+    let read_at = Utc::now().to_rfc3339();
+    for id in event_ids {
+        db.execute(
+            "UPDATE release_watch_item_events SET read_at = ?2 WHERE id = ?1 AND read_at IS NULL",
+            params![id, read_at],
+        )?;
+    }
+    Ok(())
+}
+
 impl Library {
     /// Add a title to the wishlist: from the cached calendar when it is there (source
     /// `calendar`), else read from its provider (source `manual`). Adding records no events;
@@ -221,7 +310,7 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<WatchItem, LibraryError> {
-        let (kind, number) = split_id(id)?;
+        let (kind, number, season) = split_id(id)?;
         let cached = cached_title(&*self.connection()?, id, now)?;
         let (title, source) = match cached {
             Some(title) => (title, "calendar"),
@@ -232,40 +321,14 @@ impl Library {
                         .find(|title| title.id == id)
                         .ok_or(LibraryError::IgdbNotFound)?,
                     ReleaseKind::Movie => fetch_movie(transport, number)?,
+                    ReleaseKind::Anime => fetch_anime(transport, number, season.unwrap())?,
                 };
                 (title, "manual")
             }
         };
-        let checked_at = now.to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM release_watch_items WHERE id = ?1)",
-            [id],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            let released = released_on(title.date.as_deref(), title.precision, today);
-            transaction.execute(
-                "INSERT INTO release_watch_items(id, kind, provider, external_id, title, original_title, cover,
-                   platforms_json, source, added_at, last_checked_at, next_check_at, released_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', ?8, ?9, ?9, ?10, ?11)",
-                params![
-                    title.id,
-                    kind.as_str(),
-                    kind.provider(),
-                    number.to_string(),
-                    title.title,
-                    title.original_title,
-                    title.cover,
-                    source,
-                    checked_at,
-                    next_check(now, today, title.date.as_deref(), title.precision).map(|time| time.to_rfc3339()),
-                    released.then(|| checked_at.clone()),
-                ],
-            )?;
-            write_title(&transaction, &title, &checked_at)?;
-        }
+        insert_watch(&transaction, &title, source, now, today)?;
         transaction.commit()?;
         drop(connection);
         self.release_watch_item(id)?
@@ -273,19 +336,11 @@ impl Library {
     }
 
     pub fn remove_release_watch(&self, id: &str) -> Result<(), LibraryError> {
-        split_id(id)?;
-        self.connection()?
-            .execute("DELETE FROM release_watch_items WHERE id = ?1", [id])?;
-        Ok(())
+        remove_watch(&*self.connection()?, id)
     }
 
     pub fn set_release_watch_muted(&self, id: &str, muted: bool) -> Result<(), LibraryError> {
-        split_id(id)?;
-        self.connection()?.execute(
-            "UPDATE release_watch_items SET muted = ?2 WHERE id = ?1",
-            params![id, muted],
-        )?;
-        Ok(())
+        mute_watch(&*self.connection()?, id, muted)
     }
 
     /// Mark exactly these events read; later events stay unread.
@@ -295,13 +350,7 @@ impl Library {
     ) -> Result<(), LibraryError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let read_at = Utc::now().to_rfc3339();
-        for id in event_ids {
-            transaction.execute(
-                "UPDATE release_watch_item_events SET read_at = ?2 WHERE id = ?1 AND read_at IS NULL",
-                params![id, read_at],
-            )?;
-        }
+        acknowledge_watch(&transaction, event_ids)?;
         transaction.commit()?;
         Ok(())
     }
@@ -383,10 +432,10 @@ impl Library {
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             items.push(WatchItem {
-                kind: if kind == "movie" {
-                    ReleaseKind::Movie
-                } else {
-                    ReleaseKind::Game
+                kind: match kind.as_str() {
+                    "movie" => ReleaseKind::Movie,
+                    "anime" => ReleaseKind::Anime,
+                    _ => ReleaseKind::Game,
                 },
                 id,
                 provider,
@@ -459,8 +508,8 @@ impl Library {
         let games: Vec<i64> = due
             .iter()
             .filter_map(|id| split_id(id).ok())
-            .filter(|(kind, _)| *kind == ReleaseKind::Game)
-            .map(|(_, number)| number)
+            .filter(|(kind, _, _)| *kind == ReleaseKind::Game)
+            .map(|(_, number, _)| number)
             .collect();
         for batch in games.chunks(IGDB_BATCH) {
             match fetch_games(transport, batch) {
@@ -482,16 +531,18 @@ impl Library {
             }
         }
         for id in due {
-            let Ok((ReleaseKind::Movie, number)) = split_id(id) else {
-                continue;
+            let fetched = match split_id(id)? {
+                (ReleaseKind::Movie, number, _) => fetch_movie(transport, number),
+                (ReleaseKind::Anime, number, Some(season)) => fetch_anime(transport, number, season),
+                _ => continue,
             };
-            match fetch_movie(transport, number) {
+            match fetched {
                 Ok(title) => {
                     result.changed +=
                         usize::from(self.apply_release_check(id, Some(&title), now, today)?);
                     result.checked += 1;
                 }
-                // A removed movie keeps its last known dates and is checked again tomorrow.
+                // A removed movie or season keeps its last known dates and is checked again tomorrow.
                 Err(LibraryError::TmdbNotFound) => {
                     self.apply_release_check(id, None, now, today)?;
                     result.checked += 1;

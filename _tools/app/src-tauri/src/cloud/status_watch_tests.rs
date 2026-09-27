@@ -19,6 +19,7 @@ pub(crate) fn status_with(logs: Option<PublisherLogs>) -> SyncStatus {
 
 pub(crate) fn logs(bindings_last: i64, captures_pending: i64) -> PublisherLogs {
     PublisherLogs {
+        upcoming_intents: None,
         character_exclusions: Some(3),
         character_review_decisions: Some(4),
         similarity_decisions: Some(5),
@@ -1122,4 +1123,17 @@ fn an_uncontested_pass_still_updates_the_hub() {
     let revision = status_revision(endpoint);
     assert_eq!(observe_pass(endpoint, &newer, now + 1, revision), newer);
     assert_eq!(hub().get(&endpoint_key(endpoint)).unwrap().status, Some(newer));
+}
+
+#[test]
+fn home_publications_upcoming_head_wakes_the_lane_and_missing_head_falls_back() {
+    let logs = PublisherLogs::parse(&json!({"upcomingIntents":{"last":3,"acknowledgedThrough":1,"prunedThrough":1}})).unwrap();
+    let head = Head::of(LogKind::UpcomingIntents, &logs).unwrap();
+    assert_eq!(head, Head::Reads { last:3, pruned_through:1 });
+    assert!(decide(Some(&head), LogPosition::cursor(Some(2)), Some(999), None, 1000));
+    assert!(!decide(Some(&head), LogPosition::cursor(Some(3)), Some(999), None, 1000));
+    let missing=PublisherLogs::parse(&json!({})).unwrap();
+    assert!(Head::of(LogKind::UpcomingIntents,&missing).is_none());
+    assert!(decide(None,LogPosition::cursor(Some(3)),Some(940),None,1000));
+    assert!(diff(Some(&status_with(Some(missing))),&status_with(Some(logs))).logs);
 }

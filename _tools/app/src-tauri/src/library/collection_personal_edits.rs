@@ -10,7 +10,7 @@
 //!
 //! * Server-accepted order wins: an entry overwrites the PC value of that field, including
 //!   an unpublished PC edit of the same field (user decision, 2026-09-24).
-//! * A Collection this PC deleted, or an AV/hidden legacy one (never published), gets a
+//! * A Collection this PC deleted, or a hidden legacy one (never published), gets a
 //!   `skipped` receipt and the cursor still advances: PC deletion wins.
 //! * Each page is applied in one transaction that re-reads and advances the durable
 //!   cursor and writes a receipt per consumed entry, so a replay is a no-op and a stale
@@ -503,14 +503,14 @@ impl Library {
             if consumed {
                 outcome.already_consumed += 1;
             } else {
-                // Only Collections this PC publishes can be edited: deleted, AV and hidden
-                // legacy rows are skipped (PC deletion wins).
+                // AV supports ordinary personal edits, but never manga tracking edits.
+                // Deleted and hidden legacy rows are skipped (PC deletion wins).
                 let publishable: bool = transaction
                     .query_row(
-                        "SELECT type IN ('game','manga','movie')
+                        "SELECT (type IN ('game','manga','movie') OR (type='av' AND NOT ?2))
                             AND (legacy_kind IS NULL OR legacy_kind <> 'gacha')
                          FROM collections WHERE id = ?1",
-                        [&item.collection_id],
+                        params![&item.collection_id, is_tracking_field(&item.field)],
                         |row| row.get(0),
                     )
                     .optional()?
@@ -884,7 +884,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn missing_and_av_collections_are_skipped_but_the_cursor_advances() {
+    fn av_personal_edits_apply_but_missing_rows_and_av_tracking_are_skipped() {
         let (_temp, library) = fixture();
         let id = adopt(&library, ENDPOINT);
         mark_published(&library);
@@ -895,17 +895,32 @@ pub(crate) mod tests {
                 &[
                     entry(1, "deleted", "myScore", serde_json::json!(5.0)),
                     entry(2, "av", "showcase", serde_json::json!(true)),
+                    entry(3, "av", "myScore", serde_json::json!(4.5)),
+                    entry(4, "av", "memo", serde_json::json!("AV memo")),
+                    entry(5, "av", "releaseWatch", serde_json::json!(true)),
+                    entry(6, "av", "ownedVolumes", serde_json::json!({"editionIndex":0,"count":2})),
                 ],
             )
             .unwrap();
-        assert_eq!(outcome.skipped, 2);
-        assert_eq!(outcome.changed, 0);
-        assert_eq!(cursor(&library, ENDPOINT), 2);
+        assert_eq!(outcome.skipped, 3);
+        assert_eq!(outcome.changed, 3);
+        assert_eq!(cursor(&library, ENDPOINT), 6);
         assert_eq!(
             receipts(&library),
-            vec![(1, "skipped".into()), (2, "skipped".into())]
+            vec![
+                (1, "skipped".into()),
+                (2, "applied".into()),
+                (3, "applied".into()),
+                (4, "applied".into()),
+                (5, "skipped".into()),
+                (6, "skipped".into()),
+            ]
         );
-        assert_eq!(row(&library, "av"), (None, None, false, None));
+        assert_eq!(
+            row(&library, "av"),
+            (Some(4.5), Some("AV memo".into()), true, Some(0))
+        );
+        assert_eq!(tracking(&library, "av"), (false, vec![], vec![]));
         assert!(
             dirty(&library),
             "the new cursor still needs acknowledging by a publication"

@@ -49,7 +49,7 @@ pub struct HomeServerStatus {
     pub captures_pending: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeOverview {
     pub assets: HomeAssetCounts,

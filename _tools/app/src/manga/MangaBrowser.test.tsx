@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -81,6 +81,7 @@ describe("MangaBrowser", () => {
     await userEvent.click(await screen.findByRole("button", { name: "로컬" }));
     expect(await screen.findByRole("toolbar")).toBeInTheDocument();
     expect(container.querySelector(".view-toolbar")).toBeInTheDocument();
+    expect(within(screen.getByTestId("shared-titlebar")).getByRole("heading", { name: "로컬" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "창 닫기" })).toBeInTheDocument();
   });
 

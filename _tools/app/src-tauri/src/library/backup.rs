@@ -137,6 +137,14 @@ impl Library {
         }
         let connection = self.connection()?;
         create_verified_snapshot_released(connection, destination)?;
+        // Portraits are PC-only, including in full cloud recovery snapshots. Secure
+        // deletion also removes BLOB payloads from free pages in the upload file.
+        let snapshot = Connection::open(destination)?;
+        snapshot.execute_batch(
+            "PRAGMA secure_delete=ON; DELETE FROM collection_person_portraits; VACUUM;",
+        )?;
+        drop(snapshot);
+        verify_snapshot(destination)?;
         fs::metadata(destination)
             .map(|metadata| metadata.len())
             .map_err(|source| backup_error(destination, source))

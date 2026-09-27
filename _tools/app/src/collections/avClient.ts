@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AvGateway, LocalArtworkPreview } from "./avTypes";
+import type { AvCommonsPreview, AvGateway, LocalArtworkPreview, PortraitRect } from "./avTypes";
 
 export const avGateway: AvGateway = {
   getDetails: collectionId => invoke("get_av_details", { collectionId }),
@@ -14,6 +14,14 @@ export const avGateway: AvGateway = {
     const { thumbnailBytes: _, ...preview } = wire;
     return { ...preview, thumbnailDataUrl: `data:image/png;base64,${btoa(binary)}` };
   },
+  getRelated: collectionId => invoke("get_av_related", { collectionId }),
+  getPerformer: personId => invoke("get_av_performer", { personId }),
+  savePersonMemo: (personId, memo) => invoke("save_av_person_memo", { personId, memo }),
+  listPortraitSources: personId => invoke("list_av_portrait_sources", { personId }),
+  setPortraitCrop: (personId, artworkId, rect: PortraitRect) => invoke("set_av_portrait_crop", { personId, artworkId, rect }),
+  previewCommonsPortrait: personId => invoke<AvCommonsPreview | null>("preview_av_commons_portrait", { personId }),
+  useCommonsPortrait: personId => invoke("use_av_commons_portrait", { personId }),
+  clearPortrait: personId => invoke("clear_av_portrait", { personId }),
 };
 export function avError(error: unknown): string {
   if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
