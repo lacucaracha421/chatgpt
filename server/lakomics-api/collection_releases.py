@@ -17,6 +17,11 @@ The server stores at most ``MAX_EVENTS`` rows (unread + read-but-still-uploaded)
 query is a scan of a few thousand rows at most. Nothing runs in the background: retention
 runs inside the write transactions.
 
+When mounted with Collections, known non-manga rows (including AV) are ignored by
+uploads, lists/counts and acknowledgements. Unknown collection IDs remain eligible:
+release uploads may arrive before the independent Collections replica. Existing read
+logs and idempotency receipts remain immutable even if a collection changes type.
+
 All routes are JSON. Errors are ``{"detail": {"code", "message"}}`` with Korean messages
 (401 from the auth guards is ``{"detail": "Unauthorized"}``). The routes are registered by
 ``mobile_collections.register_collections`` before ``GET /v1/collections/{collection_id}``,
@@ -332,8 +337,15 @@ def _kinds(raw):
     return kinds
 
 
-def register(app, get_db, require_client, require_publisher):
+def register(app, get_db, require_client, require_publisher, collection_source=None):
     """Install the routes. Tables come from ``startup_db`` (called by the Collections startup)."""
+
+    def eligible_events(db):
+        if collection_source is None:
+            return "1"
+        # The source is an internal table name from mobile_collections, never input.
+        return (f"NOT EXISTS (SELECT 1 FROM {collection_source(db)} AS collection"
+                " WHERE collection.id=collection_release_events.collection_id AND collection.type<>'manga')")
 
     def invalid_upload():
         fail(422, "invalidReleaseUpload", "신간 알림 목록을 확인할 수 없습니다.")
@@ -358,7 +370,11 @@ def register(app, get_db, require_client, require_publisher):
             moment = now_utc()
             now = moment.isoformat()
             changed, already_read = 0, []
+            excluded = set() if collection_source is None else {
+                row[0] for row in db.execute(f"SELECT id FROM {collection_source(db)} WHERE type<>'manga'")}
             for item in publication.items:
+                if item.collectionId in excluded:
+                    continue
                 values = (item.collectionId, item.collectionName, item.provider, item.kind, item.volumeNumber,
                           item.previousValue, item.currentValue, item.detectedAt)
                 detected_ms = int(parse_instant(item.detectedAt).timestamp() * 1000)
@@ -437,10 +453,13 @@ def register(app, get_db, require_client, require_publisher):
         with get_db() as db:
             db.execute("BEGIN")
             current = _state(db)
+            eligible = eligible_events(db)
+            clauses.append(eligible)
             rows = db.execute(f"SELECT * FROM collection_release_events WHERE {' AND '.join(clauses)}"
                               " ORDER BY detected_ms DESC, id DESC LIMIT ?", (*params, limit + 1)).fetchall()
             counts = db.execute(f"""SELECT collection_id,COUNT(*) FROM collection_release_events
-                WHERE read_at IS NULL AND kind IN ({marks}) GROUP BY collection_id ORDER BY collection_id""",
+                WHERE read_at IS NULL AND kind IN ({marks}) AND {eligible}
+                GROUP BY collection_id ORDER BY collection_id""",
                                 selected).fetchall()
             db.rollback()
         more = len(rows) > limit
@@ -472,10 +491,12 @@ def register(app, get_db, require_client, require_publisher):
                 return replay
             moment = now_utc()
             now = moment.isoformat()
+            eligible = eligible_events(db)
             if by_ids:
                 marks = ",".join("?" * len(command.eventIds))
                 rows = {r["event_id"]: r for r in db.execute(
-                    f"SELECT event_id,collection_id,read_at FROM collection_release_events WHERE event_id IN ({marks})",
+                    f"SELECT event_id,collection_id,read_at FROM collection_release_events"
+                    f" WHERE event_id IN ({marks}) AND {eligible}",
                     command.eventIds)}
                 targets = [rows[i] for i in command.eventIds if i in rows and rows[i]["read_at"] is None]
                 already = [i for i in command.eventIds if i in rows and rows[i]["read_at"] is not None]
@@ -484,6 +505,7 @@ def register(app, get_db, require_client, require_publisher):
                 kinds = tuple(dict.fromkeys(command.kinds or TABLET_KINDS))
                 targets = db.execute(f"""SELECT event_id,collection_id FROM collection_release_events
                     WHERE collection_id=? AND read_at IS NULL AND kind IN ({','.join('?' * len(kinds))})
+                    AND {eligible}
                     ORDER BY detected_ms DESC, id DESC""", (command.collectionId, *kinds)).fetchall()
                 already, missing = [], []
             sequence = _state(db)["read_sequence"]

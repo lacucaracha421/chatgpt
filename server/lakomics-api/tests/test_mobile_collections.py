@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.test_capture_api_stub import fake_s3
 import app as api_app
 import head_cache
+import mobile_collections
 from fastapi.testclient import TestClient
 
 AUTH = {"Authorization": "Bearer collections-test"}
@@ -23,6 +24,15 @@ def work(id="work", name="작품", type="manga"):
 def blob(data=b"image"):
     digest = hashlib.sha256(data).hexdigest()
     return {"sha256": digest, "sizeBytes": len(data), "contentType": "image/webp", "objectKey": "work-artwork/mobile/" + digest}
+
+
+def av_info():
+    return {"productCode": "TEST-001", "titleJa": "作品", "maker": "Maker", "label": "Label",
+            "series": "Series", "genres": ["Genre"], "releaseDate": "2024-02-29",
+            "people": [{"id": "person", "name": "Performer", "nameJa": "出演者",
+                        "role": "performer", "order": 0, "portraitCrop": None},
+                       {"id": "director", "name": "Director", "nameJa": None,
+                        "role": "director", "order": 1, "portraitCrop": None}]}
 
 
 class MobileCollectionsTests(unittest.TestCase):
@@ -61,6 +71,97 @@ class MobileCollectionsTests(unittest.TestCase):
         item, media = work(), blob()
         item.update(selectedWorkArtworkId="cover", artworks=[{"id": "cover", "kind": "cover", "selected": True, "thumbnail": media, "original": media}], volumes=[{"id": "volume", "volumeNumber": 2, "editionIndex": 1, "displayLabel": "2권", "coverArtworkId": "cover"}])
         return item, media
+
+    def test_av_capability_precedes_publication_and_preserves_legacy_shape(self):
+        status = self.client.get("/v1/collections/status", headers=AUTH).json()
+        self.assertIsNone(status["revision"])
+        self.assertEqual(status["collectionTypes"], ["game", "manga", "movie", "av"])
+        items = [work(type="av"), work("manga")]
+        reply = self.publish(items)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["collections"], 2)
+        for item in self.listing().json()["items"]:
+            self.assertNotIn("av", item)
+        self.assertNotIn("av", self.client.get("/v1/collections/manga", headers=AUTH).json()["item"])
+        with api_app.get_db() as db:
+            self.assertEqual(mobile_collections.status_signal(db)["revision"], reply.json()["revision"])
+
+    def test_av_list_detail_filter_counts_and_cover_crop_ticket(self):
+        item, media = self.with_art()
+        item.update(type="av", av=av_info())
+        crop = {"artworkId": "cover", "x": 0.1, "y": 0, "w": 0.5, "h": 1}
+        item["av"]["people"][0]["portraitCrop"] = crop
+        fake_s3.objects[media["objectKey"]] = {"body": b"image", "content_type": "image/webp"}
+        reply = self.publish([item, work("manga"), work("av-plain", type="av")])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        listing = self.listing(type="av").json()
+        self.assertEqual(listing["totalCount"], 2)
+        self.assertEqual({row["id"] for row in listing["items"]}, {"work", "av-plain"})
+        self.assertEqual(next(row for row in listing["items"] if row["id"] == "work")["av"], item["av"])
+        self.assertEqual(self.listing(type="manga").json()["totalCount"], 1)
+        self.assertEqual(self.listing().json()["totalCount"], 3)
+        detail = self.client.get("/v1/collections/work", headers=AUTH).json()["item"]
+        self.assertEqual(detail["av"], item["av"])
+        self.assertEqual(self.client.post("/v1/collections/work/artworks/cover/media-ticket",
+                                         headers=AUTH, json={}).status_code, 200)
+        self.assertNotIn("objectKey", self.listing(type="av").text)
+
+    def test_av_details_rejected_on_every_other_type(self):
+        for kind in ("game", "manga", "movie"):
+            with self.subTest(kind=kind):
+                reply = self.publish([{**work(type=kind), "av": av_info()}])
+                self.assertEqual(reply.status_code, 422, reply.text)
+        self.assertFalse(self.listing().json()["ready"])
+
+    def test_av_bounds_dates_ids_roles_and_private_fields(self):
+        invalid = [("productCode", "x" * 65), ("titleJa", "x" * 2001),
+                   *[(key, "x" * 501) for key in ("maker", "label", "series")],
+                   ("genres", ["x"] * 65), ("genres", ["x" * 101]),
+                   ("people", av_info()["people"][:1] * 65),
+                   *[("releaseDate", value) for value in ("2026-02-29", "2024-2-01", "2024-01-01T00:00:00Z")],
+                   ("portraitUrl", "https://private.invalid/portrait")]
+        for key, value in invalid:
+            with self.subTest(key=key, value=str(value)[:50]):
+                info = {**av_info(), key: value}
+                self.assertEqual(self.publish([{**work(type="av"), "av": info}]).status_code, 422)
+        for key, value in (("id", "../person"), ("name", "x" * 501), ("nameJa", "x" * 501),
+                           ("role", "actor"), ("order", 1.5), ("order", True),
+                           ("portraitPath", "/private/portrait")):
+            info = av_info()
+            info["people"][0][key] = value
+            with self.subTest(person_field=key):
+                reply = self.publish([{**work(type="av"), "av": info}])
+                self.assertEqual(reply.status_code, 422)
+                self.assertNotIn("/private/portrait", reply.text)
+        for value in (-0.01, 1.01, float("inf"), float("nan")):
+            for coordinate in ("x", "y", "w", "h"):
+                crop = {"artworkId": "cover", "x": 0, "y": 0, "w": 1, "h": 1, coordinate: value}
+                with self.subTest(coordinate=coordinate, value=value):
+                    with self.assertRaises(ValueError):
+                        mobile_collections.AvPortraitCrop.model_validate(crop)
+
+    def test_av_crop_requires_published_av_cover_in_current_snapshot(self):
+        target = {**work("target", type="av"), "av": av_info()}
+        target["av"]["people"][0]["portraitCrop"] = {
+            "artworkId": "cover", "x": 0, "y": 0, "w": 1, "h": 1}
+        source, media = self.with_art()
+        source["type"] = "av"
+        fake_s3.objects[media["objectKey"]] = {"body": b"image", "content_type": "image/webp"}
+        for kind, artwork_kind, with_bytes in (("manga", "cover", True), ("av", "back", True),
+                                                ("av", "cover", False)):
+            bad_source = copy.deepcopy(source)
+            bad_source["type"] = kind
+            bad_source["artworks"][0]["kind"] = artwork_kind
+            if not with_bytes:
+                bad_source["artworks"][0].update(thumbnail=None, original=None)
+            self.assertEqual(self.publish([target, bad_source]).status_code, 422)
+        self.assertEqual(self.publish([target]).status_code, 422)
+        self.assertEqual(self.publish([target, source, {**source, "id": "duplicate-cover"}]).status_code, 422)
+        reply = self.publish([target, source])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        # An old published cover cannot outlive its source in a complete replacement.
+        self.assertEqual(self.publish([target], reply.json()["revision"]).status_code, 422)
+        self.assertEqual(self.listing().json()["totalCount"], 2)
 
     def test_mobile_series_projection_and_revision_check(self):
         item = work(type="movie")

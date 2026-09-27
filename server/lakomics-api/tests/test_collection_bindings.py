@@ -687,6 +687,22 @@ class RealApplication(unittest.TestCase):
     def tearDown(self):
         self.fixtures.MobileCollectionsTests.tearDown(self)
 
+    def test_av_cannot_create_manga_binding_request(self):
+        auth = self.fixtures.AUTH
+        self.assertEqual(self.client.put("/v1/collections/replica", headers=auth, json={
+            "version": 1, "baseRevision": None,
+            "collections": [self.fixtures.work("av", type="av")]}).status_code, 200)
+        choices = {"mangadex": {"mangaId": MANGA_ID, "title": "Title"},
+                   "kakao": {"query": "Title", "title": "Title", "groups": [{"anchorItemId": "isbn-123",
+                                                            "groupFingerprint": "a" * 64}]}}
+        for provider, choice in choices.items():
+            reply = self.client.post(PREFIX + "/requests", headers=auth, json={
+                "version": 1, "operationId": str(uuid.uuid4()), "collectionId": "av",
+                "provider": provider, "choice": choice})
+            self.assertEqual(reply.status_code, 409, reply.text)
+            self.assertEqual(reply.json()["detail"]["code"], "collectionNotManga")
+        self.assertEqual(self.client.get(PREFIX + "/log", headers=self.publisher).json()["items"], [])
+
     def test_routes_are_not_shadowed(self):
         auth = self.fixtures.AUTH
         self.assertEqual(self.client.put("/v1/collections/replica", headers=auth, json={

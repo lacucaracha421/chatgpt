@@ -1,8 +1,8 @@
-"""Home 발매 예정: the PC's game/movie release calendar and wishlist (HOME-DASH-001, phase 2).
+"""Home 발매 예정: the PC's game/movie/anime release calendar and wishlist (HOME-DASH-001, phase 2).
 
 The PC owns both (`_tools/app/src-tauri/src/library/release_calendar.rs`,
 `release_wishlist.rs`): it fetches the ~6-month calendar (IGDB games, TMDB movies with a Korean
-release) and tracks the titles the user wished for. It publishes one full snapshot here; the
+release, TMDB Japanese TV anime seasons) and tracks the titles the user wished for. It publishes one full snapshot here; the
 tablet reads it and files wishlist *intents* (add/remove/mute/unmute/acknowledge) that the PC
 reads from an ordered log, applies locally and acknowledges with its next snapshot
 (``intentCursor``). Until then the tablet overlays its ``pending`` intents on the snapshot.
@@ -13,13 +13,14 @@ Errors are ``{"detail": {"code", "message"}}`` (401 from the auth guards is
 
 Title (calendar entry)
 ----------------------
-``{"id": "igdb:1942" | "tmdb:12345", "kind": "game"|"movie", "title", "originalTitle"|null,
+``{"id": "igdb:1942" | "tmdb:12345" | "tmdb:tv:123:s2", "kind": "game"|"movie"|"anime", "title", "originalTitle"|null,
 "date": "YYYY-MM-DD"|null, "precision": "exact"|"month"|"quarter"|"year"|"tbd",
 "region": str|null, "platforms": [str], "releaseType": str|null, "cover": Cover|null,
 "popularity": number|null}``
 
-* ``id`` is the PC's stable ``provider:external_id`` (``[A-Za-z0-9_-]{1,64}`` after the colon);
-  ``igdb`` <=> ``game``, ``tmdb`` <=> ``movie``.
+* ``id`` is the PC's stable ``provider:external_id`` (``[A-Za-z0-9_-]{1,64}`` after the colon,
+  or ``tv:<show>:s<season>`` for an anime season); ``igdb`` <=> ``game``, ``tmdb:tv:`` <=> ``anime``,
+  other ``tmdb`` <=> ``movie``.
 * ``date`` is the first day of the stated period; null exactly when ``precision`` is ``tbd``.
 * ``cover`` - see ``home_publications`` (IGDB/TMDB image URL, or an uploaded artwork blob).
 * Limits: title/originalTitle <= 500, region <= 16, platforms <= 32 x 100, releaseType <= 40.
@@ -90,7 +91,8 @@ INTENT_LOG_MAX = 5000
 RECEIPTS_RETAINED = 2000
 COVER_OWNER = "upcoming"
 
-ItemId = Annotated[str, StringConstraints(pattern=r"^(igdb|tmdb):[A-Za-z0-9_-]{1,64}$")]
+# Anime seasons are `tmdb:tv:<show>:s<season>` so they cannot collide with movie `tmdb:<id>`.
+ItemId = Annotated[str, StringConstraints(pattern=r"^(igdb:[A-Za-z0-9_-]{1,64}|tmdb:[A-Za-z0-9_-]{1,64}|tmdb:tv:[0-9]{1,12}:s[0-9]{1,4})$")]
 EventId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")]
 Value = Annotated[str, StringConstraints(max_length=200)]
 
@@ -125,7 +127,7 @@ def encode(value):
 
 class Title(Strict):
     id: ItemId
-    kind: Literal["game", "movie"]
+    kind: Literal["game", "movie", "anime"]
     title: text(500)
     originalTitle: text(500) | None = None
     date: Day | None = None
@@ -138,7 +140,7 @@ class Title(Strict):
 
     @model_validator(mode="after")
     def _consistent(self):
-        if (self.kind == "game") != self.id.startswith("igdb:"):
+        if (self.kind == "game") != self.id.startswith("igdb:") or (self.kind == "anime") != self.id.startswith("tmdb:tv:"):
             raise ValueError("kind does not match provider")
         if (self.precision == "tbd") != (self.date is None):
             raise ValueError("date must be null exactly for tbd")

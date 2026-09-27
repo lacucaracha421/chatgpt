@@ -335,6 +335,38 @@ class ReleaseRouteOrder(unittest.TestCase):
     def tearDown(self):
         self.fixtures.MobileCollectionsTests.tearDown(self)
 
+    def test_av_is_ignored_by_upload_list_counts_and_acknowledgements(self):
+        auth = self.fixtures.AUTH
+        def upload(items, generation):
+            return self.client.put(PREFIX + "/unread", headers=self.publisher, json={
+                "version": 1, "operationId": str(uuid.uuid4()), "generation": generation,
+                "final": True, "items": items})
+
+        # Releases can arrive before the replica tells us a work is AV.
+        events = [event("av-event", collection="av"), event("manga-event", collection="manga"),
+                  event("unknown-event", collection="unknown")]
+        self.assertEqual(upload(events, "1").status_code, 200)
+        self.assertEqual(self.client.put("/v1/collections/replica", headers=auth, json={
+            "version": 1, "baseRevision": None,
+            "collections": [self.fixtures.work("av", type="av"), self.fixtures.work("manga")]
+        }).status_code, 200)
+        result = self.client.get(PREFIX, headers=auth).json()
+        self.assertEqual({item["eventId"] for item in result["items"]}, {"manga-event", "unknown-event"})
+        self.assertEqual(result["counts"], {"unread": 2, "collections": [
+            {"collectionId": "manga", "unread": 1}, {"collectionId": "unknown", "unread": 1}]})
+        self.assertEqual(self.client.get(PREFIX, headers=auth, params={"collectionId": "av"}).json()["items"], [])
+        for target in ({"eventIds": ["av-event"]}, {"collectionId": "av"}):
+            reply = self.client.post(PREFIX + "/acknowledge", headers=auth, json={
+                "version": 1, "operationId": str(uuid.uuid4()), **target})
+            self.assertEqual(reply.status_code, 200, reply.text)
+            self.assertEqual(reply.json()["acknowledged"], [])
+        self.assertEqual(self.client.get(PREFIX + "/reads", headers=self.publisher).json()["items"], [])
+        reply = upload([*events, event("new-av-event", collection="av")], "2")
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["changed"], 0)
+        with self.fixtures.api_app.get_db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM collection_release_events WHERE collection_id='av'").fetchone()[0], 0)
+
     def test_releases_route_is_not_shadowed(self):
         auth = self.fixtures.AUTH  # the legacy shared token is a client credential
         self.assertEqual(self.client.put("/v1/collections/replica", headers=auth, json={

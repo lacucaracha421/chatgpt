@@ -149,6 +149,10 @@ class UpcomingRoutes(HomeFixture):
             snapshot(entries=[title(precision="tbd")]),
             snapshot(entries=[title(date="2026-02-30")]),
             snapshot(entries=[title(item_id="steam:1")]),
+            snapshot(entries=[title(item_id="tmdb:77", kind="anime")]),
+            snapshot(entries=[title(item_id="tmdb:tv:77:s2", kind="movie")]),
+            snapshot(entries=[title(item_id="tmdb:tv:77:2", kind="anime")]),
+            snapshot(entries=[title(item_id="igdb:tv:77:s2", kind="game")]),
             snapshot(entries=[title(title=" ")]),
             snapshot(entries=[title(title="a\nb")]),
             snapshot(entries=[title(cover={"url": "http://images.igdb.com/x.jpg"})]),
@@ -170,6 +174,11 @@ class UpcomingRoutes(HomeFixture):
         self.assertEqual((reply.status_code, self.code(reply)), (413, "upcomingUploadTooLarge"))
         tbd = title(item_id="igdb:5", date=None, precision="tbd")
         self.ok(self.put(snapshot(entries=[tbd])))
+        anime = title(item_id="tmdb:tv:12345:s2", kind="anime", region="JP", platforms=[],
+                      cover={"url": "https://image.tmdb.org/t/p/w342/a.jpg"})
+        self.ok(self.put(snapshot(entries=[anime], wishlist=[wish("tmdb:tv:12345:s2", kind="anime")])))
+        self.assertEqual(self.ok(self.get())["wishlist"][0]["id"], "tmdb:tv:12345:s2")
+        self.ok(self.intent("mute", "tmdb:tv:12345:s2"))
 
     def test_snapshot_replace_and_etag(self):
         first = self.ok(self.put(snapshot()))

@@ -397,6 +397,32 @@ class CollectionTrackingEditTests(unittest.TestCase):
         bad[0]['ownedVolumes'] = [{'editionIndex': 4, 'count': 1}]
         self.assertEqual(self.publish(self.body(bad, base=self.status()['revision'], edit_version=2)).status_code, 422)
 
+    def test_av_personal_edits_work_but_manga_tracking_is_rejected(self):
+        self.items[0].update(type='av', av=fixtures.av_info())
+        self.ready2()
+        for command in (self.watch(), self.owned()):
+            reply = self.edit(command)
+            self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionTrackingUnavailable'))
+        for command in (self.command(), self.command('memo', 'AV memo', 'PC 메모'),
+                        self.command('showcase', True, False)):
+            reply = self.edit(command)
+            self.assertEqual(reply.status_code, 200, reply.text)
+        detail = self.detail()
+        self.assertEqual(detail['myScore'], 4.5)
+        self.assertEqual(detail['description'], 'AV memo')
+        self.assertTrue(detail['showcase'])
+        self.assertEqual(detail['showcaseOrder'], 0)
+        self.assertEqual(detail['av'], fixtures.av_info())
+
+    def test_pending_manga_tracking_does_not_reapply_after_type_changes_to_av(self):
+        self.ready2()
+        self.assertEqual(self.edit(self.watch()).status_code, 200)
+        self.assertEqual(self.edit(self.owned()).status_code, 200)
+        self.items[0]['type'] = 'av'
+        self.ready2(cursor=0)
+        self.assertFalse(self.detail()['releaseWatch']['enabled'])
+        self.assertEqual(self.detail()['ownedVolumes'][0], {'editionIndex': 0, 'count': 3})
+
     def test_version_one_pc_cannot_receive_tracking_edits(self):
         self.ready()
         self.assertFalse(self.status()['capabilities']['collectionTrackingEdit'])
@@ -554,7 +580,7 @@ class CollectionReleaseScheduleTests(unittest.TestCase):
                     mobile_collections.Replica.model_validate({'version': 1, 'baseRevision': None,
                                                                'collections': legacy}).collections}
         for payload in expected.values():
-            for key in ('releaseSchedule', 'releaseWatch', 'ownedVolumes'):
+            for key in ('releaseSchedule', 'releaseWatch', 'ownedVolumes', 'av'):
                 del payload[key]
         self.assertEqual(self.publish(self.body(legacy, upgraded=False), headers=AUTH).status_code, 200)
         rows = self.stored_rows()

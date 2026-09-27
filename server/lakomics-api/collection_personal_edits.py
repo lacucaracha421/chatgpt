@@ -241,9 +241,10 @@ def patch(db, collection_id, field, value):
     payload = json.loads(row["payload"])
     showcase, order = bool(row["showcase"]), row["showcase_order"]
     if field in TRACKING_FIELDS:
+        # Replayed manga edits must not affect a work whose type has since changed.
         # A Collection published without the key (legacy snapshot) is left untouched.
         current = payload.get(PAYLOAD_KEYS[field])
-        if current is None:
+        if payload.get("type") != "manga" or current is None:
             return True
         if field == "releaseWatch":
             # Never show watching on a Collection the PC cannot watch.

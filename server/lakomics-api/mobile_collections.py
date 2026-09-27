@@ -1,4 +1,25 @@
-"""PC-owned Collection read replica. Artwork remains outside the Asset Library."""
+"""PC-owned Collection read replica. Artwork remains outside the Asset Library.
+
+AV publication handshake (server first, then PC, then tablet): authenticated
+``GET /v1/collections/status`` advertises top-level ``collectionTypes`` containing
+``["game", "manga", "movie", "av"]``, even before the first publication. Before
+sending ``type: "av"``, the PC must check that this array contains ``"av"``; a
+missing field means an older server and the PC must omit AV rows from its snapshot.
+This is independent of the existing personalEditVersion/libraryId/cursor handshake;
+replica version stays 1 and no AV-specific request handshake is required.
+
+The optional ``av`` block is returned on both list and detail (including people for
+the performer view). It is omitted when null/absent and rejected on non-AV types
+when non-null. AV rows need no additional fields. Portraits carry only normalized
+crop coordinates and an artworkId referencing a unique published ``kind: "cover"``
+with image bytes on an AV row in the same complete snapshot (possibly another AV
+collection). Local/Commons portrait paths, URLs and bytes are not accepted.
+
+This capability describes the replica schema only. Collections authority still
+excludes AV and fences replica writes when active; its baseline completeness guard
+must reject activation that would drop published AV rows. Manga releases, bindings
+and tracking edits do not apply to AV; ordinary personal edits remain available.
+"""
 from __future__ import annotations
 
 import base64
@@ -10,7 +31,7 @@ from typing import Annotated, Literal
 from botocore.exceptions import ClientError
 from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints, ValidationError, field_validator, model_validator
 from starlette.concurrency import run_in_threadpool
 
 import authority
@@ -26,6 +47,8 @@ MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
 ID = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 Digest = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 ImageMime = Literal["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/bmp", "image/heic", "image/heif"]
+CollectionType = Literal["game", "manga", "movie", "av"]
+COLLECTION_TYPES = ("game", "manga", "movie", "av")
 
 
 class StrictModel(BaseModel):
@@ -195,10 +218,45 @@ class ReleaseSchedule(StrictModel):
     mangadex: MangaDexSchedule | None
 
 
+class AvPortraitCrop(StrictModel):
+    artworkId: ID
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    w: float = Field(ge=0, le=1)
+    h: float = Field(ge=0, le=1)
+
+
+class AvPerson(StrictModel):
+    id: ID
+    name: str = Field(max_length=500)
+    nameJa: str | None = Field(default=None, max_length=500)
+    role: Literal["performer", "director"]
+    order: StrictInt
+    portraitCrop: AvPortraitCrop | None = None
+
+
+class AvInfo(StrictModel):
+    productCode: str | None = Field(default=None, max_length=64)
+    titleJa: str | None = Field(default=None, max_length=2000)
+    maker: str | None = Field(default=None, max_length=500)
+    label: str | None = Field(default=None, max_length=500)
+    series: str | None = Field(default=None, max_length=500)
+    genres: list[Annotated[str, StringConstraints(max_length=100)]] = Field(default_factory=list, max_length=64)
+    releaseDate: Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")] | None = None
+    people: list[AvPerson] = Field(default_factory=list, max_length=64)
+
+    @field_validator("releaseDate")
+    @classmethod
+    def calendar_date(cls, value):
+        if value is not None:
+            datetime.strptime(value, "%Y-%m-%d")
+        return value
+
+
 class Collection(StrictModel):
     id: ID
     name: str = Field(min_length=1, max_length=2000)
-    type: Literal["game", "manga", "movie"]
+    type: CollectionType
     description: str | None = Field(default=None, max_length=10000)
     coverAssetId: ID | None = None
     selectedWorkArtworkId: ID | None = None
@@ -227,6 +285,7 @@ class Collection(StrictModel):
     updatedAt: str = Field(max_length=100)
     series: Series | None = None
     film: Film | None = None
+    av: AvInfo | None = None
     volumes: list[Volume] = Field(default_factory=list, max_length=5000)
     artworks: list[Artwork] = Field(default_factory=list, max_length=10000)
     # Manga tracking state from an upgraded PC (personalEditVersion 2). Absent/null in
@@ -234,6 +293,12 @@ class Collection(StrictModel):
     releaseWatch: ReleaseWatch | None = None
     ownedVolumes: list[OwnedVolumes] | None = Field(default=None, max_length=4)
     releaseSchedule: ReleaseSchedule | None = None
+
+    @model_validator(mode="after")
+    def av_type(self):
+        if self.av is not None and self.type != "av":
+            raise ValueError("AV details require an AV collection")
+        return self
 
 
 class Replica(StrictModel):
@@ -259,9 +324,9 @@ def encode(value) -> str:
 
 
 def stored(item: Collection) -> dict:
-    """The stored payload; optional tracking keys are omitted rather than stored as null."""
+    """Omit absent tracking and AV blocks to preserve older replica payloads."""
     payload = item.model_dump()
-    for key in ("releaseWatch", "ownedVolumes", "releaseSchedule"):
+    for key in ("releaseWatch", "ownedVolumes", "releaseSchedule", "av"):
         if payload[key] is None:
             del payload[key]
     if "ownedVolumes" in payload:
@@ -364,7 +429,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
 
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
     personal_edits.register(app, get_db, reader, publisher, lambda db: legacy_state(db)[0])
-    collection_releases.register(app, get_db, reader, publisher)
+    collection_releases.register(app, get_db, reader, publisher,
+                                 collection_source=lambda db: table(served(db)))
     collection_bindings.register(app, get_db, reader, publisher)
     collection_authority.register(app, get_db, reader, publisher)
 
@@ -455,6 +521,17 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         ids = [item.id for item in snapshot.collections]
         if len(set(ids)) != len(ids):
             raise HTTPException(422, "Duplicate collection IDs")
+        av_covers = {}
+        for item in snapshot.collections:
+            if item.type == "av":
+                for art in item.artworks:
+                    if art.kind == "cover" and (art.thumbnail is not None or art.original is not None):
+                        av_covers[art.id] = av_covers.get(art.id, 0) + 1
+        for item in snapshot.collections:
+            if item.av is not None:
+                for person in item.av.people:
+                    if person.portraitCrop is not None and av_covers.get(person.portraitCrop.artworkId) != 1:
+                        raise HTTPException(422, "Portrait crop requires a unique published AV cover")
         with get_db() as db:
             if legacy_state(db)[0] != snapshot.baseRevision:
                 raise HTTPException(409, "Collection snapshot changed; refresh before publishing")
@@ -520,7 +597,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         return {"ok": True, "revision": revision, "publishedAt": published, "collections": len(items), "artworks": len(blobs)}
 
     @app.get("/v1/collections")
-    def list_collections(type: Literal["game", "manga", "movie"] | None = None,
+    def list_collections(type: CollectionType | None = None,
                          q: str = Query(default="", max_length=200), showcase: bool = False,
                          sort: Literal["name", "recent", "media_date"] = "name",
                          direction: Literal["asc", "desc"] = "asc",
@@ -597,6 +674,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                                                                      "collectionTrackingEdit": False},
                                  "libraryId": active["libraryId"]}
         return {"revision": revision, "publishedAt": published, **advertisement,
+                "collectionTypes": COLLECTION_TYPES,
                 "collectionBindings": collection_bindings.capabilities()}
 
     @app.get("/v1/collections/{collection_id}")

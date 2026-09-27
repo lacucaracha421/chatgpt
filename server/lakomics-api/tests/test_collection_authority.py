@@ -160,6 +160,15 @@ class CollectionAuthorityTests(unittest.TestCase):
         return self.client.get('/v1/collections/' + work_id, headers=AUTH)
 
     # --- inactive safety ---------------------------------------------------------
+    def test_baseline_cannot_silently_drop_av_replica_rows(self):
+        reply = self.publish_legacy([*self.items, work("av", type="av")])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        reply = self.stage()
+        self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionBaselineRejected'))
+        self.assertEqual(reply.json()['detail']['missing'], ['av'])
+        self.assertFalse(self.client.get(PREFIX + '/status', headers=self.auth).json()['active'])
+        self.assertEqual(self.listing(type='av')['totalCount'], 1)
+
     def test_inactive_domain_changes_nothing(self):
         self.assertEqual(self.client.get(PREFIX + '/status', headers=self.auth).json(),
                          {'active': False, 'domain': 'collections'})
