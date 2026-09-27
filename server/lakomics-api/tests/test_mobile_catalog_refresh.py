@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import time
 import unittest
@@ -8,7 +9,7 @@ from unittest import mock
 from tests import test_mobile_catalog as base
 import mobile_catalog_replica as replica
 import catalog_duplicates
-from mobile_catalog_refresh import DDL, RefreshWorker, register_refresh
+from mobile_catalog_refresh import DDL, MAX_PAGES, RECENT_SECONDS, RefreshWorker, register_refresh
 from catalog_refresh_content import parse_page
 
 
@@ -33,6 +34,216 @@ class RefreshTests(unittest.TestCase):
 
     def request(self, worker, language="korean"):
         return worker.request(str(uuid.uuid4()), language)
+
+    def observed_page(self, ids, language="korean", **fields):
+        rows = json.loads(page(ids, language))
+        for row in rows:
+            row.update(posted=int(time.time()), **fields)
+        return json.dumps(rows)
+
+    def run_fast(self, worker, limit=None, language="korean"):
+        job = self.request(worker, language)
+        if limit is not None:
+            with self.get_db() as db:
+                db.execute("UPDATE mobile_catalog_refresh_jobs SET page_limit=? WHERE id=?", [limit, job["id"]])
+                db.commit()
+        with mock.patch.object(worker.stop, "wait", return_value=False):
+            worker.run_once()
+        self.assertEqual(worker.status()["state"], "completed")
+        return job
+
+    def change_pc_work(self, work_id, **fields):
+        records = [json.loads(line) for line in self.data.splitlines()]
+        for record in records:
+            if record["kind"] == "work" and record["value"]["Id"] == work_id:
+                record["value"].update(fields)
+        self.data = b"".join((replica.encode(record) + "\n").encode() for record in records)
+        self.digest = hashlib.sha256(self.data).hexdigest()
+
+    def test_existing_metadata_changes_next_publication_without_changing_filters(self):
+        self.change_pc_work(1, Posted=int(time.time()))
+        self.change_pc_work(3, Posted=int(time.time()))
+        worker = self.worker(lambda *_: self.observed_page([5, 4, 3], views=6486, rating=4.25,
+                                                          filecount=125, updated=1800000000))
+        before = self.search().json()["publicationRevision"]
+        for sort in ("hotDay", "hotWeek", "hotMonth"):
+            self.assertEqual(self.search(language="korean", sort=sort).json()["items"][0]["providerWorkId"], "1")
+        self.run_fast(worker)
+        self.assertEqual(worker.status()["added"], 0)
+        for sort in ("hotDay", "hotWeek", "hotMonth"):
+            self.assertEqual(self.search(language="korean", sort=sort).json()["items"][0]["providerWorkId"], "3")
+        with replica.open_publication(worker.root(), self.get_db) as (db, publication):
+            self.assertNotEqual(publication["revision"], before)
+            self.assertEqual(tuple(db.execute("SELECT Views,Rating,FileCount,Updated,Expunged FROM catalog.Works WHERE Id=3").fetchone()),
+                             (6486, 4.25, 125, 1800000000, 0))
+            self.assertEqual(db.execute("SELECT group_id FROM catalog.online_catalog_group_members WHERE catalog_work_id=3").fetchone()[0], "g3")
+        self.assertEqual(self.search(text="id:4 OR id:5").json()["items"], [])
+        with replica.open_publication(worker.root(), self.get_db, before) as (db, _):
+            self.assertEqual(db.execute("SELECT Views FROM catalog.Works WHERE Id=3").fetchone()[0], 50)
+        worker.fetch_page = lambda *_: self.observed_page([3], views=7000, rating=3.5, expunged=True)
+        self.run_fast(worker)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(tuple(db.execute("SELECT Views,Rating,Expunged FROM catalog.Works WHERE Id=3").fetchone()), (7000, 3.5, 1))
+        self.assertEqual(self.search(text="id:3").json()["items"], [])
+
+    def test_later_pc_values_and_user_projection_survive_observation_replay(self):
+        worker = self.worker(lambda *_: self.observed_page([3], views=6486, rating=4.25, filecount=125))
+        self.run_fast(worker)
+        users = copy.deepcopy(self.users)
+        users["bookmarks"] = []
+        # An offline PC cannot roll views back to its original value.
+        prior = worker.status()["publicationRevision"]
+        response = self.publish(prior, users)
+        self.assertEqual(response.status_code, 200, response.text)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(tuple(db.execute("SELECT Views,Rating,FileCount FROM catalog.Works WHERE Id=3").fetchone()), (6486, None, 120))
+        # Changed PC values win, even a legitimately lower rating/page count.
+        self.change_pc_work(3, Views=9000, Rating=2.5, FileCount=100, Updated=1900000000, Expunged=1)
+        response = self.publish(response.json()["publicationRevision"], users)
+        self.assertEqual(response.status_code, 200, response.text)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(tuple(db.execute("SELECT Views,Rating,FileCount,Updated,Expunged FROM catalog.Works WHERE Id=3").fetchone()),
+                             (9000, 2.5, 100, 1900000000, 1))
+        self.assertEqual(self.search(scope="bookmarked").json()["items"], [])
+
+    def test_pc_metadata_changed_during_fetch_is_not_overwritten(self):
+        def fetch(*_):
+            self.change_pc_work(3, Views=9000, Rating=2.5)
+            response = self.publish(self.search().json()["publicationRevision"])
+            self.assertEqual(response.status_code, 200, response.text)
+            return self.observed_page([3], views=6000, rating=4.5)
+        worker = self.worker(fetch)
+        self.run_fast(worker)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(tuple(db.execute("SELECT Views,Rating FROM catalog.Works WHERE Id=3").fetchone()), (9000, 2.5))
+
+    def test_observation_does_not_resurrect_a_work_omitted_by_later_pc(self):
+        worker = self.worker(lambda *_: self.observed_page([3], views=6486))
+        self.run_fast(worker)
+        records = [json.loads(line) for line in self.data.splitlines()]
+        keys = {"work": "Id", "tag": "WorkId", "member": "catalog_work_id"}
+        records = [record for record in records
+                   if record["kind"] not in keys or record["value"][keys[record["kind"]]] != 3]
+        for kind in keys:
+            records[0]["value"]["counts"][kind] = sum(record["kind"] == kind for record in records)
+        self.data = b"".join((replica.encode(record) + "\n").encode() for record in records)
+        self.digest = hashlib.sha256(self.data).hexdigest()
+        response = self.publish(worker.status()["publicationRevision"])
+        self.assertEqual(response.status_code, 200, response.text)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertIsNone(db.execute("SELECT 1 FROM catalog.Works WHERE Id=3").fetchone())
+
+    def test_server_added_work_can_be_refreshed_and_survive_stale_pc(self):
+        worker = self.worker(lambda *_: self.observed_page([1001], views=7))
+        self.run_fast(worker)
+        worker.fetch_page = lambda *_: self.observed_page([1001], views=6486, rating=3.5)
+        self.run_fast(worker)
+        self.assertEqual(worker.status()["added"], 0)
+        response = self.publish(worker.status()["publicationRevision"])
+        self.assertEqual(response.status_code, 200, response.text)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(tuple(db.execute("SELECT Views,Rating FROM catalog.Works WHERE Id=1001").fetchone()), (6486, 3.5))
+
+    def test_metadata_lease_loss_does_not_publish_or_advance_sweep(self):
+        worker = self.worker(lambda *_: self.observed_page([3], views=6486))
+        before = self.search().json()["publicationRevision"]
+        job = self.request(worker)
+        original = replica.prepare_users
+        def expire(*args):
+            original(*args)
+            with self.get_db() as db:
+                db.execute("UPDATE mobile_catalog_refresh_jobs SET lease=0 WHERE id=?", [job["id"]])
+                db.commit()
+        with mock.patch.object(replica, "prepare_users", side_effect=expire), \
+                mock.patch.object(worker.stop, "wait", return_value=False):
+            worker.run_once()
+        self.assertEqual(self.search().json()["publicationRevision"], before)
+        with self.get_db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM mobile_catalog_metadata_streams").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM mobile_catalog_server_additions").fetchone()[0], 0)
+        worker.run_once()
+        self.assertEqual(worker.status()["state"], "completed")
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(db.execute("SELECT Views FROM catalog.Works WHERE Id=3").fetchone()[0], 6486)
+
+    def test_rotating_window_shares_budget_and_does_not_insert_missing_works(self):
+        calls = []
+        def fetch(language, cursor):
+            calls.append((language, cursor))
+            first = 2000 if cursor is None else cursor - 1
+            rows = json.loads(self.observed_page(range(first, first - 50, -1), language))
+            if first <= 1700:
+                for row in rows:
+                    row["posted"] = int(time.time()) - RECENT_SECONDS - 100
+            return json.dumps(rows)
+        worker = self.worker(fetch)
+        with self.get_db() as db:
+            db.execute("INSERT INTO mobile_catalog_refresh_streams VALUES('korean',2000,NULL,2000)")
+            db.commit()
+        for _ in range(3):
+            self.run_fast(worker, limit=3)
+            self.assertEqual(worker.status()["pages"], 3)
+        self.assertEqual([cursor for _, cursor in calls], [None, 1951, 1901, None, 1851, 1801, None, 1751, 1701])
+        with self.get_db() as db:
+            self.assertIsNone(db.execute("SELECT cursor FROM mobile_catalog_metadata_streams WHERE language='korean'").fetchone()[0])
+        self.assertEqual(worker.status()["added"], 0)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(db.execute("SELECT MAX(Id) FROM catalog.Works").fetchone()[0], 7)
+        self.run_fast(worker, limit=2, language="japanese")
+        self.assertEqual(calls[-2:], [("japanese", None), ("japanese", 1951)])
+        self.run_fast(worker, limit=2)
+        self.assertEqual(calls[-2:], [("korean", None), ("korean", 1951)])
+
+    def test_existing_work_outside_recent_window_is_not_refreshed(self):
+        rows = json.loads(self.observed_page([3], views=6486))
+        rows[0]["posted"] = int(time.time()) - RECENT_SECONDS - 100
+        worker = self.worker(lambda *_: json.dumps(rows))
+        before = self.search().json()["publicationRevision"]
+        self.run_fast(worker)
+        self.assertEqual(worker.status()["publicationRevision"], before)
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(db.execute("SELECT Views FROM catalog.Works WHERE Id=3").fetchone()[0], 50)
+
+    def test_hard_budget_and_metadata_progress_with_incremental_backlog(self):
+        calls = []
+        def fetch(language, cursor):
+            calls.append(cursor)
+            first = 10000 if cursor is None else cursor - 1
+            return self.observed_page(range(first, first - 50, -1))
+        worker = self.worker(fetch)
+        with self.get_db() as db:
+            db.execute("INSERT INTO mobile_catalog_metadata_streams VALUES('korean',5000)")
+            db.commit()
+        self.run_fast(worker, limit=MAX_PAGES + 10)
+        self.assertEqual(len(calls), MAX_PAGES)
+        self.assertEqual(calls[MAX_PAGES // 2], 5000)
+        self.assertTrue(worker.status()["hasMore"])
+        with self.get_db() as db:
+            self.assertLess(db.execute("SELECT cursor FROM mobile_catalog_metadata_streams WHERE language='korean'").fetchone()[0], 5000)
+
+    def test_metadata_checkpoint_resumes_after_lease_expiry(self):
+        calls = []
+        def fetch(language, cursor):
+            calls.append(cursor)
+            if cursor is None:
+                return self.observed_page([3], views=6000)
+            return self.observed_page([])
+        worker = self.worker(fetch)
+        with self.get_db() as db:
+            db.execute("INSERT INTO mobile_catalog_metadata_streams VALUES('korean',100)")
+            db.commit()
+        job = self.request(worker)
+        with mock.patch.object(worker.stop, "wait", return_value=True):
+            worker.run_once()
+        with self.get_db() as db:
+            db.execute("UPDATE mobile_catalog_refresh_jobs SET lease=0 WHERE id=?", [job["id"]])
+            db.commit()
+        with mock.patch.object(worker.stop, "wait", return_value=False):
+            worker.run_once()
+        self.assertEqual(calls, [None, 100])
+        self.assertEqual(worker.status()["state"], "completed")
+        with replica.open_publication(worker.root(), self.get_db) as (db, _):
+            self.assertEqual(db.execute("SELECT Views FROM catalog.Works WHERE Id=3").fetchone()[0], 6000)
 
     def test_refresh_publishes_new_works_preserves_users_and_old_reader_revision(self):
         worker = self.worker(lambda *_: page([1002, 1001]))

@@ -1,7 +1,10 @@
-"""Additive provider ingestion; PC decisions and existing memberships are retained.
+"""Provider additions and mutable metadata; PC decisions/memberships are retained.
 
-The durable additions ledger is also applied to later PC publications, so an
-offline PC cannot remove works accepted by a server refresh.
+The durable ledger is also applied to later PC publications. Metadata-only rows
+cannot insert works; view counts never decrease. Other fields update only from
+fresh observations, with comparison values fencing concurrent PC changes. Later
+PC publications own those non-monotonic fields (there is no observation clock in
+the PC projection).
 """
 import json
 import math
@@ -15,6 +18,17 @@ from contextlib import closing
 import mobile_catalog_replica as replica
 
 MAX_PAGE_BYTES = 5 * 1024 * 1024
+MUTABLE_FIELDS = ("Views", "Rating", "FileCount", "Updated", "Expunged")
+
+
+def merge_observation(old, row):
+    """Retain insertion rights, language membership and the highest view count."""
+    if old is None:
+        return row
+    row = {**row, "tags": sorted({tuple(tag) for tag in old["tags"] + row["tags"]}),
+           "update_only": old.get("update_only", False) and row.get("update_only", False)}
+    row["work"] = {**row["work"], "Views": max(old["work"]["Views"], row["work"]["Views"])}
+    return row
 
 
 def parse_page(body, language):
@@ -98,28 +112,41 @@ def materialize(root, content, get_db, additions=()):
 
 
 def _materialize(root, content, get_db, additions):
+    fresh = {row["work"]["Id"]: row for row in additions}
     with get_db() as control:
         saved = control.execute("SELECT payload FROM mobile_catalog_server_additions ORDER BY work_id").fetchall()
     merged = {row["work"]["Id"]: row for row in map(lambda r: json.loads(r[0]), saved)}
     for row in additions:
         work_id = row["work"]["Id"]
-        if work_id in merged:
-            row = {**row, "tags": sorted({tuple(tag) for tag in merged[work_id]["tags"] + row["tags"]})}
-        merged[work_id] = row
+        merged[work_id] = merge_observation(merged.get(work_id), row)
     if not merged:
         return content
     source = replica.artifact_path(root, content)
     changes = []
     with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as db:
         for work_id, row in sorted(merged.items()):
-            exists = db.execute("SELECT 1 FROM Works WHERE Id=?", [work_id]).fetchone()
+            existing = db.execute(f"SELECT {','.join(MUTABLE_FIELDS)} FROM Works WHERE Id=?", [work_id]).fetchone()
+            exists = existing is not None
+            if not exists and row.get("update_only"):
+                continue  # A metadata observation never resurrects an omitted work.
+            updates = {}
+            if exists:
+                before = fresh.get(work_id, {}).get("before", {})
+                for field, value in zip(MUTABLE_FIELDS, existing):
+                    observed = row["work"][field]
+                    if field == "Views":
+                        observed = max(value, observed)
+                    elif field not in before or value != before[field]:
+                        continue  # Saved non-monotonic fields never override PC content.
+                    if observed != value:
+                        updates[field] = observed
             languages = [tag for tag in row["tags"] if tag[0] == "language" and tag[1] in ("korean", "japanese")]
-            missing = [tag for tag in languages if not db.execute("SELECT 1 FROM Tags WHERE WorkId=? AND Namespace=? AND Value=?", [work_id, *tag]).fetchone()]
-            if not exists or missing:
-                changes.append((row, bool(exists), missing))
+            missing = [] if row.get("update_only") else [tag for tag in languages if not db.execute("SELECT 1 FROM Tags WHERE WorkId=? AND Namespace=? AND Value=?", [work_id, *tag]).fetchone()]
+            if not exists or missing or updates:
+                changes.append((row, exists, missing, updates))
     if not changes:
         return content
-    derived = replica.digest(["server-catalog-additions-v1", content, changes])
+    derived = replica.digest(["server-catalog-observations-v2", content, changes])
     destination = replica.artifact_path(root, derived)
     if shutil.disk_usage(root).free < source.stat().st_size * 2 + 64 * 1024 * 1024:
         replica.fail(507, "Insufficient catalog storage")
@@ -130,7 +157,7 @@ def _materialize(root, content, get_db, additions):
         with closing(sqlite3.connect(temporary)) as db:
             manifest = json.loads(db.execute("SELECT payload FROM Manifest").fetchone()[0])
             sequence = db.execute("SELECT COALESCE(MAX(sequence),0) FROM online_catalog_group_handles").fetchone()[0]
-            for row, exists, languages in changes:
+            for row, exists, languages, updates in changes:
                 work, tags = row["work"], row["tags"]
                 work_id = work["Id"]
                 if not exists:
@@ -141,6 +168,8 @@ def _materialize(root, content, get_db, additions):
                     sequence += 1
                     db.execute("INSERT OR IGNORE INTO online_catalog_group_handles VALUES('kHentai',?,?,?)", [str(work_id), group, sequence])
                     db.execute("INSERT INTO online_catalog_group_members VALUES('kHentai',?,?,?,?,0,1)", [str(work_id), work_id, group, int(bool(work["Thumb"]))])
+                if updates:
+                    db.execute(f"UPDATE Works SET {','.join(field + '=?' for field in updates)} WHERE Id=?", [*updates.values(), work_id])
                 db.executemany("INSERT OR IGNORE INTO Tags VALUES(?,?,?)", [[work_id, *tag] for tag in (languages if exists else tags)])
             manifest["sourceRevision"] = "server:" + derived
             manifest["groupGeneration"] += 1

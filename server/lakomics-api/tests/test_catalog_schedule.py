@@ -1,4 +1,5 @@
 """Hourly scheduling uses existing bounded jobs, never a second ingestion path."""
+import json
 import time
 import unittest
 from unittest import mock
@@ -63,7 +64,9 @@ class ScheduleTests(unittest.TestCase):
         calls = []
         worker.fetch_page = lambda language, cursor: calls.append(cursor) or page([])
         worker.run_once()
-        self.assertEqual(calls, [3951])
+        # The incremental lane resumes; the independent metadata sweep starts
+        # at the head once that lane completes.
+        self.assertEqual(calls, [3951, None])
 
     def test_recent_manual_or_failed_attempt_defers_its_own_language(self):
         worker, now = self.setup_schedule()
@@ -97,10 +100,12 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(worker.due(now=now + HOUR, languages=('korean',)), [])
         self.assertIsNone(worker.status())
 
-    def test_no_change_still_uses_one_provider_page_and_no_old_work_rows(self):
+    def test_unchanged_metadata_still_uses_one_provider_page_and_same_revision(self):
         calls = []
         worker, now = self.setup_schedule()
-        worker.fetch_page = lambda language, cursor: calls.append((language, cursor)) or page([6, 5, 4])
+        rows = json.loads(page([3]))
+        rows[0].update(filecount=120, views=50, rating=None, posted=int(now))
+        worker.fetch_page = lambda language, cursor: calls.append((language, cursor)) or json.dumps(rows)
         old_revision = self.revision()
         self.assertEqual(worker.due(now=now + HOUR), ['korean'])
         worker.run_once()

@@ -13,13 +13,14 @@ from app_lifecycle import lifecycle
 from fastapi import Header, Request
 import catalog_duplicates
 import mobile_catalog_replica as replica
-from catalog_refresh_content import parse_page
+from catalog_refresh_content import MUTABLE_FIELDS, merge_observation, parse_page
 
 MAX_PAGES = 40
 LEASE_SECONDS = 180
 REFRESH_INTERVAL_SECONDS = 3600
 REFRESH_POLL_SECONDS = 60
 MAX_STAGED_BYTES = 16 * 1024 * 1024
+RECENT_SECONDS = 30 * 86400
 LOG = logging.getLogger(__name__)
 DDL = """
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_jobs(
@@ -40,6 +41,11 @@ CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_streams(
  pending_max INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_schedule(
  language TEXT PRIMARY KEY, next_due REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS mobile_catalog_metadata_streams(
+ language TEXT PRIMARY KEY, cursor INTEGER);
+CREATE TABLE IF NOT EXISTS mobile_catalog_metadata_jobs(
+ job_id TEXT PRIMARY KEY, cursor INTEGER, done INTEGER NOT NULL DEFAULT 0,
+ incremental_pages INTEGER NOT NULL DEFAULT 0);
 """
 
 
@@ -235,31 +241,74 @@ class RefreshWorker:
                 return False
             job = dict(row)
             db.execute("UPDATE mobile_catalog_refresh_jobs SET state='running',owner=?,lease=?,updated=? WHERE id=?", [owner, time.time() + LEASE_SECONDS, time.time(), job["id"]])
+            db.execute("""INSERT OR IGNORE INTO mobile_catalog_metadata_jobs(job_id,cursor)
+              VALUES(?,(SELECT cursor FROM mobile_catalog_metadata_streams WHERE language=?))""", [job["id"], job["language"]])
             db.commit()
         stopped = threading.Event()
         renewer = threading.Thread(target=self.heartbeat, args=(job["id"], owner, stopped), daemon=True)
         renewer.start()
         try:
-            while not job["done"] and job["pages"] < job["page_limit"]:
+            # Reserve half of a busy run for the recent window so a new-work
+            # backlog cannot starve metadata. Both lanes share the hard page cap.
+            page_limit = min(job["page_limit"], MAX_PAGES)
+            incremental_limit = max(1, page_limit // 2)
+            while job["pages"] < page_limit:
                 if self.stop.is_set():
                     return True  # Durable page state is resumed after lease expiry.
-                rows = parse_page(self.fetch_page(job["language"], job["cursor"]), job["language"])
+                with self.get_db() as db:
+                    metadata = dict(db.execute("SELECT * FROM mobile_catalog_metadata_jobs WHERE job_id=?", [job["id"]]).fetchone())
+                incremental = not job["done"] and metadata["incremental_pages"] < incremental_limit
+                if not incremental and metadata["done"]:
+                    break
+                cursor = job["cursor"] if incremental else metadata["cursor"]
+                # Pin the pre-fetch content: a concurrent PC publication must not
+                # become the comparison baseline for an older provider response.
+                with replica.open_publication(self.root(), self.get_db) as (catalog, _):
+                    rows = parse_page(self.fetch_page(job["language"], cursor), job["language"])
+                    staged = []
+                    for row in rows:
+                        work = row["work"]
+                        addition = incremental and work["Id"] > job["watermark"]
+                        recent = work["Posted"] is not None and work["Posted"] >= job["created"] - RECENT_SECONDS
+                        if not addition and not recent:
+                            continue
+                        existing = catalog.execute(f"SELECT {','.join(MUTABLE_FIELDS)} FROM catalog.Works WHERE Id=?", [work["Id"]]).fetchone()
+                        if not addition and existing is None:
+                            continue
+                        staged.append({**row, "update_only": not addition,
+                                       "before": dict(zip(MUTABLE_FIELDS, existing)) if existing is not None else {}})
                 lowest = rows[-1]["work"]["Id"] if rows else None
-                if lowest is not None and job["cursor"] is not None and rows[0]["work"]["Id"] >= job["cursor"]:
+                if lowest is not None and cursor is not None and rows[0]["work"]["Id"] >= cursor:
                     raise ValueError("Catalog cursor did not advance")
-                done = len(rows) < 50 or lowest <= job["watermark"]
-                pending = max([job["pending_max"], *[row["work"]["Id"] for row in rows]])
+                done = job["done"]
+                pending, next_cursor = job["pending_max"], job["cursor"]
+                if incremental:
+                    done = len(rows) < 50 or lowest <= job["watermark"]
+                    pending = max([pending, *[row["work"]["Id"] for row in rows]])
+                    next_cursor = None if done else lowest
+                # Reuse an incremental page only when it is exactly the next
+                # sweep page. Unknown dates do not prematurely end the window.
+                sweep_page = not incremental or cursor == metadata["cursor"]
+                if sweep_page:
+                    metadata["done"] = len(rows) < 50 or all(
+                        row["work"]["Posted"] is not None and row["work"]["Posted"] < job["created"] - RECENT_SECONDS
+                        for row in rows)
+                    metadata["cursor"] = None if metadata["done"] else lowest
                 with self.get_db() as db:
                     db.execute("BEGIN IMMEDIATE")
                     self.owned(db, job["id"], owner)
-                    db.executemany("INSERT OR REPLACE INTO mobile_catalog_refresh_pages VALUES(?,?,?)", [[job["id"], row["work"]["Id"], replica.encode(row)] for row in rows if row["work"]["Id"] > job["watermark"]])
+                    for row in staged:
+                        previous = db.execute("SELECT payload FROM mobile_catalog_refresh_pages WHERE job_id=? AND work_id=?", [job["id"], row["work"]["Id"]]).fetchone()
+                        row = merge_observation(json.loads(previous[0]) if previous else None, row)
+                        db.execute("INSERT OR REPLACE INTO mobile_catalog_refresh_pages VALUES(?,?,?)", [job["id"], row["work"]["Id"], replica.encode(row)])
                     size = db.execute("SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM mobile_catalog_refresh_pages WHERE job_id=?", [job["id"]]).fetchone()[0]
                     if size > MAX_STAGED_BYTES:
                         raise ValueError("Catalog refresh size limit")
-                    db.execute("UPDATE mobile_catalog_refresh_jobs SET cursor=?,pending_max=?,pages=pages+1,done=?,updated=? WHERE id=?", [None if done else lowest, pending, int(done), time.time(), job["id"]])
+                    db.execute("UPDATE mobile_catalog_metadata_jobs SET cursor=?,done=?,incremental_pages=incremental_pages+? WHERE job_id=?", [metadata["cursor"], int(metadata["done"]), int(incremental), job["id"]])
+                    db.execute("UPDATE mobile_catalog_refresh_jobs SET cursor=?,pending_max=?,pages=pages+1,done=?,updated=? WHERE id=?", [next_cursor, pending, int(done), time.time(), job["id"]])
                     db.commit()
                     job = dict(db.execute("SELECT * FROM mobile_catalog_refresh_jobs WHERE id=?", [job["id"]]).fetchone())
-                if not done and self.stop.wait(0.4):
+                if job["pages"] < page_limit and self.stop.wait(0.4):
                     return True
             revision, new_rows = self.publish(job, owner)
             if self.on_published is not None:
@@ -291,17 +340,17 @@ class RefreshWorker:
                 current = dict(replica.current(db))
                 users = json.loads(db.execute("SELECT payload FROM mobile_catalog_users WHERE revision=?", [current["user_revision"]]).fetchone()[0])
             with replica.open_publication(self.root(), self.get_db, current["revision"]) as (catalog, _):
-                new_rows = [row for row in rows if not catalog.execute("SELECT 1 FROM catalog.Works WHERE Id=?", [row["work"]["Id"]]).fetchone()]
+                new_rows = [row for row in rows if not row.get("update_only") and not catalog.execute("SELECT 1 FROM catalog.Works WHERE Id=?", [row["work"]["Id"]]).fetchone()]
             added = len(new_rows)
 
             def finalize(db, revision):
                 self.owned(db, job["id"], owner)
                 for row in rows:
                     old = db.execute("SELECT payload FROM mobile_catalog_server_additions WHERE work_id=?", [row["work"]["Id"]]).fetchone()
-                    if old:
-                        row = {**row, "tags": sorted({tuple(tag) for tag in json.loads(old[0])["tags"] + row["tags"]})}
+                    row = merge_observation(json.loads(old[0]) if old else None, row)
                     db.execute("INSERT OR REPLACE INTO mobile_catalog_server_additions VALUES(?,?)", [row["work"]["Id"], replica.encode(row)])
                 db.execute("INSERT OR REPLACE INTO mobile_catalog_refresh_streams VALUES(?,?,?,?)", [job["language"], job["pending_max"] if job["done"] else job["watermark"], job["cursor"], job["pending_max"]])
+                db.execute("INSERT OR REPLACE INTO mobile_catalog_metadata_streams SELECT ?,cursor FROM mobile_catalog_metadata_jobs WHERE job_id=?", [job["language"], job["id"]])
                 db.execute("UPDATE mobile_catalog_refresh_jobs SET state='completed',added=?,publication_revision=?,updated=? WHERE id=?", [added, revision, time.time(), job["id"]])
                 db.execute("DELETE FROM mobile_catalog_refresh_pages WHERE job_id=?", [job["id"]])
 
