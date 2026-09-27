@@ -40,6 +40,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "app.startup_extension_backup",
             "app.startup_album_replica",
             "notes.register_notes.<locals>.startup_notes",
+            "av_lookup_requests.register.<locals>.setup",
             "mobile_catalog.register_mobile_catalog.<locals>.startup",
             "prune_catalog_artifacts.AutoPruner.start",
             "mobile_catalog_refresh.RefreshWorker.startup",
