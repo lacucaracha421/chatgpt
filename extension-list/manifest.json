@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Lakomics Collector List",
-  "version": "3.0.0.42",
-  "version_name": "3.0.0-alpha.42",
+  "version": "3.0.0.44",
+  "version_name": "3.0.0-alpha.44",
   "description": "A Lakomics media collector with a thumb-friendly edge menu.",
   "permissions": [
     "storage",
-    "downloads"
+    "downloads",
+    "contextMenus"
   ],
   "host_permissions": [
     "https://*/*",
@@ -61,6 +62,9 @@
         "https://twitter.com/*"
       ],
       "js": [
+        "src/av-lookup.js",
+        "src/av-send.js",
+        "src/av-lookup-chip.js",
         "src/classification-tree.js",
         "src/x-source.js",
         "src/x-gallery.js",
@@ -84,6 +88,9 @@
         "https://*/extension-pair*"
       ],
       "js": [
+        "src/av-lookup.js",
+        "src/av-send.js",
+        "src/av-lookup-chip.js",
         "src/classification-tree.js",
         "src/forum-source.js",
         "src/arc-collector.js",

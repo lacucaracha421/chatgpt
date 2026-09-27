@@ -1,8 +1,45 @@
-importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translate-service.js");
+importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "profile-store.js", "save-client.js", "translate-service.js", "av-lookup.js");
 
 (() => {
   "use strict";
-  async function handleMessage(message) {
+  const AV_LOOKUP_MENU_ID = "lakomics-av-lookup";
+  const AV_SEND_MENU_ID = "lakomics-av-send";
+
+  async function sendAvLookup(request) {
+    const productCode = globalThis.LakomicsAvLookup.normalizeProductCode(request?.productCode);
+    if (!productCode || !request?.requestId) return { ok: false, code: "invalid_query" };
+    return globalThis.LakomicsListApi.request("/v1/av-lookups", {
+      method: "POST",
+      body: { requestId: request.requestId, productCode, sourceUrl: request.sourceUrl ?? null },
+    });
+  }
+
+  async function sendAvSelection(info, tab) {
+    const request = globalThis.LakomicsAvLookup.createSendRequest(info.selectionText, info.pageUrl || tab?.url);
+    if (!request) return { ok: false, code: "invalid_query" };
+    let result;
+    try { result = await sendAvLookup(request); }
+    catch { result = { ok: false, code: "worker_failed" }; }
+    if (Number.isInteger(tab?.id)) {
+      // A callback also works in browsers whose runtime messaging is callback-only.
+      chrome.tabs.sendMessage(tab.id, { type: "av-send-result", request, result },
+        { frameId: 0 }, () => void chrome.runtime.lastError);
+    }
+    return result;
+  }
+
+  async function openAvLookup(selectionText, tab) {
+    const query = globalThis.LakomicsAvLookup?.normalizeQuery(selectionText) || "";
+    if (!query) return { ok: false, code: "invalid_query" };
+    if (!tab || !Number.isInteger(tab.id) || !Number.isInteger(tab.index)) return { ok: false, code: "tab_unavailable" };
+    const urls = globalThis.LakomicsAvLookup.buildLookupUrls(query);
+    for (let i = 0; i < urls.length; i += 1) {
+      await chrome.tabs.create({ url: urls[i], active: false, index: tab.index + 1 + i, openerTabId: tab.id });
+    }
+    return { ok: true, query, urls };
+  }
+
+  async function handleMessage(message, sender = {}) {
     if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message);
     switch (message?.type) {
       case "pair": {
@@ -52,6 +89,10 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
         return globalThis.LakomicsSaveClient.save(message.payload || {});
       case "saved-index:get":
         return globalThis.LakomicsSaveClient.savedIndex();
+      case "av-lookup":
+        return openAvLookup(message.selectionText, sender.tab);
+      case "av-send":
+        return sendAvLookup(message.request);
       default:
         return { ok: false, code: "unknown_message" };
     }
@@ -116,8 +157,8 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
       .slice(0, 180);
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    Promise.resolve(handleMessage(message)).then(sendResponse).catch((error) => sendResponse({ ok: false, code: "worker_failed", message: String(error?.message || error || "") }));
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    Promise.resolve(handleMessage(message, sender)).then(sendResponse).catch((error) => sendResponse({ ok: false, code: "worker_failed", message: String(error?.message || error || "") }));
     return true;
   });
 
@@ -133,5 +174,15 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
 
   chrome.runtime.onInstalled?.addListener(() => {
     void globalThis.LakomicsProfileStore.refresh({ forceMenuSettings: true }).catch(() => {});
+    if (chrome.contextMenus?.create) chrome.contextMenus.create({ id: AV_LOOKUP_MENU_ID, title: "AV 표지 찾기: “%s”", contexts: ["selection"] }, () => void chrome.runtime.lastError);
+    if (chrome.contextMenus?.create) chrome.contextMenus.create({ id: AV_SEND_MENU_ID, title: "AV 컬렉션에 보내기: “%s”", contexts: ["selection"], documentUrlPatterns: ["https://*/*"] }, () => void chrome.runtime.lastError);
   });
+
+  chrome.contextMenus?.onClicked?.addListener((info, tab) => {
+    if (info?.menuItemId === AV_SEND_MENU_ID) return sendAvSelection(info, tab);
+    if (info?.menuItemId !== AV_LOOKUP_MENU_ID) return undefined;
+    return openAvLookup(info.selectionText, tab);
+  });
+
+  if (globalThis.__LAKOMICS_TEST__) globalThis.LakomicsAvLookupBackground = { AV_LOOKUP_MENU_ID, AV_SEND_MENU_ID, handleMessage, openAvLookup };
 })();

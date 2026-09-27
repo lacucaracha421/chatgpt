@@ -15,11 +15,7 @@
   // a[href="/home"], and clicking one of those switches the tab, so no generic
   // /home anchor is ever used.
   const HOME_LINK_SELECTOR = 'a[data-testid="AppTabBar_Home_Link"]';
-  const ACCOUNT_SWITCHER_SELECTOR = '[data-testid="SideNav_AccountSwitcher_Button"]';
-  const AVATAR_SELECTORS = ['[data-testid^="UserAvatar-Container"]', "img"];
-  const SHIFT_VAR = "--lakomics-x-new-posts-shift";
-  const MAX_SHIFT_PX = 48;
-  const SETTLE_ALIGN_MS = 500;
+  const MORE_SELECTOR = '[data-testid="AppTabBar_More_Menu"]';
   // X's in-timeline "Show 35 posts" row, in the languages this user runs X in.
   const NEW_POSTS_TEXT = [
     /^(show|see)\s+[\d.,]+\s*[kmb]?\s+(new\s+)?(posts?|tweets?)$/i,
@@ -46,23 +42,15 @@
     return link;
   }
 
-  // The block holding X's round account avatar at the bottom of the left column. The
-  // avatar sits below the nav and the Post button, outside the nav; the control goes in
-  // front of the avatar's outermost wrapper inside its own bottom block, so it stacks
-  // directly above the avatar rather than floating in the column's spacing.
-  function findAccountSwitcher(doc) {
-    return doc?.querySelector?.(`header[role="banner"] ${ACCOUNT_SWITCHER_SELECTOR}`) ?? null;
-  }
-
-  function findAccountSwitcherAnchor(nav) {
-    const switcher = findAccountSwitcher(nav?.ownerDocument);
-    if (!switcher) return null;
-    let block = switcher;
-    while (block.parentElement && !block.parentElement.contains(nav)) block = block.parentElement;
-    if (block === switcher || !block.parentElement) return switcher;
-    let anchor = switcher;
-    while (anchor.parentElement && anchor.parentElement !== block) anchor = anchor.parentElement;
-    return anchor;
+  // X wraps the More row in several layout elements. Anchor after the row's direct
+  // child of the nav so the control follows the visible More item without entering a
+  // nested layout wrapper.
+  function findMoreAnchor(nav) {
+    const more = nav?.querySelector?.(MORE_SELECTOR);
+    if (!more) return null;
+    let anchor = more;
+    while (anchor.parentElement && anchor.parentElement !== nav) anchor = anchor.parentElement;
+    return anchor.parentElement === nav ? anchor : null;
   }
 
   // Never treat a tab (or anything inside a tab bar) as the new-posts control.
@@ -138,7 +126,7 @@
     // a 26px icon and a 20px label that X hides when the column collapses to icons.
     style.textContent = `
       #${CONTROL_ID} { display: flex; width: 100%; margin: 0; padding: 4px 0; border: 0; background: transparent; color: var(--lakomics-x-nav-color, inherit); font: inherit; text-align: start; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-      #${CONTROL_ID} .lakomics-x-new-posts-inner { transform: translateX(var(${SHIFT_VAR}, 0px)); display: inline-flex; align-items: center; max-width: 100%; padding: 12px; border-radius: 9999px; transition: background-color .2s; }
+      #${CONTROL_ID} .lakomics-x-new-posts-inner { display: inline-flex; align-items: center; max-width: 100%; padding: 12px; border-radius: 9999px; transition: background-color .2s; }
       #${CONTROL_ID}:hover .lakomics-x-new-posts-inner { background: color-mix(in srgb, currentColor 10%, transparent); }
       #${CONTROL_ID}:focus { outline: none; }
       #${CONTROL_ID}:focus-visible .lakomics-x-new-posts-inner { box-shadow: 0 0 0 2px rgb(29, 155, 240); }
@@ -146,8 +134,7 @@
       #${CONTROL_ID} .lakomics-x-new-posts-label { margin: 0 16px 0 20px; font-size: 20px; line-height: 24px; white-space: nowrap; }
       #${CONTROL_ID}.is-busy svg { animation: lakomics-x-new-posts-spin .7s linear; }
       @keyframes lakomics-x-new-posts-spin { to { transform: rotate(360deg); } }
-      /* Icon-only column: X centres its items, so the button centres its icon in the
-         column too and only a small measured nudge remains. */
+      /* Icon-only column: X centres its items, so the button centres its icon too. */
       @media (max-width: 1264px) { #${CONTROL_ID} { justify-content: center; } #${CONTROL_ID} .lakomics-x-new-posts-label { display: none; } }
       @media (prefers-reduced-motion: reduce) { #${CONTROL_ID} .lakomics-x-new-posts-inner { transition: none; } #${CONTROL_ID}.is-busy svg { animation: none; } }
     `;
@@ -190,103 +177,40 @@
     return button;
   }
 
-  // Places the control directly above X's account avatar, once. Without the avatar it
-  // falls back to the end of the left nav; without a nav it is not shown. X re-renders
-  // its column on SPA navigation and resizes, so a missing or misplaced control is put back.
+  // Places the control directly after X's More row. Without More it falls back to the
+  // end of the left nav; without a nav it is not shown. X re-renders its column during
+  // SPA navigation, so a missing or misplaced control is put back.
   function ensureControl(doc = document, win = window) {
     const nav = findNav(doc);
     const existing = doc.getElementById(CONTROL_ID);
     if (!nav) return existing?.isConnected ? existing : null;
-    const anchor = findAccountSwitcherAnchor(nav);
+    const anchor = findMoreAnchor(nav);
     const placed = anchor
-      ? existing?.nextElementSibling === anchor
+      ? existing?.parentElement === nav && existing?.previousElementSibling === anchor
       : existing?.parentElement === nav && !existing.nextElementSibling;
     if (existing?.isConnected && placed) return existing;
     ensureStyle(doc);
     const control = existing ?? createControl(doc, win);
     const color = readNavColor(findHomeLink(nav) ?? nav, win);
     if (color) control.style.setProperty("--lakomics-x-nav-color", color);
-    if (anchor) anchor.before(control);
+    if (anchor) anchor.after(control);
     else nav.append(control);
-    alignControl(doc, win);
-    win.setTimeout(() => { try { alignControl(doc, win); } catch {} }, SETTLE_ALIGN_MS);
     return control;
-  }
-
-  // Lines the icon's centre up with the account avatar's centre, measured from the live
-  // layout: the avatar's inset differs between X's icon-only and full-width columns.
-  // The shift already applied is part of the measured icon position, so it is corrected
-  // rather than stacked. Without the avatar (fallback placement) no shift is applied.
-  function findAvatar(doc) {
-    const switcher = findAccountSwitcher(doc);
-    for (const selector of AVATAR_SELECTORS) {
-      const avatar = switcher?.querySelector(selector);
-      if (avatar) return avatar;
-    }
-    return null;
-  }
-
-  function alignControl(doc = document, win = window) {
-    const control = doc.getElementById(CONTROL_ID);
-    const icon = control?.querySelector("svg");
-    if (!control?.isConnected || !icon) return null;
-    const avatar = findAvatar(doc);
-    const previous = Number.parseFloat(control.style.getPropertyValue(SHIFT_VAR)) || 0;
-    if (!avatar) {
-      control.style.removeProperty(SHIFT_VAR);
-      return 0;
-    }
-    const avatarRect = avatar.getBoundingClientRect();
-    const iconRect = icon.getBoundingClientRect();
-    // Hidden or not laid out yet: keep the current shift until the next measurement.
-    if (!avatarRect.width || !iconRect.width) return previous;
-    const delta = (avatarRect.left + avatarRect.width / 2) - (iconRect.left + iconRect.width / 2);
-    const next = Math.max(-MAX_SHIFT_PX, Math.min(MAX_SHIFT_PX, Math.round((previous + delta) * 2) / 2));
-    if (next !== previous) control.style.setProperty(SHIFT_VAR, `${next}px`);
-    return next;
   }
 
   function install(doc = document, win = window) {
     let queued = false;
-    // X re-renders its column when it switches between the full-width and icon-only
-    // layout, after the resize event. Alignment is re-measured two frames after any
-    // resize or size change of the avatar block or the button, once X has laid out.
     const nextFrame = (callback) => {
       if (typeof win.requestAnimationFrame === "function") win.requestAnimationFrame(callback);
       else win.setTimeout(callback, 16);
     };
-    let alignQueued = false;
-    const queueAlign = () => {
-      if (alignQueued) return;
-      alignQueued = true;
-      nextFrame(() => nextFrame(() => {
-        alignQueued = false;
-        try { alignControl(doc, win); } catch {}
-      }));
-    };
-    const sizeObserver = typeof win.ResizeObserver === "function" ? new win.ResizeObserver(queueAlign) : null;
-    let observed = [];
-    // Watches the current avatar block and button; X swaps these nodes on re-render.
-    const syncSizeObserver = () => {
-      if (!sizeObserver) return;
-      const switcher = findAccountSwitcher(doc);
-      const targets = [findAccountSwitcherAnchor(findNav(doc)) ?? switcher, findAvatar(doc), doc.getElementById(CONTROL_ID)]
-        .filter(Boolean);
-      if (targets.length === observed.length && targets.every((node, index) => node === observed[index])) return;
-      sizeObserver.disconnect();
-      for (const node of targets) sizeObserver.observe(node);
-      observed = targets;
-    };
-    const ensure = () => {
-      try { ensureControl(doc, win); syncSizeObserver(); } catch {}
-    };
+    const ensure = () => { try { ensureControl(doc, win); } catch {} };
     const schedule = () => {
       if (queued) return;
       queued = true;
       nextFrame(() => { queued = false; ensure(); });
     };
     ensure();
-    win.addEventListener("resize", queueAlign);
     const observer = new win.MutationObserver(schedule);
     observer.observe(doc.body ?? doc.documentElement, { childList: true, subtree: true });
     return observer;
@@ -295,7 +219,6 @@
   if (globalThis.__LAKOMICS_TEST__) {
     globalThis.LakomicsXHomeRefresh = {
       CONTROL_ID,
-      alignControl,
       ensureControl,
       findNewPostsButton,
       install,

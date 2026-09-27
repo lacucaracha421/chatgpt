@@ -21,9 +21,19 @@ once. Older servers returning 404 retain local behavior and the legacy profile
 order synchronization. The new server module must be registered separately;
 installing this extension alone does not activate the endpoint.
 
+## AV code sending (3.0.0.44 / 3.0.0-alpha.44)
+
+JAVLibrary work pages show a send button beside a recognized product code. The
+selection chip keeps cover lookup and adds Send; the selection context menu also
+sends a code to the PC. All sends use the paired API connection and
+`POST /v1/av-lookups`. A three-second toast reports success, a pairing reminder,
+or a retry action. Retry keeps the original request ID and body. Page and chip
+buttons show sending/sent until the page reloads. This requires the new Cloud API
+route; extension installation alone does not deploy it.
+
 ## Edge menu
 
-Version 3.0.0.34 uses a semicircle attached to the selected screen edge. Image
+Version 3.0.0.44 uses a semicircle attached to the selected screen edge. Image
 dragging on desktop requires a held press of at least 250 ms and movement of
 12 px. Touch requires a stationary 500 ms long press. Releasing early, scrolling,
 losing window focus, or cancelling the pointer cancels the pending opening. Releasing the opening finger never selects a folder or saves an image.
