@@ -11,7 +11,6 @@ import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
 import {ViewerInfo} from './ViewerInfo';
-import {CharacterAddSheet} from './CharacterAddSheet';
 
 import './Viewer.css';
 
@@ -39,9 +38,7 @@ export type ViewerCharacterContext = {targetId:string;name:string;libraryId:stri
 function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
   return <Button type="button" size="sm" variant="ghost" className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/><span className="viewer-action__label">{label}</span></Button>;
 }
-export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,reviewLibrary,onTrash,trashNotice,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
-  /** The library character-review decisions go to; set only when a PC adopted review. */
-  reviewLibrary?:string|null;
+export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
   /** Move the Asset on screen to the Library Trash (no confirmation: it is reversible). */
   onTrash?(asset:Asset):void;
   /** The host's "휴지통으로 이동함 · 실행 취소" snackbar, rendered inside the modal viewer. */
@@ -77,18 +74,12 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const [exclusion,setExclusion]=useState<ExclusionRequest|null>(null);
   const exclusionOpen = useRef(false);
   exclusionOpen.current = exclusion !== null;
-  // Viewer "캐릭터에 추가" sheet and the note shown after a decision was queued.
-  const [addOpen,setAddOpen]=useState(false);
-  const [added,setAdded]=useState('');
-  const addOpenRef=useRef(false);
-  addOpenRef.current=addOpen;
   useEffect(() => {
     if (!backRef) return;
     backRef.current = () => {
       // The confirmation is the innermost overlay, so it consumes Back first: dismissing it
       // leaves the viewer open with its media untouched, which is what "취소" means here.
       if (exclusionOpen.current) { setExclusion(null); return true; }
-      if (addOpenRef.current) { setAddOpen(false); return true; }
       if (infoOpen.current) { setInfo(false); return true; }
       return false;
     };
@@ -120,7 +111,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     const observation={id:asset.id,url:fromPrepared?prepared.current.get(asset.id):undefined,span};
     timing.current=observation;
     span.log('open');
-    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); setAddOpen(false); setAdded(''); if (asset.kind === 'video') setChrome(true);
+    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); if (asset.kind === 'video') setChrome(true);
     gesture.current.points.clear();
     const load = async () => {
       try {
@@ -181,9 +172,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     }
   }, [original, items, index, asset.id]);
   useEffect(() => {
-    if (!chrome || info || albumOpen || classificationOpen || exclusion || addOpen || asset.kind === 'video') return;
+    if (!chrome || info || albumOpen || classificationOpen || exclusion || asset.kind === 'video') return;
     const timer = setTimeout(() => setChrome(false), 4000); return () => clearTimeout(timer);
-  }, [chrome, info, albumOpen, classificationOpen, exclusion, addOpen, asset.id, asset.kind]);
+  }, [chrome, info, albumOpen, classificationOpen, exclusion, asset.id, asset.kind]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
   const renewVideo = (element: HTMLVideoElement | null, intendPlay: boolean) => {
     clearTimeout(progressTimer.current);
@@ -240,15 +231,15 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   return <Dialog open title="미디어 감상" variant="fullscreen" onClose={onClose} onKeyDown={event => {
     if (event.target instanceof HTMLVideoElement) return;
     // Panels own their own keyboard input, so arrows inside one never change the asset.
-    if (info || albumOpen || classificationOpen || exclusion || addOpen) return;
+    if (info || albumOpen || classificationOpen || exclusion) return;
     if (event.key === 'ArrowLeft') { event.preventDefault(); change(index - 1); }
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
     <div className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}`}>
-      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{!vault&&<>{reviewLibrary&&!asset.pending&&<Button size="sm" variant="ghost" onClick={()=>{setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAdded('');setAddOpen(true);setChrome(true);}}>캐릭터에 추가</Button>}{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/>{onTrash&&!asset.pending&&<><span className="viewer-actions__divider" aria-hidden="true"/><ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setAddOpen(false);setChrome(true);onTrash(asset);}}/></>}</>}</div></header>
+      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{!vault&&<>{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/>{onTrash&&!asset.pending&&<><span className="viewer-actions__divider" aria-hidden="true"/><ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setChrome(true);onTrash(asset);}}/></>}</>}</div></header>
       <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
-        if (event.button > 0 || info || albumOpen || classificationOpen || exclusion || addOpen) return;
+        if (event.button > 0 || info || albumOpen || classificationOpen || exclusion) return;
         if(asset.kind==='video'&&video.current){const rect=video.current.getBoundingClientRect();if(event.clientY>rect.bottom-64)return;}
         if(asset.kind!=='video')event.currentTarget.setPointerCapture?.(event.pointerId);
         const g = gesture.current; g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
@@ -297,9 +288,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
       <CharacterExclusionEditor request={exclusion} target={exclusionKey} characterName={character?.name||'이 캐릭터'} assetLabel={asset.creator_name||asset.creator_handle||'이 자산'} onClose={()=>setExclusion(null)} onExcluded={receipt=>{setExclusion(null);onCharacterExcluded?.(receipt);}}/>
-      {added && <div className="viewer-error" role="status"><span>{added}</span></div>}
       {trashNotice}
-      {addOpen&&reviewLibrary&&<CharacterAddSheet assetId={asset.id} libraryId={reviewLibrary} onClose={()=>setAddOpen(false)} onAdded={name=>{setAddOpen(false);setAdded(`${name}에 추가했습니다 · PC 반영 대기`);}}/>}
       {info && <Dialog open title="미디어 정보" variant="wide" onClose={() => setInfo(false)}><DialogDescription className="sr-only">작가, 출처와 파일 정보를 확인하고 텍스트로 복사합니다.</DialogDescription><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></Dialog>}
       </>}
     </div>

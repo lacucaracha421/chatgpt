@@ -467,15 +467,6 @@ describe('server list generation',()=>{
     await openFolder('분류 B, 2개');await screen.findByText('tile-b1');
     expect(fetches()).toBeGreaterThan(first);
   });
-  it('manual refresh fetches even when generation is unchanged',async()=>{
-    fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    const before=mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length;
-    fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
-    await screen.findByRole('button',{name:'전체 보기'});
-    const reads=mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length;
-    fireEvent.click(screen.getByRole('button',{name:'새로고침',exact:true}));
-    await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets')).length).toBe(reads+1));
-  });
 });
 it('closes an open search on Back before leaving the Library root',async()=>{
   render(<App/>);

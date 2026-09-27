@@ -90,6 +90,7 @@ describe('character exclusion confirmation',()=>{
   it('offers the action only from a character origin and names that character',()=>{
     const {view}=renderViewer();
     expect(screen.getByRole('button',{name:'Lumi에서 제외'})).toBeTruthy();
+    expect(screen.queryByRole('button',{name:'캐릭터에 추가'})).toBeNull();
     view.rerender(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}} endpoint={endpoint}/>);
     expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
   });

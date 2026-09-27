@@ -1,0 +1,54 @@
+.release-calendar-screen { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; background:var(--color-bg); }
+.release-calendar-controls { display:flex; align-items:center; gap:10px; min-height:58px; padding:8px 16px; border-bottom:1px solid var(--color-border); overflow-x:auto; }
+.release-calendar-segments { display:flex; flex:none; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
+.release-calendar-segments button, .release-calendar-interest { min-height:40px; border:0; background:transparent; color:var(--color-muted); font-size:13px; white-space:nowrap; }
+.release-calendar-segments button { min-width:54px; padding:0 12px; }
+.release-calendar-segments button + button { border-left:1px solid var(--color-border); }
+.release-calendar-segments button[aria-checked=true], .release-calendar-interest[aria-pressed=true] { background:var(--color-selected); color:var(--color-text); font-weight:600; }
+.release-calendar-segments button:active, .release-calendar-interest:active { background:var(--color-control-pressed); }
+.release-calendar-interest { display:inline-flex; align-items:center; gap:6px; flex:none; padding:0 11px; border:1px solid var(--color-border); border-radius:3px; }
+.release-calendar-interest svg { width:17px; height:17px; }
+.release-calendar-interest .numeric { color:inherit; }
+.release-calendar-error { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 16px; border-bottom:1px solid var(--color-border); color:var(--color-danger); font-size:12px; }
+.release-calendar-error button { min-height:36px; padding:0 10px; border:1px solid var(--color-border-strong); border-radius:3px; background:transparent; color:var(--color-text); font-size:12px; }
+.release-calendar-scroll { flex:1; min-height:0; overflow:auto; padding:0 16px 32px; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--color-border) transparent; }
+.release-calendar-loading, .release-calendar-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:280px; padding:32px; text-align:center; }
+.release-calendar-loading { color:var(--color-muted); font-size:13px; }
+.release-calendar-empty { gap:10px; }
+.release-calendar-empty-mark { color:var(--color-accent); font:500 28px/1 var(--font-numeric); }
+.release-calendar-empty h2 { font-size:18px; font-weight:500; }
+.release-calendar-empty p { max-width:360px; color:var(--color-muted); font-size:13px; }
+.release-calendar-month { padding-top:16px; }
+.release-calendar-month-heading { display:flex; align-items:baseline; gap:8px; padding-bottom:7px; border-bottom:1px solid var(--color-border-strong); }
+.release-calendar-month-heading h2 { font-size:17px; font-weight:600; }
+.release-calendar-month-heading span { color:var(--color-muted); font-size:12px; }
+.release-calendar-day { padding-top:10px; }
+.release-calendar-day h3 { display:flex; align-items:center; gap:6px; margin-bottom:7px; color:var(--color-muted); font-size:12px; font-weight:500; }
+.release-calendar-day h3::before { content:''; width:5px; height:5px; flex:none; background:var(--color-accent); }
+.release-calendar-card-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; list-style:none; margin:0; padding:0; }
+.release-calendar-card { display:grid; grid-template-columns:88px minmax(0,1fr); gap:10px; min-width:0; min-height:132px; padding:6px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
+.release-calendar-card.is-pending { border-color:var(--color-accent); }
+.release-calendar-cover { position:relative; width:88px; height:120px; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
+.release-calendar-cover img, .release-calendar-cover-placeholder { display:block; width:100%; height:100%; }
+.release-calendar-cover img { object-fit:cover; }
+.release-calendar-cover-placeholder { display:grid; place-items:center; background:var(--color-surface-elevated); color:var(--color-muted); font-size:11px; }
+.release-calendar-cover-placeholder.is-private { background:#17191b; }
+.release-calendar-watch { position:absolute; right:4px; bottom:4px; display:grid; place-items:center; width:40px; height:40px; padding:0; border:1px solid #1119; border-radius:3px; background:#111c; color:var(--color-text); }
+.release-calendar-watch[aria-pressed=true] { background:var(--color-accent); color:var(--color-on-accent); }
+.release-calendar-watch svg { width:19px; height:19px; }
+.release-calendar-card-meta { display:flex; flex-direction:column; align-items:flex-start; min-width:0; padding:3px 3px 3px 0; }
+.release-calendar-card-meta strong { display:-webkit-box; overflow:hidden; margin-bottom:3px; color:var(--color-text); font-size:14px; font-weight:600; line-height:1.35; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
+.release-calendar-original { overflow:hidden; max-width:100%; color:var(--color-muted); font-size:11px; line-height:1.35; white-space:nowrap; text-overflow:ellipsis; }
+.release-calendar-date { margin-top:auto; color:var(--color-text); font-size:13px; font-variant-numeric:tabular-nums; }
+.release-calendar-detail { display:flex; align-items:center; gap:5px; max-width:100%; overflow:hidden; color:var(--color-muted); font-size:11px; white-space:nowrap; text-overflow:ellipsis; }
+.release-calendar-detail > span:last-child { overflow:hidden; text-overflow:ellipsis; }
+.release-calendar-kind { flex:none; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; line-height:1.5; }
+.release-calendar-pending { margin-top:4px; color:var(--color-accent); font-size:11px; }
+@media(max-width:560px) {
+  .release-calendar-card-grid { grid-template-columns:1fr; }
+  .release-calendar-card { grid-template-columns:92px minmax(0,1fr); }
+  .release-calendar-cover { width:92px; height:124px; }
+}
+@media(prefers-reduced-motion:reduce) { .release-calendar-scroll { scroll-behavior:auto; } }
+/* Opened over any tab (Home shelf or the Collections chip); the screen owns its own top bar. */
+.release-calendar-layer { position:fixed; inset:0; z-index:40; display:flex; flex-direction:column; background:var(--color-bg); padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }

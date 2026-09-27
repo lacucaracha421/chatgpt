@@ -22,32 +22,35 @@ import {PhysicalCover} from '../src/collections/physical/PhysicalCover';
 import {PaperbackEngine, type BookTexture} from '../src/collections/physical/PaperbackEngine';
 import {loadCoverImage} from '../src/collections/physical/loadCoverImage';
 import {drawGameCase, GAME_CASE_REST} from '../src/collections/drawGameCase';
+import {usePrivacyMode} from './privacyMode';
 
 import {api, errorText, native} from './transport';
 import {mediaTicket} from './media';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
 import type {Ticket} from './types';
+import {AvCollectionDetail, AvCollectionList, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
 import './library.css';
 import './Collections.css';
 
-/** AV is a tab before it is a published type: the PC side is still being built. */
+/** AV is a published collection type; the tablet keeps its list and detail surfaces here. */
 type CollectionTab = CollectionKind | 'av';
 const labels:Record<CollectionTab,string> = {game:'게임',manga:'만화',movie:'영화',av:'AV'};
 const TABS = Object.keys(labels) as CollectionTab[];
 /** The type tabs: text tabs over one underline that glides to the chosen tab. */
-function TypeTabs({tab,onChoose}:{tab:CollectionTab;onChoose(tab:CollectionTab):void}) {
+function TypeTabs({tab,onChoose,hideAv=false}:{tab:CollectionTab;onChoose(tab:CollectionTab):void;hideAv?:boolean}) {
   const list=useRef<HTMLDivElement>(null),indicator=useRef<HTMLSpanElement>(null);
-  useTabIndicator(list,indicator,TABS.indexOf(tab));
+  const tabs=hideAv?TABS.filter(value=>value!=='av'):TABS;
+  useTabIndicator(list,indicator,tabs.indexOf(tab));
   return <div ref={list} className="collection-type-tabs" role="tablist" aria-label="컬렉션 유형">
-    {TABS.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>onChoose(value)}><span data-label={labels[value]}>{labels[value]}</span></button>)}
+    {tabs.map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>onChoose(value)}><span data-label={labels[value]}>{labels[value]}</span></button>)}
     <span ref={indicator} className="collection-type-indicator" aria-hidden="true"/>
   </div>;
 }
 /** A list query has settled on `key`: its first page (or its failure) is on screen. */
 const settledOn=(list:{key:string;busy:boolean},key:string)=>list.key===key&&!list.busy;
 // The detail pane names the work's own maker role rather than a generic "제작자".
-const makerLabels:Record<CollectionKind,string> = {game:'개발사',manga:'작가',movie:'제작사'};
+const makerLabels:Record<CollectionKind,string> = {game:'개발사',manga:'작가',movie:'제작사',av:'메이커'};
 /** Manga facts beside the cover: publisher, year and status, then the genres as Korean chips. */
 function MangaFacts({item}:{item:CollectionDetail}) {
   const rows=([['출판사',item.publisher],['출간년도',item.year],['상태',item.series?.status]] as const).filter(([,value])=>value!=null&&value!=='');
@@ -57,12 +60,12 @@ function MangaFacts({item}:{item:CollectionDetail}) {
     {genres.length>0&&<ul className="collection-genres" aria-label="장르">{genres.map(genre=><li key={genre}>{genre}</li>)}</ul>}
   </>;
 }
-const detailMaker = (item:CollectionDetail) => (item.type==='game'?item.developer:item.type==='manga'?item.author:item.productionCompany)?.trim() ?? '';
+const detailMaker = (item:CollectionDetail) => (item.type==='game'?item.developer:item.type==='manga'?item.author:item.type==='movie'?item.productionCompany:item.av?.maker)?.trim() ?? '';
 
 // Only visible artwork requests enter this small queue; native owns the disk cache.
 let artworkActive=0;
 const artworkQueue:(()=>void)[]=[];
-function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
+export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
   return new Promise((resolve,reject)=>{
     const cancel=()=>{const index=artworkQueue.indexOf(start);if(index>=0)artworkQueue.splice(index,1);reject(new DOMException('Cancelled','AbortError'));};
     const start=()=>{if(signal.aborted){cancel();return;} artworkActive++;
@@ -465,11 +468,12 @@ function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(v
 export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
 /** `onReturnHome`: set while the screen was opened from Home; closing that entry level (신간 or the work opened) returns there. */
-export function Collections({active,paused,backRef,request,onReturnHome}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void}) {
+export function Collections({active,paused,backRef,request,onReturnHome,onCalendar}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void;/** Opens the 발매 캘린더 (games, movies, anime). */onCalendar?:()=>void}) {
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
+  const [privacyMode]=usePrivacyMode();
   const [searchOpen,setSearchOpen]=useState(false);
-  const type:CollectionKind=tab==='av'?'game':tab;
-  const [filtersByType,setFiltersByType]=useState<Record<CollectionKind,Filters>>(()=>({game:defaultCollectionFilters(),manga:defaultCollectionFilters(),movie:defaultCollectionFilters()}));
+  const type:CollectionKind=tab;
+  const [filtersByType,setFiltersByType]=useState<Record<CollectionKind,Filters>>(()=>({game:defaultCollectionFilters(),manga:defaultCollectionFilters(),movie:defaultCollectionFilters(),av:defaultCollectionFilters()}));
   const filters=filtersByType[type];
   const [refresh,setRefresh]=useState(0);
   // What the server serves may have changed: the lists re-read, and so does the shared 신간 read on its next show.
@@ -488,12 +492,14 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const [releaseListRevision,setReleaseListRevision]=useState<number|null>(null);
   const takeReleaseCounts=useCallback((reply:unknown)=>{setReleases(releaseCounts(reply));setReleaseListRevision(releaseRevision(reply));},[]);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
+  const [avView,setAvView]=useState<AvListView>(()=>{try{return localStorage.getItem(AV_LIST_VIEW_KEY)==='performers'?'performers':'works';}catch{return 'works';}});
   const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[volumeLimit,setVolumeLimit]=useState(96),[overview,setOverview]=useState(false);
   // The viewer opens covers in their physical form; the choice holds while browsing.
   const [coverMode,setCoverMode]=useState<'3d'|'flat'>('3d');
   const sectionRef=useRef<HTMLElement>(null),listRef=useRef<HTMLDivElement>(null),showcaseRef=useRef<HTMLDivElement>(null),detailRef=useRef<HTMLDivElement>(null);
   const listScroll=useRef(0);
-  const live=active&&!paused&&tab!=='av';
+  const live=active&&!paused;
+  useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setDetail(null);}},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
 
   // Typing searches after a short pause; Enter applies at once.
@@ -558,6 +564,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   useEffect(()=>{if(!active)setSheet(null);},[active]);
 
   const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setTab(next);};
+  const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   const openWork=(id:string)=>{if(listRef.current&&!showcaseAll&&!inboxOpen)listScroll.current=listRef.current.scrollTop;setSheet(null);setSelected(id);};
   const openInbox=()=>{if(listRef.current&&!showcaseAll)listScroll.current=listRef.current.scrollTop;setSheet(null);setInboxOpen(true);};
@@ -598,7 +605,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   // scrolling: text tabs centred in the bar with an underline on its edge; while searching they
   // shrink to the right end. 신간 and search keep the right edge like the other tabs' actions.
   // Each label reserves its bold width, so selecting never nudges the centred group.
-  const typeSwitch=<TypeTabs tab={tab} onChoose={chooseTab}/>;
+  const typeSwitch=<TypeTabs tab={tab} onChoose={chooseTab} hideAv={privacyMode}/>;
   const header=selected
     ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
     :inboxOpen
@@ -610,7 +617,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form>{typeSwitch}</TopBarSearch>
-        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{typeSwitch}<button className="collection-release-chip" aria-label={releases.unread>0?`신간 보기, 새 알림 ${releases.unread}개`:'신간 보기'} onClick={openInbox}>신간{releases.unread>0&&<span className="collection-release-count numeric">{releases.unread.toLocaleString()}</span>}</button>{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}</>}/>;
+        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={<>{typeSwitch}<button className="collection-release-chip" aria-label={releases.unread>0?`신간 보기, 새 알림 ${releases.unread}개`:'신간 보기'} onClick={openInbox}>신간{releases.unread>0&&<span className="collection-release-count numeric">{releases.unread.toLocaleString()}</span>}</button>{onCalendar&&<button className="collection-release-chip" onClick={onCalendar}>발매 캘린더</button>}{tab!=='av'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}</>}/>;
 
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{main.legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>;
@@ -619,7 +626,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   useLevelMotion(sectionRef,active?`${selected??''}|${showcaseAll}|${inboxOpen}`:null,(selected?1:0)+(showcaseAll||inboxOpen?1:0));
   // A type switch swaps the list sideways once the new type's list (and its Showcase row, when
   // open) has settled, so the old type's cards never slide in; the bar stays still.
-  useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,TABS.indexOf(tab));
+  useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab));
   // The grid keeps the layout of the type it shows until the new type's page commits.
   const shownType=main.items[0]?.type??type;
   // Cards appended by scrolling rise in once each; a committed first page (a type switch, a
@@ -630,7 +637,12 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
     {header}
     <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll||inboxOpen?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
-      {tab==='av'?<div className="empty-state"><RectangleStackIcon/><h2>AV 컬렉션은 준비 중입니다</h2><p>PC 앱에서 AV 컬렉션이 준비되면 여기에 표시됩니다.</p></div>:<>
+      {tab==='av'?<>
+      {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
+      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<div className="empty-state"><RectangleStackIcon/><h2>PC 앱이 AV 작품을 아직 보내지 않았습니다</h2><p>PC 앱에서 AV 컬렉션을 게시하면 여기에 표시됩니다.</p></div>:<AvCollectionList items={main.items} showcase={showcase.items} showcaseOpen={showcaseOpen} onShowcase={()=>setShowcaseOpen(open=>!open)} revision={revision} active={live&&!selected} view={avView} onView={chooseAvView} onOpen={openWork} total={main.page?.totalCount} filters={filters} sortLabel={sortLabel} onSort={()=>setSheet('sort')} onRating={()=>setSheet('rating')} onReset={()=>changeFilters({...filters,rating:'all'})}/>}
+      {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
+      {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
+      </>:<>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:<>
         {!filtered&&<section className="collection-showcase-fold" aria-label="쇼케이스">
@@ -659,7 +671,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
     </>}</div>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
-    <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>):<>
+    <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>):item.type==='av'?<><AvCollectionDetail item={item} items={main.items} revision={detail!.revision} active={active&&!paused} onOpen={openWork} personal={<PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>}/><CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/></>:<>
       {background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}
       <div className={`collection-detail-intro ${background?'has-backdrop':''}`}>
         <button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button>

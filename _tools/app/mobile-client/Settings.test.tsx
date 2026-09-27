@@ -47,6 +47,15 @@ it('keeps private-HTTP validation and its explanation on the editor',async()=>{
   expect(screen.getByText(/일반 인터넷 주소는 HTTPS가 필요합니다/)).toBeTruthy();
 });
 
+it('stores the tablet privacy mode locally and exposes the switch to later private tabs',async()=>{
+  render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
+  const privacy=screen.getAllByRole('checkbox',{name:'비공개 모드'})[0]!;
+  expect((privacy as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(privacy);
+  expect((privacy as HTMLInputElement).checked).toBe(true);
+  expect(localStorage.getItem('lakomics.mobile.privacyMode')).toBe('1');
+});
+
 it('passes the entered values, including the private-HTTP option, to the native configure command',async()=>{
   const onStatus=vi.fn(), onClose=vi.fn();
   mocks.native.mockImplementation(async(op:string)=>op==='configure'?{configured:true,endpoint:'https://new.invalid',allowPrivateHttp:true}:{bytes:0,count:0,limit:1024});
@@ -73,17 +82,6 @@ it('shows a failed connection attempt without closing and keeps the entered addr
   expect(screen.getByLabelText('서버 주소')).toHaveProperty('value','https://draft.invalid');
 });
 
-it('tucks the cache and connection recovery detail behind a disclosure',async()=>{
-  render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
-  // Radix renders the dialog in a portal, so the disclosure is found in the document.
-  const details=document.querySelector('details.settings-advanced')!;
-  expect(details.hasAttribute('open')).toBe(false);
-  expect(details.querySelector('summary')!.textContent).toBe('연결·캐시 동작 자세히');
-  // Distinguishing the cache clear from the connection reset stays documented rather than implied.
-  expect(details.textContent).toContain('서버의 원본과 연결 정보');
-  expect(details.textContent).toContain('연결 해제');
-});
-
 it('reports the declared Android source version rather than a stale literal',async()=>{
   render(<Settings status={{configured:true,endpoint:'https://example.invalid'}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
   expect(document.querySelector('.settings-foot')!.textContent).toContain('0.8.49 · Android');
@@ -92,7 +90,7 @@ it('reports the declared Android source version rather than a stale literal',asy
 it('opens the USB private vault even without a cloud connection',async()=>{
   const openVault=vi.fn();
   render(<Settings status={{configured:false,endpoint:''}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()} onOpenVault={openVault}/>);
-  fireEvent.click(screen.getByRole('button',{name:'비밀 보관함'}));
+  fireEvent.click(screen.getByRole('button',{name:'비밀 보관함 연결'}));
   expect(openVault).toHaveBeenCalledOnce();
   await screen.findByText('2.0 MB / 1 GB · 12개');
 });

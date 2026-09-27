@@ -35,10 +35,24 @@ export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSele
   return <button ref={host} className={`library-folder${kind?' is-character':''}`} onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><CoverGroup items={items} paused={paused||!visible}/><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong>{count!==undefined&&<span className="numeric muted">{count}</span>}</span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
 }
 export function FolderCards({items,entries,characters,paused,revision,onSelect,strip=false}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;strip?:boolean}) {
-  const {covers,onVisible}=useFolderCovers(items,paused,revision);
+  const {covers,onVisible}=useFolderCovers(items,paused,revision,entries);
   return <div className={strip?'library-children':'library-folder-grid'}>{items.map(entry=><FolderCard key={entry.id} id={entry.id} name={entry.name} kind={characterKindOf(entry)} count={entry.asset_count} items={entry.characterNode?characterCovers(entry,characters):covers[entry.id]??[]} paused={paused} childrenLabel={entries.some(item=>item.parent_id===entry.id)?`하위 폴더 ${entries.filter(item=>item.parent_id===entry.id).length}`:undefined} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)}</div>;
 }
-export function useFolderCovers(items:Entry[],paused:boolean,revision:number){
+const coverDate=(asset:Asset)=>asset.collected_at??asset.created_at??'';
+/** Plain subfolders under `id`, nearest first, that hold assets: covers for a folder with few direct assets. */
+function coverDescendants(entries:Entry[],id:string,limit=6):Entry[]{
+  const found:Entry[]=[];let level=[id];
+  while(level.length&&found.length<limit){
+    const next=entries.filter(item=>!item.characterNode&&item.parent_id!=null&&level.includes(item.parent_id));
+    found.push(...next.filter(item=>item.asset_count>0));level=next.map(item=>item.id);
+  }
+  return found.slice(0,limit);
+}
+async function folderCoverPage(id:string,signal:AbortSignal):Promise<Asset[]>{
+  const params=new URLSearchParams({classification_id:id,limit:'3'});
+  return normalizePage(await api<Page>(`/v1/library/assets?${params}`,signal)).items.slice(0,3);
+}
+export function useFolderCovers(items:Entry[],paused:boolean,revision:number,entries:Entry[]=[]){
   const [visible,setVisible]=useState<Set<string>>(new Set()),[covers,setCovers]=useState<Record<string,Asset[]>>({});
   const completed=useRef({key:'',ids:new Set<string>()});
   const onVisible=useRef((id:string,show:boolean)=>setVisible(old=>{if(old.has(id)===show)return old;const next=new Set(old);if(show)next.add(id);else next.delete(id);return next;})).current;
@@ -49,8 +63,14 @@ export function useFolderCovers(items:Entry[],paused:boolean,revision:number){
     const pending=items.filter(item=>visible.has(item.id)&&!item.characterNode&&!completed.current.ids.has(item.id));
     const controller=new AbortController();
     void mapBounded(pending,2,async item=>{
-      try{const params=new URLSearchParams({classification_id:item.id,limit:'3'});const page=normalizePage(await api<Page>(`/v1/library/assets?${params}`,controller.signal));
-        if(!controller.signal.aborted){completed.current.ids.add(item.id);setCovers(old=>({...old,[item.id]:page.items.slice(0,3)}));}
+      try{let found=await folderCoverPage(item.id,controller.signal);
+        // A folder that keeps its assets in subfolders (e.g. 기타) borrows their newest ones.
+        if(found.length<3){
+          const more=await mapBounded(coverDescendants(entries,item.id),2,child=>folderCoverPage(child.id,controller.signal).catch(()=>[] as Asset[]),controller.signal);
+          const seen=new Set(found.map(asset=>asset.id));
+          found=[...found,...more.flat().filter(asset=>!seen.has(asset.id)&&seen.add(asset.id)).sort((a,b)=>coverDate(b).localeCompare(coverDate(a)))].slice(0,3);
+        }
+        if(!controller.signal.aborted){completed.current.ids.add(item.id);setCovers(old=>({...old,[item.id]:found}));}
       }catch{/* A missing cover must not block navigation. */}
     },controller.signal).catch(()=>{});
     return()=>controller.abort();

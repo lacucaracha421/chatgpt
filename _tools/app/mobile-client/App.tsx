@@ -1,12 +1,11 @@
 import {PrivateVault} from './PrivateVault';
-import {onVisible} from './useVisibleInterval';
+import {ReleaseCalendar} from './ReleaseCalendar';
+import {onVisible,visibleInterval} from './useVisibleInterval';
 import {fetchAssetFilterVersion, fetchListGeneration, pageGenerationOf, ASSET_LIST_CHANGED_EVENT} from './listGeneration';
 import {HeaderTools} from './HeaderTools';
 import {Notes} from './Notes';
 import {usePublicationCheck} from './usePublicationCheck';
-import {characterReviewLibrary,validCharacterIndex,type CharacterIndex} from './characterModel';
-import {CharacterReview,type ReviewScope} from './CharacterReview';
-import {CharacterReviewOverview} from './CharacterReviewOverview';
+import {validCharacterIndex,type CharacterIndex} from './characterModel';
 import {useCharacterReviewBackgroundFlush} from './useCharacterReview';
 import {SimilarityReview} from './SimilarityReview';
 import {LibraryTrash} from './LibraryTrash';
@@ -15,7 +14,7 @@ import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
 import {useDuplicateDecisionFlush} from './CatalogDuplicates';
 import type {ViewerCharacterContext} from './Viewer';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowPathIcon, ChevronRightIcon, PlayIcon, ArrowsUpDownIcon} from '@heroicons/react/24/outline';
+import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, LockClosedIcon, ChevronRightIcon, PlayIcon} from '@heroicons/react/24/outline';
 import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
 
@@ -46,11 +45,13 @@ import {Catalog} from './Catalog';
 import {readRecentFolders, rememberFolder, RECENT_FOLDERS_KEY} from './homeModel';
 import {Viewer} from './Viewer';
 import {Settings} from './Settings';
+import {Artists} from './Artists';
 import {CharacterBrowser} from './CharacterBrowser';
 import {FaultGame} from './FaultGame';
 import {faultCandidates} from '../src/games/fault/host';
 import {useLevelMotion,useScrollMemory,useTabMotion} from './motion';
 import {setOutboxConnection} from './outboxConnection';
+import {usePrivacyMode} from './privacyMode';
 /** The durable outboxes follow the connection before any screen re-renders against it. */
 const adoptConnection=(next:Status)=>{setOutboxConnection(next.configured?next.endpoint:null);return next;};
 
@@ -80,23 +81,21 @@ export function App() {
   const catalogBack = useRef<(()=>boolean)|null>(null);
   const [librarySegment,setLibrarySegment]=useState<'folders'|'albums'>('folders');
   const [vaultOpen,setVaultOpen]=useState(false);
+  const [vaultPresent,setVaultPresent]=useState(false),[vaultSelected,setVaultSelected]=useState(true);
   // 보내기/받기: a utility screen opened from the Home header or an arrival toast.
   const [exchangeOpen,setExchangeOpen]=useState(false);
   const exchangeBack=useRef<(()=>boolean)|null>(null);
+  const [artistsOpen,setArtistsOpen]=useState(false),[calendarOpen,setCalendarOpen]=useState(false);
+  const calendarBack=useRef<(()=>boolean)|null>(null);
+  const artistsBack=useRef<(()=>boolean)|null>(null);
   const vaultBack=useRef<(()=>boolean)|null>(null);
   const viewerBack = useRef<(()=>boolean)|null>(null);
   const [status, setStatus] = useState<Status>({configured:false, endpoint:''});
+  const [privacyMode] = usePrivacyMode();
   // Queued personal Collection edits are sent on start and on return, whatever screen is open.
   useCollectionEditBackgroundFlush(status.configured);
   // Queued character-review decisions are sent the same way, and when the network returns.
   useCharacterReviewBackgroundFlush(status.configured);
-  // The full-screen character review, optionally filtered to one character.
-  const [review,setReview]=useState<ReviewScope|null>(null);
-  const [reviewClosed,setReviewClosed]=useState(0);
-  const reviewBack=useRef<(()=>boolean)|null>(null);
-  // Home's 캐릭터 검토 opens this overview first; a review opened from it returns to it.
-  const [reviewOverview,setReviewOverview]=useState(false);
-  const overviewBack=useRef<(()=>boolean)|null>(null);
   // Similarity review decisions wait out their undo window, then go the same way.
   useSimilarityReviewBackgroundFlush(status.configured);
   // Catalog duplicate-edition decisions, likewise after their undo window.
@@ -118,7 +117,7 @@ export function App() {
   const [filtersOpen, setFiltersOpen] = useState<FilterGroup|null>(null);
   const [filterVersion, setFilterVersion] = useState<number | null>(null);
   const [filterNotice, setFilterNotice] = useState('');
-  const [page, setPage] = useState<Committed>({items:[], has_more:false, next_cursor:null, view:LIBRARY, cursor:null, previous:[], version:0, restoreScroll:0, generation:null, filters:{...EMPTY_FILTERS}});
+  const [page, setPage] = useState<Committed>({items:[], has_more:false, next_cursor:null, view:HOME, cursor:null, previous:[], version:0, restoreScroll:0, generation:null, filters:{...EMPTY_FILTERS}});
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [indexError, setIndexError] = useState('');
   const [characterIndex,setCharacterIndex]=useState<CharacterIndex>();
   const [indexRevision,setIndexRevision]=useState(0);
@@ -150,7 +149,7 @@ export function App() {
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
   const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null),bodyRef=useRef<HTMLDivElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
-  const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, reviewOverview, similarity, vaultOpen, exchangeOpen}); latest.current = {page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, review, reviewOverview, similarity, vaultOpen, exchangeOpen};
+  const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen}); latest.current = {calendarOpen, page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]; filters:AssetFiltersValue}>({view:LIBRARY,cursor:null,previous:[],filters:{...EMPTY_FILTERS}});
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
   // Committed classification or root to restore after leaving character browsing.
@@ -380,6 +379,14 @@ export function App() {
   }, []);
   // Warm every thumbnail into the native cache while the app is open on an unmetered link.
   useEffect(() => status.configured ? startThumbnailWarm(status.endpoint) : undefined, [status.configured, status.endpoint]);
+  // Home shows a vault shortcut only while the chosen USB with a vault is attached.
+  const onHome=status.configured&&area==='assets'&&page.view.tab==='home'&&!vaultOpen;
+  useEffect(()=>{
+    if(!onHome)return;
+    let live=true;
+    const stop=visibleInterval(()=>{void native<{present:boolean;selected:boolean}>('vaultState').then(state=>{if(live){setVaultPresent(!!state.present);setVaultSelected(!!state.selected);}},()=>{if(live)setVaultPresent(false);});},10_000,true);
+    return()=>{live=false;stop();};
+  },[onHome]);
   useEffect(() => { void native<Status>('status').then(next=>setStatus(adoptConnection(next))).catch(reason => setError(errorText(reason))).finally(() => setChecking(false)); return () => {gate.current.cancel(); secondaryGate.current.cancel();}; }, []);
   useEffect(() => {
     if (!status.configured) return;
@@ -449,9 +456,6 @@ export function App() {
       if (state.vaultOpen) {if(!vaultBack.current?.())setVaultOpen(false);}
       else if (state.fault) setFault(null);
       else if (state.exchangeOpen) {if (!exchangeBack.current?.()) setExchangeOpen(false);}
-      // The review screen covers the app too; it closes its zoom first, then itself.
-      else if (state.review) {if (!reviewBack.current?.()) setReview(null);}
-      else if (state.reviewOverview) {if (!overviewBack.current?.()) setReviewOverview(false);}
       else if (state.similarity) {if (!similarityBack.current?.()) setSimilarity(false);}
       else if (trash.backRef.current?.()) { /* The trash browser consumed back. */ }
       // The filter dialog is the innermost surface, so it closes first and consumes the press.
@@ -462,6 +466,8 @@ export function App() {
       else if (state.viewer) setViewer(null);
       // An open top-bar search closes (and clears) before Back navigates anywhere.
       else if (closeVisibleSearch()) { /* The search bar consumed back. */ }
+      else if (state.calendarOpen) {if (!calendarBack.current?.()) setCalendarOpen(false);}
+      else if (state.artistsOpen) {if (!artistsBack.current?.()) setArtistsOpen(false);}
       else if (state.area === 'collections') {if (!collectionBack.current?.()) returnHome();}
       else if (state.area === 'notes') {if (!notesBack.current?.()) returnHome();}
       else if (state.area === 'catalog') {if (!catalogBack.current?.()) returnHome();}
@@ -564,7 +570,7 @@ export function App() {
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
-    setViewer(null); setReview(null); setReviewOverview(false); setSimilarity(false); setExchangeOpen(false); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
+    setViewer(null); setSimilarity(false); setExchangeOpen(false); setArtistsOpen(false); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
     lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
@@ -592,9 +598,7 @@ export function App() {
   const seriesNode=characterIndex?.nodes.find(node=>node.id===focusedCharacter);
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
-  const paused=area!=='assets'||settings||!!viewer||!!fault||!!review||reviewOverview||similarity||trash.open||exchangeOpen;
-  const reviewLibrary=characterReviewLibrary(characterIndex);
-  const closeReview=()=>{setReview(null);setReviewClosed(n=>n+1);};
+  const paused=area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
   const intro=<>{filterable&&!sameFilters(filters,page.filters)&&<p className="hint">필터 적용 대기</p>}{!!childEntries.length&&<section className="folder-intro"><h2>폴더 {childEntries.length}</h2><FolderCards strip items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{busy?'에셋을 불러오고 있습니다':hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':'아직 자산이 없습니다'}</h2></div>}</>;
   // A drill-down level is a committed Library place; its depth decides the entrance direction.
   // Home, other tabs and filter changes are not levels, so they never slide.
@@ -627,26 +631,26 @@ export function App() {
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
   return <div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
-    {!(status.configured&&(area!=='assets'||page.view.tab==='library'))&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="exchange-entry"><IconButton label={exchange.unseen?`보내기/받기, 새 파일 ${exchange.unseen}개`:'보내기/받기'} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchange.unseen>0&&<span className="exchange-badge numeric" aria-hidden="true">{exchange.unseen>99?'99+':exchange.unseen}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
+    {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
     {status.configured ? <div className="app-body" ref={bodyRef} data-active-tab={area==='assets'?page.view.tab:area}>
-      <main className="library-main" ref={mainRef} style={{display:area!=='assets'?'none':undefined}}>
-        {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2><IconButton label="새로고침" icon={ArrowPathIcon} disabled={busy} onClick={refresh}/></div></HeaderTools>}
+      <main className="library-main" ref={mainRef} style={{display:area!=='assets'||artistsOpen?'none':undefined}}>
+        {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>}
         {page.view.tab==='library'&&!page.view.root&&!page.view.characters&&<LibraryHeader title={page.view.title} count={hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`} crumbs={crumbs} onBack={()=>window.dispatchEvent(new Event('lakomics-back'))} loading={busy&&'목록 불러오는 중'} onOptions={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}} changed={activeFilterCount(page.filters)+(density!==DEFAULT_DENSITY?1:0)}/>}
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
-        <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:()=>setReview({target:null})}:undefined} similarity={{enabled:true,refreshKey:similarityClosed,onOpen:()=>setSimilarity(true)}}/>
+        <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
-          review={{enabled:!!reviewLibrary,refreshKey:`${characterIndex?.revision}:${reviewClosed}`}} similarityKey={similarityClosed}
+          review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => setArtistsOpen(true)}
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onRevisit={(key,title) => {const view:View={tab:'library',revisit:key,title};fromHome(view);select(view);}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
           onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
           onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
-          onReview={() => setReviewOverview(true)} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
+          onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
-          onReleases={() => {setHomeOrigin({area:'collections'});openCollections({kind:'releases'});}} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
+          onReleases={() => setCalendarOpen(true)} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
         <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused}/>
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
-        {charactersVisited && <CharacterBrowser hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault||!!review} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters} review={reviewLibrary?{enabled:true,refreshKey:`${characterIndex?.revision}:${reviewClosed}`,onOpen:target=>setReview({target})}:undefined}/>}
+        {charactersVisited && <CharacterBrowser hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters}/>}
         <div className="floating-notices">
           {indexError&&rootShown&&<p className="error-message">{indexError}</p>}
           {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 해제</Button></div>}
@@ -654,20 +658,20 @@ export function App() {
           {moreError && !page.view.root && !page.view.characters && page.view.tab!=='home' && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </div>
       </main>
-      {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
+      {calendarOpen && <div className="release-calendar-layer"><ReleaseCalendar onClose={() => setCalendarOpen(false)} backRef={calendarBack}/></div>}
+      {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} onOpenViewer={(items,index) => setViewer({items,index})}/>}
+      {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onCalendar={() => setCalendarOpen(true)} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
-    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={openHome}><HomeIcon/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{setHomeOrigin(null);openLibrary();}}><PhotoIcon aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>메모</span></button></nav>}
+    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{setArtistsOpen(false);openHome();}}><HomeIcon/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);openLibrary();}}><PhotoIcon aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>메모</span></button></nav>}
     {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}>{/* Filters first: a chip closes this sheet and opens its own choice sheet (never nested). */}{filterable&&!page.view.characters&&<><p className="view-options-label">필터</p><FilterChips sheet={false} value={filters} applied={page.filters} onChange={applyFilters} open={null} onOpen={group=>{setViewSettings(false);setFiltersOpen(group);}}/></>}<div className="view-options-host" ref={setOptionsHost}/><StepSlider className="view-options-density" label="썸네일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/>{faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
     {filterable&&<FilterChips row={false} value={filters} applied={page.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}
-    {settings && <Settings onOpenVault={()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
+    {settings && <Settings onOpenVault={vaultSelected?undefined:()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/>}
     {fault && <FaultGame items={fault} onClose={() => setFault(null)}/>}
     {similarity && <SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/>}
-    {reviewOverview && reviewLibrary && <CharacterReviewOverview libraryId={reviewLibrary} characters={characterIndex} refreshKey={`${characterIndex?.revision}:${reviewClosed}`} paused={!!review} backRef={overviewBack} onOpen={setReview} onClose={() => setReviewOverview(false)}/>}
-    {review && reviewLibrary && <CharacterReview key={review.target?.id??(review.series?`series:${review.series.id}`:'all')} libraryId={reviewLibrary} target={review.target} series={review.series} serverSeries={review.serverSeries} backRef={reviewBack} onClose={closeReview}/>}
-    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} reviewLibrary={reviewLibrary} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
+    {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <LibraryTrash key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/>}
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/>}

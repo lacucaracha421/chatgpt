@@ -1,10 +1,14 @@
-export type CollectionKind = 'game' | 'manga' | 'movie';
+export type CollectionKind = 'game' | 'manga' | 'movie' | 'av';
 export type CollectionFilters = {sort:'recent'|'media_date'|'name';direction:'asc'|'desc';rating:'all'|'unrated'|number};
 export const defaultCollectionFilters = ():CollectionFilters => ({sort:'media_date',direction:'desc',rating:'all'});
 export type CollectionVolume = {id:string; volumeNumber:number; editionIndex:number; displayLabel:string; coverArtworkId?:string|null; localReleaseDate?:string|null};
+export type AvPortraitCrop = {artworkId:string;x:number;y:number;w:number;h:number};
+export type AvPerson = {id:string;name:string;nameJa?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null};
+export type AvInfo = {productCode?:string|null;titleJa?:string|null;maker?:string|null;label?:string|null;series?:string|null;genres:string[];releaseDate?:string|null;people:AvPerson[]};
 export type CollectionSummary = {
   artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null}>;
   id:string; name:string; type:CollectionKind; description?:string|null; overview?:string|null;
+  av?:AvInfo|null;
   /** 원제: for manga, usually the Japanese title the PC filled from MangaDex. */
   originalTitle?:string|null;
   coverAssetId?:string|null; selectedWorkArtworkId?:string|null; selectedHeroArtworkId?:string|null; selectedBackdropArtworkId?:string|null;
@@ -53,10 +57,11 @@ export function volumeLabel(volume:CollectionVolume) {
 
 /** The 원제 worth showing beside the title: present and not just the title again. */
 export function originalTitle(item:CollectionSummary){const value=item.originalTitle?.trim()??'';return value&&value!==item.name.trim()?value:'';}
-export function collectionCardCredit(item:CollectionSummary){return (item.type==='movie'?item.productionCompany:item.type==='game'?item.developer:item.author)?.trim()??'';}
+export function collectionCardCredit(item:CollectionSummary){return (item.type==='movie'?item.productionCompany:item.type==='game'?item.developer:item.type==='manga'?item.author:item.av?.people.find(person=>person.role==='performer')?.name)?.trim()??'';}
 export function collectionCardDate(item:CollectionSummary){
   const short=(date:string)=>{const [y,m,d]=date.split('-');return `${y.slice(-2)}.${Number(m)}.${Number(d)}`;};
   if(item.type==='movie'&&item.seasonDateRange?.length===2){const [first,last]=item.seasonDateRange;return first===last?short(first):`${short(first)}~${short(last)}`;}
+  if(item.type==='av'&&item.av?.releaseDate)return short(item.av.releaseDate);
   return item.year?String(item.year):item.releaseDate?.slice(0,4)??'';
 }
 

@@ -1,19 +1,20 @@
 import {useEffect, useState} from 'react';
-import {XMarkIcon, ArrowTopRightOnSquareIcon} from '@heroicons/react/24/outline';
+import {XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, Dialog, DialogDescription, IconButton} from './ui';
 import {errorText, native} from './transport';
 import type {Status} from './types';
-import {PickerSettings} from './PickerSettings';
 import {onWarmState, setWarmEnabled, warmEnabled, warmState, type WarmState} from './thumbnailWarm';
+import {usePrivacyMode} from './privacyMode';
 import './Settings.css';
 
 type CacheStatus = {bytes:number; count:number; limit:number};
 const APP_VERSION = '0.8.49';
 
-export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void; onOpenVault?():void}) {
+export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault}: {status: Status; onStatus(status: Status): void; onClose(): void; onCacheCleared():void; /** Only until a vault USB has been chosen; afterwards Home shows the vault icon. */ onOpenVault?():void}) {
   const [endpoint, setEndpoint] = useState(status.endpoint);
   const [token, setToken] = useState('');
   const [privateHttp, setPrivateHttp] = useState(status.allowPrivateHttp ?? false);
+  const [privacyMode, setPrivacyMode] = usePrivacyMode();
   const [editing, setEditing] = useState(!status.configured);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [cache, setCache] = useState<CacheStatus>(), [cacheBusy,setCacheBusy] = useState(false), [cacheMessage,setCacheMessage] = useState('');
@@ -31,7 +32,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
   return <Dialog open title="연결 및 설정" onClose={onClose}>
     <header className="dialog-header"><span className="eyebrow">LAKOMICS / CONNECTION</span><IconButton label="설정 닫기" icon={XMarkIcon} onClick={onClose}/></header>
     {/* Radix requires a description on the content; the visible row states it already. */}
-    <DialogDescription className="sr-only">연결 상태, 미디어 캐시와 파일 선택기 설정을 관리합니다.</DialogDescription>
+    <DialogDescription className="sr-only">연결 상태, 비공개 모드와 미디어 캐시를 관리합니다.</DialogDescription>
     <section className="settings-section" aria-label="현재 연결">
       <p className="settings-connection"><span className="status-dot"/>{status.configured?'클라우드 연결됨':'연결되지 않음'}<span className="numeric muted">{status.endpoint || '주소 없음'}</span></p>
       {status.configured && <div className="settings-inline-actions">
@@ -52,6 +53,10 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
       </form>}
       {!editing && error && <p className="error-message" role="alert">{error}</p>}
     </section>
+    <section className="settings-section" aria-label="비공개 모드">
+      <label className="check-field"><input type="checkbox" checked={privacyMode} onChange={event => setPrivacyMode(event.target.checked)} />비공개 모드</label>
+      <p className="hint">홈에서 AV 배우와 이미지 미리보기를 숨깁니다. 이 기기에만 저장됩니다.</p>
+    </section>
     <section className="settings-section" aria-label="미디어 캐시">
       <div className="settings-section-head"><h3>미디어 캐시</h3><span className="numeric">{cache ? `${(cache.bytes/1024/1024).toFixed(1)} MB / ${(cache.limit/1024/1024/1024).toFixed(0)} GB · ${cache.count}개` : '사용량 확인 중…'}</span></div>
       <div className="settings-inline-actions"><Button variant="ghost" disabled={busy || cacheBusy || !cache} onClick={() => {
@@ -61,15 +66,8 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
       {cacheMessage && <p role="status">{cacheMessage}</p>}
       <ThumbnailWarmSetting/>
     </section>
-    {onOpenVault && <section className="settings-section" aria-label="비밀 보관함"><Button onClick={onOpenVault}>비밀 보관함</Button><p className="hint">USB를 연결해 이미지와 영상을 감상합니다.</p></section>}
-    <PickerSettings configured={status.configured}/>
-    <details className="settings-advanced">
-      <summary>연결·캐시 동작 자세히</summary>
-      <p>썸네일과 감상한 이미지, 다른 앱에 첨부한 파일을 함께 저장합니다. 최대 1GB 안에서 오래 사용하지 않은 항목부터 정리하며, 1년 동안 보지 않은 파일도 삭제합니다. 썸네일 미리 받기는 앱이 켜져 있고 모바일 데이터가 아닐 때 전체 썸네일을 차례로 받아 둡니다.</p>
-      <p>캐시 지우기는 이 기기에 저장된 미디어 사본만 삭제합니다. 서버의 원본과 연결 정보, 분류·앨범 구성은 그대로 유지됩니다.</p>
-      <p>연결 해제는 기기에 저장된 서버 주소와 토큰을 지웁니다. 다시 사용하려면 주소와 토큰을 입력해야 합니다.</p>
-    </details>
-    <div className="settings-foot"><span>{APP_VERSION} · Android</span><Button variant="ghost" onClick={() => {void native('openExternal', {url:'https://github.com/lacucaracha421/chatgpt'}).catch(reason => setError(errorText(reason)));}}><ArrowTopRightOnSquareIcon/>프로젝트</Button></div>
+    {onOpenVault && <section className="settings-section" aria-label="비밀 보관함"><Button onClick={onOpenVault}>비밀 보관함 연결</Button><p className="hint">USB를 한 번 연결해 두면 이후에는 USB를 꽂았을 때 홈 상단에 보관함 아이콘이 나타납니다.</p></section>}
+    <div className="settings-foot"><span>{APP_VERSION} · Android</span></div>
   </Dialog>;
 }
 

@@ -14,11 +14,11 @@ import {invalidateTicket, loadThumbnail, mediaTicket, prefetchThumbnails} from '
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, vault, arriving, onArrived}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; vault?:GalleryVaultSource;
+function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, arriving, onArrived}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
   /** Appended by a page load and not shown yet: the tile waits for its thumbnail, then rises in. */arriving:boolean; onArrived(id:string):void}) {
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
   useEffect(()=>{
-    const element=host.current;if(paused||vault||!element||!window.IntersectionObserver)return;
+    const element=host.current;if(paused||privacy||vault||!element||!window.IntersectionObserver)return;
     let visible:AbortController|undefined;
     const observer=new IntersectionObserver(entries=>{
       if(entries.some(entry=>entry.isIntersecting)){
@@ -27,17 +27,17 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, vault, arri
     },{root:element.closest('.gallery-scroll'),rootMargin:'0px'});
     observer.observe(element);
     return()=>{observer.disconnect();visible?.abort();};
-  },[asset.id,asset.kind,asset.pending,paused,vault]);
+  },[asset.id,asset.kind,asset.pending,paused,privacy,vault]);
   const [preview, setPreview] = useState(asset.preview);
   const [retried, setRetried] = useState(false);
   // A new thumbnail revision is a new image: it reloads while the tile keeps the old one.
   useEffect(() => {
     const controller = new AbortController();
-    if (!paused && !vault && !asset.preview) void loadThumbnail(asset, controller.signal).then(ready => {
+    if (!paused && !privacy && !vault && !asset.preview) void loadThumbnail(asset, controller.signal).then(ready => {
       if (!controller.signal.aborted && ready.preview) {setPreview(ready.preview); onReady(ready);}
     }, () => {});
     return () => controller.abort();
-  }, [asset.id, asset.preview, asset.thumbnail_available, asset.thumbnail_revision, asset.pending, onReady, paused, vault]);
+  }, [asset.id, asset.preview, asset.thumbnail_available, asset.thumbnail_revision, asset.pending, onReady, paused, privacy, vault]);
   const hasPreview=!!preview;
   // An appended tile stays transparent in its final box until its thumbnail is decoded (or a
   // short wait ends), then rises in once. Any other tile whose first image comes late fades it in.
@@ -64,9 +64,9 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, vault, arri
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <button ref={host} className="media-tile" style={{width}} onClick={() => onOpen(index)} aria-label={vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} data-asset-id={asset.id}>
+  return <button ref={host} className="media-tile" style={{width}} onClick={() => {if(!privacy) onOpen(index);}} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} data-asset-id={asset.id}>
     <span className="tile-picture" style={{height}}>
-      {preview ? <img ref={image} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
+      {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <img ref={image} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
         const element = event.currentTarget;
         // A vault item without index dimensions takes its shape from the decoded thumbnail.
         if (vault && !asset.ratio && !(asset.width && asset.height) && element.naturalWidth > 0 && element.naturalHeight > 0) onReady({...asset, ratio: element.naturalWidth / element.naturalHeight});
@@ -86,7 +86,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, vault, arri
 const observeShownRect = (instance: Virtualizer<HTMLDivElement, Element>, callback: (rect: {width: number; height: number}) => void) =>
   observeElementRect(instance, rect => { if (rect.width > 0 && rect.height > 0) callback(rect); });
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, intro, onRefresh, busy=false, stale=false, vault}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
   const parent = useRef<HTMLDivElement>(null);
@@ -131,7 +131,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   const lastRow = virtualRows.length ? virtualRows[virtualRows.length - 1].index : -1;
   useEffect(() => {
     const element = parent.current;
-    if (paused || vault || lastRow < 0 || !element || element.clientHeight <= 0) return;
+    if (paused || privacy || vault || lastRow < 0 || !element || element.clientHeight <= 0) return;
     const controller = new AbortController(), ahead: Asset[] = [];
     let height = 0;
     for (let index = lastRow + 1; index < rows.length && height < element.clientHeight * 2; index++) {
@@ -139,7 +139,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     }
     prefetchThumbnails(ahead, controller.signal);
     return () => controller.abort();
-  }, [lastRow, rows, paused, vault]);
+  }, [lastRow, rows, paused, privacy, vault]);
   const checkEnd = () => {const element = parent.current; if (!paused && element && element.clientHeight > 0 && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
   useEffect(checkEnd, [items.length, onNearEnd, paused]);
   return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onScroll={event => {if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
@@ -148,7 +148,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => <div className="gallery-row" key={virtual.key} style={{transform: `translateY(${virtual.start-introHeight}px)`}}>
-        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} vault={vault} arriving={arrivals.arriving(item.asset.id)} onArrived={arrivals.arrived}/>) }
+        {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} arriving={arrivals.arriving(item.asset.id)} onArrived={arrivals.arrived}/>) }
       </div>)}
     </div>
   </div>;

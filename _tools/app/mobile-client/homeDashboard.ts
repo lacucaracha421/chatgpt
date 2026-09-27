@@ -3,7 +3,6 @@ import {rowView, type ExchangeSnapshot} from './exchange';
 import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, shortReleaseDate, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import type {CollectionSummary} from './collectionModel';
 import {currentShelf, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
-import {useCharacterReviewCount} from './useCharacterReview';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useDuplicateCount} from './CatalogDuplicates';
 import {useVisibleInterval} from './useVisibleInterval';
@@ -16,6 +15,7 @@ import {byOrder, noteColorValue, stripMarkdown} from '../src/notes/model';
 import type {Note, NotesState} from '../src/notes/store';
 import {LEDGER, LEDGER_MONTH} from '../src/notes/ledger/model';
 import {monthNotesOf, monthSummary} from '../src/notes/ledger/summary';
+import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
 
 /**
  * Home's information dashboard (HOME-DASH-001, layout R2), from data the tablet already reads
@@ -48,6 +48,18 @@ export const PENDING_LIMIT = 40;
 export type ReleaseRow = {id: string; name: string; unread: number; caption: ReleaseCaption | null};
 export type UpcomingRow = {id: string; name: string; date: string; volumeNumber: number};
 export type SendingSummary = {name: string; more: number; peer: string; progress: number | null};
+
+export type HomeCover = {url?: string | null; sha256?: string | null; sizeBytes?: number | null; contentType?: string | null};
+export type UpcomingHomeEntry = {
+  id: string; kind: 'game' | 'movie' | 'anime'; title: string; originalTitle?: string | null;
+  date?: string | null; precision?: string | null; region?: string | null; platforms?: string[];
+  releaseType?: string | null; cover?: HomeCover | null; description?: string | null;
+};
+export type UpcomingHomeReply = {version?: number; revision?: string | number | null; entries?: UpcomingHomeEntry[]; wishlist?: UpcomingHomeEntry[]; pending?: {itemId?: string; action?: string}[]};
+export type AvPick = {date?: string; personId: string; name: string; aliases?: string[]; workCount?: number; latestWork?: {code?: string; label?: string; series?: string | null; title?: string; date?: string; collectionId?: string | null; cover?: HomeCover | null} | null; cover?: HomeCover | null};
+export type AvPickReply = {version?: number; revision?: string | number | null; pick?: AvPick | null};
+export type LibraryArtist = {id: string; label: string; displayName?: string | null; sourceName?: string | null; assetCount?: number; recentCount?: number; lastOpenedAt?: string | null; main?: boolean; hidden?: boolean; coverAssetIds?: string[]};
+export type LibraryArtistsReply = {artists?: LibraryArtist[]};
 
 const ownedOf = (work: CollectionSummary, edition: number) => work.ownedVolumes?.find(entry => entry.editionIndex === edition)?.count ?? null;
 const watching = (work: CollectionSummary) => work.type === 'manga' && !!work.releaseWatch?.enabled;
@@ -229,8 +241,8 @@ export function useHomeRevisit(enabled: boolean, key: unknown) {
 
 /* ---- 메모 ---- */
 export type MemoRow =
-  | {id: string; title: string; color: string | null; kind: 'checklist'; done: number; total: number}
-  | {id: string; title: string; color: string | null; kind: 'ledger'; month: number; label: '쓸 수 있는 돈' | '쓴 돈'; amount: number}
+  | {id: string; title: string; color: string | null; kind: 'checklist'; done: number; total: number; items: {text: string; checked: boolean}[]}
+  | {id: string; title: string; color: string | null; kind: 'ledger'; month: number; label: '쓸 수 있는 돈' | '쓴 돈'; amount: number; categories: {label: string; amount: number}[]; latest: {label: string; amount: number}[]}
   | {id: string; title: string; color: string | null; kind: 'secret'}
   | {id: string; title: string; color: string | null; kind: 'text'; snippet: string};
 /** Pinned notes, most recently edited first, as one line each; month notes of a 가계부 never show. */
@@ -242,12 +254,20 @@ export function memoRows(notes: Note[], today = localToday()): MemoRow[] {
       if (note.type === 'secret') return {...base, kind: 'secret'};
       if (note.type === LEDGER) {
         const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
-        return {...base, title: base.title || '가계부', kind: 'ledger', month: Number(today.slice(5, 7)),
-          ...(summary.available !== null ? {label: '쓸 수 있는 돈' as const, amount: summary.available} : {label: '쓴 돈' as const, amount: summary.spent})};
+        const entries = summary.entries.filter(entry => !entry.in);
+        const withCategory = entries.filter(entry => typeof (entry as unknown as {category?: unknown}).category === 'string' && String((entry as unknown as {category: string}).category).trim());
+        const categoryMap = new Map<string, number>();
+        for (const entry of withCategory) {
+          const label = String((entry as unknown as {category: string}).category).trim();
+          categoryMap.set(label, (categoryMap.get(label) ?? 0) + entry.amount);
+        }
+        const categories = [...categoryMap].map(([label, amount]) => ({label, amount})).sort((a, b) => b.amount - a.amount).slice(0, 3);
+        const latest = entries.slice(0, 3).map(entry => ({label: entry.name || '기록', amount: entry.amount}));
+        return {...base, title: base.title || '가계부', kind: 'ledger', month: Number(today.slice(5, 7)), label: '쓴 돈', amount: summary.spent, categories, latest};
       }
       if (note.type === 'checklist' && !note.readOnly) {
         const items = [...(note.items ?? [])].sort(byOrder);
-        return {...base, kind: 'checklist', done: items.filter(item => item.checked).length, total: items.length};
+        return {...base, kind: 'checklist', done: items.filter(item => item.checked).length, total: items.length, items: items.slice(0, 5).map(item => ({text: item.text, checked: item.checked}))};
       }
       return {...base, kind: 'text', snippet: note.body.split('\n').map(stripMarkdown).map(line => line.trim()).filter(Boolean).join(' ').slice(0, 160)};
     });
@@ -265,6 +285,77 @@ export function useHomeMemos(enabled: boolean, key: unknown): HomeMemos {
     return () => { live = false; };
   }, [enabled, key]);
   return memos;
+}
+
+function validHomeEntry(value: unknown): value is UpcomingHomeEntry {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.id === 'string' && typeof row.title === 'string' && (row.kind === 'game' || row.kind === 'movie' || row.kind === 'anime');
+}
+
+export function normalizeUpcomingReply(value: unknown): UpcomingHomeReply {
+  const reply = value && typeof value === 'object' ? value as UpcomingHomeReply : {};
+  return {...reply, entries: (reply.entries ?? []).filter(validHomeEntry), wishlist: (reply.wishlist ?? []).filter(validHomeEntry)};
+}
+
+export function wishlistIds(reply: UpcomingHomeReply | null): Set<string> {
+  return new Set((reply?.wishlist ?? []).map(entry => entry.id));
+}
+
+export function useHomeUpcoming(enabled: boolean, scope: string, key: unknown) {
+  const [reply, setReply] = useState<UpcomingHomeReply | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    void flushUpcomingWishlist(controller.signal, scope).then(() => api<unknown>('/v1/home/upcoming', controller.signal)).then(value => {
+      if (controller.signal.aborted) return;
+      const next = normalizeUpcomingReply(value);
+      reconcileUpcomingWishlist(wishlistIds(next));
+      setReply(next); setTick(n => n + 1);
+    }, () => {
+      if (!controller.signal.aborted) setReply(current => current ?? {entries: [], wishlist: []});
+    });
+    return () => controller.abort();
+  }, [enabled, scope, key]);
+  const ids = wishlistIds(reply);
+  const pending = readUpcomingWishlistIntents();
+  for (const id of Object.keys(pending)) ids.add(id);
+  const toggle = (itemId: string) => {
+    const current = visibleUpcomingWishlist(itemId, wishlistIds(reply).has(itemId)).value;
+    commitUpcomingWishlist(itemId, !current); setTick(n => n + 1);
+    const controller = new AbortController();
+    void flushUpcomingWishlist(controller.signal, scope).finally(() => controller.abort());
+  };
+  return {entries: reply?.entries ?? [], wishlist: ids, wishlistPending: tick, toggle};
+}
+
+export function useHomeAvPick(enabled: boolean, key: unknown) {
+  const [pick, setPick] = useState<AvPick | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    void api<AvPickReply>('/v1/home/av-pick', controller.signal).then(value => {
+      if (!controller.signal.aborted) setPick(value?.pick ?? null);
+    }, reason => {
+      if (!controller.signal.aborted && (reason as {status?: number})?.status === 404) setPick(null);
+    });
+    return () => controller.abort();
+  }, [enabled, key]);
+  return pick;
+}
+
+export function useHomeArtists(enabled: boolean, key: unknown) {
+  const [artists, setArtists] = useState<LibraryArtist[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    void api<LibraryArtistsReply>('/v1/library/artists', controller.signal).then(value => {
+      if (!controller.signal.aborted) setArtists((value?.artists ?? []).filter(artist => !artist.hidden));
+    }, () => {});
+    return () => controller.abort();
+  }, [enabled, key]);
+  return artists;
 }
 
 /* ---- Offline snapshot ---- */
@@ -314,14 +405,13 @@ export function isOffline(reason: unknown) {
 export type HomeDashboardInput = {
   enabled: boolean; scope: string;
   pending: number | null;
-  reviewEnabled: boolean; reviewKey: unknown; similarityKey: unknown;
+  similarityKey: unknown;
   exchange: ExchangeSnapshot | null;
 };
 /** How often Home re-checks the release counts and the Collections publication while visible. */
 const CHECK_MS = 60_000;
 
-export function useHomeDashboard({enabled, scope, pending, reviewEnabled, reviewKey, similarityKey, exchange}: HomeDashboardInput) {
-  const character = useCharacterReviewCount(enabled && reviewEnabled, null, reviewKey);
+export function useHomeDashboard({enabled, scope, pending, similarityKey, exchange}: HomeDashboardInput) {
   const similar = useSimilarityReviewCount(enabled, similarityKey);
   const duplicates = useDuplicateCount(enabled);
   const [counts, setCounts] = useState<ReleaseCounts | null>(null);
@@ -376,7 +466,7 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
   }, [enabled, epoch, probe]);
 
   const offline = !online || unreachable;
-  const live: Record<TodoKey, number | null> = {pending, character: reviewEnabled ? character : null, similar, duplicates};
+  const live: Record<TodoKey, number | null> = {pending, character: null, similar, duplicates};
   const releases = counts && shelf ? releaseRows(shelf, counts) : null;
   const upcoming = shelf ? upcomingReleases(shelf) : null;
 
@@ -394,7 +484,7 @@ export function useHomeDashboard({enabled, scope, pending, reviewEnabled, review
     todos,
     /** Offline: when the kept to-do counts were last fresh. */
     todosAt: offline ? Math.max(0, ...TODO_ORDER.map(key => snapshot.counts[key]?.at ?? 0)) || null : null,
-    applicable: TODO_ORDER.filter(key => key !== 'character' || reviewEnabled),
+    applicable: TODO_ORDER.filter(key => key !== 'character'),
     unreadWorks: counts ? Object.keys(counts.byCollection).length : snapshot.counts.releases?.value ?? null,
     releases: pick(releases, snapshot.releases),
     releasesAt: offline || !releases ? snapshot.releases?.at ?? null : null,

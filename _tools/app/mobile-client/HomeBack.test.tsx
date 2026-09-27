@@ -18,7 +18,6 @@ vi.mock('./Home', () => ({Home:(props:HomeProps) => <div className="home-scroll"
   <button onClick={props.onDuplicates}>home 중복</button>
   <button onClick={props.onRecent}>home 최근</button>
   <button onClick={props.onLibrary}>home 라이브러리</button>
-  <button onClick={props.onReview}>home 캐릭터 검토</button>
 </div>}));
 // The review overview and the review: stand-ins that close on Back like the real ones.
 vi.mock('./CharacterReviewOverview', () => ({CharacterReviewOverview:({backRef,onOpen,onClose,refreshKey}:{backRef:MutableRefObject<(() => boolean)|null>;onOpen(scope:unknown):void;onClose():void;refreshKey:unknown}) => {
@@ -39,6 +38,7 @@ const {area} = vi.hoisted(() => ({area:(name:string) => ({active,backRef,onRetur
   </section> : null;
 }}));
 vi.mock('./Collections', () => ({Collections:area('collections-screen')}));
+vi.mock('./ReleaseCalendar', () => ({ReleaseCalendar:({onClose}:{onClose():void}) => <section aria-label="calendar-screen"><button onClick={onClose}>calendar close</button></section>}));
 vi.mock('./Notes', () => ({Notes:area('notes-screen')}));
 vi.mock('./Catalog', () => ({Catalog:area('catalog-screen')}));
 import {App} from './App';
@@ -71,7 +71,6 @@ beforeEach(() => {
 afterEach(() => {cleanup(); vi.unstubAllGlobals();});
 
 it.each([
-  ['home 신간','collections-screen'],
   ['home 작품','collections-screen'],
   ['home 메모','notes-screen'],
   ['home 중복','catalog-screen'],
@@ -94,7 +93,7 @@ it('opens the Notes list from the 메모 card header without a Home origin (the 
 
 it('forgets the Home origin when the bottom navigation switches tabs',async() => {
   await startHome();
-  fireEvent.click(screen.getByRole('button',{name:'home 신간'}));
+  fireEvent.click(screen.getByRole('button',{name:'home 작품'}));
   await screen.findByRole('region',{name:'collections-screen'});
   fireEvent.click(nav('카탈로그'));
   fireEvent.click(nav('컬렉션'));
@@ -164,24 +163,18 @@ it('forgets the Notes Home origin once the note opened from Home is trashed (Bac
   expect(finished()).toBe(false);
 });
 
-it('opens the character review overview from Home; Back returns review → overview (re-read) → Home',async() => {
-  const base = mocks.api.getMockImplementation()!;
-  mocks.api.mockImplementation(async(path:string) => path === '/v1/library/characters'
-    ? {version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false,characterReview:true},libraryId:'e'.repeat(32),ready:true,revision:'a'.repeat(64),publishedAt:null,nodes:[],scopes:[]}
-    : base(path));
+it('does not expose the character review overview from Home',async() => {
+  await startHome();
+  expect(screen.queryByRole('button',{name:/캐릭터 검토/})).toBeNull();
+  expect(screen.queryByRole('region',{name:'review-overview'})).toBeNull();
+});
+
+it('opens the 발매 캘린더 from the Home shelf over Home, and Back returns to Home',async() => {
   const home = await startHome();
-  fireEvent.click(screen.getByRole('button',{name:'home 캐릭터 검토'}));
-  const overview = await screen.findByRole('region',{name:'review-overview'});
-  const before = overview.getAttribute('data-refresh');
-  fireEvent.click(screen.getByRole('button',{name:'overview 라라'}));
-  await screen.findByRole('region',{name:'review-screen'});
+  fireEvent.click(screen.getByRole('button',{name:'home 신간'}));
+  await screen.findByRole('region',{name:'calendar-screen'});
   back();
-  await waitFor(() => expect(screen.queryByRole('region',{name:'review-screen'})).toBeNull());
-  expect(screen.getByRole('region',{name:'review-overview'}).getAttribute('data-refresh')).not.toBe(before);
-  back();
-  await waitFor(() => expect(screen.queryByRole('region',{name:'review-overview'})).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('region',{name:'calendar-screen'})).toBeNull());
   expect(onHome()).toBe(true);
   expect(screen.getByLabelText('홈 대시보드')).toBe(home);
-  expect(home.scrollTop).toBe(300);
-  expect(finished()).toBe(false);
 });

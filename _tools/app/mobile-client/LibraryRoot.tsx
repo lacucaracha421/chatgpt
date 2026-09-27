@@ -3,7 +3,6 @@ import type React from 'react';
 import {ChevronDownIcon,ChevronRightIcon,MagnifyingGlassIcon,PhotoIcon,TrashIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
-import {useCharacterReviewCount} from './useCharacterReview';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {IconButton} from './ui';
 import {Cover} from './CoverGroup';
@@ -13,7 +12,6 @@ import {Albums,type AlbumTree} from './Albums';
 import {usePullToRefresh} from './usePullToRefresh';
 import type {Asset,View} from './types';
 import type {CharacterIndex} from './characterModel';
-import {CharacterReviewEntry} from './CharacterReview';
 import {SimilarityReviewEntry} from './SimilarityReview';
 export function Highlight({name,query}:{name:string;query:string}) {
   const at=name.toLocaleLowerCase().indexOf(query.trim().toLocaleLowerCase());
@@ -73,7 +71,7 @@ function useFolderFit(active:boolean,scroller:React.RefObject<HTMLDivElement|nul
   },[active,scroller,grid,key]);
   return fit;
 }
-export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onRefresh,albumTree,albumError,segment,onSegment,restoreScroll,onScroll,review,similarity,onTrash}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the Library Trash; absent until the lifecycle authority is adopted. */onTrash?():void;review?:{enabled:boolean;refreshKey:unknown;onOpen():void};similarity?:{enabled:boolean;refreshKey:unknown;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSelect(view:View):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;segment:'folders'|'albums';onSegment(segment:'folders'|'albums'):void;restoreScroll:number;onScroll(top:number):void}) {
+export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onRefresh,albumTree,albumError,segment,onSegment,restoreScroll,onScroll,similarity,onTrash}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the Library Trash; absent until the lifecycle authority is adopted. */onTrash?():void;similarity?:{enabled:boolean;refreshKey:unknown;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSelect(view:View):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;segment:'folders'|'albums';onSegment(segment:'folders'|'albums'):void;restoreScroll:number;onScroll(top:number):void}) {
   const [query,setQuery]=useState('');
   const [searchOpen,setSearchOpen]=useState(false);
   const [queueOpen,setQueueOpen]=useState(false);
@@ -87,14 +85,9 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   const rows=query.trim()?results:[];
   const {covers,onVisible}=useFolderCovers(rows,paused||segment==='albums',revision);
   // Waiting review work is one quiet "확인 N" in the bar, shown only while something waits.
-  const characterCount=useCharacterReviewCount(!!review?.enabled&&!paused,null,review?.refreshKey)??0;
   const similarityCount=useSimilarityReviewCount(!!similarity?.enabled&&!paused,similarity?.refreshKey)??0;
-  const waiting=characterCount+similarityCount;
-  const openQueue=()=>{
-    if(characterCount&&!similarityCount)review?.onOpen();
-    else if(similarityCount&&!characterCount)similarity?.onOpen();
-    else setQueueOpen(true);
-  };
+  const waiting=similarityCount;
+  const openQueue=()=>setQueueOpen(true);
   const topFolders=entries.filter(entry=>!entry.parent_id);
   const showFolders=segment==='folders'&&!query.trim();
   const fit=useFolderFit(active&&showFolders,host,folders,`${topFolders.length}:${!!waiting}`);
@@ -115,7 +108,6 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   </div>
   {queueOpen&&<BottomSheet title="확인할 것" onClose={()=>setQueueOpen(false)}>
     {similarity&&<SimilarityReviewEntry enabled={similarity.enabled&&!paused} refreshKey={similarity.refreshKey} onOpen={()=>{setQueueOpen(false);similarity.onOpen();}}/>}
-    {review&&<CharacterReviewEntry enabled={review.enabled&&!paused} refreshKey={review.refreshKey} onOpen={()=>{setQueueOpen(false);review.onOpen();}}/>}
   </BottomSheet>}
   </div>;
 }

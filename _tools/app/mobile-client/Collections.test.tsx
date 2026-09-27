@@ -19,7 +19,7 @@ function pull(element:HTMLElement){fireEvent.touchStart(element,{touches:[{clien
 /** jsdom has no layout, so the scroller's geometry is declared before the scroll event. */
 function scrollToEnd(element:HTMLElement){Object.defineProperty(element,'clientHeight',{configurable:true,value:500});Object.defineProperty(element,'scrollHeight',{configurable:true,value:600});element.scrollTop=100;fireEvent.scroll(element);}
 const metadataBlock=()=>screen.getByLabelText('작품 정보',{selector:'dl'});
-beforeEach(()=>{mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
+beforeEach(()=>{mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 describe('tab return retention',()=>{
   const listCalls=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/collections?')&&!path.includes('showcase=true'));
@@ -390,7 +390,7 @@ describe('read-only collections',()=>{
       const switcher=screen.getByRole('tablist',{name:'컬렉션 유형'});
       expect(switcher.querySelectorAll('.collection-type-indicator')).toHaveLength(1);
       let resolveManga!:(value:CollectionPage)=>void;
-      mocks.api.mockImplementation((path:string)=>path.includes('type=manga')&&!path.includes('showcase=true')?new Promise(resolve=>{resolveManga=resolve;}):Promise.resolve(page));
+      mocks.api.mockImplementation((path:string)=>path.includes('type=manga')&&!path.includes('showcase=true')?new Promise(resolve=>{resolveManga=resolve;}):path.includes('type=av')?Promise.resolve({...page,items:[]}):Promise.resolve(page));
       pressTab('만화');await act(async()=>{});
       // Still loading: the game list stays put rather than sliding in stale.
       expect(animate).not.toHaveBeenCalled();
@@ -401,20 +401,20 @@ describe('read-only collections',()=>{
       expect((animate.mock.contexts as HTMLElement[])[0]).toBe(list());
       expect(moves[0][0][0].transform).toBe('translateX(14px)');
       // AV lies to the right as well; back to 게임 comes in from the left.
-      pressTab('AV');await screen.findByText('AV 컬렉션은 준비 중입니다');
+      pressTab('AV');await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다');
       expect(moves.at(-1)![0][0].transform).toBe('translateX(14px)');
       pressTab('게임');await screen.findByText('밤의 도서관');
       await waitFor(()=>expect(moves.at(-1)![0][0].transform).toBe('translateX(-14px)'));
     }finally{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;}
   });
-  it('shows an AV tab that waits for the PC without requesting an unsupported type',async()=>{
+  it('shows the AV tab and requests the deployed AV collection type',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     expect(screen.getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['게임','만화','영화','AV']);
     const before=mocks.api.mock.calls.length;
     pressTab('AV');
-    expect(await screen.findByText('AV 컬렉션은 준비 중입니다')).toBeTruthy();
+    expect(await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다')).toBeTruthy();
     await act(async()=>{});
-    expect(mocks.api.mock.calls.slice(before).some(([path])=>String(path).includes('type=av'))).toBe(false);
+    expect(mocks.api.mock.calls.slice(before).some(([path])=>String(path).includes('type=av'))).toBe(true);
     expect(screen.queryByRole('searchbox')).toBeNull();
   });
   it('closes sheets on Back before leaving the work, and keeps the detail free of list controls',async()=>{
