@@ -1708,6 +1708,14 @@ class CommandAuthorizationTests(ClassificationAuthorityFixture):
         self.assertEqual([row[0] for row in self.classification_rows()],
                          sorted([ROOT, WORK, TAG, OTHER, ORIGINALS]))
 
+    def test_a_client_gets_the_same_auth_failure_before_structural_body_validation(self):
+        command_type, fields = self.structural_bodies()[1]
+        well_formed = self.issue(command_type, fields, self.auth)
+        malformed = self.client.put(COMMANDS, headers=self.auth,
+                                    json={"commandType": command_type})
+        self.assertEqual(well_formed.status_code, 401, well_formed.text)
+        self.assertEqual(malformed.status_code, well_formed.status_code, malformed.text)
+
     def test_a_publisher_can_issue_structural_commands(self):
         """Each command runs against freshly created state, so revisions are unambiguous."""
         created = self.client.put(COMMANDS, headers=self.publisher_auth, json={

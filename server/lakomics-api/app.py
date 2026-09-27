@@ -3371,6 +3371,11 @@ from api_auth import client_guard, publisher_guard
 require_client = client_guard(get_db, API_TOKEN)
 require_publisher = publisher_guard(get_db)
 
+import av_lookup_requests
+
+startup_av_lookup_requests = av_lookup_requests.register(
+    app, get_db, require_admin_or_extension, require_publisher)
+
 startup_mobile_catalog = register_mobile_catalog(
     app, get_db, require_auth, lambda: DB_PATH.parent / "mobile-catalog", lambda: API_TOKEN,
     lambda work_id: _catalog_cached_get(f"{KHENTAI_ORIGIN}/r/{work_id}").body.decode("utf-8"),

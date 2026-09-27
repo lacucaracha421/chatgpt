@@ -162,7 +162,7 @@ def normalized(field, value, *, limit=MAX_MEMO_CHARS, expected=False):
     if not isinstance(value, str):
         invalid()
     value = value.strip()
-    if len(value) > limit:
+    if limit is not None and len(value) > limit:
         invalid()
     return value or None
 
@@ -320,8 +320,9 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
         except ValueError:
             invalid()
         value = normalized(command.field, command.value)
-        # A published memo may predate the 2000-character PC limit.
-        expected = normalized(command.field, command.expected, limit=10000, expected=True)
+        # A published memo may predate the 2000-character PC limit. The request byte
+        # cap still bounds the command, while the new value continues to use that limit.
+        expected = normalized(command.field, command.expected, limit=None, expected=True)
         if command.field == "ownedVolumes" and expected["editionIndex"] != value["editionIndex"]:
             invalid()
         payload_digest = hashlib.sha256(encode(command.model_dump()).encode()).hexdigest()

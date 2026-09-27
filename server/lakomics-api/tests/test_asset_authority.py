@@ -429,6 +429,19 @@ class LifecycleTests(AssetAuthorityFixture):
                                 headers={"Authorization": f"Bearer {client_token}"})
         self.assertIn(response.status_code, (401, 403), response.text)
 
+    def test_a_client_gets_the_same_auth_failure_before_structural_body_validation(self):
+        with api_app.get_db() as db:
+            _, client_token = api_auth.provision_token(db, "client", "asset-reader-3")
+            db.commit()
+        headers = {"Authorization": f"Bearer {client_token}"}
+        well_formed = self.command(asset_authority.TOMBSTONE_ASSET, self.asset_id(0), 1,
+                                   headers=headers)
+        malformed = self.client.put(
+            "/v1/assets/authority/commands", headers=headers,
+            json={"commandType": asset_authority.TOMBSTONE_ASSET})
+        self.assertIn(well_formed.status_code, (401, 403), well_formed.text)
+        self.assertEqual(malformed.status_code, well_formed.status_code, malformed.text)
+
     def test_the_change_feed_is_ordered_and_self_contained(self):
         self.command(asset_authority.TRASH_ASSET, self.asset_id(0), 1)
         self.command(asset_authority.RESTORE_ASSET, self.asset_id(0), 2)

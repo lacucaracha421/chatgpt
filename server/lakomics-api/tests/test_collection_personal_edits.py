@@ -193,6 +193,20 @@ class CollectionPersonalEditTests(unittest.TestCase):
         self.assertEqual(stale.status_code, 409)
         self.assertEqual(stale.json()['detail']['current'], '새 메모')
 
+    def test_legacy_long_memo_expected_value_succeeds_and_conflicts_on_mismatch(self):
+        legacy = 'x' * 10000  # the snapshot's own description limit
+        published = copy.deepcopy(self.items)
+        published[0]['description'] = legacy
+        self.ready(items=published)
+
+        accepted = self.edit(self.command('memo', '새 메모', legacy))
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+
+        conflict = self.edit(self.command('memo', '또 다른 메모', 'y' * 10050))
+        self.assertEqual(conflict.status_code, 409, conflict.text)
+        self.assertEqual(conflict.json()['detail']['code'], 'collectionPersonalConflict')
+        self.assertEqual(conflict.json()['detail']['current'], '새 메모')
+
     def test_validation_matches_pc(self):
         self.ready()
         for field, value, expected in [('myScore', 5.5, 3.0), ('myScore', -0.5, 3.0), ('myScore', 2.25, 3.0),
