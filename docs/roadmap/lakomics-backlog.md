@@ -207,7 +207,22 @@ Status: `IN PROGRESS` — 2026-09-27. Findings: [tagger-character-signal-2026092
 - Tablet follow-up (review finding 2026-09-27): tagger recommendations and vetoed pairs are not in the tablet's decision feed (`character_review_feed.rs` merges only S36/B36/doubtful; the server accepts only those sources). The tablet sees membership changes and the `needs_review` list only; PC review works. Needs a server + feed change.
 - New images: tag daily on the laptop with v1.0 + canary (user: < 100 images a day; low priority, one model at a time). Script prepared outside the repo (`~/.cache/lakomics-oss/daily/`).
 - Approved 2026-09-27 (build after the veto/recommendation backend; decisions in the mockup README), mockups `docs/prototypes/new-character-suggest-20260927/`: **새 캐릭터 제안** — characters the taggers see in a series folder that the user has not registered (register with preselected references, merge into an existing character, ignore).
+- Camie Tagger v2 trial 2026-09-27 (GPL-3.0, ONNX, Danbooru 2024; 2,167 decided images, CPU ≈ 1.4–2 s/image): knows 48 of 74 mapped target tags (missing most 2025 characters). On characters it knows it hits 35 % of manual confirmations vs 83 % for PixAI and canary, and 0 % of rejections (PixAI/canary 1.5 %). Too weak as a third voter; not adopted, run stopped. Scripts `~/.cache/lakomics-oss/camie/`.
 - New taggers appear irregularly (PixAI v0.9 2025-08 → v1.0 2026-09-15; canary a one-off 2026-07-29; WD v3 unchanged since 2024). Check about quarterly; re-run on a rented GPU and compare against the confirmed decisions before switching.
+
+## ARTIST-SUGGEST-001 — 닮은 작가 후보 (artist suggestions from art style)
+
+Status: `TODO` — direction chosen by the user 2026-09-27 after a read-only trial. Not started.
+
+- Goal: for 작가 미상 images (no creator key, no assignment), suggest "닮은 작가" from the artists already in the library, by art style; the user confirms (작가 지정) or dismisses. Never assign automatically.
+- Model: [Kaloscope 2.0](https://huggingface.co/heathcliff01/Kaloscope2.0) (Apache-2.0, 2025-11, LSNet-XL 448 px, 39,260 Danbooru artists; PyTorch + timm, no ONNX file on the card). Local CPU ≈ 0.4 s/image; checkpoint 2.9 GB. Trial scripts and outputs outside the repo: `~/.cache/lakomics-oss/kaloscope/` (`scripts/infer.py`, `scripts/evaluate.py`, `out/preds.npz` = top-10 classes + 512-d feature per packed image).
+- Trial 2026-09-27 (8,899 packed 1008 px copies; 3,503 images with a known artist, 2,148 artists, 260 with ≥ 3 images):
+  - Direct Danbooru-name match is weak as a metric: top-1 name equals a library name for 5.6 % (25.6 % at confidence ≥ 0.5). This undercounts: library artists are X/pixiv handles and Danbooru names differ (tunoboku → horn_wood, ryosuketarou → takeuchi_ryousuke).
+  - Style consistency: 68 of 260 artists have ≥ 60 % of their images on one top-1 class.
+  - Library kNN on the model's feature (centred, cosine): nearest image is by the same artist for 65.9 % overall; similarity ≥ 0.6 → precision 86.9 % at 21.7 % coverage; ≥ 0.5 → 85.6 % at 46.8 %. Caveat: near-duplicate variants of one post are not excluded yet and may inflate these numbers.
+  - Full run (5,396 images without an artist): 295 images have a known-artist neighbour at ≥ 0.6 (129 artists), 764 at ≥ 0.5 (303 artists); 84 are at ≥ 0.8, likely near-duplicates of attributed images (check before counting them as style matches). 154 get a top-1 Danbooru name (confidence ≥ 0.3) that matches a library artist name.
+- Proposed design: store the feature per image (like the character caches, rebuilt by one backfill + daily new images); per unknown image rank artists by their best (or top-3 mean) neighbour similarity; show candidates above a calibrated threshold in the 작가 미상 view and on the image inspector ("닮은 작가: ○○ · 유사도"), grouped per suggested artist for bulk confirmation; dismissals are remembered. Optionally show the Danbooru name as a hint when its confidence is high.
+- Before building: finish the full-library run, exclude near-duplicates (same post / PDQ match) from the evaluation, pick the threshold on walk-forward data, and check the false-suggestion rate on a sample the user reviews. Heavy runs go one at a time on the laptop (see PC load limits) or on a rented GPU.
 
 ## PC-CHAR-UI-20260927 — Character folder fixes requested by the user
 
