@@ -150,10 +150,12 @@ fn migration_creates_the_auto_tag_tables_and_upgrades_from_101() {
         }
         // Simulate a version 101 library.
         connection
-            .execute_batch(
-                "DROP TABLE asset_auto_tags; DROP TABLE auto_tag_vocabulary; DROP TABLE asset_auto_tag_edits; DROP TABLE auto_tag_import;
+            .execute_batch(&format!(
+                "{}
+                 DROP TABLE asset_auto_tags; DROP TABLE auto_tag_vocabulary; DROP TABLE asset_auto_tag_edits; DROP TABLE auto_tag_import;
                  PRAGMA user_version = 101;",
-            )
+                crate::library::db::UNDO_AFTER_102
+            ))
             .unwrap();
     }
     let library = open_library(temp.path()).unwrap();
@@ -161,7 +163,7 @@ fn migration_creates_the_auto_tag_tables_and_upgrades_from_101() {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 102);
+    assert_eq!(version, crate::library::db::SCHEMA_VERSION);
     let indexed: bool = connection
         .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'asset_auto_tags_by_tag')", [], |row| row.get(0))
         .unwrap();

@@ -2094,6 +2094,10 @@ impl CloudClient {
         read_json(&mut response)
     }
 
+    pub(crate) fn av_lookup_url(&self, after: i64) -> Result<String, LibraryError> {
+        self.endpoint(&format!("/v1/av-lookups?after={after}&limit=100"))
+    }
+
     pub(crate) fn capture_endpoint(&self) -> &str { self.base_url.as_str() }
 
     pub(crate) fn list_pending_captures_after(&self, token: &str, after_id: Option<&str>) -> Result<Vec<RemoteCapturePayload>, LibraryError> {

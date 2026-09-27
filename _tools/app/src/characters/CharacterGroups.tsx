@@ -153,7 +153,10 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
 }
 
 function CharacterGroupCard({ group, members, privacyMode, onOpen, onEdit }: { group: Group; members: CharacterTarget[]; privacyMode: boolean; onOpen: () => void; onEdit: () => void }) {
-  const groupMembers = group.targetIds.map(id => members.find(member => member.id === id)).filter((member): member is CharacterTarget => Boolean(member));
+  const orderedMembers = members.filter(member => group.targetIds.includes(member.id));
+  const groupMembers = orderedMembers.some(member => member.folderOrder != null)
+    ? orderedMembers
+    : group.targetIds.flatMap(id => orderedMembers.filter(member => member.id === id));
   const previews = groupMembers.slice(0, 4);
   return <article className="series-character series-character--group">
     <button className="series-character__open" aria-label={`${group.name} 그룹 열기`} aria-description={`${group.targetIds.length.toLocaleString()}명${groupMembers.length ? ` · ${groupMembers.map(member => member.displayName).join(" · ")}` : ""}`} onClick={onOpen}>

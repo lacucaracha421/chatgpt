@@ -515,6 +515,23 @@ pub async fn character_scan_results(
 }
 
 #[tauri::command]
+pub async fn move_character_folder(
+    series_id: String,
+    target_id: String,
+    group_id: Option<String>,
+    direction: i32,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.move_character_folder(&series_id, &target_id, group_id.as_deref(), direction)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn list_character_targets(
     state: State<'_, AppState>,
 ) -> Result<Vec<Target>, CommandError> {

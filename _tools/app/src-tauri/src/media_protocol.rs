@@ -97,6 +97,15 @@ pub(crate) fn media_response_with_range(
     if method != Method::GET {
         return empty_response(StatusCode::METHOD_NOT_ALLOWED);
     }
+    if let Some(id) = path.strip_prefix("/av-link-jacket/") {
+        if uuid::Uuid::parse_str(id).is_err() { return empty_response(StatusCode::BAD_REQUEST); }
+        return no_store(match library.and_then(|lib| lib.av_link_jacket(id).ok()) {
+            Some((bytes, mime)) => Response::builder().status(StatusCode::OK)
+                .header(CONTENT_TYPE, mime).header(CONTENT_LENGTH, bytes.len().to_string())
+                .body(bytes).expect("AV jacket response is valid"),
+            None => empty_response(StatusCode::NOT_FOUND),
+        });
+    }
     if path.starts_with("/igdb-image-preview/") {
         let Ok((variant, Some(image_id))) = parse_media_path(path) else {
             return empty_response(StatusCode::BAD_REQUEST);

@@ -15,6 +15,7 @@ import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { ClassificationDropTarget, InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { buildTree, type TreeNode } from "./buildTree";
+import { applyCharacterFolderOrder } from "./folderOrder";
 import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog";
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 
@@ -55,6 +56,7 @@ type ClassificationSidebarProps = {
 };
 
 type SidebarTreeEntry = {
+  folderOrder?: number | null;
   characterId?: string;
   characterGroupId?: string;
   /** Characters of a group row; they have no rows of their own. */
@@ -121,17 +123,18 @@ export function ClassificationSidebar({
     ...entries.map((entry): SidebarTreeEntry => ({ ...entry, assetCount: entry.totalAssetCount ?? entry.assetCount, name: characters.some(t => t.linkedClassificationId === entry.id) ? `${entry.name} · 일반 폴더` : entry.name, treeKind: "classification" })),
     ...visibleGroups.map((group): SidebarTreeEntry => ({
       id: `character-group:${group.id}`, characterGroupId: group.id, memberIds: group.targetIds,
-      members: group.targetIds.flatMap(id => characters.filter(t => t.id === id).map(t => ({ id: t.id, name: t.displayName }))), seriesId: group.seriesId, parentId: group.seriesId,
+      members: characters.filter(t => group.targetIds.includes(t.id)).map(t => ({ id: t.id, name: t.displayName })), seriesId: group.seriesId, parentId: group.seriesId,
       name: group.name, kind: "tag", iconKey: null, colorKey: null, treeKind: "classification", assetCount: characterCounts?.groups[group.id],
     })),
     // A group is one row that never expands; its members are reached from the group's content
     // and the 찾기 palette, so only ungrouped characters get rows of their own.
     ...characters.filter(t => t.seriesClassificationId && !groupedIds.has(t.id) && entries.some(e => e.id === t.seriesClassificationId)).map((t): SidebarTreeEntry => ({
-      id: `character:${t.id}`, characterId: t.id, seriesId: t.seriesClassificationId!, parentId: t.seriesClassificationId,
+      id: `character:${t.id}`, characterId: t.id, folderOrder: t.folderOrder, seriesId: t.seriesClassificationId!, parentId: t.seriesClassificationId,
       name: t.displayName, kind: "tag", iconKey: null, colorKey: null, treeKind: "classification", assetCount: characterCounts?.targets[t.id] })),
   ];
   const albumEntries: SidebarTreeEntry[] = albums.map((entry) => ({ ...entry, treeKind: "album", kind: "tag" }));
   const tree = buildTree(classificationEntries, orderIds);
+  applyCharacterFolderOrder(tree);
   const albumTree = buildTree(albumEntries);
   const visibleNodes = visibleTreeNodes(tree, expandedIds);
   const visibleAlbumNodes = visibleTreeNodes(albumTree, expandedAlbumIds);

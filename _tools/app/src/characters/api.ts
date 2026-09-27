@@ -71,11 +71,13 @@ export function draftReferenceRegions(regions: ReferenceRegions | undefined, ref
 }
 
 export type CharacterRef = { slot: number; assetId: string | null; assetHash: string; status: string; region?: ReferenceRegion | null };
-export type CharacterTarget = { id: string; seriesClassificationId: string | null; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean; manualOnly: boolean; revision: number; references: CharacterRef[]; learnedReferences?: CharacterRef[]; ready: boolean; fingerprint: string };
+export type CharacterTarget = { id: string; folderOrder?: number | null; seriesClassificationId: string | null; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean; manualOnly: boolean; revision: number; references: CharacterRef[]; learnedReferences?: CharacterRef[]; ready: boolean; fingerprint: string };
 export type TargetDraft = { id: string | null; expectedRevision: number | null; seriesClassificationId: string; linkedClassificationId: string | null; displayName: string; description?: string; thumbnailAssetId?: string | null; enabled: boolean };
 export type CharacterSettingsDraft = TargetDraft & { referenceIds: string[]; referenceRegions?: ReferenceRegions };
 export type ScanStatus = { automaticQueued?: number; id: string; targetId: string; targetFingerprint: string; runtimeFingerprint: string | null; state: string; total: number; completed: number; errors: number; reused?: number; cacheHits: number; extractions: number; error: string | null };
-export type Prediction = { targetId: string; targetName: string; targetFingerprint: string; scanId: string | null; runtimeFingerprint: string | null; state: string; decision: string | null; evidence: { referenceHashes?: string[]; learnedReferenceCount?: number; distance: number; bestQueryCrop: number; queryBoxes: number[][]; wholeFallback: boolean; evidence: { queryCrop: number; matchedReferences: number[]; referenceDistances: number[] }[] } | null; error: string | null };
+export type CharacterScanEvidence = { referenceHashes?: string[]; learnedReferenceCount?: number; distance: number; bestQueryCrop: number; queryBoxes: number[][]; wholeFallback: boolean; evidence: { queryCrop: number; matchedReferences: number[]; referenceDistances: number[] }[] };
+export type TaggerReviewEvidence = { source: "tagger"; reason: "veto" | "recommendation"; pixaiScore: number; canaryScore: number };
+export type Prediction = { targetId: string; targetName: string; targetFingerprint: string; scanId: string | null; runtimeFingerprint: string | null; state: string; decision: string | null; evidence: CharacterScanEvidence | TaggerReviewEvidence | null; error: string | null };
 export type ReviewRow = { asset: AssetSummary; predictions: Prediction[] };
 export type ReviewPage = { rows: ReviewRow[]; nextCursor: string | null };
 export type ReviewFilter = "all" | "recommended" | "unmatched" | "multiple" | "confirmed" | "pending" | "error" | "rejected";

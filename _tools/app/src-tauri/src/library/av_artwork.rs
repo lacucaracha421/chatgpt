@@ -19,7 +19,7 @@ fn read_image(path: &str) -> Result<(Vec<u8>, ImageFormat, u32, u32), AvError> {
     Ok((bytes,format,width,height))
 }
 fn digest(bytes: &[u8]) -> String { Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect() }
-fn cover_set(connection: &Connection,id: &str) -> Result<AvCoverSet, AvError> {
+pub(crate) fn cover_set(connection: &Connection,id: &str) -> Result<AvCoverSet, AvError> {
     require_av(connection,id)?;
     let updated: String = connection.query_row("SELECT updated_at FROM collections WHERE id=?1",[id],|r|r.get(0))?;
     let mut set = AvCoverSet { front_id:None,spine_id:None,back_id:None,revision:String::new() };

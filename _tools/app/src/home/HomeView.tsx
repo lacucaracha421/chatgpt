@@ -1,16 +1,19 @@
 import { CheckCircleIcon, ChevronRightIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, SignalSlashIcon, WalletIcon } from "@heroicons/react/24/outline";
-import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useAuthoritySyncHealth, useCloudSyncStatus } from "../app/useCloudProblems";
 import { useWorkloadProfile } from "../app/workloadProfile";
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { collectionCoverUrl } from "../collections/collectionCover";
+import { useAvLinkPendingCount, type AvLinkApi } from "../collections/AvLinkInbox";
 import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { exchangeStore as defaultExchangeStore, useExchangeSnapshot, type ExchangeStore } from "../exchange/exchangeStore";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, CatalogStatus, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
-import type { CharacterTarget } from "../characters/api";
+import { characterApi, type CharacterTarget } from "../characters/api";
+import { TaggerReview } from "../characters/TaggerReview";
+import { taggerCounts, taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type TaggerReviewItem, type TaggerReviewSource } from "../characters/taggerReviewClient";
 import { notesStore, type NotesStore } from "../notes/store";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewItem } from "../characters/shadowReviewApi";
@@ -48,10 +51,14 @@ export type HomeViewProps = {
   shadowApi?: Pick<ShadowReviewApi, "page">;
   /** Exact per-character counts for the 캐릭터 검토 overview; defaults to reading the whole S36 list. */
   characterSource?: CharacterReviewSource;
+  /** Exact tagger queue read; injectable for browser tests. */
+  taggerSource?: TaggerReviewSource;
+  taggerApi?: TaggerDecisionApi;
   /** Registered characters (series of each S36 target) and classifications (series names). */
   characters?: CharacterTarget[];
   classifications?: ClassificationEntry[];
   now?: () => Date;
+  avLinkApi?: AvLinkApi;
 };
 
 /**
@@ -61,10 +68,11 @@ export type HomeViewProps = {
  * counts again after imports); live parts follow the stores the app already keeps (exchange,
  * notes, cloud progress, server-sync health, the 신간 cache). No polling.
  */
-export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, exchange = defaultExchangeStore, notes, shadowApi, characterSource, characters = [], classifications = [], now = () => new Date() }: HomeViewProps) {
+export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, exchange = defaultExchangeStore, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const { privacyMode } = usePrivacy();
+  const avLinkCount = useAvLinkPendingCount({ enabled: !privacyMode, refreshVersion, api: avLinkApi });
   const at = now();
   const today = localDay(at);
 
@@ -107,25 +115,43 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   const [dialog, setDialog] = useState<Dialog | null>(null);
   // 캐릭터 검토 overview replaces Home until its back; `reviewRead` moves when a review closes.
   const [reviewOverview, setReviewOverview] = useState(false);
+  const [taggerOverview, setTaggerOverview] = useState(false);
   const [reviewRead, setReviewRead] = useState(0);
   const [queueRead, setQueueRead] = useState(0);
   const [characterQueue, setCharacterQueue] = useState<CharacterQueue | null>(null);
+  const [taggerItems, setTaggerItems] = useState<TaggerReviewItem[] | null>(null);
   const [duplicateCount, setDuplicateCount] = useState(0);
-  const characterApi = shadowApi ?? (native() ? shadowReviewApi : null);
+  const shadowQueueApi = shadowApi ?? (native() ? shadowReviewApi : null);
   // Lightweight mode skips the S36 candidate read (it scans the whole shadow list); the row
   // stays hidden until the mode ends, then the list is read once.
   const { restricted } = useWorkloadProfile();
   useEffect(() => {
-    if (!characterApi || restricted) { setCharacterQueue(null); return; }
+    if (!shadowQueueApi || restricted) { setCharacterQueue(null); return; }
     let live = true;
-    void characterApi.page({ offset: 0, limit: CHARACTER_PAGE }).then((page) => {
+    void shadowQueueApi.page({ offset: 0, limit: CHARACTER_PAGE }).then((page) => {
       if (!live || !page) return;
       const items = page.items ?? [];
       const total = page.summary ? page.summary.automatic.pending + page.summary.recommended.pending : 0;
       setCharacterQueue({ total: page.nextOffset === null ? Math.max(total, items.length) : total, items });
     }, () => undefined);
     return () => { live = false; };
-  }, [characterApi, restricted, queueRead]);
+  }, [shadowQueueApi, restricted, queueRead]);
+  // The read takes seconds on a real library, so it restarts only when the set of series changes
+  // (not on every render) or after a review closes; the last result stays visible meanwhile.
+  const taggerSeriesKey = characters.map((target) => `${target.id}:${target.seriesClassificationId ?? ""}`).join("|");
+  const charactersRef = useRef(characters);
+  charactersRef.current = characters;
+  const activeTaggerSource = useMemo(() => taggerSource ?? (native() ? taggerReviewSource(characterApi, charactersRef.current) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [taggerSource, taggerSeriesKey]);
+  useEffect(() => {
+    if (!activeTaggerSource || restricted) { setTaggerItems(null); return; }
+    let live = true;
+    void activeTaggerSource(() => undefined, () => live).then((items) => {
+      if (live && items) setTaggerItems(items);
+    }, (reason) => console.warn("tagger review read failed", reason));
+    return () => { live = false; };
+  }, [activeTaggerSource, restricted, queueRead]);
   useEffect(() => {
     let live = true;
     onQueuesRequested?.();
@@ -161,14 +187,18 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
     if (complete && groups.length === 1 && groups[0].characters.length === 1) return `${groups[0].seriesName} › ${groups[0].characters[0].name}`;
     return groups.slice(0, 2).map((group) => group.seriesName).join(" · ") + (groups.length > 2 ? " 외" : "");
   }, [characterQueue, characters, seriesName]);
-  const source = useMemo(() => characterSource ?? (characterApi ? shadowPageSource(characterApi) : null), [characterSource, characterApi]);
+  const source = useMemo(() => characterSource ?? (shadowQueueApi ? shadowPageSource(shadowQueueApi) : null), [characterSource, shadowQueueApi]);
+  const taggerQueueCounts = taggerItems ? taggerCounts(taggerItems) : null;
   const todos = [
     { key: "pending", label: "처리 대기", unit: "건", note: staleAt ? `${staleAt} 기준 · 태블릿 수집 요청` : "태블릿 수집 요청 · 아직 안 받음", count: overview?.server.capturesPending ?? 0, open: go({ kind: "settings", section: "cloud" }) },
     { key: "character", label: "캐릭터 검토", unit: "건", note: characterHint ?? "자동 분류 후보 확인", count: characterQueue?.total ?? 0,
       open: () => setReviewOverview(true) },
+    { key: "tagger", label: "태거 검토", unit: "건", note: taggerQueueCounts ? `태거 추천 ${taggerQueueCounts.recommendation.toLocaleString()} · 검토로 돌림 ${taggerQueueCounts.veto.toLocaleString()}` : null,
+      count: taggerItems?.length ?? 0, open: () => setTaggerOverview(true) },
     { key: "similar", label: "유사 이미지", unit: "쌍", note: "같은 그림일 수 있음", count: reviewCount, open: go({ kind: "similarity_review" }) },
     { key: "duplicates", label: "중복 판본", unit: "건", note: "카탈로그 · 같은 작품", count: duplicateCount, open: () => setDialog({ kind: "duplicates" }) },
     { key: "unsorted", label: "미분류", unit: "장", note: "분류가 없는 새 자산", count: unsortedCount ?? 0, open: go({ kind: "unsorted" }) },
+    { key: "av-link", label: "AV 품번", unit: "건", note: null, count: avLinkCount, open: go({ kind: "collections", typeFilter: "av", showcase: false }) },
   ].filter((todo) => todo.count > 0);
 
   /* 신간 · 발매 예정 */
@@ -249,6 +279,9 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
     {dialogs}
   </>;
 
+  if (taggerOverview && taggerItems) return <TaggerReview items={taggerItems} targets={characters} classifications={classifications} privacyMode={privacyMode}
+    api={taggerApi} onItemsChange={setTaggerItems} onBack={() => { setTaggerOverview(false); setQueueRead((value) => value + 1); }} />;
+
   return <div className="home-view">
     <ViewToolbar title="홈" titleAccessory={<span className="home-title-date"><span className="numeric">{`${at.getMonth() + 1}.${at.getDate()}`}</span> {weekdayLabel(at)}</span>} chrome={{ navigation: index }} />
     <div className="home-scroll">
@@ -263,7 +296,7 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
           {todos.length > 0 && <div className="home-todo" style={{ gridTemplateColumns: `repeat(${todos.length}, minmax(0, 1fr))` }}>
             {todos.map((todo) => <button key={todo.key} type="button" className="home-row home-row--todo" onClick={todo.open}>
               <span className="home-row__n numeric">{todo.count.toLocaleString()}<small>{todo.unit}</small></span>
-              <span className="home-row__t">{todo.label}<small>{todo.note}</small></span><Chevron />
+              <span className="home-row__t">{todo.label}{todo.note && <small>{todo.note}</small>}</span><Chevron />
             </button>)}
           </div>}
         </Section>

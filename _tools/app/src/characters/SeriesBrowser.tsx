@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { ChevronRightIcon, FolderIcon, PhotoIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
@@ -127,6 +128,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     ? [...ordinarySeriesGalleryViews, { value: "excluded" as const, label: "자동 분류 제외" }]
     : ordinarySeriesGalleryViews;
   const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
+  const groupedIds = new Set(groups.flatMap(group => group.targetIds));
+  const orderedMembers = members.filter(target => currentGroup
+    ? currentGroup.targetIds.includes(target.id) : !groupedIds.has(target.id));
   const readiness = useS36Readiness(series.classificationId, readinessVersion);
   const { settings: s36Settings, error: s36Error } = useS36Publication(s36PublicationApi);
   const s36Driven = (targetId: string) => Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.excludedTargets.includes(targetId));
@@ -451,13 +455,20 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
             }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => {
               const status = characterStatus(target, readiness.get(target.id), s36Driven(target.id));
               const description = [...(status.warning ? ["확인 필요"] : []), ...status.detail].join(" · ");
-              return <article className="series-character" key={target.id}>
+              const index = orderedMembers.findIndex(member => member.id === target.id);
+              const move = (direction: number) => void action(() => invoke("move_character_folder", {
+                seriesId: series.classificationId, targetId: target.id, groupId: currentGroup?.id ?? null, direction,
+              }));
+              return <ContextMenu key={target.id} items={[
+                { id: "move-up", label: "위로 이동", disabled: busy || index === 0, onSelect: () => move(-1) },
+                { id: "move-down", label: "아래로 이동", disabled: busy || index === orderedMembers.length - 1, onSelect: () => move(1) },
+              ]}><article className="series-character">
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
                 {(target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img draggable={false} loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><PhotoIcon aria-hidden="true" />대표 이미지</span>}
                 <strong>{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
               </button>
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
-            </article>;
+            </article></ContextMenu>;
             })}</>}</CharacterGroups>
         </div>}
         {folderError && <p className="character-message" role="alert">{folderError}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}

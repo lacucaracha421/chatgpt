@@ -7,7 +7,7 @@ pub(crate) fn allow_cover_canvas(response: &mut Response<Vec<u8>>, origin: Optio
     let packaged = matches!(origin, "http://tauri.localhost" | "https://tauri.localhost" | "tauri://localhost");
     let development = cfg!(debug_assertions) && matches!(origin, "http://localhost:1420" | "http://127.0.0.1:1420");
     // `/asset/` lets the bundled FAULT game read original images as Blobs; still app origins and images only.
-    let cover = ["/work-artwork/", "/work-artwork-thumbnail/", "/collection-source-thumbnail/", "/thumbnail/", "/asset/"]
+    let cover = ["/av-link-jacket/", "/work-artwork/", "/work-artwork-thumbnail/", "/collection-source-thumbnail/", "/thumbnail/", "/asset/"]
         .iter().any(|prefix| path.starts_with(prefix));
     let image = response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
         .is_some_and(|mime| mime.starts_with("image/"));

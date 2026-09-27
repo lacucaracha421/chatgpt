@@ -180,6 +180,17 @@ describe("buildClassificationTree", () => {
 });
 
 describe("ClassificationSidebar", () => {
+  it("uses persisted character order instead of locale order under a series", () => {
+    renderSidebar(gateway(), {
+      characters: [
+        { ...fixtureTarget("z", "Zulu"), seriesClassificationId: "work", folderOrder: 1 },
+        { ...fixtureTarget("a", "Alpha"), seriesClassificationId: "work", folderOrder: 2 },
+      ],
+      expandedIds: ["root", "work"],
+    });
+    expect(screen.getAllByRole("treeitem").filter(row => row.dataset.characterId).map(row => row.dataset.characterId)).toEqual(["z", "a"]);
+  });
+
   it("opens series relocation from a grouped character and navigates after moving", async () => {
     const user = userEvent.setup();
     const target = { ...fixtureTarget("lorentz", "로렌츠"), seriesClassificationId: "work", linkedClassificationId: null };

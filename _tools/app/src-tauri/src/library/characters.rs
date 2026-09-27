@@ -131,6 +131,8 @@ pub struct Reference {
 #[serde(rename_all = "camelCase")]
 pub struct Target {
     pub id: String,
+    /// PC-only sidebar rank; null preserves the pre-migration locale ordering.
+    pub folder_order: Option<i64>,
     pub series_classification_id: Option<String>,
     pub linked_classification_id: Option<String>,
     pub display_name: String,
@@ -209,7 +211,7 @@ impl Library {
     pub fn list_character_targets(&self) -> Result<Vec<Target>> {
         let connection = self.connection()?;
         let ids = connection
-            .prepare("SELECT id FROM character_targets ORDER BY display_name COLLATE NOCASE, id")?
+            .prepare("SELECT t.id FROM character_targets t JOIN character_folder_order o ON o.target_id=t.id ORDER BY o.position, t.id")?
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         ids.iter()
@@ -622,6 +624,7 @@ impl Library {
             |row| row.get(0),
         )?;
         let mut additions = Vec::new();
+        let mut protected = 0;
         for asset_id in ids {
             let assigned: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_relations WHERE target_id=?1 AND asset_id=?2)", params![id,asset_id], |row| row.get(0))?;
             if !assigned {
@@ -639,6 +642,7 @@ impl Library {
             self.open_library_media(&path)?;
             let current: Option<String> = transaction.query_row("SELECT asset_hash FROM character_learned_references WHERE target_id=?1 AND asset_id=?2", params![id,asset_id], |row| row.get(0)).optional()?;
             if current.as_deref() == Some(&hash) {
+                protected += transaction.execute("UPDATE character_learned_references SET provenance='user' WHERE target_id=?1 AND asset_id=?2 AND provenance<>'user'", params![id,asset_id])?;
                 continue;
             }
             if !hashes.insert(hash.clone()) {
@@ -652,13 +656,13 @@ impl Library {
             return Err(Error::Invalid("레퍼런스는 휴지통 보관분을 포함해 최대 25장입니다."));
         }
         let now = chrono::Utc::now().to_rfc3339();
-        let changed = !additions.is_empty();
+        let changed = !additions.is_empty() || protected > 0;
         for (asset_id, hash) in additions {
             transaction.execute(
                 "DELETE FROM character_reference_exclusions WHERE target_id=?1 AND asset_id=?2",
                 params![id, asset_id],
             )?;
-            transaction.execute("INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at) VALUES(?1,?2,?3,?4) ON CONFLICT(target_id,asset_id) DO UPDATE SET asset_hash=excluded.asset_hash,created_at=excluded.created_at", params![id,asset_id,hash,now])?;
+            transaction.execute("INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at,provenance) VALUES(?1,?2,?3,?4,'user') ON CONFLICT(target_id,asset_id) DO UPDATE SET asset_hash=excluded.asset_hash,created_at=excluded.created_at,provenance='user'", params![id,asset_id,hash,now])?;
         }
         if changed {
             transaction.execute("UPDATE character_targets SET revision=revision+1,updated_at=?2 WHERE id=?1", params![id,now])?;
@@ -796,6 +800,14 @@ impl Library {
             .filter_map(|r| r.asset_id.clone().map(|id| (id, r.asset_hash.clone())))
             .collect::<BTreeSet<_>>();
         let unchanged = previous_values == values.iter().cloned().collect::<BTreeSet<_>>();
+        // Saving an existing selection is still an explicit user choice, even
+        // when the reference list itself has not changed.
+        let protected = transaction.execute(
+            "UPDATE character_learned_references SET provenance='user'
+             WHERE target_id=?1 AND provenance<>'user'
+             AND asset_id IN (SELECT value FROM json_each(?2))",
+            params![id, serde_json::to_string(asset_ids)?],
+        )?;
         if !unchanged {
             transaction.execute("DELETE FROM character_references WHERE target_id=?1", [id])?;
             transaction.execute("DELETE FROM character_learned_references WHERE target_id=?1", [id])?;
@@ -819,10 +831,10 @@ impl Library {
                 "UPDATE character_targets SET manual_only=CASE WHEN ?3 THEN 0 ELSE manual_only END,revision=revision+1,updated_at=?2 WHERE id=?1",
                 params![id, chrono::Utc::now().to_rfc3339(), promote_manual],
             )?;
-        } else if promote_manual {
+        } else if promote_manual || protected > 0 {
             transaction.execute(
-                "UPDATE character_targets SET manual_only=0,revision=revision+1,updated_at=?2 WHERE id=?1",
-                params![id, chrono::Utc::now().to_rfc3339()],
+                "UPDATE character_targets SET manual_only=CASE WHEN ?3 THEN 0 ELSE manual_only END,revision=revision+1,updated_at=?2 WHERE id=?1",
+                params![id, chrono::Utc::now().to_rfc3339(), promote_manual],
             )?;
         }
         if promote_manual {
@@ -849,7 +861,16 @@ impl Library {
             .series_classification_id
             .clone()
             .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-        // Validate the original scope before moving; unrelated series cannot be pulled in.
+        // A tagger candidate can be outside the series. This explicitly requested
+        // move-and-accept action places it first; plain accept never moves folders.
+        for id in &asset_ids {
+            let pending: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_tagger_pending WHERE target_id=?1 AND asset_id=?2)", params![target.id,id], |r| r.get(0))?;
+            if pending {
+                Self::set_asset_classification_in(&transaction, &super::models::SetAssetClassification {
+                    asset_ids: vec![id.clone()], classification_id: Some(series_id.clone()),
+                })?;
+            }
+        }
         self.write_character_decisions(
             &transaction,
             DecisionRequest {
@@ -937,7 +958,11 @@ impl Library {
         let now = chrono::Utc::now().to_rfc3339();
         let mut changed = 0;
         for asset_id in ids {
-            let hash = if request.decision == DecisionKind::Cleared {
+            let tagger_rejection = request.decision == DecisionKind::Rejected && transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM character_tagger_pending WHERE target_id=?1 AND asset_id=?2)",
+                params![target.id,asset_id], |r| r.get::<_,bool>(0),
+            )?;
+            let hash = if request.decision == DecisionKind::Cleared || tagger_rejection {
                 transaction.query_row(
                     "SELECT content_hash FROM assets WHERE id=?1 AND status='normal'",
                     [asset_id],
@@ -953,7 +978,8 @@ impl Library {
                     series,
                     &target.id,
                     asset_id,
-                    evidence
+                    transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_tagger_pending WHERE target_id=?1 AND asset_id=?2 AND reason='veto')", params![target.id,asset_id], |r| r.get::<_,bool>(0))?
+                        || evidence
                         .get(asset_id)
                         .is_some_and(|e| e["prediction"]["automaticScope"] == true)
                         // A direct judgment may confirm or correct what the automatic
@@ -1138,9 +1164,10 @@ impl Library {
         id: &str,
     ) -> Result<Target> {
         let mut target = connection.query_row("SELECT id,series_classification_id,linked_classification_id,display_name,enabled,revision,description,
-            (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal'),manual_only
+            (SELECT a.id FROM assets a WHERE a.id=thumbnail_asset_id AND a.status='normal'),manual_only,
+            (SELECT position FROM character_folder_order WHERE target_id=character_targets.id AND legacy_sidebar=0)
             FROM character_targets WHERE id=?1", [id], |r| Ok(Target {
-                id:r.get(0)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
+                id:r.get(0)?,folder_order:r.get(9)?,series_classification_id:r.get(1)?,linked_classification_id:r.get(2)?,display_name:r.get(3)?,
                 enabled:r.get(4)?,revision:r.get(5)?,description:r.get(6)?,thumbnail_asset_id:r.get(7)?,manual_only:r.get(8)?,references:Vec::new(),learned_references:Vec::new(),ready:false,fingerprint:String::new()
             })).optional()?.ok_or(Error::NotFound)?;
         let regions = super::character_reference_regions::read_regions(connection, id)?;

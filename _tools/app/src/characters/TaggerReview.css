@@ -1,0 +1,33 @@
+.tagger-review__title-count { color: var(--color-muted); font-size: 14px; }
+.tagger-review__detail { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px 26px; }
+.tagger-review__bulk { position: sticky; z-index: 2; top: -14px; display: flex; align-items: center; gap: 8px; min-height: 48px; margin: 0 0 14px; padding: 8px 2px; border-bottom: 1px solid var(--color-border-strong); background: var(--color-bg); }
+.tagger-review__bulk > span { flex: 1; min-width: 160px; color: var(--color-muted); font-size: 13px; }
+.tagger-review__bulk > span b { color: var(--color-text); font-weight: 500; }
+.tagger-review__notice { margin: 0 0 12px; color: var(--color-muted); font-size: 13px; }
+.tagger-review__notice.is-error, .tagger-review__folder-error { color: var(--color-danger); }
+.tagger-review__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.tagger-review__tile { min-width: 0; padding: 0 0 9px; border: 1px solid var(--color-border); border-radius: 2px; background: var(--color-surface); outline-offset: 2px; }
+.tagger-review__tile.is-selected { border-color: var(--color-accent); }
+.tagger-review__tile:focus-visible { outline: var(--focus-width) solid var(--color-focus); }
+.tagger-review__image { position: relative; overflow: hidden; aspect-ratio: 1 / 1; background: var(--color-bg); }
+.tagger-review__image img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.tagger-review__badge, .tagger-review__outside { position: absolute; top: 7px; left: 7px; padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--color-border-strong) 75%, transparent); background: color-mix(in srgb, var(--color-bg) 88%, transparent); color: var(--color-text); font-size: 11.5px; line-height: 1; }
+.tagger-review__badge--veto { color: var(--color-warning, var(--color-accent)); }
+.tagger-review__outside { top: auto; bottom: 7px; color: var(--color-warning, var(--color-accent)); }
+.tagger-review__check { position: absolute; top: 7px; right: 7px; width: 24px; height: 24px; cursor: pointer; }
+.tagger-review__check input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; }
+.tagger-review__check span { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--color-border-strong); background: var(--color-bg); }
+.tagger-review__check input:checked + span { border-color: var(--color-accent); background: var(--color-accent); }
+.tagger-review__check input:checked + span::after { content: "✓"; color: var(--color-on-accent); font-size: 15px; line-height: 1; }
+.tagger-review__check input:focus-visible + span { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
+.tagger-review__meta { display: flex; justify-content: space-between; gap: 8px; padding: 8px 9px 5px; color: var(--color-muted); font-size: 11.5px; }
+.tagger-review__meta b { color: var(--color-text); font-size: 12.5px; font-weight: 500; }
+.tagger-review__folder-error { display: block; min-height: 30px; padding: 0 9px 5px; line-height: 1.35; }
+.tagger-review__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 9px 0; }
+
+@media (max-width: 860px) {
+  .tagger-review__detail { padding-inline: 12px; }
+  .tagger-review__grid { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 8px; }
+  .tagger-review__bulk { flex-wrap: wrap; }
+  .tagger-review__bulk > span { order: 3; flex-basis: 100%; }
+}

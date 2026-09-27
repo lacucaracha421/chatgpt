@@ -5,7 +5,7 @@ import { useBackHandler, useBackNavigationContext, useBackRequest } from "../nav
 type DialogProps = PropsWithChildren<{
   open: boolean;
   title: string;
-  variant?: "default" | "medium" | "wide" | "fullscreen";
+  variant?: "default" | "medium" | "wide" | "workspace" | "fullscreen";
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   onKeyUp?: KeyboardEventHandler<HTMLDivElement>;
   onClose: () => void;

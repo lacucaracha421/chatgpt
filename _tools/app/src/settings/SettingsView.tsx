@@ -28,6 +28,7 @@ import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
 import { CharacterAutomationSettings } from "./CharacterAutomationSettings";
 import { CharacterAugmentationSettings } from "./CharacterAugmentationSettings";
 import { AutoTagSettings } from "../autotags/AutoTagSettings";
+import { TaggerReviewSettings } from "../autotags/TaggerReviewSettings";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -813,6 +814,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         <h3 className="settings-view__group-title">자동 태그</h3>
         {library ? <AutoTagSettings key={`auto-tags:${library.root}`} disabled={pending} />
           : <p className="settings-view__row-note">라이브러리를 연 뒤 설정할 수 있습니다.</p>}
+        {library && <TaggerReviewSettings key={`tagger-review:${library.root}`} disabled={pending} />}
       </div>
     )}
     {section === "about" && (

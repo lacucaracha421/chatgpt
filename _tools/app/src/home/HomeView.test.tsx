@@ -6,6 +6,8 @@ import { EMPTY_EXCHANGE, ExchangeStore, type ExchangeSnapshot } from "../exchang
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import type { AuthoritySyncHealth, CollectionSummary, HomeOverview, ReleaseBoardEntry, ReleaseInboxItem, ReleaseWishlistItem } from "../library/types";
 import { NotesStore, type Note } from "../notes/store";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
+import type { AvLinkApi } from "../collections/AvLinkInbox";
 import { HomeView, type HomeViewProps } from "./HomeView";
 
 const gateway = vi.hoisted(() => ({
@@ -64,14 +66,14 @@ function notesWith(notes: Note[]) {
 }
 
 type Candidate = { targetId: string; targetName: string };
-type Setup = { props?: Partial<HomeViewProps>; exchange?: Partial<ExchangeSnapshot>; notes?: Note[]; characters?: number; candidates?: Candidate[] };
-function renderHome({ props = {}, exchange = {}, notes = [], characters = 0, candidates = [] }: Setup = {}) {
+type Setup = { props?: Partial<HomeViewProps>; exchange?: Partial<ExchangeSnapshot>; notes?: Note[]; characters?: number; candidates?: Candidate[]; privacy?: boolean };
+function renderHome({ props = {}, exchange = {}, notes = [], characters = 0, candidates = [], privacy = false }: Setup = {}) {
   const onNavigate = vi.fn();
   const shadowApi = { page: vi.fn().mockResolvedValue({ items: candidates, nextOffset: null, policyVersion: null, summary: { automatic: { pending: Math.max(characters, candidates.length), accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 }, byOrigin: {} } }) };
-  const view = render(<WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
+  const view = render(<PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()}><WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
     <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={onNavigate} exchange={exchangeWith(exchange)} notes={notesWith(notes)}
       shadowApi={shadowApi} now={() => NOW} {...props} />
-  </WorkspaceChromeProvider>);
+  </WorkspaceChromeProvider></PrivacyProvider>);
   return { onNavigate, shadowApi, view };
 }
 const section = (name: string) => screen.getByRole("region", { name });
@@ -95,6 +97,33 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("HomeView", () => {
+  it("hides an empty tagger queue and shows the exact reason counts when pending", async () => {
+    const emptySource = vi.fn(async () => []);
+    renderHome({ props: { taggerSource: emptySource } });
+    await waitFor(() => expect(emptySource).toHaveBeenCalledOnce());
+    expect(within(section("확인할 것")).queryByRole("button", { name: /태거 검토/ })).not.toBeInTheDocument();
+    cleanup();
+
+    const asset = (id: string) => ({ id, originalName: `${id}.png`, title: null, byteSize: 1, width: 100, height: 100,
+      collectedAt: "2026-09-27T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null,
+      creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null,
+      media: { kind: "image" } }) as never;
+    const taggerSource = vi.fn(async () => [
+      { asset: asset("a1"), seriesId: "series", targetId: "char", targetName: "라라", targetFingerprint: "fp", evidence: { source: "tagger" as const, reason: "recommendation" as const, pixaiScore: .9, canaryScore: .91 } },
+      { asset: asset("a2"), seriesId: "series", targetId: "char", targetName: "라라", targetFingerprint: "fp", evidence: { source: "tagger" as const, reason: "recommendation" as const, pixaiScore: .92, canaryScore: .93 } },
+      { asset: asset("a3"), seriesId: "series", targetId: "char", targetName: "라라", targetFingerprint: "fp", evidence: { source: "tagger" as const, reason: "veto" as const, pixaiScore: .1, canaryScore: .2 } },
+    ]);
+    renderHome({ props: {
+      taggerSource,
+      characters: [{ id: "char", seriesClassificationId: "series", displayName: "라라", thumbnailAssetId: null, references: [] }] as never,
+      classifications: [{ id: "series", parentId: null, name: "백합" }] as never,
+    } });
+    const row = await within(section("확인할 것")).findByRole("button", { name: /태거 검토/ });
+    expect(row.textContent?.replace(/\s+/g, "")).toBe("3건태거검토태거추천2·검토로돌림1");
+    await user().click(row);
+    expect(await screen.findByRole("region", { name: "백합" })).toHaveTextContent("라라");
+  });
+
   it("collapses calm sections to one line each and reads the day's boundaries", async () => {
     const { shadowApi } = renderHome();
     await waitFor(() => expect(within(section("자산 현황")).getByText(/이번 주/)).toHaveTextContent("이번 주 41장 · 오늘 0 · 전체 48,213"));
@@ -112,6 +141,19 @@ describe("HomeView", () => {
     const index = screen.getByRole("navigation", { name: "홈 인덱스" });
     await waitFor(() => expect(within(index).getAllByRole("button").map((button) => button.textContent)).toEqual(
       ["고정한 메모 없음", "서버연결됨", "태블릿Galaxy Tab S11", "클라우드동기화됨", "카탈로그12분 전", "발매 캘린더2시간 전"]));
+  });
+
+  it("shows only the AV inbox count on Home, opens Collections › AV, and hides it in privacy mode", async () => {
+    const avLinkApi = { pendingCount: vi.fn().mockResolvedValue(4) } as unknown as AvLinkApi;
+    const { onNavigate } = renderHome({ props: { avLinkApi } });
+    const row = await within(section("확인할 것")).findByRole("button", { name: /AV 품번/ });
+    expect(row.textContent?.replace(/\s+/g, "")).toBe("4건AV품번");
+    await user().click(row);
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "av", showcase: false });
+    cleanup();
+
+    renderHome({ props: { avLinkApi }, privacy: true });
+    expect(within(section("확인할 것")).queryByRole("button", { name: /AV 품번/ })).not.toBeInTheDocument();
   });
 
   it("lays out a busy day and sends every row to the screen that owns it", async () => {

@@ -1,6 +1,18 @@
 import type { ClassificationEntry } from "../library/types";
 import type { ClassificationDropTarget } from "../shared/interaction/pointerDrag";
 import type { UiPreferences } from "../preferences/uiPreferences";
+import type { TreeEntry, TreeNode } from "./buildTree";
+
+/** Reorder only character slots; ordinary folders and group rows keep their placement. */
+export function applyCharacterFolderOrder<T extends TreeEntry & { characterId?: string; folderOrder?: number | null }>(nodes: TreeNode<T>[]): void {
+  const characters = nodes.filter(node => node.entry.characterId).sort((a, b) =>
+    (a.entry.folderOrder ?? -1) - (b.entry.folderOrder ?? -1));
+  let index = 0;
+  for (let slot = 0; slot < nodes.length; slot++) {
+    if (nodes[slot].entry.characterId) nodes[slot] = characters[index++];
+    applyCharacterFolderOrder(nodes[slot].children);
+  }
+}
 
 export function applyInitialCountOrder(entries: ClassificationEntry[], preferences: UiPreferences): UiPreferences {
   if (preferences.classificationCountOrderApplied || entries.length === 0 || entries.some((entry) => !Number.isFinite(entry.assetCount))) return preferences;

@@ -55,10 +55,12 @@ use crate::library::models::{
 
 pub(crate) mod characters;
 pub(crate) mod av;
+pub(crate) mod av_link;
 pub(crate) mod video_similarity;
 pub(crate) mod release_calendar;
 pub(crate) mod artists;
 pub(crate) mod auto_tags;
+pub(crate) mod tagger_review;
 pub(crate) mod home;
 
 #[tauri::command]

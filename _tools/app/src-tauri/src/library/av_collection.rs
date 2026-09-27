@@ -11,7 +11,7 @@ fn text(value: Option<String>, max: usize) -> Result<Option<String>, AvError> {
     if value.as_ref().is_some_and(|v| v.chars().count() > max) { return Err(AvError::Invalid); }
     Ok(value)
 }
-fn details(connection: &Connection, id: &str) -> Result<AvDetails, AvError> {
+pub(crate) fn details(connection: &Connection, id: &str) -> Result<AvDetails, AvError> {
     require_av(connection, id)?;
     let mut value = connection.query_row("SELECT product_code,label,series,revision FROM collection_av_details WHERE collection_id=?1", [id], |r| Ok(AvDetails {
         collection_id: id.into(), product_code: r.get(0)?, label: r.get(1)?, series: r.get(2)?, revision: r.get(3)?, people: vec![],

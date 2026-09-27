@@ -470,8 +470,8 @@ impl Library {
                 continue;
             }
             let earlier: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2)",
-                params![target.id, pending.asset_id],
+                "SELECT EXISTS(SELECT 1 FROM character_decisions WHERE target_id=?1 AND source_asset_id=?2) OR EXISTS(SELECT 1 FROM character_tagger_candidates WHERE target_id=?1 AND asset_id=?2 AND asset_hash=?3)",
+                params![target.id, pending.asset_id, pending.content_hash],
                 |r| r.get(0),
             )?;
             if earlier {

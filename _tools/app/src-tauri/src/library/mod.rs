@@ -12,6 +12,7 @@ mod album_reconciliation_tests;
 pub(crate) mod asset_authority;
 mod asset_metadata;
 pub(crate) mod authority_pass;
+pub(crate) mod av_link;
 pub(crate) mod av_artwork;
 pub(crate) mod av_collection;
 pub(crate) mod av_models;
@@ -52,6 +53,7 @@ pub(crate) mod character_exclusions;
 #[path = "character_exclusions_tests.rs"]
 mod character_exclusions_tests;
 pub mod character_folders;
+mod character_folder_order;
 pub mod character_groups;
 pub mod character_hub;
 pub mod character_incremental;
@@ -135,6 +137,7 @@ pub(crate) mod artists;
 #[cfg(test)]
 mod artists_tests;
 pub(crate) mod auto_tags;
+pub(crate) mod tagger_review;
 #[cfg(test)]
 mod auto_tags_tests;
 pub(crate) mod release_wishlist;

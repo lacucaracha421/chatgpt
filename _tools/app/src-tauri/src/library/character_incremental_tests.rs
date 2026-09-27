@@ -2476,3 +2476,39 @@ fn broad_folder_rule_is_off_by_default_and_hides_without_deleting() {
     f.library.set_character_broad_folder_scope(true).unwrap();
     assert_eq!(listed(&f), (true, vec!["asset-5".to_string()], true));
 }
+
+#[test]
+fn tagger_pending_blocks_native_automatic_pass_and_manual_reaccept_sticks() {
+    use crate::library::tagger_review::tests::{signals,automatic};
+    for veto in [false,true] {
+        let f=Fixture::new();let t=f.ready("Tagger");
+        add_learned_reference(&f,&t.id);
+        signals(&f,&t,if veto {0.2}else{0.9},if veto {0.2}else{0.9});
+        if veto {automatic(&f,&t);}
+        let p=f.library.preview_tagger_review().unwrap();f.library.apply_tagger_review(&p.preview_token).unwrap();
+        for manual in [false,true] {
+            if manual {
+                let t=f.library.get_character_target(&t.id).unwrap();
+                f.library.record_character_decisions(crate::library::characters::DecisionRequest{
+                    target_id:t.id,expected_fingerprint:t.fingerprint,asset_ids:vec!["asset-5".into()],
+                    decision:crate::library::characters::DecisionKind::Accepted,scan_id:None,baseline_fingerprint:None,
+                }).unwrap();
+            }
+            character_autotag::enqueue(&f.library.connection().unwrap(),"asset-5",character_autotag::Cause::Reconsideration).unwrap();
+            let job=f.library.claim_character_autotag().unwrap().unwrap();
+            let mut c=f.library.connection().unwrap();let tx=c.transaction().unwrap();
+            let context=f.library.character_autotag_context(&tx,&job,&"a".repeat(64)).unwrap();
+            let prediction=Prediction{target_id:t.id.clone(),result:ScanResult{
+                asset_id:job.asset_id.clone(),content_hash:job.content_hash.clone(),state:"recommended".into(),error:None,
+                evidence:Some(json!({"passed":true,"wholeFallback":false,"queryBoxes":[[0,0,832,1216]],
+                    "evidence":[{"matchedReferences":[0,1,2,3,4,5],"referenceDistances":vec![0.05;6]}]})),
+            }};
+            f.library.finalize_incremental(&tx,&job,&context,&[prediction],&BTreeSet::new(),&BTreeSet::new()).unwrap();
+            tx.commit().unwrap();drop(c);
+            assert_eq!(!f.library.character_relations_for_asset("asset-5").unwrap().is_empty(),manual);
+            if manual {
+                assert_eq!(f.library.connection().unwrap().query_row("SELECT origin FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1",[&t.id],|r|r.get::<_,String>(0)).unwrap(),"manual");
+            }
+        }
+    }
+}

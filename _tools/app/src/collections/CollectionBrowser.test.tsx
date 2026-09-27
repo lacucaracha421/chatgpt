@@ -17,6 +17,7 @@ import { CollectionBrowser } from "./CollectionBrowser";
 import { coverSourceUrl } from "./physical/collectibleRuntime";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 import { resetReleaseDataForTests } from "./releaseData";
+import type { AvLinkApi } from "./AvLinkInbox";
 
 afterEach(() => { cleanup(); resetReleaseDataForTests(); });
 
@@ -63,13 +64,14 @@ function renderBrowser(props: {
   releaseProvider?: CollectionUpdateProvider;
   releaseCalendar?: boolean;
   calendarApi?: ReleaseCalendarGateway;
+  avLinkApi?: AvLinkApi;
 }) {
   const gateway = createGateway();
   if (props.tracking) gateway.collectionTracking = props.tracking;
   if (props.calendarApi) gateway.releaseCalendar = props.calendarApi;
   function Harness() {
     const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
-    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar}
+    return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} avLinkApi={props.avLinkApi}
       collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
       onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
       libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
@@ -134,6 +136,21 @@ describe("CollectionBrowser", () => {
     expect(rating).toHaveAttribute("min", "0");expect(rating).toHaveAttribute("max", "10");
     expect(within(index).getByRole("button", { name: "미평가" })).toHaveAttribute("aria-pressed", "false");
     expect(within(index).queryByRole("button", { name: "초기화" })).not.toBeInTheDocument();
+  });
+
+  it("shows the received-code count on the AV index row and the ledger only in the AV library", async () => {
+    const avLinkApi = {
+      listInbox: vi.fn().mockResolvedValue([{ id: "inbox-1", requestId: "request-1", productCode: "SSIS-001", normalizedCode: "SSIS-001", sourceUrl: null,
+        receivedAt: "2026-09-27T05:02:00Z", status: "fetching", attempts: 1, lastError: null, fetchedAt: null, collectionId: null, collectionName: null }]),
+      pendingCount: vi.fn(), getCandidate: vi.fn(), retry: vi.fn(), fixCode: vi.fn(), dismiss: vi.fn(), apply: vi.fn(),
+    } as unknown as AvLinkApi;
+    renderBrowser({ collections: [], typeFilter: "game", showcase: false, avLinkApi });
+    expect(await screen.findByRole("button", { name: "AV, 받은 품번 1개" })).toHaveTextContent("AV1");
+    expect(screen.queryByRole("region", { name: "받은 품번" })).not.toBeInTheDocument();
+    cleanup();
+
+    renderBrowser({ collections: [], typeFilter: "av", showcase: false, avLinkApi });
+    expect(await screen.findByRole("region", { name: "받은 품번" })).toBeInTheDocument();
   });
 
   it("shows a saved rating outside the presets as the selected option", async () => {

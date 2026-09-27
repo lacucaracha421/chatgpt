@@ -192,7 +192,7 @@ const REVIEW_INPUT_SQL: &str = "WITH RECURSIVE scope(id) AS (
     SELECT c.id,c.parent_id FROM classification_entries c JOIN ancestors p ON c.id=p.parent_id)
     SELECT a.id,a.content_hash,a.relative_path FROM assets a
     WHERE +a.status='normal' AND +a.media_kind='image' AND a.id > COALESCE(?2, '')
-    AND EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND (
+    AND (EXISTS(SELECT 1 FROM asset_classifications ac WHERE ac.asset_id=a.id AND (
         ac.classification_id IN (SELECT id FROM scope) OR (
         ac.classification_id IN (SELECT id FROM ancestors) AND (
             a.id IN (SELECT value FROM json_each(?3)) OR
@@ -201,6 +201,7 @@ const REVIEW_INPUT_SQL: &str = "WITH RECURSIVE scope(id) AS (
                 CROSS JOIN character_autotag_predictions p ON p.evidence_id=e.id
                 WHERE j.asset_id=a.id AND p.series_id=?1 AND j.state<>'superseded') OR
             EXISTS(SELECT 1 FROM character_autotag_jobs j WHERE j.asset_id=a.id AND j.state='failed')))))
+    OR EXISTS(SELECT 1 FROM character_tagger_pending q WHERE q.asset_id=a.id AND q.series_id=?1))
     ORDER BY a.id LIMIT ?4";
 
 /// Saved predictions of one candidate batch (`?2`, a JSON array of asset IDs), newest usable
@@ -321,7 +322,11 @@ impl Library {
 
 impl Library {
     pub fn character_review_page(&self, query: ReviewQuery) -> Result<ReviewPage> {
-        if query.filter == "recommended" {
+        let has_tagger: bool = self.connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM character_tagger_pending WHERE series_id=?1 AND (?2 IS NULL OR target_id=?2))",
+            params![query.series_id,query.target_id], |r| r.get(0),
+        )?;
+        if query.filter == "recommended" && !has_tagger {
             if let Some(target_id) = query.target_id.as_deref() {
                 return self.character_recommended_page(
                     &query.series_id,
@@ -569,7 +574,7 @@ impl Library {
     pub fn character_review_pending(&self, series_id: &str, target_id: &str) -> Result<bool> {
         let connection = self.connection()?;
         let target = self.read_character_target(&connection, target_id)?;
-        if target.series_classification_id.as_deref() != Some(series_id) || !target.ready {
+        if target.series_classification_id.as_deref() != Some(series_id) {
             return Ok(false);
         }
         self.review_pending_in(&connection, &target)
@@ -583,6 +588,10 @@ impl Library {
         let Some(series_id) = target.series_classification_id.as_deref() else {
             return Ok(false);
         };
+        if connection.query_row("SELECT EXISTS(SELECT 1 FROM character_tagger_pending WHERE target_id=?1)", [&target.id], |r| r.get::<_,bool>(0))? {
+            return Ok(true);
+        }
+        if !target.ready { return Ok(false); }
         let (memory_candidates, automatic_root_candidates) = {
             let state = self
                 .character_scan
@@ -655,9 +664,6 @@ impl Library {
         let mut pending = std::collections::BTreeMap::new();
         for id in ids {
             let target = self.read_character_target(&connection, &id)?;
-            if !target.ready {
-                continue;
-            }
             if self.review_pending_in(&connection, &target)? {
                 pending.insert(target.id.clone(), true);
             }
@@ -736,7 +742,7 @@ impl Library {
         let mut after = query.after.clone();
         const INPUT_BATCH: usize = 256;
         loop {
-            let (inputs, decisions, durable_predictions, failed_jobs) = {
+            let (inputs, decisions, durable_predictions, failed_jobs, tagger_predictions) = {
                 let connection = self.connection()?;
                 // Bound both candidate materialization and related evidence/decision queries.
                 let mut statement = connection.prepare(REVIEW_INPUT_SQL)?;
@@ -805,7 +811,8 @@ impl Library {
                     AND NOT EXISTS(SELECT 1 FROM character_decisions n WHERE n.target_id=d.target_id AND n.source_asset_id=d.source_asset_id AND n.sequence>d.sequence)")?
                     .query_map(params![query.series_id,ids,query.target_id],|r|Ok(((r.get::<_,String>(0)?,r.get::<_,String>(1)?),r.get::<_,String>(2)?)))?
                     .collect::<std::result::Result<BTreeMap<_,_>,_>>()?;
-                (inputs, decisions, durable, failed)
+                let tagger = super::super::tagger_review::pending_predictions(&connection, &query.series_id, &ids)?;
+                (inputs, decisions, durable, failed, tagger)
             };
             if inputs.is_empty() {
                 break;
@@ -815,7 +822,7 @@ impl Library {
                 if targets.iter().any(|t| {
                     t.usable_references()
                         .any(|r| r.asset_id.as_deref() == Some(&input.id))
-                }) {
+                }) && !tagger_predictions.keys().any(|(asset, _)| asset == &input.id) {
                     continue;
                 }
                 let source_current = advisory || self.verify_input(input).is_ok();
@@ -887,6 +894,15 @@ impl Library {
                             prediction.state = "stale".into();
                             prediction.evidence = None;
                         }
+                    }
+                }
+                for prediction in &mut predictions {
+                    if let Some(evidence) = tagger_predictions.get(&(input.id.clone(),prediction.target_id.clone())) {
+                        prediction.state = "recommended".into();
+                        prediction.scan_id = None;
+                        prediction.runtime_fingerprint = None;
+                        prediction.evidence = Some(evidence.clone());
+                        prediction.error = None;
                     }
                 }
                 if let Some(error) = failed_jobs.get(&input.id) {

@@ -396,6 +396,7 @@ pub(crate) fn import_file(
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|_| import_error("자동 태그 파일을 열 수 없습니다"))?;
+    let source = source.unchecked_transaction()?;
     if read_meta(&source, "format")?.as_deref() != Some(IMPORT_FORMAT) {
         return Err(import_error("자동 태그 파일 형식이 아닙니다"));
     }
@@ -470,6 +471,7 @@ pub(crate) fn import_file(
             tag_rows += 1;
         }
     }
+    import_review_signals(&transaction, &source, &library_assets)?;
     let summary = AutoTagImportSummary {
         model,
         imported_at: now_utc.to_owned(),
@@ -495,6 +497,95 @@ pub(crate) fn import_file(
     )?;
     transaction.commit()?;
     Ok(summary)
+}
+
+/// Optional version-1 review extension. A legacy import clears raw signals/mappings,
+/// never user edits or already-applied review candidates. Any malformed extension
+/// rolls the entire machine-output replacement back.
+fn import_review_signals(
+    transaction: &Connection,
+    source: &Connection,
+    library_assets: &HashSet<String>,
+) -> Result<(), LibraryError> {
+    transaction.execute("DELETE FROM asset_tagger_character_scores", [])?;
+    transaction.execute("DELETE FROM asset_tagger_coverage", [])?;
+    transaction.execute("DELETE FROM tagger_character_vocabulary", [])?;
+    transaction.execute("DELETE FROM character_target_tagger_tags", [])?;
+    match read_meta(source, "tagger_review_version")?.as_deref() {
+        None => return Ok(()),
+        Some("1") => {}
+        _ => return Err(import_error("지원하지 않는 태거 검토 파일 버전입니다")),
+    }
+    let valid_source = |name: &str| -> Result<(), LibraryError> {
+        if matches!(name, "pixai" | "canary") {
+            Ok(())
+        } else {
+            Err(import_error("알 수 없는 태거입니다"))
+        }
+    };
+    {
+        let mut read = source.prepare("SELECT source,tag FROM tagger_vocabulary")?;
+        let mut rows = read.query([])?;
+        let mut insert =
+            transaction.prepare("INSERT INTO tagger_character_vocabulary VALUES(?1,?2)")?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let tag: String = row.get(1)?;
+            valid_source(&name)?;
+            validate_tag(&tag)?;
+            if name == "pixai" && !transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM auto_tag_vocabulary WHERE tag=?1 AND category='character')",
+                [&tag], |r| r.get::<_, bool>(0),
+            )? { return Err(import_error("PixAI 캐릭터 태그 목록이 일치하지 않습니다")); }
+            insert.execute(params![name, tag])?;
+        }
+    }
+    {
+        let mut read = source.prepare("SELECT asset_id,source FROM tagger_assets")?;
+        let mut rows = read.query([])?;
+        let mut insert = transaction.prepare("INSERT INTO asset_tagger_coverage VALUES(?1,?2)")?;
+        while let Some(row) = rows.next()? {
+            let asset: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            valid_source(&name)?;
+            if library_assets.contains(&asset) {
+                insert.execute(params![asset, name])?;
+            }
+        }
+    }
+    {
+        let mut read = source.prepare("SELECT asset_id,source,tag,score FROM character_scores")?;
+        let mut rows = read.query([])?;
+        let mut insert =
+            transaction.prepare("INSERT INTO asset_tagger_character_scores VALUES(?1,?2,?3,?4)")?;
+        while let Some(row) = rows.next()? {
+            let asset: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let tag: String = row.get(2)?;
+            let score: f64 = row.get(3)?;
+            valid_source(&name)?;
+            validate_tag(&tag)?;
+            // 0.1 is 0.0999755859375 in the source float16 representation.
+            if !(0.0999755859375..=1.0).contains(&score) {
+                return Err(import_error("태거 점수 범위가 올바르지 않습니다"));
+            }
+            if library_assets.contains(&asset) {
+                insert.execute(params![asset, name, tag, score])?;
+            }
+        }
+    }
+    {
+        let mut read = source.prepare("SELECT target_id,tag FROM target_tags")?;
+        let mut rows = read.query([])?;
+        let mut insert = transaction.prepare("INSERT INTO character_target_tagger_tags SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM character_targets WHERE id=?1)")?;
+        while let Some(row) = rows.next()? {
+            let target: String = row.get(0)?;
+            let tag: String = row.get(1)?;
+            validate_tag(&tag)?;
+            insert.execute(params![target, tag])?;
+        }
+    }
+    Ok(())
 }
 
 impl super::Library {

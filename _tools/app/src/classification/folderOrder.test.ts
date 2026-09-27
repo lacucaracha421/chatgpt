@@ -1,8 +1,27 @@
 import { expect, it } from "vitest";
 import type { ClassificationEntry } from "../library/types";
-import { applyInitialCountOrder, reorderFolders } from "./folderOrder";
+import { applyCharacterFolderOrder, applyInitialCountOrder, reorderFolders } from "./folderOrder";
 import { DEFAULT_UI_PREFERENCES, loadUiPreferences, saveUiPreferences } from "../preferences/uiPreferences";
 import { buildTree } from "./buildTree";
+
+it("preserves legacy sidebar order, appends new characters and applies manual ranks only to character slots", () => {
+  const entries = [
+    { id: "root", name: "Series", parentId: null },
+    { id: "z", characterId: "z", name: "Zulu", parentId: "root", folderOrder: null },
+    { id: "a", characterId: "a", name: "Alpha", parentId: "root", folderOrder: null },
+    { id: "folder", name: "Middle", parentId: "root" },
+    { id: "new", characterId: "new", name: "A new character", parentId: "root", folderOrder: 3 },
+  ];
+  const tree = buildTree(entries);
+  const originalFolderSlot = tree[0].children.findIndex(node => node.entry.id === "folder");
+  applyCharacterFolderOrder(tree);
+  expect(tree[0].children.filter(node => node.entry.characterId).map(node => node.entry.id)).toEqual(["a", "z", "new"]);
+  entries.find(entry => entry.id === "z")!.folderOrder = 1;
+  entries.find(entry => entry.id === "a")!.folderOrder = 2;
+  applyCharacterFolderOrder(tree);
+  expect(tree[0].children.filter(node => node.entry.characterId).map(node => node.entry.id)).toEqual(["z", "a", "new"]);
+  expect(tree[0].children[originalFolderSlot].entry.id).toBe("folder");
+});
 
 it("sorts populated counts once and preserves later manual order across reloads", () => {
   const entries = [

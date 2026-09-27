@@ -538,6 +538,7 @@ fn start_timers(app: tauri::AppHandle) {
             let Some(library) = current else {
                 continue;
             };
+            crate::library::av_link::tick(library.clone(), profile.restricted || !focused);
             // A moved publisher log head (seen by the watcher or a pass) runs the lanes now.
             let publication_wake = crate::cloud::status_watch::take_publication_wake();
             if publication_wake || publications.elapsed() >= Duration::from_secs(10) {

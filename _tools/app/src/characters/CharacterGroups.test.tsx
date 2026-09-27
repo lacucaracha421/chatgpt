@@ -9,6 +9,15 @@ const members = [fixtureTarget("a", "A"), fixtureTarget("b", "B"), fixtureTarget
 const groups = [{ id: "group", name: "그룹 이름", revision: 1, targetIds: ["a", "b"] }];
 const children = () => null;
 
+it("preserves refreshed manual order in group member tiles and preview descriptions", () => {
+  const reordered = [members[1], members[2], members[0]].map((member, folderOrder) => ({ ...member, folderOrder }));
+  const renderMembers = (page: typeof members) => <>{page.map(member => <button key={member.id}>{member.displayName}</button>)}</>;
+  const view = render(<CharacterGroups seriesId="series" members={reordered} groups={groups}>{renderMembers}</CharacterGroups>);
+  expect(screen.getByRole("button", { name: "그룹 이름 그룹 열기" })).toHaveAttribute("aria-description", "2명 · B · A");
+  view.rerender(<CharacterGroups seriesId="series" members={reordered} groups={groups} activeGroupId="group">{renderMembers}</CharacterGroups>);
+  expect(within(screen.getByLabelText("그룹 이름 그룹 캐릭터")).getAllByRole("button").map(button => button.textContent)).toEqual(["B", "A"]);
+});
+
 it("counts every series character including members inside groups", () => {
   render(<CharacterGroups seriesId="series" members={members} groups={groups}>{children}</CharacterGroups>);
   expect(screen.getByRole("heading", { name: "캐릭터 3 · 그룹 1" })).toBeVisible();

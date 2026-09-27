@@ -1359,6 +1359,11 @@ impl Library {
         for (id, decision, _) in &decisions {
             latest.entry(id.clone()).or_insert(decision.clone());
         }
+        // Applied tagger recommendations await a human just like vetoed pairs.
+        let blocked = tx.prepare("SELECT target_id FROM character_tagger_candidates WHERE asset_id=?1 AND asset_hash=?2")?
+            .query_map(params![job.asset_id,job.content_hash], |r| r.get::<_,String>(0))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        for id in blocked { latest.entry(id).or_insert_with(|| "cleared".into()); }
         let (mut accepted, mut covered) = super::character_augmentation::native_selection(
             &selectable,
             &latest,

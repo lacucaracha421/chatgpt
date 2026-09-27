@@ -27,6 +27,7 @@ import { ReleaseCalendarView } from "./ReleaseCalendarView";
 import { groupInbox, localDay, releaseCaption } from "./releaseCaption";
 import { useReleaseData } from "./releaseData";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
+import { AvLinkInbox, useAvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
 import "./CollectionBrowser.css";
 
 const TYPE_LABEL: Record<CollectionType, string> = {
@@ -51,6 +52,7 @@ type CollectionBrowserProps = {
   onChanged: () => Promise<void>;
   libraryState: CollectionLibraryState;
   onLibraryStateChange: (next: CollectionLibraryState) => void;
+  avLinkApi?: AvLinkApi;
 };
 
 /** The card cover: the chosen work artwork, else the media-vault cover asset, else the source preview. */
@@ -80,6 +82,7 @@ export function CollectionBrowser({
   onChanged,
   libraryState,
   onLibraryStateChange,
+  avLinkApi,
 }: CollectionBrowserProps) {
   const { gateway, library } = useLibrary();
   const workspace = useWorkspaceChrome();
@@ -87,6 +90,8 @@ export function CollectionBrowser({
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
   const [tmdbOpen, setTmdbOpen] = useState(false);
+  const avInbox = useAvLinkInbox({ api: avLinkApi, poll: typeFilter === "av" && !releaseProvider && !releaseCalendar && !showcase,
+    refreshKey: `${typeFilter}:${releaseProvider ?? ""}:${releaseCalendar ? 1 : 0}:${showcase ? 1 : 0}` });
 
   const [deleteTarget, setDeleteTarget] = useState<CollectionSummary | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -245,7 +250,10 @@ export function CollectionBrowser({
   const indexNavigation = <>
     <span className="workspace-section-label">작품 유형</span>
     <div className="collection-index__types" role="group" aria-label="컬렉션 유형">
-      {TYPES.map(value => <button key={value} type="button" className="workspace-index-link" aria-current={!inbox && value === typeFilter ? "page" : undefined} onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}</button>)}
+      {TYPES.map(value => <button key={value} type="button" className={`workspace-index-link${value === "av" ? " collection-index__av" : ""}`}
+        aria-current={!inbox && value === typeFilter ? "page" : undefined}
+        aria-label={value === "av" && avInbox.items.length > 0 ? `AV, 받은 품번 ${avInbox.items.length.toLocaleString()}개` : undefined}
+        onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}{value === "av" && avInbox.items.length > 0 && <span className="collection-index__count" aria-hidden="true">{avInbox.items.length.toLocaleString()}</span>}</button>)}
       {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
         aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
         onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
@@ -281,7 +289,8 @@ export function CollectionBrowser({
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
     <h3>{filtered ? "검색 결과" : "전체"}<span className="collection-browser__total" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span></h3>
   </div>;
-  const leading = <>{showcaseRow}{sectionRow}</>;
+  const leading = <>{typeFilter === "av" && <AvLinkInbox items={avInbox.items} collections={collections} api={avLinkApi} error={avInbox.error}
+    onRefresh={avInbox.refresh} onCollectionsChanged={onChanged} />}{showcaseRow}{sectionRow}</>;
   const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
     : <EmptyState title="컬렉션이 없습니다."><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></EmptyState>;
 

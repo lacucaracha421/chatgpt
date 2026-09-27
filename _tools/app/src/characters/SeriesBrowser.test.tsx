@@ -1,4 +1,5 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import * as tauriCore from "@tauri-apps/api/core";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SeriesBrowser } from "./SeriesBrowser";
@@ -13,6 +14,8 @@ import { s36PublicationApi } from "./S36Publication";
 import { FaultGameProvider } from "../games/FaultGame";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 
+vi.mock("@tauri-apps/api/core", { spy: true });
+
 async function openReferencePicker(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "캐릭터 더보기" }));
   const panel = await screen.findByRole("dialog", { name: "히나 · 캐릭터 정보" });
@@ -20,7 +23,35 @@ async function openReferencePicker(user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => { Object.defineProperties(HTMLElement.prototype, { clientWidth: { configurable:true,get:()=>850 },clientHeight:{configurable:true,get:()=>650} }); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.mocked(tauriCore.invoke).mockReset(); vi.restoreAllMocks(); });
+
+it.each([undefined, "group"])("moves character folders in their full visible scope and refreshes shared data: %s", async groupId => {
+  const { changed } = await mount(undefined, false, groupId ? [{ id: groupId, name: "Group", seriesId: "series", revision: 1, targetIds: ["kisaki", "hina"] }] : [], groupId);
+  const invoke = vi.mocked(tauriCore.invoke).mockResolvedValue(undefined);
+  const user = userEvent.setup();
+  fireEvent.contextMenu(await screen.findByRole("button", { name: "히나 열기" }));
+  expect(screen.getByRole("menuitem", { name: "위로 이동" })).toBeDisabled();
+  await user.click(screen.getByRole("menuitem", { name: "아래로 이동" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("move_character_folder", {
+    seriesId: "series", targetId: "hina", groupId: groupId ?? null, direction: 1,
+  }));
+  await waitFor(() => expect(changed).toHaveBeenCalled());
+  fireEvent.contextMenu(screen.getByRole("button", { name: "키사키 열기" }));
+  expect(screen.getByRole("menuitem", { name: "아래로 이동" })).toBeDisabled();
+  await user.click(screen.getByRole("menuitem", { name: "위로 이동" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("move_character_folder", {
+    seriesId: "series", targetId: "kisaki", groupId: groupId ?? null, direction: -1,
+  }));
+});
+
+it("shows a failed order save without publishing a shared refresh", async () => {
+  const { changed } = await mount();
+  vi.mocked(tauriCore.invoke).mockRejectedValue(new Error("순서 저장 실패"));
+  fireEvent.contextMenu(await screen.findByRole("button", { name: "키사키 열기" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "위로 이동" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("순서 저장 실패");
+  expect(changed).not.toHaveBeenCalled();
+});
 
 it("can select and save a sixth reference without a separate additional-reference workflow", async () => {
   const { api } = await mount("hina");

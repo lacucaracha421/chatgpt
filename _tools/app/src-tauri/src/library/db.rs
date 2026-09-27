@@ -4,7 +4,38 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 102;
+pub(crate) const SCHEMA_VERSION: i64 = 105;
+
+/// Test helper: undoes migrations 0103 through 0105 so older-version fixtures can be rebuilt.
+/// Tests that simulate an older library run this before lowering `user_version`; extend it
+/// whenever a later migration adds objects.
+#[cfg(test)]
+pub(crate) const UNDO_AFTER_102: &str = "
+    DROP VIEW character_tagger_pending;
+    ALTER TABLE character_learned_references DROP COLUMN provenance;
+    DROP TRIGGER character_tagger_manual_decision;
+    DROP TRIGGER mobile_tagger_candidate_insert;
+    DROP TRIGGER mobile_tagger_candidate_delete;
+    DROP TRIGGER mobile_tagger_candidate_update;
+    DROP TABLE character_tagger_candidates;
+    DROP TABLE character_target_tagger_tags;
+    DROP TABLE asset_tagger_character_scores;
+    DROP TABLE tagger_character_vocabulary;
+    DROP TABLE asset_tagger_coverage;
+    DROP TRIGGER character_folder_order_insert;
+    DROP TRIGGER character_folder_order_series_changed;
+    DROP TABLE character_folder_order;
+    DROP TABLE av_link_candidates; DROP TABLE av_link_inbox;
+    DROP TABLE av_link_poll_cursor; DROP TABLE av_link_name_cache;
+    DROP INDEX collection_people_ja; DROP INDEX collection_people_wikidata;
+    DROP INDEX collection_people_fanza;
+    ALTER TABLE collection_av_details DROP COLUMN title_ja;
+    ALTER TABLE collection_av_details DROP COLUMN release_date;
+    ALTER TABLE collection_av_details DROP COLUMN maker;
+    ALTER TABLE collection_av_details DROP COLUMN genres_json;
+    ALTER TABLE collection_people DROP COLUMN name_ja;
+    ALTER TABLE collection_people DROP COLUMN wikidata_id;
+    ALTER TABLE collection_people DROP COLUMN fanza_actress_id;";
 const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 const VAULT_SAFETY_SCHEMA: &str = include_str!("../../migrations/0002_vault_safety.sql");
 const SIMILARITY_REVIEW_SCHEMA: &str = include_str!("../../migrations/0003_similarity_review.sql");
@@ -554,9 +585,8 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             ))?;
         }
         if version <= 95 {
-            transaction.execute_batch(include_str!(
-                "../../migrations/0096_notes_base_payload.sql"
-            ))?;
+            transaction
+                .execute_batch(include_str!("../../migrations/0096_notes_base_payload.sql"))?;
         }
         if version <= 96 {
             transaction.execute_batch(include_str!(
@@ -582,6 +612,17 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 101 {
             transaction.execute_batch(include_str!("../../migrations/0102_auto_tags.sql"))?;
+        }
+        if version <= 102 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0103_character_folder_order.sql"
+            ))?;
+        }
+        if version <= 103 {
+            transaction.execute_batch(include_str!("../../migrations/0104_av_link.sql"))?;
+        }
+        if version <= 104 {
+            transaction.execute_batch(include_str!("../../migrations/0105_tagger_review.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
@@ -685,6 +726,83 @@ mod tests {
     }
 
     #[test]
+    fn tagger_migration_from_104_preserves_previous_objects_and_edits() {
+        let mut c = Connection::open_in_memory().unwrap();
+        historical_schema(&mut c, 104);
+        c.execute_batch("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at) VALUES('a','h','image','a','assets/a','thumbnails/a',1,1,1,'now');
+            INSERT INTO asset_auto_tag_edits(asset_id,tag,state,created_at) VALUES('a','hair','removed','now');").unwrap();
+        migrate_to_latest(&mut c,104).unwrap();
+        assert_eq!(c.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),105);
+        assert_eq!(c.query_row("SELECT state FROM asset_auto_tag_edits WHERE asset_id='a'",[],|r|r.get::<_,String>(0)).unwrap(),"removed");
+        for table in ["av_link_inbox","character_folder_order","asset_tagger_character_scores","character_tagger_candidates"] {
+            c.prepare(&format!("SELECT * FROM {table}")).unwrap();
+        }
+        assert!(!c.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+        c.execute_batch(UNDO_AFTER_102).unwrap();
+        c.pragma_update(None,"user_version",102).unwrap();
+        migrate_to_latest(&mut c,102).unwrap();
+    }
+
+    #[test]
+    fn av_link_migration_from_103_preserves_collection_people_and_order() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        historical_schema(&mut connection, 103);
+        connection.execute_batch("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('av-fixture','Original','av','t','t');
+            INSERT INTO collection_av_details(collection_id,product_code,label,series,revision) VALUES('av-fixture','SSIS-001','manual','series',7);
+            INSERT INTO collection_people(id,display_name,created_at,updated_at) VALUES('person-fixture','Original person','t','t');
+            INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order) VALUES('av-fixture','person-fixture','performer',0);").unwrap();
+        migrate_to_latest(&mut connection, 103).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        assert_eq!(connection.query_row("SELECT label,revision,title_ja FROM collection_av_details WHERE collection_id='av-fixture'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,Option<String>>(2)?))).unwrap(),("manual".into(),7,None));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT display_name,name_ja FROM collection_people WHERE id='person-fixture'",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                )
+                .unwrap(),
+            ("Original person".into(), None)
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT sort_order FROM collection_person_relations",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert!(connection
+            .prepare("SELECT * FROM character_folder_order")
+            .is_ok());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM av_link_inbox", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(!connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+        assert_eq!(
+            connection
+                .query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+
+    #[test]
     fn v100_adds_artist_link_tables_and_the_scope_view_without_touching_assets() {
         let mut connection = Connection::open_in_memory().unwrap();
         historical_schema(&mut connection, 99);
@@ -728,7 +846,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             scopes,
-            vec![("a".into(), "kiri_draws".into()), ("b".into(), "unknown:none".into())]
+            vec![
+                ("a".into(), "kiri_draws".into()),
+                ("b".into(), "unknown:none".into())
+            ]
         );
         // A dismissal is an ordered pair, and a source-URL assignment names its handle.
         assert!(connection
@@ -837,15 +958,15 @@ mod tests {
             "similarity_auto_compare_queue",
         ] {
             let count: i64 = connection
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
                 .unwrap();
             assert_eq!(count, 0, "{table} starts empty");
         }
         // Existing complete Assets are not queued; a later pending -> complete transition is.
         connection
-            .execute_batch(
-                "UPDATE asset_authority_state SET materialization='complete';",
-            )
+            .execute_batch("UPDATE asset_authority_state SET materialization='complete';")
             .unwrap();
         let queued: Vec<String> = connection
             .prepare("SELECT asset_id FROM similarity_auto_compare_queue")
@@ -882,7 +1003,8 @@ mod tests {
         );
         assert_eq!(
             connection
-                .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0))
+                .query_row("SELECT COUNT(*) FROM assets", [], |row| row
+                    .get::<_, i64>(0))
                 .unwrap(),
             assets
         );
@@ -907,7 +1029,9 @@ mod tests {
         let mut connection = Connection::open_in_memory().unwrap();
         historical_schema(&mut connection, 91);
         let decisions: i64 = connection
-            .query_row("SELECT COUNT(*) FROM character_decisions", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM character_decisions", [], |row| {
+                row.get(0)
+            })
             .unwrap();
 
         migrate_to_latest(&mut connection, 91).unwrap();
