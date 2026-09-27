@@ -343,6 +343,239 @@ fn an_empty_queue_needs_no_authority_to_flush() {
 mod integration {
     use super::*;
 
+    #[test]
+    fn stored_missing_deletes_retire_before_a_later_block_without_network() {
+        let (_temp, library) = open();
+        let ids: Vec<_> = ["First", "Second", "Kept"]
+            .into_iter()
+            .map(|name| {
+                library
+                    .create_album(CreateAlbum {
+                        name: name.into(),
+                        parent_id: None,
+                    })
+                    .unwrap()
+                    .id
+            })
+            .collect();
+        adopt(&library, 1, 0);
+        library.delete_album(&ids[0]).unwrap();
+        library.delete_album(&ids[1]).unwrap();
+        library.rename_album(&ids[2], "Renamed").unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE album_authority_outbox SET state='blocked', conflict_code='albumNotFound'",
+                [],
+            )
+            .unwrap();
+        let client = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+        let report = library
+            .flush_album_outbox_with(&client, "publisher-token")
+            .unwrap();
+        assert_eq!(
+            (report.dropped, report.no_op, report.blocked, report.pending),
+            (2, 2, 1, 0)
+        );
+        assert!(report.stopped);
+        let queued = outbox(&library.connection().unwrap());
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].1, "renameAlbum");
+        let status = library.album_sync_status().unwrap();
+        assert_eq!((status.blocked_count, status.dropped_count), (1, 2));
+        assert_eq!(status.last_drop_reason.as_deref(), Some("albumNotFound"));
+        let second = library
+            .flush_album_outbox_with(&client, "publisher-token")
+            .unwrap();
+        assert_eq!((second.dropped, second.blocked), (0, 1));
+        assert_eq!(library.album_sync_status().unwrap().dropped_count, 2);
+    }
+
+    #[test]
+    fn not_found_rename_and_relation_still_block_on_later_passes() {
+        for relation in [false, true] {
+            let (_temp, library) = open();
+            let id = library
+                .create_album(CreateAlbum {
+                    name: "Known locally".into(),
+                    parent_id: None,
+                })
+                .unwrap()
+                .id;
+            insert_asset(&library, "asset-1");
+            adopt(&library, 1, 0);
+            if relation {
+                library
+                    .patch_asset_albums(AssetAlbumPatch {
+                        asset_ids: vec!["asset-1".into()],
+                        add_album_ids: vec![id.clone()],
+                        remove_album_ids: vec![],
+                    })
+                    .unwrap();
+            } else {
+                library.rename_album(&id, "Renamed").unwrap();
+            }
+            let (base, _seen, handle) = coded_rejection_server("albumNotFound", 404);
+            let client = CloudClient::new(&base).unwrap();
+            let report = library
+                .flush_album_outbox_with(&client, "publisher-token")
+                .unwrap();
+            handle.join().unwrap();
+            assert!(report.stopped);
+            assert_eq!((report.blocked, report.dropped, report.pending), (1, 0, 0));
+            let second = library
+                .flush_album_outbox_with(&client, "publisher-token")
+                .unwrap();
+            assert!(second.stopped);
+            assert_eq!((second.blocked, second.dropped), (1, 0));
+            let connection = library.connection().unwrap();
+            assert_eq!(outbox(&connection).len(), 1);
+            let code: String = connection
+                .query_row(
+                    "SELECT conflict_code FROM album_authority_outbox",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(code, "albumNotFound");
+        }
+    }
+
+    #[test]
+    fn blocked_delete_with_another_conflict_or_epoch_is_preserved() {
+        for (code, epoch) in [("revisionConflict", 1), ("albumNotFound", 2)] {
+            let (_temp, library) = open();
+            let id = library
+                .create_album(CreateAlbum {
+                    name: "Known locally".into(),
+                    parent_id: None,
+                })
+                .unwrap()
+                .id;
+            adopt(&library, 1, 0);
+            library.delete_album(&id).unwrap();
+            library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE album_authority_outbox SET state='blocked', conflict_code=?1, epoch=?2",
+                    rusqlite::params![code, epoch],
+                )
+                .unwrap();
+            let client = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+            let report = library
+                .flush_album_outbox_with(&client, "publisher-token")
+                .unwrap();
+            assert!(report.stopped);
+            assert_eq!((report.blocked, report.dropped), (1, 0));
+            assert_eq!(outbox(&library.connection().unwrap()).len(), 1);
+        }
+    }
+
+    fn assert_missing_delete_settles(previously_blocked: bool) {
+        let (_temp, library) = open();
+        // The local folder exists but has never reached this authority.
+        let name = "Unknown";
+        let id = library
+            .create_album(CreateAlbum {
+                name: name.into(),
+                parent_id: None,
+            })
+            .unwrap()
+            .id;
+        adopt(&library, 1, 0);
+        library.delete_album(&id).unwrap();
+        if previously_blocked {
+            library.connection().unwrap().execute(
+                "UPDATE album_authority_outbox SET state = 'blocked', conflict_code = 'albumNotFound'",
+                [],
+            ).unwrap();
+        }
+        let name = "Following";
+        let following = library
+            .create_album(CreateAlbum {
+                name: name.into(),
+                parent_id: None,
+            })
+            .unwrap()
+            .id;
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}/v1", server.server_addr())).unwrap();
+        let handle = thread::spawn(move || {
+            let mut seen = Vec::new();
+            while let Some(mut request) = server
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .unwrap()
+            {
+                let body = read_body(&mut request);
+                let response = if body["commandType"] == "deleteAlbum" {
+                    json_response(serde_json::json!({"detail": {"code": "albumNotFound"}}))
+                        .with_status_code(404)
+                } else {
+                    assert_eq!(body["commandType"], "createAlbum");
+                    json_response(serde_json::json!({
+                        "libraryId": body["libraryId"], "epoch": 1, "contractVersion": 1,
+                        "operationId": body["operationId"], "commandType": body["commandType"],
+                        "changed": true, "changeSequence": 1, "authorityCursor": 1,
+                        "album": {"id": body["albumId"], "name": body["name"],
+                            "parentId": null, "iconKey": null, "colorKey": null,
+                            "deleted": false, "entityRevision": 1},
+                        "membership": null, "updatedAt": "2026-09-27T00:00:00Z"
+                    }))
+                };
+                seen.push(body);
+                request.respond(response).unwrap();
+            }
+            seen
+        });
+        let report = library
+            .flush_album_outbox_with(&client, "publisher-token")
+            .unwrap();
+        let seen = handle.join().unwrap();
+        assert_eq!(
+            (
+                report.dropped,
+                report.no_op,
+                report.sent,
+                report.pending,
+                report.blocked
+            ),
+            (1, 1, 1, 0, 0)
+        );
+        assert!(!report.stopped);
+        assert_eq!(seen.len(), if previously_blocked { 1 } else { 2 });
+        assert_eq!(seen.last().unwrap()["albumId"], following);
+        let connection = library.connection().unwrap();
+        assert!(outbox(&connection).is_empty());
+        assert!(!super::super::album_authority::has_unresolved_intents(&connection).unwrap());
+        // Absence is sufficient to settle the intent, but is not a server revision.
+        assert_eq!(
+            super::super::album_authority::read_album_revision(&connection, &id).unwrap(),
+            None
+        );
+        drop(connection);
+        let status = library.album_sync_status().unwrap();
+        assert_eq!(status.blocked_count, 0);
+        assert_eq!(status.dropped_count, 1);
+        assert_eq!(status.last_drop_reason.as_deref(), Some("albumNotFound"));
+        let second = library
+            .flush_album_outbox_with(&client, "publisher-token")
+            .unwrap();
+        assert_eq!(second.dropped, 0);
+        assert_eq!(library.album_sync_status().unwrap().dropped_count, 1);
+    }
+
+    #[test]
+    fn missing_delete_settles_and_sends_the_next_intent() {
+        assert_missing_delete_settles(false);
+    }
+
+    #[test]
+    fn previously_blocked_missing_delete_settles_on_the_next_pass() {
+        assert_missing_delete_settles(true);
+    }
+
     fn json_response(value: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
         Response::from_data(serde_json::to_vec(&value).unwrap())
             .with_header(Header::from_bytes("Content-Type", "application/json").unwrap())

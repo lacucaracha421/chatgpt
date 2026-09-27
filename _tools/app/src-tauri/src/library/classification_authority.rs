@@ -99,6 +99,8 @@ pub(crate) const REVISION_CONFLICT: &str = "revisionConflict";
 /// code as its recorded reason.
 pub(crate) const INVALID_ASSIGNMENT: &str = "invalidClassificationAssignment";
 
+const NOT_FOUND: &str = "classificationNotFound";
+
 /// The adopted Classification authority, or `None` while the domain is still PC-owned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ClassificationAuthority {
@@ -849,6 +851,18 @@ pub(super) fn flush_outbox(
     let mut readiness_by_asset = PassReadiness::default();
     for entry in entries {
         if entry.is_blocked() {
+            if entry.command_type == DELETE
+                && entry.conflict_code.as_deref() == Some(NOT_FOUND)
+                && entry.epoch == authority.epoch
+            {
+                // Older clients blocked a delete whose desired state already held.
+                // Retire it through the same ledger as a newly settled intent.
+                drop_entry(library, &entry, NOT_FOUND, now)?;
+                report.blocked -= 1;
+                report.no_op += 1;
+                report.dropped += 1;
+                continue;
+            }
             // An unresolved structural conflict stops delivery: a later operation may
             // depend on this one, and receiving over the optimistic state would hide it.
             report.stopped = true;
@@ -918,6 +932,16 @@ pub(super) fn flush_outbox(
                 // The Asset is tombstoned: the intent can never apply, so it is retired
                 // instead of blocking the queue.
                 drop_entry(library, &entry, DROP_ASSET_TOMBSTONED, now)?;
+                report.pending -= 1;
+                report.no_op += 1;
+                report.dropped += 1;
+            }
+            ClassificationCommandOutcome::Conflict(conflict)
+                if entry.command_type == DELETE && conflict.code == NOT_FOUND =>
+            {
+                // No server entity remains to delete. Do not manufacture a revision
+                // or receipt: record the settled intent and let the lane continue.
+                drop_entry(library, &entry, NOT_FOUND, now)?;
                 report.pending -= 1;
                 report.no_op += 1;
                 report.dropped += 1;

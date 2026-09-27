@@ -43,6 +43,7 @@ pub(crate) const RENAME: &str = "renameAlbum";
 pub(crate) const MOVE: &str = "moveAlbum";
 pub(crate) const APPEARANCE: &str = "updateAlbumAppearance";
 pub(crate) const DELETE: &str = "deleteAlbum";
+const NOT_FOUND: &str = "albumNotFound";
 pub(crate) const MEMBERSHIP: &str = "setAlbumMembership";
 
 /// The server's refusal of a membership whose Asset it does not hold as linkable.
@@ -773,6 +774,17 @@ pub(super) fn flush_outbox(
     let mut readiness_by_asset = PassReadiness::default();
     for entry in entries {
         if entry.is_blocked() {
+            if entry.command_type == DELETE
+                && entry.conflict_code.as_deref() == Some(NOT_FOUND)
+                && entry.epoch == authority.epoch
+            {
+                // Older clients blocked a delete whose desired state already held.
+                drop_entry(library, &entry, NOT_FOUND, now)?;
+                report.blocked -= 1;
+                report.no_op += 1;
+                report.dropped += 1;
+                continue;
+            }
             // An unresolved structural conflict stops delivery: a later operation may
             // depend on this one, and receiving over the optimistic state would hide it.
             report.stopped = true;
@@ -833,6 +845,15 @@ pub(super) fn flush_outbox(
                 // The Asset is tombstoned: the intent can never apply, so it is retired
                 // instead of blocking the queue.
                 drop_entry(library, &entry, DROP_ASSET_TOMBSTONED, now)?;
+                report.pending -= 1;
+                report.no_op += 1;
+                report.dropped += 1;
+            }
+            AlbumCommandOutcome::Conflict(conflict)
+                if entry.command_type == DELETE && conflict.code == NOT_FOUND =>
+            {
+                // Absence settles the delete without inventing a server revision.
+                drop_entry(library, &entry, NOT_FOUND, now)?;
                 report.pending -= 1;
                 report.no_op += 1;
                 report.dropped += 1;

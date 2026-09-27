@@ -137,6 +137,93 @@ fn create_root(library: &Library, name: &str) -> String {
         .id
 }
 
+#[test]
+fn create_then_delete_keeps_the_create_ahead_of_revision_one_delete() {
+    let (_temp, library) = open();
+    adopt(&library, 1, 0);
+    let id = create_root(&library, "Temporary");
+    library.delete_classification(&id).unwrap();
+    let connection = library.connection().unwrap();
+    let queued = payloads(&connection);
+    assert_eq!(queued.len(), 2);
+    assert_eq!(queued[0]["commandType"], "createClassification");
+    assert_eq!(queued[1]["commandType"], "deleteClassification");
+    assert_eq!(queued[1]["expectedRevision"], 1);
+}
+
+#[test]
+fn converted_character_folder_queues_create_before_revision_one_delete() {
+    let f = crate::library::characters::tests::Fixture::new();
+    let target = f.target("Converted");
+    adopt(&f.library, 1, 0);
+    let preview = f.library.character_conversion_preview(&target.id).unwrap();
+    assert_eq!(preview.asset_count, 0);
+    let id = f
+        .library
+        .convert_character_to_folder(&target.id, &preview.token, "Converted")
+        .unwrap();
+    f.library.delete_classification(&id).unwrap();
+    let connection = f.library.connection().unwrap();
+    assert_eq!(
+        super::classification_authority::read_classification_revision(&connection, &id).unwrap(),
+        None
+    );
+    let queued = payloads(&connection);
+    // Before the fix this was a lone delete with expectedRevision 1: conversion
+    // inserted a local folder but never introduced it to the authority outbox.
+    assert_eq!(queued.last().unwrap()["expectedRevision"], 1);
+    assert_eq!(
+        queued
+            .iter()
+            .map(|body| body["commandType"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["createClassification", "deleteClassification"]
+    );
+    assert_eq!(queued[0]["classificationId"], id);
+    assert_eq!(queued[0]["parentId"], f.series);
+    assert_eq!(queued[0]["kind"], "tag");
+    assert_eq!(queued[0]["name"], "Converted");
+    assert_eq!(queued[0]["iconKey"], serde_json::Value::Null);
+    assert_eq!(queued[0]["colorKey"], serde_json::Value::Null);
+}
+
+#[test]
+fn converted_character_folder_create_precedes_assignments_and_existing_folder_is_reused() {
+    for existing in [false, true] {
+        let f = crate::library::characters::tests::Fixture::new();
+        let target = f.ready("Converted");
+        let existing_id = existing.then(|| {
+            f.library
+                .create_classification(CreateClassification {
+                    kind: ClassificationKind::Tag,
+                    name: "Converted".into(),
+                    parent_id: Some(f.series.clone()),
+                })
+                .unwrap()
+                .id
+        });
+        adopt(&f.library, 1, 0);
+        let preview = f.library.character_conversion_preview(&target.id).unwrap();
+        let id = f
+            .library
+            .convert_character_to_folder(&target.id, &preview.token, "Converted")
+            .unwrap();
+        let queued = payloads(&f.library.connection().unwrap());
+        let assignments = if let Some(existing_id) = existing_id {
+            assert_eq!(id, existing_id);
+            &queued[..]
+        } else {
+            assert_eq!(queued[0]["commandType"], "createClassification");
+            &queued[1..]
+        };
+        assert_eq!(assignments.len(), 5);
+        assert!(assignments
+            .iter()
+            .all(|body| body["commandType"] == "setAssetClassification"
+                && body["classificationId"] == id));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Compatibility: an unadopted library is unchanged
 // ---------------------------------------------------------------------------
@@ -1034,6 +1121,232 @@ fn an_empty_queue_needs_no_authority_to_flush() {
 
 mod integration {
     use super::*;
+
+    #[test]
+    fn stored_missing_deletes_retire_before_a_later_block_without_network() {
+        let (_temp, library) = open();
+        let ids: Vec<_> = ["First", "Second", "Kept"]
+            .into_iter()
+            .map(|name| create_root(&library, name))
+            .collect();
+        adopt(&library, 1, 0);
+        library.delete_classification(&ids[0]).unwrap();
+        library.delete_classification(&ids[1]).unwrap();
+        library.rename_classification(&ids[2], "Renamed").unwrap();
+        library.connection().unwrap().execute(
+            "UPDATE classification_authority_outbox SET state='blocked', conflict_code='classificationNotFound'", [],
+        ).unwrap();
+        let client = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+        let report = library
+            .flush_classification_outbox_with_credentials(
+                &client,
+                "client-token",
+                "publisher-token",
+            )
+            .unwrap();
+        assert_eq!(
+            (report.dropped, report.no_op, report.blocked, report.pending),
+            (2, 2, 1, 0)
+        );
+        assert!(report.stopped);
+        let queued = outbox(&library.connection().unwrap());
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].1, "renameClassification");
+        let status = library.classification_sync_status().unwrap();
+        assert_eq!((status.blocked_count, status.dropped_count), (1, 2));
+        assert_eq!(
+            status.last_drop_reason.as_deref(),
+            Some("classificationNotFound")
+        );
+        let second = library
+            .flush_classification_outbox_with_credentials(
+                &client,
+                "client-token",
+                "publisher-token",
+            )
+            .unwrap();
+        assert_eq!((second.dropped, second.blocked), (0, 1));
+        assert_eq!(
+            library.classification_sync_status().unwrap().dropped_count,
+            2
+        );
+    }
+
+    #[test]
+    fn not_found_rename_and_relation_still_block_on_later_passes() {
+        for relation in [false, true] {
+            let (_temp, library) = open();
+            let id = create_root(&library, "Known locally");
+            insert_asset(&library, "asset-1");
+            adopt(&library, 1, 0);
+            if relation {
+                library
+                    .set_asset_classification(SetAssetClassification {
+                        asset_ids: vec!["asset-1".into()],
+                        classification_id: Some(id.clone()),
+                    })
+                    .unwrap();
+            } else {
+                library.rename_classification(&id, "Renamed").unwrap();
+            }
+            let (base, _seen, handle) = coded_rejection_server("classificationNotFound", 404, None);
+            let client = CloudClient::new(&base).unwrap();
+            let report = library
+                .flush_classification_outbox_with_credentials(
+                    &client,
+                    "client-token",
+                    "publisher-token",
+                )
+                .unwrap();
+            handle.join().unwrap();
+            assert!(report.stopped);
+            assert_eq!((report.blocked, report.dropped, report.pending), (1, 0, 0));
+            let second = library
+                .flush_classification_outbox_with_credentials(
+                    &client,
+                    "client-token",
+                    "publisher-token",
+                )
+                .unwrap();
+            assert!(second.stopped);
+            assert_eq!((second.blocked, second.dropped), (1, 0));
+            let connection = library.connection().unwrap();
+            assert_eq!(outbox(&connection).len(), 1);
+            let code: String = connection
+                .query_row(
+                    "SELECT conflict_code FROM classification_authority_outbox",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(code, "classificationNotFound");
+        }
+    }
+
+    #[test]
+    fn blocked_delete_with_another_conflict_or_epoch_is_preserved() {
+        for (code, epoch) in [("revisionConflict", 1), ("classificationNotFound", 2)] {
+            let (_temp, library) = open();
+            let id = create_root(&library, "Known locally");
+            adopt(&library, 1, 0);
+            library.delete_classification(&id).unwrap();
+            library.connection().unwrap().execute(
+                "UPDATE classification_authority_outbox SET state='blocked', conflict_code=?1, epoch=?2",
+                rusqlite::params![code, epoch],
+            ).unwrap();
+            let client = CloudClient::new("http://127.0.0.1:9/v1").unwrap();
+            let report = library
+                .flush_classification_outbox_with_credentials(
+                    &client,
+                    "client-token",
+                    "publisher-token",
+                )
+                .unwrap();
+            assert!(report.stopped);
+            assert_eq!((report.blocked, report.dropped), (1, 0));
+            assert_eq!(outbox(&library.connection().unwrap()).len(), 1);
+        }
+    }
+
+    fn assert_missing_delete_settles(previously_blocked: bool) {
+        let (_temp, library) = open();
+        // The local folder exists but has never reached this authority.
+        let name = "Unknown";
+        let id = create_root(&library, name);
+        adopt(&library, 1, 0);
+        library.delete_classification(&id).unwrap();
+        if previously_blocked {
+            library.connection().unwrap().execute(
+                "UPDATE classification_authority_outbox SET state = 'blocked', conflict_code = 'classificationNotFound'",
+                [],
+            ).unwrap();
+        }
+        let name = "Following";
+        let following = create_root(&library, name);
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let client = CloudClient::new(&format!("http://{}/v1", server.server_addr())).unwrap();
+        let handle = thread::spawn(move || {
+            let mut seen = Vec::new();
+            while let Some(mut request) = server
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .unwrap()
+            {
+                let body = read_body(&mut request);
+                let response = if body["commandType"] == "deleteClassification" {
+                    json_response(serde_json::json!({"detail": {"code": "classificationNotFound"}}))
+                        .with_status_code(404)
+                } else {
+                    assert_eq!(body["commandType"], "createClassification");
+                    json_response(accepted_result(&body, 1))
+                };
+                seen.push(body);
+                request.respond(response).unwrap();
+            }
+            seen
+        });
+        let report = library
+            .flush_classification_outbox_with_credentials(
+                &client,
+                "client-token",
+                "publisher-token",
+            )
+            .unwrap();
+        let seen = handle.join().unwrap();
+        assert_eq!(
+            (
+                report.dropped,
+                report.no_op,
+                report.sent,
+                report.pending,
+                report.blocked
+            ),
+            (1, 1, 1, 0, 0)
+        );
+        assert!(!report.stopped);
+        assert_eq!(seen.len(), if previously_blocked { 1 } else { 2 });
+        assert_eq!(seen.last().unwrap()["classificationId"], following);
+        let connection = library.connection().unwrap();
+        assert!(outbox(&connection).is_empty());
+        assert!(
+            !super::super::classification_authority::has_unresolved_intents(&connection).unwrap()
+        );
+        // Absence is sufficient to settle the intent, but is not a server revision.
+        assert_eq!(
+            super::super::classification_authority::read_classification_revision(&connection, &id)
+                .unwrap(),
+            None
+        );
+        drop(connection);
+        let status = library.classification_sync_status().unwrap();
+        assert_eq!(status.blocked_count, 0);
+        assert_eq!(status.dropped_count, 1);
+        assert_eq!(
+            status.last_drop_reason.as_deref(),
+            Some("classificationNotFound")
+        );
+        let second = library
+            .flush_classification_outbox_with_credentials(
+                &client,
+                "client-token",
+                "publisher-token",
+            )
+            .unwrap();
+        assert_eq!(second.dropped, 0);
+        assert_eq!(
+            library.classification_sync_status().unwrap().dropped_count,
+            1
+        );
+    }
+
+    #[test]
+    fn missing_delete_settles_and_sends_the_next_intent() {
+        assert_missing_delete_settles(false);
+    }
+
+    #[test]
+    fn previously_blocked_missing_delete_settles_on_the_next_pass() {
+        assert_missing_delete_settles(true);
+    }
 
     fn json_response(value: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
         Response::from_data(serde_json::to_vec(&value).unwrap())

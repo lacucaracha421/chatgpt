@@ -108,6 +108,20 @@ impl Library {
         } else {
             let id = uuid::Uuid::new_v4().to_string();
             tx.execute("INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES(?1,'tag',?2,?3,?4)",params![id,preview.name,preview.series_id,chrono::Utc::now().to_rfc3339()])?;
+            // Introduce the folder in the same transaction, before any assignments
+            // or later deletion can name it in the authority lane.
+            Self::enqueue_classification_intent(
+                &tx,
+                super::classification_authority::CREATE,
+                &id,
+                serde_json::Map::from_iter([
+                    ("kind".into(), "tag".into()),
+                    ("name".into(), preview.name.clone().into()),
+                    ("parentId".into(), preview.series_id.clone().into()),
+                    ("iconKey".into(), serde_json::Value::Null),
+                    ("colorKey".into(), serde_json::Value::Null),
+                ]),
+            )?;
             id
         };
         if !preview.asset_ids.is_empty() {
