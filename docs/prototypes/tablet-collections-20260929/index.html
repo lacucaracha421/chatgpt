@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>태블릿 컬렉션 목업</title>
+<style>
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-pressed:#343536; --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-section-mark:rgba(221,216,202,.6); --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-filter-selected:#383838; --color-border:#363739; --color-border-strong:#55585a;
+  --font-ui:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:17px/1.45 var(--font-ui); }
+h1,h2,p { margin:0; }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; text-align:left; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+svg.i { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+svg.i.s { width:16px; height:16px; } svg.i.m { width:20px; height:20px; }
+.doc { max-width:1540px; margin:0 auto; padding:32px 24px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; font-size:15px; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 16px; font-size:15px; }
+.tabs { display:flex; gap:32px; flex-wrap:wrap; align-items:flex-start; }
+.tframe { width:560px; height:896px; overflow:hidden; border:1px solid var(--color-border); border-radius:14px; }
+.tframe > .tab { transform:scale(.7); transform-origin:0 0; }
+body.frame-only { background:var(--color-bg); } body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; }
+body.frame-only .tframe { width:800px; height:1280px; border:0; border-radius:0; } body.frame-only .tframe > .tab { transform:none; }
+
+.tab { position:relative; width:800px; height:1280px; background:var(--color-bg); display:flex; flex-direction:column; overflow:hidden; }
+.ttop { height:64px; flex:none; display:flex; align-items:center; gap:8px; padding:0 16px 0 24px; border-bottom:1px solid var(--color-border); }
+.ttop b { font-size:22px; font-weight:600; } .ttop .sp { flex:1; }
+.ib { width:44px; height:44px; display:grid; place-items:center; color:var(--color-muted); border-radius:4px; }
+.ttabs { display:flex; gap:8px; }
+.ttabs span { height:44px; display:inline-flex; align-items:center; padding:0 12px; color:var(--color-muted); font-size:17px; }
+.ttabs span.on { color:var(--color-text); font-weight:600; }
+.quiet { height:36px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border-radius:4px; color:var(--color-muted); font-size:17px; position:relative; }
+.quiet::after { content:""; position:absolute; inset:-4px 0; }
+.badge { height:24px; min-width:24px; display:inline-flex; align-items:center; justify-content:center; padding:0 8px; border-radius:2px; background:var(--color-accent); color:var(--color-on-accent); font:600 13px var(--font-numeric); }
+.body { flex:1; min-height:0; overflow:hidden; padding:16px 24px 24px; display:flex; flex-direction:column; gap:24px; }
+.seg { display:flex; background:var(--color-surface); border-radius:4px; padding:4px; }
+.seg span { flex:1; height:42px; display:grid; place-items:center; color:var(--color-muted); }
+
+.seg span { height:36px; } .seg span.on { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; border-radius:2px; box-shadow:3px 3px 0 -1px var(--color-surface),3px 3px 0 0 rgba(221,216,202,.4); }
+.label { display:flex; align-items:center; gap:8px; height:24px; color:var(--color-faint); font-size:13px; margin-bottom:12px; }
+.label::before { content:""; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label .rule { flex:1; height:1px; background:var(--section-label-rule); }
+.label .more { color:var(--color-faint); display:inline-grid; place-items:center; width:24px; height:24px; }
+.art { position:relative; overflow:hidden; background:var(--c1); display:block; border-radius:2px; }
+.art::before { content:""; position:absolute; left:50%; top:26%; width:38%; aspect-ratio:1; border-radius:50%; background:var(--c2); transform:translateX(-50%); opacity:.85; }
+.art::after { content:""; position:absolute; left:18%; right:18%; bottom:-22%; height:52%; border-radius:50% 50% 0 0; background:var(--c3); opacity:.8; }
+.new { position:absolute; left:6px; top:6px; z-index:1; height:24px; padding:0 8px; display:inline-flex; align-items:center; border-radius:2px; background:var(--color-accent); color:var(--color-on-accent); font-size:13px; font-weight:600; }
+.news { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.newsblock { width:100%; background:var(--color-surface); border-radius:4px; padding:12px 16px 16px; display:flex; flex-direction:column; gap:12px; }
+.newsblock .h { display:flex; align-items:center; gap:8px; color:var(--color-text); font-weight:600; }
+.newsblock .h small { color:var(--color-faint); font-weight:400; font-size:13px; }
+.newsblock .h .sp { flex:1; } .newsblock .h .i { color:var(--color-faint); }
+.strip { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.strip .art { aspect-ratio:2/3; }
+.strip .d { display:flex; justify-content:space-between; font-size:13px; color:var(--color-faint); margin-bottom:4px; }
+.strip .d b { font:500 15px var(--font-numeric); color:var(--color-text); }
+.show { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+.show .art { aspect-ratio:2/3; }
+.newsblock.wide .strip { grid-template-columns:repeat(6,1fr); }
+.grid { display:grid; grid-template-columns:repeat(4,1fr); gap:24px 16px; }
+.w { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.w .art { aspect-ratio:2/3; margin-bottom:8px; }
+.w b { font-weight:400; font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.w small { font-size:13px; color:var(--color-faint); }
+.tnav { height:64px; flex:none; display:grid; grid-template-columns:repeat(5,1fr); border-top:1px solid var(--color-border); background:var(--color-toolbar); }
+.tnav span { display:grid; place-items:center; align-content:center; gap:2px; font-size:13px; color:var(--color-faint); }
+.tnav span.on { color:var(--color-text); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>태블릿 컬렉션 — 신간 · 발매 캘린더 들어가는 길 (2026-09-29)</h1>
+    <p class="lead">요청: <b>신간/캘린더가 페이지에 녹아들게</b>, 테두리 있는 토글 버튼 모양(<code>collection-release-chip</code>, 다른 곳에도 씀)을 새 기준으로 교체. 지금은 상단 막대에 게임·만화·영화·AV 글자 탭(아래 밑줄) + 테두리 칩 “신간 2” “발매 캘린더” + 찾기가 한 줄에 몰려 있습니다.
+    공통: 종류 탭의 <b>밑줄 삭제</b>(선택 = 밝은 글자 + 굵게, 토대 규칙), 새 소식 개수는 사각 아이보리 배지, 버튼 테두리 없음.</p>
+  </header>
+  <section class="topic">
+    <h2><span class="k">A</span>추천 — 목록 맨 위 “소식” 두 블록</h2>
+    <p class="notes">상단 막대에는 제목 · 찾기만. 그 아래 종류 선택(게임 · 만화 · 영화 · AV). 종류마다 순서: <b>쇼케이스</b>(큰 표지 한 줄, › 전체) → <b>소식</b>(그 종류에 맞는 것만: 만화 = 신간, 게임 · 영화 = 발매 캘린더를 그 종류로 걸러서, 애니는 캘린더 애니, AV = 소식 없음) → 목록. 소식 블록을 누르면 신간 화면 · 캘린더(그 종류 선택된 채)로. 스크롤하면 같이 올라갑니다. 새 소식이 없으면 블록이 한 줄(“새 신간 없음 · 다음 10.8”)로 줄어듭니다.</p>
+    <div class="tabs"><div class="tframe" data-frame="a"></div><div class="tframe" data-frame="a2"></div></div>
+  </section>
+  <section class="topic">
+    <h2><span class="k">B</span>대안 — 상단 막대에 조용한 버튼</h2>
+    <p class="notes">배치는 지금 그대로, 칩만 교체: 테두리 없는 조용한 버튼(아이콘 + 글자, 누를 때만 면), 새 소식 수는 사각 배지. 가장 작은 변화지만 여전히 막대 한 줄에 여섯 개가 모입니다.</p>
+    <div class="tabs"><div class="tframe" data-frame="b"></div></div>
+  </section>
+</div>
+<div id="solo"></div>
+<script>
+const ICON = { search:'<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>', chev:'<path d="m9 6 6 6-6 6"/>', book:'<path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/>',
+  cal:'<rect x="4" y="5" width="16" height="15" rx="1"/><path d="M4 10h16M9 3v4M15 3v4"/>', home:'<path d="m3 11 9-7 9 7M5 10v10h14V10"/>', photo:'<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 16 5-5 5 5 3-3 5 5"/>',
+  stack:'<path d="M4 9h16v10H4zM6 6h12M8 3h8"/>', pencil:'<path d="m4 20 4-1 11-11-3-3L5 16l-1 4z"/>', sparkle:'<path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>' };
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICON[n]}</svg>`;
+const PAL = [['#a79bcf','#4f4a78','#8e6fae'],['#cf9f98','#7a4b4d','#b39a82'],['#b6d6cf','#4f7a66','#5f9ea5'],['#d8a3a7','#7a4f5c','#a88a79'],['#d6c99c','#7a6650','#a6aa74'],
+  ['#c2d0a3','#6c6b4a','#88a86c'],['#aedcc0','#557f58','#5e9a86'],['#9fc7c1','#4f7f6f','#78a8b4'],['#dcbab4','#7f5058','#a0806a'],['#9d94c9','#56578a','#8067a3'],['#c99bd6','#634774','#a871a8'],['#a9b7d4','#4b5d74','#7b7cb4']];
+const art = (i, inner = '') => { const p = PAL[i % PAL.length]; return `<span class="art" style="--c1:${p[0]};--c2:${p[1]};--c3:${p[2]}">${inner}</span>`; };
+const tnav = `<nav class="tnav"><span>${ic('home')}홈</span><span>${ic('photo')}에셋</span><span class="on">${ic('stack')}컬렉션</span><span>${ic('book')}카탈로그</span><span>${ic('pencil')}메모</span></nav>`;
+const WORKS = [['달의 도서관','22권'],['바다 건너 편지','13권'],['마법소녀를 동경해서','8권'],['던전밥','14권'],['학생회에도 구멍은 있다!','12권'],['스파이 패밀리','15권'],['프리렌','14권'],['나의 히어로','41권'],['체인소 맨','20권'],['약사의 혼잣말','13권'],['주술회전','29권'],['블루 록','33권']];
+const grid = (from, n) => `<div class="grid">${WORKS.slice(0, n).map(([t, s], i) => `<div class="w">${art(i + from)}<b>${t}</b><small>${s}</small></div>`).join('')}</div>`;
+function frameA(kind = 'manga') {
+  const show = `<section><div class="label"><span>쇼케이스 · 9</span><span class="rule"></span><span class="more">${ic('chev','m')}</span></div><div class="show">${[11, 3, 6, 9, 1].map((i) => art(i)).join('')}</div></section>`;
+  const newsNew = `<button class="newsblock wide"><span class="h">${ic('sparkle','m')}신간<span class="badge">2</span><span class="sp"></span>${ic('chev','m')}</span>
+    <span class="strip">${[0, 1, 2, 3, 4, 5].map((i) => `<span>${art(i, i < 2 ? '<span class="new">NEW</span>' : '')}</span>`).join('')}</span></button>`;
+  const newsCal = `<button class="newsblock wide"><span class="h">${ic('cal','m')}발매 캘린더<small>게임 · 관심 5</small><span class="sp"></span>${ic('chev','m')}</span>
+    <span class="strip">${[['10.1','D-2'],['10.4','D-5'],['10.10','D-11'],['10.15','D-16'],['10.24','D-25'],['11.5','D-37']].map(([d, dd], i) => `<span><span class="d"><b>${d}</b>${dd}</span>${art(i + 4)}</span>`).join('')}</span></button>`;
+  const on = kind === 'manga' ? 1 : 0;
+  return `<div class="tab"><div class="ttop"><b>컬렉션</b><span class="sp"></span><button class="ib">${ic('search')}</button></div>
+    <div class="body"><div class="seg">${['게임','만화','영화','AV'].map((t, i) => `<span class="${i === on ? 'on' : ''}">${t}</span>`).join('')}</div>
+    ${show}
+    <section><div class="label"><span>소식</span><span class="rule"></span></div>${kind === 'manga' ? newsNew : newsCal}</section>
+    <section><div class="label"><span>${kind === 'manga' ? '만화 · 212' : '게임 · 84'}</span><span class="rule"></span></div>${grid(8, 4)}</section></div>${tnav}</div>`;
+}
+function frameB() {
+  return `<div class="tab"><div class="ttop"><b>컬렉션</b><span class="sp"></span><span class="ttabs"><span>게임</span><span class="on">만화</span><span>영화</span><span>AV</span></span>
+    <button class="quiet">${ic('sparkle','m')}신간<span class="badge">2</span></button><button class="quiet">${ic('cal','m')}캘린더</button><button class="ib">${ic('search')}</button></div>
+    <div class="body"><section><div class="label"><span>만화 · 212</span><span class="rule"></span></div>${grid(8, 12)}</section></div>${tnav}</div>`;
+}
+const FRAMES = { a: () => frameA('manga'), a2: () => frameA('game'), b: frameB };
+document.querySelectorAll('[data-frame]').forEach((el) => { el.innerHTML = FRAMES[el.dataset.frame](); });
+const solo = new URLSearchParams(location.search).get('frame');
+if (solo && FRAMES[solo]) { document.body.classList.add('frame-only'); document.getElementById('solo').innerHTML = `<div class="tframe">${FRAMES[solo]()}</div>`; }
+</script>
+</body>
+</html>

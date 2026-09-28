@@ -1,0 +1,3 @@
+# Notes: fixed heading lines and folding sections (2026-09-29)
+
+Throwaway mockups replacing the proposed 피드백 note kind (user: a way to fix specific lines instead). Decided: in ordinary notes every Markdown heading line (`#`…) is automatically a fixed line; editing happens per section between headings (only the tapped section turns into an input, so headings never shift); tapping a heading folds/unfolds its section (remembered on the device); a … menu per heading renames, moves up/down, unfixes (turns it into an ordinary line) or deletes the section; "＋ 제목 추가" at the end. Storage stays plain Markdown (no server or format change). Open `index.html`; `?frame=pc|tab`.

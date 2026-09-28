@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>메모 고정 줄 목업</title>
+<style>
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+:root { color-scheme:dark; --bg:#161718; --sidebar:#1a1b1c; --toolbar:#191a1b; --surface:#222324; --elev:#292a2b; --hover:#2d2e2f; --text:#e7e9ec; --muted:#a0a3a5; --faint:#7d8184;
+  --accent:#ddd8ca; --on-accent:#202628; --echo:rgba(221,216,202,.4); --mark:rgba(221,216,202,.6); --rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --border:#363739; --focus:#7db1ff; --font:"Pretendard Variable","Pretendard",sans-serif; }
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--text); font:15px/1.6 var(--font); }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; text-align:left; }
+svg.i { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; } svg.i.s { width:16px; height:16px; }
+.doc { max-width:1540px; margin:0 auto; padding:32px 24px 80px; }
+.doc h1 { font-size:26px; font-weight:600; margin:0; }
+.lead, .notes { color:var(--muted); max-width:1250px; line-height:1.7; margin:8px 0 16px; } .lead b, .notes b { color:var(--text); }
+section.topic { margin-top:48px; border-top:1px solid var(--border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; margin:0; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--accent); color:var(--on-accent); font:600 16px var(--font); }
+.row2 { display:flex; gap:32px; align-items:flex-start; flex-wrap:wrap; }
+.frame { width:1440px; height:900px; overflow:hidden; border:1px solid var(--border); }
+.tframe { width:560px; height:896px; overflow:hidden; border:1px solid var(--border); border-radius:14px; } .tframe > .tab { transform:scale(.7); transform-origin:0 0; }
+body.frame-only { background:var(--bg); } body.frame-only .doc { display:none; } #solo { display:none; } body.frame-only #solo { display:block; }
+body.frame-only .frame, body.frame-only .tframe { border:0; border-radius:0; } body.frame-only .tframe { width:800px; height:1280px; } body.frame-only .tframe > .tab { transform:none; }
+
+.pc { width:1440px; height:900px; background:var(--bg); display:grid; grid-template-columns:64px 1fr; }
+.rail { background:var(--sidebar); border-right:1px solid var(--border); }
+.main { display:flex; flex-direction:column; min-width:0; }
+.toolbar { height:44px; display:flex; align-items:center; gap:8px; padding:0 16px; border-bottom:1px solid var(--border); background:var(--toolbar); color:var(--muted); }
+.toolbar .sp { flex:1; }
+.q { height:28px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border-radius:4px; color:var(--muted); }
+.q:hover { background:var(--hover); color:var(--text); }
+.editor { width:760px; margin:0 auto; padding:24px 32px; display:flex; flex-direction:column; }
+.title { font-size:20px; font-weight:600; margin-bottom:16px; }
+.sec { display:flex; flex-direction:column; }
+.head { height:40px; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--border); margin-top:16px; }
+.head .chev { color:var(--faint); }
+.head b { font-size:15px; font-weight:600; }
+.head em { font-style:normal; font-size:12px; color:var(--faint); }
+.head .sp { flex:1; }
+.head .more { width:28px; height:28px; display:grid; place-items:center; color:var(--faint); border-radius:4px; opacity:.0; }
+.head:hover .more, .head.show .more { opacity:1; }
+.head.folded b { color:var(--muted); }
+.body { padding:8px 0 4px 28px; color:var(--text); }
+.body ul { margin:0; padding-left:18px; } .body li { margin:2px 0; }
+.body.edit { margin:8px 0 4px 20px; padding:8px; background:var(--surface); border-radius:4px 4px 0 0; box-shadow:inset 0 -2px 0 var(--focus); font-family:var(--font); white-space:pre-wrap; color:var(--text); }
+.caret { display:inline-block; width:1.5px; height:1.1em; background:var(--text); vertical-align:-2px; }
+.add { height:36px; display:flex; align-items:center; gap:8px; color:var(--faint); margin-top:16px; padding-left:4px; }
+.menu { position:absolute; z-index:5; width:220px; padding:8px 0; background:var(--elev); border:1px solid var(--border); box-shadow:0 8px 24px rgba(0,0,0,.45);
+  background-image:linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--accent),var(--accent));
+  background-size:8px 2px,2px 8px,8px 2px,2px 8px; background-position:2px 2px,2px 2px,calc(100% - 2px) calc(100% - 2px),calc(100% - 2px) calc(100% - 2px); background-repeat:no-repeat; }
+.menu button { width:100%; height:32px; display:flex; align-items:center; gap:8px; padding:0 12px; }
+.menu button:hover { background:var(--hover); } .menu button .i { color:var(--muted); width:16px; height:16px; } .menu .danger { color:#e26767; } .menu .danger .i { color:#e26767; }
+.menu kbd { margin-left:auto; font-size:12px; color:var(--faint); font-family:var(--font); }
+.pop { position:relative; }
+.tab { width:800px; height:1280px; background:var(--bg); display:flex; flex-direction:column; font-size:17px; }
+.ttop { height:64px; display:flex; align-items:center; gap:12px; padding:0 24px; border-bottom:1px solid var(--border); color:var(--muted); }
+.tab .editor { width:auto; padding:24px; } .tab .title { font-size:22px; } .tab .head { height:52px; } .tab .head b { font-size:17px; } .tab .head em { font-size:13px; } .tab .head .more { opacity:1; width:44px; height:44px; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>메모 — 제목 줄 고정 + 구간 접기 (2026-09-29)</h1>
+    <p class="lead">결정: 새 종류 대신 보통 메모에서 <b>`#`으로 시작하는 줄은 자동으로 고정 줄</b>. 고정 줄은 편집 중에도 그대로 보이고, 편집은 <b>구간(고정 줄 사이)마다 따로</b> — 누른 구간만 입력칸으로 바뀌고 나머지는 그대로라 흔들리지 않음. 고정 줄을 누르면 그 구간이 <b>접힘/펼침</b>(기기에 기억), 오른쪽 … 메뉴: 이름 바꾸기 · 위로/아래로 · 고정 풀기(보통 줄로) · 구간 삭제. 저장은 지금처럼 Markdown(`## nai`) 그대로라 서버 변경 없음, 예전 앱에서도 읽힘. 맨 아래 “＋ 제목 추가”.</p>
+  </header>
+  <section class="topic">
+    <h2><span class="k">P</span>PC — “확장” 구간을 편집하는 중, “모바일” 접힘, … 메뉴 열림</h2>
+    <p class="notes">제목 옆 흐린 숫자는 그 구간의 줄 수. 편집 중인 구간만 면 + 파란 밑줄. Esc 또는 바깥 클릭 = 구간 편집 끝.</p>
+    <div class="frame" data-frame="pc"></div>
+  </section>
+  <section class="topic">
+    <h2><span class="k">T</span>태블릿 — 같은 동작, 44 높이 제목 줄</h2>
+    <div class="row2"><div class="tframe" data-frame="tab"></div></div>
+  </section>
+</div>
+<div id="solo"></div>
+<script>
+const ICON = { down:'<path d="m6 9 6 6 6-6"/>', right:'<path d="m9 6 6 6-6 6"/>', dots:'<path d="M5 12h.01M12 12h.01M19 12h.01"/>', back:'<path d="m15 6-6 6 6 6"/>', undo:'<path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  pen:'<path d="m4 20 4-1 11-11-3-3L5 16l-1 4z"/>', up:'<path d="m6 15 6-6 6 6"/>', unpin:'<path d="M4 4l16 16M9 4h6l-1 6 4 3H9"/>', trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', plus:'<path d="M12 5v14M5 12h14"/>' };
+const ic = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24">${ICON[n]}</svg>`;
+const head = (name, n, folded, show) => `<div class="head${folded ? ' folded' : ''}${show ? ' show' : ''}"><span class="chev">${ic(folded ? 'right' : 'down','s')}</span><b>${name}</b><em>${n}</em><span class="sp"></span><button class="more">${ic('dots','s')}</button></div>`;
+const editor = (menu) => `<div class="editor"><div class="title">Todo</div>
+  <div class="sec">${head('nai', 3)}<div class="body"><ul><li>번역쪽 자꾸 느리게 되는데 아무래도 서버문제인가</li><li>태블릿 프롬프트 기록 검색</li><li>이미지 비교 슬라이더</li></ul></div></div>
+  <div class="sec">${head('확장', 2)}<div class="body edit">- X 수집 중복 확인이 느림
+- 설정 창 글자 크기 맞추기<span class="caret"></span></div></div>
+  <div class="sec pop">${head('PC 라코믹스', 4, false, menu)}<div class="body"><ul><li>에셋에서 사이드바에 전체, 작가, 앨범 분리</li><li>메모 되돌리기</li><li>망가 읽기 깜빡임</li><li>캐릭터 넣기 단축키</li></ul></div>
+    ${menu ? `<div class="menu" style="right:0;top:40px"><button>${ic('pen')}이름 바꾸기</button><button>${ic('up')}위로</button><button>${ic('down')}아래로</button><button>${ic('unpin')}고정 풀기<kbd>보통 줄로</kbd></button><button class="danger">${ic('trash')}구간 삭제</button></div>` : ''}</div>
+  <div class="sec">${head('모바일', 6, true)}</div>
+  <div class="sec">${head('fault', 1, true)}</div>
+  <button class="add">${ic('plus','s')}제목 추가</button></div>`;
+const FRAMES = {
+  pc: () => `<div class="pc"><nav class="rail"></nav><main class="main"><div class="toolbar"><button class="q">${ic('back','s')}메모</button><span class="sp"></span><button class="q">${ic('undo','s')}되돌리기</button><button class="q">${ic('dots','s')}</button></div>${editor(true)}</main></div>`,
+  tab: () => `<div class="tab"><div class="ttop">${ic('back')}메모<span style="flex:1"></span>${ic('undo')}</div>${editor(false)}</div>`,
+};
+document.querySelectorAll('[data-frame]').forEach((el) => { el.innerHTML = FRAMES[el.dataset.frame](); });
+const solo = new URLSearchParams(location.search).get('frame');
+if (solo && FRAMES[solo]) { document.body.classList.add('frame-only'); document.getElementById('solo').innerHTML = `<div class="${solo === 'tab' ? 'tframe' : 'frame'}">${FRAMES[solo]()}</div>`; }
+</script>
+</body>
+</html>

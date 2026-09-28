@@ -140,7 +140,7 @@ Decided 2026-09-28 from `part4.html` (option B): **Swiss order, macOS manners, N
 
 - **Swiss order (structure):** strict left alignment and grid, strong size contrast (large numbers, small quiet meta), hairline dividers instead of boxes, one accent colour. Works in the dark theme: slightly warm off-white text, ivory as the single accent.
 - **macOS manners (behaviour, never the skin):** dense tidy menus with faint shortcut hints on the right, almost no explanatory text, short soft motion, full keyboard control, settings apply immediately. No traffic-light buttons, translucency, blue selection or SF look-alikes.
-- **NieR signature (only three places, fixed sizes):** the current-location selection (ivory slab, dark square mark at the right end, 3px echo), section labels (5px square + fading 1px hairline), and floating menus/dialogs (small corner brackets). Nowhere else — no beige game palette, wide-tracked caps, per-item squares or frames on buttons, chips and cards. The fuller game-style version (option C) was tried and rejected.
+- **NieR signature (fixed sizes):** the current-location selection (ivory slab, dark square mark at the right end, 3px echo), section labels (5px square + fading 1px hairline), and floating menus/dialogs (small corner brackets). The segmented control is an explicit exception: its selected thumb also uses the ivory slab and echo. Nowhere else — no beige game palette, wide-tracked caps, per-item squares or frames on buttons, chips and cards. The fuller game-style version (option C) was tried and rejected.
 
 ### Spacing
 
@@ -206,7 +206,7 @@ Large blocks (cards, dialogs, the primary button) may combine a face and a borde
 | Checkbox (`--checkbox-size`) | 16 | 20 | square mark: 1.5px border, radius 2; checked = accent border with an inner solid accent square |
 | Toggle switch | 32×18 | 40×22 | round track and round knob (the one round control); on = accent track, dark knob |
 | Badge (`--badge-height`) | 20 | 24 | radius 2, padding 0 8, icon 14/16, gap 4, weight 600 meta text; variants: plain (`--color-surface-elevated` + muted text), icon-only (square), count (tabular), accent (NEW), danger; a tappable tablet badge keeps an invisible 44 hit area |
-| Segmented control | control height | control height | 2–4 filters of the same list; joined cells, radius 4, selected = `--color-filter-selected` face and weight 600 |
+| Segmented control | control height | control height | 2–4 filters of the same list; surface track with a sliding ivory thumb, radius 4, selected text weight 600 |
 | Tabs | control height | control height | switch to different content; the selected tab is brighter text at weight 600 (no underline or colour stripe) |
 
 Use a toggle for a single setting that applies immediately; use checkboxes to pick several items that a button then applies.
@@ -234,7 +234,8 @@ Dot notation: current year `10.4`, other years `2025.9.28`, no zero padding; tim
 ### Feedback and motion
 
 - **Press (tablet):** the face darkens to `--color-surface-pressed` while pressed and returns immediately on release; no scaling, no lingering pressed state. **Hover (PC):** the face lightens. Keyboard focus is a separate blue outline.
-- **Selected chips and segments:** `--color-filter-selected` face and weight 600; unselected text is muted.
+- **Selected chips:** `--color-filter-selected` face and weight 600; unselected text is muted. Segmented controls use the ivory sliding thumb described above.
+- **Segmented drag exception:** the selected thumb lifts to scale 1.04 while it is dragged; this is the only scaling press feedback in the foundation.
 - **Motion:** 90 ms small feedback (press, colour), 140 ms open/close (menus, sheets, popovers), 200 ms screen transitions; `--ease-standard`; no bounce, no looping decoration except the skeleton breathing.
 - **Toasts:** success is shown in place (the changed row briefly tints toward `--color-success` and a check fades) — no success toast, except "되돌리기" after an undoable action (e.g. moving to the trash). Failures always show a one-line toast with "다시 시도".
 

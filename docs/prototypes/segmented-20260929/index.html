@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>세그먼트 컨트롤 시안</title>
+<style>
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+:root { color-scheme:dark;
+  --bg:#161718; --surface:#222324; --elev:#292a2b; --hover:#2d2e2f; --pressed:#343536; --text:#e7e9ec; --muted:#a0a3a5; --faint:#7d8184;
+  --accent:#ddd8ca; --on-accent:#202628; --echo:rgba(221,216,202,.4); --border:#363739; --border-strong:#55585a; --filter:#383838;
+  --font:"Pretendard Variable","Pretendard",sans-serif; --num:"Rajdhani Numbers",var(--font); }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:17px/1.45 var(--font); }
+.doc { max-width:1100px; margin:0 auto; padding:32px 24px 80px; }
+h1 { font-size:24px; font-weight:600; margin:0 0 8px; }
+.lead { color:var(--muted); font-size:15px; line-height:1.7; margin:0 0 24px; }
+.opt { border-top:1px solid var(--border); padding:24px 0; display:grid; grid-template-columns:260px 1fr; gap:24px; align-items:center; }
+.opt h2 { margin:0; font-size:18px; font-weight:600; display:flex; gap:12px; align-items:center; }
+.opt h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; background:var(--accent); color:var(--on-accent); font-size:16px; }
+.opt p { margin:8px 0 0; color:var(--muted); font-size:14px; line-height:1.6; }
+.demo { display:flex; flex-direction:column; gap:16px; }
+.demo small { color:var(--faint); font-size:12px; }
+.seg { display:flex; position:relative; width:100%; max-width:720px; }
+.seg button { flex:1; height:44px; font:inherit; color:var(--muted); background:none; border:0; display:inline-flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; position:relative; z-index:1; transition:color 140ms; }
+.seg button em { font:500 15px var(--num); font-style:normal; color:var(--faint); }
+.seg.pc button { height:32px; font-size:15px; } .seg.pc button em { font-size:13px; }
+.seg.pc { max-width:420px; }
+
+/* current */
+.s0 { border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+.s0 button + button { border-left:1px solid var(--border); }
+.s0 button.on { background:var(--filter); color:var(--text); font-weight:600; }
+
+/* A: sliding ivory slab */
+.s1 { background:var(--surface); border-radius:4px; padding:4px; }
+.s1 .thumb { position:absolute; top:4px; bottom:4px; border-radius:2px; background:var(--accent); box-shadow:3px 3px 0 -1px var(--surface),3px 3px 0 0 var(--echo); transition:left 200ms cubic-bezier(.2,0,0,1), width 200ms; }
+.s1 button.on { color:var(--on-accent); font-weight:600; } .s1 button.on em { color:var(--on-accent); opacity:.7; }
+
+/* B: macOS inset track, raised cell */
+.s2 { background:#1c1d1e; border-radius:6px; padding:3px; box-shadow:inset 0 1px 2px rgba(0,0,0,.45); }
+.s2 .thumb { position:absolute; top:3px; bottom:3px; border-radius:4px; background:#3a3b3d; box-shadow:0 1px 0 rgba(255,255,255,.06) inset, 0 1px 3px rgba(0,0,0,.45); transition:left 200ms cubic-bezier(.2,0,0,1), width 200ms; }
+.s2 button.on { color:var(--text); font-weight:600; }
+
+/* C: big type tabs, counts, selected large + bright */
+.s3 { gap:24px; justify-content:flex-start; border-bottom:1px solid var(--border); }
+.s3 button { flex:none; height:52px; padding:0; font-size:22px; font-weight:500; color:var(--faint); align-items:baseline; padding-top:12px; }
+.s3 button em { font-size:15px; }
+.s3 button.on { color:var(--text); font-weight:700; }
+.s3.pc button { font-size:20px; height:40px; padding-top:6px; }
+
+/* D: separate cells with gaps, selected = ivory outline + ivory text */
+.s4 { gap:8px; }
+.s4 button { background:var(--surface); border-radius:4px; }
+.s4 button:hover { background:var(--hover); }
+.s4 button.on { background:var(--elev); color:var(--accent); font-weight:600; box-shadow:inset 0 0 0 1px var(--accent); }
+.s4 button.on em { color:var(--accent); opacity:.75; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>세그먼트 컨트롤 — 덜 밋밋하게 (2026-09-29)</h1>
+  <p class="lead">PC와 태블릿이 같이 쓰는 공통 컨트롤이라 고른 안이 컬렉션 종류 · 캘린더 종류 · 설정 간격 등 모든 곳에 들어갑니다. 누르면 움직이는 모습(A · B)을 보려면 칸을 눌러 보세요. 각 안 위는 태블릿(44), 아래는 PC(32) 크기.</p>
+
+  <div class="opt"><div><h2><span class="k">0</span>지금</h2><p>테두리 칸 + 고른 칸 회색 면. 차분하지만 구분이 약함.</p></div><div class="demo" data-kind="s0"></div></div>
+  <div class="opt"><div><h2><span class="k">A</span>아이보리 슬랩</h2><p>트랙 안에서 아이보리 판이 미끄러져 이동(200ms), 고른 글자는 어둡게. 사이드바 선택과 같은 NieR 슬랩 + 3px 그림자 — 앱 전체 인상과 가장 잘 맞음. 가장 눈에 띔.</p></div><div class="demo" data-kind="s1"></div></div>
+  <div class="opt"><div><h2><span class="k">B</span>macOS식 오목 트랙</h2><p>살짝 파인 트랙 안에 떠 있는 밝은 칸이 미끄러짐. 입체감은 있지만 색은 조용함.</p></div><div class="demo" data-kind="s2"></div></div>
+  <div class="opt"><div><h2><span class="k">C</span>큰 글자 탭</h2><p>칸 없이 큰 글자(제목 크기) + 개수, 고른 것만 밝고 굵게. 스위스식 대비. 목록 맨 위 제목 역할도 겸함 — 설정처럼 작은 곳엔 안 어울려 “종류 전환” 전용.</p></div><div class="demo" data-kind="s3"></div></div>
+  <div class="opt"><div><h2><span class="k">D</span>떨어진 칸 + 아이보리 테두리</h2><p>칸마다 면이 있고 사이가 떨어져 있음, 고른 칸은 아이보리 1px 선과 글자. 버튼 모음에 가까운 느낌.</p></div><div class="demo" data-kind="s4"></div></div>
+</div>
+<script>
+const items = [['게임', 84], ['만화', 212], ['영화', 57], ['AV', 31]];
+document.querySelectorAll('.demo').forEach((demo) => {
+  const kind = demo.dataset.kind;
+  for (const size of ['', 'pc']) {
+    const seg = document.createElement('div');
+    seg.className = `seg ${kind} ${size}`;
+    const thumb = (kind === 's1' || kind === 's2') ? Object.assign(document.createElement('span'), { className: 'thumb' }) : null;
+    if (thumb) seg.append(thumb);
+    items.forEach(([label, count], i) => {
+      const b = document.createElement('button');
+      b.innerHTML = `${label}<em>${count}</em>`;
+      if (i === 1) b.classList.add('on');
+      b.onclick = () => { seg.querySelectorAll('button').forEach((x) => x.classList.remove('on')); b.classList.add('on'); place(); };
+      seg.append(b);
+    });
+    const place = () => { if (!thumb) return; const on = seg.querySelector('button.on'); thumb.style.left = on.offsetLeft + 'px'; thumb.style.width = on.offsetWidth + 'px'; };
+    demo.append(seg);
+    const cap = document.createElement('small'); cap.textContent = size ? 'PC 32' : '태블릿 44'; demo.append(cap);
+    requestAnimationFrame(place);
+  }
+});
+</script>
+</body>
+</html>
