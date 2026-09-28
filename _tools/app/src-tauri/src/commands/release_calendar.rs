@@ -34,6 +34,18 @@ pub async fn refresh_release_calendar(
         .map_err(CommandError::from)
 }
 
+/// Settings' 지금 새로 받기: refetch every provider now, with no interval or back-off.
+#[tauri::command]
+pub async fn refresh_release_calendar_now(
+    state: State<'_, AppState>,
+) -> Result<ReleaseCalendar, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.refresh_release_calendar_now())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
 #[tauri::command]
 pub async fn list_release_wishlist(
     state: State<'_, AppState>,

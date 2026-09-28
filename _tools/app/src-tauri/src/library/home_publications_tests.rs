@@ -99,6 +99,7 @@ fn game() -> ReleaseTitle {
             date: Some("2026-11-14".into()),
             precision: release_calendar::DatePrecision::Exact,
         }],
+        port: false,
     }
 }
 fn cache(lib: &Library, titles: &[ReleaseTitle]) {

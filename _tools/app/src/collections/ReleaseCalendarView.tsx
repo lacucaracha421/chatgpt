@@ -8,6 +8,7 @@ import type { ReleaseCalendar, ReleaseTitle, ReleaseWishlistEvent, ReleaseWishli
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { PlatformBadges } from "./PlatformBadges";
 import { groupReleases, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine } from "./releaseCalendarFormat";
 import "./releaseCalendar.css";
 import { createKoreanMatcher } from "../shared/koreanSearch";
@@ -177,7 +178,9 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
               <div className="release-calendar__meta">
                 <strong title={tile.originalTitle ?? tile.title}>{tile.title}</strong>
                 <span className="release-calendar__date">{releaseDateLabel(tile.date, tile.precision, referenceYear)}{tile.released ? " · 발매됨" : ""}</span>
-                <span className="release-calendar__detail"><span className="release-calendar__kind">{tile.kind === "game" ? "게임" : tile.kind === "anime" ? "애니" : "영화"}</span>{detail}</span>
+                {tile.kind === "game" && tile.platforms.length > 0
+                  ? <PlatformBadges platforms={tile.platforms} port={tile.port} />
+                  : <span className="release-calendar__detail"><span className="release-calendar__kind">{tile.kind === "game" ? "게임" : tile.kind === "anime" ? "애니" : "영화"}</span>{detail}</span>}
                 {tile.unread.length > 0 && <div className="release-calendar__news">
                   <span className="release-calendar__events">{tile.unread.map(event => <span key={event.id} className="release-calendar__event">{releaseEventLine(event, referenceYear)}</span>)}</span>
                   <Button size="sm" variant="ghost" className="release-calendar__confirm" disabled={Boolean(pending)} aria-label={`${tile.title} 알림 확인`} onClick={() => void acknowledge(tile.id, tile.unread)}>확인</Button>

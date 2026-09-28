@@ -60,7 +60,8 @@ export function groupReleases<T extends Pick<ReleaseTitle, "date" | "precision">
         const quarter = Math.floor((month - 1) / 3) + 1;
         key = `${year}-Q${quarter}`; order = `${year}-${String(quarter * 3).padStart(2, "0")}-b`; label = `${year} Q${quarter} · 월 미정`;
       } else {
-        key = year; order = `${year}-12-c`; label = `${year}년 · 시기 미정`;
+        // Bare years sit after every dated month, just before 미정 (user, 2026-09-28).
+        key = year; order = `9999-${year}`; label = `${year}년 · 시기 미정`;
       }
     }
     const group = groups.get(key) ?? { order, label, items: [] };

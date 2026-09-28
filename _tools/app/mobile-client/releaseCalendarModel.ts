@@ -149,7 +149,7 @@ function periodOf(entry: ReleaseCalendarEntry): {monthKey: string; monthLabel: s
     const quarter = Math.floor((month - 1) / 3) + 1;
     return {monthKey: `${parts[1]}-Q${quarter}`, monthLabel: `${year} Q${quarter} · 월 미정`, dayKey: `${parts[1]}-Q${quarter}`, dayLabel: `${year} Q${quarter} · 월 미정`, order: `${year}-${String(quarter * 3).padStart(2, '0')}-c`};
   }
-  return {monthKey: `${parts[1]}-year`, monthLabel: `${year}년 · 시기 미정`, dayKey: `${parts[1]}-year`, dayLabel: `${year}년 · 시기 미정`, order: `${year}-12-d`};
+  return {monthKey: `${parts[1]}-year`, monthLabel: `${year}년 · 시기 미정`, dayKey: `${parts[1]}-year`, dayLabel: `${year}년 · 시기 미정`, order: `9999-${year}-d`};
 }
 
 /** Group exact dates within month sections while retaining PC's broader period buckets. */

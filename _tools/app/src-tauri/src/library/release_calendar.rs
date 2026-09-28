@@ -5,8 +5,8 @@
 //!
 //! * **Games — IGDB `/v4/games`.** A game is listed when one of its release dates falls in the
 //!   window on a current major platform ([`IGDB_MAJOR_PLATFORMS`]), it has at least
-//!   [`IGDB_MIN_HYPES`] hypes (IGDB follows before release, the only pre-release popularity
-//!   signal IGDB exposes), it is not an edition (`version_parent = null`) or a DLC/expansion
+//!   [`IGDB_MIN_HYPES`] hypes (the site's "Want to Play" count before release, the only
+//!   pre-release popularity signal IGDB exposes), and it is not an edition (`version_parent = null`) or a DLC/expansion
 //!   (`parent_game = null`, except remakes and remasters), and its `game_type` is not an add-on type. That keeps the list to
 //!   the few hundred titles people are waiting for instead of thousands of store uploads.
 //!   The headline date prefers the Korean release, then Asia, then worldwide, then the
@@ -55,10 +55,9 @@ pub(crate) const IGDB_MAJOR_PLATFORMS: &[(i64, &str)] = &[
     (169, "Xbox Series"),
     (49, "Xbox One"),
 ];
-/// Minimum IGDB hypes for a game to appear in the calendar.
-pub(crate) const IGDB_MIN_HYPES: i64 = 3;
-/// Minimum IGDB hypes for a title released only on PC.
-pub(crate) const IGDB_PC_ONLY_MIN_HYPES: i64 = 10;
+/// Minimum IGDB hypes ("Want to Play") for a game to appear in the calendar, on every
+/// platform; ports of released games count like new ones (user, 2026-09-28).
+pub(crate) const IGDB_MIN_HYPES: i64 = 30;
 const IGDB_PAGE_SIZE: usize = 500;
 // Remakes (game_type 8) and remasters (9) point `parent_game` at the original, so the add-on
 // filter `parent_game = null` alone would drop them (e.g. a Zelda remake).
@@ -175,6 +174,10 @@ pub struct ReleaseTitle {
     pub region: Option<String>,
     pub popularity: f64,
     pub dates: Vec<ProviderReleaseDate>,
+    /// A new platform version of a game already released elsewhere; set by the upcoming
+    /// game calendar only.
+    #[serde(default)]
+    pub port: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -396,8 +399,9 @@ fn igdb_precision(value: &Value) -> (DatePrecision, Option<u32>) {
             })
     });
     match format.as_deref() {
-        Some("YYYYMMMMDD") => (DatePrecision::Exact, None),
-        Some("YYYYMMMM") => (DatePrecision::Month, None),
+        // IGDB sends `YYYYMMDD`/`YYYYMM` now; the long spellings are the older form.
+        Some("YYYYMMDD" | "YYYYMMMMDD") => (DatePrecision::Exact, None),
+        Some("YYYYMM" | "YYYYMMMM") => (DatePrecision::Month, None),
         Some("YYYY") => (DatePrecision::Year, None),
         Some(quarter) if quarter.starts_with("YYYYQ") => {
             match quarter[5..]
@@ -597,7 +601,33 @@ pub(crate) fn igdb_title(game: &Value, major_only: bool) -> Option<ReleaseTitle>
         region,
         popularity: game.get("hypes").and_then(Value::as_f64).unwrap_or(0.0),
         dates,
+        port: false,
     })
+}
+
+/// Keep only the release dates inside the window, so a port of a released game (e.g. a
+/// Switch 2 version) is headlined by its upcoming date and platform, not the original release.
+fn upcoming_dates_only(
+    mut title: ReleaseTitle,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Option<ReleaseTitle> {
+    title.port = title.dates.iter().any(|row| {
+        period(row.date.as_deref(), row.precision).is_some_and(|(_, until)| until <= start)
+    });
+    title.dates.retain(|row| {
+        period(row.date.as_deref(), row.precision)
+            .is_some_and(|(from, until)| from < end && until > start)
+    });
+    if title.dates.is_empty() {
+        return None;
+    }
+    let dates = &title.dates;
+    title
+        .platforms
+        .retain(|platform| dates.iter().any(|row| &row.platform == platform));
+    (title.date, title.precision, title.region) = headline(&title.dates);
+    Some(title)
 }
 
 pub(crate) fn igdb_calendar_body(start: NaiveDate, end: NaiveDate, offset: usize) -> String {
@@ -646,11 +676,14 @@ pub(crate) fn fetch_upcoming_games(
             LibraryError::IgdbInvalidResponse,
         )?;
         let count = games.len();
-        for title in games.iter().filter_map(|game| igdb_title(game, true)) {
-            // PC-only titles are mostly small Steam releases: they need more hypes than
-            // console titles to appear (user, 2026-09-27). Watched games are not filtered.
-            let pc_only = title.platforms.iter().all(|platform| platform == "PC");
-            if pc_only && title.popularity < IGDB_PC_ONLY_MIN_HYPES as f64 {
+        for title in games
+            .iter()
+            .filter_map(|game| igdb_title(game, true))
+            .filter_map(|title| upcoming_dates_only(title, start, end))
+        {
+            // Bare-year titles stay; the calendar groups them after the dated months and Home
+            // leaves them out (user, 2026-09-28).
+            if title.precision == DatePrecision::Tbd {
                 continue;
             }
             if overlaps(&title, start, end) && !titles.iter().any(|known| known.id == title.id) {
@@ -774,6 +807,7 @@ pub(crate) fn tmdb_title(movie: &Value, release_dates: Option<&Value>) -> Option
             .and_then(Value::as_f64)
             .unwrap_or(0.0),
         dates,
+        port: false,
     })
 }
 
@@ -939,6 +973,7 @@ pub(crate) fn tmdb_anime_title(show: &Value, season: &Value) -> Option<ReleaseTi
             date,
             precision,
         }],
+        port: false,
     })
 }
 
@@ -1101,6 +1136,17 @@ fn read_cache(
     })
 }
 
+/// How [`Library::refresh_release_calendar_mode`] decides which providers to refetch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RefreshMode {
+    /// Automatic: providers older than a day, outside a failure back-off.
+    Due,
+    /// The calendar's refresh button: skips the daily interval, not the hour or a fresh attempt.
+    Manual,
+    /// Settings: every provider, no limits.
+    Immediate,
+}
+
 fn refresh_due(cache: &CacheRow, now: DateTime<Utc>) -> bool {
     let stale = cache
         .fetched_at
@@ -1203,6 +1249,18 @@ impl Library {
         )
     }
 
+    /// Settings' 지금 새로 받기: refetch every provider now, ignoring the daily interval, the
+    /// one-hour minimum and any failure back-off.
+    pub fn refresh_release_calendar_now(&self) -> Result<ReleaseCalendar, LibraryError> {
+        let transport = self.release_transport();
+        self.refresh_release_calendar_mode(
+            &transport,
+            RefreshMode::Immediate,
+            Utc::now(),
+            chrono::Local::now().date_naive(),
+        )
+    }
+
     pub(crate) fn refresh_release_calendar_with(
         &self,
         transport: &dyn ReleaseTransport,
@@ -1210,15 +1268,30 @@ impl Library {
         now: DateTime<Utc>,
         today: NaiveDate,
     ) -> Result<ReleaseCalendar, LibraryError> {
+        let mode = if force {
+            RefreshMode::Manual
+        } else {
+            RefreshMode::Due
+        };
+        self.refresh_release_calendar_mode(transport, mode, now, today)
+    }
+
+    pub(crate) fn refresh_release_calendar_mode(
+        &self,
+        transport: &dyn ReleaseTransport,
+        mode: RefreshMode,
+        now: DateTime<Utc>,
+        today: NaiveDate,
+    ) -> Result<ReleaseCalendar, LibraryError> {
         let (start, end) = window(today);
         for provider in ["igdb", "tmdb", "tmdb_tv"] {
-            let due = {
+            let due = mode == RefreshMode::Immediate || {
                 let connection = self.connection()?;
                 let cache = read_cache(&connection, provider, now)?;
                 let recently_fetched = cache.fetched_at.is_some_and(|fetched| {
                     now - fetched < Duration::minutes(RETRY_AFTER_FAILURE_MINUTES)
                 });
-                if force {
+                if mode == RefreshMode::Manual {
                     // A manual refresh retries a failed provider after a minute instead of
                     // waiting out the automatic back-off; a fresh success still is not refetched.
                     let just_tried = cache

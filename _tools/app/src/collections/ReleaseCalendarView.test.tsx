@@ -26,6 +26,7 @@ function gateway(initial: ReleaseCalendar, wishlist: ReleaseWishlistItem[] = [])
   return {
     calendar: vi.fn().mockResolvedValue(initial),
     refresh: vi.fn().mockResolvedValue(initial),
+    refreshNow: vi.fn().mockResolvedValue(initial),
     wishlist: vi.fn().mockImplementation(async () => items),
     add: vi.fn().mockImplementation(async (id: string) => {
       const entry = initial.entries.find(candidate => candidate.id === id)!;
@@ -57,7 +58,7 @@ describe("release calendar wording", () => {
     expect(releaseEventLine({ id: "e", itemId: "igdb:1", kind: "date_changed", previousValue: "2026-10-02", currentValue: "2026-10-09", detectedAt: "", readAt: null }, 2026)).toBe("발매일 변경 · 10월 2일 → 10월 9일");
   });
 
-  it("groups months first, then an unnarrowed quarter or year after its last month, then TBD", () => {
+  it("groups months first, a quarter after its last month, bare years after every month, then TBD", () => {
     const groups = groupReleases([
       title("igdb:1", "Q4", "2026-10-01", "quarter"),
       title("igdb:2", "Dec", "2026-12-05", "exact"),
@@ -65,8 +66,9 @@ describe("release calendar wording", () => {
       title("igdb:4", "Oct", "2026-10-01", "month"),
       title("igdb:5", "Year", "2027-01-01", "year"),
       title("igdb:6", "Jan", "2027-01-10", "exact"),
+      title("igdb:7", "This year", "2026-01-01", "year"),
     ]);
-    expect(groups.map(group => group.label)).toEqual(["2026년 10월", "2026년 12월", "2026 Q4 · 월 미정", "2027년 1월", "2027년 · 시기 미정", "미정"]);
+    expect(groups.map(group => group.label)).toEqual(["2026년 10월", "2026년 12월", "2026 Q4 · 월 미정", "2027년 1월", "2026년 · 시기 미정", "2027년 · 시기 미정", "미정"]);
   });
 });
 
@@ -81,7 +83,9 @@ describe("ReleaseCalendarView", () => {
     const october = await screen.findByRole("region", { name: "2026년 10월" });
     expect(within(october).getByText("기다리는 게임")).toBeInTheDocument();
     expect(within(october).getByText("10월 22일")).toBeInTheDocument();
-    expect(within(october).getByText("PC · PS5")).toBeInTheDocument();
+    expect(within(october).getByRole("img", { name: "PC" })).toHaveAttribute("title", "PC (Steam): PC");
+    expect(within(october).getByRole("img", { name: "PS5" })).toHaveAttribute("title", "PlayStation: PS5");
+    expect(within(october).queryByText("이식")).not.toBeInTheDocument();
     expect(screen.getByText("11월 중")).toBeInTheDocument();
     expect(api.refresh).not.toHaveBeenCalled();
 

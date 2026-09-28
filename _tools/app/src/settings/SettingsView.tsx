@@ -21,6 +21,7 @@ import { Toggle } from "../shared/ui/Toggle";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CloudBackfillMaintenance, CloudBackfillSettings } from "./CloudBackfillSettings";
 import { LightweightModeSettings } from "./LightweightModeSettings";
+import { ReleaseCalendarRefreshSettings } from "./ReleaseCalendarRefreshSettings";
 import { ExtensionPairingQr } from "./ExtensionPairingQr";
 import { CatalogVisibilitySettings } from "./CatalogVisibilitySettings";
 import { MobileCatalogPublishSettings } from "./MobileCatalogPublishSettings";
@@ -966,6 +967,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </div>
         )}
         <p className="settings-view__row-note">TMDB API 키는 <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB API 설정 안내</a>에서 발급합니다.</p>
+        <ReleaseCalendarRefreshSettings />
       </div>
     )}
     {section === "cloud" && <div className="settings-view__section">

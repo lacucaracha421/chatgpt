@@ -225,7 +225,7 @@ fn igdb_calendar_drops_add_ons_minor_platforms_and_out_of_window_titles() {
         &format!("release_dates.date >= {}", ts("2026-09-26")),
         &format!("release_dates.date < {}", ts("2027-03-28")),
         "release_dates.platform = (6,167,48,508,130,169,49)",
-        "hypes >= 3",
+        "hypes >= 30",
         "version_parent = null",
         "(parent_game = null | game_type = (8,9))",
         "sort hypes desc",
@@ -391,6 +391,22 @@ fn calendar_refreshes_at_most_daily_backs_off_after_failures_and_expires_old_tmd
         .release_calendar_at(at("2027-04-01T00:00:00Z"), day("2026-09-26"))
         .unwrap();
     assert!(expired.entries.is_empty());
+
+    // Settings' 지금 새로 받기 refetches every provider, even one fetched minutes ago.
+    let before = transport.requests.borrow().len();
+    library
+        .refresh_release_calendar_mode(
+            &transport,
+            RefreshMode::Immediate,
+            at("2026-09-26T04:06:00Z"),
+            today,
+        )
+        .unwrap();
+    let requests = transport.requests.borrow()[before..].to_vec();
+    assert!(
+        requests.iter().any(|request| request.starts_with("igdb ")),
+        "{requests:?}"
+    );
 }
 
 #[test]
@@ -680,35 +696,52 @@ fn anime_cache_is_independent_daily_watchable_and_expires_at_tmdb_limit() {
 }
 
 #[test]
-fn pc_only_upcoming_games_need_more_hypes_than_console_games() {
-    let mut small_pc = igdb_game(
+fn upcoming_games_read_current_igdb_date_formats_and_headline_ports() {
+    let exact = igdb_game(
         1,
-        "Small PC",
-        json!([release("2026-10-10", "YYYYMMMMDD", "worldwide", 6)]),
+        "Exact",
+        json!([release("2026-11-05", "YYYYMMDD", "worldwide", 508)]),
     );
-    small_pc["hypes"] = json!(5);
-    let mut small_console = igdb_game(
+    let month = igdb_game(
         2,
-        "Small console",
-        json!([release("2026-10-10", "YYYYMMMMDD", "worldwide", 167)]),
+        "Month",
+        json!([release("2026-12-01", "YYYYMM", "worldwide", 6)]),
     );
-    small_console["hypes"] = json!(5);
-    let big_pc = igdb_game(
+    let year = igdb_game(
         3,
-        "Big PC",
-        json!([release("2026-10-10", "YYYYMMMMDD", "worldwide", 6)]),
+        "Year",
+        json!([release("2026-12-31", "YYYY", "worldwide", 167)]),
+    );
+    let port = igdb_game(
+        4,
+        "Port",
+        json!([
+            release("2024-10-31", "YYYYMMDD", "worldwide", 6),
+            release("2026-12-04", "YYYYMMDD", "worldwide", 508)
+        ]),
     );
     let transport = MockTransport::default();
     transport
         .igdb_pages
         .borrow_mut()
-        .push(Ok(json!([small_pc, small_console, big_pc])));
+        .push(Ok(json!([exact, month, year, port])));
     let titles = fetch_upcoming_games(&transport, day("2026-09-26"), day("2027-03-28")).unwrap();
     assert_eq!(
         titles
             .iter()
-            .map(|title| title.id.as_str())
+            .map(|title| (title.id.as_str(), title.date.as_deref(), title.precision))
             .collect::<Vec<_>>(),
-        vec!["igdb:2", "igdb:3"]
+        vec![
+            ("igdb:1", Some("2026-11-05"), DatePrecision::Exact),
+            ("igdb:2", Some("2026-12-01"), DatePrecision::Month),
+            ("igdb:3", Some("2026-01-01"), DatePrecision::Year),
+            ("igdb:4", Some("2026-12-04"), DatePrecision::Exact),
+        ]
+    );
+    // A port is listed under its upcoming platform only, and marked.
+    assert_eq!(titles[3].platforms, vec!["Switch 2"]);
+    assert_eq!(
+        titles.iter().map(|title| title.port).collect::<Vec<_>>(),
+        vec![false, false, false, true]
     );
 }

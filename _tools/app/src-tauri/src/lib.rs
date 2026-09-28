@@ -186,6 +186,7 @@ pub fn run() {
             commands::home::get_home_overview,
             commands::release_calendar::get_release_calendar,
             commands::release_calendar::refresh_release_calendar,
+            commands::release_calendar::refresh_release_calendar_now,
             commands::release_calendar::list_release_wishlist,
             commands::release_calendar::add_release_wishlist_item,
             commands::release_calendar::remove_release_wishlist_item,

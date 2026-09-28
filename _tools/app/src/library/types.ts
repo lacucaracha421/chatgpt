@@ -1249,6 +1249,8 @@ export type ReleaseTitle = {
   region: string | null;
   popularity: number;
   dates: ReleaseProviderDate[];
+  /** A new platform version of a game already released elsewhere (upcoming calendar only). */
+  port?: boolean;
 };
 export type ReleaseCalendarSource = { provider: "igdb" | "tmdb" | "tmdb_tv"; fetchedAt: string | null; attemptedAt: string | null; errorCode: string | null; due: boolean };
 export type ReleaseCalendar = { rangeStart: string; rangeEnd: string; entries: Array<ReleaseTitle & { watched: boolean }>; sources: ReleaseCalendarSource[] };
@@ -1268,6 +1270,8 @@ export interface ReleaseCalendarGateway {
   calendar(): Promise<ReleaseCalendar>;
   /** Refresh due providers (at most daily). */
   refresh(force: boolean): Promise<ReleaseCalendar>;
+  /** Refetch every provider now, ignoring the daily interval and back-offs (Settings). */
+  refreshNow(): Promise<ReleaseCalendar>;
   wishlist(): Promise<ReleaseWishlistItem[]>;
   add(id: string): Promise<ReleaseWishlistItem>;
   remove(id: string): Promise<void>;

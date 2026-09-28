@@ -307,7 +307,7 @@ impl Library {
         let wishlist: Vec<_> = self.list_release_watch()?.into_iter().filter(|v|supported(v.kind)).map(|v| {
             let mut body = title(&ReleaseTitle {id:v.id, kind:v.kind,provider:v.provider,external_id:v.external_id,
                 title:v.title,original_title:v.original_title,cover:v.cover,platforms:v.platforms,date:v.date,
-                precision:v.precision,region:v.region,popularity:0.0,dates:v.dates});
+                precision:v.precision,region:v.region,popularity:0.0,dates:v.dates,port:false});
             body["popularity"] = Value::Null;
             body["source"] = json!(v.source); body["addedAt"] = json!(v.added_at);
             body["muted"] = json!(v.muted); body["released"] = json!(v.released);

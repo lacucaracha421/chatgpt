@@ -218,6 +218,7 @@ export const libraryGateway: LibraryGateway = {
   releaseCalendar: {
     calendar: () => invoke("get_release_calendar"),
     refresh: (force) => invoke("refresh_release_calendar", { force }),
+    refreshNow: () => invoke("refresh_release_calendar_now"),
     wishlist: () => invoke("list_release_wishlist"),
     add: (id) => invoke("add_release_wishlist_item", { id }),
     remove: (id) => invoke("remove_release_wishlist_item", { id }),

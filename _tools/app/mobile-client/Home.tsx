@@ -147,7 +147,7 @@ export function Home(props: HomeProps) {
 
   const mangaEntries = shelfEntries(d.unreadWorks && d.unreadWorks > 0 ? d.releases ?? [] : [], d.upcoming ?? [], today);
   // Home lists only games/movies/anime on the 관심 목록 (user, 2026-09-27); the 발매 캘린더 shows everything.
-  const externalEntries = upcoming.entries.filter(entry => (entry.kind === 'game' || entry.kind === 'movie' || entry.kind === 'anime') && upcoming.wishlist.has(entry.id)).filter(entry => !entry.date || daysAfter(entry.date, today) >= 0).sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'));
+  const externalEntries = upcoming.entries.filter(entry => (entry.kind === 'game' || entry.kind === 'movie' || entry.kind === 'anime') && upcoming.wishlist.has(entry.id) && entry.precision !== 'year').filter(entry => !entry.date || daysAfter(entry.date, today) >= 0).sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'));
   const cover = (id: string, name: string) => { const work = works.get(id); return work ? <Artwork item={work} id={collectionCover(work)} revision={shelf?.revision ?? ''} active={!paused} label={name} /> : <span className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>; };
   const summary = d.summary;
   const fallback = addedToday(items, props.hasMore);
