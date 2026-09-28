@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { ClockIcon } from "@heroicons/react/24/outline";
 import type { AssetSummary } from "../library/types";
 import { assetThumbnailUrl, playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
+import { useWorkloadProfile } from "../app/workloadProfile";
 import { Button } from "../shared/ui/Button";
 import { Skeleton } from "../shared/ui/Skeleton";
 
@@ -113,7 +115,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     seekToRatio(durationMs > 0 ? Math.max(0, Math.min(durationMs, nextMs)) / durationMs : 0, false);
   };
   if (asset.media.preparationState === "pending" || asset.media.preparationState === "processing") {
-    return <div className="video-tile video-tile--pending"><span className="video-tile__status">미리보기 준비 중</span></div>;
+    return <PendingVideoTile />;
   }
   if (asset.media.preparationState === "failed") {
     return <div className="video-tile video-tile--failed"><span className="video-tile__status">미리보기 준비 실패</span><Button size="sm" onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }} onClick={(event) => { event.stopPropagation(); onRetry(); }}>다시 시도</Button></div>;
@@ -164,6 +166,14 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       <span className="video-tile__scrub-fill" style={{ width: `${scrubRatio * 100}%` }} aria-hidden="true" />
       <span className="video-tile__scrub-handle" style={{ left: `${scrubRatio * 100}%` }} aria-hidden="true" />
     </div>
+  </div>;
+}
+
+function PendingVideoTile() {
+  const { restricted } = useWorkloadProfile();
+  return <div className="video-tile video-tile--pending">
+    <ClockIcon className="video-tile__status-icon" aria-hidden="true" />
+    <span className="video-tile__status">{restricted ? "가벼운 모드로 대기 중" : "준비 중"}</span>
   </div>;
 }
 

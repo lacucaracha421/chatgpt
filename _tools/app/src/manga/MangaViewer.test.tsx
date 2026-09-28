@@ -1,12 +1,18 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MangaViewer } from "./MangaViewer";
 
 const openUrl = vi.fn().mockResolvedValue(undefined);
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (url: string) => openUrl(url) }));
 
-afterEach(() => { cleanup(); openUrl.mockClear(); localStorage.clear(); });
+beforeEach(() => {
+  vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+  vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(100);
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { callback(0); return 1; });
+});
+
+afterEach(() => { cleanup(); openUrl.mockClear(); localStorage.clear(); vi.restoreAllMocks(); });
 
 describe("MangaViewer", () => {
   it("shows the title and page progress", () => {

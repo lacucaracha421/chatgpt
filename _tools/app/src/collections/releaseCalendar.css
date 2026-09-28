@@ -1,10 +1,6 @@
 /* PC 발매 캘린더: quiet controls, media first grid, and the shared Foundation roles. */
 .release-calendar { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 .release-calendar__top-row { display: flex; flex: none; align-items: center; gap: var(--space-2); height: 44px; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); }
-.release-calendar__segments-frame { position: relative; flex: none; }
-.release-calendar__segments .ui-segmented__cell { flex: 1 1 0; min-width: 64px; padding-right: var(--space-8); }
-.release-calendar__segment-counts { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(4, 1fr); pointer-events: none; }
-.release-calendar__segment-counts span { padding-right: var(--space-2); color: var(--color-faint); font: 500 var(--type-meta) / 1 var(--font-numeric); text-align: right; }
 .release-calendar__filter.ui-button--quiet { flex: none; }
 .release-calendar__filter.is-selected { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
 .release-calendar__filter-count { color: var(--color-faint); font: 500 var(--type-meta) / 1 var(--font-numeric); }

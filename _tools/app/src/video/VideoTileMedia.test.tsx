@@ -3,13 +3,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { VideoTileMedia } from "./VideoTileMedia";
 
+const workload = vi.hoisted(() => ({ restricted: false }));
+vi.mock("../app/workloadProfile", () => ({ useWorkloadProfile: () => workload }));
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); workload.restricted = false; vi.useRealTimers(); vi.restoreAllMocks(); });
 
 it("uses prepared frames on hover and delays full playback until timeline interaction", () => {
   const request = vi.fn();
@@ -106,10 +109,13 @@ it("does not attach the original video merely because a tile is active", () => {
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/1"));
 });
 
-it("renders pending and failed states with a retry action", () => {
+it("labels pending videos according to workload mode and preserves retry for failures", () => {
   const retry = vi.fn();
   const { rerender } = render(<VideoTileMedia asset={video("pending")} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={retry} />);
-  expect(screen.getByText("미리보기 준비 중")).toBeInTheDocument();
+  expect(screen.getByText("준비 중")).toBeInTheDocument();
+  workload.restricted = true;
+  rerender(<VideoTileMedia asset={video("pending")} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={retry} />);
+  expect(screen.getByText("가벼운 모드로 대기 중")).toBeInTheDocument();
   rerender(<VideoTileMedia asset={video("failed")} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={retry} />);
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   expect(retry).toHaveBeenCalledOnce();

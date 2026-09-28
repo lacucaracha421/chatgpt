@@ -115,10 +115,10 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
     anime: currentEntries.filter(entry => entry.kind === "anime").length,
   };
   const kindOptions = ([
-    { value: "all", label: "전체" },
-    { value: "game", label: "게임" },
-    { value: "movie", label: "영화" },
-    { value: "anime", label: "애니" },
+    { value: "all", label: "전체", count: kindCounts.all },
+    { value: "game", label: "게임", count: kindCounts.game },
+    { value: "movie", label: "영화", count: kindCounts.movie },
+    { value: "anime", label: "애니", count: kindCounts.anime },
   ] as const);
   const tiles: Tile[] = watchOnly
     ? (wishlist ?? []).filter(matches).map(item => ({ ...item, watched: true }))
@@ -166,18 +166,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
 
   return <section className="release-calendar" aria-label="발매 캘린더">
     <div className="release-calendar__top-row">
-      <div className="release-calendar__segments-frame">
-        <SegmentedControl
-          className="release-calendar__segments"
-          label="종류"
-          options={kindOptions}
-          value={kind}
-          onChange={setKind}
-        />
-        <div className="release-calendar__segment-counts" aria-hidden="true">
-          {kindOptions.map(option => <span key={option.value}>{kindCounts[option.value].toLocaleString()}</span>)}
-        </div>
-      </div>
+      <SegmentedControl label="종류" options={kindOptions} value={kind} onChange={setKind} />
       <Button type="button" variant="quiet" size="sm" className={`release-calendar__filter${watchOnly ? " is-selected" : ""}`} aria-pressed={watchOnly} onClick={() => setWatchOnly(value => !value)}>
         <BookmarkOutlineIcon aria-hidden="true" />관심 <span className="release-calendar__filter-count">{(wishlist?.length ?? 0).toLocaleString()}</span>
       </Button>

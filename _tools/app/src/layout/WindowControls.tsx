@@ -1,4 +1,16 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { PauseCircleIcon } from "@heroicons/react/24/outline";
+import { updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
+
+export function LightweightModeIndicator() {
+  const { restricted } = useWorkloadProfile();
+  if (!restricted) return null;
+  return <button type="button" className="lightweight-mode-indicator" aria-label="가벼운 모드 끄기"
+    onClick={() => { void updateWorkloadSettings({ lightweight: false }); }}>
+    <PauseCircleIcon aria-hidden="true" />
+    <span>가벼운 모드</span>
+  </button>;
+}
 
 export function WindowControls() {
   const window = getCurrentWindow();

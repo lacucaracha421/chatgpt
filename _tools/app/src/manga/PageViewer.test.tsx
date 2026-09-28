@@ -1,14 +1,21 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { PageViewer } from "./PageViewer";
 import { BackNavigationProvider, useBackRequest } from "../shared/navigation/BackNavigation";
 
+beforeEach(() => {
+  vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+  vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(100);
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { callback(0); return 1; });
+});
+
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 afterEach(() => {
@@ -34,12 +41,25 @@ function viewerProps(overrides: object = {}) {
 
 function shownImages(): string[] {
   return Array.from(
-    document.querySelectorAll(".manga-viewer__spread .manga-viewer__page"),
+    document.querySelectorAll('[data-reader-buffer="active"] .manga-viewer__page'),
     (element) => element.getAttribute("alt") ?? "",
   ).filter((alt) => alt.endsWith("페이지"));
 }
 
 describe("PageViewer", () => {
+  it("keeps the painted page mounted while the next page is still loading", async () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+    const user = userEvent.setup();
+    render(<PageViewer {...viewerProps()} />);
+    const painted = screen.getByRole("img", { name: "Remote 1페이지" });
+
+    await user.keyboard("{ArrowRight}");
+
+    expect(painted).toBeInTheDocument();
+    expect(document.querySelector('[data-reader-buffer="pending"] img'))
+      .toHaveAttribute("src", "page-2");
+  });
+
   it("starts at the restored page and identifies the source", () => {
     render(<PageViewer
       title="Remote"
@@ -321,7 +341,7 @@ describe("PageViewer", () => {
     await user.click(screen.getByRole("button", { name: "읽기 설정" }));
     await user.click(screen.getByRole("menuitemradio", { name: "페이지 간격: 넓게" }));
 
-    const spread = document.querySelector(".manga-viewer__spread") as HTMLElement;
+    const spread = document.querySelector('[data-reader-buffer="active"] .manga-viewer__spread') as HTMLElement;
     expect(spread.style.padding).toBe("48px");
     expect(spread.style.columnGap).toBe("24px");
   });

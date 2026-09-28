@@ -90,8 +90,8 @@ describe("ReleaseCalendarView", () => {
     expect(screen.queryByText("국내 개봉")).not.toBeInTheDocument();
     expect(api.refresh).not.toHaveBeenCalled();
     const topRow = screen.getByRole("region", { name: "발매 캘린더" }).querySelector(".release-calendar__top-row") as HTMLElement;
-    expect(within(topRow).getByText("2")).toBeInTheDocument();
-    expect(within(topRow).getAllByText("1")).toHaveLength(2);
+    expect(within(topRow).getByRole("radio", { name: "전체 2" })).toBeInTheDocument();
+    expect(within(topRow).getAllByRole("radio", { name: / 1$/ })).toHaveLength(2);
     expect(within(topRow).getByRole("button", { name: "관심 0", pressed: false })).toBeInTheDocument();
 
     const watchButton = screen.getByRole("button", { name: "기다리는 게임 관심 목록에 추가" });
@@ -152,8 +152,8 @@ it("filters anime seasons and uses the same wishlist add and remove flow", async
   mount(api);
   expect(await screen.findByText("영화 제목")).toBeInTheDocument();
   expect(screen.getByText("새 애니")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("radio", { name: "애니" }));
-  expect(screen.getByRole("radio", { name: "애니" })).toHaveAttribute("aria-checked", "true");
+  await userEvent.click(screen.getByRole("radio", { name: "애니 2" }));
+  expect(screen.getByRole("radio", { name: "애니 2" })).toHaveAttribute("aria-checked", "true");
   expect(screen.queryByText("영화 제목")).not.toBeInTheDocument();
   expect(screen.queryByText("일본 방영")).not.toBeInTheDocument();
   expect(screen.getAllByText("ANIME")).toHaveLength(2);

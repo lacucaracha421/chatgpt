@@ -267,8 +267,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/Collections.css": {
-      "offScaleSpacing": 58,
-      "offRoleFontSize": 34,
+      "offScaleSpacing": 55,
+      "offRoleFontSize": 31,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -339,9 +339,9 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/home.css": {
-      "offScaleSpacing": 24,
-      "offRoleFontSize": 30,
-      "pillRadius": 1,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
       "legacyToken": 0
     },
     "_tools/app/mobile-client/ledger.css": {
@@ -375,8 +375,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/releaseCalendar.css": {
-      "offScaleSpacing": 16,
-      "offRoleFontSize": 10,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },
